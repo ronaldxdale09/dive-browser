@@ -23,6 +23,9 @@ interface BrowserState {
   forward: () => Promise<void>;
   reload: () => Promise<void>;
   capture: (fullPage: boolean) => Promise<void>;
+  /** Zoom factor per tab; absent means 1. */
+  zoom: Record<string, number>;
+  zoomStep: (direction: 1 | -1 | 0) => Promise<void>;
   notice: string | null;
   /** Path of the capture currently open in the annotator. */
   annotating: string | null;
@@ -87,6 +90,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   error: null,
   notice: null,
   annotating: null,
+  zoom: {},
   setAnnotating: (path) => set({ annotating: path }),
   editing: null,
   setEditing: (editing) => set({ editing }),
@@ -135,6 +139,17 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     const id = get().activeTab;
     if (id) await run(set, () => ipc.tabReload(id));
   },
+  zoomStep: async (direction) => {
+    const id = get().activeTab;
+    if (!id) return;
+    const current = get().zoom[id] ?? 1;
+    const next = direction === 0 ? 1 : nextZoom(current, direction);
+    if (next === current) return;
+    await run(set, async () => {
+      await ipc.tabZoom(id, next);
+      set((s) => ({ zoom: { ...s.zoom, [id]: next } }));
+    });
+  },
   capture: async (fullPage) => {
     const id = get().activeTab;
     if (!id) return;
@@ -182,3 +197,11 @@ async function run(set: (p: Partial<BrowserState>) => void, f: () => Promise<unk
   }
 }
 
+/** Zoom levels the chrome steps through; mirrors ZOOM_STEPS in commands.rs. */
+export const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
+export function nextZoom(current: number, direction: 1 | -1): number {
+  const i = ZOOM_STEPS.findIndex((z) => Math.abs(z - current) < 0.001);
+  const j = i === -1 ? ZOOM_STEPS.findIndex((z) => z > current) - (direction === 1 ? 0 : 1) : i + direction;
+  return ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, j))] ?? 1;
+}

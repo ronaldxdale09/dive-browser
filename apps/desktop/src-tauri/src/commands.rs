@@ -142,6 +142,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_back,
             tab_forward,
             tab_reload,
+            tab_zoom,
             tab_capture,
             capture_read,
             capture_save,
@@ -194,6 +195,9 @@ pub fn register_builtin(registry: &dive_core::CommandRegistry) {
         ("tab.new", "New tab", Some("mod+t"), CommandScope::Workspace),
         ("tab.close", "Close tab", Some("mod+w"), CommandScope::Tab),
         ("tab.reload", "Reload", Some("mod+r"), CommandScope::Tab),
+        ("zoom.in", "Zoom in", Some("mod+="), CommandScope::Tab),
+        ("zoom.out", "Zoom out", Some("mod+-"), CommandScope::Tab),
+        ("zoom.reset", "Reset zoom", Some("mod+0"), CommandScope::Tab),
         (
             "palette.open",
             "Command palette",
@@ -611,6 +615,19 @@ pub(crate) fn tab_forward(state: State<'_, AppState>, id: TabId) -> AppResult<()
 #[specta::specta]
 pub(crate) fn tab_reload(state: State<'_, AppState>, id: TabId) -> AppResult<()> {
     with_view(&state, id, tauri::Webview::reload)
+}
+
+/// Zoom levels the chrome steps through; `1.0` is the default.
+pub const ZOOM_STEPS: &[f64] = &[
+    0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0,
+];
+
+/// Set a tab's zoom factor (clamped to the step range).
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_zoom(state: State<'_, AppState>, id: TabId, factor: f64) -> AppResult<()> {
+    let factor = factor.clamp(ZOOM_STEPS[0], ZOOM_STEPS[ZOOM_STEPS.len() - 1]);
+    with_view(&state, id, |v| v.set_zoom(factor))
 }
 
 /// Screenshot a tab (viewport, or the whole document when `full_page`) to a

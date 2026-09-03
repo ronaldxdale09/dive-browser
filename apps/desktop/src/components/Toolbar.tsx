@@ -56,6 +56,7 @@ export function Toolbar() {
           className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
         />
       </form>
+      <ZoomBadge />
       <BookmarkButton />
       <SharePopover />
       <IconButton icon={Camera} label="Capture full page" disabled={!current} onClick={() => void capture(true)} />
@@ -91,4 +92,22 @@ function pretty(url: string) {
   } catch {
     return url;
   }
+}
+
+/** Shows the active tab's zoom when it is not 100%; click resets. */
+function ZoomBadge() {
+  const active = useBrowser((s) => s.activeTab);
+  const zoom = useBrowser((s) => (active ? s.zoom[active] : undefined) ?? 1);
+  const zoomStep = useBrowser((s) => s.zoomStep);
+  if (Math.abs(zoom - 1) < 0.001) return null;
+  return (
+    <button
+      type="button"
+      title="Reset zoom"
+      onClick={() => void zoomStep(0)}
+      className="mr-1 h-6 rounded-full border border-line px-2 font-mono text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink"
+    >
+      {Math.round(zoom * 100)}%
+    </button>
+  );
 }
