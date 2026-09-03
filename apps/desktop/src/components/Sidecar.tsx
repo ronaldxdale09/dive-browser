@@ -1,7 +1,8 @@
-import { ArrowUp, KeyRound, ListTree, MessageSquare, Radar, Trash2, Wand2 } from "lucide-react";
+import { ArrowUp, KeyRound, ListTree, MessageSquare, Play, Plus, Radar, Trash2, Wand2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useAgent } from "../store/agent";
 import { selectErrors, useConsole } from "../store/console";
+import { render as renderSkill, useSkills } from "../store/skills";
 import { useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
 
@@ -34,7 +35,7 @@ export function Sidecar() {
       {tab === "chat" && <Chat />}
       {tab === "trace" && <Trace />}
       {tab === "watchers" && <Watchers onAsk={() => setTab("chat")} />}
-      {tab === "skills" && <div className="flex-1 px-4 py-3 text-xs text-ink-3">Skills arrive in Phase 3.</div>}
+      {tab === "skills" && <Skills onRun={() => setTab("chat")} />}
     </aside>
   );
 }
@@ -223,6 +224,66 @@ function Trace() {
           {s.summary && <div className={`truncate ${s.error ? "text-danger" : "text-ink-2"}`} title={s.summary}>{s.summary}</div>}
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Reusable prompts. Saved locally; run against the active tab. */
+function Skills({ onRun }: { onRun: () => void }) {
+  const skills = useSkills((s) => s.skills);
+  const add = useSkills((s) => s.add);
+  const remove = useSkills((s) => s.remove);
+  const reset = useSkills((s) => s.reset);
+  const send = useAgent((s) => s.send);
+  const keyPresent = useAgent((s) => s.keyPresent);
+  const activeTab = useBrowser((s) => s.activeTab);
+  const current = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
+  const [name, setName] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const run = (p: string) => {
+    onRun();
+    void send(renderSkill(p, { url: current?.url, title: current?.title }), activeTab);
+  };
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-auto px-3 py-2 text-xs">
+      {skills.map((s) => (
+        <div key={s.id} className="group mb-2 rounded-lg border border-line bg-surface-2 p-2">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-ink">{s.name}</span>
+            <span className="flex-1" />
+            <IconButton icon={Trash2} label={`Delete ${s.name}`} size={12} onClick={() => remove(s.id)} />
+            <button
+              type="button"
+              disabled={!keyPresent || !activeTab}
+              onClick={() => run(s.prompt)}
+              className="flex h-6 items-center gap-1 rounded-full bg-accent px-2.5 text-[11px] font-medium text-accent-ink disabled:opacity-40"
+            >
+              <Icon icon={Play} size={11} /> Run
+            </button>
+          </div>
+          <p className="mt-1 line-clamp-2 text-ink-2">{s.prompt}</p>
+        </div>
+      ))}
+      <form
+        className="mt-1 rounded-lg border border-dashed border-line-2 p-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!name.trim() || !prompt.trim()) return;
+          add(name, prompt);
+          setName("");
+          setPrompt("");
+        }}
+      >
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Skill name" className="mb-1 h-7 w-full rounded-md border border-line bg-surface px-2 text-xs outline-none placeholder:text-ink-3" />
+        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} placeholder="Prompt. {url} and {title} are filled in." className="w-full resize-none rounded-md border border-line bg-surface px-2 py-1 text-xs outline-none placeholder:text-ink-3" />
+        <div className="mt-1 flex items-center">
+          <button type="button" onClick={reset} className="text-[11px] text-ink-3 hover:text-ink">Reset to defaults</button>
+          <span className="flex-1" />
+          <button type="submit" disabled={!name.trim() || !prompt.trim()} className="flex h-6 items-center gap-1 rounded-full border border-line px-2.5 text-[11px] text-ink-2 hover:bg-surface-2 disabled:opacity-40">
+            <Icon icon={Plus} size={11} /> Save
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
