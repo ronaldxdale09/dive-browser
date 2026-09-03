@@ -152,6 +152,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_emulate,
             tab_media,
             tab_throttle,
+            rules_list,
+            rules_set,
             tab_storage,
             tab_meta,
             tab_a11y,
@@ -808,6 +810,44 @@ pub(crate) async fn tab_media(
     let session = cdp_for(&state, id)?;
     let (method, params) = crate::emulate::media_call(&media);
     session.call(method, params).await.map_err(AppError::new)?;
+    Ok(())
+}
+
+/// Mock and rewrite rules of a workspace.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn rules_list(
+    state: State<'_, AppState>,
+    workspace: WorkspaceId,
+) -> Vec<crate::rules::Rule> {
+    state.rules.list(&state, workspace)
+}
+
+/// Replace a workspace's rules and re-apply interception on its open tabs.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn rules_set(
+    state: State<'_, AppState>,
+    workspace: WorkspaceId,
+    rules: Vec<crate::rules::Rule>,
+) -> AppResult<()> {
+    state.rules.set(&state, workspace, rules)?;
+    reapply_rules(&state, workspace).await
+}
+
+/// Enable or disable interception on every open tab of `workspace`.
+pub(crate) async fn reapply_rules(state: &AppState, workspace: WorkspaceId) -> AppResult<()> {
+    let rules = state.rules.list(state, workspace);
+    let sessions: Vec<dive_cdp::CdpSession> = {
+        let host = lock(&state.host);
+        let tabs = lock(&state.store).tabs_for_workspace(workspace)?;
+        tabs.iter()
+            .filter_map(|t| host.as_ref().and_then(|h| h.cdp(t.id)))
+            .collect()
+    };
+    for session in sessions {
+        crate::rules::apply(&session, &rules).await?;
+    }
     Ok(())
 }
 

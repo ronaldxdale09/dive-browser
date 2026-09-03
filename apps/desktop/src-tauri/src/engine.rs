@@ -200,6 +200,7 @@ impl TabHost {
             let console_ready = crate::console::attach(app.clone(), tab_id, session.clone());
             let network_ready = crate::network::attach(app.clone(), tab_id, session.clone());
             crate::favicon::attach(app.clone(), tab_id, session.clone());
+            crate::rules::attach(app.clone(), tab_id, tab.workspace_id, session.clone());
             self.cdp.insert(tab_id, session);
             let nav = view.clone();
             tauri::async_runtime::spawn(async move {

@@ -1,0 +1,290 @@
+//! Mock and rewrite rules: per-workspace URL patterns that block a request,
+//! answer it with a canned response, or add a request header. Applied
+//! through the `DevTools` `Fetch` domain on every tab of the workspace.
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+use base64::Engine as _;
+use dive_cdp::CdpSession;
+use dive_core::{TabId, WorkspaceId};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use specta::Type;
+use tauri::{AppHandle, Manager};
+
+use crate::Runtime;
+use crate::error::{AppError, AppResult};
+use crate::state::AppState;
+
+/// One rule; the first enabled match wins.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct Rule {
+    pub id: String,
+    /// URL glob; `*` matches any run of characters. Matched case-insensitively.
+    pub pattern: String,
+    pub enabled: bool,
+    pub action: RuleAction,
+}
+
+/// What happens to a matching request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RuleAction {
+    /// Fail the request as blocked by the client.
+    Block,
+    /// Answer without hitting the network.
+    Mock {
+        status: u16,
+        content_type: String,
+        body: String,
+    },
+    /// Add or replace one request header.
+    Header { name: String, value: String },
+}
+
+/// Largest mock body kept, in characters.
+const MAX_BODY: usize = 256 * 1024;
+
+/// Rules per workspace, loaded from settings on first use.
+#[derive(Default)]
+pub struct Registry {
+    by_workspace: Mutex<HashMap<WorkspaceId, Vec<Rule>>>,
+}
+
+fn setting_key(workspace: WorkspaceId) -> String {
+    format!("rules:{workspace}")
+}
+
+impl Registry {
+    fn map(&self) -> std::sync::MutexGuard<'_, HashMap<WorkspaceId, Vec<Rule>>> {
+        self.by_workspace
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Rules for `workspace`, reading the store the first time.
+    pub fn list(&self, state: &AppState, workspace: WorkspaceId) -> Vec<Rule> {
+        if let Some(rules) = self.map().get(&workspace) {
+            return rules.clone();
+        }
+        let stored = crate::state::lock(&state.store)
+            .setting(&setting_key(workspace))
+            .ok()
+            .flatten()
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default();
+        self.map().entry(workspace).or_insert(stored).clone()
+    }
+
+    /// Replace the rules for `workspace` and persist them.
+    pub fn set(&self, state: &AppState, workspace: WorkspaceId, rules: Vec<Rule>) -> AppResult<()> {
+        let rules: Vec<Rule> = rules.into_iter().map(clamp).collect();
+        let json = serde_json::to_string(&rules).map_err(AppError::new)?;
+        crate::state::lock(&state.store).set_setting(&setting_key(workspace), &json)?;
+        self.map().insert(workspace, rules);
+        Ok(())
+    }
+}
+
+fn clamp(mut rule: Rule) -> Rule {
+    if let RuleAction::Mock { body, .. } = &mut rule.action
+        && body.chars().count() > MAX_BODY
+    {
+        *body = body.chars().take(MAX_BODY).collect();
+    }
+    rule
+}
+
+/// Glob match with `*` wildcards, case-insensitive.
+pub fn matches(pattern: &str, url: &str) -> bool {
+    let (p, u) = (pattern.to_ascii_lowercase(), url.to_ascii_lowercase());
+    let parts: Vec<&str> = p.split('*').collect();
+    if parts.len() == 1 {
+        return p == u;
+    }
+    let mut pos = 0;
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        let Some(found) = u[pos..].find(part) else {
+            return false;
+        };
+        if i == 0 && found != 0 {
+            return false;
+        }
+        pos += found + part.len();
+    }
+    parts.last().is_some_and(|last| last.is_empty()) || pos == u.len()
+}
+
+/// First enabled rule matching `url`.
+pub fn decide<'a>(rules: &'a [Rule], url: &str) -> Option<&'a Rule> {
+    rules.iter().find(|r| r.enabled && matches(&r.pattern, url))
+}
+
+/// Enable interception on `session` when the workspace has enabled rules,
+/// disable it otherwise.
+pub async fn apply(session: &CdpSession, rules: &[Rule]) -> AppResult<()> {
+    let result = if rules.iter().any(|r| r.enabled) {
+        session
+            .call("Fetch.enable", json!({"patterns": [{"urlPattern": "*"}]}))
+            .await
+    } else {
+        session.call0("Fetch.disable").await
+    };
+    result.map(|_| ()).map_err(AppError::new)
+}
+
+/// Answer `Fetch.requestPaused` events for `tab` according to the
+/// workspace's rules; also enables interception if rules already exist.
+pub fn attach(
+    app: AppHandle<Runtime>,
+    tab_id: TabId,
+    workspace: Option<WorkspaceId>,
+    session: CdpSession,
+) {
+    let Some(workspace) = workspace else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        let mut events = session.subscribe();
+        {
+            let state = app.state::<AppState>();
+            let rules = state.rules.list(&state, workspace);
+            if let Err(e) = apply(&session, &rules).await {
+                tracing::warn!(%tab_id, "fetch interception failed: {e}");
+            }
+        }
+        loop {
+            let event = match events.recv().await {
+                Ok(event) => event,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
+            if event.method != "Fetch.requestPaused" {
+                continue;
+            }
+            let p = &event.params;
+            let Some(request_id) = p["requestId"].as_str() else {
+                continue;
+            };
+            let url = p["request"]["url"].as_str().unwrap_or_default();
+            let rules = {
+                let state = app.state::<AppState>();
+                state.rules.list(&state, workspace)
+            };
+            let (method, params) = match decide(&rules, url).map(|r| &r.action) {
+                Some(RuleAction::Block) => (
+                    "Fetch.failRequest",
+                    json!({"requestId": request_id, "errorReason": "BlockedByClient"}),
+                ),
+                Some(RuleAction::Mock {
+                    status,
+                    content_type,
+                    body,
+                }) => (
+                    "Fetch.fulfillRequest",
+                    json!({
+                        "requestId": request_id,
+                        "responseCode": status,
+                        "responseHeaders": [
+                            {"name": "Content-Type", "value": content_type},
+                            {"name": "Access-Control-Allow-Origin", "value": "*"},
+                            {"name": "X-Dive-Mock", "value": "1"}
+                        ],
+                        "body": base64::engine::general_purpose::STANDARD.encode(body),
+                    }),
+                ),
+                Some(RuleAction::Header { name, value }) => {
+                    let mut headers: Vec<Value> = p["request"]["headers"]
+                        .as_object()
+                        .map(|m| {
+                            m.iter()
+                                .filter(|(k, _)| !k.eq_ignore_ascii_case(name))
+                                .map(|(k, v)| json!({"name": k, "value": v}))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    headers.push(json!({"name": name, "value": value}));
+                    (
+                        "Fetch.continueRequest",
+                        json!({"requestId": request_id, "headers": headers}),
+                    )
+                }
+                None => ("Fetch.continueRequest", json!({"requestId": request_id})),
+            };
+            if let Err(e) = session.call(method, params).await {
+                tracing::debug!(%tab_id, "{method} failed: {e}");
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rule(pattern: &str, action: RuleAction) -> Rule {
+        Rule {
+            id: pattern.into(),
+            pattern: pattern.into(),
+            enabled: true,
+            action,
+        }
+    }
+
+    #[test]
+    fn globs_match_like_devtools() {
+        assert!(matches("https://api.dev/*", "https://api.dev/users"));
+        assert!(matches("*/users/*", "https://API.dev/users/1"));
+        assert!(matches("*.png", "https://a.dev/x.PNG"));
+        assert!(!matches("*.png", "https://a.dev/x.png?x=1"));
+        assert!(matches("https://a.dev/", "https://a.dev/"));
+        assert!(!matches("https://a.dev/", "https://a.dev/x"));
+        assert!(!matches(
+            "https://api.dev/*",
+            "https://other.dev/https://api.dev/"
+        ));
+    }
+
+    #[test]
+    fn first_enabled_match_wins() {
+        let mut off = rule("*", RuleAction::Block);
+        off.enabled = false;
+        let rules = vec![
+            off,
+            rule(
+                "*/api/*",
+                RuleAction::Header {
+                    name: "X-Test".into(),
+                    value: "1".into(),
+                },
+            ),
+            rule("*", RuleAction::Block),
+        ];
+        assert!(matches!(
+            decide(&rules, "https://a.dev/api/x").map(|r| &r.action),
+            Some(RuleAction::Header { .. })
+        ));
+        assert!(matches!(
+            decide(&rules, "https://a.dev/img.png").map(|r| &r.action),
+            Some(RuleAction::Block)
+        ));
+    }
+
+    #[test]
+    fn mock_bodies_are_capped() {
+        let big = "x".repeat(MAX_BODY + 10);
+        let r = clamp(rule(
+            "*",
+            RuleAction::Mock {
+                status: 200,
+                content_type: "text/plain".into(),
+                body: big,
+            },
+        ));
+        assert!(matches!(r.action, RuleAction::Mock { ref body, .. } if body.len() == MAX_BODY));
+    }
+}

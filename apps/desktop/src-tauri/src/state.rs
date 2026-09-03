@@ -29,6 +29,8 @@ pub struct AppState {
     pub approvals: Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<bool>>>,
     /// Tab screen recordings in progress.
     pub screencast: crate::screencast::Registry,
+    /// Mock and rewrite rules per workspace.
+    pub rules: crate::rules::Registry,
 }
 
 /// Directory holding every container's Chromium profile.
@@ -77,6 +79,7 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
         sourcemaps: crate::sourcemaps::Resolver::default(),
         approvals: Mutex::new(std::collections::HashMap::new()),
         screencast: crate::screencast::Registry::default(),
+        rules: crate::rules::Registry::default(),
     };
     crate::commands::register_builtin(&state.commands);
     app.manage(state);

@@ -1,10 +1,11 @@
-import { Accessibility, Activity, Ban, ClipboardList, Database, FileSearch, Network, Terminal } from "lucide-react";
+import { Accessibility, Activity, Ban, ClipboardList, Database, FileSearch, Network, Shuffle, Terminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ConsoleEntry, Level } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { selectEntries, useConsole } from "../store/console";
 import { Icon, IconButton } from "./Icon";
 import { NetworkPanel, NetworkTools } from "./NetworkPanel";
+import { RulesPanel, RulesTools } from "./RulesPanel";
 import { StoragePanel } from "./StoragePanel";
 import { MetaPanel } from "./MetaPanel";
 import { A11yPanel } from "./A11yPanel";
@@ -13,6 +14,7 @@ import { VitalsPanel } from "./VitalsPanel";
 const PANELS = [
   { id: "console", label: "Console", icon: Terminal },
   { id: "network", label: "Network", icon: Network },
+  { id: "rules", label: "Rules", icon: Shuffle },
   { id: "storage", label: "Storage", icon: Database },
   { id: "a11y", label: "A11y", icon: Accessibility },
   { id: "vitals", label: "Vitals", icon: Activity },
@@ -41,9 +43,11 @@ export function Dock() {
         <span className="flex-1" />
         {panel === "console" && <ConsoleTools />}
         {panel === "network" && <NetworkTools />}
+        {panel === "rules" && <RulesTools />}
       </div>
       {panel === "console" && <ConsolePanel />}
       {panel === "network" && <NetworkPanel />}
+      {panel === "rules" && <RulesPanel />}
       {panel === "storage" && <StoragePanel />}
       {panel === "meta" && <MetaPanel />}
       {panel === "a11y" && <A11yPanel />}

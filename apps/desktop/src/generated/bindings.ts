@@ -74,6 +74,10 @@ export const commands = {
 	tabMedia: (id: TabId, media: MediaOverrides) => typedError<null, AppError>(__TAURI_INVOKE("tab_media", { id, media })),
 	/**  Throttle a tab's network, or clear throttling with `None`. */
 	tabThrottle: (id: TabId, profile: "offline" | "slow3g" | "fast3g" | null) => typedError<null, AppError>(__TAURI_INVOKE("tab_throttle", { id, profile })),
+	/**  Mock and rewrite rules of a workspace. */
+	rulesList: (workspace: WorkspaceId) => __TAURI_INVOKE<Rule[]>("rules_list", { workspace }),
+	/**  Replace a workspace's rules and re-apply interception on its open tabs. */
+	rulesSet: (workspace: WorkspaceId, rules: Rule[]) => typedError<null, AppError>(__TAURI_INVOKE("rules_set", { workspace, rules })),
 	/**  Cookies and web storage for a tab. */
 	tabStorage: (id: TabId) => typedError<StorageSnapshot, AppError>(__TAURI_INVOKE("tab_storage", { id })),
 	/**  Head metadata for the Meta panel. */
@@ -484,7 +488,7 @@ export type NetworkEvent =
 	timestamp: number | null,
 } };
 
-/**  Network condition presets, matching Chrome DevTools' throttling menu. */
+/**  Network condition presets, matching Chrome's `DevTools` throttling menu. */
 export type NetworkProfile = "offline" | "slow3g" | "fast3g";
 
 /**  An original location. */
@@ -548,6 +552,24 @@ export type ReplayResponse = {
 	/**  Round-trip time. */
 	elapsed_ms: number,
 };
+
+/**  One rule; the first enabled match wins. */
+export type Rule = {
+	id: string,
+	/**  URL glob; `*` matches any run of characters. Matched case-insensitively. */
+	pattern: string,
+	enabled: boolean,
+	action: RuleAction,
+};
+
+/**  What happens to a matching request. */
+export type RuleAction = 
+/**  Fail the request as blocked by the client. */
+{ kind: "block" } | 
+/**  Answer without hitting the network. */
+{ kind: "mock"; status: number; content_type: string; body: string } | 
+/**  Add or replace one request header. */
+{ kind: "header"; name: string; value: string };
 
 /**  LAN address plus a QR code for it. */
 export type ShareInfo = {

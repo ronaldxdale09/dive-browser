@@ -24,6 +24,7 @@ mod openapi;
 mod recorder;
 mod replay;
 mod report;
+mod rules;
 mod screencast;
 mod snapshot;
 mod sourcemaps;

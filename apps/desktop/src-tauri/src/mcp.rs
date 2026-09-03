@@ -319,6 +319,25 @@ impl Browser for AppBrowser {
         ))
     }
 
+    async fn rules(&self) -> Result<Value, BrowserError> {
+        let state = self.state();
+        let ws = (*lock(&state.active_workspace)).ok_or_else(|| other("no active workspace"))?;
+        serde_json::to_value(state.rules.list(&state, ws)).map_err(other)
+    }
+
+    async fn set_rules(&self, rules: Value) -> Result<(), BrowserError> {
+        let state = self.state();
+        let ws = (*lock(&state.active_workspace)).ok_or_else(|| other("no active workspace"))?;
+        let rules: Vec<crate::rules::Rule> = serde_json::from_value(rules).map_err(other)?;
+        state
+            .rules
+            .set(&state, ws, rules)
+            .map_err(|e| other(e.message))?;
+        crate::commands::reapply_rules(&state, ws)
+            .await
+            .map_err(|e| other(e.message))
+    }
+
     async fn page_snapshot(&self, tab: TabId) -> Result<String, BrowserError> {
         let snap = self.take_snapshot(tab).await?;
         let taken = snap.taken_at.clone();

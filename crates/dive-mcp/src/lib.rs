@@ -104,6 +104,10 @@ pub trait Browser: Send + Sync + 'static {
     async fn api_spec(&self, tab: TabId) -> Result<serde_json::Value, BrowserError>;
     /// Markdown bug report: page, console errors and failed requests.
     async fn page_report(&self, tab: TabId) -> Result<String, BrowserError>;
+    /// Mock/rewrite rules of the active workspace, as JSON.
+    async fn rules(&self) -> Result<serde_json::Value, BrowserError>;
+    /// Replace the active workspace's rules with `rules` (JSON array).
+    async fn set_rules(&self, rules: serde_json::Value) -> Result<(), BrowserError>;
     /// Remember the page's current state for a later diff.
     async fn page_snapshot(&self, tab: TabId) -> Result<String, BrowserError>;
     /// Snapshot now and compare with the previous snapshot.
@@ -193,6 +197,15 @@ pub struct BodyParams {
     pub tab_id: Option<String>,
     /// Request id from `network_list`.
     pub request_id: String,
+}
+
+/// Replace the rules.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RulesParams {
+    /// Full rule list. Each rule: {id, pattern (URL glob with *), enabled, action}
+    /// where action is `{kind:"block"}`, `{kind:"mock", status, content_type, body}`
+    /// or `{kind:"header", name, value}`.
+    pub rules: Vec<serde_json::Value>,
 }
 
 /// Evaluate JavaScript.
@@ -414,6 +427,33 @@ impl<B: Browser> DiveServer<B> {
     ) -> Result<CallToolResult, ErrorData> {
         let tab = self.resolve(p.tab_id).await?;
         json_result(&self.browser.api_spec(tab).await?)
+    }
+
+    /// Rules list.
+    #[tool(
+        name = "rules_list",
+        description = "Mock and rewrite rules of the current workspace: URL globs that block a request, answer it with a canned body, or add a request header."
+    )]
+    async fn rules_list(&self) -> Result<CallToolResult, ErrorData> {
+        json_result(&self.browser.rules().await?)
+    }
+
+    /// Rules set.
+    #[tool(
+        name = "rules_set",
+        description = "Replace the workspace's mock/rewrite rules. Use to simulate API failures or canned responses; pass an empty list to clear."
+    )]
+    async fn rules_set(
+        &self,
+        Parameters(p): Parameters<RulesParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let count = p.rules.len();
+        self.browser
+            .set_rules(serde_json::Value::Array(p.rules))
+            .await?;
+        Ok(CallToolResult::success(vec![ContentBlock::text(format!(
+            "{count} rules active"
+        ))]))
     }
 
     /// Bug report.
@@ -675,6 +715,12 @@ mod tests {
         }
         async fn page_report(&self, _tab: TabId) -> Result<String, BrowserError> {
             Ok("## Bug report".into())
+        }
+        async fn rules(&self) -> Result<serde_json::Value, BrowserError> {
+            Ok(serde_json::json!([]))
+        }
+        async fn set_rules(&self, _rules: serde_json::Value) -> Result<(), BrowserError> {
+            Ok(())
         }
         async fn page_snapshot(&self, _tab: TabId) -> Result<String, BrowserError> {
             Ok("snapshot".into())

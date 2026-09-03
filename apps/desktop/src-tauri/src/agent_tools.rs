@@ -23,6 +23,8 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec { name: "tab_navigate".into(), description: "Navigate the tab to a URL.".into(), input_schema: obj(json!({"tab_id": tab, "url": {"type": "string"}}), &["url"]) },
         ToolSpec { name: "console_tail".into(), description: "Recent console output: logs, warnings, exceptions, failed loads.".into(), input_schema: obj(json!({"tab_id": tab, "limit": {"type": "integer"}}), &[]) },
         ToolSpec { name: "page_report".into(), description: "Bug report for the tab: console errors/warnings and failed requests. Start here when something is broken.".into(), input_schema: obj(json!({"tab_id": tab}), &[]) },
+        ToolSpec { name: "rules_list".into(), description: "Mock/rewrite rules of the workspace (URL globs that block, mock or add a header).".into(), input_schema: obj(json!({}), &[]) },
+        ToolSpec { name: "rules_set".into(), description: "Replace the workspace's mock/rewrite rules. Each: {id, pattern, enabled, action:{kind:'block'}|{kind:'mock',status,content_type,body}|{kind:'header',name,value}}. Empty list clears.".into(), input_schema: obj(json!({"rules": {"type": "array", "items": {"type": "object"}}}), &["rules"]) },
         ToolSpec { name: "page_snapshot".into(), description: "Remember the page state now so page_diff can report what changed later.".into(), input_schema: obj(json!({"tab_id": tab}), &[]) },
         ToolSpec { name: "page_diff".into(), description: "What changed since the last page_snapshot: text, structure, errors, requests.".into(), input_schema: obj(json!({"tab_id": tab}), &[]) },
         ToolSpec { name: "network_list".into(), description: "Recent requests with method, status, type, size and errors. No bodies; use network_body for one.".into(), input_schema: obj(json!({"tab_id": tab, "limit": {"type": "integer"}}), &[]) },
@@ -32,7 +34,10 @@ pub fn specs() -> Vec<ToolSpec> {
 
 /// Tools that change the page or leave it; the UI labels these as actions.
 pub fn is_action(name: &str) -> bool {
-    matches!(name, "page_click" | "page_type" | "tab_navigate")
+    matches!(
+        name,
+        "page_click" | "page_type" | "tab_navigate" | "rules_set"
+    )
 }
 
 /// Run one tool call against the browser.
@@ -126,6 +131,12 @@ async fn execute<B: Browser>(
             .page_report(tab()?)
             .await
             .map(Value::String)
+            .map_err(err),
+        "rules_list" => text(browser.rules().await.map_err(err)?),
+        "rules_set" => browser
+            .set_rules(input["rules"].clone())
+            .await
+            .map(|()| Value::String("rules applied".into()))
             .map_err(err),
         "page_snapshot" => browser
             .page_snapshot(tab()?)
