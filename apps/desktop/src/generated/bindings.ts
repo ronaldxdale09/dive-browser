@@ -35,6 +35,16 @@ export const commands = {
 	 *  PNG under the app data dir and return its path.
 	 */
 	tabCapture: (id: TabId, fullPage: boolean) => typedError<string, AppError>(__TAURI_INVOKE("tab_capture", { id, fullPage })),
+	/**
+	 *  Read a capture as base64 PNG for the annotator. Only files inside the
+	 *  captures directory are readable.
+	 */
+	captureRead: (path: string) => typedError<string, AppError>(__TAURI_INVOKE("capture_read", { path })),
+	/**
+	 *  Save an annotated capture (base64 PNG) beside the original and copy it
+	 *  to the clipboard; returns the new path.
+	 */
+	captureSave: (pngBase64: string) => typedError<string, AppError>(__TAURI_INVOKE("capture_save", { pngBase64 })),
 	/**  Emulate `device` on a tab, or clear emulation with `None`. */
 	tabEmulate: (id: TabId, device: {
 	/**  Viewport width in CSS pixels. */

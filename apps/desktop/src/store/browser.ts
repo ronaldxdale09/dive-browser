@@ -24,6 +24,9 @@ interface BrowserState {
   reload: () => Promise<void>;
   capture: (fullPage: boolean) => Promise<void>;
   notice: string | null;
+  /** Path of the capture currently open in the annotator. */
+  annotating: string | null;
+  setAnnotating: (path: string | null) => void;
   reorderTabs: (ordered: string[]) => Promise<void>;
   setPinned: (id: string, pinned: boolean) => Promise<void>;
   activateWorkspace: (id: string) => Promise<void>;
@@ -83,6 +86,8 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   open: { sidecar: false, dock: false, palette: false, find: false, settings: false },
   error: null,
   notice: null,
+  annotating: null,
+  setAnnotating: (path) => set({ annotating: path }),
   editing: null,
   setEditing: (editing) => set({ editing }),
 
@@ -135,7 +140,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     if (!id) return;
     await run(set, async () => {
       const path = await ipc.tabCapture(id, fullPage);
-      set({ notice: `Copied to clipboard · saved ${path.split("/").pop() ?? path}` });
+      set({ annotating: path, notice: `Copied to clipboard · saved ${path.split("/").pop() ?? path}` });
       setTimeout(() => set({ notice: null }), 4000);
     });
   },

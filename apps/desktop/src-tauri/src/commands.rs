@@ -143,6 +143,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_forward,
             tab_reload,
             tab_capture,
+            capture_read,
+            capture_save,
             tab_emulate,
             tab_media,
             tab_storage,
@@ -656,17 +658,56 @@ pub async fn capture_tab(
     }
     .map_err(AppError::new)?;
 
-    let dir = crate::state::data_root().join("captures");
-    std::fs::create_dir_all(&dir)?;
+    save_capture(&png, "")
+}
+
+/// Write `png` to `<data>/captures/dive-<timestamp><suffix>.png` and copy
+/// it to the clipboard.
+fn save_capture(png: &[u8], suffix: &str) -> AppResult<std::path::PathBuf> {
+    let dir = captures_dir()?;
     let stamp = dive_core::Timestamp::now()
         .to_rfc3339()
         .replace([':', '.'], "-");
-    let path = dir.join(format!("dive-{stamp}.png"));
-    std::fs::write(&path, &png)?;
-    if let Err(e) = copy_png_to_clipboard(&png) {
+    let path = dir.join(format!("dive-{stamp}{suffix}.png"));
+    std::fs::write(&path, png)?;
+    if let Err(e) = copy_png_to_clipboard(png) {
         tracing::warn!("capture saved but clipboard copy failed: {e}");
     }
     Ok(path)
+}
+
+fn captures_dir() -> AppResult<std::path::PathBuf> {
+    let dir = crate::state::data_root().join("captures");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+/// Read a capture as base64 PNG for the annotator. Only files inside the
+/// captures directory are readable.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn capture_read(path: String) -> AppResult<String> {
+    use base64::Engine as _;
+    let dir = captures_dir()?.canonicalize()?;
+    let file = std::path::Path::new(&path).canonicalize()?;
+    if !file.starts_with(&dir) || file.extension().is_none_or(|e| e != "png") {
+        return Err(AppError::new("not a capture"));
+    }
+    Ok(base64::engine::general_purpose::STANDARD.encode(std::fs::read(file)?))
+}
+
+/// Save an annotated capture (base64 PNG) beside the original and copy it
+/// to the clipboard; returns the new path.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn capture_save(png_base64: String) -> AppResult<String> {
+    use base64::Engine as _;
+    let png = base64::engine::general_purpose::STANDARD
+        .decode(png_base64)
+        .map_err(AppError::new)?;
+    image::load_from_memory_with_format(&png, image::ImageFormat::Png).map_err(AppError::new)?;
+    let path = save_capture(&png, "-annotated")?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 /// Emulate `device` on a tab, or clear emulation with `None`.

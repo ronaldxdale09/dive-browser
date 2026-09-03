@@ -9,6 +9,7 @@ import { Palette } from "./components/Palette";
 import { WorkspaceDialog } from "./components/WorkspaceDialog";
 import { FindBar } from "./components/FindBar";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { Annotator } from "./components/Annotator";
 import { Splash } from "./components/Splash";
 import { useBrowser } from "./store/browser";
 import { useShortcuts } from "./lib/shortcuts";
@@ -17,6 +18,7 @@ export function App() {
   const boot = useBrowser((s) => s.boot);
   const error = useBrowser((s) => s.error);
   const notice = useBrowser((s) => s.notice);
+  const annotating = useBrowser((s) => s.annotating);
   const editing = useBrowser((s) => s.editing);
   const open = useBrowser((s) => s.open);
   useEffect(() => void boot(), [boot]);
@@ -44,6 +46,7 @@ export function App() {
       </div>
       {open.palette && <Palette />}
       {open.settings && <SettingsDialog />}
+      {annotating && <Annotator path={annotating} />}
       <Splash />
       <WorkspaceDialog key={editing?.id ?? (editing ? "new" : "closed")} />
       {notice && (
