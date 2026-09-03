@@ -19,6 +19,7 @@ mod housekeeping;
 mod mcp;
 mod meta;
 mod network;
+mod openapi;
 mod replay;
 mod sourcemaps;
 mod state;

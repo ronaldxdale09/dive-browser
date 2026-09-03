@@ -234,6 +234,15 @@ impl Browser for AppBrowser {
         Ok(())
     }
 
+    async fn api_spec(&self, tab: TabId) -> Result<Value, BrowserError> {
+        let state = self.state();
+        let page_url = lock(&state.store).tab(tab).map_err(other)?.url;
+        Ok(crate::openapi::from_requests(
+            &page_url,
+            &state.buffers.requests(tab, 1000),
+        ))
+    }
+
     async fn console_tail(&self, tab: TabId, limit: usize) -> Result<Value, BrowserError> {
         serde_json::to_value(self.state().buffers.console_tail(tab, limit)).map_err(other)
     }

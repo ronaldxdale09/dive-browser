@@ -1,5 +1,6 @@
-import { Ban, Repeat } from "lucide-react";
+import { Ban, FileJson, Repeat } from "lucide-react";
 import { useState } from "react";
+import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { selectRequests, useNetwork } from "../store/network";
 import type { RequestRow } from "../store/network";
@@ -9,7 +10,20 @@ import { ReplayEditor } from "./ReplayEditor";
 export function NetworkTools() {
   const activeTab = useBrowser((s) => s.activeTab);
   const clear = useNetwork((s) => s.clear);
-  return <IconButton icon={Ban} label="Clear requests" size={13} disabled={!activeTab} onClick={() => activeTab && clear(activeTab)} />;
+  const exportSpec = () => {
+    if (!activeTab) return;
+    ipc
+      .tabOpenapi(activeTab)
+      .then((path) => useBrowser.setState({ notice: `OpenAPI copied · saved ${path.split("/").pop() ?? path}` }))
+      .catch((e: unknown) => useBrowser.setState({ error: e instanceof Error ? e.message : String(e) }));
+    setTimeout(() => useBrowser.setState({ notice: null }), 4000);
+  };
+  return (
+    <>
+      <IconButton icon={FileJson} label="Export OpenAPI from captured traffic" size={13} disabled={!activeTab} onClick={exportSpec} />
+      <IconButton icon={Ban} label="Clear requests" size={13} disabled={!activeTab} onClick={() => activeTab && clear(activeTab)} />
+    </>
+  );
 }
 
 function name(url: string) {

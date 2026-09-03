@@ -108,6 +108,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             resolve_frame,
             request_captured,
             request_replay,
+            tab_openapi,
             layout_set_content_bounds,
             commands_list,
             command_run,
@@ -734,6 +735,28 @@ pub(crate) async fn request_replay(
         None
     };
     crate::replay::send(&request, cookie).await
+}
+
+/// `OpenAPI` 3.1 JSON inferred from the tab's captured traffic; also saved
+/// under captures and copied to the clipboard.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_openapi(state: State<'_, AppState>, id: TabId) -> AppResult<String> {
+    let page_url = lock(&state.store).tab(id)?.url;
+    let requests = state.buffers.requests(id, 1000);
+    let spec = crate::openapi::from_requests(&page_url, &requests);
+    let text = serde_json::to_string_pretty(&spec).map_err(AppError::new)?;
+    let dir = crate::state::data_root().join("captures");
+    std::fs::create_dir_all(&dir)?;
+    let stamp = dive_core::Timestamp::now()
+        .to_rfc3339()
+        .replace([':', '.'], "-");
+    let path = dir.join(format!("openapi-{stamp}.json"));
+    std::fs::write(&path, &text)?;
+    if let Ok(mut cb) = arboard::Clipboard::new() {
+        let _ = cb.set_text(text);
+    }
+    Ok(path.to_string_lossy().into_owned())
 }
 
 /// Head metadata for the Meta panel.

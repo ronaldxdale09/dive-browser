@@ -94,6 +94,8 @@ pub trait Browser: Send + Sync + 'static {
         text: String,
         submit: bool,
     ) -> Result<(), BrowserError>;
+    /// `OpenAPI` 3.1 JSON inferred from the tab's traffic.
+    async fn api_spec(&self, tab: TabId) -> Result<serde_json::Value, BrowserError>;
 }
 
 /// Server options.
@@ -367,6 +369,19 @@ impl<B: Browser> DiveServer<B> {
         Ok(CallToolResult::success(vec![ContentBlock::text("ok")]))
     }
 
+    /// API spec.
+    #[tool(
+        name = "api_spec",
+        description = "OpenAPI 3.1 document inferred from the requests a tab has made: paths, methods, statuses, query params."
+    )]
+    async fn api_spec(
+        &self,
+        Parameters(p): Parameters<TabRef>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id).await?;
+        json_result(&self.browser.api_spec(tab).await?)
+    }
+
     /// Evaluate JS (gated).
     #[tool(
         name = "page_evaluate",
@@ -569,6 +584,9 @@ mod tests {
             _submit: bool,
         ) -> Result<(), BrowserError> {
             Ok(())
+        }
+        async fn api_spec(&self, _tab: TabId) -> Result<serde_json::Value, BrowserError> {
+            Ok(serde_json::json!({"openapi": "3.1.0"}))
         }
     }
 

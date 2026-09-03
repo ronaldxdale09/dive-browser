@@ -59,6 +59,7 @@ export const ipc = {
     unwrap(await commands.layoutSetContentBounds(b)),
   commandsList: () => commands.commandsList(),
   appInfo: () => commands.appInfo(),
+  tabOpenapi: async (id: string) => unwrap(await commands.tabOpenapi(id)),
   requestCaptured: async (tabId: string, requestId: string) => unwrap(await commands.requestCaptured(tabId, requestId)),
   requestReplay: async (tabId: string, request: ReplayRequestInput) => unwrap(await commands.requestReplay(tabId, request)),
   devServers: () => commands.devServers(),

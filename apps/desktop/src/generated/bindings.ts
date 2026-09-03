@@ -77,6 +77,11 @@ export const commands = {
 	requestCaptured: (tabId: TabId, requestId: string) => typedError<ReplayRequest, AppError>(__TAURI_INVOKE("request_captured", { tabId, requestId })),
 	/**  Replay a (possibly edited) request, optionally with the tab's cookies. */
 	requestReplay: (tabId: TabId, request: ReplayRequest) => typedError<ReplayResponse, AppError>(__TAURI_INVOKE("request_replay", { tabId, request })),
+	/**
+	 *  OpenAPI 3.1 JSON inferred from the tab's captured traffic; also saved
+	 *  under captures and copied to the clipboard.
+	 */
+	tabOpenapi: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_openapi", { id })),
 	layoutSetContentBounds: (bounds: Bounds) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_bounds", { bounds })),
 	commandsList: () => __TAURI_INVOKE<Command[]>("commands_list"),
 	/**
