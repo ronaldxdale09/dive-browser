@@ -32,8 +32,12 @@ export const commands = {
 	tabReload: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_reload", { id })),
 	/**  Set a tab's zoom factor (clamped to the step range). */
 	tabZoom: (id: TabId, factor: number | null) => typedError<null, AppError>(__TAURI_INVOKE("tab_zoom", { id, factor })),
-	/**  Open Chromium's DevTools window for a tab. */
+	/**  Open Chromium's `DevTools` window for a tab. */
 	tabDevtools: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_devtools", { id })),
+	/**  Start recording a tab's screencast frames. */
+	tabScreencastStart: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_screencast_start", { id })),
+	/**  Stop recording and encode the GIF; returns its path. */
+	tabScreencastStop: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_screencast_stop", { id })),
 	/**
 	 *  Screenshot a tab (viewport, or the whole document when `full_page`) to a
 	 *  PNG under the app data dir and return its path.

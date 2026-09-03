@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Bug, Camera, Lock, PanelBottom, RotateCw, Search, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bug, Camera, Lock, PanelBottom, RotateCw, Search, Sparkles, Square, Video } from "lucide-react";
 import { useState } from "react";
 import { useBrowser } from "../store/browser";
 import { selectErrorCount, useConsole } from "../store/console";
@@ -61,6 +61,7 @@ export function Toolbar() {
       <BookmarkButton />
       <SharePopover />
       <IconButton icon={Camera} label="Capture full page" disabled={!current} onClick={() => void capture(true)} />
+      <RecordButton />
       <DeviceMenu />
       <IconButton icon={Bug} label="Open DevTools" disabled={!current} onClick={() => void devtools()} />
       <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />
@@ -110,6 +111,36 @@ function ZoomBadge() {
       className="mr-1 h-6 rounded-full border border-line px-2 font-mono text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink"
     >
       {Math.round(zoom * 100)}%
+    </button>
+  );
+}
+
+/** Start/stop recording the active tab as a GIF; pulses while recording. */
+function RecordButton() {
+  const active = useBrowser((s) => s.activeTab);
+  const recordingTab = useBrowser((s) => s.recordingTab);
+  const toggle = useBrowser((s) => s.screencastToggle);
+  const recording = recordingTab !== null;
+  return (
+    <button
+      type="button"
+      aria-pressed={recording}
+      aria-label={recording ? "Stop recording" : "Record tab as GIF"}
+      title={recording ? "Stop recording (⌘⇧R)" : "Record tab as GIF (⌘⇧R)"}
+      disabled={!active && !recording}
+      onClick={() => void toggle()}
+      className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+        recording ? "bg-red-500/15 text-red-400 hover:bg-red-500/25" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
+      } disabled:opacity-40`}
+    >
+      {recording ? (
+        <span className="relative flex items-center justify-center">
+          <span className="absolute h-4 w-4 animate-ping rounded-full bg-red-500/40" />
+          <Icon icon={Square} size={12} fill="currentColor" />
+        </span>
+      ) : (
+        <Icon icon={Video} size={15} />
+      )}
     </button>
   );
 }

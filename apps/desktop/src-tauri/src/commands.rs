@@ -144,6 +144,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_reload,
             tab_zoom,
             tab_devtools,
+            tab_screencast_start,
+            tab_screencast_stop,
             tab_capture,
             capture_read,
             capture_save,
@@ -200,6 +202,12 @@ pub fn register_builtin(registry: &dive_core::CommandRegistry) {
             "tab.devtools",
             "Open DevTools",
             Some("mod+alt+i"),
+            CommandScope::Tab,
+        ),
+        (
+            "screencast.toggle",
+            "Record tab as GIF / stop",
+            Some("mod+shift+r"),
             CommandScope::Tab,
         ),
         ("zoom.in", "Zoom in", Some("mod+="), CommandScope::Tab),
@@ -634,6 +642,26 @@ pub(crate) fn tab_devtools(state: State<'_, AppState>, id: TabId) -> AppResult<(
     })
 }
 
+/// Start recording a tab's screencast frames.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_screencast_start(state: State<'_, AppState>, id: TabId) -> AppResult<()> {
+    let session = cdp_for(&state, id)?;
+    state.screencast.start(id, session).await
+}
+
+/// Stop recording and encode the GIF; returns its path.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_screencast_stop(
+    state: State<'_, AppState>,
+    id: TabId,
+) -> AppResult<String> {
+    let session = cdp_for(&state, id)?;
+    let path = state.screencast.stop(id, &session).await?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// Zoom levels the chrome steps through; `1.0` is the default.
 pub const ZOOM_STEPS: &[f64] = &[
     0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0,
@@ -710,7 +738,7 @@ fn save_capture(png: &[u8], suffix: &str) -> AppResult<std::path::PathBuf> {
     Ok(path)
 }
 
-fn captures_dir() -> AppResult<std::path::PathBuf> {
+pub(crate) fn captures_dir() -> AppResult<std::path::PathBuf> {
     let dir = crate::state::data_root().join("captures");
     std::fs::create_dir_all(&dir)?;
     Ok(dir)

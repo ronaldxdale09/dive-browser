@@ -27,6 +27,8 @@ pub struct AppState {
     pub sourcemaps: crate::sourcemaps::Resolver,
     /// Agent actions waiting for the user's decision, by tool call id.
     pub approvals: Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<bool>>>,
+    /// Tab screen recordings in progress.
+    pub screencast: crate::screencast::Registry,
 }
 
 /// Directory holding every container's Chromium profile.
@@ -74,6 +76,7 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
         buffers: crate::buffers::Buffers::default(),
         sourcemaps: crate::sourcemaps::Resolver::default(),
         approvals: Mutex::new(std::collections::HashMap::new()),
+        screencast: crate::screencast::Registry::default(),
     };
     crate::commands::register_builtin(&state.commands);
     app.manage(state);

@@ -27,6 +27,9 @@ interface BrowserState {
   zoom: Record<string, number>;
   zoomStep: (direction: 1 | -1 | 0) => Promise<void>;
   devtools: () => Promise<void>;
+  /** Tab whose screen is being recorded, if any. */
+  recordingTab: string | null;
+  screencastToggle: () => Promise<void>;
   notice: string | null;
   /** Path of the capture currently open in the annotator. */
   annotating: string | null;
@@ -92,6 +95,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   notice: null,
   annotating: null,
   zoom: {},
+  recordingTab: null,
   setAnnotating: (path) => set({ annotating: path }),
   editing: null,
   setEditing: (editing) => set({ editing }),
@@ -139,6 +143,23 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   reload: async () => {
     const id = get().activeTab;
     if (id) await run(set, () => ipc.tabReload(id));
+  },
+  screencastToggle: async () => {
+    const recording = get().recordingTab;
+    if (recording) {
+      await run(set, async () => {
+        const path = await ipc.tabScreencastStop(recording);
+        set({ recordingTab: null, notice: `Saved ${path.split("/").pop() ?? path}` });
+        setTimeout(() => set({ notice: null }), 6000);
+      });
+      return;
+    }
+    const id = get().activeTab;
+    if (!id) return;
+    await run(set, async () => {
+      await ipc.tabScreencastStart(id);
+      set({ recordingTab: id });
+    });
   },
   devtools: async () => {
     const id = get().activeTab;
