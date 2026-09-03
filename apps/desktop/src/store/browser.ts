@@ -4,7 +4,7 @@ import { listenConsole, useConsole } from "./console";
 import { listenNetwork, useNetwork } from "./network";
 import type { CoreEvent, Snapshot, Tab, Workspace } from "../lib/ipc";
 
-export type UiPanel = "sidecar" | "dock" | "palette";
+export type UiPanel = "sidecar" | "dock" | "palette" | "find";
 
 interface BrowserState {
   ready: boolean;
@@ -80,7 +80,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   activeWorkspace: null,
   tabs: [],
   activeTab: null,
-  open: { sidecar: false, dock: false, palette: false },
+  open: { sidecar: false, dock: false, palette: false, find: false },
   error: null,
   notice: null,
   editing: null,
@@ -89,6 +89,12 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   boot: async () => {
     try {
       unlisten ??= await events.stateChanged.listen((e) => get().applyEvent(e.payload));
+      await events.downloadNotice.listen((e) => {
+        const d = e.payload;
+        const name = d.path.split("/").pop() ?? d.url;
+        set({ notice: d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : `Download failed: ${name}` });
+        setTimeout(() => set({ notice: null }), 5000);
+      });
       await Promise.all([listenConsole(), listenNetwork()]);
       set({ ...fromSnapshot(await ipc.snapshot()), ready: true, error: null });
     } catch (e) {

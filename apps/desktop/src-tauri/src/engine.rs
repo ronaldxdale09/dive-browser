@@ -8,11 +8,50 @@ use dive_cdp::CdpSession;
 use dive_core::{Container, CoreEvent, Tab, TabId};
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::webview::WebviewBuilder;
+use tauri::webview::{DownloadEvent, WebviewBuilder};
 use tauri::{App, AppHandle, LogicalPosition, LogicalSize, Manager, Webview, WebviewUrl, Window};
+use tauri_specta::Event;
 
 use crate::state::{AppState, lock};
 use crate::{CHROME_LABEL, MAIN_WINDOW, Runtime};
+
+/// A download started or finished; shown as a toast.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct DownloadNotice {
+    /// Source URL.
+    pub url: String,
+    /// Where the file is (or will be) written.
+    pub path: String,
+    /// `started` | `finished` | `failed`.
+    pub status: String,
+}
+
+/// `~/Downloads`, or the temp dir when the home is unknown.
+pub fn downloads_dir() -> PathBuf {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
+    home.map_or_else(std::env::temp_dir, |h| h.join("Downloads"))
+}
+
+/// Pick a path in `dir` for `suggested`, appending ` (n)` if taken.
+pub fn unique_path(dir: &std::path::Path, suggested: &str) -> PathBuf {
+    let name = std::path::Path::new(suggested)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("download");
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s.to_owned(), format!(".{e}")),
+        _ => (name.to_owned(), String::new()),
+    };
+    let mut candidate = dir.join(name);
+    let mut n = 1;
+    while candidate.exists() {
+        candidate = dir.join(format!("{stem} ({n}){ext}"));
+        n += 1;
+    }
+    candidate
+}
 
 /// Rectangle of the content area in logical pixels, relative to the window.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
@@ -84,6 +123,52 @@ impl TabHost {
             .on_document_title_changed(move |_, title| {
                 update_tab(&title_app, tab_id, |t| t.title = title);
             });
+
+        let dl_app = app.clone();
+        builder = builder.on_download(move |_, event| {
+            match event {
+                DownloadEvent::Requested { url, destination } => {
+                    let dir = downloads_dir();
+                    let _ = std::fs::create_dir_all(&dir);
+                    let suggested = destination
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map_or_else(
+                            || {
+                                url.path_segments()
+                                    .and_then(|mut s| s.next_back())
+                                    .filter(|s| !s.is_empty())
+                                    .unwrap_or("download")
+                                    .to_owned()
+                            },
+                            str::to_owned,
+                        );
+                    *destination = unique_path(&dir, &suggested);
+                    let _ = DownloadNotice {
+                        url: url.to_string(),
+                        path: destination.to_string_lossy().into_owned(),
+                        status: "started".into(),
+                    }
+                    .emit(&dl_app);
+                }
+                DownloadEvent::Finished { url, path, success } => {
+                    let _ = DownloadNotice {
+                        url: url.to_string(),
+                        path: path
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
+                        status: if success {
+                            "finished".into()
+                        } else {
+                            "failed".into()
+                        },
+                    }
+                    .emit(&dl_app);
+                }
+                _ => {}
+            }
+            true
+        });
 
         #[cfg(feature = "cef")]
         {
@@ -283,4 +368,24 @@ fn forward_events(app: AppHandle<Runtime>, mut rx: tokio::sync::broadcast::Recei
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unique_path_appends_counter() {
+        let dir = std::env::temp_dir().join(format!("dive-dl-{}", TabId::new()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = unique_path(&dir, "/tmp/report.tar.gz");
+        assert_eq!(first.file_name().unwrap(), "report.tar.gz");
+        std::fs::write(&first, b"x").unwrap();
+        assert_eq!(
+            unique_path(&dir, "report.tar.gz").file_name().unwrap(),
+            "report.tar (1).gz"
+        );
+        assert_eq!(unique_path(&dir, "noext").file_name().unwrap(), "noext");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

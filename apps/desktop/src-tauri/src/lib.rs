@@ -11,6 +11,7 @@ mod emulate;
 mod engine;
 mod error;
 mod favicon;
+mod find;
 mod housekeeping;
 mod mcp;
 mod meta;

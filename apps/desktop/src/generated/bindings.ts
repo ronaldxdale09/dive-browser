@@ -60,6 +60,8 @@ export const commands = {
 	tabMeta: (id: TabId) => typedError<MetaSnapshot, AppError>(__TAURI_INVOKE("tab_meta", { id })),
 	/**  Run axe-core (source supplied by the chrome) and return violations. */
 	tabA11y: (id: TabId, axeSource: string) => typedError<A11yReport, AppError>(__TAURI_INVOKE("tab_a11y", { id, axeSource })),
+	/**  Find in page: select match `index` (1-based, wraps) of `query`; empty query clears. */
+	tabFind: (id: TabId, query: string, index: number) => typedError<FindResult, AppError>(__TAURI_INVOKE("tab_find", { id, query, index })),
 	layoutSetContentBounds: (bounds: Bounds) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_bounds", { bounds })),
 	commandsList: () => __TAURI_INVOKE<Command[]>("commands_list"),
 	/**
@@ -78,6 +80,7 @@ export const commands = {
 /** Events */
 export const events = {
 	consoleEntry: makeEvent<ConsoleEntry>("console-entry"),
+	downloadNotice: makeEvent<DownloadNotice>("download-notice"),
 	networkEvent: makeEvent<NetworkEvent>("network-event"),
 	stateChanged: makeEvent<StateChanged>("state-changed"),
 };
@@ -223,6 +226,24 @@ export type Device = {
 	user_agent: string,
 	/**  `"iOS" | "Android" | "macOS" | "Windows"`, used for client hints. */
 	platform: string,
+};
+
+/**  A download started or finished; shown as a toast. */
+export type DownloadNotice = {
+	/**  Source URL. */
+	url: string,
+	/**  Where the file is (or will be) written. */
+	path: string,
+	/**  `started` | `finished` | `failed`. */
+	status: string,
+};
+
+/**  Result of a find step. */
+export type FindResult = {
+	/**  Total matches in the document. */
+	total: number,
+	/**  1-based index of the selected match, 0 when none. */
+	current: number,
 };
 
 /**  Severity of a console entry. */

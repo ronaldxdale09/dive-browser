@@ -18,6 +18,7 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "sidecar.toggle": () => useBrowser.getState().toggle("sidecar"),
   "dock.toggle": () => useBrowser.getState().toggle("dock"),
   "capture.fullpage": () => useBrowser.getState().capture(true),
+  "find.open": () => useBrowser.getState().toggle("find", true),
 };
 
 export function runCommand(id: string): void {
@@ -40,6 +41,7 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+j": "sidecar.toggle",
   "mod+shift+d": "dock.toggle",
   "mod+shift+s": "capture.fullpage",
+  "mod+f": "find.open",
 };
 
 export function chordOf(e: KeyboardEvent): string | null {

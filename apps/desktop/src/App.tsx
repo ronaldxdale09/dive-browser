@@ -7,6 +7,7 @@ import { Sidecar } from "./components/Sidecar";
 import { Dock } from "./components/Dock";
 import { Palette } from "./components/Palette";
 import { WorkspaceDialog } from "./components/WorkspaceDialog";
+import { FindBar } from "./components/FindBar";
 import { Splash } from "./components/Splash";
 import { useBrowser } from "./store/browser";
 import { useShortcuts } from "./lib/shortcuts";
@@ -33,7 +34,8 @@ export function App() {
         <Toolbar />
       </div>
       <div className="col-start-2 row-start-3 grid min-h-0 gap-px bg-line pl-px" style={{ gridTemplateColumns: open.sidecar ? "minmax(0,1fr) 360px" : "minmax(0,1fr)" }}>
-        <div className="grid min-h-0 gap-px bg-line" style={{ gridTemplateRows: open.dock ? "minmax(0,1fr) 240px" : "minmax(0,1fr)" }}>
+        <div className="relative grid min-h-0 gap-px bg-line" style={{ gridTemplateRows: open.dock ? "minmax(0,1fr) 240px" : "minmax(0,1fr)" }}>
+          {open.find && <FindBar />}
           <Content />
           {open.dock && <Dock />}
         </div>

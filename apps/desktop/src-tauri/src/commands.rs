@@ -57,6 +57,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_storage,
             tab_meta,
             tab_a11y,
+            tab_find,
             layout_set_content_bounds,
             commands_list,
             command_run,
@@ -67,7 +68,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
         .events(collect_events![
             StateChanged,
             crate::console::ConsoleEntry,
-            crate::network::NetworkEvent
+            crate::network::NetworkEvent,
+            crate::engine::DownloadNotice,
         ])
 }
 
@@ -579,6 +581,19 @@ pub(crate) async fn tab_storage(
     let url = lock(&state.store).tab(id)?.url;
     let session = cdp_for(&state, id)?;
     crate::storage::snapshot(&session, &url).await
+}
+
+/// Find in page: select match `index` (1-based, wraps) of `query`; empty query clears.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_find(
+    state: State<'_, AppState>,
+    id: TabId,
+    query: String,
+    index: i32,
+) -> AppResult<crate::find::FindResult> {
+    let session = cdp_for(&state, id)?;
+    crate::find::find(&session, &query, index).await
 }
 
 /// Head metadata for the Meta panel.
