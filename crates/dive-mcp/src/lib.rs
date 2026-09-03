@@ -84,6 +84,16 @@ pub trait Browser: Send + Sync + 'static {
     async fn requests(&self, tab: TabId, limit: usize) -> Result<serde_json::Value, BrowserError>;
     /// Accessibility tree as indented text with `[ref=eN]` markers on interactive nodes.
     async fn page_state(&self, tab: TabId) -> Result<String, BrowserError>;
+    /// Click the node behind a `ref` from the last `page_state`.
+    async fn page_click(&self, tab: TabId, reference: String) -> Result<(), BrowserError>;
+    /// Replace the content of a field behind a `ref` and optionally press Enter.
+    async fn page_type(
+        &self,
+        tab: TabId,
+        reference: String,
+        text: String,
+        submit: bool,
+    ) -> Result<(), BrowserError>;
 }
 
 /// Server options.
@@ -128,6 +138,29 @@ pub struct ScreenshotParams {
     /// Capture the whole document instead of the viewport.
     #[serde(default)]
     pub full_page: bool,
+}
+
+/// A node reference from `page_state`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RefParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// `ref` id such as `e3`, from the most recent `page_state` of that tab.
+    pub r#ref: String,
+}
+
+/// Type into a field.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TypeParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// `ref` id of a textbox, searchbox or similar.
+    pub r#ref: String,
+    /// Text that replaces the field's current value.
+    pub text: String,
+    /// Press Enter afterwards.
+    #[serde(default)]
+    pub submit: bool,
 }
 
 /// Tab plus a row limit.
@@ -304,6 +337,36 @@ impl<B: Browser> DiveServer<B> {
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
+    /// Click by ref.
+    #[tool(
+        name = "page_click",
+        description = "Click the element behind a ref from page_state. Re-run page_state after navigation; refs go stale."
+    )]
+    async fn page_click(
+        &self,
+        Parameters(p): Parameters<RefParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id).await?;
+        self.browser.page_click(tab, p.r#ref).await?;
+        Ok(CallToolResult::success(vec![ContentBlock::text("ok")]))
+    }
+
+    /// Type by ref.
+    #[tool(
+        name = "page_type",
+        description = "Replace the text of a field behind a ref from page_state, optionally pressing Enter."
+    )]
+    async fn page_type(
+        &self,
+        Parameters(p): Parameters<TypeParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id).await?;
+        self.browser
+            .page_type(tab, p.r#ref, p.text, p.submit)
+            .await?;
+        Ok(CallToolResult::success(vec![ContentBlock::text("ok")]))
+    }
+
     /// Evaluate JS (gated).
     #[tool(
         name = "page_evaluate",
@@ -477,6 +540,22 @@ mod tests {
         }
         async fn page_state(&self, _tab: TabId) -> Result<String, BrowserError> {
             Ok("- RootWebArea \"x\"\n".into())
+        }
+        async fn page_click(&self, _tab: TabId, reference: String) -> Result<(), BrowserError> {
+            if reference == "e1" {
+                Ok(())
+            } else {
+                Err(BrowserError::Other("unknown ref".into()))
+            }
+        }
+        async fn page_type(
+            &self,
+            _tab: TabId,
+            _reference: String,
+            _text: String,
+            _submit: bool,
+        ) -> Result<(), BrowserError> {
+            Ok(())
         }
     }
 

@@ -43,6 +43,46 @@ impl AppBrowser {
     }
 }
 
+impl AppBrowser {
+    /// Backend node for a `ref` from the last `page_state` call.
+    fn node_for(&self, tab: TabId, reference: &str) -> Result<i64, BrowserError> {
+        self.state()
+            .buffers
+            .resolve_ref(tab, reference)
+            .ok_or_else(|| {
+                BrowserError::Other(format!("unknown ref {reference}; call page_state first"))
+            })
+    }
+}
+
+/// Centre of a node's content box in CSS pixels, scrolling it into view first.
+async fn center_of(session: &dive_cdp::CdpSession, node: i64) -> Result<(f64, f64), BrowserError> {
+    let _ = session
+        .call("DOM.scrollIntoViewIfNeeded", json!({"backendNodeId": node}))
+        .await;
+    let model = session
+        .call("DOM.getBoxModel", json!({"backendNodeId": node}))
+        .await
+        .map_err(other)?;
+    let quad = model["model"]["content"]
+        .as_array()
+        .ok_or_else(|| other("node has no box"))?;
+    let xs: Vec<f64> = quad.iter().step_by(2).filter_map(Value::as_f64).collect();
+    let ys: Vec<f64> = quad
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .filter_map(Value::as_f64)
+        .collect();
+    if xs.len() < 4 || ys.len() < 4 {
+        return Err(other("node has no box"));
+    }
+    Ok((xs.iter().sum::<f64>() / 4.0, ys.iter().sum::<f64>() / 4.0))
+}
+
+/// CDP modifier bit for the platform's select-all chord (Meta on macOS, Ctrl elsewhere).
+const SELECT_ALL_MODIFIER: u8 = if cfg!(target_os = "macos") { 4 } else { 2 };
+
 fn other(e: impl std::fmt::Display) -> BrowserError {
     BrowserError::Other(e.to_string())
 }
@@ -127,7 +167,66 @@ impl Browser for AppBrowser {
             .await
             .map_err(other)?;
         let nodes = crate::ax::flatten(&tree);
+        let refs = nodes
+            .iter()
+            .filter_map(|n| Some((n.reference.clone()?, n.backend_node_id?)))
+            .collect();
+        self.state().buffers.set_refs(tab, refs);
         Ok(crate::ax::render(&nodes, 1500))
+    }
+
+    async fn page_click(&self, tab: TabId, reference: String) -> Result<(), BrowserError> {
+        let session = self.session(tab)?;
+        let node = self.node_for(tab, &reference)?;
+        let (x, y) = center_of(&session, node).await?;
+        for kind in ["mouseMoved", "mousePressed", "mouseReleased"] {
+            let button = if kind == "mouseMoved" { "none" } else { "left" };
+            session
+                .call(
+                    "Input.dispatchMouseEvent",
+                    json!({"type": kind, "x": x, "y": y, "button": button, "clickCount": 1}),
+                )
+                .await
+                .map_err(other)?;
+        }
+        Ok(())
+    }
+
+    async fn page_type(
+        &self,
+        tab: TabId,
+        reference: String,
+        text: String,
+        submit: bool,
+    ) -> Result<(), BrowserError> {
+        let session = self.session(tab)?;
+        let node = self.node_for(tab, &reference)?;
+        session
+            .call("DOM.focus", json!({"backendNodeId": node}))
+            .await
+            .map_err(other)?;
+        // Select existing content so the inserted text replaces it.
+        let select_all = json!({"type": "keyDown", "key": "a", "code": "KeyA", "modifiers": SELECT_ALL_MODIFIER, "commands": ["selectAll"]});
+        session
+            .call("Input.dispatchKeyEvent", select_all)
+            .await
+            .map_err(other)?;
+        session
+            .call("Input.insertText", json!({"text": text}))
+            .await
+            .map_err(other)?;
+        if submit {
+            for (kind, key_text) in [("keyDown", "\r"), ("keyUp", "")] {
+                session
+                    .call(
+                        "Input.dispatchKeyEvent",
+                        json!({"type": kind, "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13, "text": key_text}),
+                    )
+                    .await
+                    .map_err(other)?;
+            }
+        }
+        Ok(())
     }
 
     async fn console_tail(&self, tab: TabId, limit: usize) -> Result<Value, BrowserError> {
