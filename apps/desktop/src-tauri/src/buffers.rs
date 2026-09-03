@@ -58,6 +58,8 @@ struct TabBuffers {
     snapshots: VecDeque<crate::snapshot::PageSnapshot>,
     /// Steps recorded so far; `None` when not recording.
     recording: Option<Vec<crate::recorder::RecordedStep>>,
+    /// Nonce the trusted recorder script embeds in its payloads.
+    recording_nonce: Option<String>,
 }
 
 /// Thread-safe buffers for every tab.
@@ -238,6 +240,11 @@ impl Buffers {
     /// Start (`Some(vec![])`) or stop (`None`) recording.
     pub fn set_recording(&self, tab: TabId, value: Option<Vec<crate::recorder::RecordedStep>>) {
         self.with(|m| m.entry(tab).or_default().recording = value);
+    }
+
+    /// Set or clear the recording nonce.
+    pub fn set_recording_nonce(&self, tab: TabId, nonce: Option<String>) {
+        self.with(|m| m.entry(tab).or_default().recording_nonce = nonce);
     }
 
     /// Whether a recording is active.

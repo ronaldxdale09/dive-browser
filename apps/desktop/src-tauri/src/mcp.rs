@@ -55,8 +55,9 @@ impl AppBrowser {
         tab: TabId,
     ) -> Result<crate::snapshot::PageSnapshot, BrowserError> {
         self.ensure_view(tab)?;
-        let text = self.page_text(tab).await?;
-        let structure = self.page_state(tab).await?;
+        let text = crate::snapshot::cap(&self.page_text(tab).await?, crate::snapshot::MAX_TEXT);
+        let structure =
+            crate::snapshot::cap(&self.page_state(tab).await?, crate::snapshot::MAX_STRUCTURE);
         let state = self.state();
         let row = lock(&state.store).tab(tab).map_err(other)?;
         let errors = state

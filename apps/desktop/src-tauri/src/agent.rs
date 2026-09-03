@@ -318,7 +318,12 @@ pub fn playwright_locator(role: &str, name: &str) -> String {
     if name.is_empty() {
         format!("getByRole('{role}')")
     } else {
-        let escaped = name.replace('\\', "\\\\").replace('\'', "\\'");
+        let escaped: String = name
+            .chars()
+            .filter(|c| !c.is_control() && *c != '\u{2028}' && *c != '\u{2029}')
+            .collect::<String>()
+            .replace('\\', "\\\\")
+            .replace('\'', "\\'");
         format!("getByRole('{role}', {{ name: '{escaped}' }})")
     }
 }
@@ -428,6 +433,10 @@ mod tests {
             "getByRole('textbox', { name: 'It\\'s here' })"
         );
         assert_eq!(playwright_locator("button", ""), "getByRole('button')");
+        assert_eq!(
+            playwright_locator("button", "a\nb\u{2028}c"),
+            "getByRole('button', { name: 'abc' })"
+        );
     }
 
     #[test]

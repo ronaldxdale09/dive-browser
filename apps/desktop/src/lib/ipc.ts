@@ -18,7 +18,7 @@ export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
 }
 
 type WorkspaceDraftInput = { name: string; color: string };
-export type ReplayRequestInput = { method: string; url: string; headers: Record<string, string>; body: string | null; with_cookies: boolean };
+export type ReplayRequestInput = { method: string; url: string; headers: Record<string, string>; body: string | null; with_cookies: boolean; captured_host: string };
 type ChatTurnInput = { role: string; content: string };
 export type ChatDeltaOut =
   | { type: "text"; data: string }

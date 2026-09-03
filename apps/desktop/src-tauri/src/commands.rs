@@ -763,12 +763,17 @@ pub(crate) fn request_captured(
         .buffers
         .request(tab_id, &request_id)
         .ok_or_else(|| AppError::new("request no longer in the buffer"))?;
+    let captured_host = url::Url::parse(&r.url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .unwrap_or_default();
     Ok(crate::replay::ReplayRequest {
         method: r.method,
         url: r.url,
         headers: r.headers,
         body: r.post_data,
         with_cookies: true,
+        captured_host,
     })
 }
 
@@ -780,7 +785,7 @@ pub(crate) async fn request_replay(
     tab_id: TabId,
     request: crate::replay::ReplayRequest,
 ) -> AppResult<crate::replay::ReplayResponse> {
-    let cookie = if request.with_cookies {
+    let cookie = if crate::replay::cookies_allowed(&request) {
         let session = cdp_for(&state, tab_id)?;
         crate::replay::cookie_header(&session, &request.url).await
     } else {

@@ -32,6 +32,7 @@ describe("recorded steps", () => {
     expect(steps[1]?.locator).toBe("getByRole('button', { name: 'Save' })");
     expect(steps[2]?.locator).toBe("getByRole('textbox', { name: 'Search' })");
     expect(playwrightLocator("link", "It's")).toBe("getByRole('link', { name: 'It\\'s' })");
+    expect(playwrightLocator("link", "a\nb\u2028c")).toBe("getByRole('link', { name: 'abc' })");
     const spec = toPlaywrightSpec(steps, undefined, "recorded");
     expect(spec).toContain("fill(\"dive\")");
   });

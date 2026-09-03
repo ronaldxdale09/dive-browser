@@ -49,6 +49,22 @@ pub struct PageDiff {
     pub notes: Vec<String>,
 }
 
+/// Caps so a busy page cannot flood the model or the IPC channel.
+pub const MAX_TEXT: usize = 12_000;
+/// Cap for the structure dump.
+pub const MAX_STRUCTURE: usize = 8_000;
+const MAX_DIFF_LINES: usize = 400;
+
+/// Truncate on a char boundary.
+pub fn cap(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_owned();
+    }
+    let mut out: String = s.chars().take(max).collect();
+    out.push_str("\n…(truncated)");
+    out
+}
+
 /// Compare two snapshots.
 pub fn diff(older: &PageSnapshot, newer: &PageSnapshot) -> PageDiff {
     let only_in = |a: &[String], b: &[String]| -> Vec<String> {
@@ -79,11 +95,24 @@ pub fn unified(a: &str, b: &str) -> String {
     if a == b {
         return String::new();
     }
-    similar::TextDiff::from_lines(a, b)
+    let full = similar::TextDiff::from_lines(a, b)
         .unified_diff()
         .context_radius(2)
         .header("before", "after")
-        .to_string()
+        .to_string();
+    let lines: Vec<&str> = full.lines().collect();
+    if lines.len() <= MAX_DIFF_LINES {
+        return full;
+    }
+    let mut out = lines[..MAX_DIFF_LINES].join("\n");
+    let _ = write!(
+        out,
+        "
+…({} more lines)
+",
+        lines.len() - MAX_DIFF_LINES
+    );
+    out
 }
 
 /// Render a diff for an agent or the sidecar.
@@ -176,6 +205,18 @@ mod tests {
         assert_eq!(d.notes, vec!["title: \"A\" -> \"B\""]);
         let s = summarize(&d);
         assert!(s.contains("fixed errors (1)") && s.contains("text diff"));
+    }
+
+    #[test]
+    fn diffs_and_text_are_capped() {
+        let mut big = String::new();
+        for i in 0..2000 {
+            let _ = writeln!(big, "line {i}");
+        }
+        let d = unified("", &big);
+        assert!(d.lines().count() <= MAX_DIFF_LINES + 2);
+        assert!(d.contains("more lines"));
+        assert!(cap("héllo", 3).starts_with("hél"));
     }
 
     #[test]

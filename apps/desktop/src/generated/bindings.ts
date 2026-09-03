@@ -474,6 +474,8 @@ export type RecordedStep = {
 	value: string,
 	/**  Milliseconds since the epoch. */
 	at: number | null,
+	/**  The value was a secret (password, card, one-time code) and was not recorded. */
+	masked?: boolean,
 };
 
 /**  Emitted to the chrome for each recorded step. */
@@ -496,6 +498,8 @@ export type ReplayRequest = {
 	body: string | null,
 	/**  Attach the tab's cookies for this URL. */
 	with_cookies: boolean,
+	/**  Host of the captured request; cookies are only ever sent there. */
+	captured_host: string,
 };
 
 /**  What came back. */

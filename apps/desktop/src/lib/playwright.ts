@@ -41,7 +41,10 @@ export function toPlaywrightSpec(steps: Step[], startUrl: string | undefined, ti
 export function playwrightLocator(role: string, name: string): string {
   const r = role === "searchbox" ? "textbox" : role || "generic";
   if (!name) return `getByRole('${r}')`;
-  const escaped = name.replaceAll("\\", "\\\\").replaceAll("'", "\\'");
+  const escaped = name
+    .replace(/[\p{Cc}\u2028\u2029]/gu, "")
+    .replaceAll("\\", "\\\\")
+    .replaceAll("'", "\\'");
   return `getByRole('${r}', { name: '${escaped}' })`;
 }
 

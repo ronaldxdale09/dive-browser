@@ -23,6 +23,8 @@ pub struct ReplayRequest {
     pub body: Option<String>,
     /// Attach the tab's cookies for this URL.
     pub with_cookies: bool,
+    /// Host of the captured request; cookies are only ever sent there.
+    pub captured_host: String,
 }
 
 /// What came back.
@@ -36,6 +38,18 @@ pub struct ReplayResponse {
     pub body: String,
     /// Round-trip time.
     pub elapsed_ms: u32,
+}
+
+/// Whether cookies may accompany `req`: only when it still targets the host it was captured from.
+pub fn cookies_allowed(req: &ReplayRequest) -> bool {
+    req.with_cookies
+        && url::Url::parse(&req.url)
+            .ok()
+            .and_then(|u| {
+                u.host_str()
+                    .map(|h| h.eq_ignore_ascii_case(&req.captured_host))
+            })
+            .unwrap_or(false)
 }
 
 /// Headers the client sets itself or that must not be replayed.
@@ -123,11 +137,31 @@ mod tests {
             headers: BTreeMap::new(),
             body: None,
             with_cookies: false,
+            captured_host: String::new(),
         };
         assert!(send(&r, None).await.is_err());
         r.url = "https://example.com".into();
         r.method = "NOT A METHOD".into();
         assert!(send(&r, None).await.is_err());
+    }
+
+    #[test]
+    fn cookies_only_go_to_the_captured_host() {
+        let r = ReplayRequest {
+            method: "GET".into(),
+            url: "https://api.a.dev/x".into(),
+            headers: BTreeMap::new(),
+            body: None,
+            with_cookies: true,
+            captured_host: "api.a.dev".into(),
+        };
+        assert!(cookies_allowed(&r));
+        let mut moved = r.clone();
+        moved.url = "http://169.254.169.254/latest".into();
+        assert!(!cookies_allowed(&moved));
+        let mut off = r;
+        off.with_cookies = false;
+        assert!(!cookies_allowed(&off));
     }
 
     #[test]
