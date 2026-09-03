@@ -1,7 +1,7 @@
 import { RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ipc } from "../lib/ipc";
-import type { StorageSnapshot } from "../lib/ipc";
+import { useTabData } from "../lib/useTabData";
 import { useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
 
@@ -9,27 +9,8 @@ import { IconButton } from "./Icon";
 export function StoragePanel() {
   const activeTab = useBrowser((s) => s.activeTab);
   const url = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.url);
-  const [data, setData] = useState<StorageSnapshot | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { data, error, refresh } = useTabData(activeTab, url, ipc.tabStorage);
   const [section, setSection] = useState<"cookies" | "local" | "session">("cookies");
-  const [tick, setTick] = useState(0);
-
-  // Re-read whenever the tab, its URL, or the refresh counter changes.
-  useEffect(() => {
-    if (!activeTab) return;
-    let alive = true;
-    ipc
-      .tabStorage(activeTab)
-      .then((d) => {
-        if (!alive) return;
-        setData(d);
-        setError(null);
-      })
-      .catch((e: unknown) => alive && setError(e instanceof Error ? e.message : String(e)));
-    return () => {
-      alive = false;
-    };
-  }, [activeTab, url, tick]);
 
   const rows: [string, string, string][] =
     section === "cookies"
@@ -51,7 +32,7 @@ export function StoragePanel() {
           </button>
         ))}
         <span className="flex-1" />
-        <IconButton icon={RefreshCw} label="Refresh storage" size={12} disabled={!activeTab} onClick={() => setTick((t) => t + 1)} />
+        <IconButton icon={RefreshCw} label="Refresh storage" size={12} disabled={!activeTab} onClick={refresh} />
       </div>
       <div className="min-h-0 flex-1 select-text overflow-auto font-mono text-[11.5px] leading-5">
         {error && <div className="px-3 py-2 text-danger">{error}</div>}

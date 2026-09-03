@@ -9,7 +9,7 @@ import { commands, events } from "../generated/bindings";
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 export { events };
-export type { Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo } from "../generated/bindings";
+export type { Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
 export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
@@ -42,6 +42,7 @@ export const ipc = {
   tabCapture: async (id: string, fullPage: boolean) => unwrap(await commands.tabCapture(id, fullPage)),
   tabStorage: async (id: string) => unwrap(await commands.tabStorage(id)),
   tabMeta: async (id: string) => unwrap(await commands.tabMeta(id)),
+  tabVitals: async (id: string) => unwrap(await commands.tabVitals(id)),
   tabFind: async (id: string, query: string, index: number) => unwrap(await commands.tabFind(id, query, index)),
   tabA11y: async (id: string, axeSource: string) => unwrap(await commands.tabA11y(id, axeSource)),
   tabEmulate: async (id: string, device: DeviceInput | null) => unwrap(await commands.tabEmulate(id, device)),

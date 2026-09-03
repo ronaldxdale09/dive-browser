@@ -90,6 +90,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_meta,
             tab_a11y,
             tab_find,
+            tab_vitals,
             layout_set_content_bounds,
             commands_list,
             command_run,
@@ -627,6 +628,17 @@ pub(crate) async fn tab_find(
 ) -> AppResult<crate::find::FindResult> {
     let session = cdp_for(&state, id)?;
     crate::find::find(&session, &query, index).await
+}
+
+/// Web Vitals from buffered performance entries.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_vitals(
+    state: State<'_, AppState>,
+    id: TabId,
+) -> AppResult<crate::vitals::Vitals> {
+    let session = cdp_for(&state, id)?;
+    crate::vitals::read(&session).await
 }
 
 /// Head metadata for the Meta panel.

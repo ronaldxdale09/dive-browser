@@ -62,6 +62,8 @@ export const commands = {
 	tabA11y: (id: TabId, axeSource: string) => typedError<A11yReport, AppError>(__TAURI_INVOKE("tab_a11y", { id, axeSource })),
 	/**  Find in page: select match `index` (1-based, wraps) of `query`; empty query clears. */
 	tabFind: (id: TabId, query: string, index: number) => typedError<FindResult, AppError>(__TAURI_INVOKE("tab_find", { id, query, index })),
+	/**  Web Vitals from buffered performance entries. */
+	tabVitals: (id: TabId) => typedError<Vitals, AppError>(__TAURI_INVOKE("tab_vitals", { id })),
 	layoutSetContentBounds: (bounds: Bounds) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_bounds", { bounds })),
 	commandsList: () => __TAURI_INVOKE<Command[]>("commands_list"),
 	/**
@@ -442,6 +444,28 @@ export type Violation = {
 	targets: string[],
 	/**  Total offending nodes. */
 	count: number,
+};
+
+/**  Core metrics in milliseconds (CLS is unitless). */
+export type Vitals = {
+	/**  Time to first byte. */
+	ttfb: number | null,
+	/**  First contentful paint. */
+	fcp: number | null,
+	/**  Largest contentful paint. */
+	lcp: number | null,
+	/**  Cumulative layout shift. */
+	cls: number | null,
+	/**  Interaction to next paint (worst interaction so far). */
+	inp: number | null,
+	/**  `DOMContentLoaded`. */
+	dcl: number | null,
+	/**  Load event end. */
+	load: number | null,
+	/**  Transfer size of the document in bytes. */
+	transfer_size: number | null,
+	/**  Element description of the LCP candidate, when known. */
+	lcp_element: string | null,
 };
 
 /**  A named set of tabs bound to one container. */

@@ -419,6 +419,21 @@ impl Handle {
     }
 }
 
+/// `null` (non-browser client) or a loopback host, compared on the parsed
+/// host rather than a string prefix so `localhost.evil.com` is rejected.
+fn origin_is_local(origin: &str) -> bool {
+    if origin == "null" {
+        return true;
+    }
+    url::Url::parse(origin)
+        .ok()
+        .and_then(|u| {
+            u.host_str()
+                .map(|h| h == "localhost" || h == "127.0.0.1" || h == "[::1]")
+        })
+        .unwrap_or(false)
+}
+
 /// Reject requests that do not carry the bearer token, or that come from a
 /// browser origin (DNS rebinding sends an `Origin` header; local MCP clients do not).
 async fn guard(
@@ -430,9 +445,7 @@ async fn guard(
     use axum::response::IntoResponse as _;
     let headers = request.headers();
     if let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok())
-        && origin != "null"
-        && !origin.starts_with("http://localhost")
-        && !origin.starts_with("http://127.0.0.1")
+        && !origin_is_local(origin)
     {
         return (StatusCode::FORBIDDEN, "origin not allowed").into_response();
     }

@@ -12,6 +12,7 @@ rmcp = { version = "3.2", features = ["server", "macros", "transport-streamable-
 schemars = "1"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 tokio-util = "0.7"
+url = { workspace = true }
 base64 = "0.22"
 async-trait = "0.1"
 serde = { workspace = true }

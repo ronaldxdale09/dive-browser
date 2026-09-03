@@ -19,6 +19,7 @@ mod meta;
 mod network;
 mod state;
 mod storage;
+mod vitals;
 
 pub use error::AppError;
 

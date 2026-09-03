@@ -313,11 +313,19 @@ fn load_or_create_token() -> std::io::Result<String> {
     }
     let token = dive_core::TabId::new().to_string().replace('-', "")
         + &dive_core::TabId::new().to_string().replace('-', "");
-    std::fs::write(&path, &token)?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)?;
+        f.write_all(token.as_bytes())?;
     }
+    #[cfg(not(unix))]
+    std::fs::write(&path, &token)?;
     Ok(token)
 }

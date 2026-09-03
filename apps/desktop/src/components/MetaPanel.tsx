@@ -1,7 +1,6 @@
 import { RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
 import { ipc } from "../lib/ipc";
-import type { MetaSnapshot } from "../lib/ipc";
+import { useTabData } from "../lib/useTabData";
 import { useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
 
@@ -9,25 +8,7 @@ import { IconButton } from "./Icon";
 export function MetaPanel() {
   const activeTab = useBrowser((s) => s.activeTab);
   const url = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.url ?? "");
-  const [meta, setMeta] = useState<MetaSnapshot | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    if (!activeTab) return;
-    let alive = true;
-    ipc
-      .tabMeta(activeTab)
-      .then((m) => {
-        if (!alive) return;
-        setMeta(m);
-        setError(null);
-      })
-      .catch((e: unknown) => alive && setError(e instanceof Error ? e.message : String(e)));
-    return () => {
-      alive = false;
-    };
-  }, [activeTab, url, tick]);
+  const { data: meta, error, refresh } = useTabData(activeTab, url, ipc.tabMeta);
 
   if (!activeTab) return <div className="px-3 py-2 text-xs text-ink-3">Open a tab to inspect its metadata.</div>;
   if (error) return <div className="px-3 py-2 text-xs text-danger">{error}</div>;
@@ -60,7 +41,7 @@ export function MetaPanel() {
         <div className="mb-1 flex items-center">
           <span className="text-[10px] tracking-wider text-ink-3 uppercase">Head</span>
           <span className="flex-1" />
-          <IconButton icon={RefreshCw} label="Re-read metadata" size={12} onClick={() => setTick((t) => t + 1)} />
+          <IconButton icon={RefreshCw} label="Re-read metadata" size={12} onClick={refresh} />
         </div>
         <div className="font-mono text-[11.5px] leading-5">
           {rows.map(([k, v]) => (

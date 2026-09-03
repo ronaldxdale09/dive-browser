@@ -8,6 +8,7 @@ import { NetworkPanel, NetworkTools } from "./NetworkPanel";
 import { StoragePanel } from "./StoragePanel";
 import { MetaPanel } from "./MetaPanel";
 import { A11yPanel } from "./A11yPanel";
+import { VitalsPanel } from "./VitalsPanel";
 
 const PANELS = [
   { id: "console", label: "Console", icon: Terminal },
@@ -46,7 +47,7 @@ export function Dock() {
       {panel === "storage" && <StoragePanel />}
       {panel === "meta" && <MetaPanel />}
       {panel === "a11y" && <A11yPanel />}
-      {panel === "vitals" && <div className="flex-1 px-3 py-2 text-xs text-ink-3">Web Vitals arrive with the performance work.</div>}
+      {panel === "vitals" && <VitalsPanel />}
     </section>
   );
 }
