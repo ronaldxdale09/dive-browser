@@ -55,6 +55,9 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             layout_set_content_bounds,
             commands_list,
             command_run,
+            crate::agent::agent_key_set,
+            crate::agent::agent_key_present,
+            crate::agent::agent_send,
         ])
         .events(collect_events![
             StateChanged,

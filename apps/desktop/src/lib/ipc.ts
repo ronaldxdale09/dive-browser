@@ -2,13 +2,14 @@
  * Thin façade over the generated tauri-specta bindings so components never
  * import the generated file directly. Regenerate with `cargo test -p dive-desktop`.
  */
+import { Channel } from "@tauri-apps/api/core";
 import { commands, events } from "../generated/bindings";
 
 /** Shape tauri-specta returns for fallible commands. */
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 export { events };
-export type { Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides } from "../generated/bindings";
+export type { Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
 export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
@@ -17,6 +18,8 @@ export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
 }
 
 type WorkspaceDraftInput = { name: string; color: string };
+type ChatTurnInput = { role: string; content: string };
+type ChatDeltaOut = { type: "text"; data: string } | { type: "done"; data: string } | { type: "error"; data: string };
 export type DeviceInput = { width: number; height: number; dpr: number; mobile: boolean; touch: boolean; user_agent: string; platform: string };
 export type MediaInput = { color_scheme: string | null; reduced_motion: string | null; media_type: string | null };
 
@@ -40,6 +43,14 @@ export const ipc = {
   setContentBounds: async (b: { x: number; y: number; width: number; height: number }) =>
     unwrap(await commands.layoutSetContentBounds(b)),
   commandsList: () => commands.commandsList(),
+  agentKeySet: async (key: string) => unwrap(await commands.agentKeySet(key)),
+  agentKeyPresent: () => commands.agentKeyPresent(),
+  /** Stream a reply; `onDelta` fires for each piece. Resolves when the stream ends. */
+  agentSend: async (turns: ChatTurnInput[], tabId: string | null, onDelta: (d: ChatDeltaOut) => void) => {
+    const channel = new Channel<ChatDeltaOut>();
+    channel.onmessage = onDelta;
+    unwrap(await commands.agentSend(turns, tabId, channel));
+  },
   commandRun: async (id: string, args: unknown = null): Promise<unknown> =>
     JSON.parse(unwrap(await commands.commandRun(id, args === null ? null : JSON.stringify(args)))),
 };

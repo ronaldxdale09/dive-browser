@@ -1,6 +1,7 @@
 //! Dive desktop: Tauri host that owns the CEF engine, the core state and the
 //! typed IPC surface used by the React chrome.
 
+mod agent;
 mod buffers;
 mod commands;
 mod console;
@@ -39,6 +40,7 @@ pub fn run() {
         )
         .init();
 
+    agent::init_keychain();
     let specta = commands::specta_builder();
 
     #[allow(unused_mut)]

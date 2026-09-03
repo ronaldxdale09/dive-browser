@@ -17,6 +17,9 @@ tauri-build = { workspace = true }
 dive-core = { path = "../../../crates/dive-core" }
 dive-cdp = { path = "../../../crates/dive-cdp" }
 dive-mcp = { path = "../../../crates/dive-mcp" }
+dive-agent = { path = "../../../crates/dive-agent" }
+keyring-core = "1"
+futures-util = "0.3"
 async-trait = "0.1"
 tauri = { workspace = true, features = ["unstable", "devtools", "specta"] }
 tauri-specta = { workspace = true }
@@ -30,6 +33,9 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
 
 [features]
 default = ["cef"]
