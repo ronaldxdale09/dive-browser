@@ -69,6 +69,7 @@ export const ipc = {
   tabRecordStop: (id: string) => commands.tabRecordStop(id),
   tabOpenapi: async (id: string) => unwrap(await commands.tabOpenapi(id)),
   tabHar: async (id: string) => unwrap(await commands.tabHar(id)),
+  tabBugReport: async (id: string) => unwrap(await commands.tabBugReport(id)),
   requestCaptured: async (tabId: string, requestId: string) => unwrap(await commands.requestCaptured(tabId, requestId)),
   requestReplay: async (tabId: string, request: ReplayRequestInput) => unwrap(await commands.requestReplay(tabId, request)),
   devServers: () => commands.devServers(),

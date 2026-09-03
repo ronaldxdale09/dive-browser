@@ -102,6 +102,12 @@ export const commands = {
 	tabOpenapi: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_openapi", { id })),
 	/**  Export the captured requests of a tab as a HAR 1.2 file; returns its path. */
 	tabHar: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_har", { id })),
+	/**
+	 *  Compose a Markdown bug report for a tab (viewport screenshot, console
+	 *  errors, failed requests), copy it to the clipboard and save it; returns
+	 *  the report path.
+	 */
+	tabBugReport: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_bug_report", { id })),
 	/**  Start recording the person's interactions in a tab. */
 	tabRecordStart: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_record_start", { id })),
 	/**  Stop recording and return the steps. */

@@ -23,6 +23,7 @@ mod network;
 mod openapi;
 mod recorder;
 mod replay;
+mod report;
 mod screencast;
 mod snapshot;
 mod sourcemaps;

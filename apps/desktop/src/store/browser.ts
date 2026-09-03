@@ -27,6 +27,7 @@ interface BrowserState {
   zoom: Record<string, number>;
   zoomStep: (direction: 1 | -1 | 0) => Promise<void>;
   devtools: () => Promise<void>;
+  bugReport: () => Promise<void>;
   /** Tab whose screen is being recorded, if any. */
   recordingTab: string | null;
   screencastToggle: () => Promise<void>;
@@ -160,6 +161,15 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     await run(set, async () => {
       await ipc.tabScreencastStart(id);
       set({ recordingTab: id });
+    });
+  },
+  bugReport: async () => {
+    const id = get().activeTab;
+    if (!id) return;
+    await run(set, async () => {
+      const path = await ipc.tabBugReport(id);
+      set({ notice: `Bug report copied · saved ${path.split("/").pop() ?? path}` });
+      setTimeout(() => set({ notice: null }), 5000);
     });
   },
   devtools: async () => {

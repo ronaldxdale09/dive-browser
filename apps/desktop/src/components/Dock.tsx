@@ -1,4 +1,4 @@
-import { Accessibility, Activity, Ban, Database, FileSearch, Network, Terminal } from "lucide-react";
+import { Accessibility, Activity, Ban, ClipboardList, Database, FileSearch, Network, Terminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ConsoleEntry, Level } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
@@ -55,7 +55,13 @@ export function Dock() {
 function ConsoleTools() {
   const activeTab = useBrowser((s) => s.activeTab);
   const clear = useConsole((s) => s.clear);
-  return <IconButton icon={Ban} label="Clear console" size={13} disabled={!activeTab} onClick={() => activeTab && clear(activeTab)} />;
+  const bugReport = useBrowser((s) => s.bugReport);
+  return (
+    <>
+      <IconButton icon={ClipboardList} label="Copy bug report" size={13} disabled={!activeTab} onClick={() => void bugReport()} />
+      <IconButton icon={Ban} label="Clear console" size={13} disabled={!activeTab} onClick={() => activeTab && clear(activeTab)} />
+    </>
+  );
 }
 
 const LEVEL_STYLE: Record<Level, string> = {

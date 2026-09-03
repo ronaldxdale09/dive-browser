@@ -161,6 +161,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             request_replay,
             tab_openapi,
             tab_har,
+            tab_bug_report,
             tab_record_start,
             tab_record_stop,
             layout_set_content_bounds,
@@ -203,6 +204,12 @@ pub fn register_builtin(registry: &dive_core::CommandRegistry) {
             "tab.devtools",
             "Open DevTools",
             Some("mod+alt+i"),
+            CommandScope::Tab,
+        ),
+        (
+            "report.compose",
+            "Copy bug report",
+            Some("mod+shift+b"),
             CommandScope::Tab,
         ),
         (
@@ -928,6 +935,25 @@ pub(crate) fn tab_har(state: State<'_, AppState>, id: TabId) -> AppResult<String
         &path,
         serde_json::to_vec_pretty(&har).map_err(AppError::new)?,
     )?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Compose a Markdown bug report for a tab (viewport screenshot, console
+/// errors, failed requests), copy it to the clipboard and save it; returns
+/// the report path.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_bug_report(state: State<'_, AppState>, id: TabId) -> AppResult<String> {
+    let shot = capture_tab(&state, id, false).await.ok();
+    let tab = lock(&state.store).tab(id)?;
+    let console = state.buffers.console_tail(id, 500);
+    let requests = state.buffers.requests(id, 1000);
+    let text = crate::report::compose(&tab, &console, &requests, shot.as_deref());
+    let path = stamped_capture("bug", "md")?;
+    std::fs::write(&path, &text)?;
+    if let Ok(mut cb) = arboard::Clipboard::new() {
+        let _ = cb.set_text(text);
+    }
     Ok(path.to_string_lossy().into_owned())
 }
 
