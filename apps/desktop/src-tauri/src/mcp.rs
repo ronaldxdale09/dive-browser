@@ -3,18 +3,48 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use dive_cdp::CdpSession;
 use dive_core::TabId;
-use dive_mcp::{Browser, BrowserError, TabInfo};
+use dive_mcp::{
+    Addressed, AppearanceParams, Browser, BrowserError, ResizeParams, TabInfo, Target,
+    WaitForParams,
+};
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager};
 
 use crate::Runtime;
-use crate::commands::{activate_tab, capture_tab, normalize_url, open_tab};
+use crate::commands::{activate_tab, normalize_url_with, open_tab};
 use crate::state::{AppState, lock};
+use crate::{automation, locator};
 
 /// Bridges MCP tools to the app state and the CEF engine.
 /// Largest response body handed to an agent in one call.
 const BODY_TOOL_CAP: usize = 4096;
+/// Interactive elements listed by `page_inspect`.
+const INSPECT_ELEMENT_CAP: u32 = 200;
+/// Console lines and requests summarised by `page_inspect`. Kept small: the
+/// point of the bundle is to be worth reading, and `console_tail` and
+/// `network_list` are there for the full history.
+const INSPECT_DIAGNOSTIC_CAP: usize = 20;
+/// Matches described by `page_locate` before it stops.
+const LOCATE_CAP: u32 = 20;
+/// Longest a single `page_evaluate` result may be.
+const EVALUATE_CAP: usize = 64_000;
+/// Longest expression accepted by `page_evaluate`.
+const EVALUATE_EXPRESSION_CAP: usize = 64_000;
+/// Largest visible-text response. The composite inspector is intentionally
+/// much smaller, while this dedicated tool can still read a long document.
+const PAGE_TEXT_CAP: usize = 256 * 1024;
+/// Largest text insertion accepted in one action.
+const TYPE_TEXT_CAP: usize = 256 * 1024;
+/// Largest string condition accepted by `page_wait_for`.
+const WAIT_TEXT_CAP: usize = 8 * 1024;
+/// Largest wheel delta accepted in one action.
+const MAX_SCROLL_DELTA: f64 = 100_000.0;
+/// Largest image handed back through MCP or the sidecar.
+const SCREENSHOT_TOOL_CAP: usize = 16 * 1024 * 1024;
+/// How often `page_wait_for` re-checks its conditions.
+const WAIT_POLL_MS: u64 = 100;
 
 pub struct AppBrowser {
     app: AppHandle<Runtime>,
@@ -116,6 +146,172 @@ impl AppBrowser {
     }
 }
 
+impl From<locator::Failure> for BrowserError {
+    fn from(f: locator::Failure) -> Self {
+        match f {
+            locator::Failure::Invalid { locator, reason } => {
+                Self::InvalidSelector { locator, reason }
+            }
+            locator::Failure::NotFound { locator } => Self::TargetNotFound { locator },
+            locator::Failure::NotVisible { locator } => Self::NotVisible { locator },
+            locator::Failure::NotEnabled { locator } => Self::NotEnabled { locator },
+            locator::Failure::NotEditable { locator } => Self::NotEditable { locator },
+            locator::Failure::Engine(e) => Self::Other(e),
+        }
+    }
+}
+
+impl AppBrowser {
+    /// A live CDP session for `tab`, creating the view if it has been
+    /// discarded.
+    fn session_for(&self, tab: TabId) -> Result<CdpSession, BrowserError> {
+        self.ensure_view(tab)?;
+        self.session(tab)
+    }
+
+    /// Whether the person is looking at this tab. Used to decide whether an
+    /// agent action is worth animating.
+    fn on_screen(&self, tab: TabId) -> bool {
+        lock(&self.state().host)
+            .as_ref()
+            .and_then(crate::engine::TabHost::active)
+            == Some(tab)
+    }
+
+    /// Record an action on the tab's timeline around `work`, so
+    /// `page_inspect` can report what has already been tried.
+    async fn tracked<T>(
+        &self,
+        tab: TabId,
+        action: &str,
+        target: Option<String>,
+        work: impl std::future::Future<Output = Result<T, BrowserError>>,
+    ) -> Result<T, BrowserError> {
+        let id = self.state().buffers.begin_action(tab, action, target);
+        let outcome = work.await;
+        let error = outcome.as_ref().err().map(ToString::to_string);
+        self.state().buffers.end_action(tab, &id, error);
+        outcome
+    }
+
+    /// Where to act, and what to call it in the cursor label.
+    ///
+    /// A locator is resolved now, against the page as it currently is; a
+    /// `ref` is looked up in the last `page_state` and may already be stale;
+    /// a coordinate is bounds-checked, because a click outside the viewport
+    /// silently hits nothing.
+    async fn point_for(
+        &self,
+        tab: TabId,
+        session: &CdpSession,
+        target: &Target,
+    ) -> Result<(f64, f64, String), BrowserError> {
+        match target.resolve()? {
+            Addressed::Locator(selector) => {
+                let found = locator::point(session, &selector).await?;
+                let label = if found.name.is_empty() {
+                    found.tag.clone()
+                } else {
+                    format!("{} {:?}", found.role, found.name)
+                };
+                Ok((found.x, found.y, label))
+            }
+            Addressed::Ref(reference) => {
+                let node = self.node_for(tab, &reference)?;
+                let (x, y) = center_of(session, node).await?;
+                Ok((x, y, reference))
+            }
+            Addressed::Point { x, y } => {
+                let viewport = locator::viewport(session).await?;
+                if x < 0.0 || y < 0.0 || x > viewport.width || y > viewport.height {
+                    return Err(BrowserError::OutsideViewport {
+                        x,
+                        y,
+                        width: viewport.width,
+                        height: viewport.height,
+                    });
+                }
+                Ok((x, y, format!("({x}, {y})")))
+            }
+        }
+    }
+
+    /// Focus a field named by `target`, or leave focus where it is when the
+    /// target is empty.
+    async fn focus_for(
+        &self,
+        tab: TabId,
+        session: &CdpSession,
+        target: &Target,
+    ) -> Result<Option<String>, BrowserError> {
+        if target.locator.is_none() && target.r#ref.is_none() && target.x.is_none() {
+            return Ok(None);
+        }
+        match target.resolve()? {
+            Addressed::Locator(selector) => {
+                let found = locator::focus(session, &selector).await?;
+                Ok(Some(format!("{} {:?}", found.role, found.name)))
+            }
+            Addressed::Ref(reference) => {
+                let node = self.node_for(tab, &reference)?;
+                session
+                    .call("DOM.focus", json!({"backendNodeId": node}))
+                    .await
+                    .map_err(other)?;
+                Ok(Some(reference))
+            }
+            Addressed::Point { .. } => Err(BrowserError::BadRequest(
+                "typing needs a locator or a ref, not coordinates".into(),
+            )),
+        }
+    }
+
+    /// Map a bundle location back to its original file through source maps.
+    ///
+    /// React's `_debugSource` points into the served bundle, which is not a
+    /// path anybody can open. Only scripts from the page's own host are
+    /// fetched, the same restriction the console panel's stack frames use.
+    async fn resolve_source(&self, tab: TabId, frame: &Value) -> Value {
+        let (Some(url), Some(line)) = (
+            frame["fileName"].as_str(),
+            frame["lineNumber"]
+                .as_u64()
+                .and_then(|l| u32::try_from(l).ok()),
+        ) else {
+            return Value::Null;
+        };
+        let state = self.state();
+        let Ok(page_url) = lock(&state.store).tab(tab).map(|t| t.url) else {
+            return Value::Null;
+        };
+        let column = frame["columnNumber"]
+            .as_u64()
+            .and_then(|c| u32::try_from(c).ok())
+            .unwrap_or(1);
+        state
+            .sourcemaps
+            .resolve(&page_url, url, line, column)
+            .await
+            .and_then(|original| serde_json::to_value(original).ok())
+            .unwrap_or(Value::Null)
+    }
+
+    /// Apply a device to a tab and reload, which is the cheapest way to make
+    /// the new metrics take effect on layout.
+    async fn emulate_device(
+        &self,
+        tab: TabId,
+        device: Option<crate::emulate::Device>,
+    ) -> Result<(), BrowserError> {
+        let session = self.session_for(tab)?;
+        crate::emulate::apply(&session, crate::emulate::device_calls(device.as_ref()))
+            .await
+            .map_err(|e| other(e.message))?;
+        session.call0("Page.reload").await.map_err(other)?;
+        Ok(())
+    }
+}
+
 /// Centre of a node's content box in CSS pixels, scrolling it into view first.
 async fn center_of(session: &dive_cdp::CdpSession, node: i64) -> Result<(f64, f64), BrowserError> {
     let _ = session
@@ -141,8 +337,15 @@ async fn center_of(session: &dive_cdp::CdpSession, node: i64) -> Result<(f64, f6
     Ok((xs.iter().sum::<f64>() / 4.0, ys.iter().sum::<f64>() / 4.0))
 }
 
-/// CDP modifier bit for the platform's select-all chord (Meta on macOS, Ctrl elsewhere).
-const SELECT_ALL_MODIFIER: u8 = if cfg!(target_os = "macos") { 4 } else { 2 };
+/// Drop everything but the newest `keep` items, in place.
+///
+/// The tail is the useful end: the most recent errors are the ones that
+/// describe the state the page is in now.
+fn keep_last<T>(items: &mut Vec<T>, keep: usize) {
+    if items.len() > keep {
+        items.drain(..items.len() - keep);
+    }
+}
 
 fn other(e: impl std::fmt::Display) -> BrowserError {
     BrowserError::Other(e.to_string())
@@ -186,13 +389,20 @@ impl Browser for AppBrowser {
     }
 
     async fn navigate(&self, tab: TabId, url: String) -> Result<(), BrowserError> {
-        let url = normalize_url(&url).map_err(|e| other(e.message))?;
-        let state = self.state();
-        let host = lock(&state.host);
-        host.as_ref()
-            .ok_or_else(|| other("engine not ready"))?
-            .navigate(tab, url)
-            .map_err(|_| BrowserError::TabNotFound(tab.to_string()))
+        let url = {
+            let state = self.state();
+            normalize_url_with(&url, state.prefs.get(&state).search_template())
+                .map_err(|e| other(e.message))?
+        };
+        self.tracked(tab, "tab_navigate", Some(url.to_string()), async {
+            let state = self.state();
+            let host = lock(&state.host);
+            host.as_ref()
+                .ok_or_else(|| other("engine not ready"))?
+                .navigate(tab, url)
+                .map_err(|_| BrowserError::TabNotFound(tab.to_string()))
+        })
+        .await
     }
 
     async fn page_text(&self, tab: TabId) -> Result<String, BrowserError> {
@@ -201,23 +411,42 @@ impl Browser for AppBrowser {
         let result = session
             .call(
                 "Runtime.evaluate",
-                json!({"expression": "document.body ? document.body.innerText : ''", "returnByValue": true}),
+                json!({
+                    "expression": format!(
+                        "(() => {{ const text = document.body ? (document.body.innerText || document.body.textContent || '') : ''; return {{ text: text.slice(0, {PAGE_TEXT_CAP}), truncated: text.length > {PAGE_TEXT_CAP} }}; }})()"
+                    ),
+                    "returnByValue": true
+                }),
             )
             .await
             .map_err(other)?;
-        Ok(result["result"]["value"]
-            .as_str()
-            .unwrap_or_default()
-            .to_owned())
+        let value = &result["result"]["value"];
+        let mut text = value["text"].as_str().unwrap_or_default().to_owned();
+        if value["truncated"].as_bool() == Some(true) {
+            text.push_str("\n…(truncated)");
+        }
+        Ok(text)
     }
 
     async fn screenshot(&self, tab: TabId, full_page: bool) -> Result<Vec<u8>, BrowserError> {
-        self.ensure_view(tab)?;
-        let state = self.state();
-        let path = capture_tab(&state, tab, full_page)
+        let session = self.session_for(tab)?;
+        let png = if full_page {
+            dive_cdp::page::capture_full_page(&session, dive_cdp::page::ImageFormat::Png).await
+        } else {
+            dive_cdp::page::capture_screenshot(
+                &session,
+                dive_cdp::page::ScreenshotOptions::default(),
+            )
             .await
-            .map_err(|e| other(e.message))?;
-        std::fs::read(path).map_err(other)
+        }
+        .map_err(other)?;
+        if png.len() > SCREENSHOT_TOOL_CAP {
+            return Err(BrowserError::ResultTooLarge {
+                bytes: png.len(),
+                max: SCREENSHOT_TOOL_CAP,
+            });
+        }
+        Ok(png)
     }
 
     async fn page_state(&self, tab: TabId) -> Result<String, BrowserError> {
@@ -245,58 +474,458 @@ impl Browser for AppBrowser {
         Ok(crate::ax::render(&nodes, 1500))
     }
 
-    async fn page_click(&self, tab: TabId, reference: String) -> Result<(), BrowserError> {
-        let session = self.session(tab)?;
-        let node = self.node_for(tab, &reference)?;
-        let (x, y) = center_of(&session, node).await?;
-        for kind in ["mouseMoved", "mousePressed", "mouseReleased"] {
-            let button = if kind == "mouseMoved" { "none" } else { "left" };
-            session
-                .call(
-                    "Input.dispatchMouseEvent",
-                    json!({"type": kind, "x": x, "y": y, "button": button, "clickCount": 1}),
+    async fn page_inspect(&self, tab: TabId) -> Result<Value, BrowserError> {
+        let session = self.session_for(tab)?;
+        let page = locator::page(&session, crate::snapshot::MAX_TEXT).await?;
+        let elements = locator::elements(&session, INSPECT_ELEMENT_CAP).await?;
+        let state = self.state();
+
+        // Warnings and errors only. An agent reading this wants to know what
+        // is wrong, and `console_tail` is there for the whole log.
+        let mut console: Vec<Value> = state
+            .buffers
+            .console_tail(tab, 500)
+            .into_iter()
+            .filter(|e| {
+                matches!(
+                    e.level,
+                    crate::console::Level::Warn | crate::console::Level::Error
                 )
-                .await
-                .map_err(other)?;
-        }
-        Ok(())
+            })
+            .map(|e| {
+                json!({
+                    "level": e.level,
+                    "text": e.text.lines().next().unwrap_or_default().chars().take(300).collect::<String>(),
+                    "url": e.url,
+                    "line": e.line,
+                })
+            })
+            .collect();
+        keep_last(&mut console, INSPECT_DIAGNOSTIC_CAP);
+
+        let all_requests = state.buffers.requests_listing(tab, 1000);
+        let total_requests = all_requests.len();
+        let mut failed: Vec<Value> = all_requests
+            .iter()
+            .filter(|r| r.error.is_some() || r.status.is_some_and(|s| s >= 400))
+            .map(|r| {
+                json!({
+                    "id": r.id,
+                    "method": r.method,
+                    "url": r.url,
+                    "status": r.status,
+                    "error": r.error,
+                })
+            })
+            .collect();
+        keep_last(&mut failed, INSPECT_DIAGNOSTIC_CAP);
+
+        Ok(json!({
+            "url": page["url"],
+            "title": page["title"],
+            "loading": page["loading"],
+            "viewport": page["viewport"],
+            "scroll": page["scroll"],
+            "scroll_height": page["scroll_height"],
+            "emulated_color_scheme": page["color_scheme"],
+            "visible_text": page["visible_text"],
+            "elements": elements["elements"],
+            "elements_truncated": elements["truncated"],
+            "console": console,
+            "failed_requests": failed,
+            "request_count": total_requests,
+            "actions": state.buffers.timeline(tab, INSPECT_DIAGNOSTIC_CAP),
+            "hint": "Each element carries the locator that addresses it. Call page_screenshot when layout matters, network_list for the full request log, console_tail for the whole console.",
+        }))
+    }
+
+    async fn page_click(&self, tab: TabId, target: Target) -> Result<Value, BrowserError> {
+        let session = self.session_for(tab)?;
+        let described = target.locator.clone().or_else(|| target.r#ref.clone());
+        self.tracked(tab, "page_click", described, async {
+            let (x, y, label) = self.point_for(tab, &session, &target).await?;
+            automation::click_at(
+                &session,
+                Some(&self.app),
+                tab,
+                x,
+                y,
+                &label,
+                self.on_screen(tab),
+            )
+            .await
+            .map_err(|e| other(e.message))?;
+            Ok(json!({"clicked": label, "x": x, "y": y}))
+        })
+        .await
     }
 
     async fn page_type(
         &self,
         tab: TabId,
-        reference: String,
+        target: Target,
         text: String,
+        clear: bool,
         submit: bool,
-    ) -> Result<(), BrowserError> {
-        let session = self.session(tab)?;
-        let node = self.node_for(tab, &reference)?;
-        session
-            .call("DOM.focus", json!({"backendNodeId": node}))
-            .await
-            .map_err(other)?;
-        // Select existing content so the inserted text replaces it.
-        let select_all = json!({"type": "keyDown", "key": "a", "code": "KeyA", "modifiers": SELECT_ALL_MODIFIER, "commands": ["selectAll"]});
-        session
-            .call("Input.dispatchKeyEvent", select_all)
-            .await
-            .map_err(other)?;
-        session
-            .call("Input.insertText", json!({"text": text}))
-            .await
-            .map_err(other)?;
-        if submit {
-            for (kind, key_text) in [("keyDown", "\r"), ("keyUp", "")] {
-                session
-                    .call(
-                        "Input.dispatchKeyEvent",
-                        json!({"type": kind, "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13, "text": key_text}),
-                    )
-                    .await
-                    .map_err(other)?;
-            }
+    ) -> Result<Value, BrowserError> {
+        if text.chars().count() > TYPE_TEXT_CAP {
+            return Err(BrowserError::BadRequest(format!(
+                "text is over the {TYPE_TEXT_CAP} character limit"
+            )));
         }
-        Ok(())
+        let session = self.session_for(tab)?;
+        let described = target.locator.clone().or_else(|| target.r#ref.clone());
+        self.tracked(tab, "page_type", described, async {
+            let label = self
+                .focus_for(tab, &session, &target)
+                .await?
+                .unwrap_or_else(|| "the focused element".to_owned());
+            automation::type_text(&session, &text, clear, submit)
+                .await
+                .map_err(|e| other(e.message))?;
+            Ok(json!({"typed_into": label, "characters": text.chars().count(), "submitted": submit}))
+        })
+        .await
+    }
+
+    async fn page_press(
+        &self,
+        tab: TabId,
+        target: Target,
+        key: String,
+        modifiers: Vec<String>,
+    ) -> Result<(), BrowserError> {
+        let session = self.session_for(tab)?;
+        self.tracked(tab, "page_press", Some(key.clone()), async {
+            // Focusing is optional: pressing Escape to dismiss a dialog has
+            // no element to aim at.
+            self.focus_for(tab, &session, &target).await?;
+            let mask = automation::modifier_mask(&modifiers).map_err(|e| other(e.message))?;
+            automation::press(&session, &key, mask)
+                .await
+                .map_err(|e| other(e.message))
+        })
+        .await
+    }
+
+    async fn page_scroll(
+        &self,
+        tab: TabId,
+        target: Target,
+        delta_x: f64,
+        delta_y: f64,
+    ) -> Result<Value, BrowserError> {
+        if !delta_x.is_finite()
+            || !delta_y.is_finite()
+            || delta_x.abs() > MAX_SCROLL_DELTA
+            || delta_y.abs() > MAX_SCROLL_DELTA
+        {
+            return Err(BrowserError::BadRequest(format!(
+                "scroll deltas must be finite and no larger than {MAX_SCROLL_DELTA}"
+            )));
+        }
+        let session = self.session_for(tab)?;
+        self.tracked(tab, "page_scroll", target.locator.clone(), async {
+            // With no target, scroll the middle of the viewport: a wheel
+            // event at (0,0) can land on a fixed header that swallows it.
+            let (x, y) = if target.locator.is_none() && target.r#ref.is_none() && target.x.is_none()
+            {
+                let viewport = locator::viewport(&session).await?;
+                (viewport.width / 2.0, viewport.height / 2.0)
+            } else {
+                let (x, y, _) = self.point_for(tab, &session, &target).await?;
+                (x, y)
+            };
+            automation::scroll(&session, x, y, delta_x, delta_y)
+                .await
+                .map_err(|e| other(e.message))?;
+            let page = locator::page(&session, 0).await?;
+            Ok(json!({"scroll": page["scroll"], "scroll_height": page["scroll_height"]}))
+        })
+        .await
+    }
+
+    async fn page_wait_for(
+        &self,
+        tab: TabId,
+        params: WaitForParams,
+    ) -> Result<Value, BrowserError> {
+        let session = self.session_for(tab)?;
+        if params.locator.is_none()
+            && params.text.is_none()
+            && params.url_includes.is_none()
+            && !params.load
+        {
+            return Err(BrowserError::BadRequest(
+                "give at least one of locator, text, url_includes or load=true".into(),
+            ));
+        }
+        if params
+            .text
+            .as_ref()
+            .is_some_and(|text| text.chars().count() > WAIT_TEXT_CAP)
+        {
+            return Err(BrowserError::BadRequest(format!(
+                "wait text is over the {WAIT_TEXT_CAP} character limit"
+            )));
+        }
+        let timeout_ms = params.timeout_ms.unwrap_or(dive_mcp::DEFAULT_WAIT_MS);
+        if timeout_ms > dive_mcp::MAX_WAIT_MS {
+            return Err(BrowserError::BadRequest(format!(
+                "timeout_ms cannot exceed {}",
+                dive_mcp::MAX_WAIT_MS
+            )));
+        }
+        let described = params
+            .locator
+            .clone()
+            .or_else(|| params.text.clone())
+            .or_else(|| params.url_includes.clone());
+        self.tracked(tab, "page_wait_for", described, async {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+            let mut unmet = Vec::new();
+            loop {
+                unmet.clear();
+                let page = locator::page(&session, 0).await?;
+                if params.load && page["loading"] == Value::Bool(true) {
+                    unmet.push("still loading".to_owned());
+                }
+                if let Some(text) = &params.text
+                    && !locator::contains_text(&session, text).await?
+                {
+                    unmet.push(format!("text {text:?} not on the page"));
+                }
+                if let Some(fragment) = &params.url_includes
+                    && !page["url"].as_str().unwrap_or_default().contains(fragment)
+                {
+                    unmet.push(format!("url does not contain {fragment:?}"));
+                }
+                if let Some(selector) = &params.locator {
+                    // An unparseable locator can never match, so fail now
+                    // rather than after the whole timeout.
+                    let count = locator::count(&session, selector).await?;
+                    if count == 0 {
+                        unmet.push(format!("nothing matches {selector:?}"));
+                    }
+                }
+                if unmet.is_empty() {
+                    return Ok(json!({
+                        "matched": true,
+                        "url": page["url"],
+                        "title": page["title"],
+                        "loading": page["loading"],
+                    }));
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err(BrowserError::Timeout {
+                        operation: "page_wait_for".into(),
+                        timeout_ms,
+                        detail: unmet.join("; "),
+                    });
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(WAIT_POLL_MS)).await;
+            }
+        })
+        .await
+    }
+
+    async fn page_locate(&self, tab: TabId, selector: String) -> Result<Value, BrowserError> {
+        let session = self.session_for(tab)?;
+        let count = locator::count(&session, &selector).await?;
+        let matches = locator::all(&session, &selector, LOCATE_CAP).await?;
+        Ok(json!({
+            "locator": selector,
+            "count": count,
+            "truncated": usize::try_from(count).unwrap_or(usize::MAX) > matches.len(),
+            "matches": matches,
+            "hint": if count > 1 {
+                "More than one match: append \" >> nth=0\" to pick one."
+            } else if matches.is_empty() {
+                "Nothing matched. Call page_inspect for the locators that do."
+            } else {
+                "Unambiguous."
+            },
+        }))
+    }
+
+    async fn page_resize(&self, tab: TabId, params: ResizeParams) -> Result<Value, BrowserError> {
+        if let Some(orientation) = params.orientation.as_deref()
+            && !matches!(orientation, "portrait" | "landscape")
+        {
+            return Err(BrowserError::BadRequest(
+                "orientation must be portrait or landscape".into(),
+            ));
+        }
+        if params.reset
+            && (params.preset.is_some()
+                || params.width.is_some()
+                || params.height.is_some()
+                || params.orientation.is_some())
+        {
+            return Err(BrowserError::BadRequest(
+                "reset=true cannot be combined with a preset, size or orientation".into(),
+            ));
+        }
+        let requested = match (&params.preset, params.width, params.height, params.reset) {
+            (Some(_), Some(_), _, _) | (Some(_), _, Some(_), _) => {
+                return Err(BrowserError::BadRequest(
+                    "give either a preset or width and height, not both".into(),
+                ));
+            }
+            (_, _, _, true) => None,
+            (Some(id), None, None, _) => {
+                let preset = crate::emulate::preset_by_id(id).ok_or_else(|| {
+                    BrowserError::BadRequest(format!(
+                        "unknown preset {id:?}; call page_devices for the list"
+                    ))
+                })?;
+                let landscape = params.orientation.as_deref() == Some("landscape");
+                let native_landscape = preset.device.width > preset.device.height;
+                Some(if landscape == native_landscape {
+                    preset
+                } else if let Some("landscape" | "portrait") = params.orientation.as_deref() {
+                    crate::emulate::rotate(preset)
+                } else {
+                    preset
+                })
+            }
+            (None, Some(width), Some(height), _) => {
+                if params.orientation.is_some() {
+                    return Err(BrowserError::BadRequest(
+                        "orientation only applies to a preset".into(),
+                    ));
+                }
+                let device = crate::emulate::exact(width, height)
+                    .map_err(|e| BrowserError::BadRequest(e.message))?;
+                Some(crate::emulate::Preset {
+                    id: format!("{width}x{height}"),
+                    name: format!("{width} x {height}"),
+                    device,
+                })
+            }
+            (None, Some(_), None, _) | (None, None, Some(_), _) => {
+                return Err(BrowserError::BadRequest(
+                    "width and height have to be given together".into(),
+                ));
+            }
+            (None, None, None, false) => {
+                return Err(BrowserError::BadRequest(
+                    "give a preset, width and height, or reset=true".into(),
+                ));
+            }
+        };
+        let described = requested.as_ref().map(|p| p.id.clone());
+        let device = requested.as_ref().map(|p| p.device.clone());
+        self.tracked(tab, "page_resize", described.clone(), async {
+            self.emulate_device(tab, device).await?;
+            Ok(json!({
+                "preset": described,
+                "width": requested.as_ref().map(|p| p.device.width),
+                "height": requested.as_ref().map(|p| p.device.height),
+                "reset": requested.is_none(),
+                "note": "The tab reloaded so the new metrics apply to layout.",
+            }))
+        })
+        .await
+    }
+
+    async fn page_devices(&self) -> Result<Value, BrowserError> {
+        serde_json::to_value(crate::emulate::presets()).map_err(other)
+    }
+
+    async fn page_appearance(
+        &self,
+        tab: TabId,
+        mut params: AppearanceParams,
+    ) -> Result<Value, BrowserError> {
+        // `system` is how a caller clears one override without disturbing
+        // the others, so it maps to None rather than being rejected.
+        if params.color_scheme.is_none()
+            && params.reduced_motion.is_none()
+            && params.media_type.is_none()
+        {
+            return Err(BrowserError::BadRequest(
+                "give color_scheme, reduced_motion or media_type".into(),
+            ));
+        }
+        let current = self.state().buffers.media(tab);
+        let color_scheme = params.color_scheme.or(current.color_scheme);
+        let reduced_motion = params.reduced_motion.or(current.reduced_motion);
+        let media_type = params.media_type.or(current.media_type);
+        params.color_scheme = color_scheme;
+        params.reduced_motion = reduced_motion;
+        params.media_type = media_type;
+        let clearable =
+            |value: Option<String>, allowed: &[&str]| -> Result<Option<String>, BrowserError> {
+                match value.as_deref().map(str::trim) {
+                    None | Some("system" | "") => Ok(None),
+                    Some(v) if allowed.contains(&v) => Ok(Some(v.to_owned())),
+                    Some(v) => Err(BrowserError::BadRequest(format!(
+                        "unknown value {v:?}; use one of {} or system",
+                        allowed.join(", ")
+                    ))),
+                }
+            };
+        let overrides = crate::emulate::MediaOverrides {
+            color_scheme: clearable(params.color_scheme, &["light", "dark"])?,
+            reduced_motion: clearable(params.reduced_motion, &["reduce", "no-preference"])?,
+            media_type: clearable(params.media_type, &["screen", "print"])?,
+        };
+        let session = self.session_for(tab)?;
+        let described = overrides.color_scheme.clone();
+        self.tracked(tab, "page_appearance", described, async {
+            let (method, args) = crate::emulate::media_call(&overrides);
+            session.call(method, args).await.map_err(other)?;
+            self.state().buffers.set_media(tab, overrides.clone());
+            Ok(json!({
+                "color_scheme": overrides.color_scheme,
+                "reduced_motion": overrides.reduced_motion,
+                "media_type": overrides.media_type,
+            }))
+        })
+        .await
+    }
+
+    async fn page_throttle(&self, tab: TabId, profile: String) -> Result<Value, BrowserError> {
+        let parsed = crate::emulate::profile_by_name(&profile)
+            .map_err(|e| BrowserError::BadRequest(e.message))?;
+        let session = self.session_for(tab)?;
+        self.tracked(tab, "page_throttle", Some(profile.clone()), async {
+            let (method, args) = crate::emulate::network_call(parsed);
+            session.call(method, args).await.map_err(other)?;
+            Ok(json!({
+                "profile": parsed.map_or("none".to_owned(), |_| profile.clone()),
+                "note": "Reload the tab to see the effect on initial load.",
+            }))
+        })
+        .await
+    }
+
+    async fn page_component(&self, tab: TabId, target: Target) -> Result<Value, BrowserError> {
+        let session = self.session_for(tab)?;
+        let mut found = match target.resolve()? {
+            Addressed::Locator(selector) => locator::component(&session, &selector).await?,
+            Addressed::Ref(_) | Addressed::Point { .. } => {
+                let (x, y, _) = self.point_for(tab, &session, &target).await?;
+                locator::component_at(&session, x, y).await?
+            }
+        };
+        // Turn the bundle location into a source location where a map is
+        // available, so the answer points at a file someone can open.
+        if let Some(frame) = found.get("source").cloned().filter(|f| !f.is_null()) {
+            found["source_resolved"] = self.resolve_source(tab, &frame).await;
+        }
+        if found["component_name"].is_null() {
+            found["note"] = Value::String(
+                "No React component was found. Either the page is not React, or it is a production build with no component names or source locations.".into(),
+            );
+        }
+        Ok(found)
+    }
+
+    async fn dev_servers(&self) -> Result<Value, BrowserError> {
+        let servers = self.state().devservers.refresh().await.0;
+        serde_json::to_value(servers).map_err(other)
     }
 
     async fn api_spec(&self, tab: TabId) -> Result<Value, BrowserError> {
@@ -393,6 +1022,11 @@ impl Browser for AppBrowser {
     }
 
     async fn evaluate(&self, tab: TabId, expression: String) -> Result<Value, BrowserError> {
+        if expression.chars().count() > EVALUATE_EXPRESSION_CAP {
+            return Err(BrowserError::BadRequest(format!(
+                "expression is over the {EVALUATE_EXPRESSION_CAP} character limit"
+            )));
+        }
         self.ensure_view(tab)?;
         let session = self.session(tab)?;
         let result = session
@@ -406,10 +1040,21 @@ impl Browser for AppBrowser {
             return Err(other(
                 details["exception"]["description"]
                     .as_str()
+                    .or_else(|| details["text"].as_str())
                     .unwrap_or("evaluation threw"),
             ));
         }
-        Ok(result["result"]["value"].clone())
+        let value = result["result"]["value"].clone();
+        // A page can hand back a megabyte of DOM. Refusing it with the size
+        // is more useful than filling the caller's context with it.
+        let bytes = serde_json::to_string(&value).map_or(0, |s| s.len());
+        if bytes > EVALUATE_CAP {
+            return Err(BrowserError::ResultTooLarge {
+                bytes,
+                max: EVALUATE_CAP,
+            });
+        }
+        Ok(value)
     }
 }
 
@@ -463,6 +1108,19 @@ fn load_or_create_token() -> std::io::Result<String> {
     if let Ok(existing) = std::fs::read_to_string(&path) {
         let t = existing.trim();
         if t.len() >= 32 {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+
+                let metadata = std::fs::symlink_metadata(&path)?;
+                if !metadata.file_type().is_file() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "MCP token path is not a regular file",
+                    ));
+                }
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+            }
             return Ok(t.to_owned());
         }
     }

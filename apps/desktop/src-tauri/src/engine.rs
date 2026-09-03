@@ -84,6 +84,10 @@ pub struct TabHost {
     bounds: Bounds,
     active: Option<TabId>,
     profiles_root: PathBuf,
+    /// A DOM overlay (dialog, menu, popover) is on screen. Child webviews
+    /// always paint above the main webview, so the active view is hidden for
+    /// as long as one is up, otherwise the overlay is buried behind the page.
+    covered: bool,
 }
 
 impl TabHost {
@@ -100,10 +104,12 @@ impl TabHost {
             },
             active: None,
             profiles_root,
+            covered: false,
         }
     }
 
     /// Create the engine view for `tab` inside `container`'s profile.
+    #[allow(clippy::too_many_lines)] // One builder owns the lifecycle callbacks for one native view.
     pub fn open(
         &mut self,
         app: &AppHandle<Runtime>,
@@ -131,7 +137,8 @@ impl TabHost {
         builder = builder.on_download(move |_, event| {
             match event {
                 DownloadEvent::Requested { url, destination } => {
-                    let dir = downloads_dir();
+                    let state = dl_app.state::<AppState>();
+                    let dir = state.prefs.get(&state).download_dir();
                     let _ = std::fs::create_dir_all(&dir);
                     let suggested = destination
                         .file_name()
@@ -190,22 +197,42 @@ impl TabHost {
         let view = self
             .window
             .add_child(builder, self.bounds.position(), self.bounds.size())?;
-        view.hide()?;
+        if let Err(error) = view.hide() {
+            let _ = view.close();
+            return Err(error);
+        }
         // The view starts blank so the DevTools feeds are listening before the
         // first navigation; otherwise the document request and early console
         // output are missed.
         #[cfg(feature = "cef")]
         {
-            let session = attach_cdp(&view)?;
+            let session = match attach_cdp(&view) {
+                Ok(session) => session,
+                Err(error) => {
+                    let _ = view.close();
+                    return Err(error);
+                }
+            };
             let console_ready = crate::console::attach(app.clone(), tab_id, session.clone());
             let network_ready = crate::network::attach(app.clone(), tab_id, session.clone());
             crate::favicon::attach(app.clone(), tab_id, session.clone());
             crate::rules::attach(app.clone(), tab_id, tab.workspace_id, session.clone());
+            crate::inspect::watch(app.clone(), tab_id, &session);
+            crate::crash::watch(app.clone(), tab_id, session.clone());
+            let session_for_prefs = session.clone();
             self.cdp.insert(tab_id, session);
             let nav = view.clone();
+            let prefs_app = app.clone();
             tauri::async_runtime::spawn(async move {
                 let _ = console_ready.await;
                 let _ = network_ready.await;
+                // Privacy preferences have to be in force before the document
+                // request goes out, or the first load escapes them.
+                let prefs = {
+                    let state = prefs_app.state::<AppState>();
+                    state.prefs.get(&state)
+                };
+                crate::prefs::apply(&session_for_prefs, &prefs).await;
                 if let Err(e) = nav.navigate(url) {
                     tracing::warn!(%tab_id, "initial navigation failed: {e}");
                 }
@@ -213,6 +240,16 @@ impl TabHost {
         }
         #[cfg(not(feature = "cef"))]
         view.navigate(url)?;
+        {
+            let state = app.state::<AppState>();
+            let prefs = state.prefs.get(&state);
+            if (prefs.default_zoom - 1.0).abs() > f64::EPSILON {
+                let _ = view.set_zoom(prefs.default_zoom);
+            }
+            if prefs.devtools_on_open {
+                view.open_devtools();
+            }
+        }
         self.views.insert(tab_id, view);
         Ok(())
     }
@@ -220,6 +257,11 @@ impl TabHost {
     /// `DevTools` protocol session for `id`, if the engine exposes one.
     pub fn cdp(&self, id: TabId) -> Option<CdpSession> {
         self.cdp.get(&id).cloned()
+    }
+
+    /// Every live `DevTools` session, for changes that touch all open tabs.
+    pub fn sessions(&self) -> Vec<(TabId, CdpSession)> {
+        self.cdp.iter().map(|(id, s)| (*id, s.clone())).collect()
     }
 
     /// Run `f` against the view for `id`.
@@ -236,16 +278,48 @@ impl TabHost {
 
     /// Show `id` and hide every other tab view.
     pub fn activate(&mut self, id: TabId) -> tauri::Result<()> {
+        self.active = Some(id);
+        self.apply_visibility()
+    }
+
+    /// Hide the page while a DOM overlay is up, and restore it afterwards.
+    pub fn set_covered(&mut self, covered: bool) -> tauri::Result<()> {
+        if self.covered == covered {
+            return Ok(());
+        }
+        self.covered = covered;
+        self.apply_visibility()
+    }
+
+    /// Show the active view unless an overlay covers it; hide every other one.
+    fn apply_visibility(&self) -> tauri::Result<()> {
         for (tab, view) in &self.views {
-            if *tab == id {
+            if Some(*tab) == self.active && !self.covered {
                 view.show()?;
                 let _ = view.set_focus();
             } else {
                 view.hide()?;
             }
         }
-        self.active = Some(id);
+        if self.covered {
+            self.focus_chrome();
+        }
         Ok(())
+    }
+
+    /// Move keyboard focus to the React chrome. The page is a separate native
+    /// webview that keeps first responder while it is up, so anything the user
+    /// is meant to type into the chrome (palette, find bar, address bar) has to
+    /// ask for focus first or the keystrokes go to the page instead.
+    pub fn focus_chrome(&self) {
+        if let Some(chrome) = self
+            .window
+            .webviews()
+            .into_iter()
+            .find(|w| w.label() == CHROME_LABEL)
+        {
+            let _ = chrome.set_focus();
+        }
     }
 
     /// Hide every tab view (used when switching workspaces).
@@ -364,7 +438,14 @@ pub fn update_tab(app: &AppHandle<Runtime>, id: TabId, f: impl FnOnce(&mut Tab))
     let state = app.state::<AppState>();
     let store = lock(&state.store);
     let Ok(mut tab) = store.tab(id) else { return };
+    let was = tab.url.clone();
     f(&mut tab);
+    // The read above lends the tab its origin's remembered icon, which belongs
+    // to the site it is leaving; a URL change has to re-key it or the old mark
+    // gets written back against the new address.
+    if tab.url != was {
+        store.rekey_favicon(&mut tab);
+    }
     if let Err(e) = store.upsert_tab(&tab) {
         tracing::warn!(%id, "failed to persist tab update: {e}");
         return;
@@ -382,12 +463,22 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
     let width = 1280.0;
     let height = 820.0;
     let window = tauri::window::WindowBuilder::new(app, MAIN_WINDOW)
-        .title("Dive")
+        .title(if cfg!(debug_assertions) {
+            "Dive Dev"
+        } else {
+            "Dive"
+        })
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true)
         .inner_size(width, height)
         .min_inner_size(720.0, 480.0)
         .build()?;
+
+    // Keep production's Dock icon clean. macOS renders this label directly on
+    // the running development app's icon, so dev and release builds cannot be
+    // mistaken for one another in the Dock or app switcher.
+    #[cfg(all(debug_assertions, target_os = "macos"))]
+    window.set_badge_label(Some("DEV".into()))?;
 
     let _chrome = window.add_child(
         WebviewBuilder::new(CHROME_LABEL, WebviewUrl::App("index.html".into())).auto_resize(),

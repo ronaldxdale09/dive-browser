@@ -1,11 +1,13 @@
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronDown, Globe, Pin, Plus, X } from "lucide-react";
+import { ChevronDown, Pin, Plus, X } from "lucide-react";
 import { useState } from "react";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "../lib/ipc";
+import { Favicon } from "./Favicon";
 import { Icon, IconButton } from "./Icon";
+import { useCoversContent } from "../lib/overlay";
 
 function label(t: Tab) {
   if (t.title) return t.title;
@@ -45,10 +47,10 @@ export function TabStrip() {
   };
 
   return (
-    <div className="flex h-full items-center gap-1 pr-2 pl-2" data-tauri-drag-region onClick={() => menu && setMenu(null)}>
+    <div className="flex h-full items-center gap-1 pr-2 pl-2" onClick={() => menu && setMenu(null)}>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
-          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden" role="tablist">
+          <div className="flex min-w-0 items-center gap-1 overflow-hidden" role="tablist">
             {tabs.map((t) => (
               <SortableTab
                 key={t.id}
@@ -59,10 +61,21 @@ export function TabStrip() {
                 onMenu={(x, y) => setMenu({ id: t.id, x, y })}
               />
             ))}
-            <IconButton icon={Plus} label="New tab" onClick={() => toggle("palette", true)} />
           </div>
         </SortableContext>
       </DndContext>
+      <IconButton icon={Plus} label="New tab" onClick={() => toggle("palette", true)} />
+      <div className="min-w-3 flex-1 self-stretch" data-tauri-drag-region />
+      {import.meta.env.DEV && (
+        <span
+          aria-label="Development environment"
+          title="Development environment"
+          className="flex h-5 shrink-0 items-center gap-1 rounded-full border border-danger/40 bg-danger/15 px-2 font-mono text-[10px] font-semibold tracking-[0.12em] text-danger"
+        >
+          <span className="size-1.5 rounded-full bg-danger" aria-hidden />
+          DEV
+        </span>
+      )}
       <IconButton icon={ChevronDown} label="All tabs" onClick={() => toggle("palette", true)} size={14} />
       {menu && (
         <TabMenu
@@ -112,17 +125,27 @@ function SortableTab({ tab: t, active, onActivate, onClose, onMenu }: { tab: Tab
       }`}
       title={pinned ? label(t) : undefined}
     >
-      <Icon icon={pinned ? Pin : Globe} size={13} className="shrink-0 text-ink-3" />
+      {/* A pinned tab is icon-only, so the site's own mark is the only thing
+          left to tell it apart; the pin itself moves to a corner dot. */}
+      <span className="relative grid shrink-0 place-items-center">
+        <Favicon src={t.favicon} size={pinned ? 16 : 14} />
+        {pinned && (
+          <span className="absolute -right-1.5 -bottom-1 grid size-3 place-items-center rounded-full bg-surface-2 text-ink-3" aria-hidden>
+            <Icon icon={Pin} size={8} />
+          </span>
+        )}
+      </span>
       {!pinned && <span className="truncate">{label(t)}</span>}
       {!pinned && (
         <button
           type="button"
           aria-label={`Close ${label(t)}`}
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
             onClose();
           }}
-          className="ml-auto grid size-5 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink group-hover:opacity-100 aria-selected:opacity-100"
+          className="ml-auto grid size-5 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100 group-aria-selected:opacity-100"
         >
           <Icon icon={X} size={12} />
         </button>
@@ -132,6 +155,7 @@ function SortableTab({ tab: t, active, onActivate, onClose, onMenu }: { tab: Tab
 }
 
 function TabMenu({ x, y, pinned, onPin, onClose, onCloseOthers }: { x: number; y: number; pinned: boolean; onPin: (v: boolean) => void; onClose: () => void; onCloseOthers: () => void }) {
+  useCoversContent();
   const item = "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink";
   return (
     <div role="menu" style={{ left: x, top: y }} className="fixed z-50 w-44 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl" onClick={(e) => e.stopPropagation()}>

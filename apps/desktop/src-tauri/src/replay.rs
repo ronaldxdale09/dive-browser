@@ -4,11 +4,14 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use dive_cdp::CdpSession;
+use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use specta::Type;
 
 use crate::error::{AppError, AppResult};
+
+const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 
 /// What to send. Starts as the captured request; the user may edit it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -111,18 +114,51 @@ pub async fn send(req: &ReplayRequest, cookie: Option<String>) -> AppResult<Repl
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("<binary>").to_owned()))
         .collect();
-    let bytes = response.bytes().await.map_err(AppError::new)?;
+    let (bytes, truncated) = read_capped(response).await?;
     let elapsed_ms = u32::try_from(started.elapsed().as_millis()).unwrap_or(u32::MAX);
-    let body = match std::str::from_utf8(&bytes) {
-        Ok(text) => text.chars().take(256 * 1024).collect(),
-        Err(_) => format!("<{} bytes of binary data>", bytes.len()),
-    };
+    let body = body_text(&bytes, truncated);
     Ok(ReplayResponse {
         status,
         headers,
         body,
         elapsed_ms,
     })
+}
+
+/// Read at most the amount the UI can display. Stopping the stream here is
+/// what prevents an unexpectedly large or endless response from consuming
+/// process memory before it is truncated.
+async fn read_capped(response: reqwest::Response) -> AppResult<(Vec<u8>, bool)> {
+    let mut stream = response.bytes_stream();
+    let mut bytes = Vec::with_capacity(MAX_RESPONSE_BYTES.min(16 * 1024));
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(AppError::new)?;
+        let remaining = MAX_RESPONSE_BYTES.saturating_sub(bytes.len());
+        if chunk.len() > remaining {
+            bytes.extend_from_slice(&chunk[..remaining]);
+            return Ok((bytes, true));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok((bytes, false))
+}
+
+fn body_text(bytes: &[u8], truncated: bool) -> String {
+    let text = match std::str::from_utf8(bytes) {
+        Ok(text) => Some(text),
+        // A byte cap can split the final UTF-8 scalar. Keep the valid prefix,
+        // but do not turn genuinely binary data into replacement characters.
+        Err(e) if truncated && e.error_len().is_none() => {
+            std::str::from_utf8(&bytes[..e.valid_up_to()]).ok()
+        }
+        Err(_) => None,
+    };
+    match text {
+        Some(text) if truncated => format!("{text}\n… [truncated]"),
+        Some(text) => text.to_owned(),
+        None if truncated => format!("<at least {} bytes of binary data>", bytes.len()),
+        None => format!("<{} bytes of binary data>", bytes.len()),
+    }
 }
 
 #[cfg(test)]
@@ -169,5 +205,17 @@ mod tests {
         for h in ["Host", "Cookie", "Content-Length"] {
             assert!(DROP.contains(&h.to_ascii_lowercase().as_str()));
         }
+    }
+
+    #[test]
+    fn response_text_reports_truncation_without_breaking_utf8() {
+        assert_eq!(body_text(b"hello", false), "hello");
+        assert!(body_text(b"hello", true).contains("[truncated]"));
+        assert!(body_text(&[0xff, 0x00], false).contains("binary data"));
+        let split = "hi 😀".as_bytes();
+        assert_eq!(
+            body_text(&split[..split.len() - 1], true),
+            "hi \n… [truncated]"
+        );
     }
 }

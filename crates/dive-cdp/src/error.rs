@@ -19,9 +19,18 @@ pub enum CdpError {
     /// The session was closed before the call completed.
     #[error("session closed")]
     Closed,
+    /// Chromium accepted a call but did not answer before the deadline.
+    #[error("cdp call timed out: {method}")]
+    Timeout {
+        /// Fully-qualified CDP method that stalled.
+        method: String,
+    },
     /// A payload could not be encoded or decoded.
     #[error("serialization: {0}")]
     Serialization(#[from] serde_json::Error),
+    /// A caller requested work that would be unsafe or nonsensical.
+    #[error("invalid argument: {0}")]
+    InvalidArgument(String),
     /// The result did not contain the field the caller expected.
     #[error("missing field in result: {0}")]
     MissingField(&'static str),

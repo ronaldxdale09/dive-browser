@@ -1,18 +1,54 @@
 //! Find dev servers on this machine and help open them on a phone.
+//!
+//! Ports are discovered by asking the OS what is listening rather than by
+//! probing a list of ports we guessed in advance. A fixed list misses the
+//! second Vite instance on 5174, anything a monorepo assigns dynamically, and
+//! every project that does not use a fashionable framework's default.
+//!
+//! Discovery is `lsof -iTCP -sTCP:LISTEN -P -n -F pcn`, which also gives the
+//! process id and command holding each port, so the list can say *what* is
+//! serving. Windows, and any machine without `lsof`, falls back to probing
+//! [`COMMON_PORTS`].
+//!
+//! A listening socket is not necessarily a web server, so each candidate gets
+//! short HTTP and HTTPS probes and is only reported once it answers with HTML. Probe
+//! results are cached briefly, keyed by port *and* the pid holding it, so
+//! restarting a dev server on the same port is noticed rather than served
+//! from a stale classification.
 
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::time::Duration;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
+use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use tauri::AppHandle;
+use tauri_specta::Event;
 
+use crate::Runtime;
 use crate::error::{AppError, AppResult};
 
-/// Ports dev servers commonly bind.
+/// Ports dev servers commonly bind. Only used where `lsof` is unavailable.
 pub const COMMON_PORTS: &[u16] = &[
-    3000, 3001, 3333, 4000, 4200, 4321, 5000, 5173, 5174, 5500, 6006, 8000, 8080, 8081, 8788, 8888,
-    9000,
+    3000, 3001, 3333, 4000, 4200, 4321, 5000, 5173, 5174, 5175, 5500, 6006, 8000, 8080, 8081, 8788,
+    8888, 9000,
 ];
+const MAX_PROBE_BODY: usize = 256 * 1024;
+/// How long a probe result is trusted.
+const PROBE_CACHE_TTL: Duration = Duration::from_secs(15);
+/// Gap between scans while anything is watching.
+const POLL_INTERVAL: Duration = Duration::from_secs(3);
+/// Ceiling on concurrent HTTP probes, so a machine with a hundred listeners
+/// does not open a hundred sockets at once.
+const PROBE_CONCURRENCY: usize = 16;
+/// Budget for `lsof`. It occasionally blocks on a wedged mount.
+const LSOF_TIMEOUT: Duration = Duration::from_secs(5);
+/// Ports above this are almost always ephemeral client sockets rather than
+/// something a person started on purpose.
+const MAX_INTERESTING_PORT: u16 = 49_151;
 
 /// A server that answered.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -25,6 +61,10 @@ pub struct DevServer {
     pub framework: String,
     /// `<title>` of the root document, when any.
     pub title: String,
+    /// Command holding the port, when the OS told us.
+    pub process: Option<String>,
+    /// Process id holding the port, when the OS told us.
+    pub pid: Option<u32>,
 }
 
 /// LAN address plus a QR code for it.
@@ -36,51 +76,329 @@ pub struct ShareInfo {
     pub qr_svg: String,
 }
 
-/// Probe the common ports concurrently.
-pub async fn scan() -> Vec<DevServer> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(1500))
-        .build()
-        .unwrap_or_default();
-    let probes = COMMON_PORTS.iter().map(|&port| {
-        let client = client.clone();
-        async move {
-            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
-            let open = tokio::time::timeout(
-                Duration::from_millis(300),
-                tokio::net::TcpStream::connect(addr),
-            )
-            .await;
-            if !matches!(open, Ok(Ok(_))) {
-                return None;
+/// Emitted when the set of running dev servers changes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
+pub struct DevServersChanged {
+    /// The current list.
+    pub servers: Vec<DevServer>,
+}
+
+/// A local socket the OS reports as listening.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Listener {
+    /// Port bound.
+    pub port: u16,
+    /// Process id holding it.
+    pub pid: Option<u32>,
+    /// Command name, as the OS reports it.
+    pub command: Option<String>,
+}
+
+/// Whether a bound address is reachable on loopback.
+///
+/// `*` and `0.0.0.0` mean every interface, which includes loopback; a socket
+/// bound to one specific LAN address is not something `localhost` will reach.
+fn is_local_bind(host: &str) -> bool {
+    matches!(
+        host,
+        "127.0.0.1" | "localhost" | "[::1]" | "::1" | "*" | "0.0.0.0" | "[::]" | "::"
+    ) || host.starts_with("127.")
+}
+
+/// Parse `lsof -F pcn` output into listeners.
+///
+/// The format is line-per-field with a one-character tag: `p` starts a
+/// process, `c` names it, and each following `n` line is one of that
+/// process's sockets. Fields persist until replaced, which is why `pid` and
+/// `command` are carried down the loop rather than read per socket.
+pub fn parse_lsof(output: &str) -> Vec<Listener> {
+    let mut listeners = Vec::new();
+    let mut pid = None;
+    let mut command = None;
+    for line in output.lines() {
+        let Some((tag, value)) = line.split_at_checked(1) else {
+            continue;
+        };
+        match tag {
+            "p" => {
+                pid = value.trim().parse::<u32>().ok();
+                command = None;
             }
-            let url = format!("http://localhost:{port}/");
-            let (server_header, body) = match client.get(&url).send().await {
-                Ok(r) => {
-                    let server = r
-                        .headers()
-                        .get("server")
-                        .and_then(|v| v.to_str().ok())
-                        .unwrap_or_default()
-                        .to_owned();
-                    (server, r.text().await.unwrap_or_default())
+            "c" => command = Some(value.trim().to_owned()),
+            "n" => {
+                // `127.0.0.1:5173`, `*:3000`, `[::1]:8080`, or a pair with
+                // `->` for a connected socket we do not want.
+                let name = value.trim();
+                if name.contains("->") {
+                    continue;
                 }
-                Err(_) => (String::new(), String::new()),
-            };
-            let framework = detect(&body, &server_header);
-            Some(DevServer {
-                port,
-                url,
-                framework,
-                title: title_of(&body),
-            })
+                let Some((host, port)) = name.rsplit_once(':') else {
+                    continue;
+                };
+                let Ok(port) = port.parse::<u16>() else {
+                    continue;
+                };
+                if port == 0 || port > MAX_INTERESTING_PORT || !is_local_bind(host) {
+                    continue;
+                }
+                let listener = Listener {
+                    port,
+                    pid,
+                    command: command.clone(),
+                };
+                // IPv4 and IPv6 binds of the same server appear separately.
+                if !listeners.contains(&listener) {
+                    listeners.push(listener);
+                }
+            }
+            _ => {}
+        }
+    }
+    listeners.sort_by_key(|l| l.port);
+    listeners
+}
+
+/// Ask the OS what is listening. `None` when `lsof` is unavailable.
+async fn listeners() -> Option<Vec<Listener>> {
+    if cfg!(target_os = "windows") {
+        return None;
+    }
+    let run = tokio::process::Command::new("lsof")
+        .args(["-iTCP", "-sTCP:LISTEN", "-P", "-n", "-F", "pcn"])
+        .kill_on_drop(true)
+        .output();
+    match tokio::time::timeout(LSOF_TIMEOUT, run).await {
+        Ok(Ok(output)) if output.status.success() => {
+            Some(parse_lsof(&String::from_utf8_lossy(&output.stdout)))
+        }
+        Ok(Ok(output)) => {
+            tracing::debug!(
+                status = %output.status,
+                stderr = %String::from_utf8_lossy(&output.stderr),
+                "lsof failed, falling back to common ports"
+            );
+            None
+        }
+        Ok(Err(e)) => {
+            tracing::debug!("lsof unavailable, falling back to common ports: {e}");
+            None
+        }
+        Err(_) => {
+            tracing::warn!("lsof timed out, falling back to common ports");
+            None
+        }
+    }
+}
+
+/// What a probe concluded about one port.
+#[derive(Debug, Clone, Copy)]
+struct Cached {
+    /// The pid that held the port when we probed it.
+    pid: Option<u32>,
+    /// Whether it answered as a web server.
+    web: bool,
+    /// When to stop trusting this.
+    expires: Instant,
+}
+
+/// Discovery state: the last published list, the probe cache, and whether the
+/// chrome is currently interested in updates.
+#[derive(Default)]
+pub struct Registry {
+    last: Mutex<Vec<DevServer>>,
+    cache: Mutex<HashMap<u16, Cached>>,
+    watched: AtomicBool,
+}
+
+impl Registry {
+    /// The most recent scan, without starting one.
+    pub fn current(&self) -> Vec<DevServer> {
+        crate::state::lock(&self.last).clone()
+    }
+
+    /// Start or stop watching. Polling costs an `lsof` and a handful of HTTP
+    /// probes every few seconds, so it only runs while a panel is open.
+    pub fn watch(&self, on: bool) {
+        self.watched.store(on, Ordering::Relaxed);
+    }
+
+    fn watched(&self) -> bool {
+        self.watched.load(Ordering::Relaxed)
+    }
+
+    /// Whether `port` is known to be (or not to be) a web server.
+    ///
+    /// A cache entry recorded against a different pid is discarded: the same
+    /// port with a new process behind it is a new question.
+    fn cached(&self, port: u16, pid: Option<u32>) -> Option<bool> {
+        let cache = crate::state::lock(&self.cache);
+        let entry = cache.get(&port)?;
+        (entry.expires > Instant::now() && entry.pid == pid).then_some(entry.web)
+    }
+
+    fn remember(&self, port: u16, pid: Option<u32>, web: bool) {
+        let mut cache = crate::state::lock(&self.cache);
+        cache.insert(
+            port,
+            Cached {
+                pid,
+                web,
+                expires: Instant::now() + PROBE_CACHE_TTL,
+            },
+        );
+        // Ports come and go; drop entries nobody asked about recently rather
+        // than growing the map for the life of the process.
+        let now = Instant::now();
+        cache.retain(|_, e| e.expires > now);
+    }
+
+    /// Scan, publish, and report whether the list changed.
+    pub async fn refresh(&self) -> (Vec<DevServer>, bool) {
+        let found = scan_with(self).await;
+        let mut last = crate::state::lock(&self.last);
+        let changed = *last != found;
+        if changed {
+            last.clone_from(&found);
+        }
+        (found, changed)
+    }
+}
+
+/// Poll while anything is watching, and tell the chrome when the list moves.
+pub fn start(app: AppHandle<Runtime>) {
+    tauri::async_runtime::spawn(async move {
+        use tauri::Manager as _;
+        loop {
+            tokio::time::sleep(POLL_INTERVAL).await;
+            let state = app.state::<crate::state::AppState>();
+            if !state.devservers.watched() {
+                continue;
+            }
+            let (servers, changed) = state.devservers.refresh().await;
+            if changed {
+                let _ = DevServersChanged { servers }.emit(&app);
+            }
         }
     });
-    futures_util::future::join_all(probes)
-        .await
-        .into_iter()
-        .flatten()
+}
+
+async fn scan_with(registry: &Registry) -> Vec<DevServer> {
+    let candidates = match listeners().await {
+        Some(found) => found,
+        None => COMMON_PORTS
+            .iter()
+            .map(|&port| Listener {
+                port,
+                pid: None,
+                command: None,
+            })
+            .collect(),
+    };
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(1500))
+        // Local HTTPS development commonly uses a self-signed certificate.
+        // Probes never follow redirects or leave loopback.
+        .danger_accept_invalid_certs(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap_or_default();
+    let probes = candidates.into_iter().map(|listener| {
+        let client = client.clone();
+        async move {
+            if registry.cached(listener.port, listener.pid) == Some(false) {
+                return None;
+            }
+            let server = probe(&client, &listener).await;
+            registry.remember(listener.port, listener.pid, server.is_some());
+            server
+        }
+    });
+    let mut found: Vec<DevServer> = futures_util::stream::iter(probes)
+        .buffer_unordered(PROBE_CONCURRENCY)
+        .filter_map(|r| async move { r })
         .collect()
+        .await;
+    found.sort_by_key(|s| s.port);
+    found
+}
+
+/// One candidate: connect, fetch the root document, and decide whether this
+/// is a web server worth listing.
+async fn probe(client: &reqwest::Client, listener: &Listener) -> Option<DevServer> {
+    let port = listener.port;
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let open = tokio::time::timeout(
+        Duration::from_millis(300),
+        tokio::net::TcpStream::connect(addr),
+    )
+    .await;
+    if !matches!(open, Ok(Ok(_))) {
+        return None;
+    }
+    for scheme in ["http", "https"] {
+        let url = format!("{scheme}://localhost:{port}/");
+        let Ok(response) = client.get(&url).send().await else {
+            continue;
+        };
+        let status = response.status();
+        let headers = response.headers().clone();
+        let server_header = headers
+            .get("server")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+        let content_type = headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        // A redirect from `/` is how plenty of dev servers greet you; the
+        // target is still a page a person would open. Redirects are not
+        // followed, which keeps every probe on loopback.
+        let redirects = status.is_redirection() && headers.contains_key("location");
+        let body = read_text_capped(response).await;
+        if !redirects && !looks_like_a_page(&content_type, &body) {
+            continue;
+        }
+        return Some(DevServer {
+            port,
+            url,
+            framework: detect(&body, &server_header),
+            title: title_of(&body),
+            process: listener.command.clone(),
+            pid: listener.pid,
+        });
+    }
+    None
+}
+
+/// Whether a response is a document rather than an API or a raw socket.
+///
+/// Checked on the body as well as the header because dev servers are casual
+/// about content types, and a Postgres or Redis port that happens to answer
+/// an HTTP request should not turn up in a list of dev servers.
+pub fn looks_like_a_page(content_type: &str, body: &str) -> bool {
+    if content_type.contains("text/html") {
+        return true;
+    }
+    if !content_type.is_empty() && !content_type.contains("text/plain") {
+        return false;
+    }
+    let head = body.trim_start().to_ascii_lowercase();
+    head.starts_with("<!doctype html") || head.starts_with("<html") || head.contains("<body")
+}
+
+async fn read_text_capped(response: reqwest::Response) -> String {
+    let mut stream = response.bytes_stream();
+    let mut body = Vec::with_capacity(16 * 1024);
+    while let Some(Ok(chunk)) = stream.next().await {
+        let remaining = MAX_PROBE_BODY.saturating_sub(body.len());
+        body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+        if chunk.len() >= remaining {
+            break;
+        }
+    }
+    String::from_utf8_lossy(&body).into_owned()
 }
 
 /// Guess the tool from the root document and the `Server` header.
@@ -135,6 +453,9 @@ fn title_of(body: &str) -> String {
 /// Rewrite a localhost URL to this machine's LAN IP and render a QR code.
 pub fn share(url: &str) -> AppResult<ShareInfo> {
     let mut parsed = url::Url::parse(url).map_err(AppError::new)?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(AppError::new("only http and https URLs can be shared"));
+    }
     let host = parsed.host_str().unwrap_or_default().to_owned();
     if host == "localhost" || host == "127.0.0.1" || host == "[::1]" || host == "0.0.0.0" {
         let ip = local_ip_address::local_ip()
@@ -186,5 +507,153 @@ mod tests {
         assert_eq!(s.lan_url, "https://example.com/path?x=1");
         assert!(s.qr_svg.starts_with("<svg") || s.qr_svg.starts_with("<?xml"));
         assert!(share("not a url").is_err());
+    }
+
+    #[test]
+    fn lsof_output_becomes_listeners_with_the_process_that_owns_them() {
+        // Real shape: fields persist until replaced, and one process can
+        // hold several sockets.
+        let output = "\
+p4321
+cnode
+n127.0.0.1:5173
+n[::1]:5173
+n*:24678
+p9876
+cpython3.12
+n127.0.0.1:8000
+";
+        let found = parse_lsof(output);
+        assert_eq!(
+            found,
+            vec![
+                Listener {
+                    port: 5173,
+                    pid: Some(4321),
+                    command: Some("node".into())
+                },
+                Listener {
+                    port: 8000,
+                    pid: Some(9876),
+                    command: Some("python3.12".into())
+                },
+                Listener {
+                    port: 24678,
+                    pid: Some(4321),
+                    command: Some("node".into())
+                },
+            ],
+            "the IPv4 and IPv6 binds of one server are the same listener"
+        );
+    }
+
+    #[test]
+    fn only_ports_reachable_on_localhost_are_candidates() {
+        let output = "\
+p1
+cnode
+n127.0.0.1:3000
+n*:3001
+n0.0.0.0:3002
+n[::]:3003
+n192.168.1.9:3004
+nfe80::1:3005
+";
+        let ports: Vec<u16> = parse_lsof(output).into_iter().map(|l| l.port).collect();
+        assert!(ports.contains(&3000), "loopback");
+        assert!(ports.contains(&3001), "* is every interface");
+        assert!(ports.contains(&3002), "0.0.0.0 is every interface");
+        assert!(ports.contains(&3003), "[::] is every interface");
+        assert!(
+            !ports.contains(&3004),
+            "a LAN-only bind is not reachable as localhost"
+        );
+    }
+
+    #[test]
+    fn connected_sockets_and_junk_lines_are_ignored() {
+        let output = "\
+p1
+cnode
+n127.0.0.1:5173->127.0.0.1:52344
+n127.0.0.1:notaport
+nnohostorport
+n127.0.0.1:0
+n127.0.0.1:60000
+n127.0.0.1:4321
+fnot-a-tag
+";
+        let ports: Vec<u16> = parse_lsof(output).into_iter().map(|l| l.port).collect();
+        assert_eq!(
+            ports,
+            vec![4321],
+            "an established connection is not a listener, and an ephemeral port is not a dev server"
+        );
+    }
+
+    #[test]
+    fn a_pid_without_a_command_still_yields_a_listener() {
+        // `-F pcn` normally gives all three, but the command line can be
+        // missing for a process that exits mid-scan.
+        let found = parse_lsof("p7\nn127.0.0.1:1234\n");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].pid, Some(7));
+        assert_eq!(found[0].command, None);
+    }
+
+    #[test]
+    fn a_listening_socket_is_only_a_dev_server_once_it_serves_a_page() {
+        assert!(looks_like_a_page("text/html; charset=utf-8", ""));
+        assert!(looks_like_a_page("", "<!doctype html><html></html>"));
+        assert!(looks_like_a_page("", "  <html><body>hi</body></html>"));
+        // A database or a JSON API on a loopback port is not a dev server.
+        assert!(!looks_like_a_page("application/json", "{\"ok\":true}"));
+        assert!(!looks_like_a_page("", "PostgreSQL 16.2"));
+        assert!(!looks_like_a_page("application/octet-stream", "<html>"));
+    }
+
+    #[test]
+    fn probe_results_are_cached_per_port_and_per_process() {
+        let registry = Registry::default();
+        assert_eq!(registry.cached(5173, Some(1)), None, "nothing known yet");
+
+        registry.remember(5173, Some(1), true);
+        assert_eq!(registry.cached(5173, Some(1)), Some(true));
+
+        // Restarting the server gives the port a new pid, so the old answer
+        // is not reused.
+        assert_eq!(
+            registry.cached(5173, Some(2)),
+            None,
+            "a new process on the same port is a new question"
+        );
+
+        registry.remember(9999, None, false);
+        assert_eq!(registry.cached(9999, None), Some(false));
+    }
+
+    #[test]
+    fn watching_is_reference_counted_and_cannot_go_negative() {
+        let registry = Registry::default();
+        assert!(
+            !registry.watched(),
+            "idle by default: polling costs an lsof"
+        );
+
+        registry.watch(true);
+        registry.watch(true);
+        assert!(registry.watched());
+
+        registry.watch(false);
+        assert!(
+            registry.watched(),
+            "one panel closed, another is still open"
+        );
+        registry.watch(false);
+        assert!(!registry.watched());
+
+        // An unbalanced release must not wrap around into "watched forever".
+        registry.watch(false);
+        assert!(!registry.watched());
     }
 }

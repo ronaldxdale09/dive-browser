@@ -81,7 +81,16 @@ export const useNetwork = create<NetworkState>((set) => ({
         const next = [...(s.frames[key] ?? []), { direction: event.data.direction === "sent" ? "sent" : "received", payload: event.data.payload, at: event.data.timestamp ?? 0 } as FrameRow];
         return { frames: { ...s.frames, [key]: next.length > FRAME_CAP ? next.slice(next.length - FRAME_CAP) : next } };
       }
-      return { byTab: { ...s.byTab, [event.data.tab_id]: fold(s.byTab[event.data.tab_id], event) } };
+      const rows = fold(s.byTab[event.data.tab_id], event);
+      if (event.type === "sent" || event.type === "socket") {
+        const live = new Set(rows.map((row) => row.id));
+        const prefix = `${event.data.tab_id}:`;
+        const frames = Object.fromEntries(
+          Object.entries(s.frames).filter(([key]) => !key.startsWith(prefix) || live.has(key.slice(prefix.length))),
+        );
+        return { byTab: { ...s.byTab, [event.data.tab_id]: rows }, frames };
+      }
+      return { byTab: { ...s.byTab, [event.data.tab_id]: rows } };
     }),
   clear: (tabId) => set((s) => ({ byTab: { ...s.byTab, [tabId]: [] }, frames: withoutTab(s.frames, tabId) })),
   drop: (tabId) =>

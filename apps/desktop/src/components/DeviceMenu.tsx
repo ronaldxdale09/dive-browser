@@ -4,6 +4,8 @@ import { DEVICES } from "../data/devices";
 import { useBrowser } from "../store/browser";
 import { selectMedia, selectThrottle, useEmulation } from "../store/emulation";
 import { Icon } from "./Icon";
+import { Tooltip } from "./Tooltip";
+import { useCoversContent } from "../lib/overlay";
 
 /** Toolbar button + popover for the device simulator and media overrides. */
 export function DeviceMenu() {
@@ -17,6 +19,7 @@ export function DeviceMenu() {
   const setThrottle = useEmulation((s) => s.setThrottle);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  useCoversContent(open);
 
   useEffect(() => {
     if (!open) return;
@@ -37,18 +40,19 @@ export function DeviceMenu() {
 
   return (
     <div ref={ref} className="relative">
-      <button
-        type="button"
-        aria-label="Device simulator"
-        title="Device simulator"
-        aria-pressed={active}
-        aria-expanded={open}
-        disabled={disabled}
-        onClick={() => setOpen((o) => !o)}
-        className="grid size-7 place-items-center rounded-full text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-35 aria-pressed:bg-surface-3 aria-pressed:text-highlight"
-      >
-        <Icon icon={Smartphone} />
-      </button>
+      <Tooltip label="Device simulator">
+        <button
+          type="button"
+          aria-label="Device simulator"
+          aria-pressed={active}
+          aria-expanded={open}
+          disabled={disabled}
+          onClick={() => setOpen((o) => !o)}
+          className="grid size-7 place-items-center rounded-full text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-35 aria-pressed:bg-surface-3 aria-pressed:text-highlight"
+        >
+          <Icon icon={Smartphone} />
+        </button>
+      </Tooltip>
       {open && activeTab && (
         <div role="menu" className="absolute right-0 z-40 mt-1 w-64 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl">
           <div className="px-2 pt-1 pb-1 text-[10px] tracking-wider text-ink-3 uppercase">Device</div>

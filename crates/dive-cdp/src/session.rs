@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -57,7 +58,26 @@ struct Inner {
     events: broadcast::Sender<CdpEvent>,
 }
 
+/// Removes an in-flight call when its future is timed out or cancelled.
+/// Results normally remove themselves in `handle_incoming`; this guard makes
+/// every other exit path equally leak-free.
+struct PendingGuard {
+    inner: Arc<Inner>,
+    id: u64,
+}
+
+impl Drop for PendingGuard {
+    fn drop(&mut self) {
+        self.inner
+            .pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.id);
+    }
+}
+
 const EVENT_BUFFER: usize = 1024;
+const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// First message id. The CEF host runtime issues its own `DevTools` messages
 /// with small ids (script evaluation) and ids from `1_000_000` (init scripts);
 /// Chromium silently drops a message whose id is already in flight, so we
@@ -80,16 +100,32 @@ impl CdpSession {
 
     /// Invoke `method` with `params` and await the `result` object.
     pub async fn call(&self, method: &str, params: Value) -> Result<Value, CdpError> {
+        self.call_with_timeout(method, params, CALL_TIMEOUT).await
+    }
+
+    async fn call_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, CdpError> {
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         self.pending().insert(id, tx);
+        let _cleanup = PendingGuard {
+            inner: Arc::clone(&self.inner),
+            id,
+        };
 
         let message = json!({ "id": id, "method": method, "params": params }).to_string();
-        if let Err(err) = self.inner.transport.send(&message) {
-            self.pending().remove(&id);
-            return Err(err);
+        self.inner.transport.send(&message)?;
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(CdpError::Closed),
+            Err(_) => Err(CdpError::Timeout {
+                method: method.to_owned(),
+            }),
         }
-        rx.await.unwrap_or(Err(CdpError::Closed))
     }
 
     /// Invoke a method that takes no parameters.
@@ -237,6 +273,31 @@ mod tests {
         });
         let err = session.call0("Page.enable").await.unwrap_err();
         assert!(matches!(err, CdpError::Transport(_)));
+        assert!(session.pending().is_empty());
+    }
+
+    #[tokio::test]
+    async fn timeout_removes_pending_entry() {
+        let session = CdpSession::new(FakeTransport::default());
+        let err = session
+            .call_with_timeout("Page.enable", json!({}), Duration::from_millis(1))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CdpError::Timeout { ref method } if method == "Page.enable"));
+        assert!(session.pending().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cancelled_call_removes_pending_entry() {
+        let session = CdpSession::new(FakeTransport::default());
+        let pending = tokio::spawn({
+            let session = session.clone();
+            async move { session.call0("Page.enable").await }
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(session.pending().len(), 1);
+        pending.abort();
+        let _ = pending.await;
         assert!(session.pending().is_empty());
     }
 

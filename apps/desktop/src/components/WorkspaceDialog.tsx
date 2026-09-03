@@ -1,7 +1,9 @@
-import { Trash2 } from "lucide-react";
+import { Shield, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useBrowser } from "../store/browser";
+import { AVATAR_SEEDS, seedFromName, workspaceAvatar } from "../lib/workspaceAvatar";
 import { Icon } from "./Icon";
+import { useCoversContent } from "../lib/overlay";
 
 const SWATCHES = ["#7FD8C8", "#F0B35E", "#E58C8C", "#8FB8F0", "#B79CF0", "#9ED67B", "#E9E9E9"];
 
@@ -16,13 +18,21 @@ export function WorkspaceDialog() {
   const existing = editing?.id ? workspaces.find((w) => w.id === editing.id) : undefined;
   const [name, setName] = useState(existing?.name ?? "");
   const [color, setColor] = useState(existing?.color ?? SWATCHES[0]!);
+  // An empty seed follows the name, so a new workspace already has a mark
+  // while it is being typed; picking one below pins it.
+  const [seed, setSeed] = useState(existing?.icon ?? "");
   const [separate, setSeparate] = useState(true);
+  const [confirming, setConfirming] = useState(false);
+  const count = useBrowser((s) => (existing ? (s.counts[existing.id] ?? 0) : 0));
+  useCoversContent(Boolean(editing));
   if (!editing) return null;
   const close = () => setEditing(null);
+  const icon = seed || seedFromName(name);
+  const seeds = [seedFromName(name), ...AVATAR_SEEDS.filter((s) => s !== seedFromName(name))].slice(0, 14);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (existing) void update(existing.id, { name, color });
-    else void create({ name, color }, separate);
+    if (existing) void update(existing.id, { name, color, icon });
+    else void create({ name, color, icon }, separate);
   };
 
   return (
@@ -33,7 +43,17 @@ export function WorkspaceDialog() {
         onKeyDown={(e) => e.key === "Escape" && close()}
         className="mx-auto mt-28 w-[380px] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
       >
-        <h2 className="text-sm font-semibold">{existing ? "Edit workspace" : "New workspace"}</h2>
+        <div className="flex items-center gap-2.5">
+          <img src={workspaceAvatar(icon, color)} alt="" width={32} height={32} className="size-8 shrink-0 rounded-[11px]" />
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold">{existing ? "Edit workspace" : "New workspace"}</h2>
+            {/* Someone meeting workspaces for the first time meets them here,
+                so the dialog says what one is rather than assuming. */}
+            <p className="text-[11px] text-ink-3">
+              {existing ? `${count} ${count === 1 ? "tab" : "tabs"} live here` : "A separate set of tabs, with its own logins if you want them."}
+            </p>
+          </div>
+        </div>
         <label className="mt-3 block text-xs text-ink-2">
           Name
           <input
@@ -60,30 +80,75 @@ export function WorkspaceDialog() {
             />
           ))}
         </div>
+        <div className="mt-4 text-xs text-ink-2">Mark</div>
+        <div className="mt-1.5 grid grid-cols-7 gap-1.5" role="radiogroup" aria-label="Mark">
+          {seeds.map((s) => (
+            <button
+              key={s}
+              type="button"
+              role="radio"
+              aria-checked={s === icon}
+              aria-label={s.replace(/-/g, " ")}
+              title={s.replace(/-/g, " ")}
+              onClick={() => setSeed(s)}
+              // The ring alone marks the choice: the marks are already colored,
+              // so tinting the cell as well would just add noise.
+              className="grid size-8 place-items-center rounded-lg ring-offset-2 ring-offset-surface aria-checked:ring-2 aria-checked:ring-ink"
+            >
+              <img src={workspaceAvatar(s, color)} alt="" width={28} height={28} className="size-7 rounded-lg" />
+            </button>
+          ))}
+        </div>
         {!existing && (
-          <label className="mt-4 flex items-center gap-2 text-xs text-ink-2">
-            <input type="checkbox" checked={separate} onChange={(e) => setSeparate(e.target.checked)} className="accent-highlight" />
-            Separate cookies and logins (own container)
+          <label className="mt-4 flex items-start gap-2 text-xs text-ink-2">
+            <input type="checkbox" checked={separate} onChange={(e) => setSeparate(e.target.checked)} className="mt-0.5 accent-highlight" />
+            <span>
+              <span className="flex items-center gap-1.5 text-ink">
+                <Icon icon={Shield} size={12} /> Separate cookies and logins
+              </span>
+              <span className="text-[11px] text-ink-3">Its own browser profile, so you can be signed in as two people at once.</span>
+            </span>
           </label>
         )}
-        <div className="mt-5 flex items-center gap-2">
-          {existing && workspaces.length > 1 && (
-            <button
-              type="button"
-              onClick={() => void remove(existing.id)}
-              className="flex h-8 items-center gap-1.5 rounded-full px-3 text-xs text-danger hover:bg-surface-2"
-            >
-              <Icon icon={Trash2} size={13} /> Delete
+        {confirming ? (
+          <div className="mt-5 rounded-lg border border-line bg-surface-2 p-3">
+            <p className="text-xs text-ink-2">
+              Delete {existing?.name} and close its {count} {count === 1 ? "tab" : "tabs"}? Its history and cookies stay on disk.
+            </p>
+            <div className="mt-3 flex gap-2">
+              <span className="flex-1" />
+              <button type="button" onClick={() => setConfirming(false)} className="h-8 rounded-full px-3 text-xs text-ink-2 hover:bg-surface-3">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => existing && void remove(existing.id)}
+                className="h-8 rounded-full bg-danger px-4 text-xs font-medium text-accent-ink"
+              >
+                Delete workspace
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-5 flex items-center gap-2">
+            {existing && workspaces.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setConfirming(true)}
+                className="flex h-8 items-center gap-1.5 rounded-full px-3 text-xs text-danger hover:bg-surface-2"
+              >
+                <Icon icon={Trash2} size={13} /> Delete
+              </button>
+            )}
+            <span className="flex-1" />
+            <button type="button" onClick={close} className="h-8 rounded-full px-3 text-xs text-ink-2 hover:bg-surface-2">
+              Cancel
             </button>
-          )}
-          <span className="flex-1" />
-          <button type="button" onClick={close} className="h-8 rounded-full px-3 text-xs text-ink-2 hover:bg-surface-2">
-            Cancel
-          </button>
-          <button type="submit" disabled={!name.trim()} className="h-8 rounded-full bg-accent px-4 text-xs font-medium text-accent-ink disabled:opacity-40">
-            {existing ? "Save" : "Create"}
-          </button>
-        </div>
+            <button type="submit" disabled={!name.trim()} className="h-8 rounded-full bg-accent px-4 text-xs font-medium text-accent-ink disabled:opacity-40">
+              {existing ? "Save" : "Create"}
+            </button>
+          </div>
+        )}
       </form>
     </div>
   );

@@ -17,6 +17,8 @@ use crate::state::AppState;
 
 /// Name of the binding the page script calls.
 const BINDING: &str = "__diveRecord";
+const MAX_FIELD: usize = 4 * 1024;
+const MAX_BINDING_PAYLOAD: usize = 1024 * 1024;
 
 /// One recorded interaction.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -45,52 +47,24 @@ pub struct RecorderEvent {
     pub step: RecordedStep,
 }
 
-/// Injected into the page: reports clicks on interactive elements and
-/// committed text input. Names follow the accessible-name heuristics
-/// Playwright's `getByRole` resolves against.
-const SCRIPT: &str = r"(function(){
-  if (window.top !== window) return; // main frame only: never read inside cross-origin iframes
-  if (window.__diveRecorderInstalled) return; window.__diveRecorderInstalled = true;
-  const NONCE = '__NONCE__';
-  const send = (payload) => { try { payload.nonce = NONCE; window.__diveRecord(JSON.stringify(payload)); } catch (e) {} };
-  const secret = (el) => el.type === 'password' || /password|cc-|one-time-code/i.test(el.autocomplete || '');
-  const text = (el) => (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
-  const nameOf = (el) => {
-    const aria = el.getAttribute && (el.getAttribute('aria-label') || '');
-    if (aria) return aria;
-    const labelled = el.getAttribute && el.getAttribute('aria-labelledby');
-    if (labelled) { const l = document.getElementById(labelled); if (l) return text(l); }
-    if (el.labels && el.labels.length) return text(el.labels[0]);
-    if (el.tagName === 'INPUT' && (el.type === 'submit' || el.type === 'button')) return el.value || '';
-    if (el.placeholder) return el.placeholder;
-    if (el.tagName === 'IMG') return el.alt || '';
-    return text(el);
-  };
-  const roleOf = (el) => {
-    const explicit = el.getAttribute && el.getAttribute('role'); if (explicit) return explicit;
-    const t = el.tagName; const type = (el.type || '').toLowerCase();
-    if (t === 'A' && el.hasAttribute('href')) return 'link';
-    if (t === 'BUTTON' || (t === 'INPUT' && (type === 'submit' || type === 'button' || type === 'reset'))) return 'button';
-    if (t === 'INPUT' && type === 'checkbox') return 'checkbox';
-    if (t === 'INPUT' && type === 'radio') return 'radio';
-    if (t === 'INPUT' && type === 'search') return 'searchbox';
-    if (t === 'INPUT' || t === 'TEXTAREA') return 'textbox';
-    if (t === 'SELECT') return 'combobox';
-    if (t === 'OPTION') return 'option';
-    return '';
-  };
-  const target = (el) => { while (el && el !== document.body) { if (roleOf(el)) return el; el = el.parentElement; } return null; };
-  document.addEventListener('click', (e) => {
-    const el = target(e.target); if (!el) return;
-    const role = roleOf(el); if (role === 'textbox' || role === 'searchbox' || role === 'combobox') return;
-    send({ kind: 'click', role, name: nameOf(el), value: '', at: Date.now() });
-  }, true);
-  document.addEventListener('change', (e) => {
-    const el = e.target; const role = roleOf(el); if (!role) return;
-    if (role === 'checkbox' || role === 'radio') { send({ kind: 'click', role, name: nameOf(el), value: '', at: Date.now() }); return; }
-    send({ kind: 'type', role, name: nameOf(el), value: secret(el) ? '' : String(el.value || ''), masked: secret(el), at: Date.now() });
-  }, true);
-})()";
+/// Build the page-side recorder from `inject/recorder.js`.
+///
+/// The nonce is embedded as a JSON string literal: it is the only thing
+/// stopping a page from calling the binding itself and forging steps into
+/// someone's recording.
+fn script(nonce: &str) -> String {
+    crate::pagescript::build(
+        "recorder.js",
+        &[
+            (
+                "__NONCE__",
+                serde_json::to_string(nonce).unwrap_or_else(|_| "null".into()),
+            ),
+            ("__BINDING__", BINDING.to_owned()),
+            ("__MAX_FIELD__", MAX_FIELD.to_string()),
+        ],
+    )
+}
 
 /// Install the binding and script, and forward events while recording.
 pub async fn start(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) -> AppResult<()> {
@@ -99,7 +73,10 @@ pub async fn start(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) 
         return Err(AppError::new("already recording this tab"));
     }
     let nonce = dive_core::TabId::new().to_string().replace('-', "");
-    let script = SCRIPT.replace("__NONCE__", &nonce);
+    let script = script(&nonce);
+    // Subscribe before setup calls: a fast navigation or interaction between
+    // injection and task startup must not disappear from the recording.
+    let mut events = session.subscribe();
     session
         .call("Runtime.addBinding", json!({"name": BINDING}))
         .await
@@ -108,24 +85,38 @@ pub async fn start(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) 
         .call("Page.enable", json!({}))
         .await
         .map_err(AppError::new)?;
-    session
+    let registered = session
         .call(
             "Page.addScriptToEvaluateOnNewDocument",
             json!({"source": script}),
         )
         .await
         .map_err(AppError::new)?;
-    session
+    let script_id = registered["identifier"]
+        .as_str()
+        .ok_or_else(|| AppError::new("CDP did not return a recorder script identifier"))?
+        .to_owned();
+    if let Err(error) = session
         .call("Runtime.evaluate", json!({"expression": script}))
         .await
-        .map_err(AppError::new)?;
+    {
+        let _ = session
+            .call(
+                "Page.removeScriptToEvaluateOnNewDocument",
+                json!({"identifier": script_id}),
+            )
+            .await;
+        return Err(AppError::new(error));
+    }
     state.buffers.set_recording(tab_id, Some(Vec::new()));
     state
         .buffers
         .set_recording_nonce(tab_id, Some(nonce.clone()));
+    state
+        .buffers
+        .set_recording_script_id(tab_id, Some(script_id));
 
     tauri::async_runtime::spawn(async move {
-        let mut events = session.subscribe();
         loop {
             match events.recv().await {
                 Ok(event) => {
@@ -138,7 +129,9 @@ pub async fn start(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) 
                         let _ = RecorderEvent { tab_id, step }.emit(&app);
                     }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(%tab_id, n, "recorder missed CDP events");
+                }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }
@@ -146,20 +139,62 @@ pub async fn start(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) 
     Ok(())
 }
 
+/// Stop page-side recording and remove the bootstrap registered for later
+/// documents. Cleanup is best effort because the tab may already be closing.
+pub async fn stop(session: CdpSession, script_id: Option<String>) {
+    let _ = session
+        .call(
+            "Runtime.evaluate",
+            json!({"expression": "window.__diveRecorderNonce = null"}),
+        )
+        .await;
+    if let Some(identifier) = script_id {
+        let _ = session
+            .call(
+                "Page.removeScriptToEvaluateOnNewDocument",
+                json!({"identifier": identifier}),
+            )
+            .await;
+    }
+}
+
 /// A `Runtime.bindingCalled` for our binding carrying the right nonce, or a
 /// main-frame navigation.
 pub fn map_event(event: &CdpEvent, nonce: &str) -> Option<RecordedStep> {
     match event.method.as_str() {
         "Runtime.bindingCalled" if event.params["name"] == BINDING => {
-            let payload: Value = serde_json::from_str(event.params["payload"].as_str()?).ok()?;
+            let encoded = event.params["payload"].as_str()?;
+            if encoded.len() > MAX_BINDING_PAYLOAD {
+                return None;
+            }
+            let payload: Value = serde_json::from_str(encoded).ok()?;
             if payload["nonce"].as_str() != Some(nonce) {
                 return None;
             }
+            let kind = payload["kind"].as_str()?;
+            if !matches!(kind, "click" | "type") {
+                return None;
+            }
             Some(RecordedStep {
-                kind: payload["kind"].as_str()?.to_owned(),
-                role: payload["role"].as_str().unwrap_or_default().to_owned(),
-                name: payload["name"].as_str().unwrap_or_default().to_owned(),
-                value: payload["value"].as_str().unwrap_or_default().to_owned(),
+                kind: kind.to_owned(),
+                role: payload["role"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(64)
+                    .collect(),
+                name: payload["name"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(256)
+                    .collect(),
+                value: payload["value"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(MAX_FIELD)
+                    .collect(),
                 at: payload["at"].as_f64().unwrap_or_default(),
                 masked: payload["masked"].as_bool().unwrap_or(false),
             })
@@ -226,5 +261,61 @@ mod tests {
         )
         .unwrap();
         assert!(step.masked && step.value.is_empty());
+        let huge = json!({"name": BINDING, "payload": format!("{{\"kind\":\"type\",\"value\":\"{}\",\"nonce\":\"n1\"}}", "x".repeat(MAX_FIELD + 10))});
+        let step = map_event(
+            &CdpEvent {
+                method: "Runtime.bindingCalled".into(),
+                params: huge,
+            },
+            "n1",
+        )
+        .unwrap();
+        assert_eq!(step.value.len(), MAX_FIELD);
+
+        let oversized = CdpEvent {
+            method: "Runtime.bindingCalled".into(),
+            params: json!({"name": BINDING, "payload": "x".repeat(MAX_BINDING_PAYLOAD + 1)}),
+        };
+        assert!(map_event(&oversized, "n1").is_none());
+    }
+
+    #[test]
+    fn recorder_script_can_be_restarted_and_disabled() {
+        let script = script("n1");
+        let nonce_assignment = script
+            .find("window.__diveRecorderNonce = NONCE")
+            .expect("script assigns the new nonce");
+        let installed_guard = script
+            .find("if (window.__diveRecorderInstalled) return")
+            .expect("script installs listeners once");
+        assert!(nonce_assignment < installed_guard);
+        assert!(script.contains("if (!nonce) return"));
+    }
+
+    #[test]
+    fn recorder_script_shares_the_locator_role_rules() {
+        // Recorded steps are replayed as role/name locators, so both sides
+        // have to compute the role the same way.
+        let script = script("n1");
+        assert!(
+            script.contains("const roleOf ="),
+            "role helper not composed in"
+        );
+        assert!(
+            script.contains("const nameOf ="),
+            "name helper not composed in"
+        );
+        assert!(
+            script.contains("INTERACTIVE.has(roleOf(el))"),
+            "landmarks and list items must not be recorded as clicks"
+        );
+    }
+
+    #[test]
+    fn recorder_script_embeds_the_nonce_as_a_json_string() {
+        // The nonce reaches the page through a JS literal; anything that
+        // escapes the quotes would let a page forge steps.
+        let script = script("ab\"cd");
+        assert!(script.contains(r#"const NONCE = "ab\"cd";"#), "{script}");
     }
 }

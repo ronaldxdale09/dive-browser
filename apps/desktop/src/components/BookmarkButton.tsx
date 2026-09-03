@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
+import { Tooltip } from "./Tooltip";
 
 /** Star toggles a bookmark for the active tab's current URL. */
 export function BookmarkButton() {
@@ -31,17 +32,19 @@ export function BookmarkButton() {
       })
       .catch((e: unknown) => useBrowser.setState({ error: e instanceof Error ? e.message : String(e) }));
   };
+  const label = saved ? "Remove bookmark" : "Bookmark this page";
   return (
-    <button
-      type="button"
-      aria-label={saved ? "Remove bookmark" : "Bookmark this page"}
-      title={saved ? "Remove bookmark" : "Bookmark this page"}
-      aria-pressed={saved}
-      disabled={!current}
-      onClick={toggle}
-      className="grid size-7 place-items-center rounded-full text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-35 aria-pressed:text-highlight"
-    >
-      <Icon icon={Star} fill={saved ? "currentColor" : "none"} />
-    </button>
+    <Tooltip label={label}>
+      <button
+        type="button"
+        aria-label={label}
+        aria-pressed={saved}
+        disabled={!current}
+        onClick={toggle}
+        className="grid size-7 place-items-center rounded-full text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-35 aria-pressed:text-highlight"
+      >
+        <Icon icon={Star} fill={saved ? "currentColor" : "none"} />
+      </button>
+    </Tooltip>
   );
 }

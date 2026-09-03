@@ -4,6 +4,8 @@ import { ipc } from "../lib/ipc";
 import type { ShareInfo } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
+import { Tooltip } from "./Tooltip";
+import { useCoversContent } from "../lib/overlay";
 
 /** Share button: the current URL rewritten to this machine's LAN address, as a QR code. */
 export function SharePopover() {
@@ -13,6 +15,7 @@ export function SharePopover() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  useCoversContent(open);
 
   useEffect(() => {
     if (!open || !current) return;
@@ -36,17 +39,18 @@ export function SharePopover() {
 
   return (
     <div ref={ref} className="relative">
-      <button
-        type="button"
-        aria-label="Share to another device"
-        title="Share to another device"
-        aria-expanded={open}
-        disabled={!current}
-        onClick={() => setOpen((o) => !o)}
-        className="grid size-7 place-items-center rounded-full text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-35"
-      >
-        <Icon icon={Share} />
-      </button>
+      <Tooltip label="Share to another device">
+        <button
+          type="button"
+          aria-label="Share to another device"
+          aria-expanded={open}
+          disabled={!current}
+          onClick={() => setOpen((o) => !o)}
+          className="grid size-7 place-items-center rounded-full text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-35"
+        >
+          <Icon icon={Share} />
+        </button>
+      </Tooltip>
       {open && (
         <div role="dialog" aria-label="Share" className="absolute right-0 z-40 mt-1 w-64 rounded-xl border border-line-2 bg-surface p-3 text-xs shadow-2xl">
           <div className="mb-2 text-[10px] tracking-wider text-ink-3 uppercase">Open on your phone</div>

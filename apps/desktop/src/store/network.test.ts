@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fold } from "./network";
+import { fold, selectFrames, useNetwork } from "./network";
 import type { NetworkEvent } from "../lib/ipc";
 
 const sent = (id: string, url: string, t = 1): NetworkEvent => ({ type: "sent", data: { tab_id: "t", request_id: id, url, method: "GET", resource_type: "Fetch", headers: {}, post_data: null, timestamp: t, wall_time: 1_700_000_000 + t } });
@@ -26,5 +26,13 @@ describe("network fold", () => {
     rows = fold(rows, { type: "frame", data: { tab_id: "t", request_id: "s", direction: "received", payload: "hi", timestamp: 1.2 } });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ resourceType: "WebSocket", method: "GET", url: "wss://a.dev/ws" });
+  });
+
+  it("drops frames when their request row is evicted", () => {
+    useNetwork.setState({ byTab: {}, frames: {} });
+    useNetwork.getState().apply({ type: "socket", data: { tab_id: "t", request_id: "old", url: "wss://a.dev/ws", timestamp: 1 } });
+    useNetwork.getState().apply({ type: "frame", data: { tab_id: "t", request_id: "old", direction: "received", payload: "hi", timestamp: 1.1 } });
+    for (let i = 0; i < 1000; i += 1) useNetwork.getState().apply(sent(String(i), `https://a.dev/${i}`));
+    expect(selectFrames("t", "old")(useNetwork.getState())).toEqual([]);
   });
 });

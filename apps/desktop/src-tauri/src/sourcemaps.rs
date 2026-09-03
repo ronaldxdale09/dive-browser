@@ -20,10 +20,27 @@ pub struct Original {
 }
 
 /// Fetches scripts and their maps, caching parsed maps per script URL.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Resolver {
     http: reqwest::Client,
     cache: Arc<Mutex<HashMap<String, Option<Arc<sourcemap::SourceMap>>>>>,
+}
+
+impl Default for Resolver {
+    fn default() -> Self {
+        let http = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(3))
+            .timeout(std::time::Duration::from_secs(10))
+            // A same-origin asset is allowed to point only at a same-origin
+            // map. Not following redirects keeps that guarantee enforceable.
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap_or_default();
+        Self {
+            http,
+            cache: Arc::default(),
+        }
+    }
 }
 
 impl Resolver {
@@ -49,40 +66,35 @@ impl Resolver {
             return cached.clone();
         }
         let loaded = self.load(url).await.map(Arc::new);
-        self.cache
-            .lock()
-            .await
-            .insert(url.to_owned(), loaded.clone());
+        let mut cache = self.cache.lock().await;
+        if cache.len() >= MAX_CACHED_MAPS {
+            cache.clear();
+        }
+        cache.insert(url.to_owned(), loaded.clone());
         loaded
     }
 
     async fn load(&self, url: &str) -> Option<sourcemap::SourceMap> {
-        if !url.starts_with("http://") && !url.starts_with("https://") {
+        let script_url = url::Url::parse(url).ok()?;
+        if !matches!(script_url.scheme(), "http" | "https") {
             return None;
         }
         let script = String::from_utf8(fetch_capped(&self.http, url).await?).ok()?;
         let map_ref = map_url(&script)?;
         let bytes = if let Some(data) = map_ref.strip_prefix("data:") {
             let (_, payload) = data.split_once(',')?;
-            if data.contains(";base64") {
+            let bytes = if data.contains(";base64") {
                 use base64::Engine as _;
                 base64::engine::general_purpose::STANDARD
                     .decode(payload)
                     .ok()?
             } else {
                 payload.as_bytes().to_vec()
-            }
+            };
+            (bytes.len() <= MAX_BYTES).then_some(bytes)?
         } else {
-            let absolute = url::Url::parse(url).ok()?.join(&map_ref).ok()?;
-            self.http
-                .get(absolute)
-                .send()
-                .await
-                .ok()?
-                .bytes()
-                .await
-                .ok()?
-                .to_vec()
+            let absolute = map_target(&script_url, &map_ref)?;
+            fetch_capped(&self.http, absolute.as_str()).await?
         };
         sourcemap::SourceMap::from_slice(&bytes).ok()
     }
@@ -90,11 +102,22 @@ impl Resolver {
 
 /// Largest script or map we are willing to pull into memory.
 const MAX_BYTES: usize = 8 * 1024 * 1024;
+/// Parsed maps can each be several MiB; periodically reset instead of letting
+/// a long browsing session retain one for every cache-busted script URL.
+const MAX_CACHED_MAPS: usize = 128;
+
+fn map_target(script: &url::Url, reference: &str) -> Option<url::Url> {
+    let target = script.join(reference).ok()?;
+    same_host(script.as_str(), target.as_str()).then_some(target)
+}
 
 /// GET `url`, giving up past [`MAX_BYTES`].
 async fn fetch_capped(http: &reqwest::Client, url: &str) -> Option<Vec<u8>> {
     use futures_util::StreamExt as _;
     let response = http.get(url).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
     if response
         .content_length()
         .is_some_and(|n| n > MAX_BYTES as u64)
@@ -181,6 +204,17 @@ mod tests {
             "https://a.dev/",
             "http://169.254.169.254/latest"
         ));
+    }
+
+    #[test]
+    fn map_references_cannot_leave_the_script_origin() {
+        let script = url::Url::parse("https://a.dev/assets/app.js").unwrap();
+        assert_eq!(
+            map_target(&script, "app.js.map").unwrap().as_str(),
+            "https://a.dev/assets/app.js.map"
+        );
+        assert!(map_target(&script, "https://evil.dev/app.js.map").is_none());
+        assert!(map_target(&script, "http://a.dev/app.js.map").is_none());
     }
 
     #[test]

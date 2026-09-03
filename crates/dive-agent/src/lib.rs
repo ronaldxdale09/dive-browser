@@ -10,6 +10,10 @@ use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const ERROR_BODY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const MAX_ERROR_BODY: usize = 64 * 1024;
+
 /// Default model.
 pub const DEFAULT_MODEL: &str = "claude-opus-5";
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -39,12 +43,18 @@ pub struct Turn {
 impl Turn {
     /// A plain text turn.
     pub fn text(role: Role, text: impl Into<String>) -> Self {
-        Self { role, content: Value::String(text.into()) }
+        Self {
+            role,
+            content: Value::String(text.into()),
+        }
     }
 
     /// The assistant turn that requested tools (text plus `tool_use` blocks).
     pub fn assistant_blocks(blocks: Vec<Value>) -> Self {
-        Self { role: Role::Assistant, content: Value::Array(blocks) }
+        Self {
+            role: Role::Assistant,
+            content: Value::Array(blocks),
+        }
     }
 
     /// The user turn carrying every `tool_result` for the previous assistant turn.
@@ -59,7 +69,10 @@ impl Turn {
                 b
             })
             .collect();
-        Self { role: Role::User, content: Value::Array(blocks) }
+        Self {
+            role: Role::User,
+            content: Value::Array(blocks),
+        }
     }
 }
 
@@ -105,7 +118,14 @@ pub struct Request {
 impl Request {
     /// A request with the defaults the sidecar uses.
     pub fn new(system: impl Into<String>, turns: Vec<Turn>) -> Self {
-        Self { model: DEFAULT_MODEL.into(), system: system.into(), turns, tools: Vec::new(), max_tokens: 16_000, effort: "medium" }
+        Self {
+            model: DEFAULT_MODEL.into(),
+            system: system.into(),
+            turns,
+            tools: Vec::new(),
+            max_tokens: 16_000,
+            effort: "medium",
+        }
     }
 
     /// JSON body for `POST /v1/messages`.
@@ -198,7 +218,9 @@ impl StreamState {
             "content_block_delta" => {
                 let d = &v["delta"];
                 match d["type"].as_str() {
-                    Some("text_delta") => Some(Delta::Text(d["text"].as_str().unwrap_or_default().to_owned())),
+                    Some("text_delta") => Some(Delta::Text(
+                        d["text"].as_str().unwrap_or_default().to_owned(),
+                    )),
                     Some("input_json_delta") => {
                         if let Some(p) = &mut self.pending {
                             p.3.push_str(d["partial_json"].as_str().unwrap_or_default());
@@ -212,7 +234,11 @@ impl StreamState {
                 let index = usize::try_from(v["index"].as_u64().unwrap_or(0)).unwrap_or(0);
                 match self.pending.take() {
                     Some((i, id, name, raw)) if i == index => {
-                        let input = if raw.trim().is_empty() { json!({}) } else { serde_json::from_str(&raw).unwrap_or(json!({})) };
+                        let input = if raw.trim().is_empty() {
+                            json!({})
+                        } else {
+                            serde_json::from_str(&raw).unwrap_or(json!({}))
+                        };
                         Some(Delta::ToolUse(ToolUse { id, name, input }))
                     }
                     other => {
@@ -221,8 +247,15 @@ impl StreamState {
                     }
                 }
             }
-            "message_delta" => v["delta"]["stop_reason"].as_str().map(|s| Delta::Done(s.to_owned())),
-            "error" => Some(Delta::Error(v["error"]["message"].as_str().unwrap_or("unknown error").to_owned())),
+            "message_delta" => v["delta"]["stop_reason"]
+                .as_str()
+                .map(|s| Delta::Done(s.to_owned())),
+            "error" => Some(Delta::Error(
+                v["error"]["message"]
+                    .as_str()
+                    .unwrap_or("unknown error")
+                    .to_owned(),
+            )),
             _ => None,
         }
     }
@@ -239,7 +272,17 @@ pub struct Client {
 impl Client {
     /// Build a client for the given key.
     pub fn new(api_key: impl Into<String>) -> Self {
-        Self { http: reqwest::Client::new(), api_key: api_key.into(), url: API_URL.into() }
+        Self {
+            http: reqwest::Client::builder()
+                .connect_timeout(CONNECT_TIMEOUT)
+                .build()
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, "could not configure agent HTTP client");
+                    reqwest::Client::new()
+                }),
+            api_key: api_key.into(),
+            url: API_URL.into(),
+        }
     }
 
     /// Point at a different endpoint (tests, proxies).
@@ -250,7 +293,10 @@ impl Client {
     }
 
     /// Send a request and stream deltas until the reply ends.
-    pub async fn stream(&self, request: &Request) -> Result<impl Stream<Item = Delta> + use<>, AgentError> {
+    pub async fn stream(
+        &self,
+        request: &Request,
+    ) -> Result<impl Stream<Item = Delta> + use<>, AgentError> {
         if self.api_key.trim().is_empty() {
             return Err(AgentError::MissingKey);
         }
@@ -267,8 +313,13 @@ impl Client {
             .map_err(|e| AgentError::Http(e.to_string()))?;
         let status = response.status();
         if !status.is_success() {
-            let message = response.text().await.unwrap_or_default();
-            return Err(AgentError::Api { status: status.as_u16(), message });
+            let message = tokio::time::timeout(ERROR_BODY_TIMEOUT, read_error_body(response))
+                .await
+                .unwrap_or_else(|_| "error response timed out".to_owned());
+            return Err(AgentError::Api {
+                status: status.as_u16(),
+                message,
+            });
         }
         let events = response.bytes_stream().eventsource();
         let state = std::sync::Arc::new(std::sync::Mutex::new(StreamState::default()));
@@ -276,12 +327,42 @@ impl Client {
             let state = std::sync::Arc::clone(&state);
             async move {
                 match item {
-                    Ok(ev) => state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).parse_event(&ev.event, &ev.data),
+                    Ok(ev) => state
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .parse_event(&ev.event, &ev.data),
                     Err(e) => Some(Delta::Error(e.to_string())),
                 }
             }
         }))
     }
+}
+
+async fn read_error_body(response: reqwest::Response) -> String {
+    let mut chunks = response.bytes_stream();
+    let mut body = Vec::with_capacity(MAX_ERROR_BODY.min(8 * 1024));
+    let mut truncated = false;
+    while let Some(chunk) = chunks.next().await {
+        let Ok(chunk) = chunk else {
+            break;
+        };
+        let remaining = MAX_ERROR_BODY.saturating_sub(body.len());
+        if chunk.len() > remaining {
+            body.extend_from_slice(&chunk[..remaining]);
+            truncated = true;
+            break;
+        }
+        body.extend_from_slice(&chunk);
+        if body.len() == MAX_ERROR_BODY {
+            truncated = chunks.next().await.is_some();
+            break;
+        }
+    }
+    let mut message = String::from_utf8_lossy(&body).into_owned();
+    if truncated {
+        message.push_str("\n[response truncated]");
+    }
+    message
 }
 
 #[cfg(test)]
@@ -300,28 +381,83 @@ mod tests {
         assert!(b.get("tools").is_none());
         assert_eq!(b["system"][0]["cache_control"]["type"], "ephemeral");
         assert_eq!(b["messages"][0]["role"], "user");
-        r.tools.push(ToolSpec { name: "t".into(), description: "d".into(), input_schema: json!({"type": "object"}) });
+        r.tools.push(ToolSpec {
+            name: "t".into(),
+            description: "d".into(),
+            input_schema: json!({"type": "object"}),
+        });
         assert_eq!(r.body()["tools"][0]["name"], "t");
     }
 
     #[test]
     fn parses_text_and_tool_use_stream() {
         let mut st = StreamState::default();
-        assert_eq!(st.parse_event("content_block_delta", r#"{"delta":{"type":"text_delta","text":"Hel"}}"#), Some(Delta::Text("Hel".into())));
-        assert_eq!(st.parse_event("content_block_delta", r#"{"delta":{"type":"thinking_delta","thinking":"..."}}"#), None);
+        assert_eq!(
+            st.parse_event(
+                "content_block_delta",
+                r#"{"delta":{"type":"text_delta","text":"Hel"}}"#
+            ),
+            Some(Delta::Text("Hel".into()))
+        );
+        assert_eq!(
+            st.parse_event(
+                "content_block_delta",
+                r#"{"delta":{"type":"thinking_delta","thinking":"..."}}"#
+            ),
+            None
+        );
         assert_eq!(st.parse_event("content_block_start", r#"{"index":1,"content_block":{"type":"tool_use","id":"tu_1","name":"page_click","input":{}}}"#), None);
-        assert_eq!(st.parse_event("content_block_delta", r#"{"index":1,"delta":{"type":"input_json_delta","partial_json":"{\"ref\":"}}"#), None);
-        assert_eq!(st.parse_event("content_block_delta", r#"{"index":1,"delta":{"type":"input_json_delta","partial_json":"\"e2\"}"}}"#), None);
+        assert_eq!(
+            st.parse_event(
+                "content_block_delta",
+                r#"{"index":1,"delta":{"type":"input_json_delta","partial_json":"{\"ref\":"}}"#
+            ),
+            None
+        );
+        assert_eq!(
+            st.parse_event(
+                "content_block_delta",
+                r#"{"index":1,"delta":{"type":"input_json_delta","partial_json":"\"e2\"}"}}"#
+            ),
+            None
+        );
         let done = st.parse_event("content_block_stop", r#"{"index":1}"#);
-        assert_eq!(done, Some(Delta::ToolUse(ToolUse { id: "tu_1".into(), name: "page_click".into(), input: json!({"ref": "e2"}) })));
-        assert_eq!(st.parse_event("message_delta", r#"{"delta":{"stop_reason":"tool_use"}}"#), Some(Delta::Done("tool_use".into())));
-        assert_eq!(st.parse_event("error", r#"{"error":{"type":"overloaded_error","message":"busy"}}"#), Some(Delta::Error("busy".into())));
+        assert_eq!(
+            done,
+            Some(Delta::ToolUse(ToolUse {
+                id: "tu_1".into(),
+                name: "page_click".into(),
+                input: json!({"ref": "e2"})
+            }))
+        );
+        assert_eq!(
+            st.parse_event("message_delta", r#"{"delta":{"stop_reason":"tool_use"}}"#),
+            Some(Delta::Done("tool_use".into()))
+        );
+        assert_eq!(
+            st.parse_event(
+                "error",
+                r#"{"error":{"type":"overloaded_error","message":"busy"}}"#
+            ),
+            Some(Delta::Error("busy".into()))
+        );
         assert_eq!(st.parse_event("ping", "{}"), None);
     }
 
     #[test]
     fn tool_result_turn_shape() {
-        let t = Turn::tool_results(vec![ToolResult { tool_use_id: "tu_1".into(), content: json!("ok"), is_error: false }, ToolResult { tool_use_id: "tu_2".into(), content: json!("boom"), is_error: true }]);
+        let t = Turn::tool_results(vec![
+            ToolResult {
+                tool_use_id: "tu_1".into(),
+                content: json!("ok"),
+                is_error: false,
+            },
+            ToolResult {
+                tool_use_id: "tu_2".into(),
+                content: json!("boom"),
+                is_error: true,
+            },
+        ]);
         assert_eq!(t.role, Role::User);
         assert_eq!(t.content[0]["type"], "tool_result");
         assert_eq!(t.content[1]["is_error"], true);
@@ -331,7 +467,11 @@ mod tests {
     #[tokio::test]
     async fn empty_key_is_rejected_before_any_request() {
         let client = Client::new("  ");
-        let err = client.stream(&Request::new("s", vec![])).await.err().unwrap();
+        let err = client
+            .stream(&Request::new("s", vec![]))
+            .await
+            .err()
+            .unwrap();
         assert!(matches!(err, AgentError::MissingKey));
     }
 }

@@ -1,4 +1,5 @@
 import type { LucideIcon, LucideProps } from "lucide-react";
+import { Tooltip } from "./Tooltip";
 
 /** One place to fix icon size and stroke so every glyph in the chrome matches. */
 export function Icon({ icon: Glyph, size = 15, ...rest }: { icon: LucideIcon; size?: number } & LucideProps) {
@@ -13,6 +14,8 @@ export function IconButton({
   active = false,
   disabled = false,
   size = 15,
+  shortcut,
+  tooltipAlign,
 }: {
   icon: LucideIcon;
   label: string;
@@ -20,18 +23,21 @@ export function IconButton({
   active?: boolean;
   disabled?: boolean;
   size?: number;
+  shortcut?: string;
+  tooltipAlign?: "start" | "center" | "end";
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      aria-pressed={active}
-      disabled={disabled}
-      onClick={onClick}
-      className="grid size-7 place-items-center rounded-full text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink"
-    >
-      <Icon icon={icon} size={size} />
-    </button>
+    <Tooltip label={label} shortcut={shortcut} align={tooltipAlign}>
+      <button
+        type="button"
+        aria-label={label}
+        aria-pressed={active}
+        disabled={disabled}
+        onClick={onClick}
+        className="grid size-7 place-items-center rounded-full text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink"
+      >
+        <Icon icon={icon} size={size} />
+      </button>
+    </Tooltip>
   );
 }

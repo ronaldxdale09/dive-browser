@@ -141,7 +141,7 @@ pub struct Workspace {
     pub name: String,
     /// Accent color as a CSS hex string, e.g. `#0F6E75`.
     pub color: String,
-    /// Icon identifier (an emoji or an icon name the UI resolves).
+    /// Icon identifier the UI resolves to a glyph, e.g. `layers`.
     pub icon: String,
     /// Container whose profile this workspace browses in.
     pub container_id: ContainerId,
@@ -152,13 +152,18 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    /// The glyph a workspace wears until someone picks another one.
+    pub fn default_icon() -> &'static str {
+        "layers"
+    }
+
     /// Create a workspace in `container` appended at `position`.
     pub fn new(name: impl Into<String>, container: ContainerId, position: i32) -> Self {
         Self {
             id: WorkspaceId::new(),
             name: name.into(),
             color: "#0F6E75".into(),
-            icon: "circle".into(),
+            icon: Self::default_icon().into(),
             container_id: container,
             position,
             created_at: Timestamp::now(),

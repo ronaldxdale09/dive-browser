@@ -15,6 +15,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 time = { workspace = true }
 rusqlite = { workspace = true }
+url = { workspace = true }
 specta = { workspace = true }
 
 [lints]

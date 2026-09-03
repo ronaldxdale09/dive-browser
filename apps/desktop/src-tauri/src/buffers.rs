@@ -5,12 +5,15 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
 use dive_core::TabId;
+use serde::{Deserialize, Serialize};
+use specta::Type;
 
 use crate::console::ConsoleEntry;
 use crate::network::NetworkEvent;
 
 const CONSOLE_CAP: usize = 500;
 const NETWORK_CAP: usize = 1000;
+const RECORDED_STEP_CAP: usize = 5_000;
 
 /// What a `ref` from `page_state` points at.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -99,8 +102,17 @@ struct TabBuffers {
     recording: Option<Vec<crate::recorder::RecordedStep>>,
     /// Nonce the trusted recorder script embeds in its payloads.
     recording_nonce: Option<String>,
+    /// CDP identifier for the recorder bootstrap installed on future documents.
+    recording_script_id: Option<String>,
     /// WebSocket frames / server-sent events per request, newest last.
     frames: HashMap<String, VecDeque<FrameSummary>>,
+    /// What automation has done to this tab, oldest first.
+    timeline: VecDeque<ActionEvent>,
+    /// Monotonic counter behind the action ids.
+    next_action: u64,
+    /// Media emulation currently applied to the tab. Shared by the UI and
+    /// automation so changing one preference does not clear the others.
+    media: crate::emulate::MediaOverrides,
 }
 
 impl RequestSummary {
@@ -132,8 +144,10 @@ impl TabBuffers {
         if let Some(existing) = self.requests.iter_mut().find(|r| r.id == row.id) {
             *existing = row;
         } else {
-            if self.requests.len() == NETWORK_CAP {
-                self.requests.pop_front();
+            if self.requests.len() == NETWORK_CAP
+                && let Some(evicted) = self.requests.pop_front()
+            {
+                self.frames.remove(&evicted.id);
             }
             self.requests.push_back(row);
         }
@@ -170,6 +184,12 @@ impl TabBuffers {
                 timestamp,
                 ..
             } => {
+                // Frames are useful only while their request row is retained.
+                // Ignoring an unknown id also prevents a malformed event stream
+                // from growing the side map without bound.
+                if !self.requests.iter().any(|r| r.id == request_id) {
+                    return;
+                }
                 let frames = self.frames.entry(request_id.to_owned()).or_default();
                 if frames.len() == FRAME_CAP {
                     frames.pop_front();
@@ -226,6 +246,31 @@ pub struct FrameSummary {
 
 /// Frames kept per socket.
 const FRAME_CAP: usize = 200;
+/// Actions remembered per tab.
+const TIMELINE_CAP: usize = 100;
+
+/// One automation action against a tab.
+///
+/// Handed back with every `page_inspect` so an agent that has lost track of
+/// its own history — a new turn, a compacted context — can see what it
+/// already tried instead of repeating it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct ActionEvent {
+    /// Unique within the tab.
+    pub id: String,
+    /// Tool name, for example `page_click`.
+    pub action: String,
+    /// What it was aimed at, when that is meaningful.
+    pub target: Option<String>,
+    /// `running`, `succeeded` or `failed`.
+    pub status: String,
+    /// RFC 3339 start time.
+    pub started_at: String,
+    /// RFC 3339 completion time, absent while running.
+    pub completed_at: Option<String>,
+    /// Failure message, when it failed.
+    pub error: Option<String>,
+}
 
 /// Thread-safe buffers for every tab.
 #[derive(Default)]
@@ -397,6 +442,11 @@ impl Buffers {
         self.with(|m| m.entry(tab).or_default().recording_nonce = nonce);
     }
 
+    /// Remember the registered recorder bootstrap so stop can remove it.
+    pub fn set_recording_script_id(&self, tab: TabId, id: Option<String>) {
+        self.with(|m| m.entry(tab).or_default().recording_script_id = id);
+    }
+
     /// Whether a recording is active.
     pub fn is_recording(&self, tab: TabId) -> bool {
         self.with(|m| m.get(&tab).is_some_and(|b| b.recording.is_some()))
@@ -405,19 +455,99 @@ impl Buffers {
     /// Append a recorded step if recording.
     pub fn push_recorded(&self, tab: TabId, step: crate::recorder::RecordedStep) {
         self.with(|m| {
-            if let Some(list) = m.entry(tab).or_default().recording.as_mut() {
+            if let Some(list) = m.entry(tab).or_default().recording.as_mut()
+                && list.len() < RECORDED_STEP_CAP
+            {
                 list.push(step);
             }
         });
     }
 
-    /// Stop recording and return the steps.
-    pub fn take_recording(&self, tab: TabId) -> Vec<crate::recorder::RecordedStep> {
+    /// Stop recording and return the steps plus the registered script id.
+    pub fn finish_recording(
+        &self,
+        tab: TabId,
+    ) -> (Vec<crate::recorder::RecordedStep>, Option<String>) {
         self.with(|m| {
-            m.get_mut(&tab)
-                .and_then(|b| b.recording.take())
+            let Some(buffer) = m.get_mut(&tab) else {
+                return (Vec::new(), None);
+            };
+            buffer.recording_nonce = None;
+            (
+                buffer.recording.take().unwrap_or_default(),
+                buffer.recording_script_id.take(),
+            )
+        })
+    }
+
+    /// Note that an action has started; returns its id.
+    ///
+    /// An action left `running` is a call that never came back — usually a
+    /// crashed page — and stays visible as such rather than disappearing.
+    pub fn begin_action(&self, tab: TabId, action: &str, target: Option<String>) -> String {
+        self.with(|m| {
+            let buf = m.entry(tab).or_default();
+            buf.next_action += 1;
+            let id = format!("a{}", buf.next_action);
+            if buf.timeline.len() == TIMELINE_CAP {
+                buf.timeline.pop_front();
+            }
+            buf.timeline.push_back(ActionEvent {
+                id: id.clone(),
+                action: action.to_owned(),
+                target,
+                status: "running".into(),
+                started_at: dive_core::Timestamp::now().to_rfc3339(),
+                completed_at: None,
+                error: None,
+            });
+            id
+        })
+    }
+
+    /// Close out an action. `error` of `None` means it succeeded.
+    pub fn end_action(&self, tab: TabId, id: &str, error: Option<String>) {
+        self.with(|m| {
+            let Some(buf) = m.get_mut(&tab) else { return };
+            let Some(event) = buf.timeline.iter_mut().find(|e| e.id == id) else {
+                return;
+            };
+            event.status = if error.is_some() {
+                "failed"
+            } else {
+                "succeeded"
+            }
+            .into();
+            event.completed_at = Some(dive_core::Timestamp::now().to_rfc3339());
+            event.error = error.map(|e| e.chars().take(300).collect());
+        });
+    }
+
+    /// The most recent actions against a tab, oldest first.
+    pub fn timeline(&self, tab: TabId, limit: usize) -> Vec<ActionEvent> {
+        self.with(|m| {
+            m.get(&tab)
+                .map(|b| {
+                    b.timeline
+                        .iter()
+                        .rev()
+                        .take(limit)
+                        .rev()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
                 .unwrap_or_default()
         })
+    }
+
+    /// Media overrides last applied to a tab.
+    pub fn media(&self, tab: TabId) -> crate::emulate::MediaOverrides {
+        self.with(|m| m.get(&tab).map(|b| b.media.clone()).unwrap_or_default())
+    }
+
+    /// Remember the full set of media overrides after CDP accepted them.
+    pub fn set_media(&self, tab: TabId, media: crate::emulate::MediaOverrides) {
+        self.with(|m| m.entry(tab).or_default().media = media);
     }
 
     /// Forget a closed tab.
@@ -509,5 +639,65 @@ mod tests {
             Some("x")
         );
         assert_eq!(rows[0].finished_at, Some(1.2));
+    }
+
+    #[test]
+    fn evicting_requests_also_evicts_their_frames() {
+        let b = Buffers::default();
+        let tab = TabId::new();
+        for i in 0..=NETWORK_CAP {
+            b.push_network(&NetworkEvent::Socket {
+                tab_id: tab,
+                request_id: i.to_string(),
+                url: "wss://a.dev/ws".into(),
+                timestamp: 0.0,
+            });
+            b.push_network(&NetworkEvent::Frame {
+                tab_id: tab,
+                request_id: i.to_string(),
+                direction: "received".into(),
+                payload: "x".into(),
+                timestamp: 0.0,
+            });
+        }
+        assert!(b.frames(tab, "0").is_empty());
+        assert_eq!(b.frames(tab, &NETWORK_CAP.to_string()).len(), 1);
+    }
+
+    #[test]
+    fn recording_steps_are_bounded() {
+        let b = Buffers::default();
+        let tab = TabId::new();
+        b.set_recording(tab, Some(Vec::new()));
+        for i in 0..(RECORDED_STEP_CAP + 10) {
+            b.push_recorded(
+                tab,
+                crate::recorder::RecordedStep {
+                    kind: "click".into(),
+                    role: "button".into(),
+                    name: i.to_string(),
+                    value: String::new(),
+                    at: 0.0,
+                    masked: false,
+                },
+            );
+        }
+        assert_eq!(b.finish_recording(tab).0.len(), RECORDED_STEP_CAP);
+    }
+
+    #[test]
+    fn media_overrides_are_isolated_and_removed_with_the_tab() {
+        let b = Buffers::default();
+        let (tab, other) = (TabId::new(), TabId::new());
+        let media = crate::emulate::MediaOverrides {
+            color_scheme: Some("dark".into()),
+            reduced_motion: Some("reduce".into()),
+            media_type: None,
+        };
+        b.set_media(tab, media.clone());
+        assert_eq!(b.media(tab), media);
+        assert_eq!(b.media(other), crate::emulate::MediaOverrides::default());
+        b.drop_tab(tab);
+        assert_eq!(b.media(tab), crate::emulate::MediaOverrides::default());
     }
 }

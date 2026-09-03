@@ -104,6 +104,9 @@ pub(crate) fn agent_approve(state: State<'_, AppState>, id: String, allow: bool)
 /// Ask the chrome whether an action may run; page content can steer the
 /// model, so the person decides before anything touches the page.
 async fn approved(state: &AppState, on_delta: &Channel<ChatDelta>, step: &ToolStep) -> bool {
+    if state.prefs.get(state).agent_auto_approve {
+        return true;
+    }
     let (tx, rx) = tokio::sync::oneshot::channel();
     lock(&state.approvals).insert(step.id.clone(), tx);
     if on_delta
@@ -178,6 +181,7 @@ pub(crate) async fn agent_send(
             .collect(),
     );
     request.tools = crate::agent_tools::specs();
+    request.model = state.prefs.get(&state).agent_model;
     let client = Client::new(key);
     let browser = crate::mcp::AppBrowser::new(app);
 

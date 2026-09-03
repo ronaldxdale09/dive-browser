@@ -38,8 +38,12 @@ interface BrowserState {
   reorderTabs: (ordered: string[]) => Promise<void>;
   setPinned: (id: string, pinned: boolean) => Promise<void>;
   activateWorkspace: (id: string) => Promise<void>;
-  createWorkspace: (draft: { name: string; color: string }, separateContainer: boolean) => Promise<void>;
-  updateWorkspace: (id: string, draft: { name: string; color: string }) => Promise<void>;
+  /** Live tab count per workspace id; the snapshot only carries the active one's tabs. */
+  counts: Record<string, number>;
+  refreshCounts: () => Promise<void>;
+  reorderWorkspaces: (ordered: string[]) => Promise<void>;
+  createWorkspace: (draft: { name: string; color: string; icon: string }, separateContainer: boolean) => Promise<void>;
+  updateWorkspace: (id: string, draft: { name: string; color: string; icon: string }) => Promise<void>;
   deleteWorkspace: (id: string) => Promise<void>;
   editing: { id: string | null } | null;
   setEditing: (v: { id: string | null } | null) => void;
@@ -93,6 +97,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   tabs: [],
   activeTab: null,
   open: { sidecar: false, dock: false, palette: false, find: false, settings: false },
+  counts: {},
   error: null,
   notice: null,
   annotating: null,
@@ -113,6 +118,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       });
       await Promise.all([listenConsole(), listenNetwork()]);
       set({ ...fromSnapshot(await ipc.snapshot()), ready: true, error: null });
+      void get().refreshCounts();
     } catch (e) {
       set({ error: String(e), ready: true });
     }
@@ -207,10 +213,25 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   activateWorkspace: async (id) => {
     await run(set, () => ipc.workspaceActivate(id));
     set(fromSnapshot(await ipc.snapshot()));
+    void get().refreshCounts();
+  },
+  refreshCounts: async () => {
+    try {
+      const counts = await ipc.workspaceTabCounts();
+      set({ counts: Object.fromEntries(counts.map((c) => [c.workspace_id, c.tabs])) });
+    } catch {
+      // A count is decoration; a failed read must not surface as an error.
+    }
+  },
+  reorderWorkspaces: async (ordered) => {
+    // Optimistic, like tab reordering: the engine confirms with upsert events.
+    set((s) => ({ workspaces: ordered.map((id) => s.workspaces.find((w) => w.id === id)).filter((w) => w !== undefined) }));
+    await run(set, () => ipc.workspaceReorder(ordered));
   },
   createWorkspace: async (draft, separateContainer) => {
     await run(set, () => ipc.workspaceCreate(draft, separateContainer));
     set({ ...fromSnapshot(await ipc.snapshot()), editing: null });
+    void get().refreshCounts();
   },
   updateWorkspace: async (id, draft) => {
     await run(set, () => ipc.workspaceUpdate(id, draft));
@@ -219,11 +240,28 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   deleteWorkspace: async (id) => {
     await run(set, () => ipc.workspaceDelete(id));
     set({ ...fromSnapshot(await ipc.snapshot()), editing: null });
+    void get().refreshCounts();
   },
 
   toggle: (panel, value) => set((s) => ({ open: { ...s.open, [panel]: value ?? !s.open[panel] } })),
-  applyEvent: (event) => set((s) => reduceEvent(s, event)),
+  applyEvent: (event) => {
+    set((s) => reduceEvent(s, event));
+    // Tabs of other workspaces never reach this store, so their badges come
+    // from the host. Coalesced: a page load can emit several tab updates.
+    if (event.type === "tab_upserted" || event.type === "tab_closed") scheduleCounts(get);
+  },
 }));
+
+let countsTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Ask for tab counts once the current burst of tab events has settled. */
+function scheduleCounts(get: () => BrowserState) {
+  if (countsTimer) clearTimeout(countsTimer);
+  countsTimer = setTimeout(() => {
+    countsTimer = null;
+    void get().refreshCounts();
+  }, 300);
+}
 
 async function run(set: (p: Partial<BrowserState>) => void, f: () => Promise<unknown>) {
   try {

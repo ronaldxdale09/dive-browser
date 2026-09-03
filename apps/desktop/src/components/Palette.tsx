@@ -7,9 +7,19 @@ import type { Bookmark, Command as CommandDef, DevServer, HistoryEntry } from ".
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { Favicon } from "./Favicon";
+import { useCoversContent } from "../lib/overlay";
+
+/**
+ * How many history rows the palette offers. It is a launcher, not a history
+ * browser: past five, the groups underneath stop being reachable without
+ * scrolling, and the backend collapses near-duplicates so five rows are five
+ * distinct sites.
+ */
+const HISTORY_LIMIT = 5;
 
 /** Omnibox-style palette: type a URL or search, or pick a tab or command. */
 export function Palette() {
+  useCoversContent();
   const toggle = useBrowser((s) => s.toggle);
   const openTab = useBrowser((s) => s.openTab);
   const tabs = useBrowser((s) => s.tabs);
@@ -23,7 +33,7 @@ export function Palette() {
     let alive = true;
     const t = setTimeout(() => {
       ipc
-        .historySearch(query, 8)
+        .historySearch(query, HISTORY_LIMIT)
         .then((h) => alive && setHistory(h))
         .catch(() => alive && setHistory([]));
       ipc
@@ -52,6 +62,9 @@ export function Palette() {
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px]" onMouseDown={close}>
       <Command
         label="Command palette"
+        role="dialog"
+        aria-label="New tab"
+        aria-modal="true"
         shouldFilter={!!query}
         className="mx-auto mt-24 w-[600px] overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
@@ -79,7 +92,7 @@ export function Palette() {
             <Command.Group heading="Bookmarks">
               {bookmarks.map((b) => (
                 <Command.Item key={b.url} value={`bookmark ${b.title} ${b.url}`} onSelect={() => void go(b.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
-                  <Icon icon={Star} size={14} className="shrink-0 text-highlight" />
+                  <Favicon src={b.favicon} size={14} fallback={Star} fallbackClassName="text-highlight" />
                   <span className="truncate">{b.title || b.url}</span>
                   <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(b.url)}</span>
                 </Command.Item>
@@ -90,7 +103,7 @@ export function Palette() {
             <Command.Group heading="History">
               {history.map((h) => (
                 <Command.Item key={h.url} value={`history ${h.title} ${h.url}`} onSelect={() => void go(h.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
-                  <Icon icon={History} size={14} className="shrink-0 text-ink-3" />
+                  <Favicon src={h.favicon} size={14} fallback={History} />
                   <span className="truncate">{h.title || h.url}</span>
                   <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(h.url)}</span>
                 </Command.Item>
@@ -121,7 +134,7 @@ export function Palette() {
                   }}
                   className="flex items-center gap-2 rounded-lg px-3 py-2"
                 >
-                  <Favicon tab={t} size={14} />
+                  <Favicon src={t.favicon} size={14} />
                   <span className="truncate">{t.title || t.url}</span>
                   <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(t.url)}</span>
                 </Command.Item>

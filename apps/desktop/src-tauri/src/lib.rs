@@ -4,11 +4,13 @@
 mod a11y;
 mod agent;
 mod agent_tools;
+mod automation;
 mod ax;
 mod buffers;
 mod cdp_feed;
 mod commands;
 mod console;
+mod crash;
 mod devservers;
 mod emulate;
 mod engine;
@@ -17,10 +19,15 @@ mod favicon;
 mod find;
 mod har;
 mod housekeeping;
+mod inspect;
+mod locator;
 mod mcp;
+mod menu;
 mod meta;
 mod network;
 mod openapi;
+mod pagescript;
+mod prefs;
 mod recorder;
 mod replay;
 mod report;
@@ -83,10 +90,12 @@ pub fn run() {
             specta.mount_events(app);
             state::init(app)?;
             engine::create_main_window(app)?;
+            menu::install(app)?;
             restore_session(app);
             open_startup_urls(app);
             mcp::start(app.handle().clone());
             housekeeping::start(app.handle().clone());
+            devservers::start(app.handle().clone());
             smoke_test(app.handle().clone());
             Ok(())
         })
@@ -183,14 +192,26 @@ async fn smoke_gif(
     state.screencast.stop(id, &session).await
 }
 
-/// Re-show the tab that was active when the app last ran, if it still exists
-/// in the remembered workspace.
+/// Open what the startup preference asks for: the tab that was active when
+/// the app last ran, the home page, or nothing.
 fn restore_session(app: &tauri::App<Runtime>) {
     use tauri::Manager;
     let state = app.state::<state::AppState>();
     let Some(workspace) = *state::lock(&state.active_workspace) else {
         return;
     };
+    let prefs = state.prefs.get(&state);
+    match prefs.startup.as_str() {
+        "none" => return,
+        "home" if !prefs.homepage.is_empty() => {
+            match commands::open_tab(app.handle(), &state, workspace, &prefs.homepage) {
+                Ok(tab) => tracing::info!(%tab.id, url = tab.url, "opened home page"),
+                Err(e) => tracing::warn!("failed to open home page: {e}"),
+            }
+            return;
+        }
+        _ => {}
+    }
     let candidate = {
         let store = state::lock(&state.store);
         let remembered = store

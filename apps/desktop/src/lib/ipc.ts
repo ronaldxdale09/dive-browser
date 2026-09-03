@@ -4,13 +4,13 @@
  */
 import { Channel } from "@tauri-apps/api/core";
 import { commands, events } from "../generated/bindings";
-import type { NetworkProfile, Rule } from "../generated/bindings";
+import type { ClearRequest, NetworkProfile, Prefs, Rule } from "../generated/bindings";
 
 /** Shape tauri-specta returns for fallible commands. */
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 export { events };
-export type { Rule, RuleAction, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark } from "../generated/bindings";
+export type { Prefs, ClearRequest, Rule, RuleAction, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
 export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
@@ -18,7 +18,7 @@ export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
   throw new Error(r.error.message);
 }
 
-type WorkspaceDraftInput = { name: string; color: string };
+type WorkspaceDraftInput = { name: string; color: string; icon: string };
 export type ReplayRequestInput = { method: string; url: string; headers: Record<string, string>; body: string | null; with_cookies: boolean; captured_host: string };
 type ChatTurnInput = { role: string; content: string };
 export type ChatDeltaOut =
@@ -38,6 +38,8 @@ export const ipc = {
     unwrap(await commands.workspaceCreate(draft, separateContainer)),
   workspaceUpdate: async (id: string, draft: WorkspaceDraftInput) => unwrap(await commands.workspaceUpdate(id, draft)),
   workspaceDelete: async (id: string) => unwrap(await commands.workspaceDelete(id)),
+  workspaceReorder: async (ordered: string[]) => unwrap(await commands.workspaceReorder(ordered)),
+  workspaceTabCounts: async () => unwrap(await commands.workspaceTabCounts()),
   tabOpen: async (workspaceId: string, url: string) => unwrap(await commands.tabOpen(workspaceId, url)),
   tabClose: async (id: string) => unwrap(await commands.tabClose(id)),
   tabActivate: async (id: string) => unwrap(await commands.tabActivate(id)),
@@ -65,8 +67,12 @@ export const ipc = {
   tabThrottle: async (id: string, profile: NetworkProfile | null) => unwrap(await commands.tabThrottle(id, profile)),
   setContentBounds: async (b: { x: number; y: number; width: number; height: number }) =>
     unwrap(await commands.layoutSetContentBounds(b)),
+  setContentCovered: async (covered: boolean) => unwrap(await commands.layoutSetContentCovered(covered)),
   commandsList: () => commands.commandsList(),
   appInfo: () => commands.appInfo(),
+  prefsGet: () => commands.prefsGet(),
+  prefsSet: async (prefs: Prefs) => unwrap(await commands.prefsSet(prefs)),
+  browsingDataClear: async (what: ClearRequest) => unwrap(await commands.browsingDataClear(what)),
   tabRecordStart: async (id: string) => unwrap(await commands.tabRecordStart(id)),
   tabRecordStop: (id: string) => commands.tabRecordStop(id),
   tabOpenapi: async (id: string) => unwrap(await commands.tabOpenapi(id)),

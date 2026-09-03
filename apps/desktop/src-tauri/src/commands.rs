@@ -46,6 +46,17 @@ pub struct AppInfo {
     pub mcp_token_path: String,
 }
 
+/// Last element picked in a tab plus the live style experiment on it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct InspectorSnapshot {
+    /// The picked element, if the user has picked one in this document.
+    pub pick: Option<crate::inspect::Pick>,
+    /// Inline style changes made through the inspector.
+    pub changes: Vec<crate::inspect::StyleChange>,
+    /// Prompt-ready summary for handing the finding to an agent.
+    pub description: Option<String>,
+}
+
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn app_info() -> AppInfo {
@@ -110,11 +121,94 @@ pub(crate) fn history_search(
     Ok(lock(&state.store).search_history(&query, usize::try_from(limit.min(200)).unwrap_or(50))?)
 }
 
-/// Dev servers listening on common localhost ports.
+/// Dev servers listening on localhost, discovered from the OS socket table.
 #[tauri::command]
 #[specta::specta]
-pub(crate) async fn dev_servers() -> Vec<crate::devservers::DevServer> {
-    crate::devservers::scan().await
+pub(crate) async fn dev_servers(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<crate::devservers::DevServer>> {
+    Ok(state.devservers.refresh().await.0)
+}
+
+/// Enable or disable low-frequency dev-server change events while a panel is open.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn dev_servers_watch(
+    state: State<'_, AppState>,
+    on: bool,
+) -> AppResult<Vec<crate::devservers::DevServer>> {
+    state.devservers.watch(on);
+    if on {
+        Ok(state.devservers.refresh().await.0)
+    } else {
+        Ok(state.devservers.current())
+    }
+}
+
+/// Start the in-page element picker for a tab.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_inspect_start(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: TabId,
+) -> AppResult<()> {
+    let session = cdp_for(&state, id)?;
+    crate::inspect::start(&app, id, &session).await
+}
+
+/// Cancel the in-page picker without discarding the last completed pick.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_inspect_cancel(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: TabId,
+) -> AppResult<()> {
+    let session = cdp_for(&state, id)?;
+    crate::inspect::cancel(&app, id, &session).await
+}
+
+/// Return the latest pick and style experiment for a tab.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_inspect_state(state: State<'_, AppState>, id: TabId) -> InspectorSnapshot {
+    let pick = state.inspector.pick(id);
+    let changes = state.inspector.changes(id);
+    let description = pick
+        .as_ref()
+        .map(|picked| crate::inspect::describe(picked, &changes));
+    InspectorSnapshot {
+        pick,
+        changes,
+        description,
+    }
+}
+
+/// Apply one temporary inline style to the picked element.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_inspect_style(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: TabId,
+    property: String,
+    value: String,
+) -> AppResult<Vec<crate::inspect::StyleChange>> {
+    let session = cdp_for(&state, id)?;
+    crate::inspect::set_style(&app, id, &session, &property, &value).await
+}
+
+/// Revert every temporary style made through the picker.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_inspect_revert(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: TabId,
+) -> AppResult<Vec<crate::inspect::StyleChange>> {
+    let session = cdp_for(&state, id)?;
+    crate::inspect::revert_styles(&app, id, &session).await
 }
 
 /// LAN URL and QR code for opening `url` on another device.
@@ -122,6 +216,46 @@ pub(crate) async fn dev_servers() -> Vec<crate::devservers::DevServer> {
 #[specta::specta]
 pub(crate) fn share_url(url: String) -> AppResult<crate::devservers::ShareInfo> {
     crate::devservers::share(&url)
+}
+
+/// Current user preferences.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn prefs_get(state: State<'_, AppState>) -> crate::prefs::Prefs {
+    state.prefs.get(&state)
+}
+
+/// Store preferences and put them into force on every open tab. Returns the
+/// stored form, which may differ where a value was out of range.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn prefs_set(
+    state: State<'_, AppState>,
+    prefs: crate::prefs::Prefs,
+) -> AppResult<crate::prefs::Prefs> {
+    let stored = state.prefs.set(&state, prefs)?;
+    let sessions = lock(&state.host)
+        .as_ref()
+        .map_or_else(Vec::new, crate::engine::TabHost::sessions);
+    for (_, session) in &sessions {
+        crate::prefs::apply(session, &stored).await;
+    }
+    match crate::prefs::prune_history(&state) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(n, "pruned history past the retention window"),
+        Err(e) => tracing::warn!("history prune failed: {e}"),
+    }
+    Ok(stored)
+}
+
+/// Delete browsing data; returns a one-line summary of what went.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn browsing_data_clear(
+    state: State<'_, AppState>,
+    what: crate::prefs::ClearRequest,
+) -> AppResult<String> {
+    crate::prefs::clear(&state, what).await
 }
 
 /// Build the specta command/event collection.
@@ -133,6 +267,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             workspace_create,
             workspace_update,
             workspace_delete,
+            workspace_reorder,
+            workspace_tab_counts,
             tab_open,
             tab_close,
             tab_activate,
@@ -165,13 +301,23 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_openapi,
             tab_har,
             tab_bug_report,
+            tab_inspect_start,
+            tab_inspect_cancel,
+            tab_inspect_state,
+            tab_inspect_style,
+            tab_inspect_revert,
             tab_record_start,
             tab_record_stop,
             layout_set_content_bounds,
+            layout_set_content_covered,
             commands_list,
             command_run,
             app_info,
+            prefs_get,
+            prefs_set,
+            browsing_data_clear,
             dev_servers,
+            dev_servers_watch,
             history_search,
             bookmark_toggle,
             bookmark_status,
@@ -183,7 +329,12 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::agent::agent_approve,
         ])
         .events(collect_events![
+            crate::automation::AgentPointer,
+            crate::crash::TabCrashed,
+            crate::devservers::DevServersChanged,
+            crate::inspect::InspectEvent,
             crate::recorder::RecorderEvent,
+            crate::menu::MenuCommand,
             StateChanged,
             crate::console::ConsoleEntry,
             crate::network::NetworkEvent,
@@ -310,6 +461,61 @@ pub(crate) fn workspace_activate(
     Ok(())
 }
 
+/// How many tabs a workspace holds, for the rail.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct WorkspaceTabs {
+    /// The workspace.
+    pub workspace_id: WorkspaceId,
+    /// Live tabs in it.
+    pub tabs: u32,
+}
+
+/// Live tab count of every workspace. The snapshot only carries the active
+/// workspace's tabs, so the rail asks for the rest separately.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn workspace_tab_counts(state: State<'_, AppState>) -> AppResult<Vec<WorkspaceTabs>> {
+    Ok(lock(&state.store)
+        .tab_counts()?
+        .into_iter()
+        .map(|(workspace_id, tabs)| WorkspaceTabs { workspace_id, tabs })
+        .collect())
+}
+
+/// Persist a new rail order. Ids not listed keep their relative order after
+/// the listed ones, so a reorder never has to name every workspace.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn workspace_reorder(
+    state: State<'_, AppState>,
+    ordered: Vec<WorkspaceId>,
+) -> AppResult<()> {
+    let updated = {
+        let store = lock(&state.store);
+        let mut workspaces = store.workspaces()?;
+        workspaces.sort_by_key(|w| {
+            ordered
+                .iter()
+                .position(|id| *id == w.id)
+                .unwrap_or(usize::MAX)
+        });
+        let mut updated = Vec::new();
+        for (i, workspace) in workspaces.iter_mut().enumerate() {
+            let position = i32::try_from(i).unwrap_or(i32::MAX);
+            if workspace.position != position {
+                workspace.position = position;
+                store.upsert_workspace(workspace)?;
+                updated.push(workspace.clone());
+            }
+        }
+        updated
+    };
+    for workspace in updated {
+        state.bus.publish(CoreEvent::WorkspaceUpserted(workspace));
+    }
+    Ok(())
+}
+
 /// Fields the chrome may set on a workspace.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct WorkspaceDraft {
@@ -317,6 +523,8 @@ pub struct WorkspaceDraft {
     pub name: String,
     /// CSS color.
     pub color: String,
+    /// Icon identifier the chrome resolves to a glyph.
+    pub icon: String,
 }
 
 #[tauri::command]
@@ -328,6 +536,10 @@ pub(crate) fn workspace_create(
     separate_container: bool,
 ) -> AppResult<Workspace> {
     let name = clean_name(&draft.name)?;
+    // Validate every user field before creating a separate container. A bad
+    // color or icon must not leave an orphan profile row behind.
+    let color = clean_color(&draft.color)?;
+    let icon = clean_icon(&draft.icon)?;
     let workspace = {
         let store = lock(&state.store);
         let container = if separate_container {
@@ -344,7 +556,8 @@ pub(crate) fn workspace_create(
         };
         let position = i32::try_from(store.workspaces()?.len()).unwrap_or(i32::MAX);
         let mut w = Workspace::new(name, container, position);
-        w.color = clean_color(&draft.color)?;
+        w.color = color;
+        w.icon = icon;
         store.upsert_workspace(&w)?;
         w
     };
@@ -367,6 +580,7 @@ pub(crate) fn workspace_update(
         let mut w = store.workspace(id)?;
         w.name = clean_name(&draft.name)?;
         w.color = clean_color(&draft.color)?;
+        w.icon = clean_icon(&draft.icon)?;
         store.upsert_workspace(&w)?;
         w
     };
@@ -437,6 +651,24 @@ fn clean_color(color: &str) -> AppResult<String> {
     }
 }
 
+/// Accept an icon identifier the chrome will be able to resolve.
+///
+/// The name seeds the workspace's generated mark in the chrome, so any name
+/// draws something and one written by an older build still works. The shape is
+/// all this side can check: lowercase, dashes, and short enough that it is a
+/// name rather than smuggled markup.
+fn clean_icon(icon: &str) -> AppResult<String> {
+    let name = icon.trim().to_ascii_lowercase();
+    if name.is_empty() {
+        return Ok(Workspace::default_icon().to_owned());
+    }
+    if name.len() <= 32 && name.chars().all(|c| c.is_ascii_lowercase() || c == '-') {
+        Ok(name)
+    } else {
+        Err(AppError::new("icon must be a lowercase icon name"))
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn tab_open(
@@ -456,7 +688,7 @@ pub fn open_tab(
     workspace_id: WorkspaceId,
     url: &str,
 ) -> AppResult<Tab> {
-    let url = normalize_url(url)?;
+    let url = normalize_url_with(url, state.prefs.get(state).search_template())?;
     let (tab, container) = {
         let store = lock(&state.store);
         let workspace = store.workspace(workspace_id)?;
@@ -467,13 +699,26 @@ pub fn open_tab(
         store.upsert_tab(&tab)?;
         (tab, container)
     };
-    {
+    let opened = {
         let mut host = lock(&state.host);
-        let host = host
-            .as_mut()
-            .ok_or_else(|| AppError::new("engine not ready"))?;
-        host.open(app, &tab, &container)?;
-        host.activate(tab.id)?;
+        match host.as_mut() {
+            Some(host) => match host.open(app, &tab, &container) {
+                Ok(()) => host.activate(tab.id).map_err(|error| {
+                    let _ = host.close(tab.id);
+                    AppError::from(error)
+                }),
+                Err(error) => Err(AppError::from(error)),
+            },
+            None => Err(AppError::new("engine not ready")),
+        }
+    };
+    if let Err(error) = opened {
+        // Persistence precedes view creation so engine callbacks can safely
+        // update the row. Compensate if the native view could not be created.
+        if let Err(rollback) = lock(&state.store).remove_tab(tab.id) {
+            tracing::warn!(id = %tab.id, "failed to roll back unopened tab: {rollback}");
+        }
+        return Err(error);
     }
     lock(&state.store).set_setting(crate::state::ACTIVE_TAB, &tab.id.to_string())?;
     state.bus.publish(CoreEvent::TabUpserted(tab.clone()));
@@ -503,6 +748,8 @@ pub(crate) fn tab_close(
         )
     };
     state.buffers.drop_tab(id);
+    state.inspector.drop_tab(id);
+    state.crashes.drop_tab(id);
     state.screencast.discard(id);
     state.bus.publish(CoreEvent::TabClosed(id));
     if was_active
@@ -560,7 +807,7 @@ pub fn activate_tab(app: &AppHandle<Runtime>, state: &AppState, id: TabId) -> Ap
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn tab_navigate(state: State<'_, AppState>, id: TabId, url: String) -> AppResult<()> {
-    let url = normalize_url(&url)?;
+    let url = normalize_url_with(&url, state.prefs.get(&state).search_template())?;
     let host = lock(&state.host);
     host.as_ref()
         .ok_or_else(|| AppError::new("engine not ready"))?
@@ -810,6 +1057,7 @@ pub(crate) async fn tab_media(
     let session = cdp_for(&state, id)?;
     let (method, params) = crate::emulate::media_call(&media);
     session.call(method, params).await.map_err(AppError::new)?;
+    state.buffers.set_media(id, media);
     Ok(())
 }
 
@@ -1039,7 +1287,11 @@ pub(crate) fn tab_record_stop(
     state: State<'_, AppState>,
     id: TabId,
 ) -> Vec<crate::recorder::RecordedStep> {
-    state.buffers.take_recording(id)
+    let (steps, script_id) = state.buffers.finish_recording(id);
+    if let Ok(session) = cdp_for(&state, id) {
+        tauri::async_runtime::spawn(crate::recorder::stop(session, script_id));
+    }
+    steps
 }
 
 /// Head metadata for the Meta panel.
@@ -1098,6 +1350,20 @@ pub(crate) fn layout_set_content_bounds(
 
 #[tauri::command]
 #[specta::specta]
+/// Hide the native content view while a DOM overlay (dialog, menu, popover)
+/// is on screen, since child webviews always paint above the main webview.
+pub(crate) fn layout_set_content_covered(
+    state: State<'_, AppState>,
+    covered: bool,
+) -> AppResult<()> {
+    if let Some(host) = lock(&state.host).as_mut() {
+        host.set_covered(covered)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) fn commands_list(state: State<'_, AppState>) -> Vec<Command> {
     state.commands.list()
 }
@@ -1121,7 +1387,14 @@ pub(crate) fn command_run(
 
 /// Turn what the user typed into a navigable URL: bare hosts get `https://`,
 /// anything with spaces or no dot becomes a search.
-pub fn normalize_url(input: &str) -> AppResult<url::Url> {
+#[cfg(test)]
+fn normalize_url(input: &str) -> AppResult<url::Url> {
+    normalize_url_with(input, crate::prefs::ENGINES[0].1)
+}
+
+/// Normalize user input, using `template` for anything that is not a URL.
+/// The template is a URL carrying a `{query}` placeholder.
+pub fn normalize_url_with(input: &str, template: &str) -> AppResult<url::Url> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err(AppError::new("empty url"));
@@ -1139,11 +1412,19 @@ pub fn normalize_url(input: &str) -> AppResult<url::Url> {
             || trimmed.starts_with("localhost")
             || trimmed.starts_with("127."));
     if looks_like_host {
-        return url::Url::parse(&format!("http://{trimmed}")).map_err(Into::into);
+        let host = trimmed.split_once(':').map_or(trimmed, |(host, _)| host);
+        let local = trimmed.starts_with("localhost")
+            || trimmed.starts_with("127.")
+            || trimmed.starts_with("[::1]")
+            || trimmed.starts_with("0.0.0.0")
+            || host
+                .rsplit_once('.')
+                .is_some_and(|(_, suffix)| suffix.eq_ignore_ascii_case("local"));
+        let scheme = if local { "http" } else { "https" };
+        return url::Url::parse(&format!("{scheme}://{trimmed}")).map_err(Into::into);
     }
-    let mut search = url::Url::parse("https://duckduckgo.com/")?;
-    search.query_pairs_mut().append_pair("q", trimmed);
-    Ok(search)
+    let query: String = url::form_urlencoded::byte_serialize(trimmed.as_bytes()).collect();
+    url::Url::parse(&template.replace("{query}", &query)).map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -1158,7 +1439,7 @@ mod tests {
         );
         assert_eq!(
             normalize_url("example.com").unwrap().as_str(),
-            "http://example.com/"
+            "https://example.com/"
         );
         assert_eq!(
             normalize_url("localhost:5173").unwrap().as_str(),
@@ -1180,6 +1461,10 @@ mod tests {
         assert!(clean_color("#12345").is_err());
         assert_eq!(clean_name("  Work ").unwrap(), "Work");
         assert!(clean_name("   ").is_err());
+        assert_eq!(clean_icon(" Book-Open ").unwrap(), "book-open");
+        assert_eq!(clean_icon("  ").unwrap(), Workspace::default_icon());
+        assert!(clean_icon("<img onerror=x>").is_err());
+        assert!(clean_icon(&"a".repeat(33)).is_err());
     }
 
     #[test]

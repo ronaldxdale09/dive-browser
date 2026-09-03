@@ -28,8 +28,27 @@
   --radius-pill: 999px;
 }
 
+/* Light palette. The theme preference resolves to `data-theme` on the root,
+   so the media query below only decides the very first paint, before the
+   chrome has read its preferences. */
+:root[data-theme="light"] {
+  --color-ground: #f3f3f1;
+  --color-surface: #ffffff;
+  --color-surface-2: #ececea;
+  --color-surface-3: #e2e2df;
+  --color-ink: #161616;
+  --color-ink-2: #5b5b5b;
+  --color-ink-3: #8c8c8c;
+  --color-line: #e1e1de;
+  --color-line-2: #cfcfcb;
+  --color-accent: #161616;
+  --color-accent-ink: #ffffff;
+  --color-highlight: #0f8f7e;
+  --color-highlight-soft: #d8f1ec;
+}
+
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme]) {
     --color-ground: #f3f3f1;
     --color-surface: #ffffff;
     --color-surface-2: #ececea;
@@ -64,24 +83,49 @@ button { cursor: default; }
 
 }
 
+/* Scrollbars belong to the browser chrome: quiet at rest, clear on hover, and
+   narrow enough not to compete with dense panels. The transparent border
+   leaves the thumb looking like a floating pill instead of a solid rail. */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--color-line-2) content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-ink-3);
+}
+
+@supports (-moz-appearance: none) {
+  * {
+    scrollbar-color: var(--color-line-2) transparent;
+    scrollbar-width: thin;
+  }
+}
+
+/* Scrolls, but shows nothing for it. For strips too narrow to give up 10px:
+   the workspace rail is 52px wide, and a scrollbar there would shove the marks
+   off centre every time the list outgrew the window. */
+.scroll-hidden {
+  scrollbar-width: none;
+}
+.scroll-hidden::-webkit-scrollbar {
+  display: none;
+}
+
 /* cmdk */
 [cmdk-item][data-selected="true"] { background: var(--color-surface-3); }
 [cmdk-group-heading] { padding: 6px 12px 4px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
 
-/* Welcome screen ground: a soft highlight glow over a faint dot grid, fading at the edges. */
+/* Welcome screen ground; the animated character field is rendered separately. */
 .welcome {
   background-color: var(--color-surface);
-  background-image:
-    radial-gradient(ellipse 60% 45% at 50% 0%, color-mix(in srgb, var(--color-highlight) 14%, transparent), transparent 70%),
-    radial-gradient(circle at center, var(--color-line-2) 0.8px, transparent 0.9px);
-  background-size: 100% 100%, 22px 22px;
-  background-position: 0 0, 11px 11px;
 }
-.welcome::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(ellipse 70% 70% at 50% 40%, transparent 50%, var(--color-surface) 100%);
-}
-.welcome > * { position: relative; }

@@ -1,4 +1,3 @@
-import axeSource from "axe-core/axe.min.js?raw";
 import { ExternalLink, Play } from "lucide-react";
 import { useState } from "react";
 import { ipc } from "../lib/ipc";
@@ -25,6 +24,7 @@ export function A11yPanel() {
     setBusy(true);
     setError(null);
     try {
+      const { default: axeSource } = await import("axe-core/axe.min.js?raw");
       setReport(await ipc.tabA11y(activeTab, axeSource));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

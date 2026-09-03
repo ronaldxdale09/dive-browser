@@ -31,6 +31,14 @@ pub struct AppState {
     pub screencast: crate::screencast::Registry,
     /// Mock and rewrite rules per workspace.
     pub rules: crate::rules::Registry,
+    /// User preferences, cached from the settings table.
+    pub prefs: crate::prefs::Registry,
+    /// Dev servers discovered on this machine.
+    pub devservers: crate::devservers::Registry,
+    /// Element picks and style experiments from the in-page inspector.
+    pub inspector: crate::inspect::Registry,
+    /// Renderer crash history, so recovery has a budget.
+    pub crashes: crate::crash::Registry,
 }
 
 /// Directory holding every container's Chromium profile.
@@ -80,6 +88,10 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
         approvals: Mutex::new(std::collections::HashMap::new()),
         screencast: crate::screencast::Registry::default(),
         rules: crate::rules::Registry::default(),
+        prefs: crate::prefs::Registry::default(),
+        devservers: crate::devservers::Registry::default(),
+        inspector: crate::inspect::Registry::default(),
+        crashes: crate::crash::Registry::default(),
     };
     crate::commands::register_builtin(&state.commands);
     app.manage(state);

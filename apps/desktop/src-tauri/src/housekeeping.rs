@@ -23,6 +23,11 @@ pub fn start(app: AppHandle<Runtime>) {
                 Ok(n) => tracing::info!(n, "archived idle tabs"),
                 Err(e) => tracing::warn!("archive sweep failed: {e}"),
             }
+            match crate::prefs::prune_history(&state) {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(n, "pruned history past the retention window"),
+                Err(e) => tracing::warn!("history prune failed: {e}"),
+            }
         }
     });
 }
@@ -66,6 +71,8 @@ pub fn sweep(state: &AppState) -> dive_core::Result<usize> {
             tracing::warn!(id = %tab.id, "failed to close discarded view: {e}");
         }
         state.buffers.drop_tab(tab.id);
+        state.inspector.drop_tab(tab.id);
+        state.crashes.drop_tab(tab.id);
         state.bus.publish(CoreEvent::TabUpserted(tab));
     }
     Ok(count)

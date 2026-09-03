@@ -45,6 +45,9 @@ pub enum RuleAction {
 
 /// Largest mock body kept, in characters.
 const MAX_BODY: usize = 256 * 1024;
+const MAX_RULES: usize = 200;
+const MAX_PATTERN: usize = 2 * 1024;
+const MAX_HEADER_VALUE: usize = 8 * 1024;
 
 /// Rules per workspace, loaded from settings on first use.
 #[derive(Default)]
@@ -68,18 +71,29 @@ impl Registry {
         if let Some(rules) = self.map().get(&workspace) {
             return rules.clone();
         }
-        let stored = crate::state::lock(&state.store)
+        let stored: Vec<Rule> = crate::state::lock(&state.store)
             .setting(&setting_key(workspace))
             .ok()
             .flatten()
             .and_then(|json| serde_json::from_str(&json).ok())
             .unwrap_or_default();
+        let stored = stored
+            .into_iter()
+            .take(MAX_RULES)
+            .filter_map(|rule| validate(rule).ok())
+            .collect();
         self.map().entry(workspace).or_insert(stored).clone()
     }
 
     /// Replace the rules for `workspace` and persist them.
     pub fn set(&self, state: &AppState, workspace: WorkspaceId, rules: Vec<Rule>) -> AppResult<()> {
-        let rules: Vec<Rule> = rules.into_iter().map(clamp).collect();
+        crate::state::lock(&state.store).workspace(workspace)?;
+        if rules.len() > MAX_RULES {
+            return Err(AppError::new(format!(
+                "at most {MAX_RULES} rules are allowed"
+            )));
+        }
+        let rules: Vec<Rule> = rules.into_iter().map(validate).collect::<AppResult<_>>()?;
         let json = serde_json::to_string(&rules).map_err(AppError::new)?;
         crate::state::lock(&state.store).set_setting(&setting_key(workspace), &json)?;
         self.map().insert(workspace, rules);
@@ -87,13 +101,67 @@ impl Registry {
     }
 }
 
-fn clamp(mut rule: Rule) -> Rule {
+fn validate(mut rule: Rule) -> AppResult<Rule> {
+    rule.id = rule.id.trim().chars().take(128).collect();
+    rule.pattern = rule.pattern.trim().to_owned();
+    if rule.pattern.is_empty() || rule.pattern.chars().count() > MAX_PATTERN {
+        return Err(AppError::new(format!(
+            "rule pattern must be 1-{MAX_PATTERN} characters"
+        )));
+    }
     if let RuleAction::Mock { body, .. } = &mut rule.action
         && body.chars().count() > MAX_BODY
     {
         *body = body.chars().take(MAX_BODY).collect();
     }
-    rule
+    match &mut rule.action {
+        RuleAction::Mock {
+            status,
+            content_type,
+            ..
+        } => {
+            if !(100..=599).contains(status) {
+                return Err(AppError::new("mock status must be between 100 and 599"));
+            }
+            *content_type = content_type.trim().chars().take(256).collect();
+            if content_type.is_empty() || content_type.contains(['\r', '\n']) {
+                return Err(AppError::new("mock content type is invalid"));
+            }
+        }
+        RuleAction::Header { name, value } => {
+            *name = name.trim().to_owned();
+            if name.is_empty()
+                || name.len() > 256
+                || !name.bytes().all(|b| {
+                    b.is_ascii_alphanumeric()
+                        || matches!(
+                            b,
+                            b'!' | b'#'
+                                | b'$'
+                                | b'%'
+                                | b'&'
+                                | b'\''
+                                | b'*'
+                                | b'+'
+                                | b'-'
+                                | b'.'
+                                | b'^'
+                                | b'_'
+                                | b'`'
+                                | b'|'
+                                | b'~'
+                        )
+                })
+            {
+                return Err(AppError::new("header name is invalid"));
+            }
+            if value.contains(['\r', '\n']) || value.chars().count() > MAX_HEADER_VALUE {
+                return Err(AppError::new("header value is invalid or too long"));
+            }
+        }
+        RuleAction::Block => {}
+    }
+    Ok(rule)
 }
 
 /// Glob match with `*` wildcards, case-insensitive.
@@ -160,7 +228,19 @@ pub fn attach(
         loop {
             let event = match events.recv().await {
                 Ok(event) => event,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    // Lost `requestPaused` events otherwise remain paused
+                    // forever. Disabling Fetch releases them, then restores the
+                    // current rules for subsequent requests.
+                    tracing::warn!(%tab_id, n, "rule listener lagged; resetting interception");
+                    let _ = session.call0("Fetch.disable").await;
+                    let rules = {
+                        let state = app.state::<AppState>();
+                        state.rules.list(&state, workspace)
+                    };
+                    let _ = apply(&session, &rules).await;
+                    continue;
+                }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             };
             if event.method != "Fetch.requestPaused" {
@@ -217,6 +297,13 @@ pub fn attach(
             };
             if let Err(e) = session.call(method, params).await {
                 tracing::debug!(%tab_id, "{method} failed: {e}");
+                // A failed mock/block must degrade to a real request rather
+                // than leaving the page permanently waiting on interception.
+                if method != "Fetch.continueRequest" {
+                    let _ = session
+                        .call("Fetch.continueRequest", json!({"requestId": request_id}))
+                        .await;
+                }
             }
         }
     });
@@ -277,14 +364,41 @@ mod tests {
     #[test]
     fn mock_bodies_are_capped() {
         let big = "x".repeat(MAX_BODY + 10);
-        let r = clamp(rule(
+        let r = validate(rule(
             "*",
             RuleAction::Mock {
                 status: 200,
                 content_type: "text/plain".into(),
                 body: big,
             },
-        ));
+        ))
+        .unwrap();
         assert!(matches!(r.action, RuleAction::Mock { ref body, .. } if body.len() == MAX_BODY));
+    }
+
+    #[test]
+    fn rejects_invalid_rules() {
+        assert!(validate(rule("", RuleAction::Block)).is_err());
+        assert!(
+            validate(rule(
+                "*",
+                RuleAction::Mock {
+                    status: 999,
+                    content_type: "text/plain".into(),
+                    body: String::new(),
+                },
+            ))
+            .is_err()
+        );
+        assert!(
+            validate(rule(
+                "*",
+                RuleAction::Header {
+                    name: "Bad Header".into(),
+                    value: "x".into(),
+                },
+            ))
+            .is_err()
+        );
     }
 }

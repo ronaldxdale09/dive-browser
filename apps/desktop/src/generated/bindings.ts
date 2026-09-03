@@ -16,6 +16,16 @@ export const commands = {
 	 *  active workspace goes, the first remaining one becomes active.
 	 */
 	workspaceDelete: (id: WorkspaceId) => typedError<null, AppError>(__TAURI_INVOKE("workspace_delete", { id })),
+	/**
+	 *  Persist a new rail order. Ids not listed keep their relative order after
+	 *  the listed ones, so a reorder never has to name every workspace.
+	 */
+	workspaceReorder: (ordered: WorkspaceId[]) => typedError<null, AppError>(__TAURI_INVOKE("workspace_reorder", { ordered })),
+	/**
+	 *  Live tab count of every workspace. The snapshot only carries the active
+	 *  workspace's tabs, so the rail asks for the rest separately.
+	 */
+	workspaceTabCounts: () => typedError<WorkspaceTabs[], AppError>(__TAURI_INVOKE("workspace_tab_counts")),
 	tabOpen: (workspaceId: WorkspaceId, url: string) => typedError<Tab, AppError>(__TAURI_INVOKE("tab_open", { workspaceId, url })),
 	tabClose: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_close", { id })),
 	tabActivate: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_activate", { id })),
@@ -114,11 +124,26 @@ export const commands = {
 	 *  the report path.
 	 */
 	tabBugReport: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_bug_report", { id })),
+	/**  Start the in-page element picker for a tab. */
+	tabInspectStart: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_inspect_start", { id })),
+	/**  Cancel the in-page picker without discarding the last completed pick. */
+	tabInspectCancel: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_inspect_cancel", { id })),
+	/**  Return the latest pick and style experiment for a tab. */
+	tabInspectState: (id: TabId) => __TAURI_INVOKE<InspectorSnapshot_Serialize>("tab_inspect_state", { id }),
+	/**  Apply one temporary inline style to the picked element. */
+	tabInspectStyle: (id: TabId, property: string, value: string) => typedError<StyleChange_Serialize[], AppError>(__TAURI_INVOKE("tab_inspect_style", { id, property, value })),
+	/**  Revert every temporary style made through the picker. */
+	tabInspectRevert: (id: TabId) => typedError<StyleChange_Serialize[], AppError>(__TAURI_INVOKE("tab_inspect_revert", { id })),
 	/**  Start recording the person's interactions in a tab. */
 	tabRecordStart: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_record_start", { id })),
 	/**  Stop recording and return the steps. */
 	tabRecordStop: (id: TabId) => __TAURI_INVOKE<RecordedStep[]>("tab_record_stop", { id }),
 	layoutSetContentBounds: (bounds: Bounds) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_bounds", { bounds })),
+	/**
+	 *  Hide the native content view while a DOM overlay (dialog, menu, popover)
+	 *  is on screen, since child webviews always paint above the main webview.
+	 */
+	layoutSetContentCovered: (covered: boolean) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_covered", { covered })),
 	commandsList: () => __TAURI_INVOKE<Command[]>("commands_list"),
 	/**
 	 *  Run a registry command. `args_json` and the result are JSON text because
@@ -126,8 +151,19 @@ export const commands = {
 	 */
 	commandRun: (id: string, argsJson: string | null) => typedError<string, AppError>(__TAURI_INVOKE("command_run", { id, argsJson })),
 	appInfo: () => __TAURI_INVOKE<AppInfo>("app_info"),
-	/**  Dev servers listening on common localhost ports. */
-	devServers: () => __TAURI_INVOKE<DevServer[]>("dev_servers"),
+	/**  Current user preferences. */
+	prefsGet: () => __TAURI_INVOKE<Prefs>("prefs_get"),
+	/**
+	 *  Store preferences and put them into force on every open tab. Returns the
+	 *  stored form, which may differ where a value was out of range.
+	 */
+	prefsSet: (prefs: Prefs) => typedError<Prefs, AppError>(__TAURI_INVOKE("prefs_set", { prefs })),
+	/**  Delete browsing data; returns a one-line summary of what went. */
+	browsingDataClear: (what: ClearRequest) => typedError<string, AppError>(__TAURI_INVOKE("browsing_data_clear", { what })),
+	/**  Dev servers listening on localhost, discovered from the OS socket table. */
+	devServers: () => typedError<DevServer[], AppError>(__TAURI_INVOKE("dev_servers")),
+	/**  Enable or disable low-frequency dev-server change events while a panel is open. */
+	devServersWatch: (on: boolean) => typedError<DevServer[], AppError>(__TAURI_INVOKE("dev_servers_watch", { on })),
 	/**  Recent history matching `query`, newest first. */
 	historySearch: (query: string, limit: number) => typedError<HistoryEntry[], AppError>(__TAURI_INVOKE("history_search", { query, limit })),
 	/**  Toggle the bookmark for a tab's current URL; returns the new state. */
@@ -153,11 +189,16 @@ export const commands = {
 
 /** Events */
 export const events = {
+	agentPointer: makeEvent<AgentPointer>("agent-pointer"),
 	consoleEntry: makeEvent<ConsoleEntry>("console-entry"),
+	devServersChanged: makeEvent<DevServersChanged>("dev-servers-changed"),
 	downloadNotice: makeEvent<DownloadNotice>("download-notice"),
+	inspectEvent: makeEvent<InspectEvent>("inspect-event"),
+	menuCommand: makeEvent<MenuCommand>("menu-command"),
 	networkEvent: makeEvent<NetworkEvent>("network-event"),
 	recorderEvent: makeEvent<RecorderEvent>("recorder-event"),
 	stateChanged: makeEvent<StateChanged>("state-changed"),
+	tabCrashed: makeEvent<TabCrashed>("tab-crashed"),
 };
 
 /* Types */
@@ -169,6 +210,25 @@ export type A11yReport = {
 	passes: number,
 	/**  Number of rules needing manual review. */
 	incomplete: number,
+};
+
+/**
+ *  Where an agent is about to act, so the chrome can draw a cursor there.
+ * 
+ *  Emitted just before the input is dispatched. The `move` phase arrives
+ *  first, then `click` once the pointer has notionally arrived.
+ */
+export type AgentPointer = {
+	/**  Tab being driven. */
+	tab_id: TabId,
+	/**  `move`, `click` or `type`. */
+	phase: string,
+	/**  Viewport x in CSS pixels. */
+	x: number | null,
+	/**  Viewport y in CSS pixels. */
+	y: number | null,
+	/**  What is being acted on, for the label beside the cursor. */
+	label: string,
 };
 
 /**  A failure reported to the chrome as a plain message. */
@@ -197,6 +257,8 @@ export type Bookmark = {
 	title: string,
 	/**  RFC 3339 creation time. */
 	created_at: string,
+	/**  The site's remembered icon as a `data:` URL, when one is known. */
+	favicon: string | null,
 };
 
 /**  Rectangle of the content area in logical pixels, relative to the window. */
@@ -239,6 +301,21 @@ export type ChatTurn = {
 	role: string,
 	/**  Text. */
 	content: string,
+};
+
+/**  What [`clear`] should delete. */
+export type ClearRequest = {
+	/**  Visited pages. */
+	history: boolean,
+	/**  Cookies of every profile with an open tab. */
+	cookies: boolean,
+	/**  HTTP cache. */
+	cache: boolean,
+	/**
+	 *  `localStorage`, `sessionStorage`, `IndexedDB` and friends for the
+	 *  origins of open tabs.
+	 */
+	site_data: boolean,
 };
 
 /**  Public description of a command, safe to send to the UI. */
@@ -332,6 +409,16 @@ export type DevServer = {
 	framework: string,
 	/**  `<title>` of the root document, when any. */
 	title: string,
+	/**  Command holding the port, when the OS told us. */
+	process: string | null,
+	/**  Process id holding the port, when the OS told us. */
+	pid: number | null,
+};
+
+/**  Emitted when the set of running dev servers changes. */
+export type DevServersChanged = {
+	/**  The current list. */
+	servers: DevServer[],
 };
 
 /**  A device preset as sent by the chrome. */
@@ -380,6 +467,41 @@ export type HistoryEntry = {
 	last_visited_at: string,
 	/**  Number of recorded visits. */
 	visits: number,
+	/**  The site's remembered icon as a `data:` URL, when one is known. */
+	favicon: string | null,
+};
+
+/**  Emitted when the person picks an element or cancels. */
+export type InspectEvent = {
+	/**  Tab the picker was running in. */
+	tab_id: TabId,
+	/**  `picked` or `cancelled`. */
+	kind: string,
+	/**  The pick, when there is one. */
+	pick: Pick | null,
+};
+
+/**  Last element picked in a tab plus the live style experiment on it. */
+export type InspectorSnapshot = InspectorSnapshot_Serialize | InspectorSnapshot_Deserialize;
+
+/**  Last element picked in a tab plus the live style experiment on it. */
+export type InspectorSnapshot_Deserialize = {
+	/**  The picked element, if the user has picked one in this document. */
+	pick: Pick | null,
+	/**  Inline style changes made through the inspector. */
+	changes: StyleChange_Deserialize[],
+	/**  Prompt-ready summary for handing the finding to an agent. */
+	description: string | null,
+};
+
+/**  Last element picked in a tab plus the live style experiment on it. */
+export type InspectorSnapshot_Serialize = {
+	/**  The picked element, if the user has picked one in this document. */
+	pick: Pick | null,
+	/**  Inline style changes made through the inspector. */
+	changes: StyleChange_Serialize[],
+	/**  Prompt-ready summary for handing the finding to an agent. */
+	description: string | null,
 };
 
 /**  Severity of a console entry. */
@@ -402,6 +524,9 @@ export type MediaOverrides = {
 	/**  `print` | `screen`, or none to clear. */
 	media_type: string | null,
 };
+
+/**  A menu item the chrome owns; the payload is a command id from `UI_COMMANDS`. */
+export type MenuCommand = string;
 
 /**  Parsed head metadata. */
 export type MetaSnapshot = {
@@ -525,6 +650,91 @@ export type Original = {
 	column: number,
 };
 
+/**  What the picker found. */
+export type Pick = {
+	/**  Tab it came from. */
+	tab_id: TabId,
+	/**  Page URL at the time. */
+	page_url: string,
+	/**  Page title at the time. */
+	page_title: string | null,
+	/**  Lowercased tag name. */
+	tag_name: string,
+	/**  ARIA role, when it has one. */
+	role: string,
+	/**  Accessible name. */
+	name: string,
+	/**  CSS path. */
+	selector: string | null,
+	/**  Locator that addresses it, for handing to an agent. */
+	locator: string | null,
+	/**  First 500 characters of `outerHTML`. */
+	html_preview: string,
+	/**  A readable dump of the properties worth knowing. */
+	styles: string,
+	/**  React component, when the page is a development React build. */
+	component_name: string | null,
+	/**  Where that component is defined, as the bundle reports it. */
+	source: SourceFrame | null,
+	/**  The owner chain above it. */
+	stack: SourceFrame[],
+	/**  Component names from the element outwards. */
+	owners: string[],
+	/**  Where `source` maps to once source maps are applied. */
+	source_resolved: Original | null,
+	/**  RFC 3339 pick time. */
+	picked_at: string,
+};
+
+/**
+ *  Every preference, with the defaults a fresh profile starts on. Stored blobs
+ *  from older builds are merged with [`Prefs::default`] when they are loaded.
+ */
+export type Prefs = {
+	/**  Chrome theme: `system` | `dark` | `light`. Applied by the chrome. */
+	theme: string,
+	/**  Accent color as a CSS hex string. Applied by the chrome. */
+	accent: string,
+	/**
+	 *  Force pages to see the chrome's color scheme. Ignored while the theme
+	 *  follows the system, since the host cannot read the OS setting.
+	 */
+	tell_pages_theme: boolean,
+	/**
+	 *  What opens at launch: `restore` the last tab, the `home` page, or
+	 *  `none` for the welcome screen.
+	 */
+	startup: string,
+	/**  Home page URL; empty means the welcome screen. */
+	homepage: string,
+	/**  Search engine key, or `custom` to use [`Prefs::search_template`]. */
+	search_engine: string,
+	/**  Custom search URL with a `{query}` placeholder. */
+	search_template: string,
+	/**  Zoom factor new tabs open at. */
+	default_zoom: number | null,
+	/**  Send `DNT: 1` and `Sec-GPC: 1` with every request. */
+	do_not_track: boolean,
+	/**  Block the built-in list of tracker and ad hosts. */
+	block_trackers: boolean,
+	/**  Extra hosts or URL globs to block, one per entry. */
+	blocked_patterns: string[],
+	/**  Run page scripts. Off makes every tab script-free. */
+	javascript: boolean,
+	/**  Days of history to keep; `0` keeps it forever. */
+	history_days: number,
+	/**  Directory downloads are written to; empty means `~/Downloads`. */
+	download_dir: string,
+	/**  Open `DevTools` for every new tab. */
+	devtools_on_open: boolean,
+	/**  Workspace rail shows names and tab counts rather than marks alone. */
+	rail_expanded: boolean,
+	/**  Model the agent sidecar talks to. */
+	agent_model: string,
+	/**  Let the agent act on a page without asking first. */
+	agent_auto_approve: boolean,
+};
+
 /**  One recorded interaction. */
 export type RecordedStep = {
 	/**  `click` | `type` | `navigate`. */
@@ -615,6 +825,18 @@ export type Snapshot = {
 	active_tab: TabId | null,
 };
 
+/**  One frame of a component's source location. */
+export type SourceFrame = {
+	/**  Component or function name, when known. */
+	function_name: string | null,
+	/**  File as the bundle reports it. */
+	file_name: string,
+	/**  1-based line. */
+	line_number: number | null,
+	/**  1-based column. */
+	column_number: number | null,
+};
+
 /**  Emitted whenever core state changes; carries the change itself. */
 export type StateChanged = CoreEvent;
 
@@ -626,6 +848,49 @@ export type StorageSnapshot = {
 	local: ([string, string])[],
 	/**  `sessionStorage` entries as `[key, value]`. */
 	session: ([string, string])[],
+};
+
+/**  A style the person changed on the picked element. */
+export type StyleChange = StyleChange_Serialize | StyleChange_Deserialize;
+
+/**  A style the person changed on the picked element. */
+export type StyleChange_Deserialize = {
+	/**  CSS property. */
+	property: string,
+	/**  What it is now. */
+	value: string,
+	/**  CSS path of the element it applies to. */
+	selector: string | null,
+	/**  Locator for the element, which survives a re-render. */
+	locator: string | null,
+} & {
+	/**  What it was before, computed or inline. */
+	previous_value: string,
+} | {
+	/**  What it was before, computed or inline. */
+	previousValue: string,
+} & {
+	/**  Component that rendered it, when known. */
+	component_name: string | null,
+} | {
+	/**  Component that rendered it, when known. */
+	componentName: string | null,
+};
+
+/**  A style the person changed on the picked element. */
+export type StyleChange_Serialize = {
+	/**  CSS property. */
+	property: string,
+	/**  What it was before, computed or inline. */
+	previous_value: string,
+	/**  What it is now. */
+	value: string,
+	/**  CSS path of the element it applies to. */
+	selector: string | null,
+	/**  Locator for the element, which survives a re-render. */
+	locator: string | null,
+	/**  Component that rendered it, when known. */
+	component_name: string | null,
 };
 
 /**  A browsing tab. */
@@ -651,6 +916,16 @@ export type Tab = {
 	state: TabState,
 	/**  Last time the tab was focused. */
 	last_active_at: string,
+};
+
+/**  Emitted when a tab's renderer dies, whether or not it is being recovered. */
+export type TabCrashed = {
+	/**  The tab that lost its renderer. */
+	tab_id: TabId,
+	/**  Which attempt this is, within the current window. */
+	attempt: number,
+	/**  Whether Dive is reloading it. */
+	recovering: boolean,
 };
 
 /**  Identifies a [`Tab`]. */
@@ -734,7 +1009,7 @@ export type Workspace = {
 	name: string,
 	/**  Accent color as a CSS hex string, e.g. `#0F6E75`. */
 	color: string,
-	/**  Icon identifier (an emoji or an icon name the UI resolves). */
+	/**  Icon identifier the UI resolves to a glyph, e.g. `layers`. */
 	icon: string,
 	/**  Container whose profile this workspace browses in. */
 	container_id: ContainerId,
@@ -750,10 +1025,20 @@ export type WorkspaceDraft = {
 	name: string,
 	/**  CSS color. */
 	color: string,
+	/**  Icon identifier the chrome resolves to a glyph. */
+	icon: string,
 };
 
 /**  Identifies a [`Workspace`]. */
 export type WorkspaceId = string;
+
+/**  How many tabs a workspace holds, for the rail. */
+export type WorkspaceTabs = {
+	/**  The workspace. */
+	workspace_id: WorkspaceId,
+	/**  Live tabs in it. */
+	tabs: number,
+};
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

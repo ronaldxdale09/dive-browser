@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { OrbBurst } from "./OrbBurst";
 import { useBrowser } from "../store/browser";
+import { useCoversContent } from "../lib/overlay";
 
 /** Shortest time the splash stays up, so a fast boot doesn't flash it. */
 const MIN_MS = 900;
@@ -16,6 +17,7 @@ export function Splash() {
   const ready = useBrowser((s) => s.ready);
   const [held, setHeld] = useState(true);
   const [gone, setGone] = useState(false);
+  useCoversContent(!gone);
 
   useEffect(() => {
     const t = setTimeout(() => setHeld(false), MIN_MS);

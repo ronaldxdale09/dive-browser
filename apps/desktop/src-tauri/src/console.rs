@@ -11,6 +11,9 @@ use tauri_specta::Event;
 
 use crate::Runtime;
 
+const MAX_TEXT: usize = 16 * 1024;
+const MAX_URL: usize = 8 * 1024;
+
 /// Severity of a console entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]
@@ -88,12 +91,12 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<ConsoleEntry> {
             Some(ConsoleEntry {
                 tab_id,
                 level,
-                text,
+                text: capped(&text, MAX_TEXT),
                 source: "console".into(),
                 url: frame
                     .and_then(|f| f["url"].as_str())
                     .filter(|u| !u.is_empty())
-                    .map(str::to_owned),
+                    .map(|url| capped(url, MAX_URL)),
                 line: frame
                     .and_then(|f| f["lineNumber"].as_u64())
                     .map(|n| u32::try_from(n + 1).unwrap_or(u32::MAX)),
@@ -111,9 +114,9 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<ConsoleEntry> {
             Some(ConsoleEntry {
                 tab_id,
                 level: Level::Error,
-                text,
+                text: capped(&text, MAX_TEXT),
                 source: "exception".into(),
-                url: d["url"].as_str().map(str::to_owned),
+                url: d["url"].as_str().map(|url| capped(url, MAX_URL)),
                 line: d["lineNumber"]
                     .as_u64()
                     .map(|n| u32::try_from(n + 1).unwrap_or(u32::MAX)),
@@ -132,9 +135,9 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<ConsoleEntry> {
             Some(ConsoleEntry {
                 tab_id,
                 level,
-                text: e["text"].as_str().unwrap_or_default().to_owned(),
+                text: capped(e["text"].as_str().unwrap_or_default(), MAX_TEXT),
                 source: e["source"].as_str().unwrap_or("log").to_owned(),
-                url: e["url"].as_str().map(str::to_owned),
+                url: e["url"].as_str().map(|url| capped(url, MAX_URL)),
                 line: e["lineNumber"]
                     .as_u64()
                     .map(|n| u32::try_from(n + 1).unwrap_or(u32::MAX)),
@@ -143,6 +146,16 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<ConsoleEntry> {
             })
         }
         _ => None,
+    }
+}
+
+fn capped(value: &str, max: usize) -> String {
+    if value.chars().count() <= max {
+        value.to_owned()
+    } else {
+        let mut out: String = value.chars().take(max).collect();
+        out.push('…');
+        out
     }
 }
 
@@ -213,5 +226,16 @@ mod tests {
             (Level::Error, "network")
         );
         assert!(map_event(TabId::new(), &ev("Page.loadEventFired", json!({}))).is_none());
+    }
+
+    #[test]
+    fn retained_console_text_is_bounded() {
+        let event = ev(
+            "Log.entryAdded",
+            json!({"entry": {"text": "x".repeat(MAX_TEXT + 10), "url": "u".repeat(MAX_URL + 10)}}),
+        );
+        let entry = map_event(TabId::new(), &event).unwrap();
+        assert_eq!(entry.text.chars().count(), MAX_TEXT + 1);
+        assert_eq!(entry.url.unwrap().chars().count(), MAX_URL + 1);
     }
 }

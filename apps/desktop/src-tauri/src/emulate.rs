@@ -149,6 +149,189 @@ pub fn network_call(profile: Option<NetworkProfile>) -> (&'static str, Value) {
     )
 }
 
+/// Parse a throttling profile from the name an agent or the chrome uses.
+///
+/// `none` is a real answer, not a parse failure: it is how a caller clears
+/// throttling again.
+pub fn profile_by_name(name: &str) -> Result<Option<NetworkProfile>, AppError> {
+    match name.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+        "none" | "off" | "" => Ok(None),
+        "offline" => Ok(Some(NetworkProfile::Offline)),
+        "slow-3g" | "slow3g" => Ok(Some(NetworkProfile::Slow3g)),
+        "fast-3g" | "fast3g" => Ok(Some(NetworkProfile::Fast3g)),
+        other => Err(AppError::new(format!(
+            "unknown throttling profile {other:?}; use offline, slow-3g, fast-3g or none"
+        ))),
+    }
+}
+
+/// A named device, as the chrome's simulator and `page_resize` both see it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct Preset {
+    /// Stable id, for example `iphone-15`.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// The device itself.
+    pub device: Device,
+}
+
+/// User agents, kept as builders so the catalog stays readable.
+fn ios_ua(version: &str) -> String {
+    let major = version.split('_').next().unwrap_or("18");
+    format!(
+        "Mozilla/5.0 (iPhone; CPU iPhone OS {version} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{major}.0 Mobile/15E148 Safari/604.1"
+    )
+}
+
+const IPAD_UA: &str = "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+
+fn android_ua(model: &str) -> String {
+    format!(
+        "Mozilla/5.0 (Linux; Android 15; {model}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
+    )
+}
+
+/// The device catalog, mirroring `src/data/devices.ts`.
+///
+/// Duplicated deliberately: the chrome needs it synchronously to render the
+/// device menu, and the host needs it to answer `page_resize` without a round
+/// trip through the UI. A test asserts the two lists have not drifted.
+pub fn presets() -> Vec<Preset> {
+    let phone =
+        |id: &str, name: &str, w: u32, h: u32, dpr: f64, ua: String, platform: &str| Preset {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            device: Device {
+                width: w,
+                height: h,
+                dpr,
+                mobile: true,
+                touch: true,
+                user_agent: ua,
+                platform: platform.to_owned(),
+            },
+        };
+    let desktop = |id: &str, name: &str, w: u32, h: u32, platform: &str| Preset {
+        id: id.to_owned(),
+        name: name.to_owned(),
+        device: Device {
+            width: w,
+            height: h,
+            dpr: 1.0,
+            mobile: false,
+            touch: false,
+            user_agent: String::new(),
+            platform: platform.to_owned(),
+        },
+    };
+    vec![
+        phone(
+            "iphone-se",
+            "iPhone SE",
+            375,
+            667,
+            2.0,
+            ios_ua("18_0"),
+            "iOS",
+        ),
+        phone(
+            "iphone-15",
+            "iPhone 15",
+            393,
+            852,
+            3.0,
+            ios_ua("18_0"),
+            "iOS",
+        ),
+        phone(
+            "iphone-15-pro-max",
+            "iPhone 15 Pro Max",
+            430,
+            932,
+            3.0,
+            ios_ua("18_0"),
+            "iOS",
+        ),
+        phone(
+            "pixel-8",
+            "Pixel 8",
+            412,
+            915,
+            2.625,
+            android_ua("Pixel 8"),
+            "Android",
+        ),
+        phone(
+            "galaxy-s24",
+            "Galaxy S24",
+            360,
+            780,
+            3.0,
+            android_ua("SM-S921B"),
+            "Android",
+        ),
+        phone(
+            "ipad-mini",
+            "iPad Mini",
+            768,
+            1024,
+            2.0,
+            IPAD_UA.to_owned(),
+            "iOS",
+        ),
+        phone(
+            "ipad-pro-11",
+            "iPad Pro 11",
+            834,
+            1194,
+            2.0,
+            IPAD_UA.to_owned(),
+            "iOS",
+        ),
+        desktop("laptop", "Laptop 1366", 1366, 768, "Windows"),
+        desktop("desktop", "Desktop 1920", 1920, 1080, "macOS"),
+    ]
+}
+
+/// Look a preset up by id.
+pub fn preset_by_id(id: &str) -> Option<Preset> {
+    let wanted = id.trim().to_ascii_lowercase();
+    presets().into_iter().find(|p| p.id == wanted)
+}
+
+/// Swap width and height. Landscape is the caller's business, not a
+/// separate catalog entry.
+pub fn rotate(mut preset: Preset) -> Preset {
+    std::mem::swap(&mut preset.device.width, &mut preset.device.height);
+    preset
+}
+
+/// Largest viewport `page_resize` will emulate. A pathological size makes
+/// Chromium allocate a surface big enough to take the tab down with it.
+pub const MAX_VIEWPORT_AREA: u64 = 8_294_400;
+
+/// A plain viewport of exactly `width` by `height`, with no device traits.
+pub fn exact(width: u32, height: u32) -> Result<Device, AppError> {
+    if width == 0 || height == 0 {
+        return Err(AppError::new("width and height have to be above zero"));
+    }
+    if u64::from(width) * u64::from(height) > MAX_VIEWPORT_AREA {
+        return Err(AppError::new(format!(
+            "{width}x{height} is larger than the {MAX_VIEWPORT_AREA} pixel limit"
+        )));
+    }
+    Ok(Device {
+        width,
+        height,
+        dpr: 1.0,
+        mobile: false,
+        touch: false,
+        user_agent: String::new(),
+        platform: "macOS".to_owned(),
+    })
+}
+
 /// Apply a list of calls, stopping at the first failure.
 pub async fn apply(session: &CdpSession, calls: Vec<(&'static str, Value)>) -> AppResult<()> {
     for (method, params) in calls {
@@ -163,6 +346,96 @@ pub async fn apply(session: &CdpSession, calls: Vec<(&'static str, Value)>) -> A
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn throttling_profiles_parse_by_name_and_none_clears() {
+        assert_eq!(profile_by_name("none").unwrap(), None);
+        assert_eq!(profile_by_name("").unwrap(), None);
+        assert_eq!(
+            profile_by_name("slow-3g").unwrap(),
+            Some(NetworkProfile::Slow3g)
+        );
+        // Agents write it both ways; both mean the same thing.
+        assert_eq!(
+            profile_by_name("SLOW_3G").unwrap(),
+            Some(NetworkProfile::Slow3g)
+        );
+        assert_eq!(
+            profile_by_name("offline").unwrap(),
+            Some(NetworkProfile::Offline)
+        );
+        let error = profile_by_name("dial-up").unwrap_err().message;
+        assert!(error.contains("slow-3g"), "{error}");
+    }
+
+    #[test]
+    fn presets_are_addressable_by_id_and_rotate() {
+        let phone = preset_by_id("iphone-15").expect("catalogued");
+        assert_eq!((phone.device.width, phone.device.height), (393, 852));
+        assert!(phone.device.mobile && phone.device.touch);
+        assert!(phone.device.user_agent.contains("iPhone"));
+
+        let landscape = rotate(phone);
+        assert_eq!(
+            (landscape.device.width, landscape.device.height),
+            (852, 393)
+        );
+
+        assert!(
+            preset_by_id("IPHONE-15").is_some(),
+            "ids are case-insensitive"
+        );
+        assert!(preset_by_id("nokia-3310").is_none());
+        // Every id is unique, or `page_resize` would silently pick one.
+        let mut ids: Vec<String> = presets().into_iter().map(|p| p.id).collect();
+        let total = ids.len();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), total, "duplicate preset id");
+    }
+
+    #[test]
+    fn exact_sizes_are_bounded() {
+        let device = exact(1024, 768).unwrap();
+        assert_eq!((device.width, device.height), (1024, 768));
+        assert!(!device.mobile, "an exact size is not a phone");
+        assert!(exact(0, 768).is_err());
+        assert!(
+            exact(100_000, 100_000).is_err(),
+            "a surface that large can take the tab down"
+        );
+    }
+
+    #[test]
+    fn the_host_catalog_matches_the_chrome_catalog() {
+        // The device menu reads src/data/devices.ts; page_resize reads this
+        // list. Drift means an agent resizes to something the user cannot see
+        // in the menu, or the reverse.
+        let ts = include_str!("../../src/data/devices.ts");
+        for preset in presets() {
+            let needle = format!("id: \"{}\"", preset.id);
+            assert!(
+                ts.contains(&needle),
+                "{} is in the host catalog but not in devices.ts",
+                preset.id
+            );
+            assert!(
+                ts.contains(&format!(
+                    "width: {}, height: {}",
+                    preset.device.width, preset.device.height
+                )),
+                "{} has a different size in devices.ts",
+                preset.id
+            );
+        }
+        let in_ts = ts.matches("{ id: \"").count();
+        assert_eq!(
+            in_ts,
+            presets().len(),
+            "devices.ts has {in_ts} presets and the host has {}",
+            presets().len()
+        );
+    }
 
     #[test]
     fn network_presets_clear_and_throttle() {

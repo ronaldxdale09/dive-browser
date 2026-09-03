@@ -9,5 +9,5 @@ export default defineConfig({
   server: { port: 1420, strictPort: true },
   envPrefix: ["VITE_", "TAURI_ENV_"],
   build: { target: "chrome120", sourcemap: true },
-  test: { environment: "jsdom", globals: false },
+  test: { environment: "jsdom", globals: false, maxWorkers: 4, setupFiles: ["src/test-setup.ts"] },
 });

@@ -37,27 +37,31 @@ export function FindBar() {
     toggle("find", false);
   };
 
+  // The bar gets its own row above the page: it cannot be drawn over the
+  // content area, because that is a native webview painting above the chrome.
   return (
-    <div className="absolute top-2 right-3 z-30 flex h-9 items-center gap-1 rounded-full border border-line-2 bg-surface px-2 shadow-xl">
-      <input
-        ref={inputRef}
-        aria-label="Find in page"
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setIndex(1);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") close();
-          if (e.key === "Enter") setIndex((i) => (e.shiftKey ? i - 1 : i + 1));
-        }}
-        placeholder="Find in page"
-        className="h-7 w-52 bg-transparent px-2 text-xs outline-none placeholder:text-ink-3"
-      />
-      <span className="w-14 text-center font-mono text-[11px] text-ink-3 tabular-nums">{query ? `${result.current}/${result.total}` : ""}</span>
-      <IconButton icon={ChevronUp} label="Previous match" size={13} disabled={!result.total} onClick={() => setIndex((i) => i - 1)} />
-      <IconButton icon={ChevronDown} label="Next match" size={13} disabled={!result.total} onClick={() => setIndex((i) => i + 1)} />
-      <IconButton icon={X} label="Close find" size={13} onClick={close} />
+    <div className="flex h-full items-center justify-end bg-ground px-3">
+      <div className="flex h-9 items-center gap-1 rounded-full border border-line-2 bg-surface px-2 shadow-xl">
+        <input
+          ref={inputRef}
+          aria-label="Find in page"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setIndex(1);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") close();
+            if (e.key === "Enter") setIndex((i) => (e.shiftKey ? i - 1 : i + 1));
+          }}
+          placeholder="Find in page"
+          className="h-7 w-52 bg-transparent px-2 text-xs outline-none placeholder:text-ink-3"
+        />
+        <span className="w-14 text-center font-mono text-[11px] text-ink-3 tabular-nums">{query ? `${result.current}/${result.total}` : ""}</span>
+        <IconButton icon={ChevronUp} label="Previous match" size={13} disabled={!result.total} onClick={() => setIndex((i) => i - 1)} />
+        <IconButton icon={ChevronDown} label="Next match" size={13} disabled={!result.total} onClick={() => setIndex((i) => i + 1)} />
+        <IconButton icon={X} label="Close find" size={13} onClick={close} />
+      </div>
     </div>
   );
 }

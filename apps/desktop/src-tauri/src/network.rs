@@ -138,6 +138,10 @@ pub fn attach(
 
 /// Largest response body kept.
 const MAX_BODY: usize = 64 * 1024;
+const MAX_URL: usize = 8 * 1024;
+const MAX_HEADER_NAME: usize = 256;
+const MAX_HEADER_VALUE: usize = 8 * 1024;
+const MAX_HEADERS: usize = 200;
 
 /// Fetch a finished JSON response's body so the `OpenAPI` inference and the
 /// replay editor can show it.
@@ -170,9 +174,9 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<NetworkEvent> {
         "Network.requestWillBeSent" => Some(NetworkEvent::Sent {
             tab_id,
             request_id,
-            url: text(&p["request"]["url"]),
-            method: text(&p["request"]["method"]),
-            resource_type: text(&p["type"]),
+            url: cap_to(&text(&p["request"]["url"]), MAX_URL),
+            method: cap_to(&text(&p["request"]["method"]), 32),
+            resource_type: cap_to(&text(&p["type"]), 64),
             headers: headers_of(&p["request"]["headers"]),
             post_data: p["request"]["postData"]
                 .as_str()
@@ -184,7 +188,7 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<NetworkEvent> {
             tab_id,
             request_id,
             status: u16::try_from(p["response"]["status"].as_u64().unwrap_or(0)).unwrap_or(0),
-            mime_type: text(&p["response"]["mimeType"]),
+            mime_type: cap_to(&text(&p["response"]["mimeType"]), 256),
             from_cache: p["response"]["fromDiskCache"].as_bool().unwrap_or(false)
                 || p["response"]["fromServiceWorker"]
                     .as_bool()
@@ -201,7 +205,7 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<NetworkEvent> {
         "Network.webSocketCreated" => Some(NetworkEvent::Socket {
             tab_id,
             request_id,
-            url: text(&p["url"]),
+            url: cap_to(&text(&p["url"]), MAX_URL),
             timestamp,
         }),
         "Network.webSocketFrameSent" | "Network.webSocketFrameReceived" => {
@@ -257,10 +261,14 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<NetworkEvent> {
 const MAX_FRAME: usize = 4 * 1024;
 
 fn cap(payload: &str) -> String {
-    if payload.chars().count() <= MAX_FRAME {
+    cap_to(payload, MAX_FRAME)
+}
+
+fn cap_to(payload: &str, max: usize) -> String {
+    if payload.chars().count() <= max {
         payload.to_owned()
     } else {
-        let mut out: String = payload.chars().take(MAX_FRAME).collect();
+        let mut out: String = payload.chars().take(max).collect();
         out.push('…');
         out
     }
@@ -271,7 +279,11 @@ fn headers_of(v: &Value) -> std::collections::BTreeMap<String, String> {
     v.as_object()
         .map(|m| {
             m.iter()
-                .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_owned())))
+                .take(MAX_HEADERS)
+                .filter_map(|(k, v)| {
+                    v.as_str()
+                        .map(|v| (cap_to(k, MAX_HEADER_NAME), cap_to(v, MAX_HEADER_VALUE)))
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -361,5 +373,34 @@ mod tests {
 
         assert!(map_event(tab, &ev("Network.dataReceived", json!({"requestId": "1"}))).is_none());
         assert!(map_event(tab, &ev("Network.loadingFinished", json!({}))).is_none());
+    }
+
+    #[test]
+    fn retained_request_fields_are_bounded() {
+        let tab = TabId::new();
+        let sent = map_event(
+            tab,
+            &ev(
+                "Network.requestWillBeSent",
+                json!({"requestId": "1", "request": {
+                    "url": "u".repeat(MAX_URL + 10),
+                    "method": "M".repeat(40),
+                    "headers": {"x": "v".repeat(MAX_HEADER_VALUE + 10)}
+                }}),
+            ),
+        )
+        .unwrap();
+        let NetworkEvent::Sent {
+            url,
+            method,
+            headers,
+            ..
+        } = sent
+        else {
+            panic!("expected sent event");
+        };
+        assert_eq!(url.chars().count(), MAX_URL + 1);
+        assert_eq!(method.chars().count(), 33);
+        assert_eq!(headers["x"].chars().count(), MAX_HEADER_VALUE + 1);
     }
 }

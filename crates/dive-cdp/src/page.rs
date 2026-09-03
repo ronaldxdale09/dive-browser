@@ -6,6 +6,13 @@ use serde_json::{Value, json};
 
 use crate::{CdpError, CdpSession, Result};
 
+/// Upper bound for one full-page capture in CSS pixels. Chromium has to
+/// allocate the whole surface before PNG compression; bounding it prevents a
+/// pathological document from taking down the browser process.
+pub const MAX_FULL_PAGE_PIXELS: f64 = 32_000_000.0;
+/// Upper bound for either side of a full-page capture.
+pub const MAX_FULL_PAGE_DIMENSION: f64 = 32_768.0;
+
 /// Image encoding for screenshots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -130,6 +137,20 @@ pub async fn capture_screenshot(session: &CdpSession, opts: ScreenshotOptions) -
 /// Capture the whole document, not just the viewport.
 pub async fn capture_full_page(session: &CdpSession, format: ImageFormat) -> Result<Vec<u8>> {
     let metrics = layout_metrics(session).await?;
+    let width = metrics.content_width;
+    let height = metrics.content_height;
+    if !width.is_finite()
+        || !height.is_finite()
+        || width <= 0.0
+        || height <= 0.0
+        || width > MAX_FULL_PAGE_DIMENSION
+        || height > MAX_FULL_PAGE_DIMENSION
+        || width * height > MAX_FULL_PAGE_PIXELS
+    {
+        return Err(CdpError::InvalidArgument(format!(
+            "full-page capture {width}x{height} exceeds the safe {MAX_FULL_PAGE_PIXELS:.0} pixel / {MAX_FULL_PAGE_DIMENSION:.0} px side limit"
+        )));
+    }
     capture_screenshot(
         session,
         ScreenshotOptions {
@@ -197,6 +218,23 @@ mod tests {
         assert_eq!(shot["method"], "Page.captureScreenshot");
         assert_eq!(shot["params"]["clip"]["height"], 4000.0);
         assert_eq!(shot["params"]["captureBeyondViewport"], true);
+    }
+
+    #[tokio::test]
+    async fn full_page_rejects_a_surface_large_enough_to_exhaust_memory() {
+        let (session, sent) = scripted(vec![json!({
+            "cssContentSize": {"width": 100_000, "height": 100_000},
+            "cssLayoutViewport": {"clientWidth": 1280, "clientHeight": 800}
+        })]);
+        let error = capture_full_page(&session, ImageFormat::Png)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("safe"), "{error}");
+        assert_eq!(
+            sent.lock().unwrap().len(),
+            1,
+            "captureScreenshot must not be sent"
+        );
     }
 
     #[tokio::test]

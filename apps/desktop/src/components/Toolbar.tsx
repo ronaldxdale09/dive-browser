@@ -1,11 +1,13 @@
 import { ArrowLeft, ArrowRight, Bug, Camera, Lock, PanelBottom, RotateCw, Search, Sparkles, Square, Video } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { FOCUS_ADDRESS } from "../lib/commands";
 import { useBrowser } from "../store/browser";
 import { selectErrorCount, useConsole } from "../store/console";
 import { Icon, IconButton } from "./Icon";
 import { DeviceMenu } from "./DeviceMenu";
 import { SharePopover } from "./SharePopover";
 import { BookmarkButton } from "./BookmarkButton";
+import { Tooltip } from "./Tooltip";
 
 /** Navigation row: nav icons, the omnibox pill, page actions, dock and agent toggles. */
 export function Toolbar() {
@@ -29,12 +31,19 @@ export function Toolbar() {
   const setValue = (v: string) => setDraft({ url, value: v });
   const secure = url.startsWith("https://");
   const display = pretty(url);
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Cmd+L, from the menu or the palette.
+  useEffect(() => {
+    const focus = () => inputRef.current?.focus();
+    window.addEventListener(FOCUS_ADDRESS, focus);
+    return () => window.removeEventListener(FOCUS_ADDRESS, focus);
+  }, []);
 
   return (
     <div className="flex h-full items-center gap-1 px-2">
       <IconButton icon={ArrowLeft} label="Back" disabled={!current} onClick={() => void back()} />
       <IconButton icon={ArrowRight} label="Forward" disabled={!current} onClick={() => void forward()} />
-      <IconButton icon={RotateCw} label="Reload" disabled={!current} onClick={() => void reload()} size={14} />
+      <IconButton icon={RotateCw} label="Reload" shortcut="⌘R" disabled={!current} onClick={() => void reload()} size={14} />
       <form
         className="mx-1 flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2"
         onSubmit={(e) => {
@@ -44,6 +53,7 @@ export function Toolbar() {
       >
         <Icon icon={current ? (secure ? Lock : Search) : Search} size={13} className="shrink-0 text-ink-3" />
         <input
+          ref={inputRef}
           aria-label="Address"
           value={value === url ? display : value}
           onChange={(e) => setValue(e.target.value)}
@@ -60,28 +70,31 @@ export function Toolbar() {
       <ZoomBadge />
       <BookmarkButton />
       <SharePopover />
-      <IconButton icon={Camera} label="Capture full page" disabled={!current} onClick={() => void capture(true)} />
+      <IconButton icon={Camera} label="Capture full page" shortcut="⌘⇧S" disabled={!current} onClick={() => void capture(true)} />
       <RecordButton />
       <DeviceMenu />
-      <IconButton icon={Bug} label="Open DevTools" disabled={!current} onClick={() => void devtools()} />
+      <IconButton icon={Bug} label="Open DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
       <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />
-      <IconButton icon={PanelBottom} label="Developer dock" active={open.dock} onClick={() => toggle("dock")} />
-      <button
-        type="button"
-        aria-pressed={open.sidecar}
-        onClick={() => toggle("sidecar")}
-        className={`ml-1 flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors ${
-          open.sidecar ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
-        }`}
-      >
-        <Icon icon={Sparkles} size={14} />
-        Agent
-        {errorCount > 0 && !open.sidecar && (
-          <span className="ml-0.5 rounded-full bg-danger px-1.5 py-px font-mono text-[10px] leading-4 text-white" aria-label={`${errorCount} errors`}>
-            {errorCount > 99 ? "99+" : errorCount}
-          </span>
-        )}
-      </button>
+      <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={open.dock} onClick={() => toggle("dock")} />
+      <Tooltip label="Agent" shortcut="⌘J" align="end">
+        <button
+          type="button"
+          aria-label="Agent"
+          aria-pressed={open.sidecar}
+          onClick={() => toggle("sidecar")}
+          className={`ml-1 flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors ${
+            open.sidecar ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
+          }`}
+        >
+          <Icon icon={Sparkles} size={14} />
+          Agent
+          {errorCount > 0 && !open.sidecar && (
+            <span className="ml-0.5 rounded-full bg-danger px-1.5 py-px font-mono text-[10px] leading-4 text-white" aria-label={`${errorCount} errors`}>
+              {errorCount > 99 ? "99+" : errorCount}
+            </span>
+          )}
+        </button>
+      </Tooltip>
     </div>
   );
 }
@@ -104,14 +117,16 @@ function ZoomBadge() {
   const zoomStep = useBrowser((s) => s.zoomStep);
   if (Math.abs(zoom - 1) < 0.001) return null;
   return (
-    <button
-      type="button"
-      title="Reset zoom"
-      onClick={() => void zoomStep(0)}
-      className="mr-1 h-6 rounded-full border border-line px-2 font-mono text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink"
-    >
-      {Math.round(zoom * 100)}%
-    </button>
+    <Tooltip label="Reset zoom" shortcut="⌘0">
+      <button
+        type="button"
+        aria-label="Reset zoom"
+        onClick={() => void zoomStep(0)}
+        className="mr-1 h-6 rounded-full border border-line px-2 font-mono text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink"
+      >
+        {Math.round(zoom * 100)}%
+      </button>
+    </Tooltip>
   );
 }
 
@@ -121,26 +136,28 @@ function RecordButton() {
   const recordingTab = useBrowser((s) => s.recordingTab);
   const toggle = useBrowser((s) => s.screencastToggle);
   const recording = recordingTab !== null;
+  const label = recording ? "Stop recording" : "Record tab as GIF";
   return (
-    <button
-      type="button"
-      aria-pressed={recording}
-      aria-label={recording ? "Stop recording" : "Record tab as GIF"}
-      title={recording ? "Stop recording (⌘⇧R)" : "Record tab as GIF (⌘⇧R)"}
-      disabled={!active && !recording}
-      onClick={() => void toggle()}
-      className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
-        recording ? "bg-red-500/15 text-red-400 hover:bg-red-500/25" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
-      } disabled:opacity-40`}
-    >
-      {recording ? (
-        <span className="relative flex items-center justify-center">
-          <span className="absolute h-4 w-4 animate-ping rounded-full bg-red-500/40" />
-          <Icon icon={Square} size={12} fill="currentColor" />
-        </span>
-      ) : (
-        <Icon icon={Video} size={15} />
-      )}
-    </button>
+    <Tooltip label={label} shortcut="⌘⇧R">
+      <button
+        type="button"
+        aria-pressed={recording}
+        aria-label={label}
+        disabled={!active && !recording}
+        onClick={() => void toggle()}
+        className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+          recording ? "bg-red-500/15 text-red-400 hover:bg-red-500/25" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
+        } disabled:opacity-40`}
+      >
+        {recording ? (
+          <span className="relative flex items-center justify-center">
+            <span className="absolute h-4 w-4 animate-ping rounded-full bg-red-500/40" />
+            <Icon icon={Square} size={12} fill="currentColor" />
+          </span>
+        ) : (
+          <Icon icon={Video} size={15} />
+        )}
+      </button>
+    </Tooltip>
   );
 }

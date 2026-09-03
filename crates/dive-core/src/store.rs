@@ -5,6 +5,7 @@
 //! thread to it.
 
 use std::path::Path;
+use std::time::Duration;
 
 use crate::model::{
     Container, ContainerId, Tab, TabId, TabState, TabTier, Timestamp, Workspace, WorkspaceId,
@@ -68,6 +69,21 @@ const MIGRATIONS: &[&str] = &[
     );",
 ];
 
+/// How a history row reads on screen: its origin and title.
+///
+/// Two visits that differ only in a trailing slash or a tracking parameter
+/// share this, and are worth one line rather than two. An untitled page falls
+/// back to its full URL, since collapsing every blank title on a host would
+/// hide real pages.
+fn display_key(entry: &HistoryEntry) -> String {
+    let origin = crate::origin_of(&entry.url).unwrap_or_default();
+    if entry.title.is_empty() {
+        entry.url.clone()
+    } else {
+        format!("{origin}\u{1f}{}", entry.title)
+    }
+}
+
 /// A saved page.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct Bookmark {
@@ -77,6 +93,8 @@ pub struct Bookmark {
     pub title: String,
     /// RFC 3339 creation time.
     pub created_at: String,
+    /// The site's remembered icon as a `data:` URL, when one is known.
+    pub favicon: Option<String>,
 }
 
 /// One page in history, aggregated by URL.
@@ -90,6 +108,8 @@ pub struct HistoryEntry {
     pub last_visited_at: String,
     /// Number of recorded visits.
     pub visits: u32,
+    /// The site's remembered icon as a `data:` URL, when one is known.
+    pub favicon: Option<String>,
 }
 
 /// Persistent store backed by SQLite.
@@ -110,6 +130,9 @@ impl Store {
 
     fn init(conn: Connection) -> Result<Self> {
         conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        // A second Dive process or a short-lived SQLite checkpoint should wait
+        // instead of surfacing an immediate, user-visible `database is locked`.
+        conn.busy_timeout(Duration::from_secs(5))?;
         let store = Self { conn };
         store.migrate()?;
         Ok(store)
@@ -123,12 +146,17 @@ impl Store {
         for (i, sql) in MIGRATIONS.iter().enumerate().skip(version) {
             let next = i + 1;
             tracing::info!(version = next, "applying migration");
-            self.conn.execute_batch(sql)?;
-            self.conn.pragma_update(
+            // Schema changes and their version marker are one unit. Without a
+            // transaction, a crash between them leaves a half-applied migration
+            // that cannot be safely retried on the next launch.
+            let tx = self.conn.unchecked_transaction()?;
+            tx.execute_batch(sql)?;
+            tx.pragma_update(
                 None,
                 "user_version",
                 i64::try_from(next).unwrap_or(i64::MAX),
             )?;
+            tx.commit()?;
         }
         Ok(())
     }
@@ -329,6 +357,17 @@ impl Store {
             .map_err(Into::into)
     }
 
+    /// Re-key `tab`'s icon to the site it is on now, dropping one that belongs
+    /// to the origin it just left.
+    ///
+    /// [`Self::tab`] lends a tab its origin's icon on the way out, so a plain
+    /// read-modify-write of `tab.url` would carry the old site's mark onto the
+    /// new one and persist it. Anything that changes the URL runs this after.
+    pub fn rekey_favicon(&self, tab: &mut Tab) {
+        tab.favicon = None;
+        self.fill_favicon(tab);
+    }
+
     /// Lend `tab` its site's remembered icon when it has none of its own.
     ///
     /// This is what puts a mark on a tab restored from a previous session: the
@@ -386,11 +425,15 @@ impl Store {
                     url: r.get(0)?,
                     title: r.get(1)?,
                     created_at: r.get(2)?,
+                    favicon: None,
                 })
             },
         )?;
-        rows.collect::<std::result::Result<_, _>>()
-            .map_err(Into::into)
+        let mut found: Vec<Bookmark> = rows.collect::<std::result::Result<_, _>>()?;
+        for b in &mut found {
+            b.favicon = self.site_favicon(&b.url);
+        }
+        Ok(found)
     }
 
     // ----- history -----
@@ -431,27 +474,101 @@ impl Store {
         Ok(())
     }
 
+    /// Live tab count per workspace, for the rail's badges. Discarded tabs are
+    /// left out: they are metadata for a tab that is no longer really open.
+    pub fn tab_counts(&self) -> Result<Vec<(WorkspaceId, u32)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT workspace_id, COUNT(*) FROM tabs
+             WHERE workspace_id IS NOT NULL AND state != 'discarded'
+             GROUP BY workspace_id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                parse_id(&r.get::<_, String>(0)?)?,
+                r.get::<_, i64>(1)?.try_into().unwrap_or(u32::MAX),
+            ))
+        })?;
+        rows.collect::<std::result::Result<_, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Delete every visit; returns how many rows went.
+    pub fn clear_history(&self) -> Result<usize> {
+        Ok(self.conn.execute("DELETE FROM history", [])?)
+    }
+
+    /// Delete visits older than `cutoff`; returns how many rows went.
+    pub fn prune_history(&self, cutoff: Timestamp) -> Result<usize> {
+        Ok(self.conn.execute(
+            "DELETE FROM history WHERE visited_at < ?1",
+            [cutoff.to_rfc3339()],
+        )?)
+    }
+
     /// Distinct recent visits matching `query` (substring on url or title), newest first.
+    ///
+    /// `GROUP BY url` alone still yields rows a reader cannot tell apart: a
+    /// trailing slash or a stray query parameter makes two URLs distinct while
+    /// the title and host stay identical, so a short list fills up with what
+    /// looks like the same entry twice. Rows are collapsed by what is actually
+    /// on screen -- see [`display_key`] -- which is why the query over-fetches
+    /// before the caller's `limit` is applied.
     pub fn search_history(&self, query: &str, limit: usize) -> Result<Vec<HistoryEntry>> {
         let like = format!("%{}%", query.trim());
+        // Enough headroom that a run of near-duplicates cannot starve the
+        // list, capped so an empty query never walks the whole table.
+        let fetch = limit.saturating_mul(4).clamp(limit, 200);
         let mut stmt = self.conn.prepare(
             "SELECT url, MAX(title), MAX(visited_at), COUNT(*) FROM history
              WHERE url LIKE ?1 OR title LIKE ?1
              GROUP BY url ORDER BY MAX(visited_at) DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(
-            params![like, i64::try_from(limit).unwrap_or(i64::MAX)],
+            params![like, i64::try_from(fetch).unwrap_or(i64::MAX)],
             |r| {
                 Ok(HistoryEntry {
                     url: r.get(0)?,
                     title: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
                     last_visited_at: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
                     visits: r.get::<_, i64>(3)?.try_into().unwrap_or(u32::MAX),
+                    favicon: None,
                 })
             },
         )?;
-        rows.collect::<std::result::Result<_, _>>()
-            .map_err(Into::into)
+
+        let mut out: Vec<HistoryEntry> = Vec::with_capacity(limit);
+        let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for entry in rows {
+            let entry = entry?;
+            match seen.get(&display_key(&entry)) {
+                // Newest wins, because the rows arrive newest first; the older
+                // twin only lends its visit count to the one on screen.
+                Some(&i) => out[i].visits = out[i].visits.saturating_add(entry.visits),
+                None if out.len() < limit => {
+                    seen.insert(display_key(&entry), out.len());
+                    out.push(entry);
+                }
+                // Full, but keep folding counts into the rows already chosen.
+                None => {}
+            }
+        }
+        for entry in &mut out {
+            entry.favicon = self.site_favicon(&entry.url);
+        }
+        Ok(out)
+    }
+
+    /// The icon remembered for `url`'s origin, if any.
+    ///
+    /// Lets a history or bookmark row wear its site's mark even though no tab
+    /// is open on it, which is the only source of an icon for a page that is
+    /// not currently loaded anywhere.
+    fn site_favicon(&self, url: &str) -> Option<String> {
+        let origin = crate::origin_of(url)?;
+        self.favicon(&origin)
+            .inspect_err(|e| tracing::debug!(origin, "favicon lookup failed: {e}"))
+            .ok()
+            .flatten()
     }
 
     // ----- settings -----
@@ -607,6 +724,11 @@ mod tests {
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(usize::try_from(v).unwrap(), MIGRATIONS.len());
+        let busy: i64 = store
+            .conn
+            .query_row("PRAGMA busy_timeout", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(busy, 5_000);
     }
 
     #[test]
@@ -795,6 +917,119 @@ mod tests {
         let hits = store.search_history("b site", 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].title, "B site");
+    }
+
+    #[test]
+    fn history_collapses_rows_that_read_the_same() {
+        let store = Store::in_memory().unwrap();
+        let t0 = Timestamp::now();
+        // The shape the palette kept showing twice: one origin, one title,
+        // URLs that differ only in a slash or a stray parameter.
+        for (i, url) in [
+            "https://www.youtube.com/",
+            "https://www.youtube.com",
+            "https://www.youtube.com/?gl=PH",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let ago = time::Duration::hours(i64::try_from(i).unwrap_or(0));
+            store.record_visit(url, "YouTube", t0 - ago).unwrap();
+        }
+        store
+            .record_visit("https://b.dev/", "B site", t0 - time::Duration::days(1))
+            .unwrap();
+
+        let all = store.search_history("", 5).unwrap();
+        assert_eq!(all.len(), 2, "three YouTube URLs are one line");
+        assert_eq!(all[0].url, "https://www.youtube.com/", "newest wins");
+        assert_eq!(all[0].visits, 3, "the twins lend their counts");
+        assert_eq!(all[1].title, "B site");
+
+        // A blank title is not enough to call two pages the same.
+        store.record_visit("https://c.dev/one", "", t0).unwrap();
+        store.record_visit("https://c.dev/two", "", t0).unwrap();
+        let untitled = store.search_history("c.dev", 5).unwrap();
+        assert_eq!(untitled.len(), 2);
+    }
+
+    #[test]
+    fn history_honours_the_limit_after_collapsing() {
+        let store = Store::in_memory().unwrap();
+        let t0 = Timestamp::now();
+        for i in 0..12 {
+            let ago = time::Duration::minutes(i * 5);
+            // Every page duplicated, so a naive limit would return five rows
+            // that are really two and a half distinct sites.
+            store
+                .record_visit(&format!("https://s{i}.dev/"), "Site", t0 - ago)
+                .unwrap();
+            store
+                .record_visit(&format!("https://s{i}.dev"), "Site", t0 - ago)
+                .unwrap();
+        }
+        let five = store.search_history("", 5).unwrap();
+        assert_eq!(five.len(), 5);
+        let hosts: std::collections::HashSet<_> =
+            five.iter().map(|h| crate::origin_of(&h.url)).collect();
+        assert_eq!(hosts.len(), 5, "five distinct sites, not five rows");
+    }
+
+    #[test]
+    fn history_and_bookmarks_wear_the_site_icon() {
+        let store = Store::in_memory().unwrap();
+        let now = Timestamp::now();
+        let icon = "data:image/png;base64,AAAA";
+        store.set_favicon("https://a.dev", icon).unwrap();
+        store
+            .record_visit("https://a.dev/docs", "Docs", now)
+            .unwrap();
+        store.record_visit("https://b.dev/", "B", now).unwrap();
+        store
+            .add_bookmark("https://a.dev/docs", "Docs", now)
+            .unwrap();
+
+        let hits = store.search_history("docs", 5).unwrap();
+        assert_eq!(hits[0].favicon.as_deref(), Some(icon));
+        assert_eq!(
+            store.search_bookmarks("docs", 5).unwrap()[0]
+                .favicon
+                .as_deref(),
+            Some(icon)
+        );
+        // An origin never resolved has no icon to lend, and must not borrow one.
+        assert_eq!(store.search_history("b.dev", 5).unwrap()[0].favicon, None);
+    }
+
+    #[test]
+    fn tab_counts_skip_discarded_tabs() {
+        let (store, w) = seeded();
+        store
+            .upsert_tab(&Tab::new(w.id, "https://a.dev", 0))
+            .unwrap();
+        let mut gone = Tab::new(w.id, "https://b.dev", 1);
+        gone.state = TabState::Discarded;
+        store.upsert_tab(&gone).unwrap();
+        assert_eq!(store.tab_counts().unwrap(), vec![(w.id, 1)]);
+    }
+
+    #[test]
+    fn history_prunes_by_age_and_clears() {
+        let store = Store::in_memory().unwrap();
+        let now = Timestamp::now();
+        store.record_visit("https://new.dev/", "New", now).unwrap();
+        store
+            .record_visit("https://old.dev/", "Old", now - time::Duration::days(40))
+            .unwrap();
+        assert_eq!(
+            store.prune_history(now - time::Duration::days(30)).unwrap(),
+            1
+        );
+        let left = store.search_history("", 10).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].url, "https://new.dev/");
+        assert_eq!(store.clear_history().unwrap(), 1);
+        assert!(store.search_history("", 10).unwrap().is_empty());
     }
 
     #[test]

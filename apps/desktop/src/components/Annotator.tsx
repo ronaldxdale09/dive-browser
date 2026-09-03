@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
+import { useCoversContent } from "../lib/overlay";
 
 type Tool = "rect" | "arrow" | "text" | "blur";
 interface Shape {
@@ -24,6 +25,7 @@ const TOOLS: { id: Tool; icon: typeof Square; label: string }[] = [
 
 /** Mark up a capture: boxes, arrows, labels and blurred regions, then copy + save. */
 export function Annotator({ path }: { path: string }) {
+  useCoversContent();
   const close = useBrowser((s) => s.setAnnotating);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
