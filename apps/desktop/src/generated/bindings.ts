@@ -72,6 +72,8 @@ export const commands = {
 } | null) => typedError<null, AppError>(__TAURI_INVOKE("tab_emulate", { id, device })),
 	/**  Override media features (color scheme, reduced motion, media type). */
 	tabMedia: (id: TabId, media: MediaOverrides) => typedError<null, AppError>(__TAURI_INVOKE("tab_media", { id, media })),
+	/**  Throttle a tab's network, or clear throttling with `None`. */
+	tabThrottle: (id: TabId, profile: "offline" | "slow3g" | "fast3g" | null) => typedError<null, AppError>(__TAURI_INVOKE("tab_throttle", { id, profile })),
 	/**  Cookies and web storage for a tab. */
 	tabStorage: (id: TabId) => typedError<StorageSnapshot, AppError>(__TAURI_INVOKE("tab_storage", { id })),
 	/**  Head metadata for the Meta panel. */
@@ -481,6 +483,9 @@ export type NetworkEvent =
 	/**  Seconds. */
 	timestamp: number | null,
 } };
+
+/**  Network condition presets, matching Chrome DevTools' throttling menu. */
+export type NetworkProfile = "offline" | "slow3g" | "fast3g";
 
 /**  An original location. */
 export type Original = {

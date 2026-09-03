@@ -125,6 +125,30 @@ pub fn media_call(m: &MediaOverrides) -> (&'static str, Value) {
     )
 }
 
+/// Network condition presets, matching Chrome's `DevTools` throttling menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkProfile {
+    Offline,
+    Slow3g,
+    Fast3g,
+}
+
+/// The CDP call for a throttling preset, or the one that clears it.
+pub fn network_call(profile: Option<NetworkProfile>) -> (&'static str, Value) {
+    // (latency ms, download B/s, upload B/s)
+    let (offline, latency, down, up) = match profile {
+        None => (false, 0, -1.0, -1.0),
+        Some(NetworkProfile::Offline) => (true, 0, 0.0, 0.0),
+        Some(NetworkProfile::Slow3g) => (false, 2000, 50_000.0, 50_000.0),
+        Some(NetworkProfile::Fast3g) => (false, 560, 180_000.0, 84_375.0),
+    };
+    (
+        "Network.emulateNetworkConditions",
+        json!({"offline": offline, "latency": latency, "downloadThroughput": down, "uploadThroughput": up}),
+    )
+}
+
 /// Apply a list of calls, stopping at the first failure.
 pub async fn apply(session: &CdpSession, calls: Vec<(&'static str, Value)>) -> AppResult<()> {
     for (method, params) in calls {
@@ -139,6 +163,20 @@ pub async fn apply(session: &CdpSession, calls: Vec<(&'static str, Value)>) -> A
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn network_presets_clear_and_throttle() {
+        let (_, clear) = network_call(None);
+        assert_eq!(clear["downloadThroughput"], -1.0);
+        assert_eq!(clear["offline"], false);
+        let (m, slow) = network_call(Some(NetworkProfile::Slow3g));
+        assert_eq!(m, "Network.emulateNetworkConditions");
+        assert_eq!(slow["latency"], 2000);
+        assert_eq!(
+            network_call(Some(NetworkProfile::Offline)).1["offline"],
+            true
+        );
+    }
 
     fn phone() -> Device {
         Device {

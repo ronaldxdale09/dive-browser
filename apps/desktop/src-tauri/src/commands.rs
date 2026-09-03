@@ -151,6 +151,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             capture_save,
             tab_emulate,
             tab_media,
+            tab_throttle,
             tab_storage,
             tab_meta,
             tab_a11y,
@@ -806,6 +807,20 @@ pub(crate) async fn tab_media(
 ) -> AppResult<()> {
     let session = cdp_for(&state, id)?;
     let (method, params) = crate::emulate::media_call(&media);
+    session.call(method, params).await.map_err(AppError::new)?;
+    Ok(())
+}
+
+/// Throttle a tab's network, or clear throttling with `None`.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_throttle(
+    state: State<'_, AppState>,
+    id: TabId,
+    profile: Option<crate::emulate::NetworkProfile>,
+) -> AppResult<()> {
+    let session = cdp_for(&state, id)?;
+    let (method, params) = crate::emulate::network_call(profile);
     session.call(method, params).await.map_err(AppError::new)?;
     Ok(())
 }

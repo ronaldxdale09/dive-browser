@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { DEVICES, rotate } from "../data/devices";
 import type { DevicePreset } from "../data/devices";
 import { ipc } from "../lib/ipc";
-import type { DeviceInput, MediaInput } from "../lib/ipc";
+import type { DeviceInput, MediaInput, NetworkProfile } from "../lib/ipc";
 import { useBrowser } from "./browser";
 
 export interface Media {
@@ -15,6 +15,9 @@ interface EmulationState {
   /** Per tab: chosen preset id and orientation. */
   byTab: Record<string, { deviceId: string; landscape: boolean }>;
   media: Record<string, Media>;
+  /** Per tab throttling preset; absent means online at full speed. */
+  throttle: Record<string, NetworkProfile>;
+  setThrottle: (tabId: string, profile: NetworkProfile | null) => Promise<void>;
   setDevice: (tabId: string, deviceId: string | null) => Promise<void>;
   toggleLandscape: (tabId: string) => Promise<void>;
   setMedia: (tabId: string, patch: Partial<Media>) => Promise<void>;
@@ -43,6 +46,18 @@ async function push(tabId: string, sel: { deviceId: string; landscape: boolean }
 export const useEmulation = create<EmulationState>((set, get) => ({
   byTab: {},
   media: {},
+  throttle: {},
+  setThrottle: async (tabId, profile) => {
+    const next = { ...get().throttle };
+    if (profile) next[tabId] = profile;
+    else delete next[tabId];
+    set({ throttle: next });
+    try {
+      await ipc.tabThrottle(tabId, profile);
+    } catch (e) {
+      useBrowser.setState({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
   setDevice: async (tabId, deviceId) => {
     const next = { ...get().byTab };
     if (deviceId) next[tabId] = { deviceId, landscape: next[tabId]?.landscape ?? false };
@@ -69,3 +84,4 @@ export const useEmulation = create<EmulationState>((set, get) => ({
 }));
 
 export const selectMedia = (tabId: string | null) => (s: EmulationState) => (tabId ? (s.media[tabId] ?? DEFAULT_MEDIA) : DEFAULT_MEDIA);
+export const selectThrottle = (tabId: string | null) => (s: EmulationState) => (tabId ? (s.throttle[tabId] ?? null) : null);

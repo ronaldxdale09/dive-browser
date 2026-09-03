@@ -4,12 +4,13 @@
  */
 import { Channel } from "@tauri-apps/api/core";
 import { commands, events } from "../generated/bindings";
+import type { NetworkProfile } from "../generated/bindings";
 
 /** Shape tauri-specta returns for fallible commands. */
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 export { events };
-export type { Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark } from "../generated/bindings";
+export type { NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
 export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
@@ -61,6 +62,7 @@ export const ipc = {
   tabA11y: async (id: string, axeSource: string) => unwrap(await commands.tabA11y(id, axeSource)),
   tabEmulate: async (id: string, device: DeviceInput | null) => unwrap(await commands.tabEmulate(id, device)),
   tabMedia: async (id: string, media: MediaInput) => unwrap(await commands.tabMedia(id, media)),
+  tabThrottle: async (id: string, profile: NetworkProfile | null) => unwrap(await commands.tabThrottle(id, profile)),
   setContentBounds: async (b: { x: number; y: number; width: number; height: number }) =>
     unwrap(await commands.layoutSetContentBounds(b)),
   commandsList: () => commands.commandsList(),

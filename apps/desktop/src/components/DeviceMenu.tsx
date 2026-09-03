@@ -1,8 +1,8 @@
-import { Check, Moon, Printer, RotateCw, Smartphone, Sun, Zap } from "lucide-react";
+import { Check, Gauge, Moon, Printer, RotateCw, Smartphone, Sun, WifiOff, Zap } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { DEVICES } from "../data/devices";
 import { useBrowser } from "../store/browser";
-import { selectMedia, useEmulation } from "../store/emulation";
+import { selectMedia, selectThrottle, useEmulation } from "../store/emulation";
 import { Icon } from "./Icon";
 
 /** Toolbar button + popover for the device simulator and media overrides. */
@@ -13,6 +13,8 @@ export function DeviceMenu() {
   const setDevice = useEmulation((s) => s.setDevice);
   const toggleLandscape = useEmulation((s) => s.toggleLandscape);
   const setMedia = useEmulation((s) => s.setMedia);
+  const throttle = useEmulation(selectThrottle(activeTab));
+  const setThrottle = useEmulation((s) => s.setThrottle);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -67,6 +69,11 @@ export function DeviceMenu() {
           <Item label="Prefer light" icon={Sun} checked={media.colorScheme === "light"} onClick={() => void setMedia(activeTab, { colorScheme: media.colorScheme === "light" ? null : "light" })} />
           <Item label="Reduced motion" icon={Zap} checked={media.reducedMotion} onClick={() => void setMedia(activeTab, { reducedMotion: !media.reducedMotion })} />
           <Item label="Print media" icon={Printer} checked={media.print} onClick={() => void setMedia(activeTab, { print: !media.print })} />
+          <div className="my-1 h-px bg-line" />
+          <div className="px-2 pt-1 pb-1 text-[10px] tracking-wider text-ink-3 uppercase">Network</div>
+          <Item label="Offline" icon={WifiOff} checked={throttle === "offline"} onClick={() => void setThrottle(activeTab, throttle === "offline" ? null : "offline")} />
+          <Item label="Slow 3G" hint="2 s · 400 kbps" icon={Gauge} checked={throttle === "slow3g"} onClick={() => void setThrottle(activeTab, throttle === "slow3g" ? null : "slow3g")} />
+          <Item label="Fast 3G" hint="0.5 s · 1.6 Mbps" icon={Gauge} checked={throttle === "fast3g"} onClick={() => void setThrottle(activeTab, throttle === "fast3g" ? null : "fast3g")} />
         </div>
       )}
     </div>
