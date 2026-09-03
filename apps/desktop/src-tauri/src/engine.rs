@@ -118,7 +118,7 @@ impl TabHost {
 
         let title_app = app.clone();
         #[allow(unused_mut)]
-        let mut builder = WebviewBuilder::new(label_for(tab_id), WebviewUrl::External(url))
+        let mut builder = WebviewBuilder::new(label_for(tab_id), WebviewUrl::External(blank_url()))
             .data_directory(self.profiles_root.join(&container.cache_dir))
             .on_document_title_changed(move |_, title| {
                 if title == PLACEHOLDER_TITLE {
@@ -194,6 +194,10 @@ impl TabHost {
             crate::favicon::attach(app.clone(), tab_id, session.clone());
             self.cdp.insert(tab_id, session);
         }
+        // The view starts blank so the DevTools feeds are attached before the
+        // first navigation; otherwise the document request and early console
+        // output are missed.
+        view.navigate(url)?;
         self.views.insert(tab_id, view);
         Ok(())
     }
@@ -331,6 +335,10 @@ fn attach_cdp(view: &Webview<Runtime>) -> tauri::Result<CdpSession> {
 
 /// Title of the runtime's internal initial-load document; never persist it.
 const PLACEHOLDER_TITLE: &str = "Tauri CEF Initial Load";
+
+fn blank_url() -> url::Url {
+    url::Url::parse("about:blank").expect("static url")
+}
 
 fn label_for(id: TabId) -> String {
     format!("tab-{id}")
