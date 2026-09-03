@@ -6,6 +6,7 @@ import { Content } from "./components/Content";
 import { Sidecar } from "./components/Sidecar";
 import { Dock } from "./components/Dock";
 import { Palette } from "./components/Palette";
+import { WorkspaceDialog } from "./components/WorkspaceDialog";
 import { useBrowser } from "./store/browser";
 import { useShortcuts } from "./lib/shortcuts";
 
@@ -13,6 +14,7 @@ export function App() {
   const boot = useBrowser((s) => s.boot);
   const error = useBrowser((s) => s.error);
   const notice = useBrowser((s) => s.notice);
+  const editing = useBrowser((s) => s.editing);
   const open = useBrowser((s) => s.open);
   useEffect(() => void boot(), [boot]);
   useShortcuts();
@@ -37,6 +39,7 @@ export function App() {
         {open.sidecar && <Sidecar />}
       </div>
       {open.palette && <Palette />}
+      <WorkspaceDialog key={editing?.id ?? (editing ? "new" : "closed")} />
       {notice && (
         <div role="status" className="fixed bottom-3 left-16 rounded-full border border-line-2 bg-surface-2 px-3 py-1.5 font-mono text-[11px] text-ink-2 shadow-lg">
           {notice}

@@ -9,6 +9,13 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 export const commands = {
 	snapshot: () => typedError<Snapshot, AppError>(__TAURI_INVOKE("snapshot")),
 	workspaceActivate: (id: WorkspaceId) => typedError<null, AppError>(__TAURI_INVOKE("workspace_activate", { id })),
+	workspaceCreate: (draft: WorkspaceDraft, separateContainer: boolean) => typedError<Workspace, AppError>(__TAURI_INVOKE("workspace_create", { draft, separateContainer })),
+	workspaceUpdate: (id: WorkspaceId, draft: WorkspaceDraft) => typedError<Workspace, AppError>(__TAURI_INVOKE("workspace_update", { id, draft })),
+	/**
+	 *  Delete a workspace and its tabs. Refuses to delete the last one; if the
+	 *  active workspace goes, the first remaining one becomes active.
+	 */
+	workspaceDelete: (id: WorkspaceId) => typedError<null, AppError>(__TAURI_INVOKE("workspace_delete", { id })),
 	tabOpen: (workspaceId: WorkspaceId, url: string) => typedError<Tab, AppError>(__TAURI_INVOKE("tab_open", { workspaceId, url })),
 	tabClose: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_close", { id })),
 	tabActivate: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_activate", { id })),
@@ -167,6 +174,14 @@ export type Workspace = {
 	position: number,
 	/**  Creation timestamp. */
 	created_at: string,
+};
+
+/**  Fields the chrome may set on a workspace. */
+export type WorkspaceDraft = {
+	/**  Display name. */
+	name: string,
+	/**  CSS color. */
+	color: string,
 };
 
 /**  Identifies a [`Workspace`]. */

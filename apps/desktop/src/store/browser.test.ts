@@ -13,9 +13,10 @@ describe("reduceEvent", () => {
     expect(out.tabs?.map((t) => t.url)).toEqual(["https://y", "https://x"]);
   });
 
-  it("closing the active tab falls back to the last remaining tab", () => {
+  it("closing the active tab clears the selection until the engine activates a replacement", () => {
     const base = { workspaces: [], tabs: [tab("a"), tab("b")], activeTab: "b", activeWorkspace: "w" };
     const out = reduceEvent(base, { type: "tab_closed", data: "b" });
-    expect(out).toEqual({ tabs: [tab("a")], activeTab: "a" });
+    expect(out).toEqual({ tabs: [tab("a")], activeTab: null });
+    expect(reduceEvent({ ...base, ...out }, { type: "tab_activated", data: "a" })).toEqual({ activeTab: "a" });
   });
 });

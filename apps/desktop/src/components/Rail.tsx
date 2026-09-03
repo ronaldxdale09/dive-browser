@@ -7,6 +7,7 @@ export function Rail() {
   const workspaces = useBrowser((s) => s.workspaces);
   const active = useBrowser((s) => s.activeWorkspace);
   const activate = useBrowser((s) => s.activateWorkspace);
+  const setEditing = useBrowser((s) => s.setEditing);
   return (
     <nav aria-label="Workspaces" className="flex h-full flex-col items-center gap-2 pt-2 pb-3">
       {workspaces.map((w) => {
@@ -18,6 +19,10 @@ export function Rail() {
             title={w.name}
             aria-pressed={isActive}
             onClick={() => void activate(w.id)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setEditing({ id: w.id });
+            }}
             className={`relative grid size-9 place-items-center rounded-full text-[12px] font-semibold uppercase transition-all ${
               isActive ? "bg-surface-3 text-ink ring-1 ring-line-2" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
             }`}
@@ -29,7 +34,7 @@ export function Rail() {
           </button>
         );
       })}
-      <button type="button" aria-label="New workspace" title="New workspace" className="grid size-9 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink">
+      <button type="button" aria-label="New workspace" title="New workspace" onClick={() => setEditing({ id: null })} className="grid size-9 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink">
         <Icon icon={Plus} />
       </button>
       <div className="mt-auto">

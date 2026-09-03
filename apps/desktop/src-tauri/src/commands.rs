@@ -39,6 +39,9 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
         .commands(collect_commands![
             snapshot,
             workspace_activate,
+            workspace_create,
+            workspace_update,
+            workspace_delete,
             tab_open,
             tab_close,
             tab_activate,
@@ -98,8 +101,11 @@ pub fn register_builtin(registry: &dive_core::CommandRegistry) {
             keybinding: key.map(Into::into),
             scope,
         };
-        // These are UI-driven; the handler is a no-op marker so `run` reports them as known.
-        if let Err(e) = registry.register(cmd, |_| Ok(Value::Null)) {
+        // These run in the chrome. Reaching this handler means the chrome's
+        // dispatcher lost an id, so fail loudly instead of pretending.
+        if let Err(e) =
+            registry.register(cmd, |_| Err("handled by the chrome, not the core".into()))
+        {
             tracing::warn!("{e}");
         }
     }
@@ -149,6 +155,133 @@ pub(crate) fn workspace_activate(
     Ok(())
 }
 
+/// Fields the chrome may set on a workspace.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct WorkspaceDraft {
+    /// Display name.
+    pub name: String,
+    /// CSS color.
+    pub color: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn workspace_create(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    draft: WorkspaceDraft,
+    separate_container: bool,
+) -> AppResult<Workspace> {
+    let name = clean_name(&draft.name)?;
+    let workspace = {
+        let store = lock(&state.store);
+        let container = if separate_container {
+            let c = dive_core::Container::new(&name);
+            store.upsert_container(&c)?;
+            c.id
+        } else {
+            store
+                .containers()?
+                .into_iter()
+                .next()
+                .ok_or_else(|| AppError::new("no container"))?
+                .id
+        };
+        let position = i32::try_from(store.workspaces()?.len()).unwrap_or(i32::MAX);
+        let mut w = Workspace::new(name, container, position);
+        w.color = clean_color(&draft.color)?;
+        store.upsert_workspace(&w)?;
+        w
+    };
+    state
+        .bus
+        .publish(CoreEvent::WorkspaceUpserted(workspace.clone()));
+    workspace_activate(app, state, workspace.id)?;
+    Ok(workspace)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn workspace_update(
+    state: State<'_, AppState>,
+    id: WorkspaceId,
+    draft: WorkspaceDraft,
+) -> AppResult<Workspace> {
+    let workspace = {
+        let store = lock(&state.store);
+        let mut w = store.workspace(id)?;
+        w.name = clean_name(&draft.name)?;
+        w.color = clean_color(&draft.color)?;
+        store.upsert_workspace(&w)?;
+        w
+    };
+    state
+        .bus
+        .publish(CoreEvent::WorkspaceUpserted(workspace.clone()));
+    Ok(workspace)
+}
+
+/// Delete a workspace and its tabs. Refuses to delete the last one; if the
+/// active workspace goes, the first remaining one becomes active.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn workspace_delete(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: WorkspaceId,
+) -> AppResult<()> {
+    let (tab_ids, next) = {
+        let store = lock(&state.store);
+        let all = store.workspaces()?;
+        if all.len() <= 1 {
+            return Err(AppError::new("cannot delete the last workspace"));
+        }
+        let tabs = store.tabs_for_workspace(id)?;
+        let next = all.iter().find(|w| w.id != id).map(|w| w.id);
+        (
+            tabs.into_iter()
+                .filter(|t| t.workspace_id == Some(id))
+                .map(|t| t.id)
+                .collect::<Vec<_>>(),
+            next,
+        )
+    };
+    if let Some(host) = lock(&state.host).as_mut() {
+        for tab in &tab_ids {
+            host.close(*tab)?;
+        }
+    }
+    lock(&state.store).remove_workspace(id)?;
+    for tab in tab_ids {
+        state.bus.publish(CoreEvent::TabClosed(tab));
+    }
+    state.bus.publish(CoreEvent::WorkspaceRemoved(id));
+    let was_active = *lock(&state.active_workspace) == Some(id);
+    if was_active && let Some(next) = next {
+        workspace_activate(app, state, next)?;
+    }
+    Ok(())
+}
+
+fn clean_name(name: &str) -> AppResult<String> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 40 {
+        return Err(AppError::new("workspace name must be 1-40 characters"));
+    }
+    Ok(name.to_owned())
+}
+
+/// Accept only `#rgb` / `#rrggbb` so the value is safe to inject as CSS.
+fn clean_color(color: &str) -> AppResult<String> {
+    let c = color.trim();
+    let hex = c.strip_prefix('#').unwrap_or("");
+    if matches!(hex.len(), 3 | 6) && hex.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        Ok(c.to_ascii_uppercase())
+    } else {
+        Err(AppError::new("color must be a hex value like #4FC1C8"))
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn tab_open(
@@ -195,12 +328,32 @@ pub fn open_tab(
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn tab_close(state: State<'_, AppState>, id: TabId) -> AppResult<()> {
-    if let Some(host) = lock(&state.host).as_mut() {
-        host.close(id)?;
-    }
-    lock(&state.store).remove_tab(id)?;
+pub(crate) fn tab_close(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: TabId,
+) -> AppResult<()> {
+    let (was_active, workspace) = {
+        let mut host = lock(&state.host);
+        let store = lock(&state.store);
+        let tab = store.tab(id)?;
+        let was_active = host.as_ref().and_then(crate::engine::TabHost::active) == Some(id);
+        if let Some(host) = host.as_mut() {
+            host.close(id)?;
+        }
+        store.remove_tab(id)?;
+        (
+            was_active,
+            tab.workspace_id.or(*lock(&state.active_workspace)),
+        )
+    };
     state.bus.publish(CoreEvent::TabClosed(id));
+    if was_active
+        && let Some(ws) = workspace
+        && let Some(next) = lock(&state.store).last_active_tab(ws)?
+    {
+        activate_tab(&app, &state, next.id)?;
+    }
     Ok(())
 }
 
@@ -217,33 +370,31 @@ pub(crate) fn tab_activate(
 /// Show `id` (recreating its view if it was discarded), persist it as the
 /// active tab and announce the change.
 pub fn activate_tab(app: &AppHandle<Runtime>, state: &AppState, id: TabId) -> AppResult<()> {
-    let (mut tab, container) = {
-        let store = lock(&state.store);
-        let tab = store.tab(id)?;
-        let ws = tab
-            .workspace_id
-            .or(*lock(&state.active_workspace))
-            .ok_or_else(|| AppError::new("tab has no workspace"))?;
-        let container = store.container(store.workspace(ws)?.container_id)?;
-        (tab, container)
-    };
-    {
+    // Lock order everywhere: host, then store. Holding both here closes the
+    // window in which a concurrent `tab_close` could delete the row while we
+    // recreate its view.
+    let tab = {
         let mut host = lock(&state.host);
         let host = host
             .as_mut()
             .ok_or_else(|| AppError::new("engine not ready"))?;
+        let store = lock(&state.store);
+        let mut tab = store.tab(id)?;
         if !host.has(id) {
+            let ws = tab
+                .workspace_id
+                .or(*lock(&state.active_workspace))
+                .ok_or_else(|| AppError::new("tab has no workspace"))?;
+            let container = store.container(store.workspace(ws)?.container_id)?;
             host.open(app, &tab, &container)?;
         }
         host.activate(id)?;
-    }
-    tab.last_active_at = dive_core::Timestamp::now();
-    tab.state = dive_core::TabState::Active;
-    {
-        let store = lock(&state.store);
+        tab.last_active_at = dive_core::Timestamp::now();
+        tab.state = dive_core::TabState::Active;
         store.upsert_tab(&tab)?;
         store.set_setting(crate::state::ACTIVE_TAB, &id.to_string())?;
-    }
+        tab
+    };
     state.bus.publish(CoreEvent::TabUpserted(tab));
     state.bus.publish(CoreEvent::TabActivated(id));
     Ok(())
@@ -418,6 +569,15 @@ mod tests {
                 .starts_with("https://duckduckgo.com/?q=")
         );
         assert!(normalize_url("   ").is_err());
+    }
+
+    #[test]
+    fn validates_workspace_fields() {
+        assert_eq!(clean_color(" #abc ").unwrap(), "#ABC");
+        assert!(clean_color("red").is_err());
+        assert!(clean_color("#12345").is_err());
+        assert_eq!(clean_name("  Work ").unwrap(), "Work");
+        assert!(clean_name("   ").is_err());
     }
 
     #[test]

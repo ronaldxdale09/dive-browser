@@ -8,7 +8,7 @@ import { commands, events } from "../generated/bindings";
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 export { events };
-export type { Snapshot, Tab, Workspace, Command, CoreEvent, Bounds } from "../generated/bindings";
+export type { Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
 export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
@@ -16,9 +16,15 @@ export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
   throw new Error(r.error.message);
 }
 
+type WorkspaceDraftInput = { name: string; color: string };
+
 export const ipc = {
   snapshot: async () => unwrap(await commands.snapshot()),
   workspaceActivate: async (id: string) => unwrap(await commands.workspaceActivate(id)),
+  workspaceCreate: async (draft: WorkspaceDraftInput, separateContainer: boolean) =>
+    unwrap(await commands.workspaceCreate(draft, separateContainer)),
+  workspaceUpdate: async (id: string, draft: WorkspaceDraftInput) => unwrap(await commands.workspaceUpdate(id, draft)),
+  workspaceDelete: async (id: string) => unwrap(await commands.workspaceDelete(id)),
   tabOpen: async (workspaceId: string, url: string) => unwrap(await commands.tabOpen(workspaceId, url)),
   tabClose: async (id: string) => unwrap(await commands.tabClose(id)),
   tabActivate: async (id: string) => unwrap(await commands.tabActivate(id)),

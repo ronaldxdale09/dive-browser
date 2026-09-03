@@ -1,0 +1,90 @@
+import { Trash2 } from "lucide-react";
+import { useState } from "react";
+import { useBrowser } from "../store/browser";
+import { Icon } from "./Icon";
+
+const SWATCHES = ["#7FD8C8", "#F0B35E", "#E58C8C", "#8FB8F0", "#B79CF0", "#9ED67B", "#E9E9E9"];
+
+/** Create or edit a workspace. Opened from the rail. */
+export function WorkspaceDialog() {
+  const editing = useBrowser((s) => s.editing);
+  const workspaces = useBrowser((s) => s.workspaces);
+  const setEditing = useBrowser((s) => s.setEditing);
+  const create = useBrowser((s) => s.createWorkspace);
+  const update = useBrowser((s) => s.updateWorkspace);
+  const remove = useBrowser((s) => s.deleteWorkspace);
+  const existing = editing?.id ? workspaces.find((w) => w.id === editing.id) : undefined;
+  const [name, setName] = useState(existing?.name ?? "");
+  const [color, setColor] = useState(existing?.color ?? SWATCHES[0]!);
+  const [separate, setSeparate] = useState(true);
+  if (!editing) return null;
+  const close = () => setEditing(null);
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (existing) void update(existing.id, { name, color });
+    else void create({ name, color }, separate);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px]" onMouseDown={close}>
+      <form
+        onSubmit={submit}
+        onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.key === "Escape" && close()}
+        className="mx-auto mt-28 w-[380px] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
+      >
+        <h2 className="text-sm font-semibold">{existing ? "Edit workspace" : "New workspace"}</h2>
+        <label className="mt-3 block text-xs text-ink-2">
+          Name
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={40}
+            placeholder="Client, Side project, Research…"
+            className="mt-1 h-9 w-full rounded-lg border border-line bg-surface-2 px-3 text-sm text-ink outline-none placeholder:text-ink-3 focus:border-line-2"
+          />
+        </label>
+        <div className="mt-3 text-xs text-ink-2">Color</div>
+        <div className="mt-1 flex gap-2" role="radiogroup" aria-label="Color">
+          {SWATCHES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              role="radio"
+              aria-checked={c === color}
+              aria-label={c}
+              onClick={() => setColor(c)}
+              className="size-6 rounded-full ring-offset-2 ring-offset-surface aria-checked:ring-2 aria-checked:ring-ink"
+              style={{ background: c }}
+            />
+          ))}
+        </div>
+        {!existing && (
+          <label className="mt-4 flex items-center gap-2 text-xs text-ink-2">
+            <input type="checkbox" checked={separate} onChange={(e) => setSeparate(e.target.checked)} className="accent-highlight" />
+            Separate cookies and logins (own container)
+          </label>
+        )}
+        <div className="mt-5 flex items-center gap-2">
+          {existing && workspaces.length > 1 && (
+            <button
+              type="button"
+              onClick={() => void remove(existing.id)}
+              className="flex h-8 items-center gap-1.5 rounded-full px-3 text-xs text-danger hover:bg-surface-2"
+            >
+              <Icon icon={Trash2} size={13} /> Delete
+            </button>
+          )}
+          <span className="flex-1" />
+          <button type="button" onClick={close} className="h-8 rounded-full px-3 text-xs text-ink-2 hover:bg-surface-2">
+            Cancel
+          </button>
+          <button type="submit" disabled={!name.trim()} className="h-8 rounded-full bg-accent px-4 text-xs font-medium text-accent-ink disabled:opacity-40">
+            {existing ? "Save" : "Create"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}

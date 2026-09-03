@@ -23,6 +23,11 @@ interface BrowserState {
   capture: (fullPage: boolean) => Promise<void>;
   notice: string | null;
   activateWorkspace: (id: string) => Promise<void>;
+  createWorkspace: (draft: { name: string; color: string }, separateContainer: boolean) => Promise<void>;
+  updateWorkspace: (id: string, draft: { name: string; color: string }) => Promise<void>;
+  deleteWorkspace: (id: string) => Promise<void>;
+  editing: { id: string | null } | null;
+  setEditing: (v: { id: string | null } | null) => void;
   toggle: (panel: UiPanel, value?: boolean) => void;
   applyEvent: (event: CoreEvent) => void;
 }
@@ -47,8 +52,9 @@ export function reduceEvent(
       return { tabs };
     }
     case "tab_closed": {
+      // The engine picks the replacement and announces it with tab_activated.
       const tabs = state.tabs.filter((t) => t.id !== event.data);
-      const activeTab = state.activeTab === event.data ? (tabs.at(-1)?.id ?? null) : state.activeTab;
+      const activeTab = state.activeTab === event.data ? null : state.activeTab;
       return { tabs, activeTab };
     }
     case "tab_activated":
@@ -73,6 +79,8 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   open: { sidecar: false, dock: false, palette: false },
   error: null,
   notice: null,
+  editing: null,
+  setEditing: (editing) => set({ editing }),
 
   boot: async () => {
     try {
@@ -119,6 +127,18 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   activateWorkspace: async (id) => {
     await run(set, () => ipc.workspaceActivate(id));
     set(fromSnapshot(await ipc.snapshot()));
+  },
+  createWorkspace: async (draft, separateContainer) => {
+    await run(set, () => ipc.workspaceCreate(draft, separateContainer));
+    set({ ...fromSnapshot(await ipc.snapshot()), editing: null });
+  },
+  updateWorkspace: async (id, draft) => {
+    await run(set, () => ipc.workspaceUpdate(id, draft));
+    set({ editing: null });
+  },
+  deleteWorkspace: async (id) => {
+    await run(set, () => ipc.workspaceDelete(id));
+    set({ ...fromSnapshot(await ipc.snapshot()), editing: null });
   },
 
   toggle: (panel, value) => set((s) => ({ open: { ...s.open, [panel]: value ?? !s.open[panel] } })),

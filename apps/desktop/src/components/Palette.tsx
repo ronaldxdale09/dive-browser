@@ -2,6 +2,7 @@ import { Command } from "cmdk";
 import { ArrowUpRight, Globe, Search, Terminal } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ipc } from "../lib/ipc";
+import { runCommand } from "../lib/commands";
 import type { Command as CommandDef } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
@@ -78,7 +79,7 @@ export function Palette() {
                 value={`${c.title} ${c.id}`}
                 onSelect={() => {
                   close();
-                  runUi(c.id);
+                  runCommand(c.id);
                 }}
                 className="flex items-center gap-2 rounded-lg px-3 py-2"
               >
@@ -104,26 +105,4 @@ function host(url: string) {
 
 function chord(k: string) {
   return k.replace("mod", "⌘").replace("shift", "⇧").replaceAll("+", "").toUpperCase();
-}
-
-/** Commands whose effect lives in the chrome are dispatched here; others go to Rust. */
-function runUi(id: string) {
-  const { toggle, closeTab, activeTab } = useBrowser.getState();
-  switch (id) {
-    case "palette.open":
-    case "tab.new":
-      toggle("palette", true);
-      break;
-    case "sidecar.toggle":
-      toggle("sidecar");
-      break;
-    case "dock.toggle":
-      toggle("dock");
-      break;
-    case "tab.close":
-      if (activeTab) void closeTab(activeTab);
-      break;
-    default:
-      void ipc.commandRun(id);
-  }
 }
