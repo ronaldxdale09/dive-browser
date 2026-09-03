@@ -492,6 +492,7 @@ pub(crate) fn tab_close(
         )
     };
     state.buffers.drop_tab(id);
+    state.screencast.discard(id);
     state.bus.publish(CoreEvent::TabClosed(id));
     if was_active
         && let Some(ws) = workspace

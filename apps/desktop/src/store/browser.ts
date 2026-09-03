@@ -47,10 +47,9 @@ interface BrowserState {
 }
 
 /** Reduce one core event into local state. Pure, so it is unit-testable. */
-export function reduceEvent(
-  state: Pick<BrowserState, "workspaces" | "tabs" | "activeTab" | "activeWorkspace">,
-  event: CoreEvent,
-): Partial<Pick<BrowserState, "workspaces" | "tabs" | "activeTab" | "activeWorkspace">> {
+type Reduced = Pick<BrowserState, "workspaces" | "tabs" | "activeTab" | "activeWorkspace" | "recordingTab">;
+
+export function reduceEvent(state: Reduced, event: CoreEvent): Partial<Reduced> {
   switch (event.type) {
     case "workspace_upserted": {
       const others = state.workspaces.filter((w) => w.id !== event.data.id);
@@ -69,7 +68,9 @@ export function reduceEvent(
       // The engine picks the replacement and announces it with tab_activated.
       const tabs = state.tabs.filter((t) => t.id !== event.data);
       const activeTab = state.activeTab === event.data ? null : state.activeTab;
-      return { tabs, activeTab };
+      // The engine discards that tab's recording; nothing is saved.
+      const recordingTab = state.recordingTab === event.data ? null : state.recordingTab;
+      return { tabs, activeTab, recordingTab };
     }
     case "tab_activated":
       return { activeTab: event.data };

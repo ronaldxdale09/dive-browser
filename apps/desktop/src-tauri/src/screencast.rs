@@ -121,6 +121,13 @@ impl Registry {
         Ok(())
     }
 
+    /// Drop a recording without encoding it (the tab is going away).
+    pub fn discard(&self, tab: TabId) {
+        if let Some(rec) = self.active().remove(&tab) {
+            rec.stopped.store(true, Ordering::Relaxed);
+        }
+    }
+
     /// Stop recording `tab` and encode the frames to a GIF; returns its path.
     pub async fn stop(&self, tab: TabId, session: &CdpSession) -> AppResult<std::path::PathBuf> {
         let rec = self
