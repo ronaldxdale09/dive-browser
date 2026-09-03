@@ -177,6 +177,11 @@ impl TabHost {
         {
             let nav_app = app.clone();
             builder = builder.on_address_change(move |_, url| {
+                // Views start on about:blank; that hop must not replace the
+                // tab's real URL or a restart would restore an empty tab.
+                if *url == blank_url() {
+                    return;
+                }
                 let url = url.to_string();
                 update_tab(&nav_app, tab_id, |t| t.url = url);
             });

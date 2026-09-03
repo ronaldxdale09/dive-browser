@@ -65,7 +65,7 @@ export function NetworkPanel() {
     useBrowser.getState().toggle("sidecar", true);
     const outcome = r.error ?? (r.status === null ? "no response yet" : `HTTP ${r.status}`);
     void send(
-      `Explain this request from the current page and whether it looks right:\n\n${r.method} ${r.url}\nResult: ${outcome}${r.mimeType ? ` (${r.mimeType})` : ""}${r.size !== null ? `, ${r.size} bytes` : ""}${r.durationMs !== null ? `, ${r.durationMs} ms` : ""}\n\nUse network_list or console_tail if you need more context. If it failed, say why and how to fix it.`,
+      `Explain this request from the current page and whether it looks right:\n\n${r.method} ${r.url}\nResult: ${outcome}${r.mimeType ? ` (${r.mimeType})` : ""}${r.size !== null ? `, ${r.size} bytes` : ""}${r.durationMs !== null ? `, ${r.durationMs} ms` : ""}\n\nRequest id ${r.id}: call network_body for its JSON body, or console_tail for related errors. If it failed, say why and how to fix it.`,
       activeTab,
     );
   };
