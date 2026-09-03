@@ -1,9 +1,9 @@
-import { Ban, FileDown, FileJson, Repeat, Sparkles } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Ban, FileDown, FileJson, Repeat, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { useAgent } from "../store/agent";
-import { selectRequests, useNetwork } from "../store/network";
+import { selectFrames, selectRequests, useNetwork } from "../store/network";
 import type { RequestRow } from "../store/network";
 import { Icon, IconButton } from "./Icon";
 import { ReplayEditor } from "./ReplayEditor";
@@ -71,6 +71,7 @@ export function NetworkPanel() {
   };
   const shown = filter ? rows.filter((r) => r.url.toLowerCase().includes(filter.toLowerCase())) : rows;
   const detail = rows.find((r) => r.id === selected);
+  const frames = useNetwork(selectFrames(activeTab, selected));
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -121,6 +122,17 @@ export function NetworkPanel() {
           </tbody>
         </table>
       </div>
+      {detail && frames.length > 0 && (
+        <div className="max-h-40 overflow-auto border-t border-line font-mono text-[11px]">
+          {frames.map((f, i) => (
+            <div key={i} className="flex items-start gap-2 border-b border-line/60 px-3 py-1">
+              <Icon icon={f.direction === "sent" ? ArrowUpRight : ArrowDownLeft} size={11} className={f.direction === "sent" ? "mt-0.5 shrink-0 text-ink-3" : "mt-0.5 shrink-0 text-accent"} />
+              <span className="min-w-0 flex-1 break-all whitespace-pre-wrap text-ink-2 select-text">{f.payload}</span>
+              <span className="shrink-0 text-ink-3 tabular-nums">{frames[0] ? `+${Math.round((f.at - frames[0].at) * 1000)} ms` : ""}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {detail && replaying !== detail.id && (
         <div className="flex items-center gap-3 border-t border-line bg-surface-2 px-3 py-1.5 font-mono text-[11px] text-ink-2 select-text">
           <span className="min-w-0 flex-1 truncate">

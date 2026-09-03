@@ -64,6 +64,30 @@ pub enum NetworkEvent {
         /// Seconds.
         timestamp: f64,
     },
+    /// A WebSocket handshake started; shown as a request row.
+    Socket {
+        /// Tab.
+        tab_id: TabId,
+        /// Request id.
+        request_id: String,
+        /// Socket URL.
+        url: String,
+        /// Seconds.
+        timestamp: f64,
+    },
+    /// A WebSocket frame or a server-sent event.
+    Frame {
+        /// Tab.
+        tab_id: TabId,
+        /// Request id of the socket or event stream.
+        request_id: String,
+        /// `sent` or `received`.
+        direction: String,
+        /// Text payload, truncated; binary frames are summarised.
+        payload: String,
+        /// Seconds.
+        timestamp: f64,
+    },
     /// Request failed or was blocked.
     Failed {
         /// Tab.
@@ -174,6 +198,47 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<NetworkEvent> {
             encoded_length: p["encodedDataLength"].as_f64().unwrap_or_default(),
             timestamp,
         }),
+        "Network.webSocketCreated" => Some(NetworkEvent::Socket {
+            tab_id,
+            request_id,
+            url: text(&p["url"]),
+            timestamp,
+        }),
+        "Network.webSocketFrameSent" | "Network.webSocketFrameReceived" => {
+            let payload = if p["response"]["opcode"].as_u64() == Some(2) {
+                format!(
+                    "<binary {} bytes>",
+                    p["response"]["payloadData"].as_str().map_or(0, str::len)
+                )
+            } else {
+                cap(&text(&p["response"]["payloadData"]))
+            };
+            Some(NetworkEvent::Frame {
+                tab_id,
+                request_id,
+                direction: if event.method == "Network.webSocketFrameSent" {
+                    "sent"
+                } else {
+                    "received"
+                }
+                .into(),
+                payload,
+                timestamp,
+            })
+        }
+        "Network.webSocketClosed" => Some(NetworkEvent::Finished {
+            tab_id,
+            request_id,
+            encoded_length: 0.0,
+            timestamp,
+        }),
+        "Network.eventSourceMessageReceived" => Some(NetworkEvent::Frame {
+            tab_id,
+            request_id,
+            direction: "received".into(),
+            payload: cap(&format!("{}: {}", text(&p["eventName"]), text(&p["data"]))),
+            timestamp,
+        }),
         "Network.loadingFailed" => Some(NetworkEvent::Failed {
             tab_id,
             request_id,
@@ -185,6 +250,19 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<NetworkEvent> {
             timestamp,
         }),
         _ => None,
+    }
+}
+
+/// Largest frame payload kept.
+const MAX_FRAME: usize = 4 * 1024;
+
+fn cap(payload: &str) -> String {
+    if payload.chars().count() <= MAX_FRAME {
+        payload.to_owned()
+    } else {
+        let mut out: String = payload.chars().take(MAX_FRAME).collect();
+        out.push('…');
+        out
     }
 }
 
@@ -209,6 +287,37 @@ mod tests {
             method: method.into(),
             params,
         }
+    }
+
+    #[test]
+    fn maps_socket_frames_and_events() {
+        let tab = TabId::new();
+        let sock = map_event(
+            tab,
+            &ev(
+                "Network.webSocketCreated",
+                json!({"requestId": "s", "url": "wss://a.dev/ws"}),
+            ),
+        )
+        .unwrap();
+        assert!(matches!(sock, NetworkEvent::Socket { ref url, .. } if url == "wss://a.dev/ws"));
+        let frame = map_event(tab, &ev("Network.webSocketFrameReceived", json!({"requestId": "s", "timestamp": 2.0, "response": {"opcode": 1, "payloadData": "hi"}}))).unwrap();
+        assert!(
+            matches!(frame, NetworkEvent::Frame { ref direction, ref payload, .. } if direction == "received" && payload == "hi")
+        );
+        let bin = map_event(tab, &ev("Network.webSocketFrameSent", json!({"requestId": "s", "timestamp": 2.0, "response": {"opcode": 2, "payloadData": "AAAA"}}))).unwrap();
+        assert!(
+            matches!(bin, NetworkEvent::Frame { ref payload, .. } if payload.starts_with("<binary"))
+        );
+        let sse = map_event(
+            tab,
+            &ev(
+                "Network.eventSourceMessageReceived",
+                json!({"requestId": "e", "timestamp": 3.0, "eventName": "message", "data": "{}"}),
+            ),
+        )
+        .unwrap();
+        assert!(matches!(sse, NetworkEvent::Frame { ref payload, .. } if payload == "message: {}"));
     }
 
     #[test]

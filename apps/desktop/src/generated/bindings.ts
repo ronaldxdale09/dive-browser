@@ -476,6 +476,30 @@ export type NetworkEvent =
 	/**  Seconds. */
 	timestamp: number | null,
 } } | 
+/**  A WebSocket handshake started; shown as a request row. */
+{ type: "socket"; data: {
+	/**  Tab. */
+	tab_id: TabId,
+	/**  Request id. */
+	request_id: string,
+	/**  Socket URL. */
+	url: string,
+	/**  Seconds. */
+	timestamp: number | null,
+} } | 
+/**  A WebSocket frame or a server-sent event. */
+{ type: "frame"; data: {
+	/**  Tab. */
+	tab_id: TabId,
+	/**  Request id of the socket or event stream. */
+	request_id: string,
+	/**  `sent` or `received`. */
+	direction: string,
+	/**  Text payload, truncated; binary frames are summarised. */
+	payload: string,
+	/**  Seconds. */
+	timestamp: number | null,
+} } | 
 /**  Request failed or was blocked. */
 { type: "failed"; data: {
 	/**  Tab. */

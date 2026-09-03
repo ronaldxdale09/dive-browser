@@ -18,8 +18,18 @@ export interface RequestRow {
   durationMs: number | null;
 }
 
+export interface FrameRow {
+  direction: "sent" | "received";
+  payload: string;
+  at: number;
+}
+
+const FRAME_CAP = 200;
+
 interface NetworkState {
   byTab: Record<string, RequestRow[]>;
+  /** Frames per `${tabId}:${requestId}` for sockets and event streams. */
+  frames: Record<string, FrameRow[]>;
   apply: (event: NetworkEvent) => void;
   clear: (tabId: string) => void;
   drop: (tabId: string) => void;
@@ -30,12 +40,13 @@ export function fold(rows: RequestRow[] | undefined, event: NetworkEvent): Reque
   const list = rows ?? [];
   // specta types f64 as `number | null` (NaN/Infinity serialize as null).
   const at = event.data.timestamp ?? 0;
-  if (event.type === "sent") {
-    const d = event.data;
-    const row: RequestRow = {
-      id: d.request_id, url: d.url, method: d.method, resourceType: d.resource_type,
-      status: null, mimeType: "", fromCache: false, size: null, error: null, startedAt: at, durationMs: null,
-    };
+  if (event.type === "frame") return list;
+  if (event.type === "sent" || event.type === "socket") {
+    const base = { status: null, mimeType: "", fromCache: false, size: null, error: null, startedAt: at, durationMs: null };
+    const row: RequestRow =
+      event.type === "socket"
+        ? { ...base, id: event.data.request_id, url: event.data.url, method: "GET", resourceType: "WebSocket", mimeType: "websocket" }
+        : { ...base, id: event.data.request_id, url: event.data.url, method: event.data.method, resourceType: event.data.resource_type };
     // Redirects reuse the request id; replace in place so the row shows the final hop.
     const idx = list.findIndex((r) => r.id === row.id);
     const next = idx === -1 ? [...list, row] : list.map((r, i) => (i === idx ? { ...row, startedAt: r.startedAt } : r));
@@ -62,15 +73,32 @@ export function fold(rows: RequestRow[] | undefined, event: NetworkEvent): Reque
 
 export const useNetwork = create<NetworkState>((set) => ({
   byTab: {},
-  apply: (event) => set((s) => ({ byTab: { ...s.byTab, [event.data.tab_id]: fold(s.byTab[event.data.tab_id], event) } })),
-  clear: (tabId) => set((s) => ({ byTab: { ...s.byTab, [tabId]: [] } })),
+  frames: {},
+  apply: (event) =>
+    set((s) => {
+      if (event.type === "frame") {
+        const key = `${event.data.tab_id}:${event.data.request_id}`;
+        const next = [...(s.frames[key] ?? []), { direction: event.data.direction === "sent" ? "sent" : "received", payload: event.data.payload, at: event.data.timestamp ?? 0 } as FrameRow];
+        return { frames: { ...s.frames, [key]: next.length > FRAME_CAP ? next.slice(next.length - FRAME_CAP) : next } };
+      }
+      return { byTab: { ...s.byTab, [event.data.tab_id]: fold(s.byTab[event.data.tab_id], event) } };
+    }),
+  clear: (tabId) => set((s) => ({ byTab: { ...s.byTab, [tabId]: [] }, frames: withoutTab(s.frames, tabId) })),
   drop: (tabId) =>
     set((s) => {
       const byTab = { ...s.byTab };
       delete byTab[tabId];
-      return { byTab };
+      return { byTab, frames: withoutTab(s.frames, tabId) };
     }),
 }));
+
+function withoutTab(frames: Record<string, FrameRow[]>, tabId: string): Record<string, FrameRow[]> {
+  return Object.fromEntries(Object.entries(frames).filter(([k]) => !k.startsWith(`${tabId}:`)));
+}
+
+const NO_FRAMES: FrameRow[] = [];
+export const selectFrames = (tabId: string | null, requestId: string | null) => (s: NetworkState) =>
+  tabId && requestId ? (s.frames[`${tabId}:${requestId}`] ?? NO_FRAMES) : NO_FRAMES;
 
 let listening: Promise<() => void> | null = null;
 

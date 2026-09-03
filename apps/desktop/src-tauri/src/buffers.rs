@@ -99,7 +99,133 @@ struct TabBuffers {
     recording: Option<Vec<crate::recorder::RecordedStep>>,
     /// Nonce the trusted recorder script embeds in its payloads.
     recording_nonce: Option<String>,
+    /// WebSocket frames / server-sent events per request, newest last.
+    frames: HashMap<String, VecDeque<FrameSummary>>,
 }
+
+impl RequestSummary {
+    /// A row with nothing known yet beyond the request line.
+    fn new(id: &str, url: &str, method: &str, resource_type: &str, started_at: f64) -> Self {
+        Self {
+            id: id.to_owned(),
+            url: url.to_owned(),
+            method: method.to_owned(),
+            resource_type: resource_type.to_owned(),
+            status: None,
+            mime_type: String::new(),
+            encoded_length: None,
+            error: None,
+            headers: std::collections::BTreeMap::new(),
+            post_data: None,
+            response_body: None,
+            response_headers: std::collections::BTreeMap::new(),
+            started_at,
+            wall_time: 0.0,
+            finished_at: None,
+        }
+    }
+}
+
+impl TabBuffers {
+    /// Insert a row, replacing one with the same id (redirects reuse ids).
+    fn push_row(&mut self, row: RequestSummary) {
+        if let Some(existing) = self.requests.iter_mut().find(|r| r.id == row.id) {
+            *existing = row;
+        } else {
+            if self.requests.len() == NETWORK_CAP {
+                self.requests.pop_front();
+            }
+            self.requests.push_back(row);
+        }
+    }
+
+    /// Fold a lifecycle event into its row; `Frame` events go to `frames`.
+    fn fold_network(&mut self, event: &NetworkEvent, request_id: &str) {
+        match event {
+            NetworkEvent::Sent {
+                url,
+                method,
+                resource_type,
+                headers,
+                post_data,
+                timestamp,
+                wall_time,
+                ..
+            } => {
+                let mut row =
+                    RequestSummary::new(request_id, url, method, resource_type, *timestamp);
+                row.headers.clone_from(headers);
+                row.post_data.clone_from(post_data);
+                row.wall_time = *wall_time;
+                self.push_row(row);
+            }
+            NetworkEvent::Socket { url, timestamp, .. } => {
+                let mut row = RequestSummary::new(request_id, url, "GET", "WebSocket", *timestamp);
+                row.mime_type = "websocket".into();
+                self.push_row(row);
+            }
+            NetworkEvent::Frame {
+                direction,
+                payload,
+                timestamp,
+                ..
+            } => {
+                let frames = self.frames.entry(request_id.to_owned()).or_default();
+                if frames.len() == FRAME_CAP {
+                    frames.pop_front();
+                }
+                frames.push_back(FrameSummary {
+                    direction: direction.clone(),
+                    payload: payload.clone(),
+                    timestamp: *timestamp,
+                });
+            }
+            NetworkEvent::Response {
+                status,
+                mime_type,
+                headers,
+                ..
+            } => {
+                if let Some(r) = self.requests.iter_mut().find(|r| r.id == request_id) {
+                    r.status = Some(*status);
+                    r.mime_type.clone_from(mime_type);
+                    r.response_headers.clone_from(headers);
+                }
+            }
+            NetworkEvent::Finished {
+                encoded_length,
+                timestamp,
+                ..
+            } => {
+                if let Some(r) = self.requests.iter_mut().find(|r| r.id == request_id) {
+                    r.encoded_length = Some(*encoded_length);
+                    r.finished_at = Some(*timestamp);
+                }
+            }
+            NetworkEvent::Failed {
+                error, timestamp, ..
+            } => {
+                if let Some(r) = self.requests.iter_mut().find(|r| r.id == request_id) {
+                    r.error = Some(error.clone());
+                    r.finished_at = Some(*timestamp);
+                }
+            }
+        }
+    }
+}
+
+/// One WebSocket frame or server-sent event.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct FrameSummary {
+    /// `sent` or `received`.
+    pub direction: String,
+    pub payload: String,
+    /// CDP monotonic seconds.
+    pub timestamp: f64,
+}
+
+/// Frames kept per socket.
+const FRAME_CAP: usize = 200;
 
 /// Thread-safe buffers for every tab.
 #[derive(Default)]
@@ -128,91 +254,27 @@ impl Buffers {
 
     /// Fold a network event into its request row.
     pub fn push_network(&self, event: &NetworkEvent) {
-        self.with(|m| {
-            let (tab_id, request_id) = match event {
-                NetworkEvent::Sent {
-                    tab_id, request_id, ..
-                }
-                | NetworkEvent::Response {
-                    tab_id, request_id, ..
-                }
-                | NetworkEvent::Finished {
-                    tab_id, request_id, ..
-                }
-                | NetworkEvent::Failed {
-                    tab_id, request_id, ..
-                } => (*tab_id, request_id),
-            };
-            let buf = &mut m.entry(tab_id).or_default().requests;
-            match event {
-                NetworkEvent::Sent {
-                    url,
-                    method,
-                    resource_type,
-                    headers,
-                    post_data,
-                    timestamp,
-                    wall_time,
-                    ..
-                } => {
-                    let row = RequestSummary {
-                        id: request_id.clone(),
-                        url: url.clone(),
-                        method: method.clone(),
-                        resource_type: resource_type.clone(),
-                        status: None,
-                        mime_type: String::new(),
-                        encoded_length: None,
-                        error: None,
-                        headers: headers.clone(),
-                        post_data: post_data.clone(),
-                        response_body: None,
-                        response_headers: std::collections::BTreeMap::new(),
-                        started_at: *timestamp,
-                        wall_time: *wall_time,
-                        finished_at: None,
-                    };
-                    if let Some(existing) = buf.iter_mut().find(|r| r.id == *request_id) {
-                        *existing = row;
-                    } else {
-                        if buf.len() == NETWORK_CAP {
-                            buf.pop_front();
-                        }
-                        buf.push_back(row);
-                    }
-                }
-                NetworkEvent::Response {
-                    status,
-                    mime_type,
-                    headers,
-                    ..
-                } => {
-                    if let Some(r) = buf.iter_mut().find(|r| r.id == *request_id) {
-                        r.status = Some(*status);
-                        r.mime_type.clone_from(mime_type);
-                        r.response_headers.clone_from(headers);
-                    }
-                }
-                NetworkEvent::Finished {
-                    encoded_length,
-                    timestamp,
-                    ..
-                } => {
-                    if let Some(r) = buf.iter_mut().find(|r| r.id == *request_id) {
-                        r.encoded_length = Some(*encoded_length);
-                        r.finished_at = Some(*timestamp);
-                    }
-                }
-                NetworkEvent::Failed {
-                    error, timestamp, ..
-                } => {
-                    if let Some(r) = buf.iter_mut().find(|r| r.id == *request_id) {
-                        r.error = Some(error.clone());
-                        r.finished_at = Some(*timestamp);
-                    }
-                }
+        let (tab_id, request_id) = match event {
+            NetworkEvent::Sent {
+                tab_id, request_id, ..
             }
-        });
+            | NetworkEvent::Response {
+                tab_id, request_id, ..
+            }
+            | NetworkEvent::Finished {
+                tab_id, request_id, ..
+            }
+            | NetworkEvent::Failed {
+                tab_id, request_id, ..
+            }
+            | NetworkEvent::Socket {
+                tab_id, request_id, ..
+            }
+            | NetworkEvent::Frame {
+                tab_id, request_id, ..
+            } => (*tab_id, request_id),
+        };
+        self.with(|m| m.entry(tab_id).or_default().fold_network(event, request_id));
     }
 
     /// Newest `limit` console entries, oldest first.
@@ -241,6 +303,16 @@ impl Buffers {
             .iter()
             .map(RequestListing::from)
             .collect()
+    }
+
+    /// Frames of a socket or event stream, oldest first.
+    pub fn frames(&self, tab: TabId, request_id: &str) -> Vec<FrameSummary> {
+        self.with(|m| {
+            m.get(&tab)
+                .and_then(|b| b.frames.get(request_id))
+                .map(|f| f.iter().cloned().collect())
+                .unwrap_or_default()
+        })
     }
 
     /// Attach a captured response body.

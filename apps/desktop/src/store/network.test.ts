@@ -20,4 +20,11 @@ describe("network fold", () => {
     expect(rows[0]).toMatchObject({ url: "https://a.dev/new", startedAt: 1, error: "net::ERR_FAILED", durationMs: 300 });
     expect(fold(rows, { type: "finished", data: { tab_id: "t", request_id: "nope", encoded_length: 1, timestamp: 2 } })).toBe(rows);
   });
+
+  it("lists sockets as rows and ignores frames in the row list", () => {
+    let rows = fold(undefined, { type: "socket", data: { tab_id: "t", request_id: "s", url: "wss://a.dev/ws", timestamp: 1 } });
+    rows = fold(rows, { type: "frame", data: { tab_id: "t", request_id: "s", direction: "received", payload: "hi", timestamp: 1.2 } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ resourceType: "WebSocket", method: "GET", url: "wss://a.dev/ws" });
+  });
 });

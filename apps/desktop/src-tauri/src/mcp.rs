@@ -372,6 +372,16 @@ impl Browser for AppBrowser {
             .buffers
             .request(tab, &request_id)
             .ok_or_else(|| BrowserError::Other(format!("no request {request_id}")))?;
+        let frames = self.state().buffers.frames(tab, &request_id);
+        if !frames.is_empty() {
+            let recent: Vec<_> = frames.iter().rev().take(50).rev().collect();
+            return Ok(serde_json::json!({
+                "request_id": request_id,
+                "mime_type": row.mime_type,
+                "frames": recent,
+                "total_frames": frames.len(),
+            }));
+        }
         let body = row.response_body.unwrap_or_default();
         let truncated = body.chars().count() > BODY_TOOL_CAP;
         Ok(serde_json::json!({
