@@ -34,6 +34,13 @@ pub fn from_requests(page_url: &str, requests: &[RequestSummary]) -> Value {
                 .entry(status)
                 .or_default()
                 .insert(r.mime_type.clone());
+            if let Some(body) = &r.response_body
+                && let Ok(sample) = serde_json::from_str::<Value>(body)
+            {
+                op.schemas
+                    .entry(status)
+                    .or_insert_with(|| infer_schema(&sample));
+            }
         }
         for (k, _) in url.query_pairs() {
             op.query.insert(k.into_owned());
@@ -65,6 +72,7 @@ struct Operation {
     statuses: BTreeMap<u16, BTreeSet<String>>,
     query: BTreeSet<String>,
     request_types: BTreeSet<String>,
+    schemas: BTreeMap<u16, Value>,
 }
 
 impl Operation {
@@ -83,10 +91,14 @@ impl Operation {
             .statuses
             .iter()
             .map(|(status, types)| {
+                let schema = self
+                    .schemas
+                    .get(status)
+                    .map_or_else(|| json!({}), |s| json!({"schema": s}));
                 let content: Map<String, Value> = types
                     .iter()
                     .filter(|t| !t.is_empty())
-                    .map(|t| (t.clone(), json!({})))
+                    .map(|t| (t.clone(), schema.clone()))
                     .collect();
                 let mut r = json!({"description": reason(*status)});
                 if !content.is_empty() {
@@ -118,6 +130,32 @@ fn reason(status: u16) -> &'static str {
         429 => "Too Many Requests",
         500..=599 => "Server Error",
         _ => "Response",
+    }
+}
+
+/// A JSON schema for a sample value: objects list their properties, arrays
+/// use the first element, scalars map to JSON types. Good enough to seed a
+/// typed client.
+pub fn infer_schema(v: &Value) -> Value {
+    match v {
+        Value::Null => json!({"type": "null"}),
+        Value::Bool(_) => json!({"type": "boolean"}),
+        Value::Number(n) => {
+            json!({"type": if n.is_i64() || n.is_u64() { "integer" } else { "number" }})
+        }
+        Value::String(_) => json!({"type": "string"}),
+        Value::Array(items) => match items.first() {
+            Some(first) => json!({"type": "array", "items": infer_schema(first)}),
+            None => json!({"type": "array", "items": {}}),
+        },
+        Value::Object(map) => {
+            let props: Map<String, Value> = map
+                .iter()
+                .take(200)
+                .map(|(k, v)| (k.clone(), infer_schema(v)))
+                .collect();
+            json!({"type": "object", "properties": props})
+        }
     }
 }
 
@@ -212,6 +250,7 @@ mod tests {
                 .into_iter()
                 .collect(),
             post_data: body.map(str::to_owned),
+            response_body: None,
         }
     }
 
@@ -227,6 +266,36 @@ mod tests {
         );
         assert_eq!(template_path("/"), "/");
         assert_eq!(template_path("/v1/health"), "/v1/health");
+    }
+
+    #[test]
+    fn infers_schemas_from_bodies() {
+        let s = infer_schema(
+            &json!({"id": 1, "name": "x", "tags": ["a"], "meta": {"ok": true, "score": 1.5}, "none": null}),
+        );
+        assert_eq!(s["type"], "object");
+        assert_eq!(s["properties"]["id"]["type"], "integer");
+        assert_eq!(s["properties"]["tags"]["items"]["type"], "string");
+        assert_eq!(
+            s["properties"]["meta"]["properties"]["score"]["type"],
+            "number"
+        );
+        assert_eq!(s["properties"]["none"]["type"], "null");
+        let mut r = req(
+            "GET",
+            "https://api.a.dev/users/7",
+            200,
+            "application/json",
+            "Fetch",
+            None,
+        );
+        r.response_body = Some(r#"{"id": 7, "name": "dive"}"#.into());
+        let spec = from_requests("https://a.dev/", &[r]);
+        assert_eq!(
+            spec["paths"]["/users/{userId}"]["get"]["responses"]["200"]["content"]["application/json"]
+                ["schema"]["properties"]["name"]["type"],
+            "string"
+        );
     }
 
     #[test]

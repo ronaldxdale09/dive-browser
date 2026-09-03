@@ -75,6 +75,7 @@ pub enum NetworkEvent {
 
 /// Enable the domain and forward events to the chrome.
 pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
+    capture_bodies(app.clone(), tab_id, session.clone());
     crate::cdp_feed::attach(
         app,
         tab_id,
@@ -85,6 +86,52 @@ pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
             state.buffers.push_network(ev);
         },
     );
+}
+
+/// Largest response body kept.
+const MAX_BODY: usize = 64 * 1024;
+
+/// After a JSON response finishes loading, fetch its body so the `OpenAPI`
+/// inference and the replay editor can show it.
+fn capture_bodies(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
+    use tauri::Manager;
+    tauri::async_runtime::spawn(async move {
+        let mut events = session.subscribe();
+        loop {
+            match events.recv().await {
+                Ok(event) if event.method == "Network.loadingFinished" => {
+                    let Some(request_id) = event.params["requestId"].as_str().map(str::to_owned)
+                    else {
+                        continue;
+                    };
+                    let state = app.state::<crate::state::AppState>();
+                    let Some(row) = state.buffers.request(tab_id, &request_id) else {
+                        continue;
+                    };
+                    if !row.mime_type.contains("json") {
+                        continue;
+                    }
+                    if let Ok(result) = session
+                        .call(
+                            "Network.getResponseBody",
+                            serde_json::json!({"requestId": request_id}),
+                        )
+                        .await
+                        && result["base64Encoded"].as_bool() != Some(true)
+                        && let Some(body) = result["body"].as_str()
+                    {
+                        state.buffers.set_response_body(
+                            tab_id,
+                            &request_id,
+                            body.chars().take(MAX_BODY).collect(),
+                        );
+                    }
+                }
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 /// Translate a CDP event into a network event, if relevant.

@@ -46,6 +46,8 @@ pub struct RequestSummary {
     pub headers: std::collections::BTreeMap<String, String>,
     /// Request body, when captured.
     pub post_data: Option<String>,
+    /// Response body for JSON responses, truncated; captured after the load finishes.
+    pub response_body: Option<String>,
 }
 
 #[derive(Default)]
@@ -125,6 +127,7 @@ impl Buffers {
                         error: None,
                         headers: headers.clone(),
                         post_data: post_data.clone(),
+                        response_body: None,
                     };
                     if let Some(existing) = buf.iter_mut().find(|r| r.id == *request_id) {
                         *existing = row;
@@ -175,6 +178,18 @@ impl Buffers {
                 })
                 .unwrap_or_default()
         })
+    }
+
+    /// Attach a captured response body.
+    pub fn set_response_body(&self, tab: TabId, request_id: &str, body: String) {
+        self.with(|m| {
+            if let Some(r) = m
+                .get_mut(&tab)
+                .and_then(|b| b.requests.iter_mut().find(|r| r.id == request_id))
+            {
+                r.response_body = Some(body);
+            }
+        });
     }
 
     /// One request by id.
