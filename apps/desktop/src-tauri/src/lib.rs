@@ -50,8 +50,36 @@ pub fn run() {
             specta.mount_events(app);
             state::init(app)?;
             engine::create_main_window(app)?;
+            open_startup_urls(app);
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("failed to run dive");
+}
+
+/// Open tabs for URLs given on the command line or in `DIVE_OPEN_URL`
+/// (comma-separated). Lets `dive https://example.com` work and gives
+/// automation a way to drive the app without accessibility permissions.
+fn open_startup_urls(app: &tauri::App<Runtime>) {
+    use tauri::Manager;
+    let from_env = std::env::var("DIVE_OPEN_URL").unwrap_or_default();
+    let urls = std::env::args()
+        .skip(1)
+        .filter(|a| !a.starts_with("--"))
+        .chain(from_env.split(',').map(str::to_owned))
+        .filter(|u| !u.trim().is_empty())
+        .collect::<Vec<_>>();
+    if urls.is_empty() {
+        return;
+    }
+    let state = app.state::<state::AppState>();
+    let Some(workspace) = *state::lock(&state.active_workspace) else {
+        return;
+    };
+    for url in urls {
+        match commands::open_tab(app.handle(), &state, workspace, &url) {
+            Ok(tab) => tracing::info!(%tab.id, url, "opened startup tab"),
+            Err(e) => tracing::warn!(url, "failed to open startup tab: {e}"),
+        }
+    }
 }

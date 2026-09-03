@@ -1,36 +1,59 @@
 @import "tailwindcss";
 
+/* Dive chrome theme. Dark-first, neutral graphite (no blue cast), one cool
+   highlight for "active". Light values exist so the OS light theme is legible. */
 @theme {
-  --color-ground: #f5f7f6;
-  --color-surface: #ffffff;
-  --color-surface-2: #edf1f0;
-  --color-ink: #1b2430;
-  --color-ink-2: #4f5b66;
-  --color-ink-3: #7c8791;
-  --color-line: #d9e0de;
-  --color-line-2: #c4cdcb;
-  --color-accent: #0f6e75;
-  --color-accent-ink: #0b565c;
-  --color-accent-soft: #dceff0;
-  --font-sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-ground: #111111;
+  --color-surface: #181818;
+  --color-surface-2: #1f1f1f;
+  --color-surface-3: #262626;
+  --color-ink: #ececec;
+  --color-ink-2: #a8a8a8;
+  --color-ink-3: #6f6f6f;
+  --color-line: #262626;
+  --color-line-2: #333333;
+  --color-accent: #e9e9e9;
+  --color-accent-ink: #111111;
+  --color-highlight: #7fd8c8;
+  --color-highlight-soft: #163430;
+  --color-danger: #f0715e;
+  --font-sans: "Instrument Sans", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius-pill: 999px;
 }
 
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme: light) {
   :root {
-    --color-ground: #0e1417;
-    --color-surface: #141b20;
-    --color-surface-2: #1b2429;
-    --color-ink: #e3e9ea;
-    --color-ink-2: #a9b4ba;
-    --color-ink-3: #7b868d;
-    --color-line: #26313a;
-    --color-line-2: #35424b;
-    --color-accent: #4fc1c8;
-    --color-accent-ink: #8adde2;
-    --color-accent-soft: #12303a;
+    --color-ground: #f3f3f1;
+    --color-surface: #ffffff;
+    --color-surface-2: #ececea;
+    --color-surface-3: #e2e2df;
+    --color-ink: #161616;
+    --color-ink-2: #5b5b5b;
+    --color-ink-3: #8c8c8c;
+    --color-line: #e1e1de;
+    --color-line-2: #cfcfcb;
+    --color-accent: #161616;
+    --color-accent-ink: #ffffff;
+    --color-highlight: #0f8f7e;
+    --color-highlight-soft: #d8f1ec;
   }
 }
 
 html, body, #root { height: 100%; margin: 0; }
-body { background: var(--color-ground); color: var(--color-ink); font-family: var(--font-sans); font-size: 13px; user-select: none; -webkit-font-smoothing: antialiased; overflow: hidden; }
+body {
+  background: var(--color-ground);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+button, input { font: inherit; color: inherit; }
+button { cursor: default; }
+:focus-visible { outline: 2px solid var(--color-highlight); outline-offset: 1px; }
+
+/* cmdk */
+[cmdk-item][data-selected="true"] { background: var(--color-surface-3); }
+[cmdk-group-heading] { padding: 6px 12px 4px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }

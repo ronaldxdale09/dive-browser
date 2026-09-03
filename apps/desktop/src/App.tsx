@@ -17,18 +17,18 @@ export function App() {
   useShortcuts();
 
   return (
-    <div className="grid h-full grid-cols-[48px_minmax(0,1fr)] grid-rows-[38px_40px_minmax(0,1fr)] bg-ground text-ink">
-      <div className="row-span-3 border-r border-line bg-surface-2">
+    <div className="grid h-full grid-cols-[52px_minmax(0,1fr)] grid-rows-[40px_44px_minmax(0,1fr)] bg-ground text-ink">
+      <div className="row-span-3 border-r border-line bg-ground">
         <Rail />
       </div>
       <div className="col-start-2 row-start-1" data-tauri-drag-region>
         <TabStrip />
       </div>
-      <div className="col-start-2 row-start-2 border-b border-line bg-surface">
+      <div className="col-start-2 row-start-2">
         <Toolbar />
       </div>
-      <div className="col-start-2 row-start-3 grid min-h-0" style={{ gridTemplateColumns: open.sidecar ? "minmax(0,1fr) 340px" : "minmax(0,1fr)" }}>
-        <div className="grid min-h-0" style={{ gridTemplateRows: open.dock ? "minmax(0,1fr) 220px" : "minmax(0,1fr)" }}>
+      <div className="col-start-2 row-start-3 grid min-h-0 gap-px bg-line pl-px" style={{ gridTemplateColumns: open.sidecar ? "minmax(0,1fr) 360px" : "minmax(0,1fr)" }}>
+        <div className="grid min-h-0 gap-px bg-line" style={{ gridTemplateRows: open.dock ? "minmax(0,1fr) 240px" : "minmax(0,1fr)" }}>
           <Content />
           {open.dock && <Dock />}
         </div>
@@ -36,7 +36,7 @@ export function App() {
       </div>
       {open.palette && <Palette />}
       {error && (
-        <div role="alert" className="fixed bottom-3 left-14 rounded-md border border-line-2 bg-surface px-3 py-2 text-xs text-ink-2 shadow">
+        <div role="alert" className="fixed bottom-3 left-16 rounded-full border border-line-2 bg-surface-2 px-3 py-1.5 text-xs text-ink-2 shadow-lg">
           {error}
         </div>
       )}

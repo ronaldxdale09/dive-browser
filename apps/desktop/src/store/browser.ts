@@ -107,10 +107,3 @@ async function run(set: (p: Partial<BrowserState>) => void, f: () => Promise<unk
   }
 }
 
-/** Tabs of the active workspace only, split by tier for the strip. */
-export function selectStrip(s: BrowserState) {
-  const essentials = s.tabs.filter((t) => t.tier === "essential");
-  const pinned = s.tabs.filter((t) => t.tier === "pinned");
-  const today = s.tabs.filter((t) => t.tier === "today" && t.state !== "discarded");
-  return { essentials, pinned, today };
-}

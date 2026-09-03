@@ -126,7 +126,7 @@ impl Container {
         Self {
             id,
             name: name.into(),
-            cache_dir: format!("containers/{id}"),
+            cache_dir: format!("container-{id}"),
             persist_cookies: true,
         }
     }

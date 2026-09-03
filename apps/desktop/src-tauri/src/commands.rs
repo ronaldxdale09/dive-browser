@@ -138,7 +138,18 @@ pub(crate) fn tab_open(
     workspace_id: WorkspaceId,
     url: String,
 ) -> AppResult<Tab> {
-    let url = normalize_url(&url)?;
+    open_tab(&app, &state, workspace_id, &url)
+}
+
+/// Create, persist, show and announce a new tab. Shared by the IPC command
+/// and startup URL handling.
+pub fn open_tab(
+    app: &AppHandle<Runtime>,
+    state: &AppState,
+    workspace_id: WorkspaceId,
+    url: &str,
+) -> AppResult<Tab> {
+    let url = normalize_url(url)?;
     let (tab, container) = {
         let store = lock(&state.store);
         let workspace = store.workspace(workspace_id)?;
@@ -154,7 +165,7 @@ pub(crate) fn tab_open(
         let host = host
             .as_mut()
             .ok_or_else(|| AppError::new("engine not ready"))?;
-        host.open(&app, &tab, &container)?;
+        host.open(app, &tab, &container)?;
         host.activate(tab.id)?;
     }
     state.bus.publish(CoreEvent::TabUpserted(tab.clone()));
