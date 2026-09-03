@@ -36,6 +36,8 @@ url = { workspace = true }
 time = { workspace = true }
 base64 = "0.22"
 sourcemap = "9"
+arboard = { version = "3", default-features = false, features = ["image-data"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

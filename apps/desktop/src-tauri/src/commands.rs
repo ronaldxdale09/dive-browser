@@ -552,6 +552,23 @@ pub(crate) async fn tab_capture(
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// Put PNG bytes on the system clipboard as an image.
+pub fn copy_png_to_clipboard(png: &[u8]) -> AppResult<()> {
+    let img = image::load_from_memory_with_format(png, image::ImageFormat::Png)
+        .map_err(AppError::new)?
+        .to_rgba8();
+    let (width, height) = img.dimensions();
+    let data = arboard::ImageData {
+        width: width as usize,
+        height: height as usize,
+        bytes: img.into_raw().into(),
+    };
+    arboard::Clipboard::new()
+        .map_err(AppError::new)?
+        .set_image(data)
+        .map_err(AppError::new)
+}
+
 /// Capture `id` to `<data>/captures/dive-<timestamp>.png`.
 pub async fn capture_tab(
     state: &AppState,
@@ -573,7 +590,10 @@ pub async fn capture_tab(
         .to_rfc3339()
         .replace([':', '.'], "-");
     let path = dir.join(format!("dive-{stamp}.png"));
-    std::fs::write(&path, png)?;
+    std::fs::write(&path, &png)?;
+    if let Err(e) = copy_png_to_clipboard(&png) {
+        tracing::warn!("capture saved but clipboard copy failed: {e}");
+    }
     Ok(path)
 }
 

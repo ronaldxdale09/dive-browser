@@ -135,7 +135,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     if (!id) return;
     await run(set, async () => {
       const path = await ipc.tabCapture(id, fullPage);
-      set({ notice: `Saved ${path}` });
+      set({ notice: `Copied to clipboard · saved ${path.split("/").pop() ?? path}` });
       setTimeout(() => set({ notice: null }), 4000);
     });
   },
