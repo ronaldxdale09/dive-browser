@@ -21,6 +21,7 @@ mod meta;
 mod network;
 mod openapi;
 mod replay;
+mod snapshot;
 mod sourcemaps;
 mod state;
 mod storage;

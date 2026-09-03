@@ -49,6 +49,57 @@ impl AppBrowser {
 }
 
 impl AppBrowser {
+    /// Capture text, structure, errors and requests of `tab` right now.
+    pub async fn take_snapshot(
+        &self,
+        tab: TabId,
+    ) -> Result<crate::snapshot::PageSnapshot, BrowserError> {
+        self.ensure_view(tab)?;
+        let text = self.page_text(tab).await?;
+        let structure = self.page_state(tab).await?;
+        let state = self.state();
+        let row = lock(&state.store).tab(tab).map_err(other)?;
+        let errors = state
+            .buffers
+            .console_tail(tab, 200)
+            .into_iter()
+            .filter(|e| e.level == crate::console::Level::Error)
+            .map(|e| {
+                e.text
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(200)
+                    .collect()
+            })
+            .collect();
+        let requests = state
+            .buffers
+            .requests(tab, 300)
+            .into_iter()
+            .map(|r| {
+                format!(
+                    "{} {} -> {}",
+                    r.method,
+                    r.url,
+                    r.error.clone().unwrap_or_else(|| r
+                        .status
+                        .map_or_else(|| "pending".into(), |s| s.to_string()))
+                )
+            })
+            .collect();
+        Ok(crate::snapshot::PageSnapshot {
+            taken_at: dive_core::Timestamp::now().to_rfc3339(),
+            url: row.url,
+            title: row.title,
+            text,
+            structure,
+            errors,
+            requests,
+        })
+    }
+
     /// Backend node for a `ref` from the last `page_state` call.
     fn node_for(&self, tab: TabId, reference: &str) -> Result<i64, BrowserError> {
         self.state()
@@ -241,6 +292,26 @@ impl Browser for AppBrowser {
             &page_url,
             &state.buffers.requests(tab, 1000),
         ))
+    }
+
+    async fn page_snapshot(&self, tab: TabId) -> Result<String, BrowserError> {
+        let snap = self.take_snapshot(tab).await?;
+        let taken = snap.taken_at.clone();
+        self.state().buffers.push_snapshot(tab, snap);
+        Ok(format!("snapshot taken at {taken}"))
+    }
+
+    async fn page_diff(&self, tab: TabId) -> Result<Value, BrowserError> {
+        let snap = self.take_snapshot(tab).await?;
+        let state = self.state();
+        state.buffers.push_snapshot(tab, snap);
+        let (older, newer) = state
+            .buffers
+            .last_two_snapshots(tab)
+            .ok_or_else(|| other("take a snapshot first, then diff after the change"))?;
+        Ok(crate::snapshot::to_json(&crate::snapshot::diff(
+            &older, &newer,
+        )))
     }
 
     async fn console_tail(&self, tab: TabId, limit: usize) -> Result<Value, BrowserError> {

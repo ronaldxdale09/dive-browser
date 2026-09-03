@@ -17,10 +17,10 @@ const API_TYPES: &[&str] = &["XHR", "Fetch", "Document", "Other", "WebSocket"];
 pub fn from_requests(page_url: &str, requests: &[RequestSummary]) -> Value {
     let mut servers: BTreeSet<String> = BTreeSet::new();
     let mut paths: BTreeMap<String, BTreeMap<String, Operation>> = BTreeMap::new();
-    for r in requests
-        .iter()
-        .filter(|r| API_TYPES.contains(&r.resource_type.as_str()) && looks_like_api(r))
-    {
+    for r in requests.iter().filter(|r| {
+        (r.resource_type.is_empty() || API_TYPES.contains(&r.resource_type.as_str()))
+            && looks_like_api(r)
+    }) {
         let Ok(url) = url::Url::parse(&r.url) else {
             continue;
         };
@@ -272,6 +272,14 @@ mod tests {
                 "Fetch",
                 None,
             ),
+            req(
+                "GET",
+                "https://api.a.dev/health",
+                200,
+                "application/json",
+                "",
+                None,
+            ),
         ];
         let spec = from_requests("https://a.dev/", &reqs);
         assert_eq!(spec["openapi"], "3.1.0");
@@ -288,5 +296,9 @@ mod tests {
         );
         assert!(spec["paths"].get("/static/app.js").is_none());
         assert!(spec["paths"].get("/logo.png").is_none());
+        assert!(
+            spec["paths"].get("/health").is_some(),
+            "untyped requests still count"
+        );
     }
 }

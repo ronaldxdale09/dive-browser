@@ -22,6 +22,8 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec { name: "page_type".into(), description: "Replace the text of a field behind a ref; submit presses Enter.".into(), input_schema: obj(json!({"tab_id": tab, "ref": {"type": "string"}, "text": {"type": "string"}, "submit": {"type": "boolean"}}), &["ref", "text"]) },
         ToolSpec { name: "tab_navigate".into(), description: "Navigate the tab to a URL.".into(), input_schema: obj(json!({"tab_id": tab, "url": {"type": "string"}}), &["url"]) },
         ToolSpec { name: "console_tail".into(), description: "Recent console output: logs, warnings, exceptions, failed loads.".into(), input_schema: obj(json!({"tab_id": tab, "limit": {"type": "integer"}}), &[]) },
+        ToolSpec { name: "page_snapshot".into(), description: "Remember the page state now so page_diff can report what changed later.".into(), input_schema: obj(json!({"tab_id": tab}), &[]) },
+        ToolSpec { name: "page_diff".into(), description: "What changed since the last page_snapshot: text, structure, errors, requests.".into(), input_schema: obj(json!({"tab_id": tab}), &[]) },
         ToolSpec { name: "network_list".into(), description: "Recent requests with method, status, type, size and errors.".into(), input_schema: obj(json!({"tab_id": tab, "limit": {"type": "integer"}}), &[]) },
     ]
 }
@@ -119,6 +121,18 @@ async fn execute<B: Browser>(
             .await
             .map(|()| Value::String("navigating".into()))
             .map_err(|e| e.to_string()),
+        "page_snapshot" => Ok(Value::String(
+            browser
+                .page_snapshot(tab()?)
+                .await
+                .map_err(|e| e.to_string())?,
+        )),
+        "page_diff" => Ok(Value::String(
+            browser.page_diff(tab()?).await.map_err(|e| e.to_string())?["summary"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+        )),
         "console_tail" => text(
             browser
                 .console_tail(tab()?, limit())

@@ -96,6 +96,10 @@ pub trait Browser: Send + Sync + 'static {
     ) -> Result<(), BrowserError>;
     /// `OpenAPI` 3.1 JSON inferred from the tab's traffic.
     async fn api_spec(&self, tab: TabId) -> Result<serde_json::Value, BrowserError>;
+    /// Remember the page's current state for a later diff.
+    async fn page_snapshot(&self, tab: TabId) -> Result<String, BrowserError>;
+    /// Snapshot now and compare with the previous snapshot.
+    async fn page_diff(&self, tab: TabId) -> Result<serde_json::Value, BrowserError>;
 }
 
 /// Server options.
@@ -382,6 +386,36 @@ impl<B: Browser> DiveServer<B> {
         json_result(&self.browser.api_spec(tab).await?)
     }
 
+    /// Snapshot.
+    #[tool(
+        name = "page_snapshot",
+        description = "Remember the page's text, structure, errors and requests so page_diff can show what changed later."
+    )]
+    async fn page_snapshot(
+        &self,
+        Parameters(p): Parameters<TabRef>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id).await?;
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            self.browser.page_snapshot(tab).await?,
+        )]))
+    }
+
+    /// Diff.
+    #[tool(
+        name = "page_diff",
+        description = "Snapshot the page now and diff it against the previous snapshot: text, structure, new or fixed errors, new or gone requests."
+    )]
+    async fn page_diff(
+        &self,
+        Parameters(p): Parameters<TabRef>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id).await?;
+        let v = self.browser.page_diff(tab).await?;
+        let summary = v["summary"].as_str().unwrap_or_default().to_owned();
+        Ok(CallToolResult::success(vec![ContentBlock::text(summary)]))
+    }
+
     /// Evaluate JS (gated).
     #[tool(
         name = "page_evaluate",
@@ -587,6 +621,12 @@ mod tests {
         }
         async fn api_spec(&self, _tab: TabId) -> Result<serde_json::Value, BrowserError> {
             Ok(serde_json::json!({"openapi": "3.1.0"}))
+        }
+        async fn page_snapshot(&self, _tab: TabId) -> Result<String, BrowserError> {
+            Ok("snapshot".into())
+        }
+        async fn page_diff(&self, _tab: TabId) -> Result<serde_json::Value, BrowserError> {
+            Ok(serde_json::json!({"summary": "no differences"}))
         }
     }
 

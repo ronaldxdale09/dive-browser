@@ -43,6 +43,8 @@ struct TabBuffers {
     requests: VecDeque<RequestSummary>,
     /// `ref` id -> backend DOM node id from the last `page_state` snapshot.
     ax_refs: HashMap<String, i64>,
+    /// Last two page snapshots, oldest first.
+    snapshots: VecDeque<crate::snapshot::PageSnapshot>,
 }
 
 /// Thread-safe buffers for every tab.
@@ -196,6 +198,28 @@ impl Buffers {
     /// Backend DOM node id for `reference`, if the snapshot is current.
     pub fn resolve_ref(&self, tab: TabId, reference: &str) -> Option<i64> {
         self.with(|m| m.get(&tab).and_then(|b| b.ax_refs.get(reference).copied()))
+    }
+
+    /// Store a snapshot, keeping the two most recent.
+    pub fn push_snapshot(&self, tab: TabId, snap: crate::snapshot::PageSnapshot) {
+        self.with(|m| {
+            let list = &mut m.entry(tab).or_default().snapshots;
+            if list.len() == 2 {
+                list.pop_front();
+            }
+            list.push_back(snap);
+        });
+    }
+
+    /// The two most recent snapshots (older, newer), if both exist.
+    pub fn last_two_snapshots(
+        &self,
+        tab: TabId,
+    ) -> Option<(crate::snapshot::PageSnapshot, crate::snapshot::PageSnapshot)> {
+        self.with(|m| {
+            let list = &m.get(&tab)?.snapshots;
+            (list.len() == 2).then(|| (list[0].clone(), list[1].clone()))
+        })
     }
 
     /// Forget a closed tab.
