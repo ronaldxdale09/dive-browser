@@ -27,6 +27,10 @@ pub enum NetworkEvent {
         method: String,
         /// `Document`, `Script`, `XHR`, `Fetch`, `Image`, ...
         resource_type: String,
+        /// Request headers as sent by the renderer.
+        headers: std::collections::BTreeMap<String, String>,
+        /// Request body when present and small.
+        post_data: Option<String>,
         /// Seconds since an arbitrary monotonic origin.
         timestamp: f64,
     },
@@ -96,6 +100,17 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<NetworkEvent> {
             url: text(&p["request"]["url"]),
             method: text(&p["request"]["method"]),
             resource_type: text(&p["type"]),
+            headers: p["request"]["headers"]
+                .as_object()
+                .map(|m| {
+                    m.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_owned())))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            post_data: p["request"]["postData"]
+                .as_str()
+                .map(|d| d.chars().take(64 * 1024).collect()),
             timestamp,
         }),
         "Network.responseReceived" => Some(NetworkEvent::Response {

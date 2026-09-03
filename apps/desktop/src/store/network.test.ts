@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { fold } from "./network";
 import type { NetworkEvent } from "../lib/ipc";
 
-const sent = (id: string, url: string, t = 1): NetworkEvent => ({ type: "sent", data: { tab_id: "t", request_id: id, url, method: "GET", resource_type: "Fetch", timestamp: t } });
+const sent = (id: string, url: string, t = 1): NetworkEvent => ({ type: "sent", data: { tab_id: "t", request_id: id, url, method: "GET", resource_type: "Fetch", headers: {}, post_data: null, timestamp: t } });
 
 describe("network fold", () => {
   it("builds a row through its lifecycle", () => {

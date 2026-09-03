@@ -106,6 +106,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_find,
             tab_vitals,
             resolve_frame,
+            request_captured,
+            request_replay,
             layout_set_content_bounds,
             commands_list,
             command_run,
@@ -691,6 +693,44 @@ pub(crate) async fn resolve_frame(
         .sourcemaps
         .resolve(&url, line, column.unwrap_or(1))
         .await)
+}
+
+/// The captured request as an editable replay draft.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn request_captured(
+    state: State<'_, AppState>,
+    tab_id: TabId,
+    request_id: String,
+) -> AppResult<crate::replay::ReplayRequest> {
+    let r = state
+        .buffers
+        .request(tab_id, &request_id)
+        .ok_or_else(|| AppError::new("request no longer in the buffer"))?;
+    Ok(crate::replay::ReplayRequest {
+        method: r.method,
+        url: r.url,
+        headers: r.headers,
+        body: r.post_data,
+        with_cookies: true,
+    })
+}
+
+/// Replay a (possibly edited) request, optionally with the tab's cookies.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn request_replay(
+    state: State<'_, AppState>,
+    tab_id: TabId,
+    request: crate::replay::ReplayRequest,
+) -> AppResult<crate::replay::ReplayResponse> {
+    let cookie = if request.with_cookies {
+        let session = cdp_for(&state, tab_id)?;
+        crate::replay::cookie_header(&session, &request.url).await
+    } else {
+        None
+    };
+    crate::replay::send(&request, cookie).await
 }
 
 /// Head metadata for the Meta panel.

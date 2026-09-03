@@ -73,6 +73,10 @@ export const commands = {
 	/**  1-based column. */
 	column: number,
 } | null, AppError>(__TAURI_INVOKE("resolve_frame", { url, line, column })),
+	/**  The captured request as an editable replay draft. */
+	requestCaptured: (tabId: TabId, requestId: string) => typedError<ReplayRequest, AppError>(__TAURI_INVOKE("request_captured", { tabId, requestId })),
+	/**  Replay a (possibly edited) request, optionally with the tab's cookies. */
+	requestReplay: (tabId: TabId, request: ReplayRequest) => typedError<ReplayResponse, AppError>(__TAURI_INVOKE("request_replay", { tabId, request })),
 	layoutSetContentBounds: (bounds: Bounds) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_bounds", { bounds })),
 	commandsList: () => __TAURI_INVOKE<Command[]>("commands_list"),
 	/**
@@ -359,6 +363,10 @@ export type NetworkEvent =
 	method: string,
 	/**  `Document`, `Script`, `XHR`, `Fetch`, `Image`, ... */
 	resource_type: string,
+	/**  Request headers as sent by the renderer. */
+	headers: { [key in string]: string },
+	/**  Request body when present and small. */
+	post_data: string | null,
 	/**  Seconds since an arbitrary monotonic origin. */
 	timestamp: number | null,
 } } | 
@@ -408,6 +416,32 @@ export type Original = {
 	line: number,
 	/**  1-based column. */
 	column: number,
+};
+
+/**  What to send. Starts as the captured request; the user may edit it. */
+export type ReplayRequest = {
+	/**  HTTP method. */
+	method: string,
+	/**  Absolute URL. */
+	url: string,
+	/**  Headers to send (hop-by-hop ones are dropped). */
+	headers: { [key in string]: string },
+	/**  Body text, if any. */
+	body: string | null,
+	/**  Attach the tab's cookies for this URL. */
+	with_cookies: boolean,
+};
+
+/**  What came back. */
+export type ReplayResponse = {
+	/**  HTTP status. */
+	status: number,
+	/**  Response headers. */
+	headers: { [key in string]: string },
+	/**  Body text, truncated to 256 kB; binary bodies are described. */
+	body: string,
+	/**  Round-trip time. */
+	elapsed_ms: number,
 };
 
 /**  LAN address plus a QR code for it. */

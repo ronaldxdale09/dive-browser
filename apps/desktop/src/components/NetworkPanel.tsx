@@ -1,9 +1,10 @@
-import { Ban } from "lucide-react";
+import { Ban, Repeat } from "lucide-react";
 import { useState } from "react";
 import { useBrowser } from "../store/browser";
 import { selectRequests, useNetwork } from "../store/network";
 import type { RequestRow } from "../store/network";
-import { IconButton } from "./Icon";
+import { Icon, IconButton } from "./Icon";
+import { ReplayEditor } from "./ReplayEditor";
 
 export function NetworkTools() {
   const activeTab = useBrowser((s) => s.activeTab);
@@ -42,6 +43,7 @@ export function NetworkPanel() {
   const rows = useNetwork(selectRequests(activeTab));
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
+  const [replaying, setReplaying] = useState<string | null>(null);
   const shown = filter ? rows.filter((r) => r.url.toLowerCase().includes(filter.toLowerCase())) : rows;
   const detail = rows.find((r) => r.id === selected);
 
@@ -94,13 +96,19 @@ export function NetworkPanel() {
           </tbody>
         </table>
       </div>
-      {detail && (
-        <div className="select-text border-t border-line bg-surface-2 px-3 py-1.5 font-mono text-[11px] text-ink-2">
-          <span className="text-ink">{detail.method}</span> {detail.url}
-          {detail.mimeType && <span className="ml-3 text-ink-3">{detail.mimeType}</span>}
-          {detail.error && <span className="ml-3 text-danger">{detail.error}</span>}
+      {detail && replaying !== detail.id && (
+        <div className="flex items-center gap-3 border-t border-line bg-surface-2 px-3 py-1.5 font-mono text-[11px] text-ink-2 select-text">
+          <span className="min-w-0 flex-1 truncate">
+            <span className="text-ink">{detail.method}</span> {detail.url}
+            {detail.mimeType && <span className="ml-3 text-ink-3">{detail.mimeType}</span>}
+            {detail.error && <span className="ml-3 text-danger">{detail.error}</span>}
+          </span>
+          <button type="button" onClick={() => setReplaying(detail.id)} className="flex h-6 shrink-0 items-center gap-1 rounded-full border border-line px-2 font-sans text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
+            <Icon icon={Repeat} size={11} /> Replay
+          </button>
         </div>
       )}
+      {detail && replaying === detail.id && activeTab && <ReplayEditor tabId={activeTab} requestId={detail.id} onClose={() => setReplaying(null)} />}
     </div>
   );
 }

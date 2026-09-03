@@ -9,7 +9,7 @@ import { commands, events } from "../generated/bindings";
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 export { events };
-export type { Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, ShareInfo } from "../generated/bindings";
+export type { Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, ShareInfo, ReplayRequest, ReplayResponse } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
 export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
@@ -18,6 +18,7 @@ export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
 }
 
 type WorkspaceDraftInput = { name: string; color: string };
+export type ReplayRequestInput = { method: string; url: string; headers: Record<string, string>; body: string | null; with_cookies: boolean };
 type ChatTurnInput = { role: string; content: string };
 export type ChatDeltaOut =
   | { type: "text"; data: string }
@@ -57,6 +58,8 @@ export const ipc = {
     unwrap(await commands.layoutSetContentBounds(b)),
   commandsList: () => commands.commandsList(),
   appInfo: () => commands.appInfo(),
+  requestCaptured: async (tabId: string, requestId: string) => unwrap(await commands.requestCaptured(tabId, requestId)),
+  requestReplay: async (tabId: string, request: ReplayRequestInput) => unwrap(await commands.requestReplay(tabId, request)),
   devServers: () => commands.devServers(),
   shareUrl: async (url: string) => unwrap(await commands.shareUrl(url)),
   agentKeySet: async (key: string) => unwrap(await commands.agentKeySet(key)),

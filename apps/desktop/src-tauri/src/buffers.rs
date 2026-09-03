@@ -31,6 +31,10 @@ pub struct RequestSummary {
     pub encoded_length: Option<f64>,
     /// Error text if it failed.
     pub error: Option<String>,
+    /// Request headers.
+    pub headers: std::collections::BTreeMap<String, String>,
+    /// Request body, when captured.
+    pub post_data: Option<String>,
 }
 
 #[derive(Default)]
@@ -89,6 +93,8 @@ impl Buffers {
                     url,
                     method,
                     resource_type,
+                    headers,
+                    post_data,
                     ..
                 } => {
                     let row = RequestSummary {
@@ -100,6 +106,8 @@ impl Buffers {
                         mime_type: String::new(),
                         encoded_length: None,
                         error: None,
+                        headers: headers.clone(),
+                        post_data: post_data.clone(),
                     };
                     if let Some(existing) = buf.iter_mut().find(|r| r.id == *request_id) {
                         *existing = row;
@@ -149,6 +157,14 @@ impl Buffers {
                     v
                 })
                 .unwrap_or_default()
+        })
+    }
+
+    /// One request by id.
+    pub fn request(&self, tab: TabId, request_id: &str) -> Option<RequestSummary> {
+        self.with(|m| {
+            m.get(&tab)
+                .and_then(|b| b.requests.iter().find(|r| r.id == request_id).cloned())
         })
     }
 
@@ -235,6 +251,8 @@ mod tests {
             url: "https://a/x".into(),
             method: "GET".into(),
             resource_type: "Fetch".into(),
+            headers: std::collections::BTreeMap::new(),
+            post_data: None,
             timestamp: 1.0,
         });
         b.push_network(&NetworkEvent::Response {
