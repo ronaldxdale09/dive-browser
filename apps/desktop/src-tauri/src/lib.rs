@@ -7,6 +7,7 @@ mod emulate;
 mod engine;
 mod error;
 mod favicon;
+mod mcp;
 mod network;
 mod state;
 
@@ -56,6 +57,7 @@ pub fn run() {
             engine::create_main_window(app)?;
             restore_session(app);
             open_startup_urls(app);
+            mcp::start(app.handle().clone());
             smoke_test(app.handle().clone());
             Ok(())
         })
