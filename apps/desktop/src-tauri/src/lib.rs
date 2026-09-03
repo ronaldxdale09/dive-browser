@@ -1,6 +1,7 @@
 //! Dive desktop: Tauri host that owns the CEF engine, the core state and the
 //! typed IPC surface used by the React chrome.
 
+mod a11y;
 mod agent;
 mod buffers;
 mod cdp_feed;
@@ -12,6 +13,7 @@ mod error;
 mod favicon;
 mod housekeeping;
 mod mcp;
+mod meta;
 mod network;
 mod state;
 mod storage;

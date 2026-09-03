@@ -6,6 +6,8 @@ import { selectEntries, useConsole } from "../store/console";
 import { Icon, IconButton } from "./Icon";
 import { NetworkPanel, NetworkTools } from "./NetworkPanel";
 import { StoragePanel } from "./StoragePanel";
+import { MetaPanel } from "./MetaPanel";
+import { A11yPanel } from "./A11yPanel";
 
 const PANELS = [
   { id: "console", label: "Console", icon: Terminal },
@@ -42,7 +44,9 @@ export function Dock() {
       {panel === "console" && <ConsolePanel />}
       {panel === "network" && <NetworkPanel />}
       {panel === "storage" && <StoragePanel />}
-      {panel !== "console" && panel !== "network" && panel !== "storage" && <div className="flex-1 px-3 py-2 text-xs text-ink-3">Coming in Phase 2.</div>}
+      {panel === "meta" && <MetaPanel />}
+      {panel === "a11y" && <A11yPanel />}
+      {panel === "vitals" && <div className="flex-1 px-3 py-2 text-xs text-ink-3">Web Vitals arrive with the performance work.</div>}
     </section>
   );
 }

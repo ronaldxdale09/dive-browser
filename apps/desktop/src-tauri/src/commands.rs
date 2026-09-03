@@ -55,6 +55,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_emulate,
             tab_media,
             tab_storage,
+            tab_meta,
+            tab_a11y,
             layout_set_content_bounds,
             commands_list,
             command_run,
@@ -577,6 +579,29 @@ pub(crate) async fn tab_storage(
     let url = lock(&state.store).tab(id)?.url;
     let session = cdp_for(&state, id)?;
     crate::storage::snapshot(&session, &url).await
+}
+
+/// Head metadata for the Meta panel.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_meta(
+    state: State<'_, AppState>,
+    id: TabId,
+) -> AppResult<crate::meta::MetaSnapshot> {
+    let session = cdp_for(&state, id)?;
+    crate::meta::snapshot(&session).await
+}
+
+/// Run axe-core (source supplied by the chrome) and return violations.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_a11y(
+    state: State<'_, AppState>,
+    id: TabId,
+    axe_source: String,
+) -> AppResult<crate::a11y::A11yReport> {
+    let session = cdp_for(&state, id)?;
+    crate::a11y::run(&session, &axe_source).await
 }
 
 fn cdp_for(state: &AppState, id: TabId) -> AppResult<dive_cdp::CdpSession> {

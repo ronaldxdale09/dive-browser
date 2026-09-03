@@ -56,6 +56,10 @@ export const commands = {
 	tabMedia: (id: TabId, media: MediaOverrides) => typedError<null, AppError>(__TAURI_INVOKE("tab_media", { id, media })),
 	/**  Cookies and web storage for a tab. */
 	tabStorage: (id: TabId) => typedError<StorageSnapshot, AppError>(__TAURI_INVOKE("tab_storage", { id })),
+	/**  Head metadata for the Meta panel. */
+	tabMeta: (id: TabId) => typedError<MetaSnapshot, AppError>(__TAURI_INVOKE("tab_meta", { id })),
+	/**  Run axe-core (source supplied by the chrome) and return violations. */
+	tabA11y: (id: TabId, axeSource: string) => typedError<A11yReport, AppError>(__TAURI_INVOKE("tab_a11y", { id, axeSource })),
 	layoutSetContentBounds: (bounds: Bounds) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_bounds", { bounds })),
 	commandsList: () => __TAURI_INVOKE<Command[]>("commands_list"),
 	/**
@@ -79,6 +83,16 @@ export const events = {
 };
 
 /* Types */
+/**  Audit result. */
+export type A11yReport = {
+	/**  Failing rules, most severe first. */
+	violations: Violation[],
+	/**  Number of rules that passed. */
+	passes: number,
+	/**  Number of rules needing manual review. */
+	incomplete: number,
+};
+
 /**  A failure reported to the chrome as a plain message. */
 export type AppError = {
 	/**  Human-readable description. */
@@ -232,6 +246,28 @@ export type MediaOverrides = {
 	media_type: string | null,
 };
 
+/**  Parsed head metadata. */
+export type MetaSnapshot = {
+	/**  `<title>`. */
+	title: string,
+	/**  `<meta name="description">`. */
+	description: string | null,
+	/**  `<link rel="canonical">`. */
+	canonical: string | null,
+	/**  `<html lang>`. */
+	lang: string | null,
+	/**  `<meta name="viewport">`. */
+	viewport: string | null,
+	/**  `<meta name="robots">`. */
+	robots: string | null,
+	/**  `og:*` properties without the prefix. */
+	og: { [key in string]: string },
+	/**  `twitter:*` names without the prefix. */
+	twitter: { [key in string]: string },
+	/**  Icon hrefs from `<link rel*="icon">`. */
+	icons: string[],
+};
+
 /**  One step in a request's life. The chrome merges these by `request_id`. */
 export type NetworkEvent = 
 /**  A request left the browser. */
@@ -357,6 +393,22 @@ export type TabTier =
 "pinned" | 
 /**  Ordinary tab, auto-archived after inactivity. */
 "today";
+
+/**  One failing rule. */
+export type Violation = {
+	/**  Rule id, e.g. `color-contrast`. */
+	id: string,
+	/**  `minor` | `moderate` | `serious` | `critical`. */
+	impact: string,
+	/**  Short description. */
+	help: string,
+	/**  Link to the rule documentation. */
+	help_url: string,
+	/**  CSS selectors of offending nodes (first 20). */
+	targets: string[],
+	/**  Total offending nodes. */
+	count: number,
+};
 
 /**  A named set of tabs bound to one container. */
 export type Workspace = {
