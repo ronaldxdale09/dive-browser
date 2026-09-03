@@ -10,6 +10,7 @@ mod emulate;
 mod engine;
 mod error;
 mod favicon;
+mod housekeeping;
 mod mcp;
 mod network;
 mod state;
@@ -63,6 +64,7 @@ pub fn run() {
             restore_session(app);
             open_startup_urls(app);
             mcp::start(app.handle().clone());
+            housekeeping::start(app.handle().clone());
             smoke_test(app.handle().clone());
             Ok(())
         })

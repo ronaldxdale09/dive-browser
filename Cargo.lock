@@ -1170,6 +1170,7 @@ dependencies = [
  "tauri-build",
  "tauri-specta",
  "thiserror 2.0.20",
+ "time",
  "tokio",
  "tracing",
  "tracing-subscriber",
