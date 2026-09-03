@@ -42,6 +42,8 @@ pub struct ConsoleEntry {
     pub line: Option<u32>,
     /// Milliseconds since the epoch.
     pub timestamp: f64,
+    /// 1-based column, when known.
+    pub column: Option<u32>,
 }
 
 /// Enable the domains and forward every entry to the chrome.
@@ -92,6 +94,7 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<ConsoleEntry> {
                     .and_then(|f| f["lineNumber"].as_u64())
                     .map(|n| u32::try_from(n + 1).unwrap_or(u32::MAX)),
                 timestamp: p["timestamp"].as_f64().unwrap_or_default(),
+                column: None,
             })
         }
         "Runtime.exceptionThrown" => {
@@ -111,6 +114,7 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<ConsoleEntry> {
                     .as_u64()
                     .map(|n| u32::try_from(n + 1).unwrap_or(u32::MAX)),
                 timestamp: p["timestamp"].as_f64().unwrap_or_default(),
+                column: None,
             })
         }
         "Log.entryAdded" => {
@@ -131,6 +135,7 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<ConsoleEntry> {
                     .as_u64()
                     .map(|n| u32::try_from(n + 1).unwrap_or(u32::MAX)),
                 timestamp: e["timestamp"].as_f64().unwrap_or_default(),
+                column: None,
             })
         }
         _ => None,

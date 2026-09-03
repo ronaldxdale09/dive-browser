@@ -243,7 +243,17 @@ async fn page_context(state: &AppState, tab: TabId) -> String {
     if !console.is_empty() {
         out.push_str("\nconsole (oldest first):\n");
         for e in console {
-            let _ = writeln!(out, "[{:?}] {}", e.level, truncate(&e.text, 300));
+            let mut loc = String::new();
+            if let (Some(url), Some(line)) = (&e.url, e.line)
+                && e.level == crate::console::Level::Error
+                && let Some(o) = state
+                    .sourcemaps
+                    .resolve(url, line, e.column.unwrap_or(1))
+                    .await
+            {
+                loc = format!(" ({}:{}:{})", o.source, o.line, o.column);
+            }
+            let _ = writeln!(out, "[{:?}] {}{loc}", e.level, truncate(&e.text, 300));
         }
     }
     let failed: Vec<_> = state

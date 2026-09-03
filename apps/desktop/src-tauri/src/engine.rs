@@ -355,13 +355,11 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
         .min_inner_size(720.0, 480.0)
         .build()?;
 
-    let chrome = window.add_child(
+    let _chrome = window.add_child(
         WebviewBuilder::new(CHROME_LABEL, WebviewUrl::App("index.html".into())).auto_resize(),
         LogicalPosition::new(0.0, 0.0),
         LogicalSize::new(width, height),
     )?;
-    #[cfg(debug_assertions)]
-    chrome.open_devtools();
 
     let state = app.state::<AppState>();
     *lock(&state.host) = Some(TabHost::new(window, crate::state::profiles_root()));

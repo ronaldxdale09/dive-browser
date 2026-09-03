@@ -204,6 +204,7 @@ mod tests {
             url: None,
             line: None,
             timestamp: 0.0,
+            column: None,
         }
     }
 

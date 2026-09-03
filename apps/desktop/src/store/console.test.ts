@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { append } from "./console";
 import type { ConsoleEntry } from "../lib/ipc";
 
-const entry = (i: number): ConsoleEntry => ({ tab_id: "t", level: "info", text: String(i), source: "console", url: null, line: null, timestamp: i });
+const entry = (i: number): ConsoleEntry => ({ tab_id: "t", level: "info", text: String(i), source: "console", url: null, line: null, column: null, timestamp: i });
 
 describe("console buffer", () => {
   it("caps at 500 entries keeping the newest", () => {

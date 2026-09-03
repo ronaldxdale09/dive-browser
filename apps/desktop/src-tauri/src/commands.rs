@@ -91,6 +91,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_a11y,
             tab_find,
             tab_vitals,
+            resolve_frame,
             layout_set_content_bounds,
             commands_list,
             command_run,
@@ -639,6 +640,21 @@ pub(crate) async fn tab_vitals(
 ) -> AppResult<crate::vitals::Vitals> {
     let session = cdp_for(&state, id)?;
     crate::vitals::read(&session).await
+}
+
+/// Map a script location to its original source through source maps.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn resolve_frame(
+    state: State<'_, AppState>,
+    url: String,
+    line: u32,
+    column: Option<u32>,
+) -> AppResult<Option<crate::sourcemaps::Original>> {
+    Ok(state
+        .sourcemaps
+        .resolve(&url, line, column.unwrap_or(1))
+        .await)
 }
 
 /// Head metadata for the Meta panel.

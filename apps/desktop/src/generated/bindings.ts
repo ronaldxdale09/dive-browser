@@ -64,6 +64,15 @@ export const commands = {
 	tabFind: (id: TabId, query: string, index: number) => typedError<FindResult, AppError>(__TAURI_INVOKE("tab_find", { id, query, index })),
 	/**  Web Vitals from buffered performance entries. */
 	tabVitals: (id: TabId) => typedError<Vitals, AppError>(__TAURI_INVOKE("tab_vitals", { id })),
+	/**  Map a script location to its original source through source maps. */
+	resolveFrame: (url: string, line: number, column: number | null) => typedError<{
+	/**  Source path as recorded in the map (often relative to the project). */
+	source: string,
+	/**  1-based line. */
+	line: number,
+	/**  1-based column. */
+	column: number,
+} | null, AppError>(__TAURI_INVOKE("resolve_frame", { url, line, column })),
 	layoutSetContentBounds: (bounds: Bounds) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_bounds", { bounds })),
 	commandsList: () => __TAURI_INVOKE<Command[]>("commands_list"),
 	/**
@@ -199,6 +208,8 @@ export type ConsoleEntry = {
 	line: number | null,
 	/**  Milliseconds since the epoch. */
 	timestamp: number | null,
+	/**  1-based column, when known. */
+	column: number | null,
 };
 
 /**  Identifies a [`Container`]. */
@@ -372,6 +383,16 @@ export type NetworkEvent =
 	/**  Seconds. */
 	timestamp: number | null,
 } };
+
+/**  An original location. */
+export type Original = {
+	/**  Source path as recorded in the map (often relative to the project). */
+	source: string,
+	/**  1-based line. */
+	line: number,
+	/**  1-based column. */
+	column: number,
+};
 
 /**  Everything the chrome needs to render on boot. */
 export type Snapshot = {

@@ -35,6 +35,8 @@ thiserror = { workspace = true }
 url = { workspace = true }
 time = { workspace = true }
 base64 = "0.22"
+sourcemap = "9"
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "1", features = ["keychain"] }

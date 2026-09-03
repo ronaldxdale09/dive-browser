@@ -23,6 +23,8 @@ pub struct AppState {
     pub active_workspace: Mutex<Option<WorkspaceId>>,
     /// Recent console/network activity per tab.
     pub buffers: crate::buffers::Buffers,
+    /// Source map cache for stack frames.
+    pub sourcemaps: crate::sourcemaps::Resolver,
 }
 
 /// Directory holding every container's Chromium profile.
@@ -68,6 +70,7 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
         host: Mutex::new(None),
         active_workspace: Mutex::new(Some(active)),
         buffers: crate::buffers::Buffers::default(),
+        sourcemaps: crate::sourcemaps::Resolver::default(),
     };
     crate::commands::register_builtin(&state.commands);
     app.manage(state);

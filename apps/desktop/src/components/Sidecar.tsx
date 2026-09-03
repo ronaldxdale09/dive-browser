@@ -1,5 +1,7 @@
 import { ArrowUp, KeyRound, ListTree, MessageSquare, Play, Plus, Radar, Trash2, Wand2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { ipc } from "../lib/ipc";
+import type { ConsoleEntry } from "../lib/ipc";
 import { useAgent } from "../store/agent";
 import { selectErrors, useConsole } from "../store/console";
 import { render as renderSkill, useSkills } from "../store/skills";
@@ -187,6 +189,7 @@ function Watchers({ onAsk }: { onAsk: () => void }) {
             <div className="mb-1 flex items-center gap-2 font-mono text-[10px] text-ink-3">
               <span>{e.source}</span>
               {where && <span className="truncate">{where}</span>}
+              <OriginalLocation entry={e} />
             </div>
             <div className="line-clamp-4 font-mono text-[11px] whitespace-pre-wrap text-danger select-text">{e.text}</div>
             <button
@@ -286,4 +289,29 @@ function Skills({ onRun }: { onRun: () => void }) {
       </form>
     </div>
   );
+}
+
+const resolved = new Map<string, Promise<string | null>>();
+
+/** Original file:line via source maps, resolved once per frame and cached. */
+function OriginalLocation({ entry }: { entry: ConsoleEntry }) {
+  const [text, setText] = useState<string | null>(null);
+  const key = entry.url && entry.line ? `${entry.url}:${entry.line}:${entry.column ?? 1}` : null;
+  useEffect(() => {
+    if (!key || !entry.url || !entry.line) return;
+    let alive = true;
+    let p = resolved.get(key);
+    if (!p) {
+      p = ipc
+        .resolveFrame(entry.url, entry.line, entry.column ?? null)
+        .then((o) => (o ? `${o.source}:${o.line}:${o.column}` : null))
+        .catch(() => null);
+      resolved.set(key, p);
+    }
+    void p.then((t) => alive && setText(t));
+    return () => {
+      alive = false;
+    };
+  }, [key, entry.url, entry.line, entry.column]);
+  return text ? <span className="truncate text-highlight" title="Original source via source map">{text}</span> : null;
 }

@@ -18,6 +18,7 @@ mod housekeeping;
 mod mcp;
 mod meta;
 mod network;
+mod sourcemaps;
 mod state;
 mod storage;
 mod vitals;
