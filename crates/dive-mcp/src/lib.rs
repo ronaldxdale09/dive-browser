@@ -252,6 +252,42 @@ impl<B: Browser> DiveServer<B> {
         )]))
     }
 
+    /// Console tail.
+    #[tool(
+        name = "console_tail",
+        description = "Recent console output for a tab: logs, warnings, uncaught exceptions and failed loads, oldest first."
+    )]
+    async fn console_tail(
+        &self,
+        Parameters(p): Parameters<TailParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id).await?;
+        json_result(
+            &self
+                .browser
+                .console_tail(tab, p.limit.unwrap_or(50) as usize)
+                .await?,
+        )
+    }
+
+    /// Network list.
+    #[tool(
+        name = "network_list",
+        description = "Recent requests for a tab with method, status, type, size and errors, oldest first."
+    )]
+    async fn network_list(
+        &self,
+        Parameters(p): Parameters<TailParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id).await?;
+        json_result(
+            &self
+                .browser
+                .requests(tab, p.limit.unwrap_or(50) as usize)
+                .await?,
+        )
+    }
+
     /// Evaluate JS (gated).
     #[tool(
         name = "page_evaluate",
@@ -470,6 +506,20 @@ mod tests {
             .await
             .unwrap();
         assert!(shot.content[0].as_image().is_some());
+
+        let tail = server
+            .console_tail(Parameters(TailParams {
+                tab_id: None,
+                limit: Some(5),
+            }))
+            .await
+            .unwrap();
+        assert!(text_of(&tail).contains("\"limit\": 5"));
+        let reqs = server
+            .network_list(Parameters(TailParams::default()))
+            .await
+            .unwrap();
+        assert!(text_of(&reqs).contains("\"limit\": 50"));
     }
 
     #[tokio::test]

@@ -297,11 +297,30 @@ fn attach_cdp(view: &Webview<Runtime>) -> tauri::Result<CdpSession> {
     view.on_dev_tools_protocol(move |protocol| {
         // `Message` carries the raw JSON for both results and events; the
         // other variants are pre-parsed duplicates we do not need.
-        if let tauri::CefDevToolsProtocol::Message(bytes) = protocol
-            && let Ok(text) = std::str::from_utf8(&bytes)
-            && let Err(e) = sink.handle_incoming(text)
-        {
-            tracing::debug!("ignoring malformed cdp message: {e}");
+        match protocol {
+            tauri::CefDevToolsProtocol::Message(bytes) => match std::str::from_utf8(&bytes) {
+                Ok(text) => {
+                    tracing::trace!(
+                        len = text.len(),
+                        head = &text[..text.len().min(160)],
+                        "cdp <-"
+                    );
+                    if let Err(e) = sink.handle_incoming(text) {
+                        tracing::debug!("ignoring malformed cdp message: {e}");
+                    }
+                }
+                Err(e) => tracing::warn!("cdp message is not utf-8: {e}"),
+            },
+            tauri::CefDevToolsProtocol::MethodResult {
+                message_id,
+                success,
+                result,
+            } => {
+                tracing::trace!(message_id, success, len = result.len(), "cdp method result");
+            }
+            tauri::CefDevToolsProtocol::Event { method, .. } => {
+                tracing::trace!(%method, "cdp event");
+            }
         }
     })?;
     Ok(session)
