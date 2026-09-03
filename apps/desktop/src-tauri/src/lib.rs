@@ -3,6 +3,7 @@
 
 mod a11y;
 mod agent;
+mod ax;
 mod buffers;
 mod cdp_feed;
 mod commands;

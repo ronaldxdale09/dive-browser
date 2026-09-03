@@ -82,6 +82,8 @@ pub trait Browser: Send + Sync + 'static {
     ) -> Result<serde_json::Value, BrowserError>;
     /// Recent requests, oldest first, as JSON rows.
     async fn requests(&self, tab: TabId, limit: usize) -> Result<serde_json::Value, BrowserError>;
+    /// Accessibility tree as indented text with `[ref=eN]` markers on interactive nodes.
+    async fn page_state(&self, tab: TabId) -> Result<String, BrowserError>;
 }
 
 /// Server options.
@@ -288,6 +290,20 @@ impl<B: Browser> DiveServer<B> {
         )
     }
 
+    /// Page state.
+    #[tool(
+        name = "page_state",
+        description = "Accessibility tree of a tab as indented text; interactive nodes carry [ref=eN] ids. Cheaper than a screenshot and shows what can be clicked or typed into."
+    )]
+    async fn page_state(
+        &self,
+        Parameters(p): Parameters<TabRef>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id).await?;
+        let text = self.browser.page_state(tab).await?;
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+    }
+
     /// Evaluate JS (gated).
     #[tool(
         name = "page_evaluate",
@@ -458,6 +474,9 @@ mod tests {
             limit: usize,
         ) -> Result<serde_json::Value, BrowserError> {
             Ok(serde_json::json!([{ "url": "https://a.dev", "limit": limit }]))
+        }
+        async fn page_state(&self, _tab: TabId) -> Result<String, BrowserError> {
+            Ok("- RootWebArea \"x\"\n".into())
         }
     }
 

@@ -119,6 +119,17 @@ impl Browser for AppBrowser {
         std::fs::read(path).map_err(other)
     }
 
+    async fn page_state(&self, tab: TabId) -> Result<String, BrowserError> {
+        self.ensure_view(tab)?;
+        let session = self.session(tab)?;
+        let tree = session
+            .call("Accessibility.getFullAXTree", json!({}))
+            .await
+            .map_err(other)?;
+        let nodes = crate::ax::flatten(&tree);
+        Ok(crate::ax::render(&nodes, 1500))
+    }
+
     async fn console_tail(&self, tab: TabId, limit: usize) -> Result<Value, BrowserError> {
         serde_json::to_value(self.state().buffers.console_tail(tab, limit)).map_err(other)
     }
