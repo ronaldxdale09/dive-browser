@@ -15,6 +15,7 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
     return activeTab ? closeTab(activeTab) : undefined;
   },
   "tab.reload": () => useBrowser.getState().reload(),
+  "tab.devtools": () => useBrowser.getState().devtools(),
   "zoom.in": () => useBrowser.getState().zoomStep(1),
   "zoom.out": () => useBrowser.getState().zoomStep(-1),
   "zoom.reset": () => useBrowser.getState().zoomStep(0),
@@ -41,6 +42,7 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+t": "tab.new",
   "mod+w": "tab.close",
   "mod+r": "tab.reload",
+  "mod+alt+i": "tab.devtools",
   "mod+=": "zoom.in",
   "mod+-": "zoom.out",
   "mod+0": "zoom.reset",

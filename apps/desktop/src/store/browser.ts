@@ -26,6 +26,7 @@ interface BrowserState {
   /** Zoom factor per tab; absent means 1. */
   zoom: Record<string, number>;
   zoomStep: (direction: 1 | -1 | 0) => Promise<void>;
+  devtools: () => Promise<void>;
   notice: string | null;
   /** Path of the capture currently open in the annotator. */
   annotating: string | null;
@@ -138,6 +139,10 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   reload: async () => {
     const id = get().activeTab;
     if (id) await run(set, () => ipc.tabReload(id));
+  },
+  devtools: async () => {
+    const id = get().activeTab;
+    if (id) await run(set, () => ipc.tabDevtools(id));
   },
   zoomStep: async (direction) => {
     const id = get().activeTab;

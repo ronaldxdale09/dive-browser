@@ -143,6 +143,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_forward,
             tab_reload,
             tab_zoom,
+            tab_devtools,
             tab_capture,
             capture_read,
             capture_save,
@@ -195,6 +196,12 @@ pub fn register_builtin(registry: &dive_core::CommandRegistry) {
         ("tab.new", "New tab", Some("mod+t"), CommandScope::Workspace),
         ("tab.close", "Close tab", Some("mod+w"), CommandScope::Tab),
         ("tab.reload", "Reload", Some("mod+r"), CommandScope::Tab),
+        (
+            "tab.devtools",
+            "Open DevTools",
+            Some("mod+alt+i"),
+            CommandScope::Tab,
+        ),
         ("zoom.in", "Zoom in", Some("mod+="), CommandScope::Tab),
         ("zoom.out", "Zoom out", Some("mod+-"), CommandScope::Tab),
         ("zoom.reset", "Reset zoom", Some("mod+0"), CommandScope::Tab),
@@ -615,6 +622,16 @@ pub(crate) fn tab_forward(state: State<'_, AppState>, id: TabId) -> AppResult<()
 #[specta::specta]
 pub(crate) fn tab_reload(state: State<'_, AppState>, id: TabId) -> AppResult<()> {
     with_view(&state, id, tauri::Webview::reload)
+}
+
+/// Open Chromium's `DevTools` window for a tab.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_devtools(state: State<'_, AppState>, id: TabId) -> AppResult<()> {
+    with_view(&state, id, |v| {
+        v.open_devtools();
+        Ok(())
+    })
 }
 
 /// Zoom levels the chrome steps through; `1.0` is the default.

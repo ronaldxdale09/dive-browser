@@ -47,6 +47,7 @@ export const ipc = {
   tabForward: async (id: string) => unwrap(await commands.tabForward(id)),
   tabReload: async (id: string) => unwrap(await commands.tabReload(id)),
   tabZoom: async (id: string, factor: number) => unwrap(await commands.tabZoom(id, factor)),
+  tabDevtools: async (id: string) => unwrap(await commands.tabDevtools(id)),
   tabCapture: async (id: string, fullPage: boolean) => unwrap(await commands.tabCapture(id, fullPage)),
   captureRead: async (path: string) => unwrap(await commands.captureRead(path)),
   captureSave: async (pngBase64: string) => unwrap(await commands.captureSave(pngBase64)),

@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Camera, Lock, PanelBottom, RotateCw, Search, Sparkles  } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bug, Camera, Lock, PanelBottom, RotateCw, Search, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { useBrowser } from "../store/browser";
 import { selectErrorCount, useConsole } from "../store/console";
@@ -16,6 +16,7 @@ export function Toolbar() {
   const forward = useBrowser((s) => s.forward);
   const reload = useBrowser((s) => s.reload);
   const capture = useBrowser((s) => s.capture);
+  const devtools = useBrowser((s) => s.devtools);
   const toggle = useBrowser((s) => s.toggle);
   const open = useBrowser((s) => s.open);
   const current = tabs.find((t) => t.id === activeTab);
@@ -61,6 +62,7 @@ export function Toolbar() {
       <SharePopover />
       <IconButton icon={Camera} label="Capture full page" disabled={!current} onClick={() => void capture(true)} />
       <DeviceMenu />
+      <IconButton icon={Bug} label="Open DevTools" disabled={!current} onClick={() => void devtools()} />
       <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />
       <IconButton icon={PanelBottom} label="Developer dock" active={open.dock} onClick={() => toggle("dock")} />
       <button
