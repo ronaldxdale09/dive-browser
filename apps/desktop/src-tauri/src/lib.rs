@@ -3,6 +3,7 @@
 
 mod commands;
 mod console;
+mod emulate;
 mod engine;
 mod error;
 mod favicon;

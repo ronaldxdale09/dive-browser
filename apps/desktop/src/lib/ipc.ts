@@ -8,7 +8,7 @@ import { commands, events } from "../generated/bindings";
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 export { events };
-export type { Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent } from "../generated/bindings";
+export type { Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
 export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
@@ -17,6 +17,8 @@ export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
 }
 
 type WorkspaceDraftInput = { name: string; color: string };
+export type DeviceInput = { width: number; height: number; dpr: number; mobile: boolean; touch: boolean; user_agent: string; platform: string };
+export type MediaInput = { color_scheme: string | null; reduced_motion: string | null; media_type: string | null };
 
 export const ipc = {
   snapshot: async () => unwrap(await commands.snapshot()),
@@ -33,6 +35,8 @@ export const ipc = {
   tabForward: async (id: string) => unwrap(await commands.tabForward(id)),
   tabReload: async (id: string) => unwrap(await commands.tabReload(id)),
   tabCapture: async (id: string, fullPage: boolean) => unwrap(await commands.tabCapture(id, fullPage)),
+  tabEmulate: async (id: string, device: DeviceInput | null) => unwrap(await commands.tabEmulate(id, device)),
+  tabMedia: async (id: string, media: MediaInput) => unwrap(await commands.tabMedia(id, media)),
   setContentBounds: async (b: { x: number; y: number; width: number; height: number }) =>
     unwrap(await commands.layoutSetContentBounds(b)),
   commandsList: () => commands.commandsList(),

@@ -28,6 +28,25 @@ export const commands = {
 	 *  PNG under the app data dir and return its path.
 	 */
 	tabCapture: (id: TabId, fullPage: boolean) => typedError<string, AppError>(__TAURI_INVOKE("tab_capture", { id, fullPage })),
+	/**  Emulate `device` on a tab, or clear emulation with `None`. */
+	tabEmulate: (id: TabId, device: {
+	/**  Viewport width in CSS pixels. */
+	width: number,
+	/**  Viewport height in CSS pixels. */
+	height: number,
+	/**  Device pixel ratio. */
+	dpr: number | null,
+	/**  Mobile layout (viewport meta honored, overlay scrollbars). */
+	mobile: boolean,
+	/**  Emit touch events for mouse input. */
+	touch: boolean,
+	/**  User agent override; empty keeps the default. */
+	user_agent: string,
+	/**  `"iOS" | "Android" | "macOS" | "Windows"`, used for client hints. */
+	platform: string,
+} | null) => typedError<null, AppError>(__TAURI_INVOKE("tab_emulate", { id, device })),
+	/**  Override media features (color scheme, reduced motion, media type). */
+	tabMedia: (id: TabId, media: MediaOverrides) => typedError<null, AppError>(__TAURI_INVOKE("tab_media", { id, media })),
 	layoutSetContentBounds: (bounds: Bounds) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_bounds", { bounds })),
 	commandsList: () => __TAURI_INVOKE<Command[]>("commands_list"),
 	/**
@@ -122,6 +141,24 @@ export type CoreEvent =
 /**  The focused tab changed. */
 { type: "tab_activated"; data: TabId };
 
+/**  A device preset as sent by the chrome. */
+export type Device = {
+	/**  Viewport width in CSS pixels. */
+	width: number,
+	/**  Viewport height in CSS pixels. */
+	height: number,
+	/**  Device pixel ratio. */
+	dpr: number | null,
+	/**  Mobile layout (viewport meta honored, overlay scrollbars). */
+	mobile: boolean,
+	/**  Emit touch events for mouse input. */
+	touch: boolean,
+	/**  User agent override; empty keeps the default. */
+	user_agent: string,
+	/**  `"iOS" | "Android" | "macOS" | "Windows"`, used for client hints. */
+	platform: string,
+};
+
 /**  Severity of a console entry. */
 export type Level = 
 /**  `console.debug`, verbose logs. */
@@ -132,6 +169,16 @@ export type Level =
 "warn" | 
 /**  `console.error`, uncaught exceptions, failed loads. */
 "error";
+
+/**  Media feature overrides. */
+export type MediaOverrides = {
+	/**  `light` | `dark`, or none to clear. */
+	color_scheme: string | null,
+	/**  `reduce` | `no-preference`, or none to clear. */
+	reduced_motion: string | null,
+	/**  `print` | `screen`, or none to clear. */
+	media_type: string | null,
+};
 
 /**  One step in a request's life. The chrome merges these by `request_id`. */
 export type NetworkEvent = 

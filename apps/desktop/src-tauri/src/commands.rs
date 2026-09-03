@@ -50,6 +50,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_forward,
             tab_reload,
             tab_capture,
+            tab_emulate,
+            tab_media,
             layout_set_content_bounds,
             commands_list,
             command_run,
@@ -452,10 +454,7 @@ pub async fn capture_tab(
     id: TabId,
     full_page: bool,
 ) -> AppResult<std::path::PathBuf> {
-    let session = lock(&state.host)
-        .as_ref()
-        .and_then(|h| h.cdp(id))
-        .ok_or_else(|| AppError::new("no devtools session for this tab"))?;
+    let session = cdp_for(state, id)?;
     let png = if full_page {
         dive_cdp::page::capture_full_page(&session, dive_cdp::page::ImageFormat::Png).await
     } else {
@@ -472,6 +471,42 @@ pub async fn capture_tab(
     let path = dir.join(format!("dive-{stamp}.png"));
     std::fs::write(&path, png)?;
     Ok(path)
+}
+
+/// Emulate `device` on a tab, or clear emulation with `None`.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_emulate(
+    state: State<'_, AppState>,
+    id: TabId,
+    device: Option<crate::emulate::Device>,
+) -> AppResult<()> {
+    let session = cdp_for(&state, id)?;
+    crate::emulate::apply(&session, crate::emulate::device_calls(device.as_ref())).await?;
+    // Emulation only takes effect on the next layout; a reload is the cheapest way there.
+    session.call0("Page.reload").await.map_err(AppError::new)?;
+    Ok(())
+}
+
+/// Override media features (color scheme, reduced motion, media type).
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_media(
+    state: State<'_, AppState>,
+    id: TabId,
+    media: crate::emulate::MediaOverrides,
+) -> AppResult<()> {
+    let session = cdp_for(&state, id)?;
+    let (method, params) = crate::emulate::media_call(&media);
+    session.call(method, params).await.map_err(AppError::new)?;
+    Ok(())
+}
+
+fn cdp_for(state: &AppState, id: TabId) -> AppResult<dive_cdp::CdpSession> {
+    lock(&state.host)
+        .as_ref()
+        .and_then(|h| h.cdp(id))
+        .ok_or_else(|| AppError::new("no devtools session for this tab"))
 }
 
 fn with_view(

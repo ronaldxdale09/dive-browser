@@ -2,6 +2,7 @@ import { ArrowLeft, ArrowRight, Camera, Lock, PanelBottom, RotateCw, Search, Sha
 import { useState } from "react";
 import { useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
+import { DeviceMenu } from "./DeviceMenu";
 
 /** Navigation row: nav icons, the omnibox pill, page actions, dock and agent toggles. */
 export function Toolbar() {
@@ -54,6 +55,7 @@ export function Toolbar() {
       <IconButton icon={Star} label="Bookmark" disabled={!current} />
       <IconButton icon={Share} label="Share" disabled={!current} />
       <IconButton icon={Camera} label="Capture full page" disabled={!current} onClick={() => void capture(true)} />
+      <DeviceMenu />
       <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />
       <IconButton icon={PanelBottom} label="Developer dock" active={open.dock} onClick={() => toggle("dock")} />
       <button
