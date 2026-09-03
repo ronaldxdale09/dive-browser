@@ -74,7 +74,11 @@ pub enum NetworkEvent {
 }
 
 /// Enable the domain and forward events to the chrome.
-pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
+pub fn attach(
+    app: AppHandle<Runtime>,
+    tab_id: TabId,
+    session: CdpSession,
+) -> crate::cdp_feed::Ready {
     capture_bodies(app.clone(), tab_id, session.clone());
     crate::cdp_feed::attach(
         app,
@@ -85,7 +89,7 @@ pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
         |state, ev| {
             state.buffers.push_network(ev);
         },
-    );
+    )
 }
 
 /// Largest response body kept.

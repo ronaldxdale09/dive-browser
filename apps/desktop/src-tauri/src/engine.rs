@@ -186,17 +186,26 @@ impl TabHost {
             .window
             .add_child(builder, self.bounds.position(), self.bounds.size())?;
         view.hide()?;
+        // The view starts blank so the DevTools feeds are listening before the
+        // first navigation; otherwise the document request and early console
+        // output are missed.
         #[cfg(feature = "cef")]
         {
             let session = attach_cdp(&view)?;
-            crate::console::attach(app.clone(), tab_id, session.clone());
-            crate::network::attach(app.clone(), tab_id, session.clone());
+            let console_ready = crate::console::attach(app.clone(), tab_id, session.clone());
+            let network_ready = crate::network::attach(app.clone(), tab_id, session.clone());
             crate::favicon::attach(app.clone(), tab_id, session.clone());
             self.cdp.insert(tab_id, session);
+            let nav = view.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = console_ready.await;
+                let _ = network_ready.await;
+                if let Err(e) = nav.navigate(url) {
+                    tracing::warn!(%tab_id, "initial navigation failed: {e}");
+                }
+            });
         }
-        // The view starts blank so the DevTools feeds are attached before the
-        // first navigation; otherwise the document request and early console
-        // output are missed.
+        #[cfg(not(feature = "cef"))]
         view.navigate(url)?;
         self.views.insert(tab_id, view);
         Ok(())

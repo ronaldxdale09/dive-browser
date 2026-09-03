@@ -47,7 +47,11 @@ pub struct ConsoleEntry {
 }
 
 /// Enable the domains and forward every entry to the chrome.
-pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
+pub fn attach(
+    app: AppHandle<Runtime>,
+    tab_id: TabId,
+    session: CdpSession,
+) -> crate::cdp_feed::Ready {
     crate::cdp_feed::attach(
         app,
         tab_id,
@@ -57,7 +61,7 @@ pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
         |state, entry| {
             state.buffers.push_console(entry.clone());
         },
-    );
+    )
 }
 
 /// Translate a CDP event into an entry, if it is console-worthy.
