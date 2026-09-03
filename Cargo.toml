@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = ["crates/*", "apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -19,7 +19,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v7", "serde"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
 rusqlite = { version = "0.38", features = ["bundled"] }
-specta = { version = "2.0.0-rc", features = ["derive", "uuid", "time"] }
+specta = { version = "2.0.0-rc.25", features = ["derive", "uuid", "time", "serde_json"] }
+specta-typescript = "0.0.12"
+tauri-specta = { version = "2.0.0-rc.25", features = ["derive", "typescript"] }
+# Tauri's CEF runtime lives on the feat/cef branch; every tauri crate is
+# pinned to one revision so crates.io plugins resolve to the same copy.
+tauri = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79", default-features = false }
+tauri-build = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79" }
 
 [workspace.lints.rust]
 unsafe_code = "warn"
@@ -36,3 +42,11 @@ must_use_candidate = "allow"
 lto = "thin"
 codegen-units = 1
 strip = true
+
+[patch.crates-io]
+tauri = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79" }
+tauri-runtime = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79" }
+tauri-utils = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79" }
+tauri-build = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79" }
+tauri-macros = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79" }
+tauri-codegen = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79" }

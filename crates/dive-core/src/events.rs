@@ -8,7 +8,7 @@ use crate::model::{Tab, TabId, Workspace, WorkspaceId};
 
 /// Something changed in the core state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum CoreEvent {
     /// A workspace was created or updated.
     WorkspaceUpserted(Workspace),

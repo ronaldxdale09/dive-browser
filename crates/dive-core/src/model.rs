@@ -3,7 +3,59 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
+
+/// A UTC instant serialized as an RFC 3339 string.
+///
+/// Hand-written serde and specta impls so the wire type is a plain string
+/// in both directions (a `#[serde(with)]` field would split the exported
+/// TypeScript into Serialize/Deserialize variants).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Timestamp(pub OffsetDateTime);
+
+impl Timestamp {
+    /// Current UTC time.
+    pub fn now() -> Self {
+        Self(OffsetDateTime::now_utc())
+    }
+
+    /// RFC 3339 text.
+    pub fn to_rfc3339(self) -> String {
+        self.0.format(&Rfc3339).unwrap_or_default()
+    }
+
+    /// Parse RFC 3339 text.
+    pub fn parse(s: &str) -> Result<Self, time::error::Parse> {
+        OffsetDateTime::parse(s, &Rfc3339).map(Self)
+    }
+}
+
+impl std::ops::Sub<time::Duration> for Timestamp {
+    type Output = Self;
+    fn sub(self, rhs: time::Duration) -> Self {
+        Self(self.0 - rhs)
+    }
+}
+
+impl Serialize for Timestamp {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.to_rfc3339())
+    }
+}
+
+impl<'de> Deserialize<'de> for Timestamp {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(d)?;
+        Self::parse(&text).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Type for Timestamp {
+    fn definition(types: &mut specta::Types) -> specta::datatype::DataType {
+        String::definition(types)
+    }
+}
 
 macro_rules! id_type {
     ($(#[$meta:meta])* $name:ident) => {
@@ -94,15 +146,14 @@ pub struct Workspace {
     /// Container whose profile this workspace browses in.
     pub container_id: ContainerId,
     /// Order in the rail; lower first.
-    pub position: i64,
+    pub position: i32,
     /// Creation timestamp.
-    #[serde(with = "time::serde::rfc3339")]
-    pub created_at: OffsetDateTime,
+    pub created_at: Timestamp,
 }
 
 impl Workspace {
     /// Create a workspace in `container` appended at `position`.
-    pub fn new(name: impl Into<String>, container: ContainerId, position: i64) -> Self {
+    pub fn new(name: impl Into<String>, container: ContainerId, position: i32) -> Self {
         Self {
             id: WorkspaceId::new(),
             name: name.into(),
@@ -110,7 +161,7 @@ impl Workspace {
             icon: "circle".into(),
             container_id: container,
             position,
-            created_at: OffsetDateTime::now_utc(),
+            created_at: Timestamp::now(),
         }
     }
 }
@@ -153,17 +204,16 @@ pub struct Tab {
     /// Page title, empty until loaded.
     pub title: String,
     /// Order within its tier; lower first.
-    pub position: i64,
+    pub position: i32,
     /// Renderer state.
     pub state: TabState,
     /// Last time the tab was focused.
-    #[serde(with = "time::serde::rfc3339")]
-    pub last_active_at: OffsetDateTime,
+    pub last_active_at: Timestamp,
 }
 
 impl Tab {
     /// Create a `Today` tab in `workspace` at `position`.
-    pub fn new(workspace: WorkspaceId, url: impl Into<String>, position: i64) -> Self {
+    pub fn new(workspace: WorkspaceId, url: impl Into<String>, position: i32) -> Self {
         Self {
             id: TabId::new(),
             workspace_id: Some(workspace),
@@ -172,7 +222,7 @@ impl Tab {
             title: String::new(),
             position,
             state: TabState::Active,
-            last_active_at: OffsetDateTime::now_utc(),
+            last_active_at: Timestamp::now(),
         }
     }
 }

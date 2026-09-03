@@ -9,5 +9,10 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "check": "pnpm typecheck && pnpm lint && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

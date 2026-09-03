@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "chrome",
+  "description": "Permissions for the browser chrome webview",
+  "windows": ["main"],
+  "webviews": ["chrome"],
+  "permissions": ["core:default", "core:window:allow-set-title", "core:webview:allow-webview-size", "core:webview:allow-webview-position"]
+}

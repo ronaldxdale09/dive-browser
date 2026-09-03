@@ -6,12 +6,11 @@
 
 use std::path::Path;
 
-use rusqlite::{Connection, OptionalExtension, Row, params};
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
-
-use crate::model::{Container, ContainerId, Tab, TabId, TabState, TabTier, Workspace, WorkspaceId};
+use crate::model::{
+    Container, ContainerId, Tab, TabId, TabState, TabTier, Timestamp, Workspace, WorkspaceId,
+};
 use crate::{CoreError, Result};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
 const MIGRATIONS: &[&str] = &[
     // v1
@@ -138,7 +137,7 @@ impl Store {
                 w.icon,
                 w.container_id.to_string(),
                 w.position,
-                fmt_time(w.created_at)
+                w.created_at.to_rfc3339()
             ],
         )?;
         Ok(())
@@ -201,7 +200,7 @@ impl Store {
                 t.title,
                 t.position,
                 t.state.as_str(),
-                fmt_time(t.last_active_at)
+                t.last_active_at.to_rfc3339()
             ],
         )?;
         Ok(())
@@ -248,12 +247,8 @@ impl Store {
     }
 
     /// Move `Today` tabs idle longer than `max_idle` to `Discarded`; returns how many.
-    pub fn archive_idle_tabs(
-        &self,
-        now: OffsetDateTime,
-        max_idle: time::Duration,
-    ) -> Result<usize> {
-        let cutoff = fmt_time(now - max_idle);
+    pub fn archive_idle_tabs(&self, now: Timestamp, max_idle: time::Duration) -> Result<usize> {
+        let cutoff = (now - max_idle).to_rfc3339();
         let n = self.conn.execute(
             "UPDATE tabs SET state = 'discarded'
              WHERE tier = 'today' AND state != 'discarded' AND last_active_at < ?1",
@@ -269,16 +264,12 @@ const WORKSPACE_SELECT: &str =
 const TAB_SELECT: &str =
     "SELECT id, workspace_id, tier, url, title, position, state, last_active_at FROM tabs";
 
-fn fmt_time(t: OffsetDateTime) -> String {
-    t.format(&Rfc3339).unwrap_or_default()
-}
-
 fn conversion(e: impl std::error::Error + Send + Sync + 'static) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
 }
 
-fn parse_time(s: &str) -> rusqlite::Result<OffsetDateTime> {
-    OffsetDateTime::parse(s, &Rfc3339).map_err(conversion)
+fn parse_time(s: &str) -> rusqlite::Result<Timestamp> {
+    Timestamp::parse(s).map_err(conversion)
 }
 
 fn parse_id<T: std::str::FromStr<Err = uuid::Error>>(s: &str) -> rusqlite::Result<T> {
@@ -410,7 +401,7 @@ mod tests {
     #[test]
     fn archive_idle_only_touches_today_tabs() {
         let (store, w) = seeded();
-        let now = OffsetDateTime::now_utc();
+        let now = Timestamp::now();
         let mut old_today = Tab::new(w.id, "https://old", 0);
         old_today.last_active_at = now - time::Duration::hours(20);
         let mut old_pinned = Tab::new(w.id, "https://pinned", 1);

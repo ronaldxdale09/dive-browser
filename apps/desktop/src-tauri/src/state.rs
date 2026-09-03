@@ -1,0 +1,95 @@
+//! Process-wide state: persistence, event bus, command registry, tab host.
+
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use dive_core::{CommandRegistry, Container, EventBus, Store, Workspace, WorkspaceId};
+use tauri::{App, Manager};
+
+use crate::Runtime;
+use crate::engine::TabHost;
+
+/// Shared state managed by Tauri.
+pub struct AppState {
+    /// Persistent store; one connection guarded by a mutex.
+    pub store: Mutex<Store>,
+    /// Broadcast of core changes, forwarded to the chrome as events.
+    pub bus: EventBus,
+    /// Every user-facing action.
+    pub commands: CommandRegistry,
+    /// Engine-side tab views; `None` until the main window exists.
+    pub host: Mutex<Option<TabHost>>,
+    /// Workspace currently shown in the chrome.
+    pub active_workspace: Mutex<Option<WorkspaceId>>,
+}
+
+/// Directory holding every container's Chromium profile.
+pub fn profiles_root() -> PathBuf {
+    data_root().join("profiles")
+}
+
+/// Application data directory, created on demand.
+///
+/// Computed without an app handle because the CEF runtime needs the root
+/// cache path before the app is built.
+pub fn data_root() -> PathBuf {
+    let base = std::env::var_os("DIVE_DATA_DIR").map_or_else(
+        || {
+            let home = std::env::var_os("HOME").map_or_else(std::env::temp_dir, PathBuf::from);
+            #[cfg(target_os = "macos")]
+            let dir = home.join("Library/Application Support/app.dive.browser");
+            #[cfg(target_os = "linux")]
+            let dir = home.join(".local/share/dive");
+            #[cfg(target_os = "windows")]
+            let dir = std::env::var_os("APPDATA")
+                .map(PathBuf::from)
+                .unwrap_or(home)
+                .join("dive");
+            dir
+        },
+        PathBuf::from,
+    );
+    let _ = std::fs::create_dir_all(&base);
+    base
+}
+
+/// Open the store, seed defaults, and register state with the app.
+pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
+    let root = data_root();
+    let store = Store::open(root.join("dive.db"))?;
+    let active = seed_defaults(&store)?;
+
+    let state = AppState {
+        store: Mutex::new(store),
+        bus: EventBus::new(),
+        commands: CommandRegistry::new(),
+        host: Mutex::new(None),
+        active_workspace: Mutex::new(Some(active)),
+    };
+    crate::commands::register_builtin(&state.commands);
+    app.manage(state);
+    Ok(())
+}
+
+/// Ensure at least one container and workspace exist; return the first workspace.
+fn seed_defaults(store: &Store) -> anyhow::Result<WorkspaceId> {
+    if let Some(first) = store.workspaces()?.first() {
+        return Ok(first.id);
+    }
+    let container = if let Some(c) = store.containers()?.into_iter().next() {
+        c
+    } else {
+        let c = Container::new("Personal");
+        store.upsert_container(&c)?;
+        c
+    };
+    let workspace = Workspace::new("Home", container.id, 0);
+    store.upsert_workspace(&workspace)?;
+    tracing::info!(id = %workspace.id, "seeded default workspace");
+    Ok(workspace.id)
+}
+
+/// Lock helper that tolerates poisoning.
+pub fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}

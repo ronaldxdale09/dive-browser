@@ -11,7 +11,9 @@ pub mod store;
 pub use commands::{Command, CommandId, CommandRegistry, CommandScope};
 pub use error::CoreError;
 pub use events::{CoreEvent, EventBus};
-pub use model::{Container, ContainerId, Tab, TabId, TabState, TabTier, Workspace, WorkspaceId};
+pub use model::{
+    Container, ContainerId, Tab, TabId, TabState, TabTier, Timestamp, Workspace, WorkspaceId,
+};
 pub use store::Store;
 
 /// Convenience alias used throughout the crate.
