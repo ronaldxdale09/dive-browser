@@ -1,8 +1,10 @@
-import { Accessibility, Activity, Ban, ClipboardList, Database, FileSearch, Network, Shuffle, Terminal } from "lucide-react";
+import { Accessibility, Activity, Ban, ClipboardList, Database, ExternalLink, FileSearch, Network, Shuffle, Terminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ConsoleEntry, Level } from "../lib/ipc";
+import { jumpToSource, editorLabel } from "../lib/editor";
 import { useBrowser } from "../store/browser";
 import { selectEntries, useConsole } from "../store/console";
+import { usePrefs } from "../store/prefs";
 import { Icon, IconButton } from "./Icon";
 import { NetworkPanel, NetworkTools } from "./NetworkPanel";
 import { RulesPanel, RulesTools } from "./RulesPanel";
@@ -99,7 +101,7 @@ function ConsolePanel() {
       <div className="min-h-0 flex-1 select-text overflow-auto font-mono text-[11.5px] leading-5">
         {shown.length === 0 && <div className="px-3 py-2 text-ink-3">{activeTab ? "No console output yet." : "Open a tab to see its console."}</div>}
         {shown.map((e, i) => (
-          <Row key={`${e.timestamp}-${i}`} entry={e} />
+          <Row key={`${e.timestamp}-${i}`} entry={e} tabId={activeTab} />
         ))}
         <div ref={endRef} />
       </div>
@@ -107,13 +109,36 @@ function ConsolePanel() {
   );
 }
 
-function Row({ entry }: { entry: ConsoleEntry }) {
+function Row({ entry, tabId }: { entry: ConsoleEntry; tabId: string | null }) {
+  const preferredEditor = usePrefs((s) => s.prefs.preferred_editor || "vscode");
   const loc = entry.url ? `${entry.url.split("/").pop() ?? entry.url}${entry.line ? `:${entry.line}` : ""}` : "";
+  const [jumping, setJumping] = useState(false);
+
+  const handleClick = async () => {
+    if (!entry.url || jumping) return;
+    setJumping(true);
+    try {
+      await jumpToSource(tabId, entry.url, entry.line, entry.column, preferredEditor);
+    } finally {
+      setJumping(false);
+    }
+  };
+
   return (
     <div className={`flex gap-3 border-b border-line/60 px-3 py-0.5 ${LEVEL_STYLE[entry.level]}`}>
       <span className="w-14 shrink-0 text-ink-3">{entry.source}</span>
       <span className="min-w-0 flex-1 break-words whitespace-pre-wrap">{entry.text}</span>
-      {loc && <span className="shrink-0 text-ink-3" title={entry.url ?? undefined}>{loc}</span>}
+      {loc && (
+        <button
+          type="button"
+          onClick={() => void handleClick()}
+          title={`Open in ${editorLabel(preferredEditor)} (${entry.url})`}
+          className="group flex shrink-0 items-center gap-1 rounded px-1 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink focus:outline-none"
+        >
+          <span>{loc}</span>
+          <ExternalLink size={10} className="opacity-0 transition-opacity group-hover:opacity-100" />
+        </button>
+      )}
     </div>
   );
 }

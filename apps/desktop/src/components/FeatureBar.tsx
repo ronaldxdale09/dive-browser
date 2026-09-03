@@ -1,17 +1,17 @@
-import { ChevronDown, Sparkles, Square, Video } from "lucide-react";
+import { ChevronDown, CircleDot, Square, Video } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useBrowser } from "../store/browser";
 import { selectErrorCount, useConsole } from "../store/console";
+import { useRecorder } from "../store/recorder";
 import { DeviceMenu } from "./DeviceMenu";
 import { Icon, IconButton } from "./Icon";
 import { Tooltip } from "./Tooltip";
+import { AgentIcon } from "./agent/AgentIcon";
 
 /**
- * The title-bar action cluster: the three features people reach for by name —
- * record, the device emulator, the agent — labelled, beside the environment
- * badge. Everything that acts on the page itself (capture, DevTools, the dock,
- * downloads, protection) stays in the address row as icons.
+ * The title-bar action cluster: the features people reach for by name —
+ * record, the device emulator, test interaction recorder, the agent.
  */
 export function FeatureBar() {
   const toggle = useBrowser((s) => s.toggle);
@@ -19,6 +19,7 @@ export function FeatureBar() {
   return (
     <div className="flex h-full shrink-0 items-center gap-0.5 pr-2">
       <RecordAction />
+      <TestRecorderAction />
       <DeviceMenu label="Mobile" />
       <AgentAction />
       <span className="mx-1.5 h-4 w-px bg-line-2" aria-hidden />
@@ -108,6 +109,36 @@ function RecordAction() {
   );
 }
 
+/** Start/stop recording user interactions into a Playwright test. */
+function TestRecorderAction() {
+  const active = useBrowser((s) => s.activeTab);
+  const recordingTab = useRecorder((s) => s.recordingTab);
+  const start = useRecorder((s) => s.start);
+  const stop = useRecorder((s) => s.stop);
+  const steps = useRecorder((s) => s.steps);
+  const recording = recordingTab !== null;
+
+  return (
+    <FeatureButton
+      icon={recording ? Square : CircleDot}
+      label={recording ? `Test (${steps.length})` : "Record Test"}
+      tip={recording ? "Stop and export Playwright test" : "Record clicks and input to Playwright test"}
+      tone={recording ? "hi" : "quiet"}
+      active={recording}
+      disabled={!active && !recording}
+      onClick={() => {
+        if (recording) {
+          void stop();
+        } else if (active) {
+          void start(active);
+        }
+      }}
+    >
+      {recording && <span className="size-1.5 animate-pulse rounded-full bg-highlight" aria-hidden />}
+    </FeatureButton>
+  );
+}
+
 /** Opens the agent sidecar; carries the active tab's error count while it is closed. */
 function AgentAction() {
   const activeTab = useBrowser((s) => s.activeTab);
@@ -125,7 +156,7 @@ function AgentAction() {
           open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
         }`}
       >
-        <Icon icon={Sparkles} size={13} />
+        <AgentIcon size={13} className={open ? "text-accent-ink" : "text-highlight"} />
         Agent
         {errorCount > 0 && !open && (
           <span className="ml-0.5 rounded-full bg-danger px-1.5 py-px font-mono text-[10px] leading-4 text-white" aria-label={`${errorCount} errors`}>

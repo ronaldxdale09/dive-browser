@@ -77,6 +77,11 @@ impl Registry {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// Whether `tab` is being recorded right now.
+    pub fn is_recording(&self, tab: TabId) -> bool {
+        self.active().contains_key(&tab)
+    }
+
     /// Start collecting frames for `tab`.
     pub async fn start(&self, tab: TabId, session: CdpSession) -> AppResult<()> {
         let rec = Arc::new(Recording::default());

@@ -158,6 +158,20 @@ export const commands = {
 	 *  is on screen, since child webviews always paint above the main webview.
 	 */
 	layoutSetContentCovered: (covered: boolean) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_covered", { covered })),
+	/**
+	 *  Show these tabs side by side at these rectangles; an empty list returns
+	 *  to a single page. Sleeping tabs are woken so every pane has a page.
+	 */
+	layoutSetPanes: (panes: PaneBounds[]) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_panes", { panes })),
+	/**
+	 *  Tear `id` off into its own window. `at` is where the pointer let go,
+	 *  relative to the main window; `None` lets the system place the window.
+	 */
+	tabDetach: (id: TabId, at: [number | null, number | null] | null) => typedError<null, AppError>(__TAURI_INVOKE("tab_detach", { id, at })),
+	/**  Bring `id` back from its own window and show it in the main one. */
+	tabAttach: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_attach", { id })),
+	/**  The chrome of a popout window reports where its page sits. */
+	popoutSetBounds: (id: TabId, bounds: Bounds) => typedError<null, AppError>(__TAURI_INVOKE("popout_set_bounds", { id, bounds })),
 	commandsList: () => __TAURI_INVOKE<Command[]>("commands_list"),
 	/**
 	 *  Run a registry command. `args_json` and the result are JSON text because
@@ -232,6 +246,7 @@ export const events = {
 	recorderEvent: makeEvent<RecorderEvent>("recorder-event"),
 	stateChanged: makeEvent<StateChanged>("state-changed"),
 	tabCrashed: makeEvent<TabCrashed>("tab-crashed"),
+	tabWindowChanged: makeEvent<TabWindowChanged>("tab-window-changed"),
 };
 
 /* Types */
@@ -781,6 +796,14 @@ export type Original = {
 	column: number,
 };
 
+/**  One pane of a split view: which tab, and where it sits. */
+export type PaneBounds = {
+	/**  The tab shown in the pane. */
+	tab: TabId,
+	/**  Its rectangle, relative to the main window. */
+	bounds: Bounds,
+};
+
 /**  What the picker found. */
 export type Pick = {
 	/**  Tab it came from. */
@@ -1048,6 +1071,8 @@ export type Snapshot = {
 	tabs: Tab[],
 	/**  Focused tab, if any. */
 	active_tab: TabId | null,
+	/**  Tabs shown in their own windows. */
+	detached: TabId[],
 };
 
 /**  One frame of a component's source location. */
@@ -1173,6 +1198,14 @@ export type TabTier =
 "pinned" |
 /**  Ordinary tab, auto-archived after inactivity. */
 "today";
+
+/**  A tab moved into its own window, or back into the main one. */
+export type TabWindowChanged = {
+	/**  The tab. */
+	tab: TabId,
+	/**  Whether it now lives in its own window. */
+	detached: boolean,
+};
 
 /**  A tool call, as shown in the thread. */
 export type ToolStep = {

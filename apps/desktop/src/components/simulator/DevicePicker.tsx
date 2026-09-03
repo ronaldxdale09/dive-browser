@@ -10,21 +10,15 @@
  */
 import { Check, Gauge, Globe, Laptop, Moon, Printer, RotateCw, Search, Smartphone, Sun, Tablet, WifiOff, X, Zap } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { create } from "zustand";
 import type { LucideIcon } from "lucide-react";
 import { DEVICE_GROUPS, devicesIn, searchDevices } from "../../data/devices";
 import type { DeviceGroup, DevicePreset } from "../../data/devices";
 import { useBrowser } from "../../store/browser";
+import { usePicker } from "../../store/simulator";
 import { PLACES, baseFor, selectDevice, selectEnvironment, selectMedia, selectThrottle, useEmulation } from "../../store/emulation";
 import { Icon, IconButton } from "../Icon";
 
-interface PickerState {
-  open: boolean;
-  setOpen: (open: boolean) => void;
-}
-
-/** Whether the picker is up; shared so the title bar and the stage can both open it. */
-export const usePicker = create<PickerState>((set) => ({ open: false, setOpen: (open) => set({ open }) }));
+export { usePicker };
 
 const GROUP_ICON: Record<DeviceGroup, LucideIcon> = {
   "apple-phone": Smartphone,

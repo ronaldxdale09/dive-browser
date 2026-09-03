@@ -25,7 +25,7 @@ const TOOLS: { id: Tool; icon: typeof Square; label: string }[] = [
 
 /** Mark up a capture: boxes, arrows, labels and blurred regions, then copy + save. */
 export function Annotator({ path }: { path: string }) {
-  useCoversContent();
+  useCoversContent(true);
   const close = useBrowser((s) => s.setAnnotating);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [image, setImage] = useState<HTMLImageElement | null>(null);

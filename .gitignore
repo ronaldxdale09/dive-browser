@@ -19,3 +19,5 @@ packages/protocol/src/generated/
 # autopilot state
 .claude/autopilot/
 /docs
+/.agents
+/tests

@@ -67,6 +67,13 @@ const MIGRATIONS: &[&str] = &[
         title TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL
     );",
+    // v7: where a discarded tab was scrolled, so waking it puts the page back.
+    "CREATE TABLE tab_scroll (
+        tab_id TEXT PRIMARY KEY,
+        url TEXT NOT NULL,
+        x INTEGER NOT NULL DEFAULT 0,
+        y INTEGER NOT NULL DEFAULT 0
+    );",
 ];
 
 /// How a history row reads on screen: its origin and title.
@@ -329,7 +336,33 @@ impl Store {
                 id: id.to_string(),
             });
         }
+        self.conn
+            .execute("DELETE FROM tab_scroll WHERE tab_id = ?1", [id.to_string()])?;
         Ok(())
+    }
+
+    /// Remember where `tab` was scrolled on `url`, so waking it can put the
+    /// page back where the user left it.
+    pub fn set_scroll(&self, tab: TabId, url: &str, x: i32, y: i32) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO tab_scroll (tab_id, url, x, y) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(tab_id) DO UPDATE SET url = excluded.url, x = excluded.x, y = excluded.y",
+            params![tab.to_string(), url, x, y],
+        )?;
+        Ok(())
+    }
+
+    /// The scroll offset remembered for `tab`, if it was saved for the URL
+    /// the tab still shows; a tab that moved on since gets a fresh start.
+    pub fn scroll(&self, tab: TabId, url: &str) -> Result<Option<(i32, i32)>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT x, y FROM tab_scroll WHERE tab_id = ?1 AND url = ?2",
+                params![tab.to_string(), url],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?)
     }
 
     // ----- favicons -----
@@ -617,29 +650,52 @@ impl Store {
         Ok(self.discard_idle_tabs(now, max_idle)?.len())
     }
 
-    /// Move `Today` tabs idle longer than `max_idle` to `Discarded` across
-    /// every workspace, returning the tabs as they are after the change so
-    /// the caller can tear down their views and announce them.
-    pub fn discard_idle_tabs(&self, now: Timestamp, max_idle: time::Duration) -> Result<Vec<Tab>> {
+    /// `Today` tabs in every workspace that have sat unfocused longer than
+    /// `max_idle` and are still alive. The sweep decides which of these it
+    /// may actually discard.
+    pub fn idle_tab_candidates(
+        &self,
+        now: Timestamp,
+        max_idle: time::Duration,
+    ) -> Result<Vec<Tab>> {
         let cutoff = (now - max_idle).to_rfc3339();
         let mut stmt = self.conn.prepare(&format!(
-            "{TAB_SELECT} WHERE tier = 'today' AND state != 'discarded' AND last_active_at < ?1"
+            "{TAB_SELECT} WHERE tier = 'today' AND state != 'discarded' AND last_active_at < ?1
+             ORDER BY last_active_at"
         ))?;
         let rows = stmt.query_map([&cutoff], tab_from_row)?;
         let mut tabs: Vec<Tab> = rows.collect::<std::result::Result<_, _>>()?;
-        if tabs.is_empty() {
-            return Ok(tabs);
-        }
-        self.conn.execute(
-            "UPDATE tabs SET state = 'discarded'
-             WHERE tier = 'today' AND state != 'discarded' AND last_active_at < ?1",
-            [&cutoff],
-        )?;
         for tab in &mut tabs {
-            tab.state = TabState::Discarded;
             self.fill_favicon(tab);
         }
         Ok(tabs)
+    }
+
+    /// Mark `ids` discarded and return them as they now read. Ids that no
+    /// longer exist are skipped rather than reported.
+    pub fn discard_tabs(&self, ids: &[TabId]) -> Result<Vec<Tab>> {
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            let n = self.conn.execute(
+                "UPDATE tabs SET state = 'discarded' WHERE id = ?1 AND state != 'discarded'",
+                [id.to_string()],
+            )?;
+            if n == 1 {
+                out.push(self.tab(*id)?);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Discard every idle candidate at once, with no engine-side exclusions.
+    /// The app's sweep applies its rules first and calls [`Store::discard_tabs`].
+    pub fn discard_idle_tabs(&self, now: Timestamp, max_idle: time::Duration) -> Result<Vec<Tab>> {
+        let ids: Vec<TabId> = self
+            .idle_tab_candidates(now, max_idle)?
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
+        self.discard_tabs(&ids)
     }
 }
 
@@ -1101,5 +1157,39 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn scroll_survives_only_for_the_same_url() {
+        let (store, w) = seeded();
+        let tab = Tab::new(w.id, "https://a/long", 0);
+        store.upsert_tab(&tab).unwrap();
+        assert_eq!(store.scroll(tab.id, "https://a/long").unwrap(), None);
+        store
+            .set_scroll(tab.id, "https://a/long", 12, 3400)
+            .unwrap();
+        assert_eq!(
+            store.scroll(tab.id, "https://a/long").unwrap(),
+            Some((12, 3400))
+        );
+        assert_eq!(store.scroll(tab.id, "https://a/other").unwrap(), None);
+        store.set_scroll(tab.id, "https://a/long", 0, 10).unwrap();
+        assert_eq!(
+            store.scroll(tab.id, "https://a/long").unwrap(),
+            Some((0, 10))
+        );
+        store.remove_tab(tab.id).unwrap();
+        assert_eq!(store.scroll(tab.id, "https://a/long").unwrap(), None);
+    }
+
+    #[test]
+    fn discard_tabs_skips_missing_and_already_discarded() {
+        let (store, w) = seeded();
+        let a = Tab::new(w.id, "https://a", 0);
+        store.upsert_tab(&a).unwrap();
+        let first = store.discard_tabs(&[a.id, TabId::new()]).unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].state, TabState::Discarded);
+        assert!(store.discard_tabs(&[a.id]).unwrap().is_empty());
     }
 }

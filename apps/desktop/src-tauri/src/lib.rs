@@ -35,11 +35,13 @@ mod rules;
 mod screencast;
 mod snapshot;
 mod sourcemaps;
+pub mod startup;
 mod state;
 mod storage;
 mod vitals;
 
 pub use error::AppError;
+pub use startup::StartupTimeline;
 
 /// The Tauri runtime in use: Chromium (CEF) for the product, the system
 /// webview as a UI-only fallback.
@@ -55,10 +57,43 @@ pub const CHROME_LABEL: &str = "chrome";
 /// Label of the main window.
 pub const MAIN_WINDOW: &str = "main";
 
+#[derive(serde::Deserialize)]
+struct StartupMilestonePayload {
+    milestone: String,
+    #[serde(alias = "elapsedMs")]
+    elapsed_ms: f64,
+}
+
+fn handle_startup_invoke(invoke: tauri::ipc::Invoke<Runtime>) -> bool {
+    let tauri::ipc::Invoke {
+        message, resolver, ..
+    } = invoke;
+    let payload = match message.payload() {
+        tauri::ipc::InvokeBody::Json(json) => {
+            serde_json::from_value::<StartupMilestonePayload>(json.clone())
+        }
+        tauri::ipc::InvokeBody::Raw(bytes) => {
+            serde_json::from_slice::<StartupMilestonePayload>(bytes)
+        }
+    };
+    match payload {
+        Ok(data) => {
+            startup::record_custom_milestone(&data.milestone, data.elapsed_ms);
+            resolver.resolve(());
+        }
+        Err(err) => {
+            resolver.reject(err.to_string());
+        }
+    }
+    true
+}
+
 /// Start the application. Under CEF this also serves as the sub-process
 /// entry point.
 #[cfg_attr(feature = "cef", tauri::cef_entry_point)]
 pub fn run() {
+    startup::record_launch();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -81,15 +116,41 @@ pub fn run() {
             // the login keychain password to unlock "Chromium Safe Storage".
             // Value form: the runtime turns a bare name into a positional argument and a
             // dashed name into a doubled switch; `--use-mock-keychain=` is honored.
-            .command_line_args([("use-mock-keychain", Some(String::new()))]);
+            .command_line_args(startup::build_chromium_args(None));
     }
 
+    let specta_handler = specta.invoke_handler();
+
     builder
-        .invoke_handler(specta.invoke_handler())
+        .invoke_handler(move |invoke: tauri::ipc::Invoke<Runtime>| {
+            if invoke.message.command() == "report_startup_milestone" {
+                handle_startup_invoke(invoke)
+            } else {
+                specta_handler(invoke)
+            }
+        })
+        .on_window_event(|window, event| {
+            // Closing a popout window closes the tab in it, the way closing
+            // any browser window does. The tab tears the window down itself,
+            // so the request is cancelled here.
+            use tauri::Manager;
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                && let Some(tab) = engine::popout_tab(window.label())
+            {
+                api.prevent_close();
+                let app = window.app_handle().clone();
+                let state = app.state::<state::AppState>();
+                if let Err(e) = commands::close_tab(&app, &state, tab) {
+                    tracing::warn!(%tab, "closing popout failed: {e}");
+                }
+            }
+        })
         .setup(move |app| {
             specta.mount_events(app);
             state::init(app)?;
+            startup::record_milestone("state_init");
             engine::create_main_window(app)?;
+            startup::record_milestone("window_created");
             menu::install(app)?;
             restore_session(app);
             open_startup_urls(app);
@@ -98,6 +159,9 @@ pub fn run() {
             housekeeping::start(app.handle().clone());
             devservers::start(app.handle().clone());
             smoke_test(app.handle().clone());
+            stress_test(app.handle().clone());
+            startup::record_milestone("setup_complete");
+            startup::on_setup_completed(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -191,6 +255,72 @@ fn smoke_test(app: tauri::AppHandle<Runtime>) {
             }
         };
         app.exit(code);
+    });
+}
+
+/// `DIVE_STRESS_TABS=<n>`: open `n` tabs cycling through the URLs in
+/// `DIVE_STRESS_URLS`, wait for them to settle, force a discard sweep, and
+/// exit. Logs `stress:` markers the memory harness samples resident memory
+/// at. Run with `DIVE_MAX_IDLE_SECS=0` so every background tab is a
+/// candidate, and give distinct sites: same-site tabs share one renderer.
+fn stress_test(app: tauri::AppHandle<Runtime>) {
+    use tauri::Manager;
+    let Some(count) = std::env::var("DIVE_STRESS_TABS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+    else {
+        return;
+    };
+    let settle = std::env::var("DIVE_STRESS_SETTLE_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(15);
+    let mut urls: Vec<String> = std::env::var("DIVE_STRESS_URLS")
+        .ok()
+        .map(|v| v.split_whitespace().map(str::to_owned).collect())
+        .unwrap_or_default();
+    if urls.is_empty() {
+        urls.push("https://example.com".into());
+    }
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(settle)).await;
+        tracing::info!(pid = std::process::id(), "stress: baseline");
+        // Let the harness sample the baseline before the tabs start opening.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let on_main = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let state = on_main.state::<state::AppState>();
+            let workspace = *state::lock(&state.active_workspace);
+            let mut opened = 0;
+            if let Some(ws) = workspace {
+                for i in 0..count {
+                    let url = &urls[i % urls.len()];
+                    match commands::open_tab(&on_main, &state, ws, url) {
+                        Ok(_) => opened += 1,
+                        Err(e) => tracing::warn!("stress: open failed: {e}"),
+                    }
+                }
+            }
+            let _ = tx.send(opened);
+        });
+        let opened = rx.await.unwrap_or(0);
+        tokio::time::sleep(std::time::Duration::from_secs(settle)).await;
+        tracing::info!(tabs = opened, "stress: loaded");
+        let discarded = match housekeeping::sweep(&app).await {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::error!("stress: sweep failed: {e}");
+                app.exit(1);
+                return;
+            }
+        };
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        tracing::info!(discarded, "stress: swept");
+        tracing::info!("stress: done");
+        // Give the harness time to sample memory before the process goes.
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        app.exit(if discarded + 1 >= opened { 0 } else { 2 });
     });
 }
 
@@ -300,5 +430,31 @@ mod tests {
             startup_plan("restore", "https://dive.dev"),
             Startup::Restore
         );
+    }
+
+    #[test]
+    fn test_chromium_switches_configuration() {
+        let args = crate::startup::build_chromium_args(None);
+        assert_eq!(args.len(), 4);
+        assert_eq!(args[0], ("use-mock-keychain", Some(String::new())));
+        assert_eq!(args[1], ("--disable-extensions", None));
+        assert_eq!(args[2], ("--process-per-site", None));
+        assert_eq!(args[3], ("renderer-process-limit", Some("6".to_string())));
+        assert!(crate::startup::validate_switch_syntax(&args).is_ok());
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_startup_timeline_instrumentation() {
+        crate::startup::reset_for_test(None);
+        crate::startup::record_custom_milestone("state_init", 12.0);
+        crate::startup::record_custom_milestone("window_created", 35.0);
+        crate::startup::record_custom_milestone("setup_complete", 50.0);
+
+        let timeline = crate::startup::get_timeline();
+        assert_eq!(timeline.state_init_ms, 12.0);
+        assert_eq!(timeline.window_created_ms, 35.0);
+        assert_eq!(timeline.setup_complete_ms, 50.0);
+        assert_eq!(timeline.chrome_paint_ms, None);
     }
 }

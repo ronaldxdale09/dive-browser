@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -56,6 +56,11 @@ struct Inner {
     next_id: AtomicU64,
     pending: Pending,
     events: broadcast::Sender<CdpEvent>,
+    /// Set once the browser behind the transport is going away. A call made
+    /// after that fails here instead of reaching the transport: the feeds
+    /// answer events on their own schedule, and a message handed to a
+    /// browser mid-teardown is how the engine's message loop trips a CHECK.
+    closed: AtomicBool,
 }
 
 /// Removes an in-flight call when its future is timed out or cancelled.
@@ -94,6 +99,7 @@ impl CdpSession {
                 next_id: AtomicU64::new(FIRST_ID),
                 pending: Mutex::new(HashMap::new()),
                 events,
+                closed: AtomicBool::new(false),
             }),
         }
     }
@@ -109,6 +115,9 @@ impl CdpSession {
         params: Value,
         timeout: Duration,
     ) -> Result<Value, CdpError> {
+        if self.inner.closed.load(Ordering::Acquire) {
+            return Err(CdpError::Closed);
+        }
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         self.pending().insert(id, tx);
@@ -146,6 +155,11 @@ impl CdpSession {
     /// Returns `Err` only when the payload is not valid protocol JSON;
     /// unknown ids and events without subscribers are ignored.
     pub fn handle_incoming(&self, raw: &str) -> Result<(), CdpError> {
+        if self.inner.closed.load(Ordering::Acquire) {
+            // A closing browser still flushes a few events; nobody should
+            // act on them, and acting is what breaks the teardown.
+            return Ok(());
+        }
         let msg: Incoming = serde_json::from_str(raw)?;
         match (msg.id, msg.method) {
             (Some(id), _) => {
@@ -174,9 +188,16 @@ impl CdpSession {
         Ok(())
     }
 
-    /// Fail every pending call; use when the browser goes away.
+    /// Fail every pending call, refuse new ones and ignore late incoming
+    /// messages; use when the browser goes away.
     pub fn close(&self) {
+        self.inner.closed.store(true, Ordering::Release);
         self.pending().clear();
+    }
+
+    /// Whether [`close`](Self::close) has been called.
+    pub fn is_closed(&self) -> bool {
+        self.inner.closed.load(Ordering::Acquire)
     }
 
     fn pending(
@@ -194,6 +215,85 @@ impl CdpSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_closed_session_refuses_calls_without_touching_the_transport() {
+        use std::sync::atomic::AtomicUsize;
+        struct Counting(Arc<AtomicUsize>);
+        impl Transport for Counting {
+            fn send(&self, _message: &str) -> Result<(), CdpError> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+        let sent = Arc::new(AtomicUsize::new(0));
+        let session = CdpSession::new(Counting(Arc::clone(&sent)));
+        let mut events = session.subscribe();
+        session.close();
+        assert!(session.is_closed());
+        // The feeds keep their clones and answer events on their own schedule;
+        // once the browser is going away their calls must fail here rather
+        // than reach a browser mid-teardown.
+        assert!(matches!(
+            session.call0("Page.enable").await,
+            Err(CdpError::Closed)
+        ));
+        assert_eq!(
+            sent.load(Ordering::SeqCst),
+            0,
+            "nothing reached the transport"
+        );
+        // Late events from the closing browser are dropped, not dispatched.
+        session
+            .handle_incoming(r#"{"method":"Inspector.detached","params":{}}"#)
+            .unwrap();
+        assert!(
+            events.try_recv().is_err(),
+            "a closed session delivers no events"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn close_never_waits_for_a_transport_blocked_on_the_ui_thread() {
+        use std::sync::{Barrier, mpsc};
+
+        struct Blocking {
+            entered: Arc<Barrier>,
+            release: Arc<Barrier>,
+        }
+        impl Transport for Blocking {
+            fn send(&self, _message: &str) -> Result<(), CdpError> {
+                self.entered.wait();
+                self.release.wait();
+                Ok(())
+            }
+        }
+
+        let entered = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let session = CdpSession::new(Blocking {
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+        });
+        let caller = session.clone();
+        let call = tokio::spawn(async move { caller.call0("Page.enable").await });
+        entered.wait();
+
+        let (closed_tx, closed_rx) = mpsc::channel();
+        let closer = session.clone();
+        std::thread::spawn(move || {
+            closer.close();
+            let _ = closed_tx.send(());
+        });
+        assert!(
+            closed_rx.recv_timeout(Duration::from_millis(250)).is_ok(),
+            "close must not wait for a transport that needs the UI thread"
+        );
+
+        release.wait();
+        assert!(matches!(call.await.unwrap(), Err(CdpError::Closed)));
+    }
+
     use std::sync::Mutex as StdMutex;
 
     /// Records outgoing messages so tests can answer them.

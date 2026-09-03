@@ -1,5 +1,6 @@
 import { ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
+import { usePicker } from "../store/simulator";
 
 /** Rail positions a workspace chord can reach. */
 const WORKSPACE_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
@@ -26,6 +27,7 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "zoom.reset": () => useBrowser.getState().zoomStep(0),
   "sidecar.toggle": () => useBrowser.getState().toggle("sidecar"),
   "dock.toggle": () => useBrowser.getState().toggle("dock"),
+  "simulator.toggle": () => usePicker.getState().toggle(),
   "capture.fullpage": () => useBrowser.getState().capture(true),
   "find.open": () => useBrowser.getState().toggle("find", true),
   "address.focus": () => void window.dispatchEvent(new CustomEvent(FOCUS_ADDRESS)),
@@ -87,6 +89,7 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+0": "zoom.reset",
   "mod+j": "sidecar.toggle",
   "mod+shift+d": "dock.toggle",
+  "mod+shift+m": "simulator.toggle",
   "mod+shift+s": "capture.fullpage",
   "mod+f": "find.open",
   "mod+l": "address.focus",

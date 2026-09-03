@@ -10,6 +10,7 @@ import { usePrefs } from "../store/prefs";
 import { workspaceAvatar } from "../lib/workspaceAvatar";
 import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
+import { AiShortcuts } from "./AiShortcuts";
 
 /** Rail width in each mode; App.tsx sizes the grid column from these. */
 export const RAIL_WIDTH = { collapsed: 52, expanded: 208 };
@@ -43,6 +44,7 @@ export function Rail() {
 
   return (
     <nav aria-label="Workspaces" className={`flex h-full flex-col gap-1 px-2 pt-2 pb-2 ${expanded ? "" : "items-center"}`}>
+      {expanded && <AiShortcuts />}
       {expanded && (
         <div className="flex h-6 items-center gap-1 pr-0.5 pl-2">
           <span className="text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">Workspaces</span>
@@ -202,7 +204,7 @@ function WorkspaceRow({
  * every tab in the workspace, which is not something to do on one click.
  */
 function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number; onClose: () => void }) {
-  useCoversContent();
+  useCoversContent(true);
   const workspaces = useBrowser((s) => s.workspaces);
   const count = useBrowser((s) => s.counts[id] ?? 0);
   const activate = useBrowser((s) => s.activateWorkspace);

@@ -131,17 +131,18 @@ export function Cutout({ device, landscape }: { device: DevicePreset; landscape:
   if (landscape) return null;
   switch (device.frame) {
     case "island":
-      return <div aria-hidden className="absolute rounded-full bg-black" style={{ top: 11, left: "50%", width: 126, height: 37, transform: "translateX(-50%)" }} />;
+      // A hairline keeps it visible when the status strip is black too.
+      return <div aria-hidden className="absolute rounded-full bg-black" style={{ top: 11, left: "50%", width: 126, height: 37, transform: "translateX(-50%)", boxShadow: "0 0 0 1px rgba(255,255,255,0.14)" }} />;
     case "notch":
       return (
         <div
           aria-hidden
           className="absolute bg-black"
-          style={{ top: 0, left: "50%", width: Math.round(device.width * 0.56), height: 30, transform: "translateX(-50%)", borderRadius: "0 0 20px 20px" }}
+          style={{ top: 0, left: "50%", width: Math.round(device.width * 0.56), height: 30, transform: "translateX(-50%)", borderRadius: "0 0 20px 20px", boxShadow: "0 1px 0 0 rgba(255,255,255,0.12)" }}
         />
       );
     case "punch":
-      return <div aria-hidden className="absolute rounded-full bg-black" style={{ top: 10, left: "50%", width: 14, height: 14, transform: "translateX(-50%)", boxShadow: "inset 0 0 0 2px #0a0a0a" }} />;
+      return <div aria-hidden className="absolute rounded-full bg-black" style={{ top: 10, left: "50%", width: 14, height: 14, transform: "translateX(-50%)", boxShadow: "0 0 0 1px rgba(255,255,255,0.18), inset 0 0 0 2px #0a0a0a" }} />;
     default:
       return null;
   }

@@ -8,6 +8,7 @@ import { Content } from "./components/Content";
 import { WorkspaceDialog } from "./components/WorkspaceDialog";
 import { FindBar } from "./components/FindBar";
 import { Splash } from "./components/Splash";
+import { RecorderModal } from "./components/RecorderModal";
 import { useBrowser } from "./store/browser";
 import { usePrefs, watchSystemTheme } from "./store/prefs";
 import { useShortcuts } from "./lib/shortcuts";
@@ -83,6 +84,7 @@ export function App() {
       </Suspense>
       <Splash />
       <WorkspaceDialog key={editing?.id ?? (editing ? "new" : "closed")} />
+      <RecorderModal />
       {notice && (
         <div role="status" className="fixed bottom-3 left-16 rounded-full border border-line-2 bg-surface-2 px-3 py-1.5 font-mono text-[11px] text-ink-2 shadow-lg">
           {notice}

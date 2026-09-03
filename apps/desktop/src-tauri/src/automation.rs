@@ -192,17 +192,50 @@ pub async fn click_at(
         false,
     )
     .await;
-    for kind in ["mouseMoved", "mousePressed", "mouseReleased"] {
-        let button = if kind == "mouseMoved" { "none" } else { "left" };
+    for (index, event) in mouse_events(x, y).into_iter().enumerate() {
+        // Give CEF one event-loop turn with the button held. Sending down and
+        // up back-to-back can be acknowledged by CDP without Blink producing
+        // a DOM click.
+        if index == 2 {
+            tokio::time::sleep(std::time::Duration::from_millis(16)).await;
+        }
         session
-            .call(
-                "Input.dispatchMouseEvent",
-                json!({"type": kind, "x": x, "y": y, "button": button, "clickCount": 1}),
-            )
+            .call("Input.dispatchMouseEvent", event)
             .await
             .map_err(AppError::new)?;
     }
     Ok(())
+}
+
+fn mouse_events(x: f64, y: f64) -> [serde_json::Value; 3] {
+    [
+        json!({
+            "type": "mouseMoved",
+            "x": x,
+            "y": y,
+            "button": "none",
+            "buttons": 0,
+            "pointerType": "mouse"
+        }),
+        json!({
+            "type": "mousePressed",
+            "x": x,
+            "y": y,
+            "button": "left",
+            "buttons": 1,
+            "clickCount": 1,
+            "pointerType": "mouse"
+        }),
+        json!({
+            "type": "mouseReleased",
+            "x": x,
+            "y": y,
+            "button": "left",
+            "buttons": 0,
+            "clickCount": 1,
+            "pointerType": "mouse"
+        }),
+    ]
 }
 
 /// Insert text into whatever has focus, optionally replacing it first and
@@ -395,6 +428,19 @@ mod tests {
         assert!(key_events("Shift", 0).is_err());
         // A multi-character string that is not a known name is a typo.
         assert!(key_events("abc", 0).is_err());
+    }
+
+    #[test]
+    fn mouse_click_tracks_the_pressed_button_state() {
+        let [moved, pressed, released] = mouse_events(10.5, 20.25);
+        assert_eq!(moved["type"], "mouseMoved");
+        assert_eq!(moved["buttons"], 0);
+        assert_eq!(pressed["type"], "mousePressed");
+        assert_eq!(pressed["button"], "left");
+        assert_eq!(pressed["buttons"], 1);
+        assert_eq!(pressed["clickCount"], 1);
+        assert_eq!(released["type"], "mouseReleased");
+        assert_eq!(released["buttons"], 0);
     }
 
     #[test]

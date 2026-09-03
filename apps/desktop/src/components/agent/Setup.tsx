@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, ExternalLink, KeyRound, Loader2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, ExternalLink, Loader2 } from "lucide-react";
 import { useState } from "react";
 import type { Provider, ProviderInfo } from "../../lib/ipc";
 import { useAgent } from "../../store/agent";
@@ -6,10 +6,19 @@ import { useBrowser } from "../../store/browser";
 import { usePrefs } from "../../store/prefs";
 import { Icon } from "../Icon";
 
+const TOP_PROVIDERS: { id: Provider; label: string; badge?: string }[] = [
+  { id: "anthropic", label: "Anthropic", badge: "Recommended" },
+  { id: "openai", label: "OpenAI" },
+  { id: "ollama", label: "Ollama", badge: "Local" },
+];
+
 /**
- * Bring your own key. Pick a provider, paste a key, and it is checked against
- * the provider before it is kept -- a typo surfaces here rather than as the
- * first reply failing. Local servers and custom endpoints take no key.
+ * Clean, developer-centric provider configuration for Dive Agent.
+ * Follows 2026 IDE agent patterns (Kilo Code, Cline, Anthropic Console):
+ * - High-density, single-screen layout with zero decorative icon slop
+ * - Direct provider selector with 1-click top tier access
+ * - Monospace credentials input with OS Keychain storage
+ * - Clear verification feedback
  */
 export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () => void }) {
   const providers = useAgent((s) => s.providers);
@@ -20,24 +29,34 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
   const update = usePrefs((s) => s.update);
   const openTab = useBrowser((s) => s.openTab);
 
-  const [selected, setSelected] = useState<Provider>(prefs.agent_provider as Provider);
+  const [selected, setSelected] = useState<Provider>(
+    (prefs.agent_provider as Provider) || "anthropic",
+  );
   const [key, setKey] = useState("");
-  const [baseUrl, setBaseUrl] = useState(prefs.agent_custom_base_url);
+  const [showKey, setShowKey] = useState(false);
+  const [baseUrl, setBaseUrl] = useState(prefs.agent_custom_base_url || "");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const info = providers.find((p) => p.id === selected);
+  const [verifiedSuccess, setVerifiedSuccess] = useState(false);
+
+  const info = providers.find((p) => p.id === selected) ?? providers[0];
+
   const choose = (id: Provider) => {
     setSelected(id);
     setKey("");
     setResult(null);
+    setVerifiedSuccess(false);
   };
 
-  /** Make `p` the active provider, moving the model to its default when the
-   *  current one belongs to another provider's naming. */
+  /** Make `p` the active provider and return to conversation. */
   const activate = async (p: ProviderInfo) => {
     const models = useAgent.getState().models[p.id] ?? [];
     const keep = prefs.agent_provider === p.id || models.some((m) => m.id === prefs.agent_model);
-    await update({ agent_provider: p.id, agent_model: keep ? prefs.agent_model : p.default_model, ...(p.id === "custom" ? { agent_custom_base_url: baseUrl.trim() } : {}) });
+    await update({
+      agent_provider: p.id,
+      agent_model: keep ? prefs.agent_model : p.default_model,
+      ...(p.id === "custom" ? { agent_custom_base_url: baseUrl.trim() } : {}),
+    });
     onDone();
   };
 
@@ -45,23 +64,35 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
     if (!info) return;
     setBusy(true);
     setResult(null);
+    setVerifiedSuccess(false);
     try {
       if (info.id === "custom" && !baseUrl.trim()) {
-        setResult({ ok: false, message: "Enter the base URL of the endpoint." });
+        setResult({ ok: false, message: "Please enter the API base URL for this endpoint." });
         return;
       }
-      if (info.id === "custom") await update({ agent_custom_base_url: baseUrl.trim() });
+      if (info.id === "custom") {
+        await update({ agent_custom_base_url: baseUrl.trim() });
+      }
       if (info.needs_key && !key.trim() && !keyed.includes(info.id)) {
-        setResult({ ok: false, message: "Paste a key first." });
+        setResult({ ok: false, message: "Please enter your API key to continue." });
         return;
       }
       if (check) {
         const verdict = await verifyKey(info.id, key.trim() || null);
         setResult(verdict);
         if (!verdict.ok) return;
+        setVerifiedSuccess(true);
       }
-      if (key.trim()) await saveKey(info.id, key.trim());
-      await activate(info);
+      if (key.trim()) {
+        await saveKey(info.id, key.trim());
+      }
+      if (check) {
+        setTimeout(() => {
+          void activate(info);
+        }, 500);
+      } else {
+        await activate(info);
+      }
     } catch (e) {
       setResult({ ok: false, message: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -69,107 +100,284 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
     }
   };
 
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) setKey(text.trim());
+    } catch {
+      // Clipboard permissions unavailable; ignored
+    }
+  };
+
+  const hasKey = info ? keyed.includes(info.id) || !info.needs_key : false;
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 px-3 pt-3 pb-2">
-        {canGoBack && (
-          <button type="button" onClick={onDone} aria-label="Back to the conversation" className="grid size-6 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface animate-agent-slide-up">
+      {/* Top back bar when navigating back to chat */}
+      {canGoBack && (
+        <div className="flex h-9 shrink-0 items-center justify-between border-b border-line px-3">
+          <button
+            type="button"
+            onClick={onDone}
+            aria-label="Back to chat"
+            className="flex items-center gap-1.5 text-xs text-ink-2 hover:text-ink transition-colors"
+          >
             <Icon icon={ArrowLeft} size={13} />
+            <span>Back to conversation</span>
           </button>
-        )}
-        <div>
-          <h3 className="text-xs font-semibold text-ink">Bring your own key</h3>
-          <p className="text-[11px] text-ink-3">Keys stay in your OS keychain and leave this Mac only in calls to the provider you chose.</p>
+          <button
+            type="button"
+            onClick={onDone}
+            className="text-[11px] text-ink-3 hover:text-ink transition-colors px-1"
+          >
+            Done
+          </button>
         </div>
-      </div>
+      )}
 
-      <div role="radiogroup" aria-label="Provider" className="scroll-hidden min-h-0 flex-1 overflow-y-auto px-2">
-        {providers.map((p) => {
-          const active = p.id === selected;
-          const has = keyed.includes(p.id) || !p.needs_key;
-          return (
-            <button
-              key={p.id}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              onClick={() => choose(p.id)}
-              className={`mb-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${active ? "bg-surface-3 ring-1 ring-line-2" : "hover:bg-surface-2"}`}
-            >
-              <span className={`grid size-7 shrink-0 place-items-center rounded-lg text-[11px] font-semibold ${active ? "bg-highlight-soft text-highlight" : "bg-surface-2 text-ink-2"}`}>{p.name.slice(0, 1)}</span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1.5 text-xs text-ink">
-                  {p.name}
-                  {has && (
-                    <span className="flex items-center gap-0.5 rounded-full bg-highlight-soft px-1.5 text-[9px] tracking-wider text-highlight uppercase">
-                      <Icon icon={Check} size={9} /> {p.needs_key ? "key" : "local"}
-                    </span>
-                  )}
-                </span>
-                <span className="block truncate text-[11px] text-ink-3">{p.note}</span>
+      {/* Main Form Content */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3 space-y-3.5">
+        {/* Onboarding Overview (shown on initial setup) */}
+        {!canGoBack && keyed.length === 0 && (
+          <div className="space-y-1 rounded-xl border border-line bg-surface-2/40 p-3">
+            <h3 className="text-xs font-semibold text-ink">Connect Model Provider</h3>
+            <p className="text-[11px] leading-relaxed text-ink-2">
+              Select an AI model provider to inspect DOM elements, analyze network traffic, and automate page tasks.
+            </p>
+          </div>
+        )}
+
+        {/* Provider Selection */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[10.5px] font-medium text-ink-3 uppercase tracking-wider">
+              API Provider
+            </span>
+            {hasKey && (
+              <span className="text-[10.5px] text-highlight font-medium">
+                {info?.needs_key ? "Connected" : "Ready"}
               </span>
-            </button>
-          );
-        })}
-      </div>
+            )}
+          </div>
 
-      {info && (
-        <form
-          className="border-t border-line p-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit(true);
-          }}
-        >
-          {info.id === "custom" && (
-            <input
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="https://host/v1"
-              spellCheck={false}
-              aria-label="Base URL"
-              className="mb-2 h-9 w-full rounded-lg border border-line bg-surface-2 px-3 font-mono text-xs text-ink outline-none placeholder:text-ink-3 focus:border-line-2"
-            />
-          )}
-          {info.needs_key || info.id === "custom" ? (
-            <div className="flex items-center gap-2 rounded-lg border border-line bg-surface-2 pr-2 pl-3 focus-within:border-line-2">
-              <Icon icon={KeyRound} size={13} className="shrink-0 text-ink-3" />
-              <input
-                type="password"
-                value={key}
-                onChange={(e) => setKey(e.target.value)}
-                placeholder={keyed.includes(info.id) ? "Key saved · paste to replace" : info.key_hint || (info.id === "custom" ? "API key (optional)" : "API key")}
-                autoComplete="off"
-                spellCheck={false}
-                aria-label={`${info.name} API key`}
-                className="h-9 min-w-0 flex-1 bg-transparent font-mono text-xs text-ink outline-none placeholder:text-ink-3"
-              />
+          {/* Quick-select top providers */}
+          <div className="grid grid-cols-3 gap-1.5">
+            {TOP_PROVIDERS.map((tp) => {
+              const isSelected = selected === tp.id;
+              return (
+                <button
+                  key={tp.id}
+                  type="button"
+                  onClick={() => choose(tp.id)}
+                  className={`flex flex-col items-start rounded-lg border px-2.5 py-1.5 text-left transition-colors ${
+                    isSelected
+                      ? "border-line-2 bg-surface-2 text-ink shadow-2xs"
+                      : "border-line/60 bg-surface-2/40 text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink"
+                  }`}
+                >
+                  <span className="text-xs font-medium truncate w-full">{tp.label}</span>
+                  <span className="text-[9.5px] text-ink-3 mt-0.5">
+                    {tp.badge || "Cloud"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Full provider dropdown */}
+          <div className="relative">
+            <select
+              id="agent-provider-select"
+              aria-label="All Providers"
+              value={selected}
+              onChange={(e) => choose(e.target.value as Provider)}
+              className="w-full appearance-none rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs text-ink outline-none transition-colors hover:border-line-2 focus:border-highlight pr-7 cursor-pointer"
+            >
+              <optgroup label="Recommended">
+                <option value="anthropic">Anthropic (Claude 3.7 Sonnet)</option>
+                <option value="openai">OpenAI (GPT-4o)</option>
+                <option value="ollama">Ollama (Local & Free)</option>
+              </optgroup>
+              <optgroup label="Cloud Gateways & Frontier">
+                <option value="openrouter">OpenRouter (Multi-model gateway)</option>
+                <option value="google">Google Gemini</option>
+                <option value="groq">Groq (Fast inference)</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="mistral">Mistral AI</option>
+                <option value="xai">xAI Grok</option>
+                <option value="together">Together AI</option>
+                <option value="fireworks">Fireworks AI</option>
+                <option value="cerebras">Cerebras</option>
+              </optgroup>
+              <optgroup label="Local & Custom">
+                <option value="lmstudio">LM Studio (Local server)</option>
+                <option value="custom">Custom (OpenAI-compatible URL)</option>
+              </optgroup>
+            </select>
+            <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-ink-3">
+              <Icon icon={ChevronDown} size={13} />
+            </div>
+          </div>
+        </div>
+
+        {/* Selected Provider Form */}
+        {info && (
+          <form
+            className="space-y-3 pt-1 border-t border-line/60"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submit(true);
+            }}
+          >
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[11px] text-ink-3">
+                Default model: <code className="font-mono text-ink text-[10.5px]">{info.default_model}</code>
+              </span>
+
               {info.key_url && (
-                <button type="button" onClick={() => void openTab(info.key_url)} className="flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink" title={info.key_url}>
-                  Get a key <Icon icon={ExternalLink} size={10} />
+                <button
+                  type="button"
+                  onClick={() => void openTab(info.key_url)}
+                  className="flex items-center gap-1 text-[11px] text-ink-3 hover:text-ink hover:underline transition-colors"
+                  title={info.key_url}
+                >
+                  <span>Get API Key</span>
+                  <Icon icon={ExternalLink} size={10} />
                 </button>
               )}
             </div>
-          ) : (
-            <p className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-[11px] text-ink-2">
-              No key needed. Make sure {info.name} is running at <code className="font-mono text-ink">{info.base_url}</code> with a model that supports tools.
-            </p>
-          )}
-          {result && <p className={`mt-2 text-[11px] ${result.ok ? "text-highlight" : "text-danger"}`}>{result.message}</p>}
-          <div className="mt-2.5 flex items-center gap-2">
-            {result && !result.ok && (info.needs_key || info.id === "custom") && (
-              <button type="button" disabled={busy} onClick={() => void submit(false)} className="text-[11px] text-ink-3 hover:text-ink disabled:opacity-40">
-                Save without checking
-              </button>
+
+            {/* Custom Endpoint Base URL */}
+            {info.id === "custom" && (
+              <div>
+                <label htmlFor="agent-base-url" className="block text-[11px] font-medium text-ink-2 mb-1">
+                  API Base URL
+                </label>
+                <input
+                  id="agent-base-url"
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder="https://api.example.com/v1"
+                  spellCheck={false}
+                  className="h-8 w-full rounded-lg border border-line bg-surface-2 px-2.5 font-mono text-xs text-ink outline-none placeholder:text-ink-3 focus:border-line-2 transition-colors"
+                />
+              </div>
             )}
-            <span className="flex-1" />
-            <button type="submit" disabled={busy} className="flex h-8 items-center gap-1.5 rounded-full bg-accent px-4 text-xs font-medium text-accent-ink disabled:opacity-40">
-              {busy && <Icon icon={Loader2} size={12} className="animate-spin" />}
-              {info.needs_key ? (keyed.includes(info.id) && !key.trim() ? "Use this provider" : "Verify and save") : "Use this provider"}
-            </button>
-          </div>
-        </form>
-      )}
+
+            {/* API Key Input */}
+            {info.needs_key || info.id === "custom" ? (
+              <div>
+                <label htmlFor="agent-api-key" className="block text-[11px] font-medium text-ink-2 mb-1">
+                  API Key
+                </label>
+                <div className="relative flex items-center">
+                  <input
+                    id="agent-api-key"
+                    type={showKey ? "text" : "password"}
+                    value={key}
+                    onChange={(e) => setKey(e.target.value)}
+                    placeholder={
+                      keyed.includes(info.id)
+                        ? "Key saved · paste to replace"
+                        : info.key_hint || (info.id === "custom" ? "sk-... (optional)" : "sk-...")
+                    }
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="h-8 w-full rounded-lg border border-line bg-surface-2 px-2.5 font-mono text-xs text-ink outline-none placeholder:text-ink-3 focus:border-line-2 transition-colors pr-16"
+                  />
+                  <div className="absolute right-1 flex items-center gap-0.5">
+                    {key && (
+                      <button
+                        type="button"
+                        onClick={() => setShowKey(!showKey)}
+                        className="px-1.5 py-0.5 text-[10px] text-ink-3 hover:text-ink"
+                      >
+                        {showKey ? "Hide" : "Show"}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handlePaste}
+                      className="px-1.5 py-0.5 text-[10px] text-ink-3 hover:text-ink"
+                    >
+                      Paste
+                    </button>
+                  </div>
+                </div>
+                <p className="mt-1 text-[10.5px] text-ink-3">
+                  Encrypted and stored in macOS Keychain.
+                </p>
+              </div>
+            ) : (
+              /* Local Provider Notice */
+              <div className="rounded-lg border border-line bg-surface-2/60 p-2.5 text-xs text-ink-2 space-y-1">
+                <span className="font-medium text-ink block">Local & Offline Model</span>
+                <p className="text-[11px] text-ink-3 leading-relaxed">
+                  No API key required. Make sure {info.name} is running at{" "}
+                  <code className="rounded bg-surface-3 px-1 py-0.5 font-mono text-[10px] text-ink">
+                    {info.base_url}
+                  </code>{" "}
+                  with a tool-capable model (e.g. <span className="text-ink font-mono">llama3.3</span>).
+                </p>
+              </div>
+            )}
+
+            {/* Success state */}
+            {verifiedSuccess && (
+              <div className="text-[11px] text-highlight font-medium">
+                Connection verified! Loading agent…
+              </div>
+            )}
+
+            {/* Error state */}
+            {result && !result.ok && (
+              <div className="rounded-lg border border-danger/30 bg-danger/10 px-2.5 py-1.5 text-[11px] text-danger space-y-0.5">
+                <span className="font-medium">Verification failed:</span>
+                <p className="text-[10.5px] opacity-90">{result.message}</p>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="pt-1 flex items-center justify-between gap-2">
+              {result && !result.ok && (info.needs_key || info.id === "custom") ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void submit(false)}
+                  className="text-[11px] text-ink-3 hover:text-ink transition-colors disabled:opacity-40"
+                >
+                  Save without verifying
+                </button>
+              ) : (
+                <span />
+              )}
+
+              <button
+                type="submit"
+                disabled={busy || (info.needs_key && !key.trim() && !hasKey)}
+                className="h-8 rounded-lg bg-accent px-4 text-xs font-medium text-accent-ink hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center gap-1.5"
+              >
+                {busy ? (
+                  <>
+                    <Icon icon={Loader2} size={11} className="animate-spin" />
+                    <span>Verifying…</span>
+                  </>
+                ) : verifiedSuccess ? (
+                  "Connected"
+                ) : info.needs_key ? (
+                  hasKey && !key.trim() ? (
+                    "Use Provider"
+                  ) : (
+                    "Verify & Connect"
+                  )
+                ) : (
+                  "Connect Provider"
+                )}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
     </div>
   );
 }

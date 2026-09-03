@@ -88,6 +88,41 @@ pub struct TabHost {
     /// always paint above the main webview, so the active view is hidden for
     /// as long as one is up, otherwise the overlay is buried behind the page.
     covered: bool,
+    /// Split view: tabs shown side by side, each at its own rectangle. Empty
+    /// means the active tab alone fills the content area.
+    panes: Vec<PaneBounds>,
+    /// Tabs torn off into their own window. Their views are children of that
+    /// window, not the main one, so the main layout leaves them alone.
+    popouts: HashMap<TabId, Popout>,
+}
+
+/// One pane of a split view: which tab, and where it sits.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
+pub struct PaneBounds {
+    /// The tab shown in the pane.
+    pub tab: TabId,
+    /// Its rectangle, relative to the main window.
+    pub bounds: Bounds,
+}
+
+/// A tab living in its own window.
+struct Popout {
+    window: Window<Runtime>,
+    bounds: Bounds,
+}
+
+/// Height of the strip a popout window reserves for its own small toolbar
+/// until the chrome in it reports the real content rectangle.
+const POPOUT_TOOLBAR: f64 = 44.0;
+
+/// Window label of the popout holding `id`.
+pub fn popout_label(id: TabId) -> String {
+    format!("pop-{id}")
+}
+
+/// The tab a popout window label belongs to, if it is one.
+pub fn popout_tab(label: &str) -> Option<TabId> {
+    label.strip_prefix("pop-").and_then(|id| id.parse().ok())
 }
 
 impl TabHost {
@@ -105,6 +140,8 @@ impl TabHost {
             active: None,
             profiles_root,
             covered: false,
+            panes: Vec::new(),
+            popouts: HashMap::new(),
         }
     }
 
@@ -129,6 +166,13 @@ impl TabHost {
             .on_document_title_changed(move |_, title| {
                 if title == PLACEHOLDER_TITLE {
                     return;
+                }
+                // `try_lock`: this fires from the engine, and must never wait
+                // on a command that holds the host.
+                if let Ok(host) = title_app.state::<AppState>().host.try_lock()
+                    && let Some(host) = host.as_ref()
+                {
+                    host.retitle_popout(tab_id, &title);
                 }
                 update_tab(&title_app, tab_id, |t| t.title = title);
             });
@@ -291,12 +335,20 @@ impl TabHost {
         self.apply_visibility()
     }
 
-    /// Show the active view unless an overlay covers it; hide every other one.
+    /// Show whatever the layout says is on screen unless an overlay covers
+    /// it; hide every other view. Popouts live in their own window and are
+    /// never touched here.
     fn apply_visibility(&self) -> tauri::Result<()> {
+        let showing = self.on_screen();
         for (tab, view) in &self.views {
-            if Some(*tab) == self.active && !self.covered {
+            if self.popouts.contains_key(tab) {
+                continue;
+            }
+            if showing.contains(tab) && !self.covered {
                 view.show()?;
-                let _ = view.set_focus();
+                if Some(*tab) == self.active {
+                    let _ = view.set_focus();
+                }
             } else {
                 view.hide()?;
             }
@@ -305,6 +357,190 @@ impl TabHost {
             self.focus_chrome();
         }
         Ok(())
+    }
+
+    /// Tabs the main window's layout shows: the panes of a split, or the
+    /// active tab alone.
+    fn on_screen(&self) -> Vec<TabId> {
+        if self.panes.is_empty() {
+            self.active.into_iter().collect()
+        } else {
+            self.panes.iter().map(|p| p.tab).collect()
+        }
+    }
+
+    /// Every tab a user can currently see, in any window. The idle sweep
+    /// must not put one of these to sleep.
+    pub fn showing(&self) -> Vec<TabId> {
+        let mut ids = self.on_screen();
+        ids.extend(self.popouts.keys().copied());
+        ids
+    }
+
+    /// Lay the content area out as these panes (empty for a single page),
+    /// showing each pane's tab at its rectangle.
+    pub fn set_panes(&mut self, panes: Vec<PaneBounds>) -> tauri::Result<()> {
+        self.panes = panes
+            .into_iter()
+            .filter(|p| self.views.contains_key(&p.tab) && !self.popouts.contains_key(&p.tab))
+            .collect();
+        self.layout()?;
+        self.apply_visibility()
+    }
+
+    /// Tabs in the current split, in pane order.
+    pub fn panes(&self) -> Vec<TabId> {
+        self.panes.iter().map(|p| p.tab).collect()
+    }
+
+    /// Where a view belongs: its popout window, its pane, or the content area.
+    fn rect_for(&self, id: TabId) -> Bounds {
+        if let Some(p) = self.popouts.get(&id) {
+            return p.bounds;
+        }
+        self.panes
+            .iter()
+            .find(|p| p.tab == id)
+            .map_or(self.bounds, |p| p.bounds)
+    }
+
+    /// Move and resize every view to where the layout says it belongs.
+    fn layout(&self) -> tauri::Result<()> {
+        for (tab, view) in &self.views {
+            let b = self.rect_for(*tab);
+            view.set_bounds(tauri::Rect {
+                position: b.position().into(),
+                size: b.size().into(),
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Tear `id` off into its own window at `at` (logical, relative to the
+    /// main window's origin), keeping the page exactly as it is: the native
+    /// view is reparented, not recreated.
+    pub fn detach(
+        &mut self,
+        app: &AppHandle<Runtime>,
+        id: TabId,
+        title: &str,
+        at: Option<(f64, f64)>,
+    ) -> tauri::Result<()> {
+        if self.popouts.contains_key(&id) {
+            return Ok(());
+        }
+        let view = self
+            .views
+            .get(&id)
+            .cloned()
+            .ok_or(tauri::Error::WebviewNotFound)?;
+        let width = self.bounds.width.clamp(480.0, 1100.0);
+        let height = (self.bounds.height + POPOUT_TOOLBAR).clamp(360.0, 900.0);
+        let mut builder = tauri::window::WindowBuilder::new(app, popout_label(id))
+            .title(if title.is_empty() { "Dive" } else { title })
+            .inner_size(width, height)
+            .min_inner_size(360.0, 240.0);
+        if let Some((x, y)) = at {
+            let scale = self.window.scale_factor()?;
+            let origin = self.window.outer_position()?.to_logical::<f64>(scale);
+            // The pointer sits on the tab pill it dragged; put the window so
+            // that pill lands under it rather than a corner.
+            builder = builder.position(
+                (origin.x + x - 120.0).max(0.0),
+                (origin.y + y - 20.0).max(0.0),
+            );
+        }
+        let window = builder.build()?;
+        window.add_child(
+            WebviewBuilder::new(
+                popout_chrome_label(id),
+                WebviewUrl::App(format!("index.html?popout={id}").into()),
+            )
+            .auto_resize(),
+            LogicalPosition::new(0.0, 0.0),
+            LogicalSize::new(width, height),
+        )?;
+        if let Err(error) = view.reparent(&window) {
+            let _ = window.destroy();
+            return Err(error);
+        }
+        let bounds = Bounds {
+            x: 0.0,
+            y: POPOUT_TOOLBAR,
+            width,
+            height: height - POPOUT_TOOLBAR,
+        };
+        self.popouts.insert(id, Popout { window, bounds });
+        self.panes.retain(|p| p.tab != id);
+        if self.active == Some(id) {
+            self.active = None;
+        }
+        view.set_bounds(tauri::Rect {
+            position: bounds.position().into(),
+            size: bounds.size().into(),
+        })?;
+        view.show()?;
+        let _ = view.set_focus();
+        self.apply_visibility()
+    }
+
+    /// Bring `id` back from its own window into the main one. The caller
+    /// decides whether it becomes the active tab.
+    pub fn attach(&mut self, id: TabId) -> tauri::Result<()> {
+        let Some(popout) = self.popouts.remove(&id) else {
+            return Ok(());
+        };
+        if let Some(view) = self.views.get(&id) {
+            view.reparent(&self.window)?;
+            view.hide()?;
+        }
+        let _ = popout.window.destroy();
+        let _ = self.window.set_focus();
+        self.layout()
+    }
+
+    /// The popout chrome reports where its page should sit.
+    pub fn set_popout_bounds(&mut self, id: TabId, bounds: Bounds) -> tauri::Result<()> {
+        if let Some(p) = self.popouts.get_mut(&id) {
+            p.bounds = bounds;
+        }
+        if let Some(view) = self.views.get(&id) {
+            view.set_bounds(tauri::Rect {
+                position: bounds.position().into(),
+                size: bounds.size().into(),
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Whether `id` is shown in its own window.
+    pub fn is_detached(&self, id: TabId) -> bool {
+        self.popouts.contains_key(&id)
+    }
+
+    /// Tabs shown in their own windows.
+    pub fn detached(&self) -> Vec<TabId> {
+        self.popouts.keys().copied().collect()
+    }
+
+    /// Raise the window holding `id`.
+    pub fn focus_popout(&self, id: TabId) -> tauri::Result<()> {
+        if let Some(p) = self.popouts.get(&id) {
+            p.window.set_focus()?;
+            if let Some(view) = self.views.get(&id) {
+                let _ = view.set_focus();
+            }
+        }
+        Ok(())
+    }
+
+    /// Keep a popout's title in step with its page.
+    pub fn retitle_popout(&self, id: TabId, title: &str) {
+        if let Some(p) = self.popouts.get(&id) {
+            let _ = p
+                .window
+                .set_title(if title.is_empty() { "Dive" } else { title });
+        }
     }
 
     /// Move keyboard focus to the React chrome. The page is a separate native
@@ -322,12 +558,16 @@ impl TabHost {
         }
     }
 
-    /// Hide every tab view (used when switching workspaces).
+    /// Hide every tab view in the main window (used when switching
+    /// workspaces). Popouts stay up: they belong to their own window.
     pub fn deactivate_all(&mut self) -> tauri::Result<()> {
-        for view in self.views.values() {
-            view.hide()?;
+        for (tab, view) in &self.views {
+            if !self.popouts.contains_key(tab) {
+                view.hide()?;
+            }
         }
         self.active = None;
+        self.panes.clear();
         Ok(())
     }
 
@@ -339,6 +579,10 @@ impl TabHost {
         if let Some(view) = self.views.remove(&id) {
             view.close()?;
         }
+        if let Some(popout) = self.popouts.remove(&id) {
+            let _ = popout.window.destroy();
+        }
+        self.panes.retain(|p| p.tab != id);
         if self.active == Some(id) {
             self.active = None;
         }
@@ -353,16 +597,11 @@ impl TabHost {
         }
     }
 
-    /// Move and resize every tab view to the content rectangle.
+    /// The content rectangle a single page fills. Panes and popouts keep
+    /// their own rectangles.
     pub fn set_bounds(&mut self, bounds: Bounds) -> tauri::Result<()> {
         self.bounds = bounds;
-        for view in self.views.values() {
-            view.set_bounds(tauri::Rect {
-                position: bounds.position().into(),
-                size: bounds.size().into(),
-            })?;
-        }
-        Ok(())
+        self.layout()
     }
 
     /// Currently shown tab.
@@ -431,6 +670,11 @@ fn blank_url() -> url::Url {
 
 fn label_for(id: TabId) -> String {
     format!("tab-{id}")
+}
+
+/// Label of the chrome webview inside the popout window for `id`.
+fn popout_chrome_label(id: TabId) -> String {
+    format!("chrome-pop-{id}")
 }
 
 /// Apply `f` to the stored tab, persist it, and broadcast the change.

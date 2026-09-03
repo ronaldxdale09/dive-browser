@@ -12,7 +12,7 @@ use tauri::{AppHandle, State};
 use tauri_specta::{Event, collect_commands, collect_events};
 
 use crate::Runtime;
-use crate::engine::Bounds;
+use crate::engine::{Bounds, PaneBounds};
 use crate::error::{AppError, AppResult};
 use crate::state::{AppState, lock};
 
@@ -31,6 +31,17 @@ pub struct Snapshot {
     pub tabs: Vec<Tab>,
     /// Focused tab, if any.
     pub active_tab: Option<TabId>,
+    /// Tabs shown in their own windows.
+    pub detached: Vec<TabId>,
+}
+
+/// A tab moved into its own window, or back into the main one.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct TabWindowChanged {
+    /// The tab.
+    pub tab: TabId,
+    /// Whether it now lives in its own window.
+    pub detached: bool,
 }
 
 /// Facts the Settings dialog shows.
@@ -367,6 +378,10 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_record_stop,
             layout_set_content_bounds,
             layout_set_content_covered,
+            layout_set_panes,
+            tab_detach,
+            tab_attach,
+            popout_set_bounds,
             commands_list,
             command_run,
             app_info,
@@ -399,6 +414,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::recorder::RecorderEvent,
             crate::menu::MenuCommand,
             StateChanged,
+            TabWindowChanged,
             crate::console::ConsoleEntry,
             crate::network::NetworkEvent,
             crate::engine::DownloadNotice,
@@ -462,6 +478,12 @@ pub fn register_builtin(registry: &dive_core::CommandRegistry) {
             Some("mod+shift+s"),
             CommandScope::Tab,
         ),
+        (
+            "simulator.toggle",
+            "Toggle device simulator",
+            Some("mod+shift+m"),
+            CommandScope::Tab,
+        ),
     ];
     for (id, title, key, scope) in builtin {
         let cmd = Command {
@@ -489,14 +511,15 @@ pub(crate) fn snapshot(state: State<'_, AppState>) -> AppResult<Snapshot> {
         Some(id) => store.tabs_for_workspace(id)?,
         None => Vec::new(),
     };
-    let active_tab = lock(&state.host)
+    let (active_tab, detached) = lock(&state.host)
         .as_ref()
-        .and_then(super::engine::TabHost::active);
+        .map_or((None, Vec::new()), |h| (h.active(), h.detached()));
     Ok(Snapshot {
         workspaces: store.workspaces()?,
         active_workspace,
         tabs,
         active_tab,
+        detached,
     })
 }
 
@@ -796,6 +819,12 @@ pub(crate) fn tab_close(
     state: State<'_, AppState>,
     id: TabId,
 ) -> AppResult<()> {
+    close_tab(&app, &state, id)
+}
+
+/// Close `id`: destroy its view (and its window, if it had one of its own),
+/// forget it, and move on to the workspace's previous tab if it was showing.
+pub fn close_tab(app: &AppHandle<Runtime>, state: &AppState, id: TabId) -> AppResult<()> {
     let (was_active, workspace) = {
         let mut host = lock(&state.host);
         let store = lock(&state.store);
@@ -815,11 +844,16 @@ pub(crate) fn tab_close(
     state.crashes.drop_tab(id);
     state.screencast.discard(id);
     state.bus.publish(CoreEvent::TabClosed(id));
-    if was_active
-        && let Some(ws) = workspace
-        && let Some(next) = lock(&state.store).last_active_tab(ws)?
-    {
-        activate_tab(&app, &state, next.id)?;
+    // Picked in its own statement so the store guard is released before
+    // `activate_tab` takes the store again. Inside an `if let` chain the
+    // guard lives through the body, and the second lock never returns:
+    // closing the active tab froze the main thread.
+    let next = match workspace {
+        Some(ws) if was_active => lock(&state.store).last_active_tab(ws)?,
+        _ => None,
+    };
+    if let Some(next) = next {
+        activate_tab(app, state, next.id)?;
     }
     Ok(())
 }
@@ -845,6 +879,12 @@ pub fn activate_tab(app: &AppHandle<Runtime>, state: &AppState, id: TabId) -> Ap
         let host = host
             .as_mut()
             .ok_or_else(|| AppError::new("engine not ready"))?;
+        // A tab in its own window is "activated" by raising that window; the
+        // main window's page does not change.
+        if host.is_detached(id) {
+            host.focus_popout(id)?;
+            return Ok(());
+        }
         let store = lock(&state.store);
         let mut tab = store.tab(id)?;
         if !host.has(id) {
@@ -854,6 +894,7 @@ pub fn activate_tab(app: &AppHandle<Runtime>, state: &AppState, id: TabId) -> Ap
                 .ok_or_else(|| AppError::new("tab has no workspace"))?;
             let container = store.container(store.workspace(ws)?.container_id)?;
             host.open(app, &tab, &container)?;
+            crate::housekeeping::restore_scroll(app.clone(), id);
         }
         host.activate(id)?;
         tab.last_active_at = dive_core::Timestamp::now();
@@ -1105,6 +1146,9 @@ pub(crate) async fn tab_emulate(
 ) -> AppResult<()> {
     let session = cdp_for(&state, id)?;
     crate::emulate::apply(&session, crate::emulate::device_calls(device.as_ref())).await?;
+    // Remembered so an agent's page_resize can tell whether the user agent
+    // moved from what the chrome last applied, and reload only then.
+    state.buffers.set_device(id, device);
     // Metrics take effect live; the user agent does not. The chrome asks for
     // a reload only when the UA changed, so rotating or zooming a phone does
     // not throw the page's state away.
@@ -1446,6 +1490,138 @@ pub(crate) fn layout_set_content_covered(
 ) -> AppResult<()> {
     if let Some(host) = lock(&state.host).as_mut() {
         host.set_covered(covered)?;
+    }
+    Ok(())
+}
+
+/// Make sure `id` has a live view, recreating one if it was discarded. The
+/// host and store guards are the caller's, in that lock order.
+fn ensure_view(
+    app: &AppHandle<Runtime>,
+    state: &AppState,
+    host: &mut crate::engine::TabHost,
+    store: &dive_core::Store,
+    id: TabId,
+) -> AppResult<Tab> {
+    let mut tab = store.tab(id)?;
+    if !host.has(id) {
+        let ws = tab
+            .workspace_id
+            .or(*lock(&state.active_workspace))
+            .ok_or_else(|| AppError::new("tab has no workspace"))?;
+        let container = store.container(store.workspace(ws)?.container_id)?;
+        host.open(app, &tab, &container)?;
+        crate::housekeeping::restore_scroll(app.clone(), id);
+        if tab.state != dive_core::TabState::Active {
+            tab.state = dive_core::TabState::Active;
+            store.upsert_tab(&tab)?;
+            state.bus.publish(CoreEvent::TabUpserted(tab.clone()));
+        }
+    }
+    Ok(tab)
+}
+
+#[tauri::command]
+#[specta::specta]
+/// Show these tabs side by side at these rectangles; an empty list returns
+/// to a single page. Sleeping tabs are woken so every pane has a page.
+pub(crate) fn layout_set_panes(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    panes: Vec<PaneBounds>,
+) -> AppResult<()> {
+    let mut host = lock(&state.host);
+    let Some(host) = host.as_mut() else {
+        return Ok(());
+    };
+    {
+        let store = lock(&state.store);
+        for pane in &panes {
+            ensure_view(&app, &state, host, &store, pane.tab)?;
+        }
+    }
+    host.set_panes(panes)?;
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+/// Tear `id` off into its own window. `at` is where the pointer let go,
+/// relative to the main window; `None` lets the system place the window.
+pub(crate) fn tab_detach(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: TabId,
+    at: Option<(f64, f64)>,
+) -> AppResult<()> {
+    let (was_active, workspace) = {
+        let mut host = lock(&state.host);
+        let host = host
+            .as_mut()
+            .ok_or_else(|| AppError::new("engine not ready"))?;
+        let store = lock(&state.store);
+        let tab = ensure_view(&app, &state, host, &store, id)?;
+        let was_active = host.active() == Some(id);
+        host.detach(&app, id, &tab.title, at)?;
+        (
+            was_active,
+            tab.workspace_id.or(*lock(&state.active_workspace)),
+        )
+    };
+    let _ = TabWindowChanged {
+        tab: id,
+        detached: true,
+    }
+    .emit(&app);
+    // The main window needs a page again; pick the workspace's most recent
+    // tab that is still in it.
+    if was_active && let Some(ws) = workspace {
+        let next = {
+            let host = lock(&state.host);
+            let store = lock(&state.store);
+            let mut tabs = store.tabs_for_workspace(ws)?;
+            tabs.retain(|t| t.id != id && !host.as_ref().is_some_and(|h| h.is_detached(t.id)));
+            tabs.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
+            tabs.first().map(|t| t.id)
+        };
+        // With nothing left the chrome shows its welcome page; it learns
+        // that from the detach event itself.
+        if let Some(next) = next {
+            activate_tab(&app, &state, next)?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+/// Bring `id` back from its own window and show it in the main one.
+pub(crate) fn tab_attach(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: TabId,
+) -> AppResult<()> {
+    if let Some(host) = lock(&state.host).as_mut() {
+        host.attach(id)?;
+    }
+    let _ = TabWindowChanged {
+        tab: id,
+        detached: false,
+    }
+    .emit(&app);
+    activate_tab(&app, &state, id)
+}
+
+#[tauri::command]
+#[specta::specta]
+/// The chrome of a popout window reports where its page sits.
+pub(crate) fn popout_set_bounds(
+    state: State<'_, AppState>,
+    id: TabId,
+    bounds: Bounds,
+) -> AppResult<()> {
+    if let Some(host) = lock(&state.host).as_mut() {
+        host.set_popout_bounds(id, bounds)?;
     }
     Ok(())
 }

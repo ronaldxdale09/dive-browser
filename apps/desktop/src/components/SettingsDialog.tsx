@@ -9,7 +9,6 @@ import {
   Plug,
   ShieldCheck,
   SlidersHorizontal,
-  Sparkles,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -23,6 +22,7 @@ import type { Prefs } from "../store/prefs";
 import { Icon, IconButton } from "./Icon";
 import { Button, Check, Group, Row, Segmented, Select, Switch, TextArea, TextInput } from "./SettingsFields";
 import { useCoversContent } from "../lib/overlay";
+import { AgentIcon } from "./agent/AgentIcon";
 
 type SectionId = "general" | "appearance" | "privacy" | "downloads" | "developer" | "agent" | "shortcuts" | "about";
 
@@ -32,14 +32,14 @@ const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
   { id: "privacy", label: "Privacy", icon: ShieldCheck },
   { id: "downloads", label: "Downloads", icon: Download },
   { id: "developer", label: "Developer", icon: Plug },
-  { id: "agent", label: "Agent", icon: Sparkles },
+  { id: "agent", label: "Agent", icon: AgentIcon as LucideIcon },
   { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
   { id: "about", label: "About", icon: Info },
 ];
 
 /** Settings: a section list on the left, one panel of settings on the right. */
 export function SettingsDialog() {
-  useCoversContent();
+  useCoversContent(true);
   const toggle = useBrowser((s) => s.toggle);
   const [section, setSection] = useState<SectionId>("general");
   const [info, setInfo] = useState<AppInfo | null>(null);

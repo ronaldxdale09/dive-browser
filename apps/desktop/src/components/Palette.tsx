@@ -19,7 +19,7 @@ const HISTORY_LIMIT = 5;
 
 /** Omnibox-style palette: type a URL or search, or pick a tab or command. */
 export function Palette() {
-  useCoversContent();
+  useCoversContent(true);
   const toggle = useBrowser((s) => s.toggle);
   const openTab = useBrowser((s) => s.openTab);
   const tabs = useBrowser((s) => s.tabs);

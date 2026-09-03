@@ -5,6 +5,7 @@ import type { ModelInfo, Provider } from "../../lib/ipc";
 import { isReady, useAgent } from "../../store/agent";
 import { usePrefs } from "../../store/prefs";
 import { Icon } from "../Icon";
+import { ProviderLogo } from "./ProviderLogo";
 
 const EFFORTS = [
   { value: "default", label: "Auto" },
@@ -77,9 +78,10 @@ export function ModelPicker({ onAddProvider }: { onAddProvider: () => void }) {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="dialog"
-        className="flex h-6 max-w-full items-center gap-1 rounded-full px-2 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink aria-expanded:bg-surface-3 aria-expanded:text-ink"
+        className="flex h-6 max-w-full items-center gap-1.5 rounded-full px-2 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink aria-expanded:bg-surface-3 aria-expanded:text-ink transition-colors"
         title="Model and provider"
       >
+        {provider && <ProviderLogo id={provider.id} size={11} className="shrink-0" />}
         <span className="truncate">{current?.name ?? shortModel(prefs.agent_model)}</span>
         {provider && <span className="hidden truncate text-ink-3 sm:inline">· {provider.name}</span>}
         <Icon icon={ChevronDown} size={11} className="shrink-0 text-ink-3" />
@@ -93,8 +95,9 @@ export function ModelPicker({ onAddProvider }: { onAddProvider: () => void }) {
                 type="button"
                 onClick={() => switchProvider(p.id)}
                 aria-pressed={p.id === prefs.agent_provider}
-                className="h-6 shrink-0 rounded-full border border-line px-2 text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink aria-pressed:border-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink"
+                className="flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-line px-2 text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink aria-pressed:border-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink transition-colors"
               >
+                <ProviderLogo id={p.id} size={11} />
                 {p.name}
               </button>
             ))}

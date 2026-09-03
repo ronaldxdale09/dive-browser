@@ -1339,6 +1339,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "dive-e2e"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dive-cdp",
+ "dive-core",
+ "dive-mcp",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "dive-mcp"
 version = "0.1.0"
 dependencies = [

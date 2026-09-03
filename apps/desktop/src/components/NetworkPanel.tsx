@@ -1,4 +1,4 @@
-import { ArrowDownLeft, ArrowUpRight, Ban, FileDown, FileJson, Repeat, Sparkles } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Ban, FileDown, FileJson, Repeat } from "lucide-react";
 import { useState } from "react";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
@@ -8,6 +8,7 @@ import { selectFrames, selectRequests, useNetwork } from "../store/network";
 import type { RequestRow } from "../store/network";
 import { Icon, IconButton } from "./Icon";
 import { ReplayEditor } from "./ReplayEditor";
+import { AgentIcon } from "./agent/AgentIcon";
 
 export function NetworkTools() {
   const activeTab = useBrowser((s) => s.activeTab);
@@ -152,9 +153,9 @@ export function NetworkPanel() {
             disabled={!keyPresent}
             title={keyPresent ? "Ask the agent about this request" : "Add an API key in the Agent sidecar first"}
             onClick={() => askAgent(detail)}
-            className="flex h-6 shrink-0 items-center gap-1 rounded-full border border-line px-2 font-sans text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40"
+            className="flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-line px-2 font-sans text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40"
           >
-            <Icon icon={Sparkles} size={11} /> Explain
+            <AgentIcon size={11} className="text-highlight" /> Explain
           </button>
         </div>
       )}

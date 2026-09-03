@@ -1,7 +1,7 @@
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Pin, Plus, X } from "lucide-react";
+import { Moon, Pin, Plus, X } from "lucide-react";
 import { useState } from "react";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "../lib/ipc";
@@ -18,10 +18,11 @@ function label(t: Tab) {
   }
 }
 
-/** Sort for display: pinned first, then by position. */
+/** Sort for display: pinned first, then by position. Sleeping (discarded)
+ * tabs stay in the strip so one click wakes them. */
 export function orderTabs(tabs: Tab[]): Tab[] {
   return tabs
-    .filter((t) => t.tier !== "essential" && t.state !== "discarded")
+    .filter((t) => t.tier !== "essential")
     .sort((a, b) => (a.tier === b.tier ? a.position - b.position : a.tier === "pinned" ? -1 : 1));
 }
 
@@ -93,6 +94,7 @@ function SortableTab({ tab: t, active, onActivate, onClose, onMenu }: { tab: Tab
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.6 : 1 };
   const pinned = t.tier === "pinned";
+  const sleeping = t.state === "discarded";
   return (
     <div
       ref={setNodeRef}
@@ -111,8 +113,9 @@ function SortableTab({ tab: t, active, onActivate, onClose, onMenu }: { tab: Tab
       }}
       className={`group flex h-8 items-center gap-2 rounded-lg px-2.5 text-xs transition-colors ${pinned ? "w-9 justify-center px-0" : "max-w-56 min-w-28"} ${
         active ? "bg-surface-2 text-ink ring-1 ring-line-2" : "text-ink-2 hover:bg-surface hover:text-ink"
-      }`}
-      title={pinned ? label(t) : undefined}
+      } ${sleeping ? "opacity-55 hover:opacity-100" : ""}`}
+      title={sleeping ? `${label(t)} (sleeping, click to wake)` : pinned ? label(t) : undefined}
+      data-sleeping={sleeping || undefined}
     >
       {/* A pinned tab is icon-only, so the site's own mark is the only thing
           left to tell it apart; the pin itself moves to a corner dot. */}
@@ -125,6 +128,11 @@ function SortableTab({ tab: t, active, onActivate, onClose, onMenu }: { tab: Tab
         )}
       </span>
       {!pinned && <span className="truncate">{label(t)}</span>}
+      {sleeping && !pinned && (
+        <span className="grid shrink-0 place-items-center text-ink-3" aria-label="Sleeping">
+          <Icon icon={Moon} size={11} />
+        </span>
+      )}
       {!pinned && (
         <button
           type="button"
@@ -144,7 +152,7 @@ function SortableTab({ tab: t, active, onActivate, onClose, onMenu }: { tab: Tab
 }
 
 function TabMenu({ x, y, pinned, onPin, onClose, onCloseOthers }: { x: number; y: number; pinned: boolean; onPin: (v: boolean) => void; onClose: () => void; onCloseOthers: () => void }) {
-  useCoversContent();
+  useCoversContent(true);
   const item = "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink";
   return (
     <div role="menu" style={{ left: x, top: y }} className="fixed z-50 w-44 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl" onClick={(e) => e.stopPropagation()}>

@@ -72,14 +72,41 @@ impl AppBrowser {
             .ok_or_else(|| BrowserError::TabNotFound(tab.to_string()))
     }
 
+    /// Run `f` on the main thread and wait for its answer.
+    ///
+    /// Creating or showing a native view has to happen on the main thread,
+    /// and `activate_tab` holds the host lock while it does so. Called from
+    /// the MCP server's own thread, that pairing deadlocks the moment the
+    /// chrome sends a command that wants the same lock. Hopping over first
+    /// puts the call on the thread the chrome's commands already use.
+    async fn on_main<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&AppHandle<Runtime>) -> T + Send + 'static,
+    ) -> Result<T, BrowserError> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let app = self.app.clone();
+        self.app
+            .run_on_main_thread(move || {
+                let _ = tx.send(f(&app));
+            })
+            .map_err(other)?;
+        rx.await
+            .map_err(|_| other("the main thread dropped the request"))
+    }
+
     /// Make sure a view (and therefore a CDP session) exists for `tab`.
-    fn ensure_view(&self, tab: TabId) -> Result<(), BrowserError> {
-        let state = self.state();
-        let has = lock(&state.host).as_ref().is_some_and(|h| h.has(tab));
+    async fn ensure_view(&self, tab: TabId) -> Result<(), BrowserError> {
+        let has = lock(&self.state().host)
+            .as_ref()
+            .is_some_and(|h| h.has(tab));
         if has {
             return Ok(());
         }
-        activate_tab(&self.app, &state, tab).map_err(|e| BrowserError::Other(e.message))
+        self.on_main(move |app| {
+            let state = app.state::<AppState>();
+            activate_tab(app, &state, tab).map_err(|e| BrowserError::Other(e.message))
+        })
+        .await?
     }
 }
 
@@ -89,7 +116,7 @@ impl AppBrowser {
         &self,
         tab: TabId,
     ) -> Result<crate::snapshot::PageSnapshot, BrowserError> {
-        self.ensure_view(tab)?;
+        self.ensure_view(tab).await?;
         let text = crate::snapshot::cap(&self.page_text(tab).await?, crate::snapshot::MAX_TEXT);
         let structure =
             crate::snapshot::cap(&self.page_state(tab).await?, crate::snapshot::MAX_STRUCTURE);
@@ -166,19 +193,18 @@ impl From<locator::Failure> for BrowserError {
 impl AppBrowser {
     /// A live CDP session for `tab`, creating the view if it has been
     /// discarded.
-    fn session_for(&self, tab: TabId) -> Result<CdpSession, BrowserError> {
-        self.ensure_view(tab)?;
+    async fn session_for(&self, tab: TabId) -> Result<CdpSession, BrowserError> {
+        self.ensure_view(tab).await?;
         self.session(tab)
     }
 
     /// A session that can accept real input. CEF stops acknowledging `Input`
     /// events while a native child view is hidden, so a user-like action must
     /// bring its target tab forward first.
-    fn action_session_for(&self, tab: TabId) -> Result<CdpSession, BrowserError> {
-        self.ensure_view(tab)?;
+    async fn action_session_for(&self, tab: TabId) -> Result<CdpSession, BrowserError> {
+        self.ensure_view(tab).await?;
         if !self.on_screen(tab) {
-            let state = self.state();
-            activate_tab(&self.app, &state, tab).map_err(|error| other(error.message))?;
+            self.activate(tab).await?;
         }
         self.session(tab)
     }
@@ -257,13 +283,18 @@ impl AppBrowser {
         tab: TabId,
         session: &CdpSession,
         target: &Target,
+        editable: bool,
     ) -> Result<Option<String>, BrowserError> {
         if target.locator.is_none() && target.r#ref.is_none() && target.x.is_none() {
             return Ok(None);
         }
         match target.resolve()? {
             Addressed::Locator(selector) => {
-                let found = locator::focus(session, &selector).await?;
+                let found = if editable {
+                    locator::focus(session, &selector).await?
+                } else {
+                    locator::focus_any(session, &selector).await?
+                };
                 Ok(Some(format!("{} {:?}", found.role, found.name)))
             }
             Addressed::Ref(reference) => {
@@ -275,7 +306,7 @@ impl AppBrowser {
                 Ok(Some(reference))
             }
             Addressed::Point { .. } => Err(BrowserError::BadRequest(
-                "typing needs a locator or a ref, not coordinates".into(),
+                "focusing needs a locator or a ref, not coordinates".into(),
             )),
         }
     }
@@ -317,7 +348,7 @@ impl AppBrowser {
         tab: TabId,
         device: Option<crate::emulate::Device>,
     ) -> Result<bool, BrowserError> {
-        let session = self.session_for(tab)?;
+        let session = self.session_for(tab).await?;
         crate::emulate::apply(&session, crate::emulate::device_calls(device.as_ref()))
             .await
             .map_err(|e| other(e.message))?;
@@ -407,10 +438,16 @@ impl Browser for AppBrowser {
     }
 
     async fn open_tab(&self, url: String) -> Result<TabInfo, BrowserError> {
-        let state = self.state();
-        let workspace =
-            (*lock(&state.active_workspace)).ok_or_else(|| other("no active workspace"))?;
-        let tab = open_tab(&self.app, &state, workspace, &url).map_err(|e| other(e.message))?;
+        // Creating the native view has to happen on the main thread; from
+        // the server's thread CEF takes the process down.
+        let tab = self
+            .on_main(move |app| {
+                let state = app.state::<AppState>();
+                let workspace =
+                    (*lock(&state.active_workspace)).ok_or_else(|| other("no active workspace"))?;
+                open_tab(app, &state, workspace, &url).map_err(|e| other(e.message))
+            })
+            .await??;
         Ok(TabInfo {
             id: tab.id.to_string(),
             url: tab.url,
@@ -436,8 +473,26 @@ impl Browser for AppBrowser {
         .await
     }
 
+    async fn activate(&self, tab: TabId) -> Result<(), BrowserError> {
+        self.on_main(move |app| {
+            let state = app.state::<AppState>();
+            activate_tab(app, &state, tab).map_err(|e| other(e.message))
+        })
+        .await?
+    }
+
+    async fn close(&self, tab: TabId) -> Result<(), BrowserError> {
+        // CEF's Webview::close already queues its message onto the event
+        // loop. Calling it from inside run_on_main_thread makes that message
+        // dispatch reentrantly and can stall the main loop. The command is
+        // lock-serialized and its view operations are thread-safe handles, so
+        // let the runtime perform the one required hop itself.
+        crate::commands::tab_close(self.app.clone(), self.app.state(), tab)
+            .map_err(|e| other(e.message))
+    }
+
     async fn page_text(&self, tab: TabId) -> Result<String, BrowserError> {
-        self.ensure_view(tab)?;
+        self.ensure_view(tab).await?;
         let session = self.session(tab)?;
         let result = session
             .call(
@@ -460,7 +515,7 @@ impl Browser for AppBrowser {
     }
 
     async fn screenshot(&self, tab: TabId, full_page: bool) -> Result<Vec<u8>, BrowserError> {
-        let session = self.session_for(tab)?;
+        let session = self.session_for(tab).await?;
         let png = if full_page {
             dive_cdp::page::capture_full_page(&session, dive_cdp::page::ImageFormat::Png).await
         } else {
@@ -481,7 +536,7 @@ impl Browser for AppBrowser {
     }
 
     async fn page_state(&self, tab: TabId) -> Result<String, BrowserError> {
-        self.ensure_view(tab)?;
+        self.ensure_view(tab).await?;
         let session = self.session(tab)?;
         let tree = session
             .call("Accessibility.getFullAXTree", json!({}))
@@ -506,7 +561,7 @@ impl Browser for AppBrowser {
     }
 
     async fn page_inspect(&self, tab: TabId) -> Result<Value, BrowserError> {
-        let session = self.session_for(tab)?;
+        let session = self.session_for(tab).await?;
         let page = locator::page(&session, crate::snapshot::MAX_TEXT).await?;
         let elements = locator::elements(&session, INSPECT_ELEMENT_CAP).await?;
         let state = self.state();
@@ -571,7 +626,7 @@ impl Browser for AppBrowser {
     }
 
     async fn page_click(&self, tab: TabId, target: Target) -> Result<Value, BrowserError> {
-        let session = self.action_session_for(tab)?;
+        let session = self.action_session_for(tab).await?;
         let described = target.locator.clone().or_else(|| target.r#ref.clone());
         self.tracked(tab, "page_click", described, async {
             let (x, y, label) = self.point_for(tab, &session, &target).await?;
@@ -604,11 +659,11 @@ impl Browser for AppBrowser {
                 "text is over the {TYPE_TEXT_CAP} character limit"
             )));
         }
-        let session = self.action_session_for(tab)?;
+        let session = self.action_session_for(tab).await?;
         let described = target.locator.clone().or_else(|| target.r#ref.clone());
         self.tracked(tab, "page_type", described, async {
             let label = self
-                .focus_for(tab, &session, &target)
+                .focus_for(tab, &session, &target, true)
                 .await?
                 .unwrap_or_else(|| "the focused element".to_owned());
             automation::type_text(&session, &text, clear, submit)
@@ -626,11 +681,11 @@ impl Browser for AppBrowser {
         key: String,
         modifiers: Vec<String>,
     ) -> Result<(), BrowserError> {
-        let session = self.action_session_for(tab)?;
+        let session = self.action_session_for(tab).await?;
         self.tracked(tab, "page_press", Some(key.clone()), async {
             // Focusing is optional: pressing Escape to dismiss a dialog has
             // no element to aim at.
-            self.focus_for(tab, &session, &target).await?;
+            self.focus_for(tab, &session, &target, false).await?;
             let mask = automation::modifier_mask(&modifiers).map_err(|e| other(e.message))?;
             automation::press(&session, &key, mask)
                 .await
@@ -655,7 +710,7 @@ impl Browser for AppBrowser {
                 "scroll deltas must be finite and no larger than {MAX_SCROLL_DELTA}"
             )));
         }
-        let session = self.action_session_for(tab)?;
+        let session = self.action_session_for(tab).await?;
         self.tracked(tab, "page_scroll", target.locator.clone(), async {
             // With no target, scroll the middle of the viewport: a wheel
             // event at (0,0) can land on a fixed header that swallows it.
@@ -684,7 +739,7 @@ impl Browser for AppBrowser {
         tab: TabId,
         params: WaitForParams,
     ) -> Result<Value, BrowserError> {
-        let session = self.session_for(tab)?;
+        let session = self.session_for(tab).await?;
         if params.locator.is_none()
             && params.text.is_none()
             && params.url_includes.is_none()
@@ -764,7 +819,7 @@ impl Browser for AppBrowser {
     }
 
     async fn page_locate(&self, tab: TabId, selector: String) -> Result<Value, BrowserError> {
-        let session = self.session_for(tab)?;
+        let session = self.session_for(tab).await?;
         let count = locator::count(&session, &selector).await?;
         let matches = locator::all(&session, &selector, LOCATE_CAP).await?;
         Ok(json!({
@@ -945,7 +1000,7 @@ impl Browser for AppBrowser {
                 &["standalone", "browser", "fullscreen", "minimal-ui"],
             )?,
         };
-        let session = self.session_for(tab)?;
+        let session = self.session_for(tab).await?;
         let described = overrides.color_scheme.clone();
         self.tracked(tab, "page_appearance", described, async {
             let (method, args) = crate::emulate::media_call(&overrides);
@@ -964,7 +1019,7 @@ impl Browser for AppBrowser {
     async fn page_throttle(&self, tab: TabId, profile: String) -> Result<Value, BrowserError> {
         let parsed = crate::emulate::profile_by_name(&profile)
             .map_err(|e| BrowserError::BadRequest(e.message))?;
-        let session = self.session_for(tab)?;
+        let session = self.session_for(tab).await?;
         self.tracked(tab, "page_throttle", Some(profile.clone()), async {
             let (method, args) = crate::emulate::network_call(parsed);
             session.call(method, args).await.map_err(other)?;
@@ -977,7 +1032,7 @@ impl Browser for AppBrowser {
     }
 
     async fn page_component(&self, tab: TabId, target: Target) -> Result<Value, BrowserError> {
-        let session = self.session_for(tab)?;
+        let session = self.session_for(tab).await?;
         let mut found = match target.resolve()? {
             Addressed::Locator(selector) => locator::component(&session, &selector).await?,
             Addressed::Ref(_) | Addressed::Point { .. } => {
@@ -1102,7 +1157,7 @@ impl Browser for AppBrowser {
                 "expression is over the {EVALUATE_EXPRESSION_CAP} character limit"
             )));
         }
-        self.ensure_view(tab)?;
+        self.ensure_view(tab).await?;
         let session = self.session(tab)?;
         let result = session
             .call(

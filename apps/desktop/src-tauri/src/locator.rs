@@ -150,13 +150,6 @@ async fn eval(session: &CdpSession, expression: String) -> Result<Value, Failure
     Ok(result["result"]["value"].clone())
 }
 
-/// Make sure the engine is present. Cheap and idempotent: the script returns
-/// immediately when its own version is already installed, so callers do not
-/// have to track which documents have seen it.
-pub async fn install(session: &CdpSession) -> Result<(), Failure> {
-    eval(session, script()).await.map(|_| ())
-}
-
 /// Call one method on the installed engine with JSON-encoded arguments.
 async fn invoke(
     session: &CdpSession,
@@ -164,13 +157,21 @@ async fn invoke(
     args: &[Value],
     locator: &str,
 ) -> Result<Value, Failure> {
-    install(session).await?;
     let args = args
         .iter()
         .map(|a| serde_json::to_string(a).unwrap_or_else(|_| "null".into()))
         .collect::<Vec<_>>()
         .join(", ");
-    let value = eval(session, format!("window.__diveLocator.{method}({args})")).await?;
+    // Install and invoke in one Runtime.evaluate. A navigation can replace the
+    // document between two CDP calls; doing this atomically prevents a short
+    // `window.__diveLocator is undefined` race while page_wait_for polls a
+    // just-navigated tab.
+    let source = script();
+    let value = eval(
+        session,
+        format!("(() => {{\n{source}\nreturn window.__diveLocator.{method}({args});\n}})()"),
+    )
+    .await?;
     if value.is_null() {
         return Err(Failure::Engine(
             "the locator engine did not answer; the page may have navigated".into(),
@@ -207,6 +208,12 @@ pub async fn point(session: &CdpSession, locator: &str) -> Result<Found, Failure
 /// element can actually accept text.
 pub async fn focus(session: &CdpSession, locator: &str) -> Result<Found, Failure> {
     found(&invoke(session, "focus", &[json!(locator)], locator).await?)
+}
+
+/// Resolve and focus any actionable control, including non-editable buttons
+/// and links used as keyboard targets.
+pub async fn focus_any(session: &CdpSession, locator: &str) -> Result<Found, Failure> {
+    found(&invoke(session, "focusAny", &[json!(locator)], locator).await?)
 }
 
 /// Resolve `locator` and remember the node as `window.__diveHeld`, so a
@@ -320,6 +327,15 @@ mod tests {
             s.contains(&MAX_CANDIDATES.to_string()),
             "cap not substituted"
         );
+    }
+
+    #[test]
+    fn locator_install_and_invocation_share_one_expression() {
+        let source = script();
+        let expression =
+            format!("(() => {{\n{source}\nreturn window.__diveLocator.page(0);\n}})()");
+        assert!(expression.contains("window.__diveLocator ="));
+        assert!(expression.contains("return window.__diveLocator.page(0)"));
     }
 
     #[test]

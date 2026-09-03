@@ -288,6 +288,19 @@
       return found.described;
     }),
 
+    // Focus any actionable control for keyboard input. Unlike `focus`, this
+    // intentionally accepts buttons, links and other non-editable controls.
+    focusAny: guard((selector) => {
+      const found = actionable(selector, false);
+      if (found.error) return found;
+      found.element.focus();
+      const active = document.activeElement;
+      if (active !== found.element && !found.element.contains(active)) {
+        return { error: "not_focusable" };
+      }
+      return found.described;
+    }),
+
     // How many elements match, ignoring actionability. Zero is not an error.
     matches: guard((selector) => ({ ok: true, count: resolveAll(selector).length })),
 

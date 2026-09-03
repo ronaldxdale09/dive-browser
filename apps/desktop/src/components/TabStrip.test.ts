@@ -16,13 +16,26 @@ afterEach(() => {
 });
 
 describe("orderTabs", () => {
-  it("puts pinned first, sorts by position, hides essentials and discarded", () => {
+  it("puts pinned first, sorts by position, hides essentials, keeps sleeping tabs", () => {
     const out = orderTabs([t("c", "today", 2), t("p", "pinned", 9), t("a", "today", 0), t("e", "essential", 0), t("d", "today", 1, "discarded")]);
-    expect(out.map((x) => x.id)).toEqual(["p", "a", "c"]);
+    expect(out.map((x) => x.id)).toEqual(["p", "a", "d", "c"]);
   });
 });
 
 describe("TabStrip controls", () => {
+  it("shows a sleeping tab dimmed and wakes it on click", () => {
+    const activateTab = vi.fn();
+    useBrowser.setState({ tabs: [t("d", "today", 0, "discarded")], activeTab: null, activateTab });
+
+    render(createElement(TabStrip));
+
+    const tab = screen.getByRole("tab");
+    expect(tab.dataset.sleeping).toBe("true");
+    expect(screen.getByLabelText("Sleeping")).toBeTruthy();
+    fireEvent.click(tab);
+    expect(activateTab).toHaveBeenCalledWith("d");
+  });
+
   it("opens the URL and history dialog from the persistent new-tab button", () => {
     const toggle = vi.fn();
     useBrowser.setState({ tabs: [], activeTab: null, toggle });

@@ -1,16 +1,20 @@
-import { Plus, Settings2, Sparkles } from "lucide-react";
+import { Plus, Settings2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { isReady, useAgent } from "../store/agent";
 import { useBrowser } from "../store/browser";
 import { usePrefs } from "../store/prefs";
 import { IconButton } from "./Icon";
+import { AgentIcon } from "./agent/AgentIcon";
 import { Setup } from "./agent/Setup";
 import { Thread } from "./agent/Thread";
 
 /**
- * Right-docked agent panel. One surface: the conversation, with the model's
- * steps inline, and a provider/key setup that takes over only while the
- * selected provider cannot be used yet.
+ * Right-docked agent panel.
+ * Designed with OpenAI & Anthropic polish:
+ * - Bespoke Agent icon with radiant soft mint container
+ * - Live model & readiness indicator
+ * - Seamless conversation and step timeline
+ * - Integrated animated onboarding and key management
  */
 export function Sidecar() {
   const init = useAgent((s) => s.init);
@@ -24,7 +28,7 @@ export function Sidecar() {
   const providerId = usePrefs((s) => s.prefs.agent_provider);
   const settingsOpen = useBrowser((s) => s.open.settings);
   const toggle = useBrowser((s) => s.toggle);
-  // The person may add a provider in Settings while the panel is open.
+  // The user may want to change or configure a provider even while ready
   const [wantsSetup, setWantsSetup] = useState(false);
 
   useEffect(() => void init(), [init]);
@@ -37,16 +41,42 @@ export function Sidecar() {
   const showSetup = loaded && (!ready || wantsSetup);
 
   return (
-    <aside aria-label="Agent" className="flex min-h-0 flex-col bg-surface">
-      <div className="flex h-10 items-center gap-2 border-b border-line px-3">
-        <span className="grid size-6 place-items-center rounded-lg bg-highlight-soft text-highlight">
-          <Sparkles size={13} strokeWidth={1.75} absoluteStrokeWidth aria-hidden />
-        </span>
-        <h2 className="text-xs font-semibold text-ink">Agent</h2>
-        <span className="flex-1" />
-        <IconButton icon={Plus} label="New conversation" size={14} disabled={busy || messages.length === 0} onClick={clear} />
-        <IconButton icon={Settings2} label="Agent settings" size={14} onClick={() => toggle("settings", true)} />
-      </div>
+    <aside aria-label="Agent" className="flex min-h-0 flex-col bg-surface select-none">
+      {/* Header */}
+      {(!showSetup || !ready) && (
+        <div className="flex h-10 items-center gap-2 border-b border-line px-3 shrink-0">
+          <AgentIcon size={14} className="text-highlight shrink-0" />
+          <h2 className="text-xs font-semibold text-ink">Agent</h2>
+
+          {ready && provider && !showSetup && (
+            <span className="flex items-center gap-1.5 rounded-full bg-surface-2 px-2 py-0.5 text-[10px] text-ink-3">
+              <span className="size-1.5 rounded-full bg-highlight" />
+              <span className="max-w-[100px] truncate">{provider.name}</span>
+            </span>
+          )}
+
+          <span className="flex-1" />
+
+          {!showSetup && (
+            <>
+              <IconButton
+                icon={Plus}
+                label="New conversation"
+                size={14}
+                disabled={busy || messages.length === 0}
+                onClick={clear}
+              />
+              <IconButton
+                icon={Settings2}
+                label="Agent settings"
+                size={14}
+                onClick={() => toggle("settings", true)}
+              />
+            </>
+          )}
+        </div>
+      )}
+
       {!loaded && <div className="flex-1" />}
       {loaded && showSetup && <Setup canGoBack={ready} onDone={() => setWantsSetup(false)} />}
       {loaded && !showSetup && <Thread onAddProvider={() => setWantsSetup(true)} />}

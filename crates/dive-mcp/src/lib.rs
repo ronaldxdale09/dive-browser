@@ -199,6 +199,10 @@ pub trait Browser: Send + Sync + 'static {
     async fn open_tab(&self, url: String) -> Result<TabInfo, BrowserError>;
     /// Navigate an existing tab.
     async fn navigate(&self, tab: TabId, url: String) -> Result<(), BrowserError>;
+    /// Bring a tab to the front, so the person sees what the agent is doing.
+    async fn activate(&self, tab: TabId) -> Result<(), BrowserError>;
+    /// Close a tab.
+    async fn close(&self, tab: TabId) -> Result<(), BrowserError>;
     /// Visible text of the page (`document.body.innerText`).
     async fn page_text(&self, tab: TabId) -> Result<String, BrowserError>;
     /// PNG screenshot of the viewport or the full document.
@@ -731,6 +735,34 @@ impl<B: Browser> DiveServer<B> {
         Parameters(p): Parameters<OpenParams>,
     ) -> Result<CallToolResult, ErrorData> {
         json_result(&self.browser.open_tab(p.url).await?)
+    }
+
+    /// Close.
+    #[tool(
+        name = "tab_close",
+        description = "Close a tab. Use it to tidy up tabs you opened; the person's own tabs are theirs to close."
+    )]
+    async fn tab_close(
+        &self,
+        Parameters(p): Parameters<TabRef>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id).await?;
+        self.browser.close(tab).await?;
+        Ok(CallToolResult::success(vec![ContentBlock::text("closed")]))
+    }
+
+    /// Activate.
+    #[tool(
+        name = "tab_activate",
+        description = "Bring a tab to the front so the person sees it. Tab-scoped tools work on background tabs too; use this when the point is to show something."
+    )]
+    async fn tab_activate(
+        &self,
+        Parameters(p): Parameters<TabRef>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id).await?;
+        self.browser.activate(tab).await?;
+        Ok(CallToolResult::success(vec![ContentBlock::text("ok")]))
     }
 
     /// Navigate.
@@ -1272,6 +1304,25 @@ mod tests {
         }
         async fn navigate(&self, tab: TabId, url: String) -> Result<(), BrowserError> {
             self.navigated.lock().unwrap().push((tab, url));
+            Ok(())
+        }
+        async fn close(&self, tab: TabId) -> Result<(), BrowserError> {
+            let mut tabs = self.tabs.lock().unwrap();
+            let before = tabs.len();
+            tabs.retain(|t| t.id != tab.to_string());
+            if tabs.len() == before {
+                return Err(BrowserError::TabNotFound(tab.to_string()));
+            }
+            Ok(())
+        }
+        async fn activate(&self, tab: TabId) -> Result<(), BrowserError> {
+            let mut tabs = self.tabs.lock().unwrap();
+            if !tabs.iter().any(|t| t.id == tab.to_string()) {
+                return Err(BrowserError::TabNotFound(tab.to_string()));
+            }
+            for t in tabs.iter_mut() {
+                t.active = t.id == tab.to_string();
+            }
             Ok(())
         }
         async fn page_text(&self, _tab: TabId) -> Result<String, BrowserError> {

@@ -104,6 +104,18 @@ fn is_local_bind(host: &str) -> bool {
     ) || host.starts_with("127.")
 }
 
+/// Whether `url` points at a server on this machine: the kind of page a
+/// developer is iterating against, which must never be discarded under them.
+pub fn is_local_url(url: &str) -> bool {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|u| {
+            u.host_str()
+                .map(|h| is_local_bind(h) || h.ends_with(".localhost"))
+        })
+        .unwrap_or(false)
+}
+
 /// Parse `lsof -F pcn` output into listeners.
 ///
 /// The format is line-per-field with a one-character tag: `p` starts a
@@ -479,6 +491,16 @@ pub fn share(url: &str) -> AppResult<ShareInfo> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn local_urls_cover_loopback_and_dot_localhost() {
+        assert!(super::is_local_url("http://localhost:3000/app"));
+        assert!(super::is_local_url("http://127.0.0.1:5173"));
+        assert!(super::is_local_url("http://[::1]:8080"));
+        assert!(super::is_local_url("http://api.localhost/"));
+        assert!(!super::is_local_url("https://example.com"));
+        assert!(!super::is_local_url("about:blank"));
+    }
+
     use super::*;
 
     #[test]

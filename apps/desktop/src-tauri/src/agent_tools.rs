@@ -17,6 +17,7 @@ const MAX_AGENT_SCREENSHOT_BYTES: usize = 8 * 1024 * 1024;
 /// `page_state` hands out. A ref is a DOM node id that goes stale on the next
 /// render, so an agent that read the tree and then acted would click the
 /// wrong thing after any update; a locator is resolved when the action runs.
+#[allow(clippy::too_many_lines)] // Keeping the complete model-visible tool catalog together makes it auditable.
 pub fn specs() -> Vec<ToolSpec> {
     let tab = json!({"type": "string", "description": "Tab id from tabs_list; omit for the current tab."});
     let locator = json!({
@@ -95,6 +96,8 @@ pub fn specs() -> Vec<ToolSpec> {
             obj(json!({"tab_id": tab, "locator": locator, "ref": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}}), &[]),
         ),
         spec("tab_navigate", "Navigate the tab to a URL.".into(), obj(json!({"tab_id": tab, "url": {"type": "string"}}), &["url"])),
+        spec("tab_activate", "Bring a tab to the front so the person sees it.".into(), obj(json!({"tab_id": tab}), &[])),
+        spec("tab_close", "Close a tab you opened.".into(), obj(json!({"tab_id": tab}), &[])),
         spec("console_tail", "Recent console output: logs, warnings, exceptions, failed loads.".into(), obj(json!({"tab_id": tab, "limit": {"type": "integer"}}), &[])),
         spec(
             "page_report",
@@ -131,6 +134,8 @@ pub fn is_action(name: &str) -> bool {
             | "page_appearance"
             | "page_throttle"
             | "tab_navigate"
+            | "tab_activate"
+            | "tab_close"
             | "rules_set"
     )
 }
@@ -345,6 +350,16 @@ async fn execute<B: Browser>(
                 .await
                 .map_err(err)?,
         ),
+        "tab_close" => browser
+            .close(tab()?)
+            .await
+            .map(|()| Value::String("closed".into()))
+            .map_err(err),
+        "tab_activate" => browser
+            .activate(tab()?)
+            .await
+            .map(|()| Value::String("activated".into()))
+            .map_err(err),
         "tab_navigate" => browser
             .navigate(tab()?, s("url")?)
             .await
