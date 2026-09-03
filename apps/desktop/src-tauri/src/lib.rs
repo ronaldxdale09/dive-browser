@@ -55,7 +55,13 @@ pub fn run() {
     {
         builder = builder
             .root_cache_path(state::profiles_root())
-            .command_line_args([("use-mock-keychain", None::<String>)]);
+            // Leading dashes are load-bearing: tauri's CEF handler appends a
+            // valueless arg as a positional ARGUMENT unless it starts with "-",
+            // and Chromium ignores it. Without the switch every launch asks for
+            // the login keychain password to unlock "Chromium Safe Storage".
+            // Value form: the runtime turns a bare name into a positional argument and a
+            // dashed name into a doubled switch; `--use-mock-keychain=` is honored.
+            .command_line_args([("use-mock-keychain", Some(String::new()))]);
     }
 
     builder
