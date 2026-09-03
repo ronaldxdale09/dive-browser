@@ -4,6 +4,7 @@ import type { ConsoleEntry, Level } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { selectEntries, useConsole } from "../store/console";
 import { Icon, IconButton } from "./Icon";
+import { NetworkPanel, NetworkTools } from "./NetworkPanel";
 
 const PANELS = [
   { id: "console", label: "Console", icon: Terminal },
@@ -35,8 +36,11 @@ export function Dock() {
         ))}
         <span className="flex-1" />
         {panel === "console" && <ConsoleTools />}
+        {panel === "network" && <NetworkTools />}
       </div>
-      {panel === "console" ? <ConsolePanel /> : <div className="flex-1 px-3 py-2 text-xs text-ink-3">Coming in Phase 2.</div>}
+      {panel === "console" && <ConsolePanel />}
+      {panel === "network" && <NetworkPanel />}
+      {panel !== "console" && panel !== "network" && <div className="flex-1 px-3 py-2 text-xs text-ink-3">Coming in Phase 2.</div>}
     </section>
   );
 }

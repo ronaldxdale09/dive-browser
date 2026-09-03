@@ -6,6 +6,7 @@ mod console;
 mod engine;
 mod error;
 mod favicon;
+mod network;
 mod state;
 
 pub use error::AppError;

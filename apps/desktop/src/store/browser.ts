@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { ipc, events } from "../lib/ipc";
 import { listenConsole, useConsole } from "./console";
+import { listenNetwork, useNetwork } from "./network";
 import type { CoreEvent, Snapshot, Tab, Workspace } from "../lib/ipc";
 
 export type UiPanel = "sidecar" | "dock" | "palette";
@@ -86,7 +87,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   boot: async () => {
     try {
       unlisten ??= await events.stateChanged.listen((e) => get().applyEvent(e.payload));
-      await listenConsole();
+      await Promise.all([listenConsole(), listenNetwork()]);
       set({ ...fromSnapshot(await ipc.snapshot()), ready: true, error: null });
     } catch (e) {
       set({ error: String(e), ready: true });
@@ -101,6 +102,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   closeTab: async (id) => {
     await run(set, () => ipc.tabClose(id));
     useConsole.getState().drop(id);
+    useNetwork.getState().drop(id);
   },
   activateTab: async (id) => run(set, () => ipc.tabActivate(id)),
   navigate: async (url) => {

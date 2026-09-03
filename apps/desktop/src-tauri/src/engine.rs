@@ -102,6 +102,7 @@ impl TabHost {
         {
             let session = attach_cdp(&view)?;
             crate::console::attach(app.clone(), tab_id, session.clone());
+            crate::network::attach(app.clone(), tab_id, session.clone());
             crate::favicon::attach(app.clone(), tab_id, session.clone());
             self.cdp.insert(tab_id, session);
         }

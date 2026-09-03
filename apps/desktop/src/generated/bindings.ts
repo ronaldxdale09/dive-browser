@@ -40,6 +40,7 @@ export const commands = {
 /** Events */
 export const events = {
 	consoleEntry: makeEvent<ConsoleEntry>("console-entry"),
+	networkEvent: makeEvent<NetworkEvent>("network-event"),
 	stateChanged: makeEvent<StateChanged>("state-changed"),
 };
 
@@ -131,6 +132,61 @@ export type Level =
 "warn" | 
 /**  `console.error`, uncaught exceptions, failed loads. */
 "error";
+
+/**  One step in a request's life. The chrome merges these by `request_id`. */
+export type NetworkEvent = 
+/**  A request left the browser. */
+{ type: "sent"; data: {
+	/**  Tab that issued it. */
+	tab_id: TabId,
+	/**  CDP request id, unique per session. */
+	request_id: string,
+	/**  Full URL. */
+	url: string,
+	/**  HTTP method. */
+	method: string,
+	/**  `Document`, `Script`, `XHR`, `Fetch`, `Image`, ... */
+	resource_type: string,
+	/**  Seconds since an arbitrary monotonic origin. */
+	timestamp: number | null,
+} } | 
+/**  Headers arrived. */
+{ type: "response"; data: {
+	/**  Tab. */
+	tab_id: TabId,
+	/**  Request id. */
+	request_id: string,
+	/**  HTTP status. */
+	status: number,
+	/**  Content type without parameters. */
+	mime_type: string,
+	/**  Whether it was served from cache. */
+	from_cache: boolean,
+	/**  Seconds. */
+	timestamp: number | null,
+} } | 
+/**  Body fully received. */
+{ type: "finished"; data: {
+	/**  Tab. */
+	tab_id: TabId,
+	/**  Request id. */
+	request_id: string,
+	/**  Bytes on the wire. */
+	encoded_length: number | null,
+	/**  Seconds. */
+	timestamp: number | null,
+} } | 
+/**  Request failed or was blocked. */
+{ type: "failed"; data: {
+	/**  Tab. */
+	tab_id: TabId,
+	/**  Request id. */
+	request_id: string,
+	/**  Chromium error text, e.g. `net::ERR_FAILED`. */
+	error: string,
+	/**  Seconds. */
+	timestamp: number | null,
+} };
 
 /**  Everything the chrome needs to render on boot. */
 export type Snapshot = {
