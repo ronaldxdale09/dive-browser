@@ -24,6 +24,8 @@ interface BrowserState {
   reload: () => Promise<void>;
   capture: (fullPage: boolean) => Promise<void>;
   notice: string | null;
+  reorderTabs: (ordered: string[]) => Promise<void>;
+  setPinned: (id: string, pinned: boolean) => Promise<void>;
   activateWorkspace: (id: string) => Promise<void>;
   createWorkspace: (draft: { name: string; color: string }, separateContainer: boolean) => Promise<void>;
   updateWorkspace: (id: string, draft: { name: string; color: string }) => Promise<void>;
@@ -131,6 +133,14 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       setTimeout(() => set({ notice: null }), 4000);
     });
   },
+  reorderTabs: async (ordered) => {
+    const ws = get().activeWorkspace;
+    if (!ws) return;
+    // Optimistic: renumber locally, the engine confirms with tab_upserted events.
+    set((s) => ({ tabs: s.tabs.map((t) => (ordered.includes(t.id) ? { ...t, position: ordered.indexOf(t.id) } : t)) }));
+    await run(set, () => ipc.tabReorder(ws, ordered));
+  },
+  setPinned: async (id, pinned) => run(set, () => ipc.tabSetPinned(id, pinned)),
   activateWorkspace: async (id) => {
     await run(set, () => ipc.workspaceActivate(id));
     set(fromSnapshot(await ipc.snapshot()));

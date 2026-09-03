@@ -46,6 +46,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_close,
             tab_activate,
             tab_navigate,
+            tab_reorder,
+            tab_set_pinned,
             tab_back,
             tab_forward,
             tab_reload,
@@ -418,6 +420,64 @@ pub(crate) fn tab_navigate(state: State<'_, AppState>, id: TabId, url: String) -
     host.as_ref()
         .ok_or_else(|| AppError::new("engine not ready"))?
         .navigate(id, url)?;
+    Ok(())
+}
+
+/// Persist a new order for the tabs of `workspace_id`. Ids not listed keep
+/// their relative order after the listed ones.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_reorder(
+    state: State<'_, AppState>,
+    workspace_id: WorkspaceId,
+    ordered: Vec<TabId>,
+) -> AppResult<()> {
+    let updated = {
+        let store = lock(&state.store);
+        let mut tabs: Vec<Tab> = store
+            .tabs_for_workspace(workspace_id)?
+            .into_iter()
+            .filter(|t| t.workspace_id == Some(workspace_id))
+            .collect();
+        tabs.sort_by_key(|t| {
+            ordered
+                .iter()
+                .position(|id| *id == t.id)
+                .unwrap_or(usize::MAX)
+        });
+        let mut updated = Vec::new();
+        for (i, tab) in tabs.iter_mut().enumerate() {
+            let position = i32::try_from(i).unwrap_or(i32::MAX);
+            if tab.position != position {
+                tab.position = position;
+                store.upsert_tab(tab)?;
+                updated.push(tab.clone());
+            }
+        }
+        updated
+    };
+    for tab in updated {
+        state.bus.publish(CoreEvent::TabUpserted(tab));
+    }
+    Ok(())
+}
+
+/// Move a tab between the pinned and today tiers.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_set_pinned(state: State<'_, AppState>, id: TabId, pinned: bool) -> AppResult<()> {
+    let tab = {
+        let store = lock(&state.store);
+        let mut tab = store.tab(id)?;
+        tab.tier = if pinned {
+            dive_core::TabTier::Pinned
+        } else {
+            dive_core::TabTier::Today
+        };
+        store.upsert_tab(&tab)?;
+        tab
+    };
+    state.bus.publish(CoreEvent::TabUpserted(tab));
     Ok(())
 }
 

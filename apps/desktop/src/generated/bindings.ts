@@ -20,6 +20,13 @@ export const commands = {
 	tabClose: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_close", { id })),
 	tabActivate: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_activate", { id })),
 	tabNavigate: (id: TabId, url: string) => typedError<null, AppError>(__TAURI_INVOKE("tab_navigate", { id, url })),
+	/**
+	 *  Persist a new order for the tabs of `workspace_id`. Ids not listed keep
+	 *  their relative order after the listed ones.
+	 */
+	tabReorder: (workspaceId: WorkspaceId, ordered: TabId[]) => typedError<null, AppError>(__TAURI_INVOKE("tab_reorder", { workspaceId, ordered })),
+	/**  Move a tab between the pinned and today tiers. */
+	tabSetPinned: (id: TabId, pinned: boolean) => typedError<null, AppError>(__TAURI_INVOKE("tab_set_pinned", { id, pinned })),
 	tabBack: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_back", { id })),
 	tabForward: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_forward", { id })),
 	tabReload: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_reload", { id })),
