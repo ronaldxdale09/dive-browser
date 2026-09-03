@@ -74,6 +74,14 @@ pub trait Browser: Send + Sync + 'static {
         tab: TabId,
         expression: String,
     ) -> Result<serde_json::Value, BrowserError>;
+    /// Recent console output, oldest first, as JSON rows.
+    async fn console_tail(
+        &self,
+        tab: TabId,
+        limit: usize,
+    ) -> Result<serde_json::Value, BrowserError>;
+    /// Recent requests, oldest first, as JSON rows.
+    async fn requests(&self, tab: TabId, limit: usize) -> Result<serde_json::Value, BrowserError>;
 }
 
 /// Server options.
@@ -116,6 +124,15 @@ pub struct ScreenshotParams {
     /// Capture the whole document instead of the viewport.
     #[serde(default)]
     pub full_page: bool,
+}
+
+/// Tab plus a row limit.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct TailParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// Maximum rows, newest kept (default 50).
+    pub limit: Option<u32>,
 }
 
 /// Evaluate JavaScript.
@@ -357,6 +374,20 @@ mod tests {
             expr: String,
         ) -> Result<serde_json::Value, BrowserError> {
             Ok(serde_json::json!({ "expr": expr }))
+        }
+        async fn console_tail(
+            &self,
+            _tab: TabId,
+            limit: usize,
+        ) -> Result<serde_json::Value, BrowserError> {
+            Ok(serde_json::json!([{ "text": "line", "limit": limit }]))
+        }
+        async fn requests(
+            &self,
+            _tab: TabId,
+            limit: usize,
+        ) -> Result<serde_json::Value, BrowserError> {
+            Ok(serde_json::json!([{ "url": "https://a.dev", "limit": limit }]))
         }
     }
 

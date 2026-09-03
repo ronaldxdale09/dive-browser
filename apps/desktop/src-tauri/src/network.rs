@@ -6,7 +6,7 @@ use dive_core::TabId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use specta::Type;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
 
 use crate::Runtime;
@@ -81,6 +81,9 @@ pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
                 Ok(event) => {
                     if let Some(ev) = map_event(tab_id, &event) {
                         tracing::debug!(%tab_id, event = ?ev, "network");
+                        app.state::<crate::state::AppState>()
+                            .buffers
+                            .push_network(&ev);
                         if let Err(e) = ev.emit(&app) {
                             tracing::warn!("network emit failed: {e}");
                         }

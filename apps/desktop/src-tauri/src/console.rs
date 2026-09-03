@@ -6,7 +6,7 @@ use dive_core::TabId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use specta::Type;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
 
 use crate::Runtime;
@@ -58,6 +58,9 @@ pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
                 Ok(event) => {
                     if let Some(entry) = map_event(tab_id, &event) {
                         tracing::debug!(%tab_id, level = ?entry.level, text = %entry.text, "console");
+                        app.state::<crate::state::AppState>()
+                            .buffers
+                            .push_console(entry.clone());
                         if let Err(e) = entry.emit(&app) {
                             tracing::warn!("console emit failed: {e}");
                         }
