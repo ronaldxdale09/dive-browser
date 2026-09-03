@@ -18,6 +18,11 @@ pub struct AppBrowser {
 }
 
 impl AppBrowser {
+    /// Wrap the app handle.
+    pub fn new(app: AppHandle<Runtime>) -> Self {
+        Self { app }
+    }
+
     fn state(&self) -> tauri::State<'_, AppState> {
         self.app.state::<AppState>()
     }
@@ -279,7 +284,7 @@ pub fn start(app: AppHandle<Runtime>) {
         allow_evaluate: std::env::var_os("DIVE_MCP_ALLOW_EVAL").is_some(),
         token: Some(token),
     };
-    let browser = Arc::new(AppBrowser { app });
+    let browser = Arc::new(AppBrowser::new(app));
     tauri::async_runtime::spawn(async move {
         match dive_mcp::serve(browser, config, ([127, 0, 0, 1], port).into()).await {
             Ok(handle) => {

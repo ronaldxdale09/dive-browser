@@ -1,5 +1,15 @@
 import { create } from "zustand";
 import { ipc } from "../lib/ipc";
+import type { ChatDeltaOut } from "../lib/ipc";
+
+export interface Step {
+  id: string;
+  name: string;
+  input: string;
+  action: boolean;
+  summary?: string;
+  error?: boolean;
+}
 
 export interface Message {
   id: string;
@@ -7,6 +17,7 @@ export interface Message {
   content: string;
   pending?: boolean;
   error?: string;
+  steps?: Step[];
 }
 
 interface AgentState {
@@ -23,15 +34,30 @@ let seq = 0;
 const nextId = () => `m${++seq}`;
 
 /** Apply one delta to the trailing assistant message. Pure for tests. */
-export function applyDelta(messages: Message[], delta: { type: "text" | "done" | "error"; data: string }): Message[] {
+export function applyDelta(messages: Message[], delta: ChatDeltaOut): Message[] {
   const last = messages.at(-1);
   if (!last || last.role !== "assistant") return messages;
-  const patch: Partial<Message> =
-    delta.type === "text"
-      ? { content: last.content + delta.data }
-      : delta.type === "done"
-        ? { pending: false, ...(delta.data === "max_tokens" ? { error: "Reply was cut off at the length limit." } : delta.data === "refusal" ? { error: "The model declined this request." } : {}) }
-        : { pending: false, error: delta.data };
+  let patch: Partial<Message>;
+  switch (delta.type) {
+    case "text":
+      patch = { content: last.content + delta.data };
+      break;
+    case "tool_call":
+      patch = { steps: [...(last.steps ?? []), { ...delta.data }] };
+      break;
+    case "tool_done":
+      patch = { steps: (last.steps ?? []).map((s) => (s.id === delta.data.id ? { ...s, summary: delta.data.summary, error: delta.data.error } : s)) };
+      break;
+    case "done":
+      patch = {
+        pending: false,
+        ...(delta.data === "max_tokens" ? { error: "Reply was cut off at the length limit." } : delta.data === "refusal" ? { error: "The model declined this request." } : {}),
+      };
+      break;
+    case "error":
+      patch = { pending: false, error: delta.data };
+      break;
+  }
   return [...messages.slice(0, -1), { ...last, ...patch }];
 }
 

@@ -76,7 +76,10 @@ export const commands = {
 	agentKeySet: (key: string) => typedError<null, AppError>(__TAURI_INVOKE("agent_key_set", { key })),
 	/**  Whether a key is configured. */
 	agentKeyPresent: () => __TAURI_INVOKE<boolean>("agent_key_present"),
-	/**  Send a conversation to the model; deltas stream back over `on_delta`. */
+	/**
+	 *  Send a conversation to the model; deltas stream back over `on_delta`.
+	 *  Tool calls are executed here and fed back until the model stops.
+	 */
 	agentSend: (turns: ChatTurn[], tabId: string | null, onDelta: Channel<ChatDelta>) => typedError<null, AppError>(__TAURI_INVOKE("agent_send", { turns, tabId, onDelta })),
 };
 
@@ -129,10 +132,21 @@ export type Bounds = {
 	height: number | null,
 };
 
-/**  A streamed piece of the reply, mirrored from `dive_agent::Delta`. */
+/**  A streamed piece of the reply. */
 export type ChatDelta = 
 /**  More text. */
 { type: "text"; data: string } | 
+/**  The agent is calling a tool. */
+{ type: "tool_call"; data: ToolStep } | 
+/**  A tool finished: id, short summary, error flag. */
+{ type: "tool_done"; data: {
+	/**  Call id. */
+	id: string,
+	/**  First line of the result. */
+	summary: string,
+	/**  Failed. */
+	error: boolean,
+} } | 
 /**  Finished with a stop reason. */
 { type: "done"; data: string } | 
 /**  Failed. */
@@ -429,6 +443,18 @@ export type TabTier =
 "pinned" | 
 /**  Ordinary tab, auto-archived after inactivity. */
 "today";
+
+/**  A tool call shown in the Trace tab. */
+export type ToolStep = {
+	/**  Call id. */
+	id: string,
+	/**  Tool name. */
+	name: string,
+	/**  Input as JSON text. */
+	input: string,
+	/**  Whether the tool changes the page. */
+	action: boolean,
+};
 
 /**  One failing rule. */
 export type Violation = {

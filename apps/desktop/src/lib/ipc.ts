@@ -19,7 +19,12 @@ export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
 
 type WorkspaceDraftInput = { name: string; color: string };
 type ChatTurnInput = { role: string; content: string };
-type ChatDeltaOut = { type: "text"; data: string } | { type: "done"; data: string } | { type: "error"; data: string };
+export type ChatDeltaOut =
+  | { type: "text"; data: string }
+  | { type: "tool_call"; data: { id: string; name: string; input: string; action: boolean } }
+  | { type: "tool_done"; data: { id: string; summary: string; error: boolean } }
+  | { type: "done"; data: string }
+  | { type: "error"; data: string };
 export type DeviceInput = { width: number; height: number; dpr: number; mobile: boolean; touch: boolean; user_agent: string; platform: string };
 export type MediaInput = { color_scheme: string | null; reduced_motion: string | null; media_type: string | null };
 

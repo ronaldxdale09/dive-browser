@@ -25,3 +25,11 @@ describe("applyDelta", () => {
     expect(applyDelta(only, { type: "text", data: "x" })).toBe(only);
   });
 });
+
+describe("tool steps", () => {
+  it("records calls and their results on the assistant message", () => {
+    let m = applyDelta(base, { type: "tool_call", data: { id: "tu1", name: "page_click", input: "{\"ref\":\"e1\"}", action: true } });
+    m = applyDelta(m, { type: "tool_done", data: { id: "tu1", summary: "clicked", error: false } });
+    expect(m[1]?.steps).toEqual([{ id: "tu1", name: "page_click", input: "{\"ref\":\"e1\"}", action: true, summary: "clicked", error: false }]);
+  });
+});

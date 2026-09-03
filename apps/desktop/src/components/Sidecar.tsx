@@ -32,8 +32,9 @@ export function Sidecar() {
         ))}
       </div>
       {tab === "chat" && <Chat />}
+      {tab === "trace" && <Trace />}
       {tab === "watchers" && <Watchers onAsk={() => setTab("chat")} />}
-      {tab !== "chat" && tab !== "watchers" && <div className="flex-1 px-4 py-3 text-xs text-ink-3">Coming in Phase 3.</div>}
+      {tab === "skills" && <div className="flex-1 px-4 py-3 text-xs text-ink-3">Skills arrive in Phase 3.</div>}
     </aside>
   );
 }
@@ -111,6 +112,15 @@ function Thread() {
         )}
         {messages.map((m) => (
           <div key={m.id} className={m.role === "user" ? "self-end max-w-[85%] rounded-2xl rounded-br-md bg-surface-3 px-3 py-2 text-xs text-ink" : "max-w-full text-xs leading-relaxed text-ink whitespace-pre-wrap"}>
+            {m.steps && m.steps.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1">
+                {m.steps.map((s) => (
+                  <span key={s.id} title={s.summary ?? s.input} className={`rounded-full border px-2 py-0.5 font-mono text-[10px] ${s.error ? "border-danger text-danger" : s.action ? "border-highlight text-highlight" : "border-line-2 text-ink-2"}`}>
+                    {s.name}{s.summary === undefined && !s.error ? "…" : ""}
+                  </span>
+                ))}
+              </div>
+            )}
             {m.content}
             {m.pending && !m.content && <span className="text-ink-3">Thinking…</span>}
             {m.error && <div className="mt-1 text-danger">{m.error}</div>}
@@ -190,6 +200,29 @@ function Watchers({ onAsk }: { onAsk: () => void }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** Every tool call of the conversation, in order, with inputs and outcomes. */
+function Trace() {
+  const messages = useAgent((s) => s.messages);
+  const steps = messages.flatMap((m) => (m.steps ?? []).map((s) => ({ ...s, messageId: m.id })));
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-auto px-3 py-2 font-mono text-[11px] select-text">
+      {steps.length === 0 && <p className="font-sans text-xs text-ink-3">Tool calls the agent makes will appear here with their inputs and results.</p>}
+      {steps.map((s) => (
+        <div key={s.id} className="border-b border-line/60 py-1.5">
+          <div className="flex items-center gap-2">
+            <span className={s.action ? "text-highlight" : "text-ink"}>{s.name}</span>
+            {s.action && <span className="rounded-full bg-highlight-soft px-1.5 text-[9px] tracking-wider text-highlight uppercase">action</span>}
+            <span className="flex-1" />
+            <span className={s.error ? "text-danger" : "text-ink-3"}>{s.summary === undefined ? "running" : s.error ? "failed" : "ok"}</span>
+          </div>
+          <div className="truncate text-ink-3" title={s.input}>{s.input}</div>
+          {s.summary && <div className={`truncate ${s.error ? "text-danger" : "text-ink-2"}`} title={s.summary}>{s.summary}</div>}
+        </div>
+      ))}
     </div>
   );
 }
