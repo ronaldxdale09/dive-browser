@@ -54,7 +54,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             commands_list,
             command_run,
         ])
-        .events(collect_events![StateChanged])
+        .events(collect_events![StateChanged, crate::console::ConsoleEntry])
 }
 
 /// Emit a core event to the chrome.

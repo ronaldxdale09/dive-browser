@@ -3,7 +3,7 @@ import { reduceEvent } from "./browser";
 import type { Tab } from "../lib/ipc";
 
 const tab = (id: string, url = "https://x"): Tab => ({
-  id, workspace_id: "w", tier: "today", url, title: "", position: 0, state: "active", last_active_at: "2026-01-01T00:00:00Z",
+  id, workspace_id: "w", tier: "today", url, title: "", position: 0, state: "active", last_active_at: "2026-01-01T00:00:00Z", favicon: null,
 });
 
 describe("reduceEvent", () => {

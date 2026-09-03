@@ -203,6 +203,9 @@ pub struct Tab {
     pub url: String,
     /// Page title, empty until loaded.
     pub title: String,
+    /// Site icon as a `data:` URL, resolved from the page once it loads.
+    /// `None` until then, and cleared whenever the tab leaves its origin.
+    pub favicon: Option<String>,
     /// Order within its tier; lower first.
     pub position: i32,
     /// Renderer state.
@@ -220,6 +223,7 @@ impl Tab {
             tier: TabTier::Today,
             url: url.into(),
             title: String::new(),
+            favicon: None,
             position,
             state: TabState::Active,
             last_active_at: Timestamp::now(),

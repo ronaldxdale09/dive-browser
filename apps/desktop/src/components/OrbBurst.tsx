@@ -38,7 +38,7 @@ function fib(i: number, n: number): [number, number, number] {
   return [Math.cos(th) * r, y, Math.sin(th) * r];
 }
 
-type Dot = [number, number, number, number?, number?, string?];
+type Dot = [number, number, number, (number | undefined)?, (number | undefined)?, (string | undefined)?];
 
 // Yaw about the vertical axis, then pitch. Used both for a loop's own baked
 // tilt and for the viewer's Turn / Tilt.
@@ -165,7 +165,10 @@ function parseColor(input: string | undefined, fb: RGBA): RGBA {
   if (str.charAt(0) === "#") {
     let hex = str.slice(1);
     if (hex.length === 3 || hex.length === 4) {
-      hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2] + (hex.length === 4 ? hex[3] + hex[3] : "");
+      hex = hex
+        .split("")
+        .map((ch) => ch + ch)
+        .join("");
     }
     if (hex.length >= 6) {
       const r = parseInt(hex.slice(0, 2), 16);
@@ -178,11 +181,12 @@ function parseColor(input: string | undefined, fb: RGBA): RGBA {
   }
   const m = str.match(/[\d.]+/g);
   if (m && m.length >= 3) {
+    const [r, g, b, a] = m.map((x) => parseFloat(x));
     return [
-      Math.min(255, parseFloat(m[0])),
-      Math.min(255, parseFloat(m[1])),
-      Math.min(255, parseFloat(m[2])),
-      m.length >= 4 ? Math.min(1, parseFloat(m[3])) : 1,
+      Math.min(255, r ?? 0),
+      Math.min(255, g ?? 0),
+      Math.min(255, b ?? 0),
+      a === undefined ? 1 : Math.min(1, a),
     ];
   }
   return fb;
@@ -243,13 +247,11 @@ export function OrbBurst(props: OrbBurstProps) {
   const pointer_ = { ...POINTER_DEFAULTS, ...(pointer || {}) };
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const sizeRef = useRef({ w: 0, h: 0 });
-  sizeRef.current = { w: num(width, 0), h: num(height, 0) };
 
+  const size = { w: num(width, 0), h: num(height, 0) };
   // Every live input is read from a ref inside the loop. Putting any of them in
   // the effect deps would restart the animation on every colour tweak.
-  const vRef = useRef<Record<string, number | string>>({});
-  vRef.current = {
+  const v: Record<string, number | string> = {
     dot: dotColor,
     acc: accentColor,
     // Signed: negative speed runs the loop in reverse.
@@ -263,6 +265,15 @@ export function OrbBurst(props: OrbBurstProps) {
     turn: (clampN(num(ball_.turn, 0), -180, 180) * Math.PI) / 180,
     tilt: (clampN(num(ball_.tilt, 0), -90, 90) * Math.PI) / 180,
   };
+
+  const sizeRef = useRef(size);
+  const vRef = useRef(v);
+  // Synced in an effect rather than during render, and declared before the
+  // animation effect so the loop never reads a stale first value.
+  useEffect(() => {
+    sizeRef.current = size;
+    vRef.current = v;
+  });
 
   useEffect(() => {
     const canvas = canvasRef.current;

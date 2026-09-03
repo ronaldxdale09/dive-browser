@@ -2,8 +2,10 @@
 //! typed IPC surface used by the React chrome.
 
 mod commands;
+mod console;
 mod engine;
 mod error;
+mod favicon;
 mod state;
 
 pub use error::AppError;
@@ -60,7 +62,7 @@ pub fn run() {
 }
 
 /// Open tabs for URLs given on the command line or in `DIVE_OPEN_URL`
-/// (comma-separated). Lets `dive https://example.com` work and gives
+/// (whitespace-separated). Lets `dive https://example.com` work and gives
 /// automation a way to drive the app without accessibility permissions.
 fn open_startup_urls(app: &tauri::App<Runtime>) {
     use tauri::Manager;
@@ -68,7 +70,7 @@ fn open_startup_urls(app: &tauri::App<Runtime>) {
     let urls = std::env::args()
         .skip(1)
         .filter(|a| !a.starts_with("--"))
-        .chain(from_env.split(',').map(str::to_owned))
+        .chain(from_env.split_whitespace().map(str::to_owned))
         .filter(|u| !u.trim().is_empty())
         .collect::<Vec<_>>();
     if urls.is_empty() {

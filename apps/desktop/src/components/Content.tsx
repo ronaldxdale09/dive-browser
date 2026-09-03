@@ -1,8 +1,7 @@
-import { Compass } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
-import { Icon } from "./Icon";
+import { OrbBurst } from "./OrbBurst";
 
 /**
  * Placeholder for the engine view. The real page is a native child webview
@@ -35,10 +34,8 @@ export function Content() {
       {!activeTab && (
         <div className="absolute inset-0 grid place-items-center">
           <div className="flex flex-col items-center text-center">
-            <span className="grid size-12 place-items-center rounded-full bg-surface-3 text-ink-2">
-              <Icon icon={Compass} size={22} />
-            </span>
-            <p className="mt-4 text-base font-semibold tracking-tight">Dive</p>
+            <OrbBurst width={220} height={220} />
+            <p className="-mt-1 text-base font-semibold tracking-tight">Dive</p>
             <p className="mt-1 text-ink-3">A workspace for people who build the web.</p>
             <button
               type="button"

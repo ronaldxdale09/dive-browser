@@ -7,6 +7,7 @@ import { Sidecar } from "./components/Sidecar";
 import { Dock } from "./components/Dock";
 import { Palette } from "./components/Palette";
 import { WorkspaceDialog } from "./components/WorkspaceDialog";
+import { Splash } from "./components/Splash";
 import { useBrowser } from "./store/browser";
 import { useShortcuts } from "./lib/shortcuts";
 
@@ -39,6 +40,7 @@ export function App() {
         {open.sidecar && <Sidecar />}
       </div>
       {open.palette && <Palette />}
+      <Splash />
       <WorkspaceDialog key={editing?.id ?? (editing ? "new" : "closed")} />
       {notice && (
         <div role="status" className="fixed bottom-3 left-16 rounded-full border border-line-2 bg-surface-2 px-3 py-1.5 font-mono text-[11px] text-ink-2 shadow-lg">

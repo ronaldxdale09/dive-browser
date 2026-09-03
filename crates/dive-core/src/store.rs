@@ -42,6 +42,8 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX tabs_by_workspace ON tabs(workspace_id, tier, position);",
     // v2: small key/value table for session state and preferences.
     "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+    // v3: site icon, stored inline as a `data:` URL.
+    "ALTER TABLE tabs ADD COLUMN favicon TEXT;",
 ];
 
 /// Persistent store backed by SQLite.
@@ -189,11 +191,12 @@ impl Store {
     /// Insert or replace a tab.
     pub fn upsert_tab(&self, t: &Tab) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO tabs (id, workspace_id, tier, url, title, position, state, last_active_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            "INSERT INTO tabs (id, workspace_id, tier, url, title, position, state, last_active_at, favicon)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, tier = excluded.tier,
              url = excluded.url, title = excluded.title, position = excluded.position,
-             state = excluded.state, last_active_at = excluded.last_active_at",
+             state = excluded.state, last_active_at = excluded.last_active_at,
+             favicon = excluded.favicon",
             params![
                 t.id.to_string(),
                 t.workspace_id.map(|w| w.to_string()),
@@ -202,7 +205,8 @@ impl Store {
                 t.title,
                 t.position,
                 t.state.as_str(),
-                t.last_active_at.to_rfc3339()
+                t.last_active_at.to_rfc3339(),
+                t.favicon
             ],
         )?;
         Ok(())
@@ -301,7 +305,7 @@ const CONTAINER_SELECT: &str = "SELECT id, name, cache_dir, persist_cookies FROM
 const WORKSPACE_SELECT: &str =
     "SELECT id, name, color, icon, container_id, position, created_at FROM workspaces";
 const TAB_SELECT: &str =
-    "SELECT id, workspace_id, tier, url, title, position, state, last_active_at FROM tabs";
+    "SELECT id, workspace_id, tier, url, title, position, state, last_active_at, favicon FROM tabs";
 
 fn conversion(e: impl std::error::Error + Send + Sync + 'static) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
@@ -355,12 +359,21 @@ fn tab_from_row(r: &Row<'_>) -> rusqlite::Result<Tab> {
         position: r.get(5)?,
         state: TabState::parse(&state).ok_or_else(|| invalid("state"))?,
         last_active_at: parse_time(&r.get::<_, String>(7)?)?,
+        favicon: r.get(8)?,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl Store {
+        /// Persist `t` and read it back, so a test can assert what survived.
+        fn tab_after_upsert(&self, t: &Tab) -> Tab {
+            self.upsert_tab(t).unwrap();
+            self.tab(t.id).unwrap()
+        }
+    }
 
     fn seeded() -> (Store, Workspace) {
         let store = Store::in_memory().unwrap();
@@ -419,6 +432,20 @@ mod tests {
             urls,
             ["https://mail", "https://docs", "https://a", "https://b"]
         );
+    }
+
+    #[test]
+    fn favicon_roundtrips_and_clears() {
+        let (store, w) = seeded();
+        let mut t = Tab::new(w.id, "https://x", 0);
+        assert_eq!(store.tab_after_upsert(&t).favicon, None);
+        t.favicon = Some("data:image/png;base64,AAAA".into());
+        assert_eq!(
+            store.tab_after_upsert(&t).favicon.as_deref(),
+            Some("data:image/png;base64,AAAA")
+        );
+        t.favicon = None;
+        assert_eq!(store.tab_after_upsert(&t).favicon, None);
     }
 
     #[test]

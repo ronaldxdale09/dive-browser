@@ -39,6 +39,7 @@ export const commands = {
 
 /** Events */
 export const events = {
+	consoleEntry: makeEvent<ConsoleEntry>("console-entry"),
 	stateChanged: makeEvent<StateChanged>("state-changed"),
 };
 
@@ -84,6 +85,24 @@ export type CommandScope =
 /**  Only inside the agent sidecar. */
 "agent";
 
+/**  One line in the console panel. */
+export type ConsoleEntry = {
+	/**  Tab that produced it. */
+	tab_id: TabId,
+	/**  Severity. */
+	level: Level,
+	/**  Rendered text (arguments joined by spaces, objects as JSON). */
+	text: string,
+	/**  Origin: `console`, `exception`, `network`, `security`, ... */
+	source: string,
+	/**  Script URL, when known. */
+	url: string | null,
+	/**  1-based line, when known. */
+	line: number | null,
+	/**  Milliseconds since the epoch. */
+	timestamp: number | null,
+};
+
 /**  Identifies a [`Container`]. */
 export type ContainerId = string;
 
@@ -101,6 +120,17 @@ export type CoreEvent =
 { type: "tab_closed"; data: TabId } | 
 /**  The focused tab changed. */
 { type: "tab_activated"; data: TabId };
+
+/**  Severity of a console entry. */
+export type Level = 
+/**  `console.debug`, verbose logs. */
+"debug" | 
+/**  `console.log` / `console.info`. */
+"info" | 
+/**  `console.warn`. */
+"warn" | 
+/**  `console.error`, uncaught exceptions, failed loads. */
+"error";
 
 /**  Everything the chrome needs to render on boot. */
 export type Snapshot = {
@@ -129,6 +159,11 @@ export type Tab = {
 	url: string,
 	/**  Page title, empty until loaded. */
 	title: string,
+	/**
+	 *  Site icon as a `data:` URL, resolved from the page once it loads.
+	 *  `None` until then, and cleared whenever the tab leaves its origin.
+	 */
+	favicon: string | null,
 	/**  Order within its tier; lower first. */
 	position: number,
 	/**  Renderer state. */

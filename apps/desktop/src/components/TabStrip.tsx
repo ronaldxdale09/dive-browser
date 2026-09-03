@@ -1,7 +1,8 @@
-import { ChevronDown, Globe, Plus, X } from "lucide-react";
+import { ChevronDown, Plus, X } from "lucide-react";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "../lib/ipc";
 import { Icon, IconButton } from "./Icon";
+import { Favicon } from "./Favicon";
 
 function label(t: Tab) {
   if (t.title) return t.title;
@@ -39,7 +40,7 @@ export function TabStrip() {
                 isActive ? "bg-surface-2 text-ink ring-1 ring-line-2" : "text-ink-2 hover:bg-surface hover:text-ink"
               }`}
             >
-              <Icon icon={Globe} size={13} className="shrink-0 text-ink-3" />
+              <Favicon tab={t} size={14} />
               <span className="truncate">{label(t)}</span>
               <button
                 type="button"

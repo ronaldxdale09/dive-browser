@@ -1,11 +1,12 @@
 import { Command } from "cmdk";
-import { ArrowUpRight, Globe, Search, Terminal } from "lucide-react";
+import { ArrowUpRight, Search, Terminal } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ipc } from "../lib/ipc";
 import { runCommand } from "../lib/commands";
 import type { Command as CommandDef } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
+import { Favicon } from "./Favicon";
 
 /** Omnibox-style palette: type a URL or search, or pick a tab or command. */
 export function Palette() {
@@ -65,7 +66,7 @@ export function Palette() {
                   }}
                   className="flex items-center gap-2 rounded-lg px-3 py-2"
                 >
-                  <Icon icon={Globe} size={14} className="shrink-0 text-ink-3" />
+                  <Favicon tab={t} size={14} />
                   <span className="truncate">{t.title || t.url}</span>
                   <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(t.url)}</span>
                 </Command.Item>

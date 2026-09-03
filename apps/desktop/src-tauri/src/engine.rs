@@ -99,7 +99,12 @@ impl TabHost {
             .add_child(builder, self.bounds.position(), self.bounds.size())?;
         view.hide()?;
         #[cfg(feature = "cef")]
-        self.cdp.insert(tab_id, attach_cdp(&view)?);
+        {
+            let session = attach_cdp(&view)?;
+            crate::console::attach(app.clone(), tab_id, session.clone());
+            crate::favicon::attach(app.clone(), tab_id, session.clone());
+            self.cdp.insert(tab_id, session);
+        }
         self.views.insert(tab_id, view);
         Ok(())
     }
@@ -221,7 +226,7 @@ fn label_for(id: TabId) -> String {
 }
 
 /// Apply `f` to the stored tab, persist it, and broadcast the change.
-fn update_tab(app: &AppHandle<Runtime>, id: TabId, f: impl FnOnce(&mut Tab)) {
+pub fn update_tab(app: &AppHandle<Runtime>, id: TabId, f: impl FnOnce(&mut Tab)) {
     let state = app.state::<AppState>();
     let store = lock(&state.store);
     let Ok(mut tab) = store.tab(id) else { return };
