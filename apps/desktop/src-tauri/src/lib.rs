@@ -133,7 +133,15 @@ fn smoke_test(app: tauri::AppHandle<Runtime>) {
             .as_ref()
             .and_then(crate::engine::TabHost::active);
         let outcome = match active {
-            Some(id) => commands::capture_tab(&state, id, true).await,
+            Some(id) => match commands::capture_tab(&state, id, true).await {
+                Ok(path) if std::env::var_os("DIVE_SMOKE_GIF").is_some() => {
+                    smoke_gif(&state, id).await.map(|gif| {
+                        tracing::info!(path = %gif.display(), "smoke: gif ok");
+                        path
+                    })
+                }
+                other => other,
+            },
             None => Err(AppError::new("no active tab")),
         };
         let code = match outcome {
@@ -148,6 +156,28 @@ fn smoke_test(app: tauri::AppHandle<Runtime>) {
         };
         app.exit(code);
     });
+}
+
+/// Record three seconds of the tab while scrolling it, then encode the GIF.
+async fn smoke_gif(
+    state: &state::AppState,
+    id: dive_core::TabId,
+) -> Result<std::path::PathBuf, AppError> {
+    let session = state::lock(&state.host)
+        .as_ref()
+        .and_then(|h| h.cdp(id))
+        .ok_or_else(|| AppError::new("no devtools session"))?;
+    state.screencast.start(id, session.clone()).await?;
+    for step in 0..6 {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let _ = session
+            .call(
+                "Runtime.evaluate",
+                serde_json::json!({"expression": format!("window.scrollTo(0, {})", step * 120)}),
+            )
+            .await;
+    }
+    state.screencast.stop(id, &session).await
 }
 
 /// Re-show the tab that was active when the app last ran, if it still exists
