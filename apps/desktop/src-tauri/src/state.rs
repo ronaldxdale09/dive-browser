@@ -71,10 +71,21 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Ensure at least one container and workspace exist; return the first workspace.
+/// Setting keys used for session restore.
+pub const ACTIVE_WORKSPACE: &str = "active_workspace";
+/// Setting keys used for session restore.
+pub const ACTIVE_TAB: &str = "active_tab";
+
+/// Ensure at least one container and workspace exist; return the workspace to
+/// show: the last active one if it still exists, else the first.
 fn seed_defaults(store: &Store) -> anyhow::Result<WorkspaceId> {
-    if let Some(first) = store.workspaces()?.first() {
-        return Ok(first.id);
+    let workspaces = store.workspaces()?;
+    if !workspaces.is_empty() {
+        let remembered = store
+            .setting(ACTIVE_WORKSPACE)?
+            .and_then(|s| s.parse::<WorkspaceId>().ok())
+            .filter(|id| workspaces.iter().any(|w| w.id == *id));
+        return Ok(remembered.unwrap_or(workspaces[0].id));
     }
     let container = if let Some(c) = store.containers()?.into_iter().next() {
         c

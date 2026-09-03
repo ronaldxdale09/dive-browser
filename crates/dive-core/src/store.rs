@@ -40,6 +40,8 @@ const MIGRATIONS: &[&str] = &[
         last_active_at TEXT NOT NULL
     );
     CREATE INDEX tabs_by_workspace ON tabs(workspace_id, tier, position);",
+    // v2: small key/value table for session state and preferences.
+    "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
 ];
 
 /// Persistent store backed by SQLite.
@@ -246,6 +248,43 @@ impl Store {
         Ok(())
     }
 
+    // ----- settings -----
+
+    /// Read a setting.
+    pub fn setting(&self, key: &str) -> Result<Option<String>> {
+        self.conn
+            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+                r.get(0)
+            })
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Write a setting.
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [key, value],
+        )?;
+        Ok(())
+    }
+
+    /// The most recently active, non-discarded tab of `workspace`, if any.
+    pub fn last_active_tab(&self, workspace: WorkspaceId) -> Result<Option<Tab>> {
+        self.conn
+            .query_row(
+                &format!(
+                    "{TAB_SELECT} WHERE workspace_id = ?1 AND state != 'discarded'
+                     ORDER BY last_active_at DESC LIMIT 1"
+                ),
+                [workspace.to_string()],
+                tab_from_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     /// Move `Today` tabs idle longer than `max_idle` to `Discarded`; returns how many.
     pub fn archive_idle_tabs(&self, now: Timestamp, max_idle: time::Duration) -> Result<usize> {
         let cutoff = (now - max_idle).to_rfc3339();
@@ -396,6 +435,31 @@ mod tests {
             store.remove_workspace(w.id),
             Err(CoreError::NotFound { .. })
         ));
+    }
+
+    #[test]
+    fn settings_roundtrip_and_last_active_tab() {
+        let (store, w) = seeded();
+        assert_eq!(store.setting("active_tab").unwrap(), None);
+        store.set_setting("active_tab", "x").unwrap();
+        store.set_setting("active_tab", "y").unwrap();
+        assert_eq!(store.setting("active_tab").unwrap().as_deref(), Some("y"));
+
+        assert!(store.last_active_tab(w.id).unwrap().is_none());
+        let now = Timestamp::now();
+        let mut older = Tab::new(w.id, "https://older", 0);
+        older.last_active_at = now - time::Duration::hours(2);
+        let mut newest_but_discarded = Tab::new(w.id, "https://gone", 1);
+        newest_but_discarded.state = TabState::Discarded;
+        let mut newer = Tab::new(w.id, "https://newer", 2);
+        newer.last_active_at = now - time::Duration::hours(1);
+        for t in [&older, &newest_but_discarded, &newer] {
+            store.upsert_tab(t).unwrap();
+        }
+        assert_eq!(
+            store.last_active_tab(w.id).unwrap().unwrap().url,
+            "https://newer"
+        );
     }
 
     #[test]

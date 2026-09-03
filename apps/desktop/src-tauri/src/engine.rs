@@ -135,6 +135,15 @@ impl TabHost {
         Ok(())
     }
 
+    /// Hide every tab view (used when switching workspaces).
+    pub fn deactivate_all(&mut self) -> tauri::Result<()> {
+        for view in self.views.values() {
+            view.hide()?;
+        }
+        self.active = None;
+        Ok(())
+    }
+
     /// Destroy the view for `id`, if any.
     pub fn close(&mut self, id: TabId) -> tauri::Result<()> {
         if let Some(session) = self.cdp.remove(&id) {

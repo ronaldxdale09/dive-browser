@@ -50,6 +50,7 @@ pub fn run() {
             specta.mount_events(app);
             state::init(app)?;
             engine::create_main_window(app)?;
+            restore_session(app);
             open_startup_urls(app);
             smoke_test(app.handle().clone());
             Ok(())
@@ -115,4 +116,33 @@ fn smoke_test(app: tauri::AppHandle<Runtime>) {
         };
         app.exit(code);
     });
+}
+
+/// Re-show the tab that was active when the app last ran, if it still exists
+/// in the remembered workspace.
+fn restore_session(app: &tauri::App<Runtime>) {
+    use tauri::Manager;
+    let state = app.state::<state::AppState>();
+    let Some(workspace) = *state::lock(&state.active_workspace) else {
+        return;
+    };
+    let candidate = {
+        let store = state::lock(&state.store);
+        let remembered = store
+            .setting(state::ACTIVE_TAB)
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<dive_core::TabId>().ok())
+            .and_then(|id| store.tab(id).ok())
+            .filter(|t| {
+                t.workspace_id == Some(workspace) && t.state != dive_core::TabState::Discarded
+            });
+        remembered.or_else(|| store.last_active_tab(workspace).ok().flatten())
+    };
+    if let Some(tab) = candidate {
+        match commands::activate_tab(app.handle(), &state, tab.id) {
+            Ok(()) => tracing::info!(%tab.id, url = tab.url, "restored session tab"),
+            Err(e) => tracing::warn!("failed to restore session tab: {e}"),
+        }
+    }
 }

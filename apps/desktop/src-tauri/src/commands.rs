@@ -127,10 +127,25 @@ pub(crate) fn snapshot(state: State<'_, AppState>) -> AppResult<Snapshot> {
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn workspace_activate(state: State<'_, AppState>, id: WorkspaceId) -> AppResult<()> {
-    lock(&state.store).workspace(id)?;
+pub(crate) fn workspace_activate(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: WorkspaceId,
+) -> AppResult<()> {
+    let last = {
+        let store = lock(&state.store);
+        store.workspace(id)?;
+        store.set_setting(crate::state::ACTIVE_WORKSPACE, &id.to_string())?;
+        store.last_active_tab(id)?
+    };
     *lock(&state.active_workspace) = Some(id);
+    if let Some(host) = lock(&state.host).as_mut() {
+        host.deactivate_all()?;
+    }
     state.bus.publish(CoreEvent::WorkspaceActivated(id));
+    if let Some(tab) = last {
+        activate_tab(&app, &state, tab.id)?;
+    }
     Ok(())
 }
 
@@ -172,6 +187,7 @@ pub fn open_tab(
         host.open(app, &tab, &container)?;
         host.activate(tab.id)?;
     }
+    lock(&state.store).set_setting(crate::state::ACTIVE_TAB, &tab.id.to_string())?;
     state.bus.publish(CoreEvent::TabUpserted(tab.clone()));
     state.bus.publish(CoreEvent::TabActivated(tab.id));
     Ok(tab)
@@ -195,7 +211,13 @@ pub(crate) fn tab_activate(
     state: State<'_, AppState>,
     id: TabId,
 ) -> AppResult<()> {
-    let (tab, container) = {
+    activate_tab(&app, &state, id)
+}
+
+/// Show `id` (recreating its view if it was discarded), persist it as the
+/// active tab and announce the change.
+pub fn activate_tab(app: &AppHandle<Runtime>, state: &AppState, id: TabId) -> AppResult<()> {
+    let (mut tab, container) = {
         let store = lock(&state.store);
         let tab = store.tab(id)?;
         let ws = tab
@@ -211,15 +233,17 @@ pub(crate) fn tab_activate(
             .as_mut()
             .ok_or_else(|| AppError::new("engine not ready"))?;
         if !host.has(id) {
-            // Discarded or restored tab: recreate its view lazily.
-            host.open(&app, &tab, &container)?;
+            host.open(app, &tab, &container)?;
         }
         host.activate(id)?;
     }
-    let mut tab = tab;
     tab.last_active_at = dive_core::Timestamp::now();
     tab.state = dive_core::TabState::Active;
-    lock(&state.store).upsert_tab(&tab)?;
+    {
+        let store = lock(&state.store);
+        store.upsert_tab(&tab)?;
+        store.set_setting(crate::state::ACTIVE_TAB, &id.to_string())?;
+    }
     state.bus.publish(CoreEvent::TabUpserted(tab));
     state.bus.publish(CoreEvent::TabActivated(id));
     Ok(())
