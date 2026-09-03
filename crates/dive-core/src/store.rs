@@ -44,7 +44,36 @@ const MIGRATIONS: &[&str] = &[
     "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
     // v3: site icon, stored inline as a `data:` URL.
     "ALTER TABLE tabs ADD COLUMN favicon TEXT;",
+    // v4: icons remembered per origin, so a tab shows its site's mark before
+    // it has ever been opened in this session.
+    "CREATE TABLE favicons (
+        origin TEXT PRIMARY KEY,
+        data TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );",
+    // v5: visited pages for the palette.
+    "CREATE TABLE history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        url TEXT NOT NULL,
+        title TEXT NOT NULL DEFAULT '',
+        visited_at TEXT NOT NULL
+    );
+    CREATE INDEX history_by_url ON history(url);
+    CREATE INDEX history_by_time ON history(visited_at);",
 ];
+
+/// One page in history, aggregated by URL.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct HistoryEntry {
+    /// URL.
+    pub url: String,
+    /// Most recent non-empty title.
+    pub title: String,
+    /// RFC 3339 time of the last visit.
+    pub last_visited_at: String,
+    /// Number of recorded visits.
+    pub visits: u32,
+}
 
 /// Persistent store backed by SQLite.
 pub struct Store {
@@ -214,7 +243,8 @@ impl Store {
 
     /// Fetch one tab.
     pub fn tab(&self, id: TabId) -> Result<Tab> {
-        self.conn
+        let mut tab = self
+            .conn
             .query_row(
                 &format!("{TAB_SELECT} WHERE id = ?1"),
                 [id.to_string()],
@@ -224,7 +254,9 @@ impl Store {
             .ok_or_else(|| CoreError::NotFound {
                 kind: "tab",
                 id: id.to_string(),
-            })
+            })?;
+        self.fill_favicon(&mut tab);
+        Ok(tab)
     }
 
     /// Tabs of one workspace plus essentials, ordered by tier then position.
@@ -234,8 +266,11 @@ impl Store {
              ORDER BY CASE tier WHEN 'essential' THEN 0 WHEN 'pinned' THEN 1 ELSE 2 END, position"
         ))?;
         let rows = stmt.query_map([id.to_string()], tab_from_row)?;
-        rows.collect::<std::result::Result<_, _>>()
-            .map_err(Into::into)
+        let mut tabs: Vec<Tab> = rows.collect::<std::result::Result<_, _>>()?;
+        for tab in &mut tabs {
+            self.fill_favicon(tab);
+        }
+        Ok(tabs)
     }
 
     /// Remove a tab.
@@ -250,6 +285,109 @@ impl Store {
             });
         }
         Ok(())
+    }
+
+    // ----- favicons -----
+
+    /// Remember `data` as the icon every tab on `origin` should wear.
+    pub fn set_favicon(&self, origin: &str, data: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO favicons (origin, data, updated_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(origin) DO UPDATE SET data = excluded.data,
+             updated_at = excluded.updated_at",
+            params![origin, data, Timestamp::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// The icon remembered for `origin`, if one has ever been resolved.
+    pub fn favicon(&self, origin: &str) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT data FROM favicons WHERE origin = ?1",
+                [origin],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Lend `tab` its site's remembered icon when it has none of its own.
+    ///
+    /// This is what puts a mark on a tab restored from a previous session: the
+    /// tab has no renderer yet, but its origin was resolved once before.
+    fn fill_favicon(&self, tab: &mut Tab) {
+        if tab.favicon.is_some() {
+            return;
+        }
+        let Some(origin) = origin_of(&tab.url) else {
+            return;
+        };
+        match self.favicon(&origin) {
+            Ok(data) => tab.favicon = data,
+            Err(e) => tracing::debug!(origin, "favicon lookup failed: {e}"),
+        }
+    }
+
+    // ----- history -----
+
+    /// Record a visit. Same URL within a minute updates the title instead of adding a row.
+    pub fn record_visit(&self, url: &str, title: &str, at: Timestamp) -> Result<()> {
+        let recent: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT id FROM history WHERE url = ?1 ORDER BY visited_at DESC LIMIT 1",
+                [url],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let last_at: Option<String> = match recent {
+            Some(id) => self
+                .conn
+                .query_row("SELECT visited_at FROM history WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })
+                .optional()?,
+            None => None,
+        };
+        let fresh = last_at
+            .and_then(|t| Timestamp::parse(&t).ok())
+            .is_some_and(|t| (at.0 - t.0).abs() < time::Duration::minutes(1));
+        if fresh && let Some(id) = recent {
+            self.conn.execute(
+                "UPDATE history SET title = ?1 WHERE id = ?2 AND ?1 != ''",
+                params![title, id],
+            )?;
+            return Ok(());
+        }
+        self.conn.execute(
+            "INSERT INTO history (url, title, visited_at) VALUES (?1, ?2, ?3)",
+            params![url, title, at.to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// Distinct recent visits matching `query` (substring on url or title), newest first.
+    pub fn search_history(&self, query: &str, limit: usize) -> Result<Vec<HistoryEntry>> {
+        let like = format!("%{}%", query.trim());
+        let mut stmt = self.conn.prepare(
+            "SELECT url, MAX(title), MAX(visited_at), COUNT(*) FROM history
+             WHERE url LIKE ?1 OR title LIKE ?1
+             GROUP BY url ORDER BY MAX(visited_at) DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(
+            params![like, i64::try_from(limit).unwrap_or(i64::MAX)],
+            |r| {
+                Ok(HistoryEntry {
+                    url: r.get(0)?,
+                    title: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    last_visited_at: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    visits: r.get::<_, i64>(3)?.try_into().unwrap_or(u32::MAX),
+                })
+            },
+        )?;
+        rows.collect::<std::result::Result<_, _>>()
+            .map_err(Into::into)
     }
 
     // ----- settings -----
@@ -276,7 +414,8 @@ impl Store {
 
     /// The most recently active, non-discarded tab of `workspace`, if any.
     pub fn last_active_tab(&self, workspace: WorkspaceId) -> Result<Option<Tab>> {
-        self.conn
+        let mut tab = self
+            .conn
             .query_row(
                 &format!(
                     "{TAB_SELECT} WHERE workspace_id = ?1 AND state != 'discarded'
@@ -285,8 +424,11 @@ impl Store {
                 [workspace.to_string()],
                 tab_from_row,
             )
-            .optional()
-            .map_err(Into::into)
+            .optional()?;
+        if let Some(t) = tab.as_mut() {
+            self.fill_favicon(t);
+        }
+        Ok(tab)
     }
 
     /// Move `Today` tabs idle longer than `max_idle` to `Discarded`; returns how many.
@@ -306,6 +448,14 @@ const WORKSPACE_SELECT: &str =
     "SELECT id, name, color, icon, container_id, position, created_at FROM workspaces";
 const TAB_SELECT: &str =
     "SELECT id, workspace_id, tier, url, title, position, state, last_active_at, favicon FROM tabs";
+
+/// Scheme and authority of `url`, the key an icon is remembered under.
+pub fn origin_of(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    // Opaque origins (`data:`, `about:`) serialize to "null"; nothing to key on.
+    let origin = parsed.origin();
+    origin.is_tuple().then(|| origin.ascii_serialization())
+}
 
 fn conversion(e: impl std::error::Error + Send + Sync + 'static) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
@@ -435,6 +585,56 @@ mod tests {
     }
 
     #[test]
+    fn origin_cache_lends_icons_to_unopened_tabs() {
+        let (store, w) = seeded();
+        let a = Tab::new(w.id, "https://example.com/one", 0);
+        let b = Tab::new(w.id, "https://example.com/two", 1);
+        let other = Tab::new(w.id, "https://elsewhere.test/", 2);
+        for t in [&a, &b, &other] {
+            store.upsert_tab(t).unwrap();
+        }
+        store
+            .set_favicon("https://example.com", "data:image/png;base64,AAAA")
+            .unwrap();
+
+        // Neither tab has an icon of its own; both wear their site's.
+        let icon = Some("data:image/png;base64,AAAA");
+        assert_eq!(store.tab(a.id).unwrap().favicon.as_deref(), icon);
+        assert_eq!(store.tab(b.id).unwrap().favicon.as_deref(), icon);
+        assert_eq!(store.tab(other.id).unwrap().favicon, None);
+
+        // A tab's own icon outranks the site's.
+        let mut own = b.clone();
+        own.favicon = Some("data:image/svg+xml;base64,BBBB".into());
+        assert_eq!(
+            store.tab_after_upsert(&own).favicon.as_deref(),
+            Some("data:image/svg+xml;base64,BBBB")
+        );
+
+        // Listing fills icons too, and an opaque URL keys nothing.
+        let opaque = Tab::new(w.id, "data:text/html,hi", 3);
+        store.upsert_tab(&opaque).unwrap();
+        let tabs = store.tabs_for_workspace(w.id).unwrap();
+        assert_eq!(
+            tabs.iter()
+                .find(|t| t.id == a.id)
+                .unwrap()
+                .favicon
+                .as_deref(),
+            icon
+        );
+        assert_eq!(
+            tabs.iter().find(|t| t.id == opaque.id).unwrap().favicon,
+            None
+        );
+        assert_eq!(origin_of("data:text/html,hi"), None);
+        assert_eq!(
+            origin_of("https://example.com:443/x?q=1").as_deref(),
+            Some("https://example.com")
+        );
+    }
+
+    #[test]
     fn favicon_roundtrips_and_clears() {
         let (store, w) = seeded();
         let mut t = Tab::new(w.id, "https://x", 0);
@@ -487,6 +687,33 @@ mod tests {
             store.last_active_tab(w.id).unwrap().unwrap().url,
             "https://newer"
         );
+    }
+
+    #[test]
+    fn history_dedupes_and_searches() {
+        let store = Store::in_memory().unwrap();
+        let t0 = Timestamp::now();
+        store.record_visit("https://a.dev/docs", "", t0).unwrap();
+        store
+            .record_visit("https://a.dev/docs", "Docs", t0)
+            .unwrap();
+        store
+            .record_visit("https://b.dev/", "B site", t0 - time::Duration::hours(1))
+            .unwrap();
+        store
+            .record_visit(
+                "https://a.dev/docs",
+                "Docs again",
+                t0 - time::Duration::hours(2),
+            )
+            .unwrap();
+        let all = store.search_history("", 10).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].url, "https://a.dev/docs");
+        assert_eq!(all[0].visits, 2, "same url within a minute is one visit");
+        let hits = store.search_history("b site", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "B site");
     }
 
     #[test]

@@ -65,6 +65,17 @@ pub(crate) fn app_info() -> AppInfo {
     }
 }
 
+/// Recent history matching `query`, newest first.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn history_search(
+    state: State<'_, AppState>,
+    query: String,
+    limit: u32,
+) -> AppResult<Vec<dive_core::HistoryEntry>> {
+    Ok(lock(&state.store).search_history(&query, usize::try_from(limit.min(200)).unwrap_or(50))?)
+}
+
 /// Dev servers listening on common localhost ports.
 #[tauri::command]
 #[specta::specta]
@@ -116,6 +127,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             command_run,
             app_info,
             dev_servers,
+            history_search,
             share_url,
             crate::agent::agent_key_set,
             crate::agent::agent_key_present,

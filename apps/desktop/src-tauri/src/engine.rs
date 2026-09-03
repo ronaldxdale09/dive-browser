@@ -346,6 +346,11 @@ pub fn update_tab(app: &AppHandle<Runtime>, id: TabId, f: impl FnOnce(&mut Tab))
         tracing::warn!(%id, "failed to persist tab update: {e}");
         return;
     }
+    if tab.url.starts_with("http")
+        && let Err(e) = store.record_visit(&tab.url, &tab.title, dive_core::Timestamp::now())
+    {
+        tracing::debug!("history write failed: {e}");
+    }
     state.bus.publish(CoreEvent::TabUpserted(tab));
 }
 

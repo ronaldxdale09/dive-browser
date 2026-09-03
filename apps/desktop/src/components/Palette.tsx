@@ -1,9 +1,9 @@
 import { Command } from "cmdk";
-import { ArrowUpRight, Search, Terminal, Server } from "lucide-react";
+import { ArrowUpRight, Search, Terminal, Server, History } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ipc } from "../lib/ipc";
 import { runCommand } from "../lib/commands";
-import type { Command as CommandDef, DevServer } from "../lib/ipc";
+import type { Command as CommandDef, DevServer, HistoryEntry } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { Favicon } from "./Favicon";
@@ -17,6 +17,20 @@ export function Palette() {
   const [query, setQuery] = useState("");
   const [cmds, setCmds] = useState<CommandDef[]>([]);
   const [servers, setServers] = useState<DevServer[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const t = setTimeout(() => {
+      ipc
+        .historySearch(query, 8)
+        .then((h) => alive && setHistory(h))
+        .catch(() => alive && setHistory([]));
+    }, 60);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [query]);
   useEffect(() => {
     void ipc.commandsList().then(setCmds);
     void ipc.devServers().then(setServers).catch(() => setServers([]));
@@ -55,6 +69,17 @@ export function Palette() {
               <span className="text-ink-2">{looksLikeUrl ? "Open" : "Search"}</span>
               <span className="truncate font-mono text-ink">{query}</span>
             </Command.Item>
+          )}
+          {history.length > 0 && (
+            <Command.Group heading="History">
+              {history.map((h) => (
+                <Command.Item key={h.url} value={`history ${h.title} ${h.url}`} onSelect={() => void go(h.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
+                  <Icon icon={History} size={14} className="shrink-0 text-ink-3" />
+                  <span className="truncate">{h.title || h.url}</span>
+                  <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(h.url)}</span>
+                </Command.Item>
+              ))}
+            </Command.Group>
           )}
           {servers.length > 0 && (
             <Command.Group heading="Local servers">

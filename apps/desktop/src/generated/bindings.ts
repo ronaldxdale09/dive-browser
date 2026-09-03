@@ -96,6 +96,8 @@ export const commands = {
 	appInfo: () => __TAURI_INVOKE<AppInfo>("app_info"),
 	/**  Dev servers listening on common localhost ports. */
 	devServers: () => __TAURI_INVOKE<DevServer[]>("dev_servers"),
+	/**  Recent history matching `query`, newest first. */
+	historySearch: (query: string, limit: number) => typedError<HistoryEntry[], AppError>(__TAURI_INVOKE("history_search", { query, limit })),
 	/**  LAN URL and QR code for opening `url` on another device. */
 	shareUrl: (url: string) => typedError<ShareInfo, AppError>(__TAURI_INVOKE("share_url", { url })),
 	/**  Store the Anthropic API key in the keychain. Empty removes it. */
@@ -318,6 +320,18 @@ export type FindResult = {
 	total: number,
 	/**  1-based index of the selected match, 0 when none. */
 	current: number,
+};
+
+/**  One page in history, aggregated by URL. */
+export type HistoryEntry = {
+	/**  URL. */
+	url: string,
+	/**  Most recent non-empty title. */
+	title: string,
+	/**  RFC 3339 time of the last visit. */
+	last_visited_at: string,
+	/**  Number of recorded visits. */
+	visits: number,
 };
 
 /**  Severity of a console entry. */
