@@ -32,26 +32,14 @@ pub fn start(app: AppHandle<Runtime>) {
     });
 }
 
-/// Archive idle tabs, close their engine views, and announce the changes.
-/// Returns how many tabs were archived.
+/// Archive idle tabs in every workspace, close their engine views, and
+/// announce the changes. Returns how many tabs were archived.
 pub fn sweep(state: &AppState) -> dive_core::Result<usize> {
-    let (count, discarded) = {
-        let store = lock(&state.store);
-        let count = store.archive_idle_tabs(Timestamp::now(), MAX_IDLE)?;
-        if count == 0 {
-            return Ok(0);
-        }
-        let active = *lock(&state.active_workspace);
-        let discarded: Vec<_> = match active {
-            Some(ws) => store
-                .tabs_for_workspace(ws)?
-                .into_iter()
-                .filter(|t| t.state == TabState::Discarded)
-                .collect(),
-            None => Vec::new(),
-        };
-        (count, discarded)
-    };
+    let discarded = lock(&state.store).discard_idle_tabs(Timestamp::now(), MAX_IDLE)?;
+    if discarded.is_empty() {
+        return Ok(0);
+    }
+    let count = discarded.len();
     // Never discard the tab the user is looking at.
     let showing = lock(&state.host)
         .as_ref()

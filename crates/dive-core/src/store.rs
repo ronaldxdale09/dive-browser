@@ -614,13 +614,32 @@ impl Store {
 
     /// Move `Today` tabs idle longer than `max_idle` to `Discarded`; returns how many.
     pub fn archive_idle_tabs(&self, now: Timestamp, max_idle: time::Duration) -> Result<usize> {
+        Ok(self.discard_idle_tabs(now, max_idle)?.len())
+    }
+
+    /// Move `Today` tabs idle longer than `max_idle` to `Discarded` across
+    /// every workspace, returning the tabs as they are after the change so
+    /// the caller can tear down their views and announce them.
+    pub fn discard_idle_tabs(&self, now: Timestamp, max_idle: time::Duration) -> Result<Vec<Tab>> {
         let cutoff = (now - max_idle).to_rfc3339();
-        let n = self.conn.execute(
+        let mut stmt = self.conn.prepare(&format!(
+            "{TAB_SELECT} WHERE tier = 'today' AND state != 'discarded' AND last_active_at < ?1"
+        ))?;
+        let rows = stmt.query_map([&cutoff], tab_from_row)?;
+        let mut tabs: Vec<Tab> = rows.collect::<std::result::Result<_, _>>()?;
+        if tabs.is_empty() {
+            return Ok(tabs);
+        }
+        self.conn.execute(
             "UPDATE tabs SET state = 'discarded'
              WHERE tier = 'today' AND state != 'discarded' AND last_active_at < ?1",
-            [cutoff],
+            [&cutoff],
         )?;
-        Ok(n)
+        for tab in &mut tabs {
+            tab.state = TabState::Discarded;
+            self.fill_favicon(tab);
+        }
+        Ok(tabs)
     }
 }
 
@@ -1054,5 +1073,33 @@ mod tests {
         assert_eq!(store.tab(old_today.id).unwrap().state, TabState::Discarded);
         assert_eq!(store.tab(old_pinned.id).unwrap().state, TabState::Active);
         assert_eq!(store.tab(fresh.id).unwrap().state, TabState::Active);
+    }
+
+    #[test]
+    fn discard_idle_spans_every_workspace() {
+        let (store, w) = seeded();
+        let other = Workspace::new("Other", w.container_id, 1);
+        store.upsert_workspace(&other).unwrap();
+        let now = Timestamp::now();
+        let mut a = Tab::new(w.id, "https://a", 0);
+        a.last_active_at = now - time::Duration::hours(20);
+        let mut b = Tab::new(other.id, "https://b", 0);
+        b.last_active_at = now - time::Duration::hours(20);
+        store.upsert_tab(&a).unwrap();
+        store.upsert_tab(&b).unwrap();
+        let discarded = store
+            .discard_idle_tabs(now, time::Duration::hours(12))
+            .unwrap();
+        let ids: Vec<_> = discarded.iter().map(|t| t.id.to_string()).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&a.id.to_string()) && ids.contains(&b.id.to_string()));
+        assert!(discarded.iter().all(|t| t.state == TabState::Discarded));
+        assert_eq!(store.tab(b.id).unwrap().state, TabState::Discarded);
+        assert!(
+            store
+                .discard_idle_tabs(now, time::Duration::hours(12))
+                .unwrap()
+                .is_empty()
+        );
     }
 }
