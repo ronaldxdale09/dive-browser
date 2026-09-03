@@ -1,7 +1,8 @@
-import { Ban, FileJson, Repeat } from "lucide-react";
+import { Ban, FileJson, Repeat, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
+import { useAgent } from "../store/agent";
 import { selectRequests, useNetwork } from "../store/network";
 import type { RequestRow } from "../store/network";
 import { Icon, IconButton } from "./Icon";
@@ -58,6 +59,16 @@ export function NetworkPanel() {
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [replaying, setReplaying] = useState<string | null>(null);
+  const send = useAgent((s) => s.send);
+  const keyPresent = useAgent((s) => s.keyPresent);
+  const askAgent = (r: RequestRow) => {
+    useBrowser.getState().toggle("sidecar", true);
+    const outcome = r.error ?? (r.status === null ? "no response yet" : `HTTP ${r.status}`);
+    void send(
+      `Explain this request from the current page and whether it looks right:\n\n${r.method} ${r.url}\nResult: ${outcome}${r.mimeType ? ` (${r.mimeType})` : ""}${r.size !== null ? `, ${r.size} bytes` : ""}${r.durationMs !== null ? `, ${r.durationMs} ms` : ""}\n\nUse network_list or console_tail if you need more context. If it failed, say why and how to fix it.`,
+      activeTab,
+    );
+  };
   const shown = filter ? rows.filter((r) => r.url.toLowerCase().includes(filter.toLowerCase())) : rows;
   const detail = rows.find((r) => r.id === selected);
 
@@ -119,6 +130,15 @@ export function NetworkPanel() {
           </span>
           <button type="button" onClick={() => setReplaying(detail.id)} className="flex h-6 shrink-0 items-center gap-1 rounded-full border border-line px-2 font-sans text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
             <Icon icon={Repeat} size={11} /> Replay
+          </button>
+          <button
+            type="button"
+            disabled={!keyPresent}
+            title={keyPresent ? "Ask the agent about this request" : "Add an API key in the Agent sidecar first"}
+            onClick={() => askAgent(detail)}
+            className="flex h-6 shrink-0 items-center gap-1 rounded-full border border-line px-2 font-sans text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40"
+          >
+            <Icon icon={Sparkles} size={11} /> Explain
           </button>
         </div>
       )}
