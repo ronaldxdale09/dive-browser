@@ -15,6 +15,7 @@ mod engine;
 mod error;
 mod favicon;
 mod find;
+mod har;
 mod housekeeping;
 mod mcp;
 mod meta;

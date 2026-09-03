@@ -160,6 +160,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             request_captured,
             request_replay,
             tab_openapi,
+            tab_har,
             tab_record_start,
             tab_record_stop,
             layout_set_content_bounds,
@@ -907,17 +908,35 @@ pub(crate) fn tab_openapi(state: State<'_, AppState>, id: TabId) -> AppResult<St
     let requests = state.buffers.requests(id, 1000);
     let spec = crate::openapi::from_requests(&page_url, &requests);
     let text = serde_json::to_string_pretty(&spec).map_err(AppError::new)?;
-    let dir = crate::state::data_root().join("captures");
-    std::fs::create_dir_all(&dir)?;
-    let stamp = dive_core::Timestamp::now()
-        .to_rfc3339()
-        .replace([':', '.'], "-");
-    let path = dir.join(format!("openapi-{stamp}.json"));
+    let path = stamped_capture("openapi", "json")?;
     std::fs::write(&path, &text)?;
     if let Ok(mut cb) = arboard::Clipboard::new() {
         let _ = cb.set_text(text);
     }
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// Export the captured requests of a tab as a HAR 1.2 file; returns its path.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_har(state: State<'_, AppState>, id: TabId) -> AppResult<String> {
+    let tab = lock(&state.store).tab(id)?;
+    let requests = state.buffers.requests(id, 1000);
+    let har = crate::har::from_requests(&tab.url, &tab.title, &requests);
+    let path = stamped_capture("dive", "har")?;
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(&har).map_err(AppError::new)?,
+    )?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// `<captures>/<prefix>-<timestamp>.<ext>`.
+fn stamped_capture(prefix: &str, ext: &str) -> AppResult<std::path::PathBuf> {
+    let stamp = dive_core::Timestamp::now()
+        .to_rfc3339()
+        .replace([':', '.'], "-");
+    Ok(captures_dir()?.join(format!("{prefix}-{stamp}.{ext}")))
 }
 
 /// Start recording the person's interactions in a tab.

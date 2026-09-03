@@ -100,6 +100,8 @@ export const commands = {
 	 *  under captures and copied to the clipboard.
 	 */
 	tabOpenapi: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_openapi", { id })),
+	/**  Export the captured requests of a tab as a HAR 1.2 file; returns its path. */
+	tabHar: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_har", { id })),
 	/**  Start recording the person's interactions in a tab. */
 	tabRecordStart: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_record_start", { id })),
 	/**  Stop recording and return the steps. */
@@ -431,6 +433,8 @@ export type NetworkEvent =
 	post_data: string | null,
 	/**  Seconds since an arbitrary monotonic origin. */
 	timestamp: number | null,
+	/**  Seconds since the epoch, for exports. */
+	wall_time: number | null,
 } } | 
 /**  Headers arrived. */
 { type: "response"; data: {
@@ -444,6 +448,8 @@ export type NetworkEvent =
 	mime_type: string,
 	/**  Whether it was served from cache. */
 	from_cache: boolean,
+	/**  Response headers. */
+	headers: { [key in string]: string },
 	/**  Seconds. */
 	timestamp: number | null,
 } } | 

@@ -33,6 +33,8 @@ pub enum NetworkEvent {
         post_data: Option<String>,
         /// Seconds since an arbitrary monotonic origin.
         timestamp: f64,
+        /// Seconds since the epoch, for exports.
+        wall_time: f64,
     },
     /// Headers arrived.
     Response {
@@ -46,6 +48,8 @@ pub enum NetworkEvent {
         mime_type: String,
         /// Whether it was served from cache.
         from_cache: bool,
+        /// Response headers.
+        headers: std::collections::BTreeMap<String, String>,
         /// Seconds.
         timestamp: f64,
     },
@@ -145,18 +149,12 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<NetworkEvent> {
             url: text(&p["request"]["url"]),
             method: text(&p["request"]["method"]),
             resource_type: text(&p["type"]),
-            headers: p["request"]["headers"]
-                .as_object()
-                .map(|m| {
-                    m.iter()
-                        .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_owned())))
-                        .collect()
-                })
-                .unwrap_or_default(),
+            headers: headers_of(&p["request"]["headers"]),
             post_data: p["request"]["postData"]
                 .as_str()
                 .map(|d| d.chars().take(64 * 1024).collect()),
             timestamp,
+            wall_time: p["wallTime"].as_f64().unwrap_or_default(),
         }),
         "Network.responseReceived" => Some(NetworkEvent::Response {
             tab_id,
@@ -167,6 +165,7 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<NetworkEvent> {
                 || p["response"]["fromServiceWorker"]
                     .as_bool()
                     .unwrap_or(false),
+            headers: headers_of(&p["response"]["headers"]),
             timestamp,
         }),
         "Network.loadingFinished" => Some(NetworkEvent::Finished {
@@ -187,6 +186,17 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<NetworkEvent> {
         }),
         _ => None,
     }
+}
+
+/// CDP header object to a sorted map; non-string values are dropped.
+fn headers_of(v: &Value) -> std::collections::BTreeMap<String, String> {
+    v.as_object()
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_owned())))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

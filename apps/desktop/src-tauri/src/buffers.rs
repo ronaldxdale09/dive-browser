@@ -48,6 +48,14 @@ pub struct RequestSummary {
     pub post_data: Option<String>,
     /// Response body for JSON responses, truncated; captured after the load finishes.
     pub response_body: Option<String>,
+    /// Response headers once they arrived.
+    pub response_headers: std::collections::BTreeMap<String, String>,
+    /// CDP monotonic seconds when the request was sent.
+    pub started_at: f64,
+    /// Seconds since the epoch when the request was sent.
+    pub wall_time: f64,
+    /// CDP monotonic seconds when it finished or failed.
+    pub finished_at: Option<f64>,
 }
 
 /// What the agent and MCP see of a request: no headers, bodies or cookies.
@@ -143,6 +151,8 @@ impl Buffers {
                     resource_type,
                     headers,
                     post_data,
+                    timestamp,
+                    wall_time,
                     ..
                 } => {
                     let row = RequestSummary {
@@ -157,6 +167,10 @@ impl Buffers {
                         headers: headers.clone(),
                         post_data: post_data.clone(),
                         response_body: None,
+                        response_headers: std::collections::BTreeMap::new(),
+                        started_at: *timestamp,
+                        wall_time: *wall_time,
+                        finished_at: None,
                     };
                     if let Some(existing) = buf.iter_mut().find(|r| r.id == *request_id) {
                         *existing = row;
@@ -168,21 +182,33 @@ impl Buffers {
                     }
                 }
                 NetworkEvent::Response {
-                    status, mime_type, ..
+                    status,
+                    mime_type,
+                    headers,
+                    ..
                 } => {
                     if let Some(r) = buf.iter_mut().find(|r| r.id == *request_id) {
                         r.status = Some(*status);
                         r.mime_type.clone_from(mime_type);
+                        r.response_headers.clone_from(headers);
                     }
                 }
-                NetworkEvent::Finished { encoded_length, .. } => {
+                NetworkEvent::Finished {
+                    encoded_length,
+                    timestamp,
+                    ..
+                } => {
                     if let Some(r) = buf.iter_mut().find(|r| r.id == *request_id) {
                         r.encoded_length = Some(*encoded_length);
+                        r.finished_at = Some(*timestamp);
                     }
                 }
-                NetworkEvent::Failed { error, .. } => {
+                NetworkEvent::Failed {
+                    error, timestamp, ..
+                } => {
                     if let Some(r) = buf.iter_mut().find(|r| r.id == *request_id) {
                         r.error = Some(error.clone());
+                        r.finished_at = Some(*timestamp);
                     }
                 }
             }
@@ -378,6 +404,7 @@ mod tests {
             headers: std::collections::BTreeMap::new(),
             post_data: None,
             timestamp: 1.0,
+            wall_time: 1_700_000_000.0,
         });
         b.push_network(&NetworkEvent::Response {
             tab_id: tab,
@@ -385,6 +412,7 @@ mod tests {
             status: 200,
             mime_type: "text/plain".into(),
             from_cache: false,
+            headers: [("server".to_owned(), "x".to_owned())].into(),
             timestamp: 1.1,
         });
         b.push_network(&NetworkEvent::Finished {
@@ -404,5 +432,10 @@ mod tests {
         assert_eq!(rows[0].status, Some(200));
         assert_eq!(rows[0].encoded_length, Some(42.0));
         assert_eq!(rows[0].error, None);
+        assert_eq!(
+            rows[0].response_headers.get("server").map(String::as_str),
+            Some("x")
+        );
+        assert_eq!(rows[0].finished_at, Some(1.2));
     }
 }

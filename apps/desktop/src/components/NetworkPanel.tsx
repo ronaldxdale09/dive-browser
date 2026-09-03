@@ -1,4 +1,4 @@
-import { Ban, FileJson, Repeat, Sparkles } from "lucide-react";
+import { Ban, FileDown, FileJson, Repeat, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
@@ -11,17 +11,17 @@ import { ReplayEditor } from "./ReplayEditor";
 export function NetworkTools() {
   const activeTab = useBrowser((s) => s.activeTab);
   const clear = useNetwork((s) => s.clear);
-  const exportSpec = () => {
+  const exportWith = (run: (tab: string) => Promise<string>, label: string) => () => {
     if (!activeTab) return;
-    ipc
-      .tabOpenapi(activeTab)
-      .then((path) => useBrowser.setState({ notice: `OpenAPI copied · saved ${path.split("/").pop() ?? path}` }))
+    run(activeTab)
+      .then((path) => useBrowser.setState({ notice: `${label} · saved ${path.split("/").pop() ?? path}` }))
       .catch((e: unknown) => useBrowser.setState({ error: e instanceof Error ? e.message : String(e) }));
     setTimeout(() => useBrowser.setState({ notice: null }), 4000);
   };
   return (
     <>
-      <IconButton icon={FileJson} label="Export OpenAPI from captured traffic" size={13} disabled={!activeTab} onClick={exportSpec} />
+      <IconButton icon={FileDown} label="Export HAR" size={13} disabled={!activeTab} onClick={exportWith(ipc.tabHar, "HAR exported")} />
+      <IconButton icon={FileJson} label="Export OpenAPI from captured traffic" size={13} disabled={!activeTab} onClick={exportWith(ipc.tabOpenapi, "OpenAPI copied")} />
       <IconButton icon={Ban} label="Clear requests" size={13} disabled={!activeTab} onClick={() => activeTab && clear(activeTab)} />
     </>
   );
