@@ -1,11 +1,12 @@
-import { ArrowUp, KeyRound, ListTree, MessageSquare, Play, Plus, Radar, Trash2, Wand2 } from "lucide-react";
+import { ArrowUp, Circle, KeyRound, ListTree, MessageSquare, Play, Plus, Radar, Square, Trash2, Wand2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
 import type { ConsoleEntry } from "../lib/ipc";
 import { useAgent } from "../store/agent";
 import { selectErrors, useConsole } from "../store/console";
 import { render as renderSkill, useSkills } from "../store/skills";
-import { toPlaywrightSpec } from "../lib/playwright";
+import { recordedToSteps, toPlaywrightSpec } from "../lib/playwright";
+import { useRecorder } from "../store/recorder";
 import { useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
 
@@ -223,8 +224,14 @@ function Watchers({ onAsk }: { onAsk: () => void }) {
 /** Every tool call of the conversation, in order, with inputs and outcomes. */
 function Trace() {
   const messages = useAgent((s) => s.messages);
+  const activeTab = useBrowser((s) => s.activeTab);
   const current = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
-  const steps = messages.flatMap((m) => (m.steps ?? []).map((s) => ({ ...s, messageId: m.id })));
+  const recordingTab = useRecorder((s) => s.recordingTab);
+  const recorded = useRecorder((s) => s.steps);
+  const startRec = useRecorder((s) => s.start);
+  const stopRec = useRecorder((s) => s.stop);
+  const agentSteps = messages.flatMap((m) => (m.steps ?? []).map((s) => ({ ...s, messageId: m.id })));
+  const steps = [...recordedToSteps(recorded).map((s) => ({ ...s, messageId: "recorded" })), ...agentSteps];
   const actions = steps.filter((s) => s.action && !s.error);
   const [copied, setCopied] = useState(false);
   const exportSpec = () => {
@@ -236,6 +243,17 @@ function Trace() {
   };
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-auto px-3 py-2 font-mono text-[11px] select-text">
+      <div className="mb-2 flex items-center gap-2 font-sans">
+        {recordingTab ? (
+          <button type="button" onClick={() => void stopRec()} className="flex h-7 items-center gap-1.5 rounded-full bg-danger px-3 text-[11px] font-medium text-white">
+            <Icon icon={Square} size={11} /> Stop recording ({recorded.length})
+          </button>
+        ) : (
+          <button type="button" disabled={!activeTab} onClick={() => activeTab && void startRec(activeTab)} className="flex h-7 items-center gap-1.5 rounded-full border border-line px-3 text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
+            <Icon icon={Circle} size={11} className="text-danger" /> Record my clicks
+          </button>
+        )}
+      </div>
       {actions.length > 0 && (
         <button type="button" onClick={exportSpec} className="mb-2 h-7 self-start rounded-full border border-line px-3 font-sans text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink">
           {copied ? "Copied Playwright test" : `Export ${actions.length} action${actions.length === 1 ? "" : "s"} as Playwright test`}

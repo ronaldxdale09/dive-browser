@@ -82,6 +82,10 @@ export const commands = {
 	 *  under captures and copied to the clipboard.
 	 */
 	tabOpenapi: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_openapi", { id })),
+	/**  Start recording the person's interactions in a tab. */
+	tabRecordStart: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_record_start", { id })),
+	/**  Stop recording and return the steps. */
+	tabRecordStop: (id: TabId) => __TAURI_INVOKE<RecordedStep[]>("tab_record_stop", { id }),
 	layoutSetContentBounds: (bounds: Bounds) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_bounds", { bounds })),
 	commandsList: () => __TAURI_INVOKE<Command[]>("commands_list"),
 	/**
@@ -112,6 +116,7 @@ export const events = {
 	consoleEntry: makeEvent<ConsoleEntry>("console-entry"),
 	downloadNotice: makeEvent<DownloadNotice>("download-notice"),
 	networkEvent: makeEvent<NetworkEvent>("network-event"),
+	recorderEvent: makeEvent<RecorderEvent>("recorder-event"),
 	stateChanged: makeEvent<StateChanged>("state-changed"),
 };
 
@@ -425,6 +430,28 @@ export type Original = {
 	line: number,
 	/**  1-based column. */
 	column: number,
+};
+
+/**  One recorded interaction. */
+export type RecordedStep = {
+	/**  `click` | `type` | `navigate`. */
+	kind: string,
+	/**  ARIA role of the target. */
+	role: string,
+	/**  Accessible name of the target. */
+	name: string,
+	/**  Typed text for `type`; URL for `navigate`. */
+	value: string,
+	/**  Milliseconds since the epoch. */
+	at: number | null,
+};
+
+/**  Emitted to the chrome for each recorded step. */
+export type RecorderEvent = {
+	/**  Tab being recorded. */
+	tab_id: TabId,
+	/**  The step. */
+	step: RecordedStep,
 };
 
 /**  What to send. Starts as the captured request; the user may edit it. */

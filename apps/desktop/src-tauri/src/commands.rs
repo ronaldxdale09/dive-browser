@@ -109,6 +109,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             request_captured,
             request_replay,
             tab_openapi,
+            tab_record_start,
+            tab_record_stop,
             layout_set_content_bounds,
             commands_list,
             command_run,
@@ -121,6 +123,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::agent::agent_approve,
         ])
         .events(collect_events![
+            crate::recorder::RecorderEvent,
             StateChanged,
             crate::console::ConsoleEntry,
             crate::network::NetworkEvent,
@@ -757,6 +760,28 @@ pub(crate) fn tab_openapi(state: State<'_, AppState>, id: TabId) -> AppResult<St
         let _ = cb.set_text(text);
     }
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// Start recording the person's interactions in a tab.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_record_start(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: TabId,
+) -> AppResult<()> {
+    let session = cdp_for(&state, id)?;
+    crate::recorder::start(app, id, session).await
+}
+
+/// Stop recording and return the steps.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_record_stop(
+    state: State<'_, AppState>,
+    id: TabId,
+) -> Vec<crate::recorder::RecordedStep> {
+    state.buffers.take_recording(id)
 }
 
 /// Head metadata for the Meta panel.

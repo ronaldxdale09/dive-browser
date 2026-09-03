@@ -20,6 +20,7 @@ mod mcp;
 mod meta;
 mod network;
 mod openapi;
+mod recorder;
 mod replay;
 mod snapshot;
 mod sourcemaps;

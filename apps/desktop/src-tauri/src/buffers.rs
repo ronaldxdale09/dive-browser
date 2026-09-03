@@ -56,6 +56,8 @@ struct TabBuffers {
     ax_refs: HashMap<String, RefTarget>,
     /// Last two page snapshots, oldest first.
     snapshots: VecDeque<crate::snapshot::PageSnapshot>,
+    /// Steps recorded so far; `None` when not recording.
+    recording: Option<Vec<crate::recorder::RecordedStep>>,
 }
 
 /// Thread-safe buffers for every tab.
@@ -230,6 +232,34 @@ impl Buffers {
         self.with(|m| {
             let list = &m.get(&tab)?.snapshots;
             (list.len() == 2).then(|| (list[0].clone(), list[1].clone()))
+        })
+    }
+
+    /// Start (`Some(vec![])`) or stop (`None`) recording.
+    pub fn set_recording(&self, tab: TabId, value: Option<Vec<crate::recorder::RecordedStep>>) {
+        self.with(|m| m.entry(tab).or_default().recording = value);
+    }
+
+    /// Whether a recording is active.
+    pub fn is_recording(&self, tab: TabId) -> bool {
+        self.with(|m| m.get(&tab).is_some_and(|b| b.recording.is_some()))
+    }
+
+    /// Append a recorded step if recording.
+    pub fn push_recorded(&self, tab: TabId, step: crate::recorder::RecordedStep) {
+        self.with(|m| {
+            if let Some(list) = m.entry(tab).or_default().recording.as_mut() {
+                list.push(step);
+            }
+        });
+    }
+
+    /// Stop recording and return the steps.
+    pub fn take_recording(&self, tab: TabId) -> Vec<crate::recorder::RecordedStep> {
+        self.with(|m| {
+            m.get_mut(&tab)
+                .and_then(|b| b.recording.take())
+                .unwrap_or_default()
         })
     }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toPlaywrightSpec } from "./playwright";
+import { playwrightLocator, recordedToSteps, toPlaywrightSpec } from "./playwright";
 
 describe("toPlaywrightSpec", () => {
   it("emits goto, click, fill and press from executed steps", () => {
@@ -18,5 +18,21 @@ describe("toPlaywrightSpec", () => {
     expect(spec).toContain("await page.getByRole('textbox', { name: 'Name' }).fill(\"dive\");");
     expect(spec).toContain("press(\"Enter\")");
     expect(spec).not.toContain("getByRole('button')");
+  });
+});
+
+describe("recorded steps", () => {
+  it("map to agent-shaped steps with locators", () => {
+    const steps = recordedToSteps([
+      { kind: "navigate", role: "", name: "", value: "https://a.dev/", at: 1 },
+      { kind: "click", role: "button", name: "Save", value: "", at: 2 },
+      { kind: "type", role: "searchbox", name: "Search", value: "dive", at: 3 },
+    ]);
+    expect(steps[0]).toMatchObject({ name: "tab_navigate", locator: null });
+    expect(steps[1]?.locator).toBe("getByRole('button', { name: 'Save' })");
+    expect(steps[2]?.locator).toBe("getByRole('textbox', { name: 'Search' })");
+    expect(playwrightLocator("link", "It's")).toBe("getByRole('link', { name: 'It\\'s' })");
+    const spec = toPlaywrightSpec(steps, undefined, "recorded");
+    expect(spec).toContain("fill(\"dive\")");
   });
 });
