@@ -87,6 +87,7 @@ function Thread() {
   const busy = useAgent((s) => s.busy);
   const send = useAgent((s) => s.send);
   const clear = useAgent((s) => s.clear);
+  const approve = useAgent((s) => s.approve);
   const activeTab = useBrowser((s) => s.activeTab);
   const tabs = useBrowser((s) => s.tabs);
   const current = tabs.find((t) => t.id === activeTab);
@@ -119,11 +120,21 @@ function Thread() {
               <div className="mb-2 flex flex-wrap gap-1">
                 {m.steps.map((s) => (
                   <span key={s.id} title={s.summary ?? s.input} className={`rounded-full border px-2 py-0.5 font-mono text-[10px] ${s.error ? "border-danger text-danger" : s.action ? "border-highlight text-highlight" : "border-line-2 text-ink-2"}`}>
-                    {s.name}{s.summary === undefined && !s.error ? "…" : ""}
+                    {s.name}{s.summary === undefined && !s.error && !s.awaiting ? "…" : ""}
                   </span>
                 ))}
               </div>
             )}
+            {m.steps?.filter((s) => s.awaiting).map((s) => (
+              <div key={`ask-${s.id}`} className="mb-2 rounded-lg border border-highlight/60 bg-highlight-soft/40 p-2 font-sans">
+                <div className="text-xs text-ink">The agent wants to <span className="font-mono text-highlight">{s.name}</span></div>
+                <div className="mt-0.5 truncate font-mono text-[10px] text-ink-3" title={s.input}>{s.input}</div>
+                <div className="mt-1.5 flex gap-2">
+                  <button type="button" onClick={() => void approve(s.id, true)} className="h-6 rounded-full bg-accent px-3 text-[11px] font-medium text-accent-ink">Allow</button>
+                  <button type="button" onClick={() => void approve(s.id, false)} className="h-6 rounded-full border border-line px-3 text-[11px] text-ink-2 hover:bg-surface-2">Deny</button>
+                </div>
+              </div>
+            ))}
             {m.content}
             {m.pending && !m.content && <span className="text-ink-3">Thinking…</span>}
             {m.error && <div className="mt-1 text-danger">{m.error}</div>}
@@ -189,7 +200,7 @@ function Watchers({ onAsk }: { onAsk: () => void }) {
             <div className="mb-1 flex items-center gap-2 font-mono text-[10px] text-ink-3">
               <span>{e.source}</span>
               {where && <span className="truncate">{where}</span>}
-              <OriginalLocation entry={e} />
+              {activeTab && <OriginalLocation tabId={activeTab} entry={e} />}
             </div>
             <div className="line-clamp-4 font-mono text-[11px] whitespace-pre-wrap text-danger select-text">{e.text}</div>
             <button
@@ -294,16 +305,16 @@ function Skills({ onRun }: { onRun: () => void }) {
 const resolved = new Map<string, Promise<string | null>>();
 
 /** Original file:line via source maps, resolved once per frame and cached. */
-function OriginalLocation({ entry }: { entry: ConsoleEntry }) {
+function OriginalLocation({ tabId, entry }: { tabId: string; entry: ConsoleEntry }) {
   const [text, setText] = useState<string | null>(null);
-  const key = entry.url && entry.line ? `${entry.url}:${entry.line}:${entry.column ?? 1}` : null;
+  const key = entry.url && entry.line ? `${tabId}|${entry.url}:${entry.line}:${entry.column ?? 1}` : null;
   useEffect(() => {
     if (!key || !entry.url || !entry.line) return;
     let alive = true;
     let p = resolved.get(key);
     if (!p) {
       p = ipc
-        .resolveFrame(entry.url, entry.line, entry.column ?? null)
+        .resolveFrame(tabId, entry.url, entry.line, entry.column ?? null)
         .then((o) => (o ? `${o.source}:${o.line}:${o.column}` : null))
         .catch(() => null);
       resolved.set(key, p);
@@ -312,6 +323,6 @@ function OriginalLocation({ entry }: { entry: ConsoleEntry }) {
     return () => {
       alive = false;
     };
-  }, [key, entry.url, entry.line, entry.column]);
+  }, [key, tabId, entry.url, entry.line, entry.column]);
   return text ? <span className="truncate text-highlight" title="Original source via source map">{text}</span> : null;
 }

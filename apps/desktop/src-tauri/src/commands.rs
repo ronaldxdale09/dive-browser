@@ -117,6 +117,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::agent::agent_key_set,
             crate::agent::agent_key_present,
             crate::agent::agent_send,
+            crate::agent::agent_approve,
         ])
         .events(collect_events![
             StateChanged,
@@ -685,13 +686,15 @@ pub(crate) async fn tab_vitals(
 #[specta::specta]
 pub(crate) async fn resolve_frame(
     state: State<'_, AppState>,
+    tab_id: TabId,
     url: String,
     line: u32,
     column: Option<u32>,
 ) -> AppResult<Option<crate::sourcemaps::Original>> {
+    let page_url = lock(&state.store).tab(tab_id)?.url;
     Ok(state
         .sourcemaps
-        .resolve(&url, line, column.unwrap_or(1))
+        .resolve(&page_url, &url, line, column.unwrap_or(1))
         .await)
 }
 

@@ -64,6 +64,8 @@ pub enum ChatDelta {
     Text(String),
     /// The agent is calling a tool.
     ToolCall(ToolStep),
+    /// An action needs the user's approval before it runs (answer with `agent_approve`).
+    NeedsApproval(ToolStep),
     /// A tool finished: id, short summary, error flag.
     ToolDone {
         /// Call id.
@@ -81,6 +83,40 @@ pub enum ChatDelta {
 
 /// Upper bound on tool round-trips per user message.
 const MAX_TOOL_ROUNDS: usize = 12;
+/// How long an action waits for the user before it is treated as denied.
+const APPROVAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Resolve a pending action approval from the chrome.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn agent_approve(state: State<'_, AppState>, id: String, allow: bool) -> AppResult<()> {
+    match lock(&state.approvals).remove(&id) {
+        Some(tx) => {
+            let _ = tx.send(allow);
+            Ok(())
+        }
+        None => Err(AppError::new("no pending approval with that id")),
+    }
+}
+
+/// Ask the chrome whether an action may run; page content can steer the
+/// model, so the person decides before anything touches the page.
+async fn approved(state: &AppState, on_delta: &Channel<ChatDelta>, step: &ToolStep) -> bool {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    lock(&state.approvals).insert(step.id.clone(), tx);
+    if on_delta
+        .send(ChatDelta::NeedsApproval(step.clone()))
+        .is_err()
+    {
+        lock(&state.approvals).remove(&step.id);
+        return false;
+    }
+    if let Ok(Ok(allow)) = tokio::time::timeout(APPROVAL_TIMEOUT, rx).await {
+        return allow;
+    }
+    lock(&state.approvals).remove(&step.id);
+    false
+}
 
 /// Store the Anthropic API key in the keychain. Empty removes it.
 #[tauri::command]
@@ -182,29 +218,7 @@ pub(crate) async fn agent_send(
         if !text.is_empty() {
             blocks.push(json!({"type": "text", "text": text}));
         }
-        let mut results = Vec::new();
-        for call in &calls {
-            blocks.push(
-                json!({"type": "tool_use", "id": call.id, "name": call.name, "input": call.input}),
-            );
-            let result = crate::agent_tools::run(&browser, tab_id, call).await;
-            let summary = match &result.content {
-                serde_json::Value::String(s) => s
-                    .lines()
-                    .next()
-                    .unwrap_or_default()
-                    .chars()
-                    .take(160)
-                    .collect(),
-                _ => "image".to_owned(),
-            };
-            let _ = on_delta.send(ChatDelta::ToolDone {
-                id: call.id.clone(),
-                summary,
-                error: result.is_error,
-            });
-            results.push(result);
-        }
+        let results = run_calls(&state, &browser, &on_delta, tab_id, &calls, &mut blocks).await;
         request.turns.push(Turn::assistant_blocks(blocks));
         request.turns.push(Turn::tool_results(results));
     }
@@ -212,6 +226,58 @@ pub(crate) async fn agent_send(
         "stopped after {MAX_TOOL_ROUNDS} tool rounds"
     )));
     Ok(())
+}
+
+/// Execute one round of tool calls (gating actions on approval), recording
+/// each call in `blocks` and reporting outcomes to the chrome.
+async fn run_calls(
+    state: &AppState,
+    browser: &crate::mcp::AppBrowser,
+    on_delta: &Channel<ChatDelta>,
+    tab_id: Option<TabId>,
+    calls: &[dive_agent::ToolUse],
+    blocks: &mut Vec<serde_json::Value>,
+) -> Vec<dive_agent::ToolResult> {
+    let mut results = Vec::new();
+    for call in calls {
+        blocks.push(
+            json!({"type": "tool_use", "id": call.id, "name": call.name, "input": call.input}),
+        );
+        let gate_step = ToolStep {
+            id: call.id.clone(),
+            name: call.name.clone(),
+            input: call.input.to_string(),
+            action: crate::agent_tools::is_action(&call.name),
+        };
+        let result = if gate_step.action && !approved(state, on_delta, &gate_step).await {
+            dive_agent::ToolResult {
+                tool_use_id: call.id.clone(),
+                content: serde_json::Value::String(
+                    "The user did not allow this action. Do not retry it; explain what you wanted to do instead.".into(),
+                ),
+                is_error: true,
+            }
+        } else {
+            crate::agent_tools::run(browser, tab_id, call).await
+        };
+        let summary = match &result.content {
+            serde_json::Value::String(s) => s
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .chars()
+                .take(160)
+                .collect(),
+            _ => "image".to_owned(),
+        };
+        let _ = on_delta.send(ChatDelta::ToolDone {
+            id: call.id.clone(),
+            summary,
+            error: result.is_error,
+        });
+        results.push(result);
+    }
+    results
 }
 
 /// Stable instructions first (cached), page context last.
@@ -248,7 +314,7 @@ async fn page_context(state: &AppState, tab: TabId) -> String {
                 && e.level == crate::console::Level::Error
                 && let Some(o) = state
                     .sourcemaps
-                    .resolve(url, line, e.column.unwrap_or(1))
+                    .resolve(&tab_row.url, url, line, e.column.unwrap_or(1))
                     .await
             {
                 loc = format!(" ({}:{}:{})", o.source, o.line, o.column);

@@ -23,6 +23,7 @@ type ChatTurnInput = { role: string; content: string };
 export type ChatDeltaOut =
   | { type: "text"; data: string }
   | { type: "tool_call"; data: { id: string; name: string; input: string; action: boolean } }
+  | { type: "needs_approval"; data: { id: string; name: string; input: string; action: boolean } }
   | { type: "tool_done"; data: { id: string; summary: string; error: boolean } }
   | { type: "done"; data: string }
   | { type: "error"; data: string };
@@ -48,7 +49,7 @@ export const ipc = {
   tabCapture: async (id: string, fullPage: boolean) => unwrap(await commands.tabCapture(id, fullPage)),
   tabStorage: async (id: string) => unwrap(await commands.tabStorage(id)),
   tabMeta: async (id: string) => unwrap(await commands.tabMeta(id)),
-  resolveFrame: async (url: string, line: number, column: number | null) => unwrap(await commands.resolveFrame(url, line, column)),
+  resolveFrame: async (tabId: string, url: string, line: number, column: number | null) => unwrap(await commands.resolveFrame(tabId, url, line, column)),
   tabVitals: async (id: string) => unwrap(await commands.tabVitals(id)),
   tabFind: async (id: string, query: string, index: number) => unwrap(await commands.tabFind(id, query, index)),
   tabA11y: async (id: string, axeSource: string) => unwrap(await commands.tabA11y(id, axeSource)),
@@ -64,6 +65,7 @@ export const ipc = {
   shareUrl: async (url: string) => unwrap(await commands.shareUrl(url)),
   agentKeySet: async (key: string) => unwrap(await commands.agentKeySet(key)),
   agentKeyPresent: () => commands.agentKeyPresent(),
+  agentApprove: async (id: string, allow: boolean) => unwrap(await commands.agentApprove(id, allow)),
   /** Stream a reply; `onDelta` fires for each piece. Resolves when the stream ends. */
   agentSend: async (turns: ChatTurnInput[], tabId: string | null, onDelta: (d: ChatDeltaOut) => void) => {
     const channel = new Channel<ChatDeltaOut>();

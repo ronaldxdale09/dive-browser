@@ -30,6 +30,17 @@ describe("tool steps", () => {
   it("records calls and their results on the assistant message", () => {
     let m = applyDelta(base, { type: "tool_call", data: { id: "tu1", name: "page_click", input: "{\"ref\":\"e1\"}", action: true } });
     m = applyDelta(m, { type: "tool_done", data: { id: "tu1", summary: "clicked", error: false } });
-    expect(m[1]?.steps).toEqual([{ id: "tu1", name: "page_click", input: "{\"ref\":\"e1\"}", action: true, summary: "clicked", error: false }]);
+    expect(m[1]?.steps).toHaveLength(1);
+    expect(m[1]?.steps?.[0]).toMatchObject({ id: "tu1", name: "page_click", action: true, summary: "clicked", error: false });
+  });
+});
+
+describe("approval", () => {
+  it("marks a step as awaiting and clears it when done", () => {
+    let m = applyDelta(base, { type: "tool_call", data: { id: "tu2", name: "tab_navigate", input: "{}", action: true } });
+    m = applyDelta(m, { type: "needs_approval", data: { id: "tu2", name: "tab_navigate", input: "{}", action: true } });
+    expect(m[1]?.steps?.[0]?.awaiting).toBe(true);
+    m = applyDelta(m, { type: "tool_done", data: { id: "tu2", summary: "denied", error: true } });
+    expect(m[1]?.steps?.[0]).toMatchObject({ awaiting: false, error: true });
   });
 });

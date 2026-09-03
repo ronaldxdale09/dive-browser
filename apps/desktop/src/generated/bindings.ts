@@ -65,14 +65,14 @@ export const commands = {
 	/**  Web Vitals from buffered performance entries. */
 	tabVitals: (id: TabId) => typedError<Vitals, AppError>(__TAURI_INVOKE("tab_vitals", { id })),
 	/**  Map a script location to its original source through source maps. */
-	resolveFrame: (url: string, line: number, column: number | null) => typedError<{
+	resolveFrame: (tabId: TabId, url: string, line: number, column: number | null) => typedError<{
 	/**  Source path as recorded in the map (often relative to the project). */
 	source: string,
 	/**  1-based line. */
 	line: number,
 	/**  1-based column. */
 	column: number,
-} | null, AppError>(__TAURI_INVOKE("resolve_frame", { url, line, column })),
+} | null, AppError>(__TAURI_INVOKE("resolve_frame", { tabId, url, line, column })),
 	/**  The captured request as an editable replay draft. */
 	requestCaptured: (tabId: TabId, requestId: string) => typedError<ReplayRequest, AppError>(__TAURI_INVOKE("request_captured", { tabId, requestId })),
 	/**  Replay a (possibly edited) request, optionally with the tab's cookies. */
@@ -98,6 +98,8 @@ export const commands = {
 	 *  Tool calls are executed here and fed back until the model stops.
 	 */
 	agentSend: (turns: ChatTurn[], tabId: string | null, onDelta: Channel<ChatDelta>) => typedError<null, AppError>(__TAURI_INVOKE("agent_send", { turns, tabId, onDelta })),
+	/**  Resolve a pending action approval from the chrome. */
+	agentApprove: (id: string, allow: boolean) => typedError<null, AppError>(__TAURI_INVOKE("agent_approve", { id, allow })),
 };
 
 /** Events */
@@ -155,6 +157,8 @@ export type ChatDelta =
 { type: "text"; data: string } | 
 /**  The agent is calling a tool. */
 { type: "tool_call"; data: ToolStep } | 
+/**  An action needs the user's approval before it runs (answer with `agent_approve`). */
+{ type: "needs_approval"; data: ToolStep } | 
 /**  A tool finished: id, short summary, error flag. */
 { type: "tool_done"; data: {
 	/**  Call id. */

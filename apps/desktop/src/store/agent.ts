@@ -9,6 +9,8 @@ export interface Step {
   action: boolean;
   summary?: string;
   error?: boolean;
+  /** Waiting for the user's Allow / Deny. */
+  awaiting?: boolean;
 }
 
 export interface Message {
@@ -27,6 +29,7 @@ interface AgentState {
   checkKey: () => Promise<void>;
   saveKey: (key: string) => Promise<void>;
   send: (text: string, tabId: string | null) => Promise<void>;
+  approve: (id: string, allow: boolean) => Promise<void>;
   clear: () => void;
 }
 
@@ -45,8 +48,11 @@ export function applyDelta(messages: Message[], delta: ChatDeltaOut): Message[] 
     case "tool_call":
       patch = { steps: [...(last.steps ?? []), { ...delta.data }] };
       break;
+    case "needs_approval":
+      patch = { steps: (last.steps ?? []).map((s) => (s.id === delta.data.id ? { ...s, awaiting: true } : s)) };
+      break;
     case "tool_done":
-      patch = { steps: (last.steps ?? []).map((s) => (s.id === delta.data.id ? { ...s, summary: delta.data.summary, error: delta.data.error } : s)) };
+      patch = { steps: (last.steps ?? []).map((s) => (s.id === delta.data.id ? { ...s, summary: delta.data.summary, error: delta.data.error, awaiting: false } : s)) };
       break;
     case "done":
       patch = {
@@ -92,6 +98,10 @@ export const useAgent = create<AgentState>((set, get) => ({
     } finally {
       set((s) => ({ busy: false, messages: applyDelta(s.messages, { type: "done", data: "end_turn" }) }));
     }
+  },
+  approve: async (id, allow) => {
+    set((s) => ({ messages: s.messages.map((m) => (m.steps ? { ...m, steps: m.steps.map((st) => (st.id === id ? { ...st, awaiting: false } : st)) } : m)) }));
+    await ipc.agentApprove(id, allow).catch(() => undefined);
   },
   clear: () => set({ messages: [] }),
 }));

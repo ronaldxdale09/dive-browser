@@ -28,7 +28,18 @@ pub struct Resolver {
 
 impl Resolver {
     /// Map `line`/`column` (1-based) in the script at `url` to its original.
-    pub async fn resolve(&self, url: &str, line: u32, column: u32) -> Option<Original> {
+    /// Only scripts served from `page_url`'s host are fetched: a page can
+    /// name any URL in a stack frame, and this runs outside the sandbox.
+    pub async fn resolve(
+        &self,
+        page_url: &str,
+        url: &str,
+        line: u32,
+        column: u32,
+    ) -> Option<Original> {
+        if !same_host(page_url, url) {
+            return None;
+        }
         let map = self.map_for(url).await?;
         lookup(&map, line, column)
     }
@@ -49,7 +60,7 @@ impl Resolver {
         if !url.starts_with("http://") && !url.starts_with("https://") {
             return None;
         }
-        let script = self.http.get(url).send().await.ok()?.text().await.ok()?;
+        let script = String::from_utf8(fetch_capped(&self.http, url).await?).ok()?;
         let map_ref = map_url(&script)?;
         let bytes = if let Some(data) = map_ref.strip_prefix("data:") {
             let (_, payload) = data.split_once(',')?;
@@ -74,6 +85,43 @@ impl Resolver {
                 .to_vec()
         };
         sourcemap::SourceMap::from_slice(&bytes).ok()
+    }
+}
+
+/// Largest script or map we are willing to pull into memory.
+const MAX_BYTES: usize = 8 * 1024 * 1024;
+
+/// GET `url`, giving up past [`MAX_BYTES`].
+async fn fetch_capped(http: &reqwest::Client, url: &str) -> Option<Vec<u8>> {
+    use futures_util::StreamExt as _;
+    let response = http.get(url).send().await.ok()?;
+    if response
+        .content_length()
+        .is_some_and(|n| n > MAX_BYTES as u64)
+    {
+        return None;
+    }
+    let mut out = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.ok()?;
+        if out.len() + chunk.len() > MAX_BYTES {
+            return None;
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Some(out)
+}
+
+/// Whether two URLs share scheme, host and port.
+pub fn same_host(a: &str, b: &str) -> bool {
+    match (url::Url::parse(a), url::Url::parse(b)) {
+        (Ok(a), Ok(b)) => {
+            a.scheme() == b.scheme()
+                && a.host_str() == b.host_str()
+                && a.port_or_known_default() == b.port_or_known_default()
+        }
+        _ => false,
     }
 }
 
@@ -116,6 +164,23 @@ mod tests {
             Some("data:application/json;base64,e30=")
         );
         assert_eq!(map_url("no map here"), None);
+    }
+
+    #[test]
+    fn same_host_is_strict() {
+        assert!(same_host(
+            "http://localhost:5173/",
+            "http://localhost:5173/assets/app.js"
+        ));
+        assert!(!same_host(
+            "http://localhost:5173/",
+            "http://localhost:3000/x.js"
+        ));
+        assert!(!same_host("https://a.dev/", "https://cdn.a.dev/x.js"));
+        assert!(!same_host(
+            "https://a.dev/",
+            "http://169.254.169.254/latest"
+        ));
     }
 
     #[test]
