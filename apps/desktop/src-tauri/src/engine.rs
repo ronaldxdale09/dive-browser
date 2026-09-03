@@ -121,6 +121,9 @@ impl TabHost {
         let mut builder = WebviewBuilder::new(label_for(tab_id), WebviewUrl::External(url))
             .data_directory(self.profiles_root.join(&container.cache_dir))
             .on_document_title_changed(move |_, title| {
+                if title == PLACEHOLDER_TITLE {
+                    return;
+                }
                 update_tab(&title_app, tab_id, |t| t.title = title);
             });
 
@@ -325,6 +328,9 @@ fn attach_cdp(view: &Webview<Runtime>) -> tauri::Result<CdpSession> {
     })?;
     Ok(session)
 }
+
+/// Title of the runtime's internal initial-load document; never persist it.
+const PLACEHOLDER_TITLE: &str = "Tauri CEF Initial Load";
 
 fn label_for(id: TabId) -> String {
     format!("tab-{id}")
