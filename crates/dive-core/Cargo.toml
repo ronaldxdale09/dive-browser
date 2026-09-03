@@ -1,0 +1,21 @@
+[package]
+name = "dive-core"
+description = "Workspace, container and tab domain model, persistence and command registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+time = { workspace = true }
+rusqlite = { workspace = true }
+specta = { workspace = true }
+
+[lints]
+workspace = true

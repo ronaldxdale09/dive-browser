@@ -1,0 +1,13 @@
+{
+  "name": "dive-browser",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "dev": "pnpm --filter @dive/desktop dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "check": "pnpm typecheck && pnpm lint && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace"
+  }
+}

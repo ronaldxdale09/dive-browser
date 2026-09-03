@@ -1,0 +1,20 @@
+# deps / build
+node_modules/
+target/
+dist/
+.pnpm-store/
+# tauri
+apps/desktop/src-tauri/gen/
+# cef binaries / vendored engine
+vendor/cef/
+.cef/
+# local
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+# generated
+packages/protocol/src/generated/
+# autopilot state
+.claude/autopilot/
