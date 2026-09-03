@@ -1,4 +1,10 @@
 @import "tailwindcss";
+/* Bundled, not fetched: the chrome's CSP is `default-src 'self'`, so a webfont
+   from a CDN would silently fail and fall back to the system stack. Geist is
+   the type this chrome is drawn for -- neutral, tight, engineered rather than
+   friendly -- and Geist Mono keeps URLs and console output in the same voice. */
+@import "@fontsource-variable/geist/index.css";
+@import "@fontsource-variable/geist-mono/index.css";
 
 /* Dive chrome theme. Dark-first, neutral graphite (no blue cast), one cool
    highlight for "active". Light values exist so the OS light theme is legible. */
@@ -17,8 +23,8 @@
   --color-highlight: #7fd8c8;
   --color-highlight-soft: #163430;
   --color-danger: #f0715e;
-  --font-sans: "Instrument Sans", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: "Geist Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
   --radius-pill: 999px;
 }
 
@@ -40,6 +46,8 @@
   }
 }
 
+@layer base {
+
 html, body, #root { height: 100%; margin: 0; }
 body {
   background: var(--color-ground);
@@ -54,6 +62,26 @@ button, input { font: inherit; color: inherit; }
 button { cursor: default; }
 :focus-visible { outline: 2px solid var(--color-highlight); outline-offset: 1px; }
 
+}
+
 /* cmdk */
 [cmdk-item][data-selected="true"] { background: var(--color-surface-3); }
 [cmdk-group-heading] { padding: 6px 12px 4px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
+
+/* Welcome screen ground: a soft highlight glow over a faint dot grid, fading at the edges. */
+.welcome {
+  background-color: var(--color-surface);
+  background-image:
+    radial-gradient(ellipse 60% 45% at 50% 0%, color-mix(in srgb, var(--color-highlight) 14%, transparent), transparent 70%),
+    radial-gradient(circle at center, var(--color-line-2) 0.8px, transparent 0.9px);
+  background-size: 100% 100%, 22px 22px;
+  background-position: 0 0, 11px 11px;
+}
+.welcome::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse 70% 70% at 50% 40%, transparent 50%, var(--color-surface) 100%);
+}
+.welcome > * { position: relative; }
