@@ -4,6 +4,7 @@ import { useBrowser } from "../store/browser";
 import { workspaceAvatar } from "../lib/workspaceAvatar";
 import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
+import { useFocusTrap } from "../lib/useFocusTrap";
 
 /**
  * The workspace you are in, in the title bar, next to the tabs it owns.
@@ -21,7 +22,9 @@ export function WorkspaceChip() {
   const counts = useBrowser((s) => s.counts);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
   useCoversContent(open);
+  useFocusTrap(menu, { active: open, menu: true });
 
   useEffect(() => {
     if (!open) return;
@@ -55,7 +58,7 @@ export function WorkspaceChip() {
         <Icon icon={ChevronDown} size={12} className="shrink-0 text-ink-3" />
       </button>
       {open && (
-        <div role="menu" aria-label="Switch workspace" className="absolute left-0 z-50 mt-1 w-64 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl">
+        <div ref={menu} role="menu" aria-label="Switch workspace" className="absolute left-0 z-50 mt-1 w-64 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl">
           <div className="px-2 pt-1 pb-1.5 text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">Workspaces</div>
           {workspaces.map((w, i) => {
             const separate = workspaces.filter((other) => other.container_id === w.container_id).length === 1;

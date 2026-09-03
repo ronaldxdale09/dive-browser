@@ -1,6 +1,8 @@
 import { Check, Copy, Download, PlayCircle, X } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useCoversContent } from "../lib/overlay";
+import { useFadeClose } from "../lib/useFadeClose";
+import { useFocusTrap } from "../lib/useFocusTrap";
 import { recordedToSteps, toPlaywrightSpec } from "../lib/playwright";
 import { useBrowser } from "../store/browser";
 import { useRecorder } from "../store/recorder";
@@ -17,6 +19,9 @@ export function RecorderModal() {
   // Mounted unconditionally by App, so this must follow `isOpen`: covering
   // while closed would hide the page for the life of the app.
   useCoversContent(isOpen);
+  const root = useRef<HTMLDivElement>(null);
+  useFocusTrap(root, { active: isOpen });
+  const { close, className } = useFadeClose(() => setOpen(false));
 
   if (!isOpen) return null;
 
@@ -47,13 +52,10 @@ export function RecorderModal() {
     URL.revokeObjectURL(url);
   };
 
-  const close = () => {
-    setOpen(false);
-  };
-
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-[2px]"
+      ref={root}
+      className={`fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-[2px] ${className}`}
       onMouseDown={close}
     >
       <div

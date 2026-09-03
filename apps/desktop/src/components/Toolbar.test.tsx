@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
@@ -32,6 +32,7 @@ beforeEach(() => {
     annotating: null,
     recordingTab: null,
     zoom: {},
+    loading: {},
   });
   useEmulation.setState({ byTab: {}, media: {}, throttle: {} });
   useDownloads.setState({ items: [] });
@@ -149,5 +150,22 @@ describe("Toolbar", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Block trackers and ads" }));
     await waitFor(() => expect(ipc.prefsSet).toHaveBeenCalledWith({ ...DEFAULT_PREFS, block_trackers: true }));
     expect(screen.getByText("1 request blocked on this page")).toBeTruthy();
+  });
+
+  it("draws a progress line under the toolbar while the active tab loads", () => {
+    render(<Toolbar />);
+    expect(screen.queryByRole("progressbar")).toBeNull();
+
+    act(() => useBrowser.getState().applyLoad({ tab_id: tab.id, phase: "started", url: tab.url, error: null }));
+    const bar = screen.getByRole("progressbar", { name: "Loading page" });
+    expect(bar.className).toContain("h-0.5");
+    expect(screen.getByTestId("loading-sweep").className).toContain("motion-reduce:animate-none");
+
+    // Another tab's load is not this toolbar's business.
+    act(() => {
+      useBrowser.getState().applyLoad({ tab_id: "elsewhere", phase: "started", url: null, error: null });
+      useBrowser.getState().applyLoad({ tab_id: tab.id, phase: "stopped", url: tab.url, error: null });
+    });
+    expect(screen.queryByRole("progressbar")).toBeNull();
   });
 });

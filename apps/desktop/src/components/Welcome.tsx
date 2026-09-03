@@ -95,7 +95,7 @@ function ActiveDevServers() {
   return (
     <div className="mt-6 w-full max-w-[560px] rounded-2xl border border-line bg-surface-2/60 p-3 shadow-sm">
       <div className="flex items-center gap-2 px-1 pb-2">
-        <span className="size-2 animate-pulse rounded-full bg-emerald-400" aria-hidden />
+        <span className="size-2 animate-pulse rounded-full bg-emerald-400 motion-reduce:animate-none" aria-hidden />
         <span className="text-[11px] font-semibold tracking-wider text-ink uppercase">
           Detected Dev Server{servers.length > 1 ? "s" : ""}
         </span>

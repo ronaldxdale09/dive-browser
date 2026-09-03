@@ -3,6 +3,7 @@
 // part that is "burst", everything else is generic projection and plumbing.
 import { useEffect, useRef } from "react";
 import type { CSSProperties } from "react";
+import { useReducedMotion } from "../lib/useReducedMotion";
 
 const MAX_DPR = 2;
 const TAU = Math.PI * 2;
@@ -14,6 +15,8 @@ const DEPTH_SIZE = 1;
 const DEPTH_FADE = 1;
 const MIN_RADIUS = 0.6; // below this a disc is widened and its alpha scaled back
 const MAX_DOTS = 1024;
+/** Frame interval while the window is unfocused: a splash nobody is looking at gets 20fps, not 60. */
+const BLURRED_FRAME_MS = 50;
 
 function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
@@ -247,6 +250,7 @@ export function OrbBurst(props: OrbBurstProps) {
   const pointer_ = { ...POINTER_DEFAULTS, ...(pointer || {}) };
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const reduced = useReducedMotion();
 
   const size = { w: num(width, 0), h: num(height, 0) };
   // Every live input is read from a ref inside the loop. Putting any of them in
@@ -288,9 +292,19 @@ export function OrbBurst(props: OrbBurstProps) {
     let raf = 0;
     let last = performance.now();
     let phase = 0;
+    let lastDrawn = 0;
 
     const render = (now: number) => {
-      const dt = Math.min(0.05, (now - last) / 1000);
+      // Unfocused, the loop keeps its place but paints at a fraction of the
+      // rate; there is no one to see the difference and the CPU is someone
+      // else's. `dt` is still measured from the last paint, so the phase
+      // advances by real time rather than slowing down.
+      if (!reduced && !document.hasFocus() && now - lastDrawn < BLURRED_FRAME_MS) {
+        raf = requestAnimationFrame(render);
+        return;
+      }
+      lastDrawn = now;
+      const dt = reduced ? 0 : Math.min(0.05, (now - last) / 1000);
       last = now;
       const v = vRef.current;
 
@@ -377,12 +391,27 @@ export function OrbBurst(props: OrbBurstProps) {
       });
       ctx.globalAlpha = 1;
 
+      // Reduced motion gets one still of the ball and no loop; a drag still
+      // redraws it, since that is motion the user asked for.
+      if (!reduced || drag.active) raf = requestAnimationFrame(render);
+    };
+
+    // A hidden window paints nothing; when it comes back the clock resumes
+    // from now rather than jumping the whole time it was away.
+    const onVisibility = () => {
+      cancelAnimationFrame(raf);
+      if (document.hidden) return;
+      last = performance.now();
       raf = requestAnimationFrame(render);
     };
 
     const onDown = (e: PointerEvent) => {
       if ((vRef.current.drag as number) <= 0) return;
       drag.active = true;
+      if (reduced) {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(render);
+      }
       drag.lx = e.clientX;
       drag.ly = e.clientY;
       drag.lt = performance.now();
@@ -423,16 +452,18 @@ export function OrbBurst(props: OrbBurstProps) {
     canvas.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
+    document.addEventListener("visibilitychange", onVisibility);
 
-    raf = requestAnimationFrame(render);
+    if (!document.hidden) raf = requestAnimationFrame(render);
     return () => {
       cancelAnimationFrame(raf);
+      document.removeEventListener("visibilitychange", onVisibility);
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, []);
+  }, [reduced]);
 
   return (
     <div

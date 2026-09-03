@@ -7,6 +7,7 @@ import { FeatureButton } from "./FeatureBar";
 import { Icon } from "./Icon";
 import { Switch } from "./SettingsFields";
 import { useCoversContent } from "../lib/overlay";
+import { useFocusTrap } from "../lib/useFocusTrap";
 
 /**
  * Protection: the tracker blocker and its neighbours, one click from the
@@ -21,7 +22,9 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
   const blocked = useNetwork((s) => selectRequests(activeTab)(s).filter((r) => r.error?.includes("BLOCKED_BY_CLIENT")).length);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   useCoversContent(open);
+  useFocusTrap(panel, { active: open });
 
   useEffect(() => {
     if (!open) return;
@@ -48,7 +51,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
         )}
       </FeatureButton>
       {open && (
-        <div role="dialog" aria-label="Protection" className="absolute right-0 z-50 mt-1 w-80 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl">
+        <div ref={panel} role="dialog" aria-label="Protection" className="absolute right-0 z-50 mt-1 w-80 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl">
           <div className="flex items-center gap-2.5 rounded-lg bg-surface-2 px-3 py-2.5">
             <span className={`grid size-8 shrink-0 place-items-center rounded-full ${on ? "bg-highlight-soft text-highlight" : "bg-surface-3 text-ink-3"}`}>
               <Icon icon={on ? ShieldCheck : Shield} size={15} />

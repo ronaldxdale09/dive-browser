@@ -1,6 +1,7 @@
 import { Accessibility, Activity, Ban, ClipboardList, Database, ExternalLink, FileSearch, Network, Shuffle, Terminal } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { useLayout } from "../store/layout";
 import type { Level } from "../lib/ipc";
 import { jumpToSource, editorLabel } from "../lib/editor";
 import { useBrowser } from "../store/browser";
@@ -28,7 +29,10 @@ type PanelId = (typeof PANELS)[number]["id"];
 
 /** Bottom developer dock. */
 export function Dock() {
-  const [panel, setPanel] = useState<PanelId>("console");
+  // Remembered across launches: the panel you were reading is the one you
+  // come back to.
+  const panel: PanelId = useLayout((s) => s.dockPanel);
+  const setPanel = useLayout((s) => s.setDockPanel);
   return (
     <section aria-label="Developer dock" className="flex min-h-0 flex-col bg-surface">
       <div className="flex items-center gap-1 px-2 pt-2 pb-1">

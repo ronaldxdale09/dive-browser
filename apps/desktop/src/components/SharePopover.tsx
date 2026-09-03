@@ -6,6 +6,7 @@ import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { Tooltip } from "./Tooltip";
 import { useCoversContent } from "../lib/overlay";
+import { useFocusTrap } from "../lib/useFocusTrap";
 
 /** Share button: the current URL rewritten to this machine's LAN address, as a QR code. */
 export function SharePopover() {
@@ -15,7 +16,9 @@ export function SharePopover() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   useCoversContent(open);
+  useFocusTrap(panel, { active: open });
 
   useEffect(() => {
     if (!open || !current) return;
@@ -52,7 +55,7 @@ export function SharePopover() {
         </button>
       </Tooltip>
       {open && (
-        <div role="dialog" aria-label="Share" className="absolute right-0 z-40 mt-1 w-64 rounded-xl border border-line-2 bg-surface p-3 text-xs shadow-2xl">
+        <div ref={panel} role="dialog" aria-label="Share" className="absolute right-0 z-40 mt-1 w-64 rounded-xl border border-line-2 bg-surface p-3 text-xs shadow-2xl">
           <div className="mb-2 text-[10px] tracking-wider text-ink-3 uppercase">Open on your phone</div>
           {error && <p className="text-danger">{error}</p>}
           {info && (

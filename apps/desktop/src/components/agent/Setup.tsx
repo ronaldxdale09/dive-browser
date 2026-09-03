@@ -359,7 +359,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
               >
                 {busy ? (
                   <>
-                    <Icon icon={Loader2} size={11} className="animate-spin" />
+                    <Icon icon={Loader2} size={11} className="animate-spin motion-reduce:animate-none" />
                     <span>Verifying…</span>
                   </>
                 ) : verifiedSuccess ? (

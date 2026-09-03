@@ -239,7 +239,7 @@ function AssistantMessage({
       {waiting && (
         <span className="flex items-center gap-2 text-ink-3 py-1">
           <span className="relative flex size-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-highlight opacity-75" />
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-highlight opacity-75 motion-reduce:hidden" />
             <span className="relative inline-flex rounded-full size-2 bg-highlight" />
           </span>
           Thinking…
@@ -284,7 +284,7 @@ function Reasoning({ text, live }: { text: string; live: boolean }) {
         aria-expanded={expanded}
         className="flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-[11px] text-ink-3 hover:bg-surface-2 hover:text-ink-2 transition-colors"
       >
-        <Icon icon={Brain} size={12} className={live ? "animate-pulse text-highlight" : ""} />
+        <Icon icon={Brain} size={12} className={live ? "animate-pulse text-highlight motion-reduce:animate-none" : ""} />
         <span className="min-w-0 flex-1 truncate">{expanded ? "Thinking trace" : firstLine}</span>
         <Icon
           icon={ChevronRight}

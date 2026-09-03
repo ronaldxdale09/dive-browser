@@ -2,7 +2,7 @@ import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type D
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { PanelLeftClose, PanelLeftOpen, Pencil, Plus, Settings2, Shield, SquarePlus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { useBrowser } from "../store/browser";
 import type { Workspace } from "../lib/ipc";
@@ -10,6 +10,7 @@ import { usePrefs } from "../store/prefs";
 import { workspaceAvatar } from "../lib/workspaceAvatar";
 import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
+import { useFocusTrap } from "../lib/useFocusTrap";
 import { AiShortcuts } from "./AiShortcuts";
 
 /** Rail width in each mode; App.tsx sizes the grid column from these. */
@@ -205,6 +206,8 @@ function WorkspaceRow({
  */
 function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number; onClose: () => void }) {
   useCoversContent(true);
+  const root = useRef<HTMLDivElement>(null);
+  useFocusTrap(root, { menu: true });
   const workspaces = useBrowser((s) => s.workspaces);
   const count = useBrowser((s) => s.counts[id] ?? 0);
   const activate = useBrowser((s) => s.activateWorkspace);
@@ -220,6 +223,7 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
     <>
       <div className="fixed inset-0 z-40" onMouseDown={onClose} />
       <div
+        ref={root}
         role="menu"
         aria-label={workspace.name}
         style={{ left: x, top: y }}

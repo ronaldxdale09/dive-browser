@@ -11,7 +11,7 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { ipc } from "../lib/ipc";
 import type { AppInfo, Command, ProviderInfo } from "../lib/ipc";
@@ -22,6 +22,8 @@ import type { Prefs } from "../store/prefs";
 import { Icon, IconButton } from "./Icon";
 import { Button, Check, Group, Row, Segmented, Select, Switch, TextArea, TextInput } from "./SettingsFields";
 import { useCoversContent } from "../lib/overlay";
+import { useFadeClose } from "../lib/useFadeClose";
+import { useFocusTrap } from "../lib/useFocusTrap";
 import { AgentIcon } from "./agent/AgentIcon";
 
 type SectionId = "general" | "appearance" | "privacy" | "downloads" | "developer" | "agent" | "shortcuts" | "about";
@@ -48,7 +50,9 @@ export function SettingsDialog() {
     void ipc.appInfo().then(setInfo);
     void load();
   }, [load]);
-  const close = () => toggle("settings", false);
+  const { close, className } = useFadeClose(() => toggle("settings", false));
+  const root = useRef<HTMLDivElement>(null);
+  useFocusTrap(root);
 
   // Up and down move through the sections, as in any preferences window.
   const onNavKey = (e: React.KeyboardEvent) => {
@@ -60,7 +64,7 @@ export function SettingsDialog() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-[2px]" onMouseDown={close}>
+    <div ref={root} className={`fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-[2px] ${className}`} onMouseDown={close}>
       <div
         role="dialog"
         aria-modal="true"

@@ -38,7 +38,7 @@ function StepRow({ step }: { step: Step }) {
         </span>
         <span className={`min-w-0 flex-1 truncate text-[11px] ${tone}`}>{label}</span>
         <span className="shrink-0 text-ink-3">
-          {status === "running" && <Icon icon={Loader2} size={11} className="animate-spin" />}
+          {status === "running" && <Icon icon={Loader2} size={11} className="animate-spin motion-reduce:animate-none" />}
           {status === "ok" && <Icon icon={Check} size={11} className="text-ink-3" />}
           {status === "failed" && <Icon icon={X} size={11} className="text-danger" />}
           {status === "awaiting" && <Icon icon={ShieldAlert} size={11} className="text-highlight" />}

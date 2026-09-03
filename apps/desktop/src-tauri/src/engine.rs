@@ -147,20 +147,27 @@ pub struct PaneBounds {
 struct Popout {
     window: Window<Runtime>,
     bounds: Bounds,
+    /// Label of the chrome webview inside the window.
+    chrome: String,
 }
+
+/// Numbers popout windows so a tab torn off, brought back and torn off
+/// again never reuses a label the runtime may still be tearing down.
+static POPOUT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Height of the strip a popout window reserves for its own small toolbar
 /// until the chrome in it reports the real content rectangle.
 const POPOUT_TOOLBAR: f64 = 44.0;
 
-/// Window label of the popout holding `id`.
-pub fn popout_label(id: TabId) -> String {
-    format!("pop-{id}")
+/// Window label for the `seq`th popout, holding `id`.
+fn popout_label(seq: u64, id: TabId) -> String {
+    format!("pop-{seq}-{id}")
 }
 
 /// The tab a popout window label belongs to, if it is one.
 pub fn popout_tab(label: &str) -> Option<TabId> {
-    label.strip_prefix("pop-").and_then(|id| id.parse().ok())
+    let (_, id) = label.strip_prefix("pop-")?.split_once('-')?;
+    id.parse().ok()
 }
 
 impl TabHost {
@@ -299,6 +306,7 @@ impl TabHost {
             let console_ready = crate::console::attach(app.clone(), tab_id, session.clone());
             let network_ready = crate::network::attach(app.clone(), tab_id, session.clone());
             crate::favicon::attach(app.clone(), tab_id, session.clone());
+            crate::loading::attach(app.clone(), tab_id, session.clone());
             crate::rules::attach(app.clone(), tab_id, tab.workspace_id, session.clone());
             crate::inspect::watch(app.clone(), tab_id, &session);
             crate::crash::watch(app.clone(), tab_id, session.clone());
@@ -476,7 +484,9 @@ impl TabHost {
             .ok_or(tauri::Error::WebviewNotFound)?;
         let width = self.bounds.width.clamp(480.0, 1100.0);
         let height = (self.bounds.height + POPOUT_TOOLBAR).clamp(360.0, 900.0);
-        let mut builder = tauri::window::WindowBuilder::new(app, popout_label(id))
+        let seq = POPOUT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let chrome = popout_chrome_label(seq, id);
+        let mut builder = tauri::window::WindowBuilder::new(app, popout_label(seq, id))
             .title(if title.is_empty() { "Dive" } else { title })
             .inner_size(width, height)
             .min_inner_size(360.0, 240.0);
@@ -493,7 +503,7 @@ impl TabHost {
         let window = builder.build()?;
         window.add_child(
             WebviewBuilder::new(
-                popout_chrome_label(id),
+                chrome.clone(),
                 WebviewUrl::App(format!("index.html?popout={id}").into()),
             )
             .auto_resize(),
@@ -510,7 +520,14 @@ impl TabHost {
             width,
             height: height - POPOUT_TOOLBAR,
         };
-        self.popouts.insert(id, Popout { window, bounds });
+        self.popouts.insert(
+            id,
+            Popout {
+                window,
+                bounds,
+                chrome,
+            },
+        );
         self.panes.retain(|p| p.tab != id);
         if self.active == Some(id) {
             self.active = None;
@@ -587,7 +604,8 @@ impl TabHost {
     /// focused popout's, else the main window's.
     pub fn chrome_for_menu(&self) -> String {
         self.focused_popout()
-            .map_or_else(|| CHROME_LABEL.to_owned(), popout_chrome_label)
+            .and_then(|id| self.popouts.get(&id))
+            .map_or_else(|| CHROME_LABEL.to_owned(), |p| p.chrome.clone())
     }
 
     /// Move keyboard focus to the chrome of whichever window is focused.
@@ -599,7 +617,7 @@ impl TabHost {
                         .window
                         .webviews()
                         .into_iter()
-                        .find(|w| w.label() == popout_chrome_label(id))
+                        .find(|w| w.label() == p.chrome)
                 {
                     let _ = chrome.set_focus();
                 }
@@ -746,9 +764,9 @@ fn label_for(id: TabId) -> String {
     format!("tab-{id}")
 }
 
-/// Label of the chrome webview inside the popout window for `id`.
-fn popout_chrome_label(id: TabId) -> String {
-    format!("chrome-pop-{id}")
+/// Label of the chrome webview inside the `seq`th popout window, for `id`.
+fn popout_chrome_label(seq: u64, id: TabId) -> String {
+    format!("chrome-pop-{seq}-{id}")
 }
 
 /// Apply `f` to the stored tab, persist it, and broadcast the change.
@@ -776,11 +794,78 @@ pub fn update_tab(app: &AppHandle<Runtime>, id: TabId, f: impl FnOnce(&mut Tab))
     state.bus.publish(CoreEvent::TabUpserted(tab));
 }
 
+/// Settings key holding the main window's last position and size.
+pub const WINDOW_BOUNDS: &str = "window_bounds";
+
+/// The main window's frame, remembered across launches.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WindowBounds {
+    /// Outer position, logical pixels.
+    pub x: f64,
+    /// Outer position, logical pixels.
+    pub y: f64,
+    /// Inner size, logical pixels.
+    pub width: f64,
+    /// Inner size, logical pixels.
+    pub height: f64,
+}
+
+impl WindowBounds {
+    /// Read `x,y,width,height`; anything malformed or too small is ignored.
+    pub fn parse(s: &str) -> Option<Self> {
+        let mut it = s.split(',').map(|p| p.trim().parse::<f64>().ok());
+        let (x, y, width, height) = (it.next()??, it.next()??, it.next()??, it.next()??);
+        if !(x.is_finite() && y.is_finite() && width >= 720.0 && height >= 480.0) {
+            return None;
+        }
+        Some(Self {
+            x,
+            y,
+            width,
+            height,
+        })
+    }
+
+    /// The form [`WindowBounds::parse`] reads.
+    pub fn serialize(&self) -> String {
+        format!("{},{},{},{}", self.x, self.y, self.width, self.height)
+    }
+}
+
+/// Store the main window's current frame so the next launch opens there.
+pub fn remember_window_bounds(window: &Window<Runtime>) {
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let (Ok(pos), Ok(size)) = (window.outer_position(), window.inner_size()) else {
+        return;
+    };
+    let pos = pos.to_logical::<f64>(scale);
+    let size = size.to_logical::<f64>(scale);
+    let bounds = WindowBounds {
+        x: pos.x,
+        y: pos.y,
+        width: size.width,
+        height: size.height,
+    };
+    let state = window.app_handle().state::<AppState>();
+    if let Err(e) = crate::state::lock(&state.store).set_setting(WINDOW_BOUNDS, &bounds.serialize())
+    {
+        tracing::debug!("could not remember window bounds: {e}");
+    }
+}
+
 /// Build the main window with the chrome webview filling it.
 pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
-    let width = 1280.0;
-    let height = 820.0;
-    let window = tauri::window::WindowBuilder::new(app, MAIN_WINDOW)
+    let remembered = {
+        let state = app.state::<AppState>();
+        let store = crate::state::lock(&state.store);
+        store
+            .setting(WINDOW_BOUNDS)
+            .ok()
+            .flatten()
+            .and_then(|s| WindowBounds::parse(&s))
+    };
+    let (width, height) = remembered.map_or((1280.0, 820.0), |b| (b.width, b.height));
+    let mut builder = tauri::window::WindowBuilder::new(app, MAIN_WINDOW)
         .title(if cfg!(debug_assertions) {
             "Dive Dev"
         } else {
@@ -789,8 +874,11 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true)
         .inner_size(width, height)
-        .min_inner_size(720.0, 480.0)
-        .build()?;
+        .min_inner_size(720.0, 480.0);
+    if let Some(b) = remembered {
+        builder = builder.position(b.x, b.y);
+    }
+    let window = builder.build()?;
 
     // Keep production's Dock icon clean. macOS renders this label directly on
     // the running development app's icon, so dev and release builds cannot be
@@ -832,6 +920,19 @@ fn forward_events(app: AppHandle<Runtime>, mut rx: tokio::sync::broadcast::Recei
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn window_bounds_round_trip_and_reject_tiny_frames() {
+        let b = WindowBounds {
+            x: 12.0,
+            y: -3.5,
+            width: 1280.0,
+            height: 820.0,
+        };
+        assert_eq!(WindowBounds::parse(&b.serialize()), Some(b));
+        assert_eq!(WindowBounds::parse("1,2,100,100"), None);
+        assert_eq!(WindowBounds::parse("garbage"), None);
+    }
+
     #[test]
     fn view_labels_round_trip_to_tab_ids() {
         let id = TabId::new();

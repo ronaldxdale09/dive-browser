@@ -95,14 +95,84 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+l": "address.focus",
   "mod+[": "tab.back",
   "mod+]": "tab.forward",
+  "mod+shift+[": "tab.prev",
+  "mod+shift+]": "tab.next",
+  "ctrl+tab": "tab.next",
+  "ctrl+shift+tab": "tab.prev",
   "mod+shift+n": "workspace.new",
   "mod+shift+e": "workspace.edit",
   ...Object.fromEntries(WORKSPACE_SLOTS.map((n) => [`mod+${n}`, `workspace.jump.${n}`])),
 };
 
+/**
+ * Chords that keep working while the omnibox or any other field has focus.
+ * Everything else is the field's own business there: ⌘A selects its text,
+ * Enter submits it, and a bare letter is typing.
+ */
+const CHORDS_IN_FIELDS = new Set(["mod+l", "mod+k", "mod+t", "mod+w", "mod+r", "mod+shift+t", "mod+shift+[", "mod+shift+]", "ctrl+tab", "ctrl+shift+tab"]);
+
+/** Keys that are not characters but still make sense in a chord. */
+const NAMED_KEYS = new Set(["escape", "enter", "tab", "backspace", "delete", "home", "end", "pageup", "pagedown", "arrowleft", "arrowright", "arrowup", "arrowdown", "space"]);
+
+/** `mod` is ⌘ on macOS and Ctrl elsewhere; the other one is spelled out. */
+export function isMac(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+}
+
+/** Whether a key event happened inside something the user types into. */
+export function isEditable(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  // jsdom never fills in `isContentEditable`; the attribute is the fallback.
+  if (typeof target.isContentEditable === "boolean") return target.isContentEditable;
+  return target.closest('[contenteditable]:not([contenteditable="false"])') !== null;
+}
+
+/**
+ * The chord for a key event in the notation Rust reports ("mod+shift+s"), or
+ * null when the event is not one: a bare character, a modifier on its own.
+ * A named key (Escape, F5, Tab…) is a chord even without a modifier.
+ */
 export function chordOf(e: KeyboardEvent): string | null {
-  if (!(e.metaKey || e.ctrlKey)) return null;
-  const key = e.key.toLowerCase();
-  if (key.length !== 1) return null;
-  return `mod+${e.shiftKey ? "shift+" : ""}${key}`;
+  const key = keyOf(e);
+  if (!key) return null;
+  const mac = isMac();
+  const mod = mac ? e.metaKey : e.ctrlKey;
+  const other = mac ? e.ctrlKey : e.metaKey;
+  const named = key.length > 1;
+  if (!mod && !other && !named) return null;
+  const parts: string[] = [];
+  if (mod) parts.push("mod");
+  if (other) parts.push(mac ? "ctrl" : "meta");
+  if (e.altKey) parts.push("alt");
+  if (e.shiftKey) parts.push("shift");
+  parts.push(key);
+  return parts.join("+");
+}
+
+/** The key's name for a chord, or null when it cannot be part of one. */
+function keyOf(e: KeyboardEvent): string | null {
+  // Shift changes what `key` reports for punctuation (⌘⇧] arrives as "}"),
+  // so the brackets go by physical position.
+  if (e.code === "BracketLeft") return "[";
+  if (e.code === "BracketRight") return "]";
+  const key = e.key;
+  if (key === " ") return "space";
+  if (key.length === 1) return key.toLowerCase();
+  const lower = key.toLowerCase();
+  if (NAMED_KEYS.has(lower) || /^f\d{1,2}$/.test(lower)) return lower;
+  return null;
+}
+
+/**
+ * The command a key event should run, or null. Inside a field only the
+ * navigation chords apply, and only with the platform modifier held.
+ */
+export function shortcutFor(e: KeyboardEvent, shortcuts: Record<string, string> = SHORTCUTS): string | null {
+  const chord = chordOf(e);
+  if (!chord) return null;
+  if (isEditable(e.target) && !CHORDS_IN_FIELDS.has(chord)) return null;
+  return shortcuts[chord] ?? null;
 }

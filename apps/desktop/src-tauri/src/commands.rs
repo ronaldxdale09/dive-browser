@@ -418,6 +418,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::console::ConsoleEntry,
             crate::network::NetworkEvent,
             crate::engine::DownloadNotice,
+            crate::loading::TabLoad,
         ])
 }
 

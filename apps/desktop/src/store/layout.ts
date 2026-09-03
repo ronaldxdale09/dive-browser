@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Tab } from "../lib/ipc";
+import { DOCK_LIMITS, SIDECAR_LIMITS, clampSize } from "../lib/resize";
 
 /** Most panes a split can hold; past this the pages are too narrow to use. */
 export const MAX_PANES = 4;
@@ -13,9 +14,30 @@ export interface Split {
   sizes: number[];
 }
 
+/** The developer dock's tabs, by id; the last one chosen is remembered across launches. */
+export type DockPanel = "console" | "network" | "rules" | "storage" | "a11y" | "vitals" | "meta";
+
+/** The panels whose open state survives a relaunch. The palette, find bar and settings are transient. */
+export type PersistedPanel = "sidecar" | "dock";
+
+export const DEFAULT_DOCK_HEIGHT = 240;
+export const DEFAULT_SIDECAR_WIDTH = 360;
+
 interface LayoutState {
   /** Split per workspace id. A workspace without one shows a single page. */
   splits: Record<string, Split>;
+  /** Height of the bottom dock in px, within DOCK_LIMITS. */
+  dockHeight: number;
+  /** Width of the agent sidecar in px, within SIDECAR_LIMITS. */
+  sidecarWidth: number;
+  /** The dock tab that was showing last. */
+  dockPanel: DockPanel;
+  /** Which persisted panels were open when the window last changed them. */
+  openPanels: Record<PersistedPanel, boolean>;
+  setDockHeight: (px: number) => void;
+  setSidecarWidth: (px: number) => void;
+  setDockPanel: (panel: DockPanel) => void;
+  setOpenPanels: (open: Record<PersistedPanel, boolean>) => void;
   /** Put `tab` into the workspace's split at `index`, creating the split beside `anchor` if there is none. */
   insert: (workspace: string, tab: string, index: number, anchor: string | null) => void;
   /** Take `tab` out of the split; a split of one pane goes away. */
@@ -49,6 +71,18 @@ export const useLayout = create<LayoutState>()(
   persist(
     (set, get) => ({
       splits: {},
+      dockHeight: DEFAULT_DOCK_HEIGHT,
+      sidecarWidth: DEFAULT_SIDECAR_WIDTH,
+      dockPanel: "console",
+      openPanels: { sidecar: false, dock: false },
+      setDockHeight: (px) => set({ dockHeight: clampSize(px, DOCK_LIMITS) }),
+      setSidecarWidth: (px) => set({ sidecarWidth: clampSize(px, SIDECAR_LIMITS) }),
+      setDockPanel: (panel) => set({ dockPanel: panel }),
+      setOpenPanels: (open) => {
+        const cur = get().openPanels;
+        if (cur.sidecar === open.sidecar && cur.dock === open.dock) return;
+        set({ openPanels: { sidecar: open.sidecar, dock: open.dock } });
+      },
       insert: (ws, tab, index, anchor) => {
         const next = insertPane(get().splits[ws], tab, index, anchor);
         const rest = without(get().splits, ws);
@@ -68,7 +102,22 @@ export const useLayout = create<LayoutState>()(
       },
       clear: (ws) => set({ splits: without(get().splits, ws) }),
     }),
-    { name: "dive.layout", version: 1 },
+    {
+      name: "dive.layout",
+      version: 1,
+      // Sizes from an older build, or a hand-edited store, are clamped on the
+      // way in so a stray value cannot leave a panel unreachable.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<LayoutState>;
+        return {
+          ...current,
+          ...p,
+          dockHeight: clampSize(p.dockHeight ?? current.dockHeight, DOCK_LIMITS),
+          sidecarWidth: clampSize(p.sidecarWidth ?? current.sidecarWidth, SIDECAR_LIMITS),
+          openPanels: { ...current.openPanels, ...(p.openPanels ?? {}) },
+        };
+      },
+    },
   ),
 );
 

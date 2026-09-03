@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
-    "build": "tauri build",
+    "build": "tauri build --config src-tauri/tauri.local.conf.json",
     "vite": "vite",
     "vite:build": "tsc -b && vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",

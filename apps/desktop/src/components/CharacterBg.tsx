@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { CSSProperties, RefObject } from "react";
+import { useReducedMotion } from "../lib/useReducedMotion";
 
 interface FontValue {
   fontFamily?: string;
@@ -74,18 +75,6 @@ function useInView(ref: RefObject<HTMLElement | null>) {
     return () => observer.disconnect();
   }, [ref]);
   return inView;
-}
-
-function useReducedMotion() {
-  const [reduced, setReduced] = useState(false);
-  useEffect(() => {
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const update = () => setReduced(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return reduced;
 }
 
 /** Repeating characters animated by one shared CSS time value. */

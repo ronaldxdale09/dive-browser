@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Rail, RAIL_WIDTH } from "./components/Rail";
 import { TabStrip } from "./components/TabStrip";
 import { TabDnd } from "./components/TabDnd";
@@ -10,7 +10,10 @@ import { WorkspaceDialog } from "./components/WorkspaceDialog";
 import { FindBar } from "./components/FindBar";
 import { Splash } from "./components/Splash";
 import { RecorderModal } from "./components/RecorderModal";
+import { ResizeHandle } from "./components/ResizeHandle";
+import { DOCK_LIMITS, SIDECAR_LIMITS } from "./lib/resize";
 import { useBrowser } from "./store/browser";
+import { useLayout } from "./store/layout";
 import { usePrefs, watchSystemTheme } from "./store/prefs";
 import { useShortcuts } from "./lib/shortcuts";
 
@@ -29,7 +32,24 @@ export function App() {
   const open = useBrowser((s) => s.open);
   const loadPrefs = usePrefs((s) => s.load);
   const railExpanded = usePrefs((s) => s.prefs.rail_expanded);
+  const toggle = useBrowser((s) => s.toggle);
+  const dockHeight = useLayout((s) => s.dockHeight);
+  const sidecarWidth = useLayout((s) => s.sidecarWidth);
+  const setDockHeight = useLayout((s) => s.setDockHeight);
+  const setSidecarWidth = useLayout((s) => s.setSidecarWidth);
+  // The size under the pointer mid-drag; the store gets it on release.
+  const [live, setLive] = useState<{ dock: number | null; sidecar: number | null }>({ dock: null, sidecar: null });
   useEffect(() => void boot(), [boot]);
+  // Which panels were open last time is remembered here rather than in the
+  // browser store, whose `open` map is per-window state. Applied once at
+  // boot, then followed.
+  useEffect(() => {
+    const remembered = useLayout.getState().openPanels;
+    for (const panel of ["sidecar", "dock"] as const) toggle(panel, remembered[panel]);
+    return useBrowser.subscribe((s, prev) => {
+      if (s.open !== prev.open) useLayout.getState().setOpenPanels({ sidecar: s.open.sidecar, dock: s.open.dock });
+    });
+  }, [toggle]);
   // Theme and accent live in the preferences, so they land on the document
   // root as soon as the chrome can read them.
   useEffect(() => {
@@ -68,15 +88,45 @@ export function App() {
       <div className="col-start-2 row-start-2">
         <Toolbar />
       </div>
-      <div className="col-start-2 row-start-3 grid min-h-0 gap-px bg-line" style={{ gridTemplateColumns: open.sidecar ? "minmax(0,1fr) 360px" : "minmax(0,1fr)" }}>
+      <div className="col-start-2 row-start-3 grid min-h-0 bg-line" style={{ gridTemplateColumns: open.sidecar ? `minmax(0,1fr) auto ${live.sidecar ?? sidecarWidth}px` : "minmax(0,1fr)" }}>
         <div
-          className="relative grid min-h-0 gap-px bg-line"
-          style={{ gridTemplateRows: `${open.find ? "44px " : ""}minmax(0,1fr)${open.dock ? " 240px" : ""}` }}
+          className="relative grid min-h-0 bg-line"
+          style={{ gridTemplateRows: `${open.find ? "44px " : ""}minmax(0,1fr)${open.dock ? ` auto ${live.dock ?? dockHeight}px` : ""}` }}
         >
-          {open.find && <FindBar />}
+          {open.find && (
+            <div className="min-h-0 border-b border-line">
+              <FindBar />
+            </div>
+          )}
           <Content />
+          {open.dock && (
+            <ResizeHandle
+              orientation="horizontal"
+              label="Resize dock"
+              value={live.dock ?? dockHeight}
+              limits={DOCK_LIMITS}
+              onResize={(px) => setLive((l) => ({ ...l, dock: px }))}
+              onCommit={(px) => {
+                setLive((l) => ({ ...l, dock: null }));
+                setDockHeight(px);
+              }}
+            />
+          )}
           <Suspense fallback={null}>{open.dock && <Dock />}</Suspense>
         </div>
+        {open.sidecar && (
+          <ResizeHandle
+            orientation="vertical"
+            label="Resize agent panel"
+            value={live.sidecar ?? sidecarWidth}
+            limits={SIDECAR_LIMITS}
+            onResize={(px) => setLive((l) => ({ ...l, sidecar: px }))}
+            onCommit={(px) => {
+              setLive((l) => ({ ...l, sidecar: null }));
+              setSidecarWidth(px);
+            }}
+          />
+        )}
         <Suspense fallback={null}>{open.sidecar && <Sidecar />}</Suspense>
       </div>
       <Suspense fallback={null}>

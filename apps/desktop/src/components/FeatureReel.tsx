@@ -1,6 +1,7 @@
 import { Player } from "@remotion/player";
 import type { PlayerRef } from "@remotion/player";
 import { useEffect, useRef } from "react";
+import { useReducedMotion } from "../lib/useReducedMotion";
 import { DURATION, POSTER_FRAME, Showcase } from "../video/Showcase";
 import { FPS, HEIGHT, WIDTH } from "../video/primitives";
 
@@ -14,11 +15,20 @@ import { FPS, HEIGHT, WIDTH } from "../video/primitives";
  */
 export function FeatureReel() {
   const ref = useRef<PlayerRef>(null);
-  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduced = useReducedMotion();
 
-  // Thirty React renders a second are not free; stop when the window is hidden.
+  // Thirty React renders a second are not free; stop when the window is
+  // hidden, and stop for good (on the poster frame) under reduced motion --
+  // including when that preference changes while the reel is playing.
   useEffect(() => {
-    if (reduced) return;
+    const player = ref.current;
+    if (!player) return;
+    if (reduced) {
+      player.pause();
+      player.seekTo(POSTER_FRAME);
+      return;
+    }
+    if (!document.hidden) player.play();
     const onVisibility = () => {
       const player = ref.current;
       if (!player) return;

@@ -8,6 +8,7 @@ import { usePrefs } from "../store/prefs";
 import { FeatureButton } from "./FeatureBar";
 import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
+import { useFocusTrap } from "../lib/useFocusTrap";
 
 /** Downloads: what this session saved, where it went, and a way to the file. */
 export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
@@ -17,7 +18,9 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
   const folder = usePrefs((s) => s.prefs.download_dir) || "~/Downloads";
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   useCoversContent(open);
+  useFocusTrap(panel, { active: open });
 
   useEffect(() => {
     if (!open) return;
@@ -47,7 +50,7 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
         )}
       </FeatureButton>
       {open && (
-        <div role="dialog" aria-label="Downloads" className="absolute right-0 z-50 mt-1 w-80 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl">
+        <div ref={panel} role="dialog" aria-label="Downloads" className="absolute right-0 z-50 mt-1 w-80 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl">
           <div className="flex items-center px-2 pt-1 pb-1.5">
             <span className="text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">Downloads</span>
             <span className="flex-1" />
@@ -95,7 +98,7 @@ function Row({ item, onReveal }: { item: Item; onReveal: () => void }) {
   return (
     <li className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface-2">
       <span
-        className={`size-2 shrink-0 rounded-full ${item.status === "started" ? "animate-pulse bg-highlight" : item.status === "finished" ? "bg-highlight" : "bg-danger"}`}
+        className={`size-2 shrink-0 rounded-full ${item.status === "started" ? "animate-pulse bg-highlight motion-reduce:animate-none" : item.status === "finished" ? "bg-highlight" : "bg-danger"}`}
         aria-hidden
       />
       <span className="min-w-0 flex-1">

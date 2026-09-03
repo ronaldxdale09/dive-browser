@@ -57,10 +57,10 @@ describe("SettingsDialog", () => {
     expect(screen.getByLabelText("Search URL")).toBeTruthy();
   });
 
-  it("closes on Escape", () => {
+  it("closes on Escape", async () => {
     useBrowser.setState({ open: { sidecar: false, dock: false, palette: false, find: false, settings: true } });
     render(<SettingsDialog />);
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
-    expect(useBrowser.getState().open.settings).toBe(false);
+    await waitFor(() => expect(useBrowser.getState().open.settings).toBe(false));
   });
 });

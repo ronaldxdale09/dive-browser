@@ -246,6 +246,7 @@ export const events = {
 	recorderEvent: makeEvent<RecorderEvent>("recorder-event"),
 	stateChanged: makeEvent<StateChanged>("state-changed"),
 	tabCrashed: makeEvent<TabCrashed>("tab-crashed"),
+	tabLoad: makeEvent<TabLoad>("tab-load"),
 	tabWindowChanged: makeEvent<TabWindowChanged>("tab-window-changed"),
 };
 
@@ -633,6 +634,15 @@ export type Level =
 "warn" |
 /**  `console.error`, uncaught exceptions, failed loads. */
 "error";
+
+/**  Where a tab's main-frame navigation stands. */
+export type LoadPhase =
+/**  The main frame started loading a document. */
+"started" |
+/**  The main frame finished, successfully or not. */
+"stopped" |
+/**  The document request itself failed (DNS, refused, offline). */
+"failed";
 
 /**  Media feature overrides. */
 export type MediaOverrides = {
@@ -1180,6 +1190,18 @@ export type TabCrashed = {
 
 /**  Identifies a [`Tab`]. */
 export type TabId = string;
+
+/**  A change in a tab's loading state. */
+export type TabLoad = {
+	/**  The tab. */
+	tab_id: TabId,
+	/**  What happened. */
+	phase: LoadPhase,
+	/**  The URL involved, when the engine reported one. */
+	url: string | null,
+	/**  Chromium's error text for `Failed`, e.g. `net::ERR_NAME_NOT_RESOLVED`. */
+	error: string | null,
+};
 
 /**  Lifecycle state of a tab's renderer. */
 export type TabState =

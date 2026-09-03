@@ -20,6 +20,7 @@ mod find;
 mod har;
 mod housekeeping;
 mod inspect;
+mod loading;
 mod locator;
 mod mcp;
 mod menu;
@@ -143,19 +144,30 @@ pub fn run() {
             // any browser window does. The tab tears the window down itself,
             // so the request is cancelled here.
             use tauri::Manager;
+            if matches!(
+                event,
+                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Focused(false)
+            ) && window.label() == MAIN_WINDOW
+            {
+                engine::remember_window_bounds(window);
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event
                 && let Some(tab) = engine::popout_tab(window.label())
             {
                 api.prevent_close();
+                // Deferred a turn: tearing the window down from inside its own
+                // close callback re-enters the engine while it is mid-event.
                 let app = window.app_handle().clone();
-                let state = app.state::<state::AppState>();
-                let Some(main) = engine::MainThread::here() else {
-                    tracing::warn!(%tab, "closing popout was requested off the main thread");
-                    return;
-                };
-                if let Err(e) = commands::close_tab(&main, &app, &state, tab) {
-                    tracing::warn!(%tab, "closing popout failed: {e}");
-                }
+                let _ = app.clone().run_on_main_thread(move || {
+                    let Some(main) = engine::MainThread::here() else {
+                        tracing::warn!(%tab, "closing popout was requested off the main thread");
+                        return;
+                    };
+                    let state = app.state::<state::AppState>();
+                    if let Err(e) = commands::close_tab(&main, &app, &state, tab) {
+                        tracing::warn!(%tab, "closing popout failed: {e}");
+                    }
+                });
             }
         })
         .setup(move |app| {

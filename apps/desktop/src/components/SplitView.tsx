@@ -164,7 +164,7 @@ function Zone({ index, keyName, side }: { index: number; keyName: string; side: 
   const { setNodeRef, isOver } = useDroppable({ id: zoneId(index, keyName) });
   return (
     <div ref={setNodeRef} className={`p-1 ${side === "left" ? "pr-0.5" : "pl-0.5"}`}>
-      <div className={`grid h-full place-items-center rounded-lg border-2 border-dashed text-xs transition-colors ${isOver ? "border-highlight bg-highlight-soft text-ink" : "border-transparent text-transparent"}`}>Open here</div>
+      <div className={`grid h-full place-items-center rounded-lg border-2 border-dashed text-xs transition-colors ${isOver ? "border-highlight bg-highlight-soft text-ink" : "border-line-2 text-ink-3"}`}>{side === "left" ? "Open on the left" : "Open on the right"}</div>
     </div>
   );
 }

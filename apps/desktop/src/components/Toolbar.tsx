@@ -21,6 +21,7 @@ export function Toolbar() {
   const devtools = useBrowser((s) => s.devtools);
   const toggle = useBrowser((s) => s.toggle);
   const open = useBrowser((s) => s.open);
+  const loading = useBrowser((s) => (s.activeTab ? s.loading[s.activeTab] === true : false));
   const current = tabs.find((t) => t.id === activeTab);
   const url = current?.url ?? "";
   // Reset the draft whenever the active tab's URL changes (adjust-state-during-render).
@@ -39,7 +40,7 @@ export function Toolbar() {
   }, []);
 
   return (
-    <div className="flex h-full items-center gap-1 px-2">
+    <div className="relative flex h-full items-center gap-1 px-2">
       <IconButton icon={ArrowLeft} label="Back" disabled={!current} onClick={() => void back()} />
       <IconButton icon={ArrowRight} label="Forward" disabled={!current} onClick={() => void forward()} />
       <IconButton icon={RotateCw} label="Reload" shortcut="⌘R" disabled={!current} onClick={() => void reload()} size={14} />
@@ -75,6 +76,21 @@ export function Toolbar() {
       <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={open.dock} onClick={() => toggle("dock")} />
       <DownloadsMenu compact />
       <ProtectionMenu compact />
+      {loading && <LoadingLine />}
+    </div>
+  );
+}
+
+/**
+ * Indeterminate progress along the toolbar's bottom edge while the active
+ * tab's main frame loads. Chromium gives no byte counts for the document, so
+ * the bar sweeps rather than fills; with reduced motion it simply shows.
+ */
+function LoadingLine() {
+  return (
+    <div role="progressbar" aria-label="Loading page" className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-accent/15">
+      <style>{`@keyframes dive-loading-sweep{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}`}</style>
+      <div className="h-full w-1/3 rounded-full bg-accent animate-[dive-loading-sweep_1.1s_cubic-bezier(0.4,0,0.6,1)_infinite] motion-reduce:w-full motion-reduce:animate-none" data-testid="loading-sweep" />
     </div>
   );
 }

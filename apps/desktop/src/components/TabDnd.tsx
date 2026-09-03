@@ -66,6 +66,8 @@ export function planDrop(args: {
   ordered: string[];
   pointer: { x: number; y: number } | null;
   viewport: { width: number; height: number };
+  /** Bottom edge of the tab strip's row; a release below it has left the strip. */
+  stripBottom: number;
 }): DropPlan {
   const { dragged, fromPane, over, ordered, pointer, viewport } = args;
   const tab = tabOf(dragged);
@@ -76,14 +78,27 @@ export function planDrop(args: {
   if (over && !fromPane && over !== tab && ordered.includes(over) && ordered.includes(tab)) {
     return { kind: "reorder", ordered: arrayMove(ordered, ordered.indexOf(tab), ordered.indexOf(over)) };
   }
-  if (!over && pointer) {
+  // No slot and no zone under the pointer: the tab was carried somewhere
+  // that is not the strip, whether past the window's edge or onto the rail
+  // or toolbar. Chrome makes that a window of its own; so does Dive. A drag
+  // that never left the strip's row (a wobble, or a release on the "+")
+  // stays a no-op.
+  if (!over && pointer && !fromPane) {
     const out = pointer.x < -OUTSIDE || pointer.y < -OUTSIDE || pointer.x > viewport.width + OUTSIDE || pointer.y > viewport.height + OUTSIDE;
-    if (out) return { kind: "detach", tab, at: pointer };
+    if (out || pointer.y > args.stripBottom) return { kind: "detach", tab, at: pointer };
   }
   return { kind: "none" };
 }
 
-/** Zones win wherever the pointer is inside one; otherwise the nearest slot of the same family (strip tabs, or pane headers). */
+/** How far above or below the strip a pointer may stray and still be reordering, in px. */
+const STRIP_SLACK = 16;
+
+/**
+ * Zones win wherever the pointer is inside one. A strip tab dragged along
+ * the strip lands on the nearest slot; once the pointer leaves that row it
+ * is heading somewhere else (the page, or out of the window) and no slot is
+ * near, so a drop there never reorders by accident.
+ */
 const collision: CollisionDetection = (args) => {
   const zones = args.droppableContainers.filter((c) => String(c.id).startsWith(ZONE));
   const within = pointerWithin({ ...args, droppableContainers: zones });
@@ -91,8 +106,23 @@ const collision: CollisionDetection = (args) => {
   const fromPane = String(args.active.id).startsWith(PANE);
   if (fromPane) return [];
   const strip = args.droppableContainers.filter((c) => !String(c.id).startsWith(ZONE) && !String(c.id).startsWith(PANE));
+  const p = args.pointerCoordinates;
+  if (!p || p.x < 0 || p.y < 0 || p.x > window.innerWidth || p.y > window.innerHeight) return [];
+  const rects = strip.map((c) => c.rect.current).filter((r): r is NonNullable<typeof r> => !!r);
+  if (rects.length) {
+    const top = Math.min(...rects.map((r) => r.top)) - STRIP_SLACK;
+    const bottom = Math.max(...rects.map((r) => r.bottom)) + STRIP_SLACK;
+    if (p.y < top || p.y > bottom) return [];
+  }
   return closestCenter({ ...args, droppableContainers: strip });
 };
+
+/** Where the strip's row ends, with the same slack the collision rule allows. */
+function stripBottom(): number {
+  const tabs = Array.from(document.querySelectorAll<HTMLElement>('[role="tablist"] [role="tab"]'));
+  const bottom = Math.max(0, ...tabs.map((t) => t.getBoundingClientRect().bottom));
+  return bottom + STRIP_SLACK;
+}
 
 function pointerAt(e: DragEndEvent): { x: number; y: number } | null {
   const start = e.activatorEvent as PointerEvent | MouseEvent | null;
@@ -121,6 +151,7 @@ export function TabDnd({ children }: { children: ReactNode }) {
       ordered: orderTabs(browser.tabs).map((t) => t.id),
       pointer: pointerAt(e),
       viewport: { width: window.innerWidth, height: window.innerHeight },
+      stripBottom: stripBottom(),
     });
     void apply(plan);
   };

@@ -3,7 +3,7 @@ import { ipc, events } from "../lib/ipc";
 import { listenConsole, useConsole } from "./console";
 import { listenNetwork, useNetwork } from "./network";
 import { useDownloads } from "./downloads";
-import type { CoreEvent, Snapshot, Tab, Workspace } from "../lib/ipc";
+import type { CoreEvent, Snapshot, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
 
 export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings";
 
@@ -19,6 +19,14 @@ interface BrowserState {
   attachTab: (id: string) => Promise<void>;
   open: Record<UiPanel, boolean>;
   error: string | null;
+  /** Tabs whose main frame is loading right now. */
+  loading: Record<string, boolean>;
+  /** Tabs whose last document request failed; cleared by the next load or navigation. */
+  navError: Record<string, NavError>;
+  /** Tabs whose renderer died; cleared once a load finishes. */
+  crashedTabs: Record<string, CrashState>;
+  applyLoad: (load: TabLoad) => void;
+  applyCrash: (crash: TabCrashed) => void;
   boot: () => Promise<void>;
   openTab: (url: string) => Promise<void>;
   closeTab: (id: string) => Promise<void>;
@@ -54,6 +62,42 @@ interface BrowserState {
   setEditing: (v: { id: string | null } | null) => void;
   toggle: (panel: UiPanel, value?: boolean) => void;
   applyEvent: (event: CoreEvent) => void;
+}
+
+export type NavError = { url: string; error: string };
+export type CrashState = { attempt: number; recovering: boolean };
+
+type LoadState = Pick<BrowserState, "loading" | "navError" | "crashedTabs">;
+
+/** Drop `key` from a record without mutating it; the same object when absent. */
+function without<T>(rec: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in rec)) return rec;
+  return Object.fromEntries(Object.entries(rec).filter(([k]) => k !== key));
+}
+
+/**
+ * Reduce a load-state change. A failed document request is followed by
+ * `stopped`, so a stop never clears the error; only the next `started` (or
+ * an explicit navigation) does. A stop does end crash recovery: the tab has
+ * a document again.
+ */
+export function reduceLoad(state: LoadState, load: TabLoad): Partial<LoadState> {
+  const id = load.tab_id;
+  switch (load.phase) {
+    case "started":
+      return { loading: { ...state.loading, [id]: true }, navError: without(state.navError, id) };
+    case "stopped":
+      return { loading: without(state.loading, id), crashedTabs: without(state.crashedTabs, id) };
+    case "failed":
+      return { loading: without(state.loading, id), navError: { ...state.navError, [id]: { url: load.url ?? "", error: load.error ?? "" } } };
+  }
+}
+
+export function reduceCrash(state: Pick<LoadState, "crashedTabs" | "loading">, crash: TabCrashed): Partial<LoadState> {
+  return {
+    crashedTabs: { ...state.crashedTabs, [crash.tab_id]: { attempt: crash.attempt, recovering: crash.recovering } },
+    loading: without(state.loading, crash.tab_id),
+  };
 }
 
 /** Reduce one core event into local state. Pure, so it is unit-testable. */
@@ -106,6 +150,8 @@ export function reduceWindowChange(state: Pick<BrowserState, "detached" | "activ
 }
 
 let unlisten: (() => void) | null = null;
+let unlistenLoad: (() => void) | null = null;
+let unlistenCrash: (() => void) | null = null;
 
 export const useBrowser = create<BrowserState>((set, get) => ({
   ready: false,
@@ -120,7 +166,12 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   notice: null,
   annotating: null,
   zoom: {},
+  loading: {},
+  navError: {},
+  crashedTabs: {},
   recordingTab: null,
+  applyLoad: (load) => set((s) => reduceLoad(s, load)),
+  applyCrash: (crash) => set((s) => reduceCrash(s, crash)),
   setAnnotating: (path) => set({ annotating: path }),
   editing: null,
   setEditing: (editing) => set({ editing }),
@@ -128,6 +179,8 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   boot: async () => {
     try {
       unlisten ??= await events.stateChanged.listen((e) => get().applyEvent(e.payload));
+      unlistenLoad ??= await events.tabLoad.listen((e) => get().applyLoad(e.payload));
+      unlistenCrash ??= await events.tabCrashed.listen((e) => get().applyCrash(e.payload));
       await events.tabWindowChanged.listen((e) => set(reduceWindowChange(get(), e.payload.tab, e.payload.detached)));
       await events.downloadNotice.listen((e) => {
         const d = e.payload;
@@ -156,10 +209,24 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     useConsole.getState().drop(id);
     useNetwork.getState().drop(id);
   },
-  activateTab: async (id) => run(set, () => ipc.tabActivate(id)),
+  activateTab: async (id) => {
+    // Optimistic: the strip highlights the tab at once and `tab_activated`
+    // merely confirms. A refusal puts the selection back where it was, unless
+    // something else moved it in the meantime.
+    const prev = get().activeTab;
+    if (prev === id) return;
+    set({ activeTab: id });
+    try {
+      await ipc.tabActivate(id);
+      set({ error: null });
+    } catch (e) {
+      set((s) => ({ activeTab: s.activeTab === id ? prev : s.activeTab, error: message(e) }));
+    }
+  },
   navigate: async (url) => {
     const id = get().activeTab;
     if (!id) return get().openTab(url);
+    set((s) => ({ navError: without(s.navError, id) }));
     await run(set, () => ipc.tabNavigate(id, url));
   },
   back: async () => {
@@ -233,8 +300,19 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   },
   setPinned: async (id, pinned) => run(set, () => ipc.tabSetPinned(id, pinned)),
   activateWorkspace: async (id) => {
-    await run(set, () => ipc.workspaceActivate(id));
-    set(fromSnapshot(await ipc.snapshot()));
+    // The rail moves at once. The engine only announces `workspace_activated`
+    // and the tab it focuses, never the workspace's tab list, so the snapshot
+    // round trip stays; it just no longer gates the highlight.
+    const prev = get().activeWorkspace;
+    if (prev === id) return;
+    set({ activeWorkspace: id });
+    try {
+      await ipc.workspaceActivate(id);
+    } catch (e) {
+      set((s) => ({ activeWorkspace: s.activeWorkspace === id ? prev : s.activeWorkspace, error: message(e) }));
+      return;
+    }
+    await run(set, async () => set(fromSnapshot(await ipc.snapshot())));
     void get().refreshCounts();
   },
   refreshCounts: async () => {
@@ -268,6 +346,10 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   toggle: (panel, value) => set((s) => ({ open: { ...s.open, [panel]: value ?? !s.open[panel] } })),
   applyEvent: (event) => {
     set((s) => reduceEvent(s, event));
+    if (event.type === "tab_closed") {
+      const id = event.data;
+      set((s) => ({ loading: without(s.loading, id), navError: without(s.navError, id), crashedTabs: without(s.crashedTabs, id) }));
+    }
     // Tabs of other workspaces never reach this store, so their badges come
     // from the host. Coalesced: a page load can emit several tab updates.
     if (event.type === "tab_upserted" || event.type === "tab_closed") scheduleCounts(get);
@@ -290,8 +372,12 @@ async function run(set: (p: Partial<BrowserState>) => void, f: () => Promise<unk
     await f();
     set({ error: null });
   } catch (e) {
-    set({ error: e instanceof Error ? e.message : String(e) });
+    set({ error: message(e) });
   }
+}
+
+function message(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 /** Zoom levels the chrome steps through; mirrors ZOOM_STEPS in commands.rs. */

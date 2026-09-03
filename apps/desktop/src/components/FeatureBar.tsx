@@ -1,6 +1,7 @@
 import { ChevronDown, CircleDot, Square, Video } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode, RefObject } from "react";
 import { useBrowser } from "../store/browser";
 import { selectErrorCount, useConsole } from "../store/console";
 import { useRecorder } from "../store/recorder";
@@ -10,18 +11,47 @@ import { Tooltip } from "./Tooltip";
 import { AgentIcon } from "./agent/AgentIcon";
 
 /**
+ * Below this many pixels of title bar, the labelled buttons drop their words.
+ * At the 720px window minimum the bar with labels leaves the tab strip a
+ * sliver; icons alone give the tabs back about 180px.
+ */
+export const COLLAPSE_BELOW = 900;
+
+/**
+ * Whether the bar's row is too narrow for labels. Measures the parent (the
+ * title-bar row) rather than the bar, which is `shrink-0` and so says
+ * nothing about the room around it. An unmeasured row (width 0, as before
+ * first layout) counts as wide, so nothing flashes to icons and back.
+ */
+function useNarrow(ref: RefObject<HTMLElement | null>): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const row = ref.current?.parentElement;
+    if (!row) return;
+    const apply = (width: number) => setNarrow(width > 0 && width < COLLAPSE_BELOW);
+    apply(row.getBoundingClientRect().width);
+    const observer = new ResizeObserver((entries) => apply(entries[0]?.contentRect.width ?? row.getBoundingClientRect().width));
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [ref]);
+  return narrow;
+}
+
+/**
  * The title-bar action cluster: the features people reach for by name —
  * record, the device emulator, test interaction recorder, the agent.
  */
 export function FeatureBar() {
   const toggle = useBrowser((s) => s.toggle);
+  const ref = useRef<HTMLDivElement>(null);
+  const narrow = useNarrow(ref);
 
   return (
-    <div className="flex h-full shrink-0 items-center gap-0.5 pr-2">
-      <RecordAction />
-      <TestRecorderAction />
-      <DeviceMenu label="Mobile" />
-      <AgentAction />
+    <div ref={ref} data-narrow={narrow || undefined} className="flex h-full shrink-0 items-center gap-0.5 pr-2">
+      <RecordAction compact={narrow} />
+      <TestRecorderAction compact={narrow} />
+      {narrow ? <DeviceMenu /> : <DeviceMenu label="Mobile" />}
+      <AgentAction compact={narrow} />
       <span className="mx-1.5 h-4 w-px bg-line-2" aria-hidden />
       {import.meta.env.DEV && (
         <span
@@ -88,7 +118,7 @@ export function FeatureButton({
 }
 
 /** Start/stop recording the active tab as a GIF; pulses while recording. */
-function RecordAction() {
+function RecordAction({ compact }: { compact: boolean }) {
   const active = useBrowser((s) => s.activeTab);
   const recordingTab = useBrowser((s) => s.recordingTab);
   const toggle = useBrowser((s) => s.screencastToggle);
@@ -102,15 +132,16 @@ function RecordAction() {
       tone={recording ? "danger" : "quiet"}
       active={recording}
       disabled={!active && !recording}
+      iconOnly={compact}
       onClick={() => void toggle()}
     >
-      {recording && <span className="size-1.5 animate-pulse rounded-full bg-danger" aria-hidden />}
+      {recording && <span className="size-1.5 animate-pulse rounded-full bg-danger motion-reduce:animate-none" aria-hidden />}
     </FeatureButton>
   );
 }
 
 /** Start/stop recording user interactions into a Playwright test. */
-function TestRecorderAction() {
+function TestRecorderAction({ compact }: { compact: boolean }) {
   const active = useBrowser((s) => s.activeTab);
   const recordingTab = useRecorder((s) => s.recordingTab);
   const start = useRecorder((s) => s.start);
@@ -126,6 +157,7 @@ function TestRecorderAction() {
       tone={recording ? "hi" : "quiet"}
       active={recording}
       disabled={!active && !recording}
+      iconOnly={compact}
       onClick={() => {
         if (recording) {
           void stop();
@@ -134,13 +166,13 @@ function TestRecorderAction() {
         }
       }}
     >
-      {recording && <span className="size-1.5 animate-pulse rounded-full bg-highlight" aria-hidden />}
+      {recording && <span className="size-1.5 animate-pulse rounded-full bg-highlight motion-reduce:animate-none" aria-hidden />}
     </FeatureButton>
   );
 }
 
 /** Opens the agent sidecar; carries the active tab's error count while it is closed. */
-function AgentAction() {
+function AgentAction({ compact }: { compact: boolean }) {
   const activeTab = useBrowser((s) => s.activeTab);
   const open = useBrowser((s) => s.open.sidecar);
   const toggle = useBrowser((s) => s.toggle);
@@ -152,14 +184,21 @@ function AgentAction() {
         aria-label="Agent"
         aria-pressed={open}
         onClick={() => toggle("sidecar")}
-        className={`ml-0.5 flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] font-medium transition-colors ${
-          open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
-        }`}
+        className={
+          compact
+            ? `relative ml-0.5 grid size-7 place-items-center rounded-full transition-colors ${open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-3 hover:text-ink"}`
+            : `ml-0.5 flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] font-medium transition-colors ${
+                open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
+              }`
+        }
       >
-        <AgentIcon size={13} className={open ? "text-accent-ink" : "text-highlight"} />
-        Agent
+        <AgentIcon size={compact ? 15 : 13} className={open ? "text-accent-ink" : "text-highlight"} />
+        {!compact && "Agent"}
         {errorCount > 0 && !open && (
-          <span className="ml-0.5 rounded-full bg-danger px-1.5 py-px font-mono text-[10px] leading-4 text-white" aria-label={`${errorCount} errors`}>
+          <span
+            className={`rounded-full bg-danger px-1.5 py-px font-mono text-[10px] leading-4 text-white ${compact ? "absolute -top-1 -right-1.5" : "ml-0.5"}`}
+            aria-label={`${errorCount} errors`}
+          >
             {errorCount > 99 ? "99+" : errorCount}
           </span>
         )}

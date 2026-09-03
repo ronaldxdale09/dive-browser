@@ -15,7 +15,9 @@
   --color-surface-3: #262626;
   --color-ink: #ececec;
   --color-ink-2: #a8a8a8;
-  --color-ink-3: #6f6f6f;
+  /* 5.3:1 on surface, 4.9:1 on surface-2, 4.5:1 on surface-3: the quietest
+     grey that still passes AA for the 11px captions it is used on. */
+  --color-ink-3: #8c8c8c;
   --color-line: #262626;
   --color-line-2: #333333;
   --color-accent: #e9e9e9;
@@ -38,7 +40,7 @@
   --color-surface-3: #e2e2df;
   --color-ink: #161616;
   --color-ink-2: #5b5b5b;
-  --color-ink-3: #8c8c8c;
+  --color-ink-3: #696969;
   --color-line: #e1e1de;
   --color-line-2: #cfcfcb;
   --color-accent: #161616;
@@ -55,7 +57,7 @@
     --color-surface-3: #e2e2df;
     --color-ink: #161616;
     --color-ink-2: #5b5b5b;
-    --color-ink-3: #8c8c8c;
+    --color-ink-3: #696969;
     --color-line: #e1e1de;
     --color-line-2: #cfcfcb;
     --color-accent: #161616;
@@ -68,6 +70,7 @@
 @layer base {
 
 html, body, #root { height: 100%; margin: 0; }
+:root { --dialog-fade: 120ms; }
 body {
   background: var(--color-ground);
   color: var(--color-ink);
@@ -190,4 +193,76 @@ button { cursor: default; }
 
 .animate-agent-pop {
   animation: agent-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Dialogs and menus over the page. The page itself is a native view that the
+   engine hides while anything covers it (lib/overlay.ts), so the scrim's
+   "dimming" is really a cut to black; a short fade on the scrim and panel
+   turns the cut into a transition. The leave animation runs before the
+   dialog unmounts (lib/useFadeClose.ts), which is what gives the page back. */
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.dialog-enter {
+  animation: scrim-in var(--dialog-fade) ease-out both;
+}
+.dialog-enter > * {
+  animation: dialog-in var(--dialog-fade) ease-out both;
+}
+.dialog-leave {
+  animation: scrim-in var(--dialog-fade) ease-in reverse both;
+  pointer-events: none;
+}
+.dialog-leave > * {
+  animation: dialog-in var(--dialog-fade) ease-in reverse both;
+}
+
+/* Reduced motion: nothing loops, nothing slides, and a state change is a
+   cut. Spinners keep their glyph but stop turning; the pulsing dots that mark
+   "recording" or "downloading" stay lit instead of blinking. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dialog-fade: 0ms;
+  }
+  .animate-agent-pulse,
+  .animate-agent-float,
+  .animate-agent-slide-up,
+  .animate-agent-pop,
+  .animate-pulse,
+  .animate-ping,
+  .animate-spin,
+  .animate-bounce,
+  .dialog-enter,
+  .dialog-enter > *,
+  .dialog-leave,
+  .dialog-leave > * {
+    animation: none !important;
+  }
+  .animate-ping {
+    display: none;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { events } from "./ipc";
-import { SHORTCUTS, chordOf, runCommand } from "./commands";
+import { runCommand, shortcutFor } from "./commands";
 
 /**
  * Global key chords, routed through the shared command dispatcher.
@@ -12,8 +12,8 @@ import { SHORTCUTS, chordOf, runCommand } from "./commands";
 export function useShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const chord = chordOf(e);
-      const id = chord && SHORTCUTS[chord];
+      if (e.defaultPrevented) return;
+      const id = shortcutFor(e);
       if (!id) return;
       e.preventDefault();
       runCommand(id);

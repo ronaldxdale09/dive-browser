@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { orderTabs, TabStrip } from "./TabStrip";
+import { orderTabs, roveTab, TabStrip } from "./TabStrip";
 import type { Tab } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 
@@ -59,5 +59,57 @@ describe("TabStrip controls", () => {
     expect(closeTab).toHaveBeenCalledWith("a");
     expect(activateTab).not.toHaveBeenCalled();
     expect(container.querySelector("[data-tauri-drag-region] button")).toBeNull();
+  });
+
+  it("swaps the favicon for a spinner while the tab loads", () => {
+    useBrowser.setState({ tabs: [t("a", "today", 0)], activeTab: "a", loading: { a: true } });
+    render(createElement(TabStrip));
+    const spinner = screen.getByRole("img", { name: "Loading" });
+    expect(spinner.className).toContain("animate-spin");
+    expect(spinner.className).toContain("motion-reduce:animate-none");
+    expect(spinner.querySelector("svg")).toBeTruthy();
+  });
+
+  it("puts one tab in the Tab order and moves focus with the arrow keys", () => {
+    const activateTab = vi.fn().mockResolvedValue(undefined);
+    useBrowser.setState({ tabs: [t("a", "today", 0), t("b", "today", 1), t("c", "today", 2)], activeTab: "b", activateTab });
+    render(createElement(TabStrip));
+
+    const list = screen.getByRole("tablist", { name: "Tabs" });
+    expect(getComputedStyle(list).display).not.toBe("contents");
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((el) => el.tabIndex)).toEqual([-1, 0, -1]);
+
+    tabs[1]!.focus();
+    fireEvent.keyDown(tabs[1]!, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(tabs[2]);
+    fireEvent.keyDown(tabs[2]!, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(tabs[0]);
+    fireEvent.keyDown(tabs[0]!, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(tabs[2]);
+    fireEvent.keyDown(tabs[2]!, { key: "Home" });
+    expect(document.activeElement).toBe(tabs[0]);
+    fireEvent.keyDown(tabs[0]!, { key: "End" });
+    expect(document.activeElement).toBe(tabs[2]);
+    // Focus moved, the Tab stop follows it, and nothing was activated.
+    expect(screen.getAllByRole("tab").map((el) => el.tabIndex)).toEqual([-1, -1, 0]);
+    expect(activateTab).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(tabs[2]!, { key: " " });
+    expect(activateTab).toHaveBeenCalledWith("c");
+    fireEvent.keyDown(tabs[0]!, { key: "Enter" });
+    expect(activateTab).toHaveBeenCalledWith("a");
+  });
+
+  it("ignores arrow keys that were not pressed on a tab", () => {
+    const list = document.createElement("div");
+    const tab = document.createElement("div");
+    tab.setAttribute("role", "tab");
+    const button = document.createElement("button");
+    tab.appendChild(button);
+    list.appendChild(tab);
+    expect(roveTab("ArrowRight", list, button)).toBeNull();
+    expect(roveTab("ArrowRight", list, tab)).toBe(tab);
+    expect(roveTab("a", list, tab)).toBeNull();
   });
 });

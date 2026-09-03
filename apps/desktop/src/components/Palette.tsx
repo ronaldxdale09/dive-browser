@@ -1,6 +1,6 @@
 import { Command } from "cmdk";
 import { ArrowUpRight, Search, Terminal, Server, History, Star } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { events, ipc } from "../lib/ipc";
 import { runCommand } from "../lib/commands";
 import type { Bookmark, Command as CommandDef, DevServer, HistoryEntry } from "../lib/ipc";
@@ -8,6 +8,8 @@ import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { Favicon } from "./Favicon";
 import { useCoversContent } from "../lib/overlay";
+import { useFadeClose } from "../lib/useFadeClose";
+import { useFocusTrap } from "../lib/useFocusTrap";
 
 /**
  * How many history rows the palette offers. It is a launcher, not a history
@@ -19,8 +21,13 @@ const HISTORY_LIMIT = 5;
 
 /** Omnibox-style palette: type a URL or search, or pick a tab or command. */
 export function Palette() {
+  // The cover goes on synchronously with the mount -- a late cover leaves the
+  // page painting over the palette -- and comes off when the fade-out ends.
   useCoversContent(true);
   const toggle = useBrowser((s) => s.toggle);
+  const root = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  useFocusTrap(root, { initialFocus: input });
   const openTab = useBrowser((s) => s.openTab);
   const tabs = useBrowser((s) => s.tabs);
   const activateTab = useBrowser((s) => s.activateTab);
@@ -60,7 +67,7 @@ export function Palette() {
     };
   }, []);
 
-  const close = () => toggle("palette", false);
+  const { close, className } = useFadeClose(() => toggle("palette", false));
   const go = async (url: string) => {
     close();
     await openTab(url);
@@ -68,7 +75,7 @@ export function Palette() {
   const looksLikeUrl = /^[\w-]+(\.[\w-]+)+|^localhost|^https?:\/\//i.test(query.trim());
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px]" onMouseDown={close}>
+    <div ref={root} className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] ${className}`} onMouseDown={close}>
       <Command
         label="Command palette"
         role="dialog"
@@ -82,7 +89,7 @@ export function Palette() {
         <div className="flex items-center gap-2 border-b border-line px-4">
           <Icon icon={Search} size={15} className="text-ink-3" />
           <Command.Input
-            autoFocus
+            ref={input}
             value={query}
             onValueChange={setQuery}
             placeholder="Search, enter a URL, or run a command"

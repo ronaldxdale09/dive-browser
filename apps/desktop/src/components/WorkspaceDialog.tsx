@@ -1,9 +1,11 @@
 import { Shield, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useBrowser } from "../store/browser";
 import { AVATAR_SEEDS, seedFromName, workspaceAvatar } from "../lib/workspaceAvatar";
 import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
+import { useFadeClose } from "../lib/useFadeClose";
+import { useFocusTrap } from "../lib/useFocusTrap";
 
 const SWATCHES = ["#7FD8C8", "#F0B35E", "#E58C8C", "#8FB8F0", "#B79CF0", "#9ED67B", "#E9E9E9"];
 
@@ -25,8 +27,11 @@ export function WorkspaceDialog() {
   const [confirming, setConfirming] = useState(false);
   const count = useBrowser((s) => (existing ? (s.counts[existing.id] ?? 0) : 0));
   useCoversContent(Boolean(editing));
+  const root = useRef<HTMLDivElement>(null);
+  const nameField = useRef<HTMLInputElement>(null);
+  useFocusTrap(root, { active: Boolean(editing), initialFocus: nameField });
+  const { close, className } = useFadeClose(() => setEditing(null));
   if (!editing) return null;
-  const close = () => setEditing(null);
   const icon = seed || seedFromName(name);
   const seeds = [seedFromName(name), ...AVATAR_SEEDS.filter((s) => s !== seedFromName(name))].slice(0, 14);
   const submit = (e: React.FormEvent) => {
@@ -36,10 +41,13 @@ export function WorkspaceDialog() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px]" onMouseDown={close}>
+    <div ref={root} className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] ${className}`} onMouseDown={close}>
       <form
         onSubmit={submit}
         onMouseDown={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={existing ? "Edit workspace" : "New workspace"}
         onKeyDown={(e) => e.key === "Escape" && close()}
         className="mx-auto mt-28 w-[380px] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
       >
@@ -57,7 +65,7 @@ export function WorkspaceDialog() {
         <label className="mt-3 block text-xs text-ink-2">
           Name
           <input
-            autoFocus
+            ref={nameField}
             value={name}
             onChange={(e) => setName(e.target.value)}
             maxLength={40}

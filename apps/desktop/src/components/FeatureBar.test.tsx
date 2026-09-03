@@ -1,10 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { useEmulation } from "../store/emulation";
-import { FeatureBar } from "./FeatureBar";
+import { COLLAPSE_BELOW, FeatureBar } from "./FeatureBar";
 import { usePicker } from "./simulator/DevicePicker";
 
 const tab: Tab = {
@@ -70,5 +70,39 @@ describe("FeatureBar", () => {
     const { open } = useBrowser.getState();
     expect(open.sidecar).toBe(true);
     expect(open.palette).toBe(true);
+  });
+
+  it("drops the labels to icons when the title bar is narrow, and brings them back", () => {
+    // A ResizeObserver whose callbacks the test can fire with a chosen width.
+    const callbacks: ResizeObserverCallback[] = [];
+    const Observer = class {
+      constructor(cb: ResizeObserverCallback) {
+        callbacks.push(cb);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    vi.stubGlobal("ResizeObserver", Observer);
+    const resize = (width: number) => act(() => callbacks.forEach((cb) => cb([{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver)));
+
+    render(<FeatureBar />);
+    const agent = () => screen.getByRole("button", { name: "Agent" });
+    expect(screen.getByText("Record")).toBeTruthy();
+    expect(agent().textContent).toContain("Agent");
+
+    resize(COLLAPSE_BELOW - 100);
+    expect(screen.queryByText("Record")).toBeNull();
+    expect(screen.queryByText("Mobile")).toBeNull();
+    expect(agent().textContent).not.toContain("Agent");
+    // Every action is still there by name.
+    expect(screen.getByRole("button", { name: "Record tab as GIF" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Device simulator" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Agent" })).toBeTruthy();
+
+    resize(COLLAPSE_BELOW + 300);
+    expect(screen.getByText("Record")).toBeTruthy();
+    expect(agent().textContent).toContain("Agent");
+    vi.unstubAllGlobals();
   });
 });

@@ -4,6 +4,7 @@ import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
+import { useFocusTrap } from "../lib/useFocusTrap";
 
 type Tool = "rect" | "arrow" | "text" | "blur";
 interface Shape {
@@ -27,6 +28,8 @@ const TOOLS: { id: Tool; icon: typeof Square; label: string }[] = [
 export function Annotator({ path }: { path: string }) {
   useCoversContent(true);
   const close = useBrowser((s) => s.setAnnotating);
+  const root = useRef<HTMLDivElement>(null);
+  useFocusTrap(root);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [shapes, setShapes] = useState<Shape[]>([]);
@@ -112,7 +115,7 @@ export function Annotator({ path }: { path: string }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black/70 backdrop-blur-[2px]">
+    <div ref={root} role="dialog" aria-modal="true" aria-label="Annotate capture" className="dialog-enter fixed inset-0 z-50 flex flex-col bg-black/70 backdrop-blur-[2px]">
       <div role="toolbar" aria-label="Annotate" className="flex h-11 shrink-0 items-center gap-1 border-b border-line bg-surface px-3">
         {TOOLS.map((t) => (
           <IconButton key={t.id} icon={t.icon} label={t.label} active={tool === t.id} onClick={() => setTool(t.id)} />
