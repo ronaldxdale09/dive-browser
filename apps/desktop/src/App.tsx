@@ -12,17 +12,19 @@ import { useShortcuts } from "./lib/shortcuts";
 export function App() {
   const boot = useBrowser((s) => s.boot);
   const error = useBrowser((s) => s.error);
+  const notice = useBrowser((s) => s.notice);
   const open = useBrowser((s) => s.open);
   useEffect(() => void boot(), [boot]);
   useShortcuts();
 
   return (
     <div className="grid h-full grid-cols-[52px_minmax(0,1fr)] grid-rows-[40px_44px_minmax(0,1fr)] bg-ground text-ink">
-      <div className="row-span-3 border-r border-line bg-ground">
-        <Rail />
-      </div>
-      <div className="col-start-2 row-start-1" data-tauri-drag-region>
+      {/* Title-bar row: tabs sit beside the traffic lights (overlay title bar). */}
+      <div className="col-span-2 row-start-1 pl-[84px]" data-tauri-drag-region>
         <TabStrip />
+      </div>
+      <div className="col-start-1 row-span-2 row-start-2 border-r border-line bg-ground">
+        <Rail />
       </div>
       <div className="col-start-2 row-start-2">
         <Toolbar />
@@ -35,6 +37,11 @@ export function App() {
         {open.sidecar && <Sidecar />}
       </div>
       {open.palette && <Palette />}
+      {notice && (
+        <div role="status" className="fixed bottom-3 left-16 rounded-full border border-line-2 bg-surface-2 px-3 py-1.5 font-mono text-[11px] text-ink-2 shadow-lg">
+          {notice}
+        </div>
+      )}
       {error && (
         <div role="alert" className="fixed bottom-3 left-16 rounded-full border border-line-2 bg-surface-2 px-3 py-1.5 text-xs text-ink-2 shadow-lg">
           {error}

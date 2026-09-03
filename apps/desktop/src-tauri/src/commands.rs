@@ -43,6 +43,10 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_close,
             tab_activate,
             tab_navigate,
+            tab_back,
+            tab_forward,
+            tab_reload,
+            tab_capture,
             layout_set_content_bounds,
             commands_list,
             command_run,
@@ -229,6 +233,67 @@ pub(crate) fn tab_navigate(state: State<'_, AppState>, id: TabId, url: String) -
     host.as_ref()
         .ok_or_else(|| AppError::new("engine not ready"))?
         .navigate(id, url)?;
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_back(state: State<'_, AppState>, id: TabId) -> AppResult<()> {
+    with_view(&state, id, tauri::Webview::go_back)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_forward(state: State<'_, AppState>, id: TabId) -> AppResult<()> {
+    with_view(&state, id, tauri::Webview::go_forward)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_reload(state: State<'_, AppState>, id: TabId) -> AppResult<()> {
+    with_view(&state, id, tauri::Webview::reload)
+}
+
+/// Screenshot a tab (viewport, or the whole document when `full_page`) to a
+/// PNG under the app data dir and return its path.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_capture(
+    state: State<'_, AppState>,
+    id: TabId,
+    full_page: bool,
+) -> AppResult<String> {
+    let session = lock(&state.host)
+        .as_ref()
+        .and_then(|h| h.cdp(id))
+        .ok_or_else(|| AppError::new("no devtools session for this tab"))?;
+    let png = if full_page {
+        dive_cdp::page::capture_full_page(&session, dive_cdp::page::ImageFormat::Png).await
+    } else {
+        dive_cdp::page::capture_screenshot(&session, dive_cdp::page::ScreenshotOptions::default())
+            .await
+    }
+    .map_err(AppError::new)?;
+
+    let dir = crate::state::data_root().join("captures");
+    std::fs::create_dir_all(&dir)?;
+    let stamp = dive_core::Timestamp::now()
+        .to_rfc3339()
+        .replace([':', '.'], "-");
+    let path = dir.join(format!("dive-{stamp}.png"));
+    std::fs::write(&path, png)?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+fn with_view(
+    state: &AppState,
+    id: TabId,
+    f: impl FnOnce(&tauri::Webview<Runtime>) -> tauri::Result<()>,
+) -> AppResult<()> {
+    let host = lock(&state.host);
+    host.as_ref()
+        .ok_or_else(|| AppError::new("engine not ready"))?
+        .with_view(id, f)?;
     Ok(())
 }
 

@@ -17,6 +17,11 @@ interface BrowserState {
   closeTab: (id: string) => Promise<void>;
   activateTab: (id: string) => Promise<void>;
   navigate: (url: string) => Promise<void>;
+  back: () => Promise<void>;
+  forward: () => Promise<void>;
+  reload: () => Promise<void>;
+  capture: (fullPage: boolean) => Promise<void>;
+  notice: string | null;
   activateWorkspace: (id: string) => Promise<void>;
   toggle: (panel: UiPanel, value?: boolean) => void;
   applyEvent: (event: CoreEvent) => void;
@@ -67,6 +72,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   activeTab: null,
   open: { sidecar: false, dock: false, palette: false },
   error: null,
+  notice: null,
 
   boot: async () => {
     try {
@@ -88,6 +94,27 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     const id = get().activeTab;
     if (!id) return get().openTab(url);
     await run(set, () => ipc.tabNavigate(id, url));
+  },
+  back: async () => {
+    const id = get().activeTab;
+    if (id) await run(set, () => ipc.tabBack(id));
+  },
+  forward: async () => {
+    const id = get().activeTab;
+    if (id) await run(set, () => ipc.tabForward(id));
+  },
+  reload: async () => {
+    const id = get().activeTab;
+    if (id) await run(set, () => ipc.tabReload(id));
+  },
+  capture: async (fullPage) => {
+    const id = get().activeTab;
+    if (!id) return;
+    await run(set, async () => {
+      const path = await ipc.tabCapture(id, fullPage);
+      set({ notice: `Saved ${path}` });
+      setTimeout(() => set({ notice: null }), 4000);
+    });
   },
   activateWorkspace: async (id) => {
     await run(set, () => ipc.workspaceActivate(id));

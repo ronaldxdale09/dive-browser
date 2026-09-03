@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use dive_cdp::CdpSession;
 use dive_core::{Container, CoreEvent, Tab, TabId};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -40,6 +41,7 @@ impl Bounds {
 pub struct TabHost {
     window: Window<Runtime>,
     views: HashMap<TabId, Webview<Runtime>>,
+    cdp: HashMap<TabId, CdpSession>,
     bounds: Bounds,
     active: Option<TabId>,
     profiles_root: PathBuf,
@@ -50,6 +52,7 @@ impl TabHost {
         Self {
             window,
             views: HashMap::new(),
+            cdp: HashMap::new(),
             bounds: Bounds {
                 x: 0.0,
                 y: 0.0,
@@ -95,8 +98,27 @@ impl TabHost {
             .window
             .add_child(builder, self.bounds.position(), self.bounds.size())?;
         view.hide()?;
+        #[cfg(feature = "cef")]
+        self.cdp.insert(tab_id, attach_cdp(&view)?);
         self.views.insert(tab_id, view);
         Ok(())
+    }
+
+    /// `DevTools` protocol session for `id`, if the engine exposes one.
+    pub fn cdp(&self, id: TabId) -> Option<CdpSession> {
+        self.cdp.get(&id).cloned()
+    }
+
+    /// Run `f` against the view for `id`.
+    pub fn with_view<T>(
+        &self,
+        id: TabId,
+        f: impl FnOnce(&Webview<Runtime>) -> tauri::Result<T>,
+    ) -> tauri::Result<T> {
+        match self.views.get(&id) {
+            Some(view) => f(view),
+            None => Err(tauri::Error::WebviewNotFound),
+        }
     }
 
     /// Show `id` and hide every other tab view.
@@ -115,6 +137,9 @@ impl TabHost {
 
     /// Destroy the view for `id`, if any.
     pub fn close(&mut self, id: TabId) -> tauri::Result<()> {
+        if let Some(session) = self.cdp.remove(&id) {
+            session.close();
+        }
         if let Some(view) = self.views.remove(&id) {
             view.close()?;
         }
@@ -155,6 +180,33 @@ impl TabHost {
     }
 }
 
+/// Bridge a CEF webview's `DevTools` channel into a [`CdpSession`].
+#[cfg(feature = "cef")]
+fn attach_cdp(view: &Webview<Runtime>) -> tauri::Result<CdpSession> {
+    struct CefTransport(Webview<Runtime>);
+    impl dive_cdp::Transport for CefTransport {
+        fn send(&self, message: &str) -> Result<(), dive_cdp::CdpError> {
+            self.0
+                .send_dev_tools_message(message.as_bytes())
+                .map_err(|e| dive_cdp::CdpError::Transport(e.to_string()))
+        }
+    }
+
+    let session = CdpSession::new(CefTransport(view.clone()));
+    let sink = session.clone();
+    view.on_dev_tools_protocol(move |protocol| {
+        // `Message` carries the raw JSON for both results and events; the
+        // other variants are pre-parsed duplicates we do not need.
+        if let tauri::CefDevToolsProtocol::Message(bytes) = protocol
+            && let Ok(text) = std::str::from_utf8(&bytes)
+            && let Err(e) = sink.handle_incoming(text)
+        {
+            tracing::debug!("ignoring malformed cdp message: {e}");
+        }
+    })?;
+    Ok(session)
+}
+
 fn label_for(id: TabId) -> String {
     format!("tab-{id}")
 }
@@ -178,6 +230,8 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
     let height = 820.0;
     let window = tauri::window::WindowBuilder::new(app, MAIN_WINDOW)
         .title("Dive")
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
         .inner_size(width, height)
         .min_inner_size(720.0, 480.0)
         .build()?;

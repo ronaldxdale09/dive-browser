@@ -8,7 +8,7 @@ export function Rail() {
   const active = useBrowser((s) => s.activeWorkspace);
   const activate = useBrowser((s) => s.activateWorkspace);
   return (
-    <nav aria-label="Workspaces" className="flex h-full flex-col items-center gap-2 pt-11 pb-3" data-tauri-drag-region>
+    <nav aria-label="Workspaces" className="flex h-full flex-col items-center gap-2 pt-2 pb-3">
       {workspaces.map((w) => {
         const isActive = w.id === active;
         return (

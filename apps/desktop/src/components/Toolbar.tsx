@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Lock, PanelBottom, RotateCw, Search, Share, Sparkles, Star } from "lucide-react";
+import { ArrowLeft, ArrowRight, Camera, Lock, PanelBottom, RotateCw, Search, Share, Sparkles, Star } from "lucide-react";
 import { useState } from "react";
 import { useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
@@ -8,6 +8,10 @@ export function Toolbar() {
   const tabs = useBrowser((s) => s.tabs);
   const activeTab = useBrowser((s) => s.activeTab);
   const navigate = useBrowser((s) => s.navigate);
+  const back = useBrowser((s) => s.back);
+  const forward = useBrowser((s) => s.forward);
+  const reload = useBrowser((s) => s.reload);
+  const capture = useBrowser((s) => s.capture);
   const toggle = useBrowser((s) => s.toggle);
   const open = useBrowser((s) => s.open);
   const current = tabs.find((t) => t.id === activeTab);
@@ -22,9 +26,9 @@ export function Toolbar() {
 
   return (
     <div className="flex h-full items-center gap-1 px-2">
-      <IconButton icon={ArrowLeft} label="Back" disabled={!current} />
-      <IconButton icon={ArrowRight} label="Forward" disabled={!current} />
-      <IconButton icon={RotateCw} label="Reload" disabled={!current} onClick={() => current && void navigate(current.url)} size={14} />
+      <IconButton icon={ArrowLeft} label="Back" disabled={!current} onClick={() => void back()} />
+      <IconButton icon={ArrowRight} label="Forward" disabled={!current} onClick={() => void forward()} />
+      <IconButton icon={RotateCw} label="Reload" disabled={!current} onClick={() => void reload()} size={14} />
       <form
         className="mx-1 flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2"
         onSubmit={(e) => {
@@ -49,6 +53,7 @@ export function Toolbar() {
       </form>
       <IconButton icon={Star} label="Bookmark" disabled={!current} />
       <IconButton icon={Share} label="Share" disabled={!current} />
+      <IconButton icon={Camera} label="Capture full page" disabled={!current} onClick={() => void capture(true)} />
       <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />
       <IconButton icon={PanelBottom} label="Developer dock" active={open.dock} onClick={() => toggle("dock")} />
       <button

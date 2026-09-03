@@ -13,6 +13,14 @@ export const commands = {
 	tabClose: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_close", { id })),
 	tabActivate: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_activate", { id })),
 	tabNavigate: (id: TabId, url: string) => typedError<null, AppError>(__TAURI_INVOKE("tab_navigate", { id, url })),
+	tabBack: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_back", { id })),
+	tabForward: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_forward", { id })),
+	tabReload: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_reload", { id })),
+	/**
+	 *  Screenshot a tab (viewport, or the whole document when `full_page`) to a
+	 *  PNG under the app data dir and return its path.
+	 */
+	tabCapture: (id: TabId, fullPage: boolean) => typedError<string, AppError>(__TAURI_INVOKE("tab_capture", { id, fullPage })),
 	layoutSetContentBounds: (bounds: Bounds) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_bounds", { bounds })),
 	commandsList: () => __TAURI_INVOKE<Command[]>("commands_list"),
 	/**

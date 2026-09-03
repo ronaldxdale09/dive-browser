@@ -23,6 +23,10 @@ export const ipc = {
   tabClose: async (id: string) => unwrap(await commands.tabClose(id)),
   tabActivate: async (id: string) => unwrap(await commands.tabActivate(id)),
   tabNavigate: async (id: string, url: string) => unwrap(await commands.tabNavigate(id, url)),
+  tabBack: async (id: string) => unwrap(await commands.tabBack(id)),
+  tabForward: async (id: string) => unwrap(await commands.tabForward(id)),
+  tabReload: async (id: string) => unwrap(await commands.tabReload(id)),
+  tabCapture: async (id: string, fullPage: boolean) => unwrap(await commands.tabCapture(id, fullPage)),
   setContentBounds: async (b: { x: number; y: number; width: number; height: number }) =>
     unwrap(await commands.layoutSetContentBounds(b)),
   commandsList: () => commands.commandsList(),

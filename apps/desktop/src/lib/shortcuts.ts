@@ -5,6 +5,8 @@ import { useBrowser } from "../store/browser";
 export function useShortcuts() {
   const toggle = useBrowser((s) => s.toggle);
   const closeTab = useBrowser((s) => s.closeTab);
+  const reload = useBrowser((s) => s.reload);
+  const capture = useBrowser((s) => s.capture);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -19,6 +21,12 @@ export function useShortcuts() {
       } else if (key === "d" && e.shiftKey) {
         e.preventDefault();
         toggle("dock");
+      } else if (key === "r") {
+        e.preventDefault();
+        void reload();
+      } else if (key === "s" && e.shiftKey) {
+        e.preventDefault();
+        void capture(true);
       } else if (key === "w") {
         e.preventDefault();
         const active = useBrowser.getState().activeTab;
@@ -27,5 +35,5 @@ export function useShortcuts() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [toggle, closeTab]);
+  }, [toggle, closeTab, reload, capture]);
 }
