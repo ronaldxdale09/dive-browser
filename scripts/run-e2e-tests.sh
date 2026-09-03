@@ -121,7 +121,7 @@ echo "Filter:    ${FILTER:-<none>}"
 echo "=============================================================================="
 echo ""
 
-CARGO_CMD=("cargo" "test" "-p" "dive-e2e")
+CARGO_CMD=("cargo" "test" "-p" "dive-integration")
 
 if [[ -n "$FILTER" ]]; then
   CARGO_CMD+=("$FILTER")

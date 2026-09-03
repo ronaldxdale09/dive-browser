@@ -1,7 +1,7 @@
 import { Shield, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useBrowser } from "../store/browser";
-import { useNetwork } from "../store/network";
+import { selectRequests, useNetwork } from "../store/network";
 import { usePrefs } from "../store/prefs";
 import { FeatureButton } from "./FeatureBar";
 import { Icon } from "./Icon";
@@ -18,7 +18,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
   const update = usePrefs((s) => s.update);
   const activeTab = useBrowser((s) => s.activeTab);
   const toggle = useBrowser((s) => s.toggle);
-  const blocked = useNetwork((s) => (activeTab ? (s.byTab[activeTab] ?? []) : []).filter((r) => r.error?.includes("BLOCKED_BY_CLIENT")).length);
+  const blocked = useNetwork((s) => selectRequests(activeTab)(s).filter((r) => r.error?.includes("BLOCKED_BY_CLIENT")).length);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useCoversContent(open);

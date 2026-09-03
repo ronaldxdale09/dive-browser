@@ -1,9 +1,11 @@
 import { Accessibility, Activity, Ban, ClipboardList, Database, ExternalLink, FileSearch, Network, Shuffle, Terminal } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import type { ConsoleEntry, Level } from "../lib/ipc";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import type { Level } from "../lib/ipc";
 import { jumpToSource, editorLabel } from "../lib/editor";
 import { useBrowser } from "../store/browser";
 import { selectEntries, useConsole } from "../store/console";
+import type { ConsoleRow } from "../store/console";
 import { usePrefs } from "../store/prefs";
 import { Icon, IconButton } from "./Icon";
 import { NetworkPanel, NetworkTools } from "./NetworkPanel";
@@ -77,15 +79,36 @@ const LEVEL_STYLE: Record<Level, string> = {
   error: "text-danger",
 };
 
+/** A single line of `leading-5` text with `py-0.5` and the row's bottom border; wrapped entries measure taller. */
+const ROW_HEIGHT = 25;
+
+/** Below this many pixels from the end, the user counts as reading the newest output. */
+const BOTTOM_SLACK = 8;
+
 function ConsolePanel() {
   const activeTab = useBrowser((s) => s.activeTab);
   const entries = useConsole(selectEntries(activeTab));
   const [filter, setFilter] = useState("");
-  const endRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Whether the user was at the end the last time they scrolled; new output only pulls the view along then.
+  const atBottom = useRef(true);
+  const shown = useMemo(() => {
+    const q = filter.toLowerCase();
+    return q ? entries.filter((e) => e.text.toLowerCase().includes(q)) : entries;
+  }, [entries, filter]);
+
+  // The React Compiler is not in use here; the virtualizer's mutable instance is intended.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer({
+    count: shown.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 12,
+    getItemKey: (i) => shown[i]?.id ?? i,
+  });
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
-  }, [entries.length]);
-  const shown = filter ? entries.filter((e) => e.text.toLowerCase().includes(filter.toLowerCase())) : entries;
+    if (atBottom.current && shown.length > 0) virtualizer.scrollToEnd();
+  }, [shown.length, virtualizer]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -98,18 +121,41 @@ function ConsolePanel() {
           className="h-6 w-56 rounded-md border border-line bg-surface-2 px-2 text-[11px] outline-none placeholder:text-ink-3 focus:border-line-2"
         />
       </div>
-      <div className="min-h-0 flex-1 select-text overflow-auto font-mono text-[11.5px] leading-5">
+      <div
+        ref={scrollRef}
+        data-testid="console-scroll"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK;
+        }}
+        className="min-h-0 flex-1 select-text overflow-auto font-mono text-[11.5px] leading-5"
+      >
         {shown.length === 0 && <div className="px-3 py-2 text-ink-3">{activeTab ? "No console output yet." : "Open a tab to see its console."}</div>}
-        {shown.map((e, i) => (
-          <Row key={`${e.timestamp}-${i}`} entry={e} tabId={activeTab} />
-        ))}
-        <div ref={endRef} />
+        <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+          {virtualizer.getVirtualItems().map((v) => {
+            const e = shown[v.index]!;
+            return <Row key={e.id} entry={e} tabId={activeTab} index={v.index} start={v.start} measure={virtualizer.measureElement} />;
+          })}
+        </div>
       </div>
     </div>
   );
 }
 
-function Row({ entry, tabId }: { entry: ConsoleEntry; tabId: string | null }) {
+/** One console line. Memoized on the entry object, so output arriving elsewhere in the list leaves it alone. */
+const Row = memo(function Row({
+  entry,
+  tabId,
+  index,
+  start,
+  measure,
+}: {
+  entry: ConsoleRow;
+  tabId: string | null;
+  index: number;
+  start: number;
+  measure: (node: HTMLDivElement | null) => void;
+}) {
   const preferredEditor = usePrefs((s) => s.prefs.preferred_editor || "vscode");
   const loc = entry.url ? `${entry.url.split("/").pop() ?? entry.url}${entry.line ? `:${entry.line}` : ""}` : "";
   const [jumping, setJumping] = useState(false);
@@ -125,7 +171,12 @@ function Row({ entry, tabId }: { entry: ConsoleEntry; tabId: string | null }) {
   };
 
   return (
-    <div className={`flex gap-3 border-b border-line/60 px-3 py-0.5 ${LEVEL_STYLE[entry.level]}`}>
+    <div
+      ref={measure}
+      data-index={index}
+      style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${start}px)` }}
+      className={`flex gap-3 border-b border-line/60 px-3 py-0.5 ${LEVEL_STYLE[entry.level]}`}
+    >
       <span className="w-14 shrink-0 text-ink-3">{entry.source}</span>
       <span className="min-w-0 flex-1 break-words whitespace-pre-wrap">{entry.text}</span>
       {loc && (
@@ -141,4 +192,4 @@ function Row({ entry, tabId }: { entry: ConsoleEntry; tabId: string | null }) {
       )}
     </div>
   );
-}
+});

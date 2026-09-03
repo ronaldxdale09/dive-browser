@@ -53,6 +53,11 @@ DIVE_MAX_IDLE_SECS=0 DIVE_SWEEP_SECS=3600 RUST_LOG="${RUST_LOG:-info}" \
     NO_COLOR=1 "${BIN}" >"${LOG}" 2>&1 &
 APP=$!
 
+# Several samples a second apart, keeping the extreme: memory keeps climbing
+# for a moment after pages load and keeps falling after their renderers go.
+sample_max() { local best=0 v; for _ in 1 2 3; do v=$(tree_rss "$1"); [[ ${v} -gt ${best} ]] && best=${v}; sleep 1; done; echo "${best}"; }
+sample_min() { local best="" v; for _ in 1 2 3 4; do v=$(tree_rss "$1"); [[ -z ${best} || ${v} -lt ${best} ]] && best=${v}; sleep 1; done; echo "${best}"; }
+
 baseline=""; loaded=""; swept=""; tabs=""; discarded=""
 deadline=$(( $(date +%s) + SETTLE + 90 ))
 while kill -0 "${APP}" 2>/dev/null && [[ $(date +%s) -lt ${deadline} ]]; do
@@ -60,11 +65,11 @@ while kill -0 "${APP}" 2>/dev/null && [[ $(date +%s) -lt ${deadline} ]]; do
         baseline=$(tree_rss "${APP}"); echo "   baseline  ${baseline} KB"
     fi
     if [[ -z "${loaded}" ]] && plain_log | grep -q "stress: loaded"; then
-        loaded=$(tree_rss "${APP}"); tabs=$(plain_log | sed -n 's/.*stress: loaded.*tabs=\([0-9]*\).*/\1/p' | tail -1)
+        loaded=$(sample_max "${APP}"); tabs=$(plain_log | sed -n 's/.*stress: loaded.*tabs=\([0-9]*\).*/\1/p' | tail -1)
         echo "   loaded    ${loaded} KB (${tabs} tabs)"
     fi
     if [[ -z "${swept}" ]] && plain_log | grep -q "stress: done"; then
-        swept=$(tree_rss "${APP}"); discarded=$(plain_log | sed -n 's/.*stress: swept.*discarded=\([0-9]*\).*/\1/p' | tail -1)
+        swept=$(sample_min "${APP}"); discarded=$(plain_log | sed -n 's/.*stress: swept.*discarded=\([0-9]*\).*/\1/p' | tail -1)
         echo "   swept     ${swept} KB (${discarded} discarded)"
         break
     fi

@@ -76,6 +76,39 @@ const MIGRATIONS: &[&str] = &[
     );",
 ];
 
+/// Copy an existing database aside when this build is about to migrate it,
+/// so a migration that goes wrong is recoverable by hand. Returns the copy's
+/// path, or `None` when there was nothing to protect (a new file, or one
+/// already at this build's schema).
+fn backup_before_migrating(path: &Path) -> Result<Option<std::path::PathBuf>> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let version = Store::file_version(path)?;
+    if version >= MIGRATIONS.len() {
+        return Ok(None);
+    }
+    let name = path
+        .file_name()
+        .map_or_else(|| "dive.db".into(), |n| n.to_string_lossy().into_owned());
+    let backup = path.with_file_name(format!("{name}.before-v{}", MIGRATIONS.len()));
+    // A checkpoint folds the WAL into the main file, so the copy is complete.
+    let live = Connection::open(path)?;
+    live.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+    drop(live);
+    std::fs::copy(path, &backup).map_err(|e| {
+        CoreError::Db(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_IOERR),
+            Some(format!(
+                "copying {} to {}: {e}",
+                path.display(),
+                backup.display()
+            )),
+        ))
+    })?;
+    Ok(Some(backup))
+}
+
 /// How a history row reads on screen: its origin and title.
 ///
 /// Two visits that differ only in a trailing slash or a tracking parameter
@@ -127,6 +160,10 @@ pub struct Store {
 impl Store {
     /// Open or create the database at `path`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        if let Some(backup) = backup_before_migrating(path)? {
+            tracing::info!(backup = %backup.display(), "copied the database before migrating it");
+        }
         Self::init(Connection::open(path)?)
     }
 
@@ -143,6 +180,13 @@ impl Store {
         let store = Self { conn };
         store.migrate()?;
         Ok(store)
+    }
+
+    /// The schema version a database file carries, without migrating it.
+    pub fn file_version(path: &Path) -> Result<usize> {
+        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        Ok(usize::try_from(version).unwrap_or(0))
     }
 
     fn migrate(&self) -> Result<()> {
@@ -1191,5 +1235,71 @@ mod tests {
         assert_eq!(first.len(), 1);
         assert_eq!(first[0].state, TabState::Discarded);
         assert!(store.discard_tabs(&[a.id]).unwrap().is_empty());
+    }
+
+    /// Every shipped migration's text, pinned. A migration that has reached
+    /// users is applied exactly once per database, so changing it here does
+    /// nothing for them and silently diverges new installs; the only safe
+    /// change is appending a new one (and its checksum below).
+    #[test]
+    fn shipped_migrations_are_append_only() {
+        fn djb2(s: &str) -> u64 {
+            s.bytes()
+                .fold(5381u64, |h, b| h.wrapping_mul(33) ^ u64::from(b))
+        }
+        const SHIPPED: &[u64] = &[
+            0xb9e7_35ed_8a19_b103,
+            0x52d5_64ee_25f8_dd05,
+            0x5909_8ac2_b030_93da,
+            0x9fa9_7e32_2105_32d1,
+            0xff9d_3310_52cc_7359,
+            0xa4b7_de1f_1a35_d3a6,
+            0x1d6d_f725_f438_8a3c,
+        ];
+        assert!(
+            MIGRATIONS.len() >= SHIPPED.len(),
+            "a shipped migration was removed"
+        );
+        for (i, (sql, want)) in MIGRATIONS.iter().zip(SHIPPED).enumerate() {
+            assert_eq!(
+                djb2(sql),
+                *want,
+                "migration v{} changed after shipping; append a new one instead",
+                i + 1
+            );
+        }
+        assert_eq!(
+            MIGRATIONS.len(),
+            SHIPPED.len(),
+            "a new migration needs its checksum pinned here"
+        );
+    }
+
+    #[test]
+    fn an_older_database_is_copied_aside_before_it_is_migrated() {
+        let dir = std::env::temp_dir().join(format!("dive-store-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("dive.db");
+        // A fresh file gets no backup: there is nothing to protect yet.
+        drop(Store::open(&path).unwrap());
+        assert!(std::fs::read_dir(&dir).unwrap().all(|e| {
+            !e.unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("before-v")
+        }));
+        // Roll the file back to an older schema version and reopen.
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.pragma_update(None, "user_version", 3).unwrap();
+        }
+        assert_eq!(Store::file_version(&path).unwrap(), 3);
+        // Reopening at v3 on a v7 build is a migration (which fails on the
+        // already-present tables, which is fine: the copy is what we test).
+        let _ = Store::open(&path);
+        let backup = path.with_file_name(format!("dive.db.before-v{}", MIGRATIONS.len()));
+        assert!(backup.is_file(), "no backup at {}", backup.display());
+        assert_eq!(Store::file_version(&backup).unwrap(), 3);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

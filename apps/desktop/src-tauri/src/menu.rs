@@ -201,12 +201,22 @@ pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
 
     app.on_menu_event(|app, event| {
         let id = event.id().0.clone();
-        if FOCUS_CHROME.contains(&id.as_str())
-            && let Some(host) = lock(&app.state::<AppState>().host).as_ref()
-        {
-            host.focus_chrome();
-        }
-        let _ = MenuCommand(id).emit_to(app, crate::CHROME_LABEL);
+        // A tab in its own window has its own chrome; while that window is
+        // focused the shortcut is about it, not the main window's page.
+        let target = {
+            let state = app.state::<AppState>();
+            let host = lock(&state.host);
+            match host.as_ref() {
+                Some(host) => {
+                    if FOCUS_CHROME.contains(&id.as_str()) {
+                        host.focus_chrome_for_menu();
+                    }
+                    host.chrome_for_menu()
+                }
+                None => crate::CHROME_LABEL.to_owned(),
+            }
+        };
+        let _ = MenuCommand(id).emit_to(app, target.as_str());
     });
     Ok(())
 }

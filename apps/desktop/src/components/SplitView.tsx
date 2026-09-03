@@ -1,0 +1,170 @@
+import { useDraggable, useDroppable } from "@dnd-kit/core";
+import { X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ipc } from "../lib/ipc";
+import type { Tab } from "../lib/ipc";
+import { useBrowser } from "../store/browser";
+import { MAX_PANES, MIN_PANE, useLayout, type Split } from "../store/layout";
+import { Favicon } from "./Favicon";
+import { Icon } from "./Icon";
+import { paneId, zoneId } from "./TabDnd";
+import { tabLabel } from "./TabStrip";
+
+const GAP = 6;
+
+/** Grid columns for pane fractions with a divider between each pair. */
+function columns(sizes: number[]) {
+  return sizes.map((s) => `minmax(0,${s}fr)`).join(` ${GAP}px `);
+}
+
+/**
+ * Two to four pages side by side. Each pane is a header the chrome draws and
+ * a body the native view is placed over; the bodies report their rectangles
+ * and the engine puts every pane's page where its body is.
+ */
+export function SplitView({ split, workspace }: { split: Split; workspace: string }) {
+  const tabs = useBrowser((s) => s.tabs);
+  const active = useBrowser((s) => s.activeTab);
+  const activate = useBrowser((s) => s.activateTab);
+  const remove = useLayout((s) => s.remove);
+  const resize = useLayout((s) => s.resize);
+  const root = useRef<HTMLDivElement>(null);
+  const bodies = useRef(new Map<string, HTMLDivElement>());
+  const [live, setLive] = useState<number[] | null>(null);
+  const sizes = live ?? split.sizes;
+
+  const register = useCallback((tab: string, el: HTMLDivElement | null) => {
+    if (el) bodies.current.set(tab, el);
+    else bodies.current.delete(tab);
+  }, []);
+
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    let raf = 0;
+    const report = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const panes = split.tabs.flatMap((tab) => {
+          const body = bodies.current.get(tab);
+          if (!body) return [];
+          const r = body.getBoundingClientRect();
+          return [{ tab, bounds: { x: r.left, y: r.top, width: r.width, height: r.height } }];
+        });
+        void ipc.setPanes(panes).catch(() => undefined);
+      });
+    };
+    report();
+    const ro = new ResizeObserver(report);
+    ro.observe(el);
+    for (const body of bodies.current.values()) ro.observe(body);
+    window.addEventListener("resize", report);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      window.removeEventListener("resize", report);
+    };
+  }, [split, sizes]);
+
+  // Leaving the split returns the engine to a single page.
+  useEffect(() => () => void ipc.setPanes([]).catch(() => undefined), []);
+
+  const startResize = (i: number, e: React.PointerEvent<HTMLDivElement>) => {
+    const width = root.current?.getBoundingClientRect().width ?? 0;
+    if (!width) return;
+    const startX = e.clientX;
+    const base = [...split.sizes];
+    const first = base[i] ?? 0;
+    const pair = first + (base[i + 1] ?? 0);
+    let next = base;
+    const move = (ev: PointerEvent) => {
+      const delta = (ev.clientX - startX) / width;
+      const left = Math.min(Math.max(first + delta, MIN_PANE), pair - MIN_PANE);
+      next = base.map((s, j) => (j === i ? left : j === i + 1 ? pair - left : s));
+      setLive(next);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setLive(null);
+      resize(workspace, next);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  return (
+    <div ref={root} role="group" aria-label="Split view" className="grid min-h-0 min-w-0 bg-ground p-1" style={{ gridTemplateColumns: columns(sizes) }}>
+      {split.tabs.map((id, i) => {
+        const tab = tabs.find((t) => t.id === id);
+        if (!tab) return null;
+        return (
+          <PaneAndDivider key={id} tab={tab} active={id === active} last={i === split.tabs.length - 1} onActivate={() => void activate(id)} onClose={() => remove(workspace, id)} onResize={(e) => startResize(i, e)} register={(el) => register(id, el)} />
+        );
+      })}
+    </div>
+  );
+}
+
+function PaneAndDivider({ tab, active, last, onActivate, onClose, onResize, register }: { tab: Tab; active: boolean; last: boolean; onActivate: () => void; onClose: () => void; onResize: (e: React.PointerEvent<HTMLDivElement>) => void; register: (el: HTMLDivElement | null) => void }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: paneId(tab.id) });
+  return (
+    <>
+      <section aria-label={tabLabel(tab)} aria-current={active ? "true" : undefined} className={`flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border ${active ? "border-line-2" : "border-line"} ${isDragging ? "opacity-50" : ""}`}>
+        <header ref={setNodeRef} {...attributes} {...listeners} onClick={onActivate} className={`flex h-7 shrink-0 cursor-grab items-center gap-2 px-2 text-[11px] ${active ? "bg-surface-2 text-ink" : "bg-surface text-ink-2"}`}>
+          <Favicon src={tab.favicon} size={12} />
+          <span className="min-w-0 flex-1 truncate">{tabLabel(tab)}</span>
+          <button
+            type="button"
+            aria-label={`Close pane ${tabLabel(tab)}`}
+            title="Close pane (the tab stays open)"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+            className="grid size-5 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-ink"
+          >
+            <Icon icon={X} size={11} />
+          </button>
+        </header>
+        <div ref={register} className="min-h-0 flex-1 bg-surface" />
+      </section>
+      {!last && <div role="separator" aria-orientation="vertical" onPointerDown={onResize} className="cursor-col-resize rounded-full hover:bg-line-2" style={{ width: GAP }} />}
+    </>
+  );
+}
+
+/**
+ * Where a dragged tab can land on the page: the left or right half of each
+ * pane (or of the single page), each standing for the slot on that side.
+ * Drawn only while a tab is dragged, over the hidden page.
+ */
+export function DropZones({ dragging, split, activeTab }: { dragging: string; split: Split | null; activeTab: string | null }) {
+  const panes = split?.tabs ?? (activeTab ? [activeTab] : []);
+  const sizes = split?.sizes ?? [1];
+  const inSplit = panes.includes(dragging);
+  if (panes.length === 0) return null;
+  // Nothing to split with: the only page is the one being dragged.
+  if (!split && dragging === activeTab) return null;
+  if (!inSplit && panes.length >= MAX_PANES) return null;
+  return (
+    <div aria-hidden className="pointer-events-auto absolute inset-0 z-10 grid p-1" style={{ gridTemplateColumns: columns(sizes) }}>
+      {panes.map((tab, i) => (
+        <div key={tab} className="grid grid-cols-2" style={{ gridColumn: i === 0 ? 1 : 2 * i + 1 }}>
+          <Zone index={i} keyName={`${tab}:l`} side="left" />
+          <Zone index={i + 1} keyName={`${tab}:r`} side="right" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Zone({ index, keyName, side }: { index: number; keyName: string; side: "left" | "right" }) {
+  const { setNodeRef, isOver } = useDroppable({ id: zoneId(index, keyName) });
+  return (
+    <div ref={setNodeRef} className={`p-1 ${side === "left" ? "pr-0.5" : "pl-0.5"}`}>
+      <div className={`grid h-full place-items-center rounded-lg border-2 border-dashed text-xs transition-colors ${isOver ? "border-highlight bg-highlight-soft text-ink" : "border-transparent text-transparent"}`}>Open here</div>
+    </div>
+  );
+}

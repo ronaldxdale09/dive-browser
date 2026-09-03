@@ -77,6 +77,44 @@ impl Bounds {
 }
 
 /// Owns the child webviews for open tabs.
+/// Proof that the caller is on the main thread.
+///
+/// Creating or showing a native view has to happen there: from any other
+/// thread CEF takes the process down, and a caller that holds the host lock
+/// while it waits for the main thread deadlocks against the chrome's own
+/// commands. [`TabHost::open`] and [`TabHost::activate`] therefore demand
+/// this token, which can only be minted on the main thread and cannot be
+/// sent off it.
+#[derive(Debug)]
+pub struct MainThread(std::marker::PhantomData<*const ()>);
+
+impl MainThread {
+    /// Claim the token, if this is the main thread. Tauri's sync commands and
+    /// `run_on_main_thread` closures qualify; a tokio task never does.
+    pub fn here() -> Option<Self> {
+        is_main_thread().then_some(Self(std::marker::PhantomData))
+    }
+}
+
+static MAIN_THREAD: std::sync::OnceLock<std::thread::ThreadId> = std::sync::OnceLock::new();
+
+/// Remember the calling thread as the main thread. Called once at startup;
+/// until then (unit tests) every thread counts as main.
+pub fn mark_main_thread() {
+    let _ = MAIN_THREAD.set(std::thread::current().id());
+}
+
+fn is_main_thread() -> bool {
+    MAIN_THREAD
+        .get()
+        .is_none_or(|id| *id == std::thread::current().id())
+}
+
+/// The tab a view label names, if it is one of ours.
+pub fn tab_from_label(label: &str) -> Option<TabId> {
+    label.strip_prefix("tab-")?.parse().ok()
+}
+
 pub struct TabHost {
     window: Window<Runtime>,
     views: HashMap<TabId, Webview<Runtime>>,
@@ -149,6 +187,7 @@ impl TabHost {
     #[allow(clippy::too_many_lines)] // One builder owns the lifecycle callbacks for one native view.
     pub fn open(
         &mut self,
+        _main: &MainThread,
         app: &AppHandle<Runtime>,
         tab: &Tab,
         container: &Container,
@@ -321,7 +360,7 @@ impl TabHost {
     }
 
     /// Show `id` and hide every other tab view.
-    pub fn activate(&mut self, id: TabId) -> tauri::Result<()> {
+    pub fn activate(&mut self, _main: &MainThread, id: TabId) -> tauri::Result<()> {
         self.active = Some(id);
         self.apply_visibility()
     }
@@ -380,17 +419,18 @@ impl TabHost {
     /// Lay the content area out as these panes (empty for a single page),
     /// showing each pane's tab at its rectangle.
     pub fn set_panes(&mut self, panes: Vec<PaneBounds>) -> tauri::Result<()> {
+        let before: Vec<TabId> = self.panes.iter().map(|p| p.tab).collect();
         self.panes = panes
             .into_iter()
             .filter(|p| self.views.contains_key(&p.tab) && !self.popouts.contains_key(&p.tab))
             .collect();
         self.layout()?;
-        self.apply_visibility()
-    }
-
-    /// Tabs in the current split, in pane order.
-    pub fn panes(&self) -> Vec<TabId> {
-        self.panes.iter().map(|p| p.tab).collect()
+        // Showing also focuses the active page, so only do it when the set of
+        // panes changed: a resize must not pull the caret out of the omnibox.
+        if before != self.panes.iter().map(|p| p.tab).collect::<Vec<_>>() {
+            self.apply_visibility()?;
+        }
+        Ok(())
     }
 
     /// Where a view belongs: its popout window, its pane, or the content area.
@@ -532,6 +572,40 @@ impl TabHost {
             }
         }
         Ok(())
+    }
+
+    /// The tab whose popout window has keyboard focus, if any: menu commands
+    /// and shortcuts belong to it rather than to the main window.
+    pub fn focused_popout(&self) -> Option<TabId> {
+        self.popouts
+            .iter()
+            .find(|(_, p)| p.window.is_focused().unwrap_or(false))
+            .map(|(id, _)| *id)
+    }
+
+    /// Label of the chrome webview that should receive a menu command: the
+    /// focused popout's, else the main window's.
+    pub fn chrome_for_menu(&self) -> String {
+        self.focused_popout()
+            .map_or_else(|| CHROME_LABEL.to_owned(), popout_chrome_label)
+    }
+
+    /// Move keyboard focus to the chrome of whichever window is focused.
+    pub fn focus_chrome_for_menu(&self) {
+        match self.focused_popout() {
+            Some(id) => {
+                if let Some(p) = self.popouts.get(&id)
+                    && let Some(chrome) = p
+                        .window
+                        .webviews()
+                        .into_iter()
+                        .find(|w| w.label() == popout_chrome_label(id))
+                {
+                    let _ = chrome.set_focus();
+                }
+            }
+            None => self.focus_chrome(),
+        }
     }
 
     /// Keep a popout's title in step with its page.
@@ -758,6 +832,24 @@ fn forward_events(app: AppHandle<Runtime>, mut rx: tokio::sync::broadcast::Recei
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn view_labels_round_trip_to_tab_ids() {
+        let id = TabId::new();
+        assert_eq!(tab_from_label(&label_for(id)), Some(id));
+        assert_eq!(tab_from_label("main"), None);
+        assert_eq!(tab_from_label("tab-not-an-id"), None);
+    }
+
+    #[test]
+    fn main_thread_token_is_granted_here_and_refused_elsewhere() {
+        mark_main_thread();
+        assert!(MainThread::here().is_some());
+        let off = std::thread::spawn(|| MainThread::here().is_some())
+            .join()
+            .unwrap();
+        assert!(!off, "a worker thread must not be able to mint the token");
+    }
+
     use super::*;
 
     #[test]

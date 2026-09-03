@@ -14,6 +14,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::Runtime;
 use crate::commands::{activate_tab, normalize_url_with, open_tab};
+use crate::engine::MainThread;
 use crate::state::{AppState, lock};
 use crate::{automation, locator};
 
@@ -104,7 +105,8 @@ impl AppBrowser {
         }
         self.on_main(move |app| {
             let state = app.state::<AppState>();
-            activate_tab(app, &state, tab).map_err(|e| BrowserError::Other(e.message))
+            let main = MainThread::here().ok_or_else(|| other("not on the main thread"))?;
+            activate_tab(&main, app, &state, tab).map_err(|e| BrowserError::Other(e.message))
         })
         .await?
     }
@@ -445,7 +447,8 @@ impl Browser for AppBrowser {
                 let state = app.state::<AppState>();
                 let workspace =
                     (*lock(&state.active_workspace)).ok_or_else(|| other("no active workspace"))?;
-                open_tab(app, &state, workspace, &url).map_err(|e| other(e.message))
+                let main = MainThread::here().ok_or_else(|| other("not on the main thread"))?;
+                open_tab(&main, app, &state, workspace, &url).map_err(|e| other(e.message))
             })
             .await??;
         Ok(TabInfo {
@@ -476,19 +479,19 @@ impl Browser for AppBrowser {
     async fn activate(&self, tab: TabId) -> Result<(), BrowserError> {
         self.on_main(move |app| {
             let state = app.state::<AppState>();
-            activate_tab(app, &state, tab).map_err(|e| other(e.message))
+            let main = MainThread::here().ok_or_else(|| other("not on the main thread"))?;
+            activate_tab(&main, app, &state, tab).map_err(|e| other(e.message))
         })
         .await?
     }
 
     async fn close(&self, tab: TabId) -> Result<(), BrowserError> {
-        // CEF's Webview::close already queues its message onto the event
-        // loop. Calling it from inside run_on_main_thread makes that message
-        // dispatch reentrantly and can stall the main loop. The command is
-        // lock-serialized and its view operations are thread-safe handles, so
-        // let the runtime perform the one required hop itself.
-        crate::commands::tab_close(self.app.clone(), self.app.state(), tab)
-            .map_err(|e| other(e.message))
+        self.on_main(move |app| {
+            let state = app.state::<AppState>();
+            let main = MainThread::here().ok_or_else(|| other("not on the main thread"))?;
+            crate::commands::close_tab(&main, app, &state, tab).map_err(|e| other(e.message))
+        })
+        .await?
     }
 
     async fn page_text(&self, tab: TabId) -> Result<String, BrowserError> {

@@ -4,16 +4,24 @@ import type { ConsoleEntry } from "../lib/ipc";
 
 const CAP = 500;
 
+/** A console entry as kept here: the wire entry plus a key that survives eviction, so a windowed list can reuse rows. */
+export interface ConsoleRow extends ConsoleEntry {
+  id: number;
+}
+
 interface ConsoleState {
-  byTab: Record<string, ConsoleEntry[]>;
+  byTab: Record<string, ConsoleRow[]>;
   push: (entry: ConsoleEntry) => void;
   clear: (tabId: string) => void;
   drop: (tabId: string) => void;
 }
 
+let seq = 0;
+
 /** Append keeping at most CAP entries per tab. Pure for tests. */
-export function append(list: ConsoleEntry[] | undefined, entry: ConsoleEntry): ConsoleEntry[] {
-  const next = list ? [...list, entry] : [entry];
+export function append(list: ConsoleRow[] | undefined, entry: ConsoleEntry): ConsoleRow[] {
+  const row: ConsoleRow = { ...entry, id: ++seq };
+  const next = list ? [...list, row] : [row];
   return next.length > CAP ? next.slice(next.length - CAP) : next;
 }
 
@@ -37,7 +45,8 @@ export function listenConsole() {
   return listening;
 }
 
-const EMPTY: ConsoleEntry[] = [];
+const EMPTY: ConsoleRow[] = [];
+/** The tab's entries by reference: an event for another tab leaves this untouched, so subscribers do not re-render. */
 export const selectEntries = (tabId: string | null) => (s: ConsoleState) => (tabId ? (s.byTab[tabId] ?? EMPTY) : EMPTY);
 
 /** Favicon fetch failures are browser noise, not the page's problem. */
@@ -45,7 +54,11 @@ export function isNoise(e: ConsoleEntry): boolean {
   return e.level === "error" && (e.url?.endsWith("/favicon.ico") === true || e.text.includes("favicon.ico"));
 }
 
-/** Errors and exceptions for a tab, newest last. */
+/**
+ * Errors and exceptions for a tab, newest last. Builds a new array per call, so
+ * derive from `selectEntries` with `useMemo` in components rather than passing
+ * this to the store hook directly.
+ */
 export const selectErrors = (tabId: string | null) => (s: ConsoleState) => {
   const list = tabId ? (s.byTab[tabId] ?? EMPTY) : EMPTY;
   return list === EMPTY ? EMPTY : list.filter((e) => e.level === "error" && !isNoise(e));

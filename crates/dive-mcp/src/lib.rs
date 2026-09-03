@@ -674,6 +674,230 @@ pub struct EvaluateParams {
     pub expression: String,
 }
 
+/// One tool as the server advertises it. The single source of the tool
+/// surface; the sidecar agent's catalog is checked against it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CatalogEntry {
+    /// Tool name.
+    pub name: String,
+    /// What the tool does, as clients see it.
+    pub description: String,
+    /// JSON schema of the parameters.
+    pub input_schema: serde_json::Value,
+}
+
+/// Every tool the server advertises, listed without a browser behind it.
+pub fn tool_catalog() -> Vec<CatalogEntry> {
+    let mut entries: Vec<CatalogEntry> = DiveServer::<NoBrowser>::tool_router()
+        .list_all()
+        .into_iter()
+        .map(|t| CatalogEntry {
+            name: t.name.into_owned(),
+            description: t
+                .description
+                .map(std::borrow::Cow::into_owned)
+                .unwrap_or_default(),
+            input_schema: serde_json::Value::Object((*t.input_schema).clone()),
+        })
+        .collect();
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    entries
+}
+
+/// A browser that answers nothing, so the tool router can be built for its
+/// metadata alone.
+struct NoBrowser;
+
+#[async_trait]
+impl Browser for NoBrowser {
+    async fn tabs(&self) -> Result<Vec<TabInfo>, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn open_tab(&self, _url: String) -> Result<TabInfo, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn navigate(&self, _tab: TabId, _url: String) -> Result<(), BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn activate(&self, _tab: TabId) -> Result<(), BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn close(&self, _tab: TabId) -> Result<(), BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_text(&self, _tab: TabId) -> Result<String, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn screenshot(&self, _tab: TabId, _full_page: bool) -> Result<Vec<u8>, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn evaluate(
+        &self,
+        _tab: TabId,
+        _expression: String,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn console_tail(
+        &self,
+        _tab: TabId,
+        _limit: usize,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn requests(
+        &self,
+        _tab: TabId,
+        _limit: usize,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn request_body(
+        &self,
+        _tab: TabId,
+        _request_id: String,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_state(&self, _tab: TabId) -> Result<String, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_inspect(&self, _tab: TabId) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_click(
+        &self,
+        _tab: TabId,
+        _target: Target,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_type(
+        &self,
+        _tab: TabId,
+        _target: Target,
+        _text: String,
+        _clear: bool,
+        _submit: bool,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_press(
+        &self,
+        _tab: TabId,
+        _target: Target,
+        _key: String,
+        _modifiers: Vec<String>,
+    ) -> Result<(), BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_scroll(
+        &self,
+        _tab: TabId,
+        _target: Target,
+        _delta_x: f64,
+        _delta_y: f64,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_wait_for(
+        &self,
+        _tab: TabId,
+        _params: WaitForParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_locate(
+        &self,
+        _tab: TabId,
+        _locator: String,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_resize(
+        &self,
+        _tab: TabId,
+        _params: ResizeParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_devices(&self) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_appearance(
+        &self,
+        _tab: TabId,
+        _params: AppearanceParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_throttle(
+        &self,
+        _tab: TabId,
+        _profile: String,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_component(
+        &self,
+        _tab: TabId,
+        _target: Target,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn dev_servers(&self) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn api_spec(&self, _tab: TabId) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_report(&self, _tab: TabId) -> Result<String, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn rules(&self) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn set_rules(&self, _rules: serde_json::Value) -> Result<(), BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_snapshot(&self, _tab: TabId) -> Result<String, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_diff(&self, _tab: TabId) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+}
+
 /// The MCP server handler.
 #[derive(Clone)]
 pub struct DiveServer<B: Browser> {
@@ -1278,6 +1502,25 @@ pub async fn serve<B: Browser>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_catalog_lists_every_tool_once_with_a_schema() {
+        let catalog = tool_catalog();
+        assert!(catalog.len() >= 30, "{}", catalog.len());
+        let mut names: Vec<&str> = catalog.iter().map(|e| e.name.as_str()).collect();
+        names.dedup();
+        assert_eq!(names.len(), catalog.len());
+        for entry in &catalog {
+            assert!(
+                !entry.description.is_empty(),
+                "{} has no description",
+                entry.name
+            );
+            assert_eq!(entry.input_schema["type"], "object", "{}", entry.name);
+        }
+        assert!(names.contains(&"page_click"));
+        assert!(names.contains(&"tab_open"));
+    }
+
     use super::*;
     use std::sync::Mutex;
 

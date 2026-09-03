@@ -70,7 +70,8 @@ pub enum Keep {
 }
 
 /// What the sweep knows about one candidate when it decides.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
+#[allow(clippy::struct_excessive_bools)] // independent safety signals, not one state machine
 pub struct Signals {
     /// The tab currently shown, if any.
     pub showing: Option<TabId>,
@@ -80,13 +81,29 @@ pub struct Signals {
     pub agent_busy: bool,
     /// Whether the page reports playing media.
     pub audible: bool,
+    /// Whether local dev-server pages are exempt. Always on for users;
+    /// `DIVE_DISCARD_LOCAL_TABS=1` lets a harness on loopback exercise
+    /// the sweep.
+    pub protect_local: bool,
+}
+
+impl Default for Signals {
+    fn default() -> Self {
+        Self {
+            showing: None,
+            recording: false,
+            agent_busy: false,
+            audible: false,
+            protect_local: true,
+        }
+    }
 }
 
 /// The rule that keeps an idle tab alive, if any applies.
 pub fn keep_reason(tab: &Tab, s: Signals) -> Option<Keep> {
     if s.showing == Some(tab.id) {
         Some(Keep::Showing)
-    } else if crate::devservers::is_local_url(&tab.url) {
+    } else if s.protect_local && crate::devservers::is_local_url(&tab.url) {
         Some(Keep::LocalDevServer)
     } else if s.recording {
         Some(Keep::Recording)
@@ -113,6 +130,7 @@ pub async fn sweep(app: &AppHandle<Runtime>) -> dive_core::Result<usize> {
         .map(crate::engine::TabHost::showing)
         .unwrap_or_default();
     let agent_busy = !lock(&state.agent_runs).is_empty();
+    let protect_local = std::env::var("DIVE_DISCARD_LOCAL_TABS").is_err();
 
     let mut discard = Vec::new();
     for tab in candidates {
@@ -127,6 +145,7 @@ pub async fn sweep(app: &AppHandle<Runtime>) -> dive_core::Result<usize> {
             recording: state.screencast.is_recording(tab.id) || state.buffers.is_recording(tab.id),
             agent_busy,
             audible,
+            protect_local,
         };
         match keep_reason(&tab, signals) {
             Some(Keep::Showing) => {
@@ -261,6 +280,7 @@ mod tests {
             recording: true,
             agent_busy: true,
             audible: true,
+            protect_local: true,
         };
         assert_eq!(keep_reason(&t, s), Some(Keep::Showing));
     }
@@ -302,6 +322,16 @@ mod tests {
             ),
             Some(Keep::Audible)
         );
+    }
+
+    #[test]
+    fn a_harness_may_switch_the_local_exemption_off() {
+        let t = tab("http://127.0.0.1:5173/");
+        let s = Signals {
+            protect_local: false,
+            ..Signals::default()
+        };
+        assert_eq!(keep_reason(&t, s), None);
     }
 
     #[test]

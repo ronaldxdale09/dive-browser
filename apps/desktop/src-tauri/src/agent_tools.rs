@@ -43,7 +43,11 @@ pub fn specs() -> Vec<ToolSpec> {
             "Accessibility tree as indented text. page_inspect is usually the better read; use this when you need the full tree.".into(),
             obj(json!({"tab_id": tab}), &[]),
         ),
-        spec("page_screenshot", "Screenshot of the viewport. Use only when layout matters.".into(), obj(json!({"tab_id": tab}), &[])),
+        spec(
+            "page_screenshot",
+            "Screenshot of the viewport, or of the whole page with full_page. Use only when layout matters.".into(),
+            obj(json!({"tab_id": tab, "full_page": {"type": "boolean", "description": "Capture the entire scrollable page instead of the viewport."}}), &[]),
+        ),
         spec(
             "page_click",
             "Click one element.".into(),
@@ -52,17 +56,17 @@ pub fn specs() -> Vec<ToolSpec> {
         spec(
             "page_type",
             "Type into one field. Replaces the current value unless clear is false; submit presses Enter.".into(),
-            obj(json!({"tab_id": tab, "locator": locator, "ref": {"type": "string"}, "text": {"type": "string"}, "clear": {"type": "boolean"}, "submit": {"type": "boolean"}}), &["text"]),
+            obj(json!({"tab_id": tab, "locator": locator, "ref": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "text": {"type": "string"}, "clear": {"type": "boolean"}, "submit": {"type": "boolean"}}), &["text"]),
         ),
         spec(
             "page_press",
             "Press one key: Enter, Escape, Tab, ArrowDown, Backspace, or a single character. Modifiers are Meta, Control, Alt, Shift. Give a locator to focus an editable field first, or omit it to press against the focused element.".into(),
-            obj(json!({"tab_id": tab, "locator": locator, "key": {"type": "string"}, "modifiers": {"type": "array", "items": {"type": "string"}}}), &["key"]),
+            obj(json!({"tab_id": tab, "locator": locator, "ref": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "key": {"type": "string"}, "modifiers": {"type": "array", "items": {"type": "string"}}}), &["key"]),
         ),
         spec(
             "page_scroll",
             "Scroll the page, or a container named by a locator. Positive delta_y scrolls down. Use this to reach content below the fold.".into(),
-            obj(json!({"tab_id": tab, "locator": locator, "delta_x": {"type": "number"}, "delta_y": {"type": "number"}}), &[]),
+            obj(json!({"tab_id": tab, "locator": locator, "ref": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "delta_x": {"type": "number"}, "delta_y": {"type": "number"}}), &[]),
         ),
         spec(
             "page_wait_for",
@@ -121,6 +125,29 @@ pub fn specs() -> Vec<ToolSpec> {
         spec("dev_servers", "Dev servers listening on this machine, with port, framework, page title, process and PID when the OS reports them.".into(), obj(json!({}), &[])),
     ]
 }
+
+/// MCP tools the sidecar agent is deliberately not offered, with the reason.
+/// Everything else the server advertises the agent gets, and a test holds
+/// the two catalogs to that.
+#[cfg(test)]
+pub const NOT_FOR_AGENT: &[(&str, &str)] = &[
+    (
+        "page_evaluate",
+        "arbitrary JavaScript is behind the DIVE_MCP_ALLOW_EVAL opt-in; the agent gets typed tools",
+    ),
+    (
+        "api_spec",
+        "an OpenAPI export is a developer artefact to save, not something to reason over mid-task",
+    ),
+    (
+        "dive_capabilities",
+        "MCP clients ask what the server can do; the agent is told in its system prompt",
+    ),
+    (
+        "tab_open",
+        "the agent works in the tab the person is in; it may navigate it but not multiply tabs",
+    ),
+];
 
 /// Tools that change the page or leave it; the UI labels these as actions.
 pub fn is_action(name: &str) -> bool {
@@ -239,7 +266,8 @@ async fn execute<B: Browser>(
             .map(Value::String)
             .map_err(err),
         "page_screenshot" => {
-            let png = browser.screenshot(tab()?, false).await.map_err(err)?;
+            let full_page = input["full_page"].as_bool().unwrap_or(false);
+            let png = browser.screenshot(tab()?, full_page).await.map_err(err)?;
             if png.len() > MAX_AGENT_SCREENSHOT_BYTES {
                 return Err(format!(
                     "screenshot is over the {MAX_AGENT_SCREENSHOT_BYTES} byte agent limit; resize the page and try again"
@@ -402,6 +430,60 @@ async fn execute<B: Browser>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_agent_catalog_is_the_mcp_catalog_minus_documented_exceptions() {
+        use std::collections::{BTreeSet, HashMap};
+        let mcp: HashMap<String, dive_mcp::CatalogEntry> = dive_mcp::tool_catalog()
+            .into_iter()
+            .map(|e| (e.name.clone(), e))
+            .collect();
+        let props = |schema: &Value| -> BTreeSet<String> {
+            schema["properties"]
+                .as_object()
+                .map(|o| o.keys().cloned().collect())
+                .unwrap_or_default()
+        };
+        let offered: BTreeSet<String> = specs().into_iter().map(|s| s.name).collect();
+        let mut drift = Vec::new();
+        for spec in specs() {
+            let entry = mcp.get(&spec.name).unwrap_or_else(|| {
+                panic!(
+                    "{} is offered to the agent but is not an MCP tool",
+                    spec.name
+                )
+            });
+            let (agent, server) = (props(&spec.input_schema), props(&entry.input_schema));
+            if agent != server {
+                drift.push(format!(
+                    "{}: agent {agent:?} vs server {server:?}",
+                    spec.name
+                ));
+            }
+        }
+        assert!(
+            drift.is_empty(),
+            "the agent's parameters drifted from the server's:\n{}",
+            drift.join("\n")
+        );
+        for name in mcp.keys() {
+            assert!(
+                offered.contains(name) || NOT_FOR_AGENT.iter().any(|(n, _)| n == name),
+                "{name} is an MCP tool the agent neither offers nor documents as excluded"
+            );
+        }
+        for (name, why) in NOT_FOR_AGENT {
+            assert!(
+                mcp.contains_key(*name),
+                "{name} is excluded but no longer exists"
+            );
+            assert!(
+                !offered.contains(*name),
+                "{name} is both offered and excluded"
+            );
+            assert!(!why.is_empty());
+        }
+    }
+
     use super::*;
 
     #[test]

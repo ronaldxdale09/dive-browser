@@ -5,13 +5,13 @@
 import { Channel } from "@tauri-apps/api/core";
 import type { ChatDelta, SendOptions } from "../generated/bindings";
 import { commands, events } from "../generated/bindings";
-import type { ClearRequest, NetworkProfile, Prefs, Rule } from "../generated/bindings";
+import type { ClearRequest, NetworkProfile, PaneBounds, Prefs, Rule } from "../generated/bindings";
 
 /** Shape tauri-specta returns for fallible commands. */
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 export { events };
-export type { Prefs, ClearRequest, Rule, RuleAction, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions } from "../generated/bindings";
+export type { Prefs, ClearRequest, Rule, RuleAction, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, PaneBounds, TabWindowChanged, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
 export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
@@ -81,6 +81,12 @@ export const ipc = {
   setContentBounds: async (b: { x: number; y: number; width: number; height: number }) =>
     unwrap(await commands.layoutSetContentBounds(b)),
   setContentCovered: async (covered: boolean) => unwrap(await commands.layoutSetContentCovered(covered)),
+  /** Show these tabs side by side; an empty list returns to a single page. */
+  setPanes: async (panes: PaneBounds[]) => unwrap(await commands.layoutSetPanes(panes)),
+  /** Tear a tab off into its own window, placed under `at` (window-relative logical px) when given. */
+  tabDetach: async (id: string, at: { x: number; y: number } | null) => unwrap(await commands.tabDetach(id, at ? [at.x, at.y] : null)),
+  tabAttach: async (id: string) => unwrap(await commands.tabAttach(id)),
+  popoutSetBounds: async (id: string, b: { x: number; y: number; width: number; height: number }) => unwrap(await commands.popoutSetBounds(id, b)),
   commandsList: () => commands.commandsList(),
   appInfo: () => commands.appInfo(),
   prefsGet: () => commands.prefsGet(),

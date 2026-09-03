@@ -10,6 +10,16 @@ use crate::Runtime;
 use crate::engine::TabHost;
 
 /// Shared state managed by Tauri.
+///
+/// # Locking
+///
+/// Every mutex here is a plain `std::sync::Mutex` held for a short sync
+/// block and released before any `.await`. When two are needed at once the
+/// order is always **`host`, then `store`**; `commands::activate_tab` is the
+/// canonical example. Creating or showing a native view additionally needs
+/// the main thread, which [`crate::engine::MainThread`] proves, and the
+/// MCP server hops there with `AppBrowser::on_main` before touching `host`
+/// for anything but a read.
 pub struct AppState {
     /// Persistent store; one connection guarded by a mutex.
     pub store: Mutex<Store>,

@@ -1,8 +1,12 @@
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { createElement } from "react";
 import { describe, expect, it } from "vitest";
-import { fold, selectFrames, useNetwork } from "./network";
+import { fold, selectFrames, selectRequests, useNetwork } from "./network";
 import type { NetworkEvent } from "../lib/ipc";
 
-const sent = (id: string, url: string, t = 1): NetworkEvent => ({ type: "sent", data: { tab_id: "t", request_id: id, url, method: "GET", resource_type: "Fetch", headers: {}, post_data: null, timestamp: t, wall_time: 1_700_000_000 + t } });
+type SentEvent = Extract<NetworkEvent, { type: "sent" }>;
+
+const sent = (id: string, url: string, t = 1, tab = "t"): SentEvent => ({ type: "sent", data: { tab_id: tab, request_id: id, url, method: "GET", resource_type: "Fetch", headers: {}, post_data: null, timestamp: t, wall_time: 1_700_000_000 + t } });
 
 describe("network fold", () => {
   it("builds a row through its lifecycle", () => {
@@ -34,5 +38,43 @@ describe("network fold", () => {
     useNetwork.getState().apply({ type: "frame", data: { tab_id: "t", request_id: "old", direction: "received", payload: "hi", timestamp: 1.1 } });
     for (let i = 0; i < 1000; i += 1) useNetwork.getState().apply(sent(String(i), `https://a.dev/${i}`));
     expect(selectFrames("t", "old")(useNetwork.getState())).toEqual([]);
+  });
+});
+
+describe("selectRequests", () => {
+  it("returns the same array for tab A after an event lands on tab B", () => {
+    useNetwork.setState({ byTab: {}, frames: {} });
+    useNetwork.getState().apply(sent("a1", "https://a.dev/1"));
+    const before = selectRequests("t")(useNetwork.getState());
+    const empty = selectRequests("never")(useNetwork.getState());
+
+    useNetwork.getState().apply(sent("b1", "https://b.dev/1", 1, "other"));
+    useNetwork.getState().apply({ type: "response", data: { tab_id: "other", request_id: "b1", status: 200, mime_type: "text/html", from_cache: false, headers: {}, timestamp: 2 } });
+
+    expect(selectRequests("t")(useNetwork.getState())).toBe(before);
+    expect(selectRequests("never")(useNetwork.getState())).toBe(empty);
+    expect(selectRequests(null)(useNetwork.getState())).toBe(empty);
+    expect(selectRequests("other")(useNetwork.getState())).toHaveLength(1);
+  });
+
+  it("does not re-render a subscriber of tab A for tab B's traffic", () => {
+    useNetwork.setState({ byTab: {}, frames: {} });
+    useNetwork.getState().apply(sent("a1", "https://a.dev/1"));
+    let renders = 0;
+    function Probe() {
+      const rows = useNetwork(selectRequests("t"));
+      renders += 1;
+      return createElement("span", null, rows.length);
+    }
+    render(createElement(Probe));
+    expect(renders).toBe(1);
+
+    act(() => useNetwork.getState().apply(sent("b1", "https://b.dev/1", 1, "other")));
+    expect(renders).toBe(1);
+
+    act(() => useNetwork.getState().apply(sent("a2", "https://a.dev/2")));
+    expect(renders).toBe(2);
+    expect(screen.getByText("2")).toBeTruthy();
+    cleanup();
   });
 });

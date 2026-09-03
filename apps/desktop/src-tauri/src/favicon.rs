@@ -169,8 +169,11 @@ pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
                     // navigation during them has to be seen to cancel them.
                     tauri::async_runtime::spawn(async move {
                         for (attempt, delay) in ATTEMPTS.into_iter().enumerate() {
+                            if session.is_closed() {
+                                return;
+                            }
                             tokio::time::sleep(delay).await;
-                            if epoch.load(Ordering::SeqCst) != mine {
+                            if session.is_closed() || epoch.load(Ordering::SeqCst) != mine {
                                 return;
                             }
                             if let Some(data) = resolve(&session, attempt == 0).await {

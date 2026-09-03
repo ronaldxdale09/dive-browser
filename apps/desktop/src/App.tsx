@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from "react";
 import { Rail, RAIL_WIDTH } from "./components/Rail";
 import { TabStrip } from "./components/TabStrip";
+import { TabDnd } from "./components/TabDnd";
 import { WorkspaceChip } from "./components/WorkspaceChip";
 import { FeatureBar } from "./components/FeatureBar";
 import { Toolbar } from "./components/Toolbar";
@@ -38,6 +39,7 @@ export function App() {
   useShortcuts();
 
   return (
+    <TabDnd>
     <div
       className="grid h-full grid-rows-[40px_44px_minmax(0,1fr)] bg-ground text-ink"
       style={{ gridTemplateColumns: `${railExpanded ? RAIL_WIDTH.expanded : RAIL_WIDTH.collapsed}px minmax(0,1fr)` }}
@@ -96,5 +98,6 @@ export function App() {
         </div>
       )}
     </div>
+    </TabDnd>
   );
 }

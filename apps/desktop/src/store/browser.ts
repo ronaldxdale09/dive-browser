@@ -13,6 +13,10 @@ interface BrowserState {
   activeWorkspace: string | null;
   tabs: Tab[];
   activeTab: string | null;
+  /** Tabs living in their own window rather than the main one. */
+  detached: string[];
+  detachTab: (id: string, at: { x: number; y: number } | null) => Promise<void>;
+  attachTab: (id: string) => Promise<void>;
   open: Record<UiPanel, boolean>;
   error: string | null;
   boot: () => Promise<void>;
@@ -53,7 +57,7 @@ interface BrowserState {
 }
 
 /** Reduce one core event into local state. Pure, so it is unit-testable. */
-type Reduced = Pick<BrowserState, "workspaces" | "tabs" | "activeTab" | "activeWorkspace" | "recordingTab">;
+type Reduced = Pick<BrowserState, "workspaces" | "tabs" | "activeTab" | "activeWorkspace" | "recordingTab" | "detached">;
 
 export function reduceEvent(state: Reduced, event: CoreEvent): Partial<Reduced> {
   switch (event.type) {
@@ -76,7 +80,8 @@ export function reduceEvent(state: Reduced, event: CoreEvent): Partial<Reduced> 
       const activeTab = state.activeTab === event.data ? null : state.activeTab;
       // The engine discards that tab's recording; nothing is saved.
       const recordingTab = state.recordingTab === event.data ? null : state.recordingTab;
-      return { tabs, activeTab, recordingTab };
+      const detached = state.detached.filter((id) => id !== event.data);
+      return { tabs, activeTab, recordingTab, detached };
     }
     case "tab_activated":
       return { activeTab: event.data };
@@ -86,7 +91,18 @@ export function reduceEvent(state: Reduced, event: CoreEvent): Partial<Reduced> 
 }
 
 function fromSnapshot(s: Snapshot) {
-  return { workspaces: s.workspaces, activeWorkspace: s.active_workspace, tabs: s.tabs, activeTab: s.active_tab };
+  return { workspaces: s.workspaces, activeWorkspace: s.active_workspace, tabs: s.tabs, activeTab: s.active_tab, detached: s.detached };
+}
+
+/** A tab moved into its own window, or back. The main window's page goes
+ * blank when the tab it was showing leaves; the engine does not announce a
+ * replacement unless there is one. */
+export function reduceWindowChange(state: Pick<BrowserState, "detached" | "activeTab">, tab: string, detached: boolean) {
+  const rest = state.detached.filter((id) => id !== tab);
+  return {
+    detached: detached ? [...rest, tab] : rest,
+    activeTab: detached && state.activeTab === tab ? null : state.activeTab,
+  };
 }
 
 let unlisten: (() => void) | null = null;
@@ -97,6 +113,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   activeWorkspace: null,
   tabs: [],
   activeTab: null,
+  detached: [],
   open: { sidecar: false, dock: false, palette: false, find: false, settings: false },
   counts: {},
   error: null,
@@ -111,6 +128,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   boot: async () => {
     try {
       unlisten ??= await events.stateChanged.listen((e) => get().applyEvent(e.payload));
+      await events.tabWindowChanged.listen((e) => set(reduceWindowChange(get(), e.payload.tab, e.payload.detached)));
       await events.downloadNotice.listen((e) => {
         const d = e.payload;
         useDownloads.getState().apply(d);
@@ -131,6 +149,8 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     if (!ws) return;
     await run(set, () => ipc.tabOpen(ws, url));
   },
+  detachTab: async (id, at) => run(set, () => ipc.tabDetach(id, at)),
+  attachTab: async (id) => run(set, () => ipc.tabAttach(id)),
   closeTab: async (id) => {
     await run(set, () => ipc.tabClose(id));
     useConsole.getState().drop(id);

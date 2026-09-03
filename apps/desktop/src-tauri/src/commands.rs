@@ -12,7 +12,7 @@ use tauri::{AppHandle, State};
 use tauri_specta::{Event, collect_commands, collect_events};
 
 use crate::Runtime;
-use crate::engine::{Bounds, PaneBounds};
+use crate::engine::{Bounds, MainThread, PaneBounds};
 use crate::error::{AppError, AppResult};
 use crate::state::{AppState, lock};
 
@@ -542,7 +542,10 @@ pub(crate) fn workspace_activate(
     }
     state.bus.publish(CoreEvent::WorkspaceActivated(id));
     if let Some(tab) = last {
-        activate_tab(&app, &state, tab.id)?;
+        let next = tab.id;
+        on_main(&app, move |main, app, state| {
+            activate_tab(main, app, state, next)
+        })?;
     }
     Ok(())
 }
@@ -759,16 +762,18 @@ fn clean_icon(icon: &str) -> AppResult<String> {
 #[specta::specta]
 pub(crate) fn tab_open(
     app: AppHandle<Runtime>,
-    state: State<'_, AppState>,
     workspace_id: WorkspaceId,
     url: String,
 ) -> AppResult<Tab> {
-    open_tab(&app, &state, workspace_id, &url)
+    on_main(&app, move |main, app, state| {
+        open_tab(main, app, state, workspace_id, &url)
+    })
 }
 
 /// Create, persist, show and announce a new tab. Shared by the IPC command
 /// and startup URL handling.
 pub fn open_tab(
+    main: &MainThread,
     app: &AppHandle<Runtime>,
     state: &AppState,
     workspace_id: WorkspaceId,
@@ -788,8 +793,8 @@ pub fn open_tab(
     let opened = {
         let mut host = lock(&state.host);
         match host.as_mut() {
-            Some(host) => match host.open(app, &tab, &container) {
-                Ok(()) => host.activate(tab.id).map_err(|error| {
+            Some(host) => match host.open(main, app, &tab, &container) {
+                Ok(()) => host.activate(main, tab.id).map_err(|error| {
                     let _ = host.close(tab.id);
                     AppError::from(error)
                 }),
@@ -814,17 +819,20 @@ pub fn open_tab(
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn tab_close(
-    app: AppHandle<Runtime>,
-    state: State<'_, AppState>,
-    id: TabId,
-) -> AppResult<()> {
-    close_tab(&app, &state, id)
+pub(crate) fn tab_close(app: AppHandle<Runtime>, id: TabId) -> AppResult<()> {
+    on_main(&app, move |main, app, state| {
+        close_tab(main, app, state, id)
+    })
 }
 
 /// Close `id`: destroy its view (and its window, if it had one of its own),
 /// forget it, and move on to the workspace's previous tab if it was showing.
-pub fn close_tab(app: &AppHandle<Runtime>, state: &AppState, id: TabId) -> AppResult<()> {
+pub fn close_tab(
+    main: &MainThread,
+    app: &AppHandle<Runtime>,
+    state: &AppState,
+    id: TabId,
+) -> AppResult<()> {
     let (was_active, workspace) = {
         let mut host = lock(&state.host);
         let store = lock(&state.store);
@@ -853,24 +861,58 @@ pub fn close_tab(app: &AppHandle<Runtime>, state: &AppState, id: TabId) -> AppRe
         _ => None,
     };
     if let Some(next) = next {
-        activate_tab(app, state, next.id)?;
+        activate_tab(main, app, state, next.id)?;
     }
     Ok(())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn tab_activate(
-    app: AppHandle<Runtime>,
-    state: State<'_, AppState>,
-    id: TabId,
-) -> AppResult<()> {
-    activate_tab(&app, &state, id)
+pub(crate) fn tab_activate(app: AppHandle<Runtime>, id: TabId) -> AppResult<()> {
+    on_main(&app, move |main, app, state| {
+        activate_tab(main, app, state, id)
+    })
+}
+
+/// Run `f` on the main thread and wait for its result.
+///
+/// Under the CEF runtime Tauri hands every IPC command to a worker thread,
+/// and native views may only be created, shown or moved from the main
+/// thread, so engine-facing commands hop there. Call this before taking any
+/// lock the closure will need, or the hop waits on itself.
+fn on_main<T: Send + 'static>(
+    app: &AppHandle<Runtime>,
+    f: impl FnOnce(&MainThread, &AppHandle<Runtime>, &AppState) -> AppResult<T> + Send + 'static,
+) -> AppResult<T> {
+    use tauri::Manager;
+    if let Some(main) = MainThread::here() {
+        let state = app.state::<AppState>();
+        return f(&main, app, &state);
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        let result = match MainThread::here() {
+            Some(main) => {
+                let state = handle.state::<AppState>();
+                f(&main, &handle, &state)
+            }
+            None => Err(AppError::new("main-thread hop landed on another thread")),
+        };
+        let _ = tx.send(result);
+    })?;
+    rx.recv()
+        .map_err(|_| AppError::new("the main thread dropped the command"))?
 }
 
 /// Show `id` (recreating its view if it was discarded), persist it as the
 /// active tab and announce the change.
-pub fn activate_tab(app: &AppHandle<Runtime>, state: &AppState, id: TabId) -> AppResult<()> {
+pub fn activate_tab(
+    main: &MainThread,
+    app: &AppHandle<Runtime>,
+    state: &AppState,
+    id: TabId,
+) -> AppResult<()> {
     // Lock order everywhere: host, then store. Holding both here closes the
     // window in which a concurrent `tab_close` could delete the row while we
     // recreate its view.
@@ -893,10 +935,10 @@ pub fn activate_tab(app: &AppHandle<Runtime>, state: &AppState, id: TabId) -> Ap
                 .or(*lock(&state.active_workspace))
                 .ok_or_else(|| AppError::new("tab has no workspace"))?;
             let container = store.container(store.workspace(ws)?.container_id)?;
-            host.open(app, &tab, &container)?;
+            host.open(main, app, &tab, &container)?;
             crate::housekeeping::restore_scroll(app.clone(), id);
         }
-        host.activate(id)?;
+        host.activate(main, id)?;
         tab.last_active_at = dive_core::Timestamp::now();
         tab.state = dive_core::TabState::Active;
         store.upsert_tab(&tab)?;
@@ -1497,6 +1539,7 @@ pub(crate) fn layout_set_content_covered(
 /// Make sure `id` has a live view, recreating one if it was discarded. The
 /// host and store guards are the caller's, in that lock order.
 fn ensure_view(
+    main: &MainThread,
     app: &AppHandle<Runtime>,
     state: &AppState,
     host: &mut crate::engine::TabHost,
@@ -1510,7 +1553,7 @@ fn ensure_view(
             .or(*lock(&state.active_workspace))
             .ok_or_else(|| AppError::new("tab has no workspace"))?;
         let container = store.container(store.workspace(ws)?.container_id)?;
-        host.open(app, &tab, &container)?;
+        host.open(main, app, &tab, &container)?;
         crate::housekeeping::restore_scroll(app.clone(), id);
         if tab.state != dive_core::TabState::Active {
             tab.state = dive_core::TabState::Active;
@@ -1525,23 +1568,21 @@ fn ensure_view(
 #[specta::specta]
 /// Show these tabs side by side at these rectangles; an empty list returns
 /// to a single page. Sleeping tabs are woken so every pane has a page.
-pub(crate) fn layout_set_panes(
-    app: AppHandle<Runtime>,
-    state: State<'_, AppState>,
-    panes: Vec<PaneBounds>,
-) -> AppResult<()> {
-    let mut host = lock(&state.host);
-    let Some(host) = host.as_mut() else {
-        return Ok(());
-    };
-    {
-        let store = lock(&state.store);
-        for pane in &panes {
-            ensure_view(&app, &state, host, &store, pane.tab)?;
+pub(crate) fn layout_set_panes(app: AppHandle<Runtime>, panes: Vec<PaneBounds>) -> AppResult<()> {
+    on_main(&app, move |main, app, state| {
+        let mut host = lock(&state.host);
+        let Some(host) = host.as_mut() else {
+            return Ok(());
+        };
+        {
+            let store = lock(&state.store);
+            for pane in &panes {
+                ensure_view(main, app, state, host, &store, pane.tab)?;
+            }
         }
-    }
-    host.set_panes(panes)?;
-    Ok(())
+        host.set_panes(panes)?;
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -1550,7 +1591,18 @@ pub(crate) fn layout_set_panes(
 /// relative to the main window; `None` lets the system place the window.
 pub(crate) fn tab_detach(
     app: AppHandle<Runtime>,
-    state: State<'_, AppState>,
+    id: TabId,
+    at: Option<(f64, f64)>,
+) -> AppResult<()> {
+    on_main(&app, move |main, app, state| {
+        detach_tab(main, app, state, id, at)
+    })
+}
+
+fn detach_tab(
+    main: &MainThread,
+    app: &AppHandle<Runtime>,
+    state: &AppState,
     id: TabId,
     at: Option<(f64, f64)>,
 ) -> AppResult<()> {
@@ -1560,9 +1612,9 @@ pub(crate) fn tab_detach(
             .as_mut()
             .ok_or_else(|| AppError::new("engine not ready"))?;
         let store = lock(&state.store);
-        let tab = ensure_view(&app, &state, host, &store, id)?;
+        let tab = ensure_view(main, app, state, host, &store, id)?;
         let was_active = host.active() == Some(id);
-        host.detach(&app, id, &tab.title, at)?;
+        host.detach(app, id, &tab.title, at)?;
         (
             was_active,
             tab.workspace_id.or(*lock(&state.active_workspace)),
@@ -1572,7 +1624,7 @@ pub(crate) fn tab_detach(
         tab: id,
         detached: true,
     }
-    .emit(&app);
+    .emit(app);
     // The main window needs a page again; pick the workspace's most recent
     // tab that is still in it.
     if was_active && let Some(ws) = workspace {
@@ -1581,13 +1633,14 @@ pub(crate) fn tab_detach(
             let store = lock(&state.store);
             let mut tabs = store.tabs_for_workspace(ws)?;
             tabs.retain(|t| t.id != id && !host.as_ref().is_some_and(|h| h.is_detached(t.id)));
-            tabs.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
-            tabs.first().map(|t| t.id)
+            tabs.into_iter()
+                .max_by_key(|t| t.last_active_at)
+                .map(|t| t.id)
         };
         // With nothing left the chrome shows its welcome page; it learns
         // that from the detach event itself.
         if let Some(next) = next {
-            activate_tab(&app, &state, next)?;
+            activate_tab(main, app, state, next)?;
         }
     }
     Ok(())
@@ -1596,20 +1649,18 @@ pub(crate) fn tab_detach(
 #[tauri::command]
 #[specta::specta]
 /// Bring `id` back from its own window and show it in the main one.
-pub(crate) fn tab_attach(
-    app: AppHandle<Runtime>,
-    state: State<'_, AppState>,
-    id: TabId,
-) -> AppResult<()> {
-    if let Some(host) = lock(&state.host).as_mut() {
-        host.attach(id)?;
-    }
-    let _ = TabWindowChanged {
-        tab: id,
-        detached: false,
-    }
-    .emit(&app);
-    activate_tab(&app, &state, id)
+pub(crate) fn tab_attach(app: AppHandle<Runtime>, id: TabId) -> AppResult<()> {
+    on_main(&app, move |main, app, state| {
+        if let Some(host) = lock(&state.host).as_mut() {
+            host.attach(id)?;
+        }
+        let _ = TabWindowChanged {
+            tab: id,
+            detached: false,
+        }
+        .emit(app);
+        activate_tab(main, app, state, id)
+    })
 }
 
 #[tauri::command]

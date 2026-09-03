@@ -1,5 +1,6 @@
 import { ArrowDownLeft, ArrowUpRight, Ban, FileDown, FileJson, Repeat } from "lucide-react";
-import { useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { isReady, useAgent } from "../store/agent";
@@ -54,7 +55,42 @@ function statusClass(r: RequestRow) {
   return "text-ink-2";
 }
 
-/** Request table for the active tab with a detail strip for the selected row. */
+/** One request. Memoized on its row object and selection flag so a lifecycle event for another request leaves it alone. */
+const NetworkRow = memo(function NetworkRow({
+  row: r,
+  index,
+  selected,
+  onSelect,
+  measure,
+}: {
+  row: RequestRow;
+  index: number;
+  selected: boolean;
+  onSelect: (id: string) => void;
+  measure: (node: HTMLTableRowElement | null) => void;
+}) {
+  return (
+    <tr
+      ref={measure}
+      data-index={index}
+      onClick={() => onSelect(r.id)}
+      aria-selected={selected}
+      className="cursor-default border-b border-line/60 hover:bg-surface-2 aria-selected:bg-surface-3"
+    >
+      <td className="max-w-[360px] truncate px-3 text-ink" title={r.url}>{name(r.url)}</td>
+      <td className="px-2 text-ink-2">{r.method}</td>
+      <td className={`px-2 ${statusClass(r)}`}>{r.error ? "failed" : (r.status ?? "…")}{r.fromCache ? " (cache)" : ""}</td>
+      <td className="px-2 text-ink-2">{r.resourceType.toLowerCase()}</td>
+      <td className="px-2 text-right text-ink-2 tabular-nums">{size(r.size)}</td>
+      <td className="px-3 text-right text-ink-2 tabular-nums">{r.durationMs === null ? "" : `${r.durationMs} ms`}</td>
+    </tr>
+  );
+});
+
+/** A single line of `leading-5` text plus the row's bottom border. */
+const ROW_HEIGHT = 21;
+
+/** Request table for the active tab with a detail strip for the selected row. Only the rows in view are mounted. */
 export function NetworkPanel() {
   const activeTab = useBrowser((s) => s.activeTab);
   const rows = useNetwork(selectRequests(activeTab));
@@ -74,9 +110,29 @@ export function NetworkPanel() {
       activeTab,
     );
   };
-  const shown = filter ? rows.filter((r) => r.url.toLowerCase().includes(filter.toLowerCase())) : rows;
-  const detail = rows.find((r) => r.id === selected);
+  const shown = useMemo(() => {
+    const q = filter.toLowerCase();
+    return q ? rows.filter((r) => r.url.toLowerCase().includes(q)) : rows;
+  }, [rows, filter]);
+  const transferred = useMemo(() => rows.reduce((a, r) => a + (r.size ?? 0), 0), [rows]);
+  const detail = useMemo(() => rows.find((r) => r.id === selected), [rows, selected]);
   const frames = useNetwork(selectFrames(activeTab, selected));
+  const select = useCallback((id: string) => setSelected((cur) => (cur === id ? null : id)), []);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // The React Compiler is not in use here; the virtualizer's mutable instance is intended.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer({
+    count: shown.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 10,
+    getItemKey: (i) => shown[i]?.id ?? i,
+  });
+  const items = virtualizer.getVirtualItems();
+  // The table keeps its own layout; spacer rows stand in for everything scrolled out of view.
+  const above = items[0]?.start ?? 0;
+  const below = items.length > 0 ? virtualizer.getTotalSize() - items[items.length - 1]!.end : 0;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -89,9 +145,9 @@ export function NetworkPanel() {
           className="h-6 w-56 rounded-md border border-line bg-surface-2 px-2 text-[11px] text-ink outline-none placeholder:text-ink-3 focus:border-line-2"
         />
         <span>{rows.length} requests</span>
-        <span>{size(rows.reduce((a, r) => a + (r.size ?? 0), 0))} transferred</span>
+        <span>{size(transferred)} transferred</span>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto font-mono text-[11.5px] leading-5">
+      <div ref={scrollRef} data-testid="network-scroll" className="min-h-0 flex-1 overflow-auto font-mono text-[11.5px] leading-5">
         <table className="w-full border-collapse">
           <thead className="sticky top-0 bg-surface text-left text-[10px] tracking-wider text-ink-3 uppercase">
             <tr>
@@ -109,21 +165,12 @@ export function NetworkPanel() {
                 <td colSpan={6} className="px-3 py-2 text-ink-3">{activeTab ? "No requests yet." : "Open a tab to see its traffic."}</td>
               </tr>
             )}
-            {shown.map((r) => (
-              <tr
-                key={r.id}
-                onClick={() => setSelected(r.id === selected ? null : r.id)}
-                aria-selected={r.id === selected}
-                className="cursor-default border-b border-line/60 hover:bg-surface-2 aria-selected:bg-surface-3"
-              >
-                <td className="max-w-[360px] truncate px-3 text-ink" title={r.url}>{name(r.url)}</td>
-                <td className="px-2 text-ink-2">{r.method}</td>
-                <td className={`px-2 ${statusClass(r)}`}>{r.error ? "failed" : (r.status ?? "…")}{r.fromCache ? " (cache)" : ""}</td>
-                <td className="px-2 text-ink-2">{r.resourceType.toLowerCase()}</td>
-                <td className="px-2 text-right text-ink-2 tabular-nums">{size(r.size)}</td>
-                <td className="px-3 text-right text-ink-2 tabular-nums">{r.durationMs === null ? "" : `${r.durationMs} ms`}</td>
-              </tr>
-            ))}
+            {above > 0 && <tr aria-hidden style={{ height: above }} />}
+            {items.map((v) => {
+              const r = shown[v.index]!;
+              return <NetworkRow key={r.id} row={r} index={v.index} selected={r.id === selected} onSelect={select} measure={virtualizer.measureElement} />;
+            })}
+            {below > 0 && <tr aria-hidden style={{ height: below }} />}
           </tbody>
         </table>
       </div>

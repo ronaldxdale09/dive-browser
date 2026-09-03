@@ -57,3 +57,53 @@ jobs:
       - run: pnpm -r test
       - run: pnpm --filter @dive/desktop exec vite build
       - run: pnpm audit --prod --audit-level=moderate
+
+  live:
+    # The real app, driven through its MCP server: open, read, screenshot,
+    # discard and wake, renderer crash recovery, CDP latency, then the
+    # 20-tab memory harness. Everything the unit tiers cannot see.
+    name: live (macos-15)
+    runs-on: macos-15
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: brew install cmake ninja
+      - name: Cache CEF binaries
+        uses: actions/cache@v4
+        with:
+          path: .cef
+          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+      - name: Build the debug app bundle
+        run: pnpm --filter @dive/desktop exec tauri build --debug --bundles app
+      - name: Live end-to-end check
+        run: scripts/live-check.sh
+        env:
+          DIVE_BIN: target/debug/bundle/macos/Dive.app/Contents/MacOS/dive-desktop
+      - name: Memory harness (discard must reclaim)
+        run: scripts/benchmark-memory.sh
+        env:
+          DIVE_BIN: target/debug/bundle/macos/Dive.app/Contents/MacOS/dive-desktop
+          STRESS_TABS: "12"
+          STRESS_SETTLE_SECS: "20"
+          MEM_MIN_RECLAIM_PCT: "30"
+      - name: Startup benchmark
+        run: scripts/benchmark-startup.sh
+        env:
+          DIVE_BIN: target/debug/bundle/macos/Dive.app/Contents/MacOS/dive-desktop
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-logs
+          path: |
+            target/live-check.log
+            target/memory-benchmark.json
+            target/memory-benchmark.log
+            target/startup-benchmark-summary.json

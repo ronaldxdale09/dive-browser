@@ -20,4 +20,3 @@ packages/protocol/src/generated/
 .claude/autopilot/
 /docs
 /.agents
-/tests

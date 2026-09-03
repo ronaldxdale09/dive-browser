@@ -94,13 +94,10 @@ fn handle_startup_invoke(invoke: tauri::ipc::Invoke<Runtime>) -> bool {
 pub fn run() {
     startup::record_launch();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,dive=debug".into()),
-        )
-        .init();
+    let _log_guard = init_logging();
+    install_panic_hook();
 
+    engine::mark_main_thread();
     agent::init_keychain();
     let specta = commands::specta_builder();
 
@@ -117,6 +114,18 @@ pub fn run() {
             // Value form: the runtime turns a bare name into a positional argument and a
             // dashed name into a doubled switch; `--use-mock-keychain=` is honored.
             .command_line_args(startup::build_chromium_args(None));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // CEF's own word that a tab's web content process died, alongside
+        // the DevTools signal; the crash registry folds the two together.
+        builder = builder.on_web_content_process_terminate(crash::on_native_terminate);
+    }
+    // Signed updates need the release public key compiled in; a build
+    // without one (development, CI checks) simply has no updater.
+    if option_env!("DIVE_UPDATER_PUBKEY").is_some_and(|k| !k.trim().is_empty()) {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     }
 
     let specta_handler = specta.invoke_handler();
@@ -140,7 +149,11 @@ pub fn run() {
                 api.prevent_close();
                 let app = window.app_handle().clone();
                 let state = app.state::<state::AppState>();
-                if let Err(e) = commands::close_tab(&app, &state, tab) {
+                let Some(main) = engine::MainThread::here() else {
+                    tracing::warn!(%tab, "closing popout was requested off the main thread");
+                    return;
+                };
+                if let Err(e) = commands::close_tab(&main, &app, &state, tab) {
                     tracing::warn!(%tab, "closing popout failed: {e}");
                 }
             }
@@ -160,6 +173,7 @@ pub fn run() {
             devservers::start(app.handle().clone());
             smoke_test(app.handle().clone());
             stress_test(app.handle().clone());
+            cdp_bench(app.handle().clone());
             startup::record_milestone("setup_complete");
             startup::on_setup_completed(app.handle().clone());
             Ok(())
@@ -187,8 +201,12 @@ fn open_startup_urls(app: &tauri::App<Runtime>) {
     let Some(workspace) = *state::lock(&state.active_workspace) else {
         return;
     };
+    let Some(main) = engine::MainThread::here() else {
+        tracing::error!("startup tabs requested off the main thread");
+        return;
+    };
     for url in urls {
-        match commands::open_tab(app.handle(), &state, workspace, &url) {
+        match commands::open_tab(&main, app.handle(), &state, workspace, &url) {
             Ok(tab) => tracing::info!(%tab.id, url, "opened startup tab"),
             Err(e) => tracing::warn!(url, "failed to open startup tab: {e}"),
         }
@@ -215,6 +233,119 @@ fn open_startup_panels(app: tauri::AppHandle<Runtime>) {
                 Err(e) => tracing::warn!(command = id, "failed to open startup panel: {e}"),
             }
         }
+    });
+}
+
+/// Console output plus a daily-rotated log file under the data directory,
+/// so a report from the field carries what happened before the failure.
+/// The guard flushes the file writer; it lives as long as `run`.
+fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
+    use tracing_subscriber::Layer as _;
+    use tracing_subscriber::layer::SubscriberExt as _;
+    use tracing_subscriber::util::SubscriberInitExt as _;
+    let filter = || {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| "info,dive=debug".into())
+    };
+    let logs = state::data_root().join("logs");
+    let file = std::fs::create_dir_all(&logs).ok().and_then(|()| {
+        tracing_appender::rolling::Builder::new()
+            .rotation(tracing_appender::rolling::Rotation::DAILY)
+            .filename_prefix("dive")
+            .filename_suffix("log")
+            .max_log_files(7)
+            .build(&logs)
+            .ok()
+    });
+    let (file_layer, guard) = match file {
+        Some(appender) => {
+            let (writer, guard) = tracing_appender::non_blocking(appender);
+            let layer = tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(writer)
+                .with_filter(filter());
+            (Some(layer), Some(guard))
+        }
+        None => (None, None),
+    };
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_filter(filter()))
+        .with(file_layer)
+        .init();
+    guard
+}
+
+/// Write every panic in the browser process to `crashes/` in the data
+/// directory with the build version, then carry on to the default hook.
+fn install_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let dir = state::data_root().join("crashes");
+        if std::fs::create_dir_all(&dir).is_ok() {
+            let stamp = time::OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_default()
+                .replace(':', "-");
+            let body = format!(
+                "dive {} ({})\n{}\nthread: {}\n{}\n",
+                env!("CARGO_PKG_VERSION"),
+                std::env::consts::OS,
+                stamp,
+                std::thread::current().name().unwrap_or("?"),
+                info
+            );
+            let _ = std::fs::write(dir.join(format!("panic-{stamp}.txt")), body);
+        }
+        tracing::error!("{info}");
+        previous(info);
+    }));
+}
+
+/// `DIVE_CDP_BENCH=1`: once the first tab is up, time a burst of trivial
+/// `DevTools` round trips on it and log the distribution. The in-process
+/// bridge is the reason the agent tools are fast; this keeps that honest.
+fn cdp_bench(app: tauri::AppHandle<Runtime>) {
+    use tauri::Manager;
+    if std::env::var_os("DIVE_CDP_BENCH").is_none() {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+        let state = app.state::<state::AppState>();
+        let session = state::lock(&state.host)
+            .as_ref()
+            .and_then(|h| h.active().and_then(|id| h.cdp(id)));
+        let Some(session) = session else {
+            tracing::warn!("cdp bench: no active tab");
+            return;
+        };
+        let mut samples = Vec::with_capacity(100);
+        for _ in 0..100 {
+            let started = std::time::Instant::now();
+            let ok = session
+                .call(
+                    "Runtime.evaluate",
+                    serde_json::json!({"expression": "1", "returnByValue": true}),
+                )
+                .await
+                .is_ok();
+            if ok {
+                samples.push(started.elapsed());
+            }
+        }
+        if samples.is_empty() {
+            tracing::warn!("cdp bench: every call failed");
+            return;
+        }
+        samples.sort();
+        let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
+        let p50 = ms(samples[samples.len() / 2]);
+        let p95 = ms(samples[samples.len() * 95 / 100]);
+        let max = ms(*samples.last().unwrap_or(&std::time::Duration::ZERO));
+        tracing::info!(
+            "cdp bench: n={} p50_ms={p50:.3} p95_ms={p95:.3} max_ms={max:.3}",
+            samples.len()
+        );
     });
 }
 
@@ -293,10 +424,10 @@ fn stress_test(app: tauri::AppHandle<Runtime>) {
             let state = on_main.state::<state::AppState>();
             let workspace = *state::lock(&state.active_workspace);
             let mut opened = 0;
-            if let Some(ws) = workspace {
+            if let (Some(ws), Some(main)) = (workspace, engine::MainThread::here()) {
                 for i in 0..count {
                     let url = &urls[i % urls.len()];
-                    match commands::open_tab(&on_main, &state, ws, url) {
+                    match commands::open_tab(&main, &on_main, &state, ws, url) {
                         Ok(_) => opened += 1,
                         Err(e) => tracing::warn!("stress: open failed: {e}"),
                     }
@@ -319,7 +450,7 @@ fn stress_test(app: tauri::AppHandle<Runtime>) {
         tracing::info!(discarded, "stress: swept");
         tracing::info!("stress: done");
         // Give the harness time to sample memory before the process goes.
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(8)).await;
         app.exit(if discarded + 1 >= opened { 0 } else { 2 });
     });
 }
@@ -384,7 +515,10 @@ fn restore_session(app: &tauri::App<Runtime>) {
     match startup_plan(&prefs.startup, &prefs.homepage) {
         Startup::Welcome => return,
         Startup::Home(url) => {
-            match commands::open_tab(app.handle(), &state, workspace, url) {
+            let Some(main) = engine::MainThread::here() else {
+                return;
+            };
+            match commands::open_tab(&main, app.handle(), &state, workspace, url) {
                 Ok(tab) => tracing::info!(%tab.id, url = tab.url, "opened home page"),
                 Err(e) => tracing::warn!("failed to open home page: {e}"),
             }
@@ -405,8 +539,8 @@ fn restore_session(app: &tauri::App<Runtime>) {
             });
         remembered.or_else(|| store.last_active_tab(workspace).ok().flatten())
     };
-    if let Some(tab) = candidate {
-        match commands::activate_tab(app.handle(), &state, tab.id) {
+    if let (Some(tab), Some(main)) = (candidate, engine::MainThread::here()) {
+        match commands::activate_tab(&main, app.handle(), &state, tab.id) {
             Ok(()) => tracing::info!(%tab.id, url = tab.url, "restored session tab"),
             Err(e) => tracing::warn!("failed to restore session tab: {e}"),
         }

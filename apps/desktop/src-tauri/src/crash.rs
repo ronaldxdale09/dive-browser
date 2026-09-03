@@ -30,6 +30,9 @@ pub const MAX_ATTEMPTS: u32 = 3;
 pub const WINDOW: Duration = Duration::from_secs(30);
 /// First backoff; each further attempt doubles it.
 pub const BASE_DELAY: Duration = Duration::from_millis(250);
+/// Two reports of the same tab this close together are one crash seen by
+/// both signals: CEF's process hook and the `DevTools` `targetCrashed` event.
+pub const SAME_EVENT: Duration = Duration::from_secs(1);
 
 /// Emitted when a tab's renderer dies, whether or not it is being recovered.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
@@ -94,9 +97,17 @@ pub fn plan(state: Attempts, now: Instant) -> Option<Plan> {
 #[derive(Default)]
 pub struct Registry {
     inner: Mutex<HashMap<TabId, Attempts>>,
+    /// When each tab's crash was last reported, to fold duplicate signals.
+    seen: Mutex<HashMap<TabId, Instant>>,
 }
 
 impl Registry {
+    /// Note a report and say whether it repeats one just handled.
+    pub fn duplicate(&self, tab: TabId, now: Instant) -> bool {
+        let mut seen = lock(&self.seen);
+        matches!(seen.insert(tab, now), Some(prev) if now.duration_since(prev) < SAME_EVENT)
+    }
+
     /// Record a crash and say what to do about it.
     pub fn on_crash(&self, tab: TabId, now: Instant) -> Option<Plan> {
         let mut history = lock(&self.inner);
@@ -109,7 +120,27 @@ impl Registry {
     /// Forget a closed tab's history.
     pub fn drop_tab(&self, tab: TabId) {
         lock(&self.inner).remove(&tab);
+        lock(&self.seen).remove(&tab);
     }
+}
+
+/// CEF's report that a tab's web content process went away. The `DevTools`
+/// session usually notices too; whichever signal lands second is dropped.
+pub fn on_native_terminate(webview: &tauri::Webview<Runtime>) {
+    let Some(tab_id) = crate::engine::tab_from_label(webview.label()) else {
+        return;
+    };
+    let app = webview.app_handle().clone();
+    tauri::async_runtime::spawn(async move {
+        let session = lock(&app.state::<AppState>().host)
+            .as_ref()
+            .and_then(|h| h.cdp(tab_id));
+        if let Some(session) = session {
+            recover(&app, tab_id, &session).await;
+        } else {
+            tracing::warn!(%tab_id, "web content process died with no session to reload");
+        }
+    });
 }
 
 /// Watch a tab's session for renderer crashes and reload within budget.
@@ -136,10 +167,13 @@ pub fn watch(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
 }
 
 async fn recover(app: &AppHandle<Runtime>, tab_id: TabId, session: &CdpSession) {
-    let planned = app
-        .state::<AppState>()
-        .crashes
-        .on_crash(tab_id, Instant::now());
+    let now = Instant::now();
+    let crashes = &app.state::<AppState>().crashes;
+    if crashes.duplicate(tab_id, now) {
+        tracing::debug!(%tab_id, "crash already being handled");
+        return;
+    }
+    let planned = crashes.on_crash(tab_id, now);
     let Some(plan) = planned else {
         tracing::warn!(
             %tab_id,
@@ -174,6 +208,18 @@ async fn recover(app: &AppHandle<Runtime>, tab_id: TabId, session: &CdpSession) 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_same_crash_seen_twice_is_handled_once() {
+        let registry = Registry::default();
+        let tab = TabId::new();
+        let t0 = Instant::now();
+        assert!(!registry.duplicate(tab, t0));
+        assert!(registry.duplicate(tab, t0 + Duration::from_millis(50)));
+        assert!(!registry.duplicate(tab, t0 + SAME_EVENT + Duration::from_secs(1)));
+        registry.drop_tab(tab);
+        assert!(!registry.duplicate(tab, t0 + SAME_EVENT + Duration::from_secs(1)));
+    }
+
     use super::*;
 
     #[test]
