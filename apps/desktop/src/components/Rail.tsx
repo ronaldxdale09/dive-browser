@@ -38,7 +38,7 @@ export function Rail() {
         <Icon icon={Plus} />
       </button>
       <div className="mt-auto">
-        <button type="button" aria-label="Settings" title="Settings" className="grid size-9 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink">
+        <button type="button" aria-label="Settings" title="Settings" onClick={() => useBrowser.getState().toggle("settings", true)} className="grid size-9 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink">
           <Icon icon={Settings2} />
         </button>
       </div>

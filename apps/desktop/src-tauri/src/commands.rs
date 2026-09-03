@@ -33,6 +33,38 @@ pub struct Snapshot {
     pub active_tab: Option<TabId>,
 }
 
+/// Facts the Settings dialog shows.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct AppInfo {
+    /// Package version.
+    pub version: String,
+    /// Application data directory.
+    pub data_dir: String,
+    /// MCP endpoint, empty when disabled.
+    pub mcp_url: String,
+    /// Path of the bearer token file.
+    pub mcp_token_path: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn app_info() -> AppInfo {
+    let port: u16 = std::env::var("DIVE_MCP_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(7391);
+    AppInfo {
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        data_dir: crate::state::data_root().to_string_lossy().into_owned(),
+        mcp_url: if port == 0 {
+            String::new()
+        } else {
+            format!("http://127.0.0.1:{port}/mcp")
+        },
+        mcp_token_path: crate::mcp::token_path().to_string_lossy().into_owned(),
+    }
+}
+
 /// Build the specta command/event collection.
 pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
     tauri_specta::Builder::<Runtime>::new()
@@ -61,6 +93,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             layout_set_content_bounds,
             commands_list,
             command_run,
+            app_info,
             crate::agent::agent_key_set,
             crate::agent::agent_key_present,
             crate::agent::agent_send,

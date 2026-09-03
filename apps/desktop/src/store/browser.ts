@@ -4,7 +4,7 @@ import { listenConsole, useConsole } from "./console";
 import { listenNetwork, useNetwork } from "./network";
 import type { CoreEvent, Snapshot, Tab, Workspace } from "../lib/ipc";
 
-export type UiPanel = "sidecar" | "dock" | "palette" | "find";
+export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings";
 
 interface BrowserState {
   ready: boolean;
@@ -80,7 +80,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   activeWorkspace: null,
   tabs: [],
   activeTab: null,
-  open: { sidecar: false, dock: false, palette: false, find: false },
+  open: { sidecar: false, dock: false, palette: false, find: false, settings: false },
   error: null,
   notice: null,
   editing: null,

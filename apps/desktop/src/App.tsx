@@ -8,6 +8,7 @@ import { Dock } from "./components/Dock";
 import { Palette } from "./components/Palette";
 import { WorkspaceDialog } from "./components/WorkspaceDialog";
 import { FindBar } from "./components/FindBar";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { Splash } from "./components/Splash";
 import { useBrowser } from "./store/browser";
 import { useShortcuts } from "./lib/shortcuts";
@@ -42,6 +43,7 @@ export function App() {
         {open.sidecar && <Sidecar />}
       </div>
       {open.palette && <Palette />}
+      {open.settings && <SettingsDialog />}
       <Splash />
       <WorkspaceDialog key={editing?.id ?? (editing ? "new" : "closed")} />
       {notice && (

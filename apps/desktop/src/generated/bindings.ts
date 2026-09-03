@@ -69,6 +69,7 @@ export const commands = {
 	 *  tauri-specta cannot export `serde_json::Value` in a function signature.
 	 */
 	commandRun: (id: string, argsJson: string | null) => typedError<string, AppError>(__TAURI_INVOKE("command_run", { id, argsJson })),
+	appInfo: () => __TAURI_INVOKE<AppInfo>("app_info"),
 	/**  Store the Anthropic API key in the keychain. Empty removes it. */
 	agentKeySet: (key: string) => typedError<null, AppError>(__TAURI_INVOKE("agent_key_set", { key })),
 	/**  Whether a key is configured. */
@@ -100,6 +101,18 @@ export type A11yReport = {
 export type AppError = {
 	/**  Human-readable description. */
 	message: string,
+};
+
+/**  Facts the Settings dialog shows. */
+export type AppInfo = {
+	/**  Package version. */
+	version: string,
+	/**  Application data directory. */
+	data_dir: string,
+	/**  MCP endpoint, empty when disabled. */
+	mcp_url: string,
+	/**  Path of the bearer token file. */
+	mcp_token_path: string,
 };
 
 /**  Rectangle of the content area in logical pixels, relative to the window. */
