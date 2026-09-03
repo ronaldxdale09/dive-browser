@@ -13,6 +13,9 @@ use crate::commands::{activate_tab, capture_tab, normalize_url, open_tab};
 use crate::state::{AppState, lock};
 
 /// Bridges MCP tools to the app state and the CEF engine.
+/// Largest response body handed to an agent in one call.
+const BODY_TOOL_CAP: usize = 4096;
+
 pub struct AppBrowser {
     app: AppHandle<Runtime>,
 }
@@ -330,7 +333,23 @@ impl Browser for AppBrowser {
     }
 
     async fn requests(&self, tab: TabId, limit: usize) -> Result<Value, BrowserError> {
-        serde_json::to_value(self.state().buffers.requests(tab, limit)).map_err(other)
+        serde_json::to_value(self.state().buffers.requests_listing(tab, limit)).map_err(other)
+    }
+
+    async fn request_body(&self, tab: TabId, request_id: String) -> Result<Value, BrowserError> {
+        let row = self
+            .state()
+            .buffers
+            .request(tab, &request_id)
+            .ok_or_else(|| BrowserError::Other(format!("no request {request_id}")))?;
+        let body = row.response_body.unwrap_or_default();
+        let truncated = body.chars().count() > BODY_TOOL_CAP;
+        Ok(serde_json::json!({
+            "request_id": request_id,
+            "mime_type": row.mime_type,
+            "body": body.chars().take(BODY_TOOL_CAP).collect::<String>(),
+            "truncated": truncated,
+        }))
     }
 
     async fn evaluate(&self, tab: TabId, expression: String) -> Result<Value, BrowserError> {

@@ -80,8 +80,14 @@ pub trait Browser: Send + Sync + 'static {
         tab: TabId,
         limit: usize,
     ) -> Result<serde_json::Value, BrowserError>;
-    /// Recent requests, oldest first, as JSON rows.
+    /// Recent requests, oldest first, as JSON rows (no headers or bodies).
     async fn requests(&self, tab: TabId, limit: usize) -> Result<serde_json::Value, BrowserError>;
+    /// The captured response body of one request, truncated to a few KB.
+    async fn request_body(
+        &self,
+        tab: TabId,
+        request_id: String,
+    ) -> Result<serde_json::Value, BrowserError>;
     /// Accessibility tree as indented text with `[ref=eN]` markers on interactive nodes.
     async fn page_state(&self, tab: TabId) -> Result<String, BrowserError>;
     /// Click the node behind a `ref` from the last `page_state`.
@@ -176,6 +182,15 @@ pub struct TailParams {
     pub tab_id: Option<String>,
     /// Maximum rows, newest kept (default 50).
     pub limit: Option<u32>,
+}
+
+/// One request's body.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct BodyParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// Request id from `network_list`.
+    pub request_id: String,
 }
 
 /// Evaluate JavaScript.
@@ -327,6 +342,19 @@ impl<B: Browser> DiveServer<B> {
                 .requests(tab, p.limit.unwrap_or(50) as usize)
                 .await?,
         )
+    }
+
+    /// Response body.
+    #[tool(
+        name = "network_body",
+        description = "The captured JSON response body of one request from network_list, truncated to a few KB. Bodies may contain tokens or personal data; fetch only what you need."
+    )]
+    async fn network_body(
+        &self,
+        Parameters(p): Parameters<BodyParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id).await?;
+        json_result(&self.browser.request_body(tab, p.request_id).await?)
     }
 
     /// Page state.
@@ -599,6 +627,13 @@ mod tests {
             limit: usize,
         ) -> Result<serde_json::Value, BrowserError> {
             Ok(serde_json::json!([{ "url": "https://a.dev", "limit": limit }]))
+        }
+        async fn request_body(
+            &self,
+            _tab: TabId,
+            request_id: String,
+        ) -> Result<serde_json::Value, BrowserError> {
+            Ok(serde_json::json!({ "request_id": request_id, "body": "{}" }))
         }
         async fn page_state(&self, _tab: TabId) -> Result<String, BrowserError> {
             Ok("- RootWebArea \"x\"\n".into())

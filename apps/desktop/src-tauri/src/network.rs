@@ -79,15 +79,31 @@ pub fn attach(
     tab_id: TabId,
     session: CdpSession,
 ) -> crate::cdp_feed::Ready {
-    capture_bodies(app.clone(), tab_id, session.clone());
+    let body_app = app.clone();
+    let body_session = session.clone();
     crate::cdp_feed::attach(
         app,
         tab_id,
         session,
         &["Network.enable"],
         map_event,
-        |state, ev| {
+        move |state, ev| {
             state.buffers.push_network(ev);
+            // Same task that recorded the response, so the row's mime type is
+            // already known here.
+            if let NetworkEvent::Finished { request_id, .. } = ev
+                && state
+                    .buffers
+                    .request(tab_id, request_id)
+                    .is_some_and(|r| r.mime_type.contains("json"))
+            {
+                capture_body(
+                    body_app.clone(),
+                    tab_id,
+                    body_session.clone(),
+                    request_id.clone(),
+                );
+            }
         },
     )
 }
@@ -95,45 +111,23 @@ pub fn attach(
 /// Largest response body kept.
 const MAX_BODY: usize = 64 * 1024;
 
-/// After a JSON response finishes loading, fetch its body so the `OpenAPI`
-/// inference and the replay editor can show it.
-fn capture_bodies(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
+/// Fetch a finished JSON response's body so the `OpenAPI` inference and the
+/// replay editor can show it.
+fn capture_body(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession, request_id: String) {
     use tauri::Manager;
     tauri::async_runtime::spawn(async move {
-        let mut events = session.subscribe();
-        loop {
-            match events.recv().await {
-                Ok(event) if event.method == "Network.loadingFinished" => {
-                    let Some(request_id) = event.params["requestId"].as_str().map(str::to_owned)
-                    else {
-                        continue;
-                    };
-                    let state = app.state::<crate::state::AppState>();
-                    let Some(row) = state.buffers.request(tab_id, &request_id) else {
-                        continue;
-                    };
-                    if !row.mime_type.contains("json") {
-                        continue;
-                    }
-                    if let Ok(result) = session
-                        .call(
-                            "Network.getResponseBody",
-                            serde_json::json!({"requestId": request_id}),
-                        )
-                        .await
-                        && result["base64Encoded"].as_bool() != Some(true)
-                        && let Some(body) = result["body"].as_str()
-                    {
-                        state.buffers.set_response_body(
-                            tab_id,
-                            &request_id,
-                            body.chars().take(MAX_BODY).collect(),
-                        );
-                    }
-                }
-                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
+        if let Ok(result) = session
+            .call(
+                "Network.getResponseBody",
+                serde_json::json!({"requestId": request_id}),
+            )
+            .await
+            && result["base64Encoded"].as_bool() != Some(true)
+            && let Some(body) = result["body"].as_str()
+        {
+            app.state::<crate::state::AppState>()
+                .buffers
+                .set_response_body(tab_id, &request_id, body.chars().take(MAX_BODY).collect());
         }
     });
 }

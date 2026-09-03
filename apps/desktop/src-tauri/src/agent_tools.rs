@@ -24,7 +24,8 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec { name: "console_tail".into(), description: "Recent console output: logs, warnings, exceptions, failed loads.".into(), input_schema: obj(json!({"tab_id": tab, "limit": {"type": "integer"}}), &[]) },
         ToolSpec { name: "page_snapshot".into(), description: "Remember the page state now so page_diff can report what changed later.".into(), input_schema: obj(json!({"tab_id": tab}), &[]) },
         ToolSpec { name: "page_diff".into(), description: "What changed since the last page_snapshot: text, structure, errors, requests.".into(), input_schema: obj(json!({"tab_id": tab}), &[]) },
-        ToolSpec { name: "network_list".into(), description: "Recent requests with method, status, type, size and errors.".into(), input_schema: obj(json!({"tab_id": tab, "limit": {"type": "integer"}}), &[]) },
+        ToolSpec { name: "network_list".into(), description: "Recent requests with method, status, type, size and errors. No bodies; use network_body for one.".into(), input_schema: obj(json!({"tab_id": tab, "limit": {"type": "integer"}}), &[]) },
+        ToolSpec { name: "network_body".into(), description: "Captured JSON response body of one request (truncated to a few KB).".into(), input_schema: obj(json!({"tab_id": tab, "request_id": {"type": "string"}}), &["request_id"]) },
     ]
 }
 
@@ -142,6 +143,12 @@ async fn execute<B: Browser>(
         "network_list" => text(
             browser
                 .requests(tab()?, limit())
+                .await
+                .map_err(|e| e.to_string())?,
+        ),
+        "network_body" => text(
+            browser
+                .request_body(tab()?, s("request_id")?)
                 .await
                 .map_err(|e| e.to_string())?,
         ),

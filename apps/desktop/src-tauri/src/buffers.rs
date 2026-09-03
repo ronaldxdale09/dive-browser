@@ -50,6 +50,35 @@ pub struct RequestSummary {
     pub response_body: Option<String>,
 }
 
+/// What the agent and MCP see of a request: no headers, bodies or cookies.
+/// Bodies are fetched one at a time through `network_body`.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct RequestListing {
+    pub id: String,
+    pub method: String,
+    pub url: String,
+    pub resource_type: String,
+    pub status: Option<u16>,
+    pub mime_type: String,
+    pub encoded_length: Option<f64>,
+    pub error: Option<String>,
+}
+
+impl From<&RequestSummary> for RequestListing {
+    fn from(r: &RequestSummary) -> Self {
+        Self {
+            id: r.id.clone(),
+            method: r.method.clone(),
+            url: r.url.clone(),
+            resource_type: r.resource_type.clone(),
+            status: r.status,
+            mime_type: r.mime_type.clone(),
+            encoded_length: r.encoded_length,
+            error: r.error.clone(),
+        }
+    }
+}
+
 #[derive(Default)]
 struct TabBuffers {
     console: VecDeque<ConsoleEntry>,
@@ -178,6 +207,14 @@ impl Buffers {
                 })
                 .unwrap_or_default()
         })
+    }
+
+    /// Newest `limit` requests as slim listings, oldest first.
+    pub fn requests_listing(&self, tab: TabId, limit: usize) -> Vec<RequestListing> {
+        self.requests(tab, limit)
+            .iter()
+            .map(RequestListing::from)
+            .collect()
     }
 
     /// Attach a captured response body.
