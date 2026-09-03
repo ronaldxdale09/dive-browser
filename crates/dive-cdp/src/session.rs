@@ -58,6 +58,11 @@ struct Inner {
 }
 
 const EVENT_BUFFER: usize = 1024;
+/// First message id. The CEF host runtime issues its own `DevTools` messages
+/// with small ids (script evaluation) and ids from `1_000_000` (init scripts);
+/// Chromium silently drops a message whose id is already in flight, so we
+/// start far away from both ranges.
+const FIRST_ID: u64 = 10_000_000;
 
 impl CdpSession {
     /// Create a session over `transport`.
@@ -66,7 +71,7 @@ impl CdpSession {
         Self {
             inner: Arc::new(Inner {
                 transport: Box::new(transport),
-                next_id: AtomicU64::new(1),
+                next_id: AtomicU64::new(FIRST_ID),
                 pending: Mutex::new(HashMap::new()),
                 events,
             }),
@@ -275,7 +280,7 @@ mod tests {
         });
         assert_eq!(
             (0..3).map(|i| sent_id(&transport, i)).collect::<Vec<_>>(),
-            vec![1, 2, 3]
+            vec![FIRST_ID, FIRST_ID + 1, FIRST_ID + 2]
         );
     }
 
