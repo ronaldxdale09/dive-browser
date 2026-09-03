@@ -263,6 +263,16 @@ pub(crate) async fn tab_capture(
     id: TabId,
     full_page: bool,
 ) -> AppResult<String> {
+    let path = capture_tab(&state, id, full_page).await?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Capture `id` to `<data>/captures/dive-<timestamp>.png`.
+pub async fn capture_tab(
+    state: &AppState,
+    id: TabId,
+    full_page: bool,
+) -> AppResult<std::path::PathBuf> {
     let session = lock(&state.host)
         .as_ref()
         .and_then(|h| h.cdp(id))
@@ -282,7 +292,7 @@ pub(crate) async fn tab_capture(
         .replace([':', '.'], "-");
     let path = dir.join(format!("dive-{stamp}.png"));
     std::fs::write(&path, png)?;
-    Ok(path.to_string_lossy().into_owned())
+    Ok(path)
 }
 
 fn with_view(

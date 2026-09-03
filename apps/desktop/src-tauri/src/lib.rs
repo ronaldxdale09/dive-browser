@@ -51,6 +51,7 @@ pub fn run() {
             state::init(app)?;
             engine::create_main_window(app)?;
             open_startup_urls(app);
+            smoke_test(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -82,4 +83,36 @@ fn open_startup_urls(app: &tauri::App<Runtime>) {
             Err(e) => tracing::warn!(url, "failed to open startup tab: {e}"),
         }
     }
+}
+
+/// `DIVE_SMOKE=1`: a few seconds after start, capture the active tab to a
+/// PNG, log the path, and exit. Used by CI and by automation that cannot
+/// drive the UI.
+fn smoke_test(app: tauri::AppHandle<Runtime>) {
+    use tauri::Manager;
+    if std::env::var_os("DIVE_SMOKE").is_none() {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        let state = app.state::<state::AppState>();
+        let active = state::lock(&state.host)
+            .as_ref()
+            .and_then(crate::engine::TabHost::active);
+        let outcome = match active {
+            Some(id) => commands::capture_tab(&state, id, true).await,
+            None => Err(AppError::new("no active tab")),
+        };
+        let code = match outcome {
+            Ok(path) => {
+                tracing::info!(path = %path.display(), "smoke: capture ok");
+                0
+            }
+            Err(e) => {
+                tracing::error!("smoke: capture failed: {e}");
+                1
+            }
+        };
+        app.exit(code);
+    });
 }
