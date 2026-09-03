@@ -20,5 +20,8 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
 tracing = { workspace = true }
 
+[dev-dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+
 [lints]
 workspace = true

@@ -54,6 +54,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_capture,
             tab_emulate,
             tab_media,
+            tab_storage,
             layout_set_content_bounds,
             commands_list,
             command_run,
@@ -564,6 +565,18 @@ pub(crate) async fn tab_media(
     let (method, params) = crate::emulate::media_call(&media);
     session.call(method, params).await.map_err(AppError::new)?;
     Ok(())
+}
+
+/// Cookies and web storage for a tab.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_storage(
+    state: State<'_, AppState>,
+    id: TabId,
+) -> AppResult<crate::storage::StorageSnapshot> {
+    let url = lock(&state.store).tab(id)?.url;
+    let session = cdp_for(&state, id)?;
+    crate::storage::snapshot(&session, &url).await
 }
 
 fn cdp_for(state: &AppState, id: TabId) -> AppResult<dive_cdp::CdpSession> {

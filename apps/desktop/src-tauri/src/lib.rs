@@ -3,6 +3,7 @@
 
 mod agent;
 mod buffers;
+mod cdp_feed;
 mod commands;
 mod console;
 mod emulate;
@@ -12,6 +13,7 @@ mod favicon;
 mod mcp;
 mod network;
 mod state;
+mod storage;
 
 pub use error::AppError;
 

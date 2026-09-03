@@ -6,7 +6,7 @@ use dive_core::TabId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use specta::Type;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tauri_specta::Event;
 
 use crate::Runtime;
@@ -46,33 +46,16 @@ pub struct ConsoleEntry {
 
 /// Enable the domains and forward every entry to the chrome.
 pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
-    tauri::async_runtime::spawn(async move {
-        let mut events = session.subscribe();
-        for method in ["Runtime.enable", "Log.enable"] {
-            if let Err(e) = session.call0(method).await {
-                tracing::warn!(%tab_id, "{method} failed: {e}");
-            }
-        }
-        loop {
-            match events.recv().await {
-                Ok(event) => {
-                    if let Some(entry) = map_event(tab_id, &event) {
-                        tracing::debug!(%tab_id, level = ?entry.level, text = %entry.text, "console");
-                        app.state::<crate::state::AppState>()
-                            .buffers
-                            .push_console(entry.clone());
-                        if let Err(e) = entry.emit(&app) {
-                            tracing::warn!("console emit failed: {e}");
-                        }
-                    }
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!(%tab_id, n, "console listener lagged");
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    });
+    crate::cdp_feed::attach(
+        app,
+        tab_id,
+        session,
+        &["Runtime.enable", "Log.enable"],
+        map_event,
+        |state, entry| {
+            state.buffers.push_console(entry.clone());
+        },
+    );
 }
 
 /// Translate a CDP event into an entry, if it is console-worthy.

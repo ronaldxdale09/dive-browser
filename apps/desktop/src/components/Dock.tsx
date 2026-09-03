@@ -5,6 +5,7 @@ import { useBrowser } from "../store/browser";
 import { selectEntries, useConsole } from "../store/console";
 import { Icon, IconButton } from "./Icon";
 import { NetworkPanel, NetworkTools } from "./NetworkPanel";
+import { StoragePanel } from "./StoragePanel";
 
 const PANELS = [
   { id: "console", label: "Console", icon: Terminal },
@@ -40,7 +41,8 @@ export function Dock() {
       </div>
       {panel === "console" && <ConsolePanel />}
       {panel === "network" && <NetworkPanel />}
-      {panel !== "console" && panel !== "network" && <div className="flex-1 px-3 py-2 text-xs text-ink-3">Coming in Phase 2.</div>}
+      {panel === "storage" && <StoragePanel />}
+      {panel !== "console" && panel !== "network" && panel !== "storage" && <div className="flex-1 px-3 py-2 text-xs text-ink-3">Coming in Phase 2.</div>}
     </section>
   );
 }

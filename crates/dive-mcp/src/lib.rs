@@ -89,6 +89,8 @@ pub trait Browser: Send + Sync + 'static {
 pub struct Config {
     /// Allow `page_evaluate`, which runs arbitrary JS in the page. Off by default.
     pub allow_evaluate: bool,
+    /// Bearer token every request must carry. `None` disables auth (tests only).
+    pub token: Option<String>,
 }
 
 // ----- tool parameter types -----
@@ -302,6 +304,35 @@ impl Handle {
     }
 }
 
+/// Reject requests that do not carry the bearer token, or that come from a
+/// browser origin (DNS rebinding sends an `Origin` header; local MCP clients do not).
+async fn guard(
+    axum::extract::State(token): axum::extract::State<Option<Arc<str>>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::{StatusCode, header};
+    use axum::response::IntoResponse as _;
+    let headers = request.headers();
+    if let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok())
+        && origin != "null"
+        && !origin.starts_with("http://localhost")
+        && !origin.starts_with("http://127.0.0.1")
+    {
+        return (StatusCode::FORBIDDEN, "origin not allowed").into_response();
+    }
+    if let Some(expected) = token.as_deref() {
+        let presented = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "));
+        if presented != Some(expected) {
+            return (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
+        }
+    }
+    next.run(request).await
+}
+
 /// Bind `addr` (use port 0 for an ephemeral port) and serve until shut down.
 pub async fn serve<B: Browser>(
     browser: Arc<B>,
@@ -310,13 +341,16 @@ pub async fn serve<B: Browser>(
 ) -> std::io::Result<Handle> {
     let cancel = CancellationToken::new();
     let http = StreamableHttpServerConfig::default().with_cancellation_token(cancel.clone());
+    let token: Option<Arc<str>> = config.token.as_deref().map(Arc::from);
     let service: StreamableHttpService<DiveServer<B>, LocalSessionManager> =
         StreamableHttpService::new(
             move || Ok(DiveServer::new(Arc::clone(&browser), config.clone())),
             Arc::default(),
             http,
         );
-    let router = axum::Router::new().nest_service("/mcp", service);
+    let router = axum::Router::new()
+        .nest_service("/mcp", service)
+        .layer(axum::middleware::from_fn_with_state(token, guard));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let addr = listener.local_addr()?;
     let ct = cancel.clone();
@@ -454,6 +488,7 @@ mod tests {
             Arc::new(Fake::default()),
             Config {
                 allow_evaluate: true,
+                ..Default::default()
             },
         );
         let err = open
@@ -481,6 +516,60 @@ mod tests {
         .unwrap();
         assert!(handle.url().starts_with("http://127.0.0.1:"));
         assert_ne!(handle.addr.port(), 0);
+        handle.shutdown();
+    }
+
+    async fn status_of(url: &str, headers: &[(&str, &str)]) -> u16 {
+        let client = reqwest::Client::new();
+        let mut req = client
+            .post(url)
+            .header("content-type", "application/json")
+            .header("accept", "application/json, text/event-stream");
+        for (k, v) in headers {
+            req = req.header(*k, *v);
+        }
+        req.body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}"#)
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16()
+    }
+
+    #[tokio::test]
+    async fn token_and_origin_are_enforced() {
+        let config = Config {
+            allow_evaluate: false,
+            token: Some("s3cret".into()),
+        };
+        let handle = serve(
+            Arc::new(Fake::default()),
+            config,
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+        let url = handle.url();
+        assert_eq!(status_of(&url, &[]).await, 401);
+        assert_eq!(
+            status_of(&url, &[("authorization", "Bearer wrong")]).await,
+            401
+        );
+        assert_eq!(
+            status_of(
+                &url,
+                &[
+                    ("authorization", "Bearer s3cret"),
+                    ("origin", "https://evil.example")
+                ]
+            )
+            .await,
+            403
+        );
+        assert_eq!(
+            status_of(&url, &[("authorization", "Bearer s3cret")]).await,
+            200
+        );
         handle.shutdown();
     }
 }

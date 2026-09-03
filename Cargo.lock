@@ -1184,6 +1184,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "dive-core",
+ "reqwest",
  "rmcp",
  "schemars 1.2.2",
  "serde",

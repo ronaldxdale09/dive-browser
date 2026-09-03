@@ -158,8 +158,16 @@ pub fn start(app: AppHandle<Runtime>) {
         tracing::info!("mcp server disabled");
         return;
     }
+    let token = match load_or_create_token() {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("mcp server disabled: cannot create token file: {e}");
+            return;
+        }
+    };
     let config = dive_mcp::Config {
         allow_evaluate: std::env::var_os("DIVE_MCP_ALLOW_EVAL").is_some(),
+        token: Some(token),
     };
     let browser = Arc::new(AppBrowser { app });
     tauri::async_runtime::spawn(async move {
@@ -167,8 +175,9 @@ pub fn start(app: AppHandle<Runtime>) {
             Ok(handle) => {
                 tracing::info!(
                     url = handle.url(),
-                    "mcp: add with `claude mcp add --transport http dive {}`",
-                    handle.url()
+                    "mcp: add with `claude mcp add --transport http dive {} --header \"Authorization: Bearer $(cat '{}')\"`",
+                    handle.url(),
+                    token_path().display()
                 );
                 // Keep the handle alive for the life of the process.
                 std::mem::forget(handle);
@@ -176,4 +185,29 @@ pub fn start(app: AppHandle<Runtime>) {
             Err(e) => tracing::warn!("mcp server failed to start on port {port}: {e}"),
         }
     });
+}
+
+/// Where the bearer token lives; readable only by the user.
+pub fn token_path() -> std::path::PathBuf {
+    crate::state::data_root().join("mcp-token")
+}
+
+/// Read the token, creating a fresh random one on first run.
+fn load_or_create_token() -> std::io::Result<String> {
+    let path = token_path();
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        let t = existing.trim();
+        if t.len() >= 32 {
+            return Ok(t.to_owned());
+        }
+    }
+    let token = dive_core::TabId::new().to_string().replace('-', "")
+        + &dive_core::TabId::new().to_string().replace('-', "");
+    std::fs::write(&path, &token)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(token)
 }

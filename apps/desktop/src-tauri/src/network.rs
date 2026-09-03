@@ -6,7 +6,7 @@ use dive_core::TabId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use specta::Type;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tauri_specta::Event;
 
 use crate::Runtime;
@@ -71,31 +71,16 @@ pub enum NetworkEvent {
 
 /// Enable the domain and forward events to the chrome.
 pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
-    tauri::async_runtime::spawn(async move {
-        let mut events = session.subscribe();
-        if let Err(e) = session.call0("Network.enable").await {
-            tracing::warn!(%tab_id, "Network.enable failed: {e}");
-        }
-        loop {
-            match events.recv().await {
-                Ok(event) => {
-                    if let Some(ev) = map_event(tab_id, &event) {
-                        tracing::debug!(%tab_id, event = ?ev, "network");
-                        app.state::<crate::state::AppState>()
-                            .buffers
-                            .push_network(&ev);
-                        if let Err(e) = ev.emit(&app) {
-                            tracing::warn!("network emit failed: {e}");
-                        }
-                    }
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!(%tab_id, n, "network listener lagged");
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    });
+    crate::cdp_feed::attach(
+        app,
+        tab_id,
+        session,
+        &["Network.enable"],
+        map_event,
+        |state, ev| {
+            state.buffers.push_network(ev);
+        },
+    );
 }
 
 /// Translate a CDP event into a network event, if relevant.

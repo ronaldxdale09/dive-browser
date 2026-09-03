@@ -54,6 +54,8 @@ export const commands = {
 } | null) => typedError<null, AppError>(__TAURI_INVOKE("tab_emulate", { id, device })),
 	/**  Override media features (color scheme, reduced motion, media type). */
 	tabMedia: (id: TabId, media: MediaOverrides) => typedError<null, AppError>(__TAURI_INVOKE("tab_media", { id, media })),
+	/**  Cookies and web storage for a tab. */
+	tabStorage: (id: TabId) => typedError<StorageSnapshot, AppError>(__TAURI_INVOKE("tab_storage", { id })),
 	layoutSetContentBounds: (bounds: Bounds) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_bounds", { bounds })),
 	commandsList: () => __TAURI_INVOKE<Command[]>("commands_list"),
 	/**
@@ -155,6 +157,26 @@ export type ConsoleEntry = {
 
 /**  Identifies a [`Container`]. */
 export type ContainerId = string;
+
+/**  One cookie. */
+export type Cookie = {
+	/**  Name. */
+	name: string,
+	/**  Value. */
+	value: string,
+	/**  Domain. */
+	domain: string,
+	/**  Path. */
+	path: string,
+	/**  Expiry as seconds since the epoch; `-1` for session cookies. */
+	expires: number | null,
+	/**  `HttpOnly` flag. */
+	http_only: boolean,
+	/**  `Secure` flag. */
+	secure: boolean,
+	/**  `SameSite` value, if any. */
+	same_site: string | null,
+};
 
 /**  Something changed in the core state. */
 export type CoreEvent = 
@@ -279,6 +301,16 @@ export type Snapshot = {
 
 /**  Emitted whenever core state changes; carries the change itself. */
 export type StateChanged = CoreEvent;
+
+/**  Everything the Storage panel shows. */
+export type StorageSnapshot = {
+	/**  Cookies visible to the page's URL. */
+	cookies: Cookie[],
+	/**  `localStorage` entries as `[key, value]`. */
+	local: ([string, string])[],
+	/**  `sessionStorage` entries as `[key, value]`. */
+	session: ([string, string])[],
+};
 
 /**  A browsing tab. */
 export type Tab = {
