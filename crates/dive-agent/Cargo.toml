@@ -1,0 +1,20 @@
+[package]
+name = "dive-agent"
+description = "LLM client for the Dive agent: Anthropic Messages API over HTTPS with streaming"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream"] }
+eventsource-stream = "0.2"
+futures-util = "0.3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true
