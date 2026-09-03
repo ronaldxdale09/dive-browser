@@ -14,7 +14,7 @@ pub use events::{CoreEvent, EventBus};
 pub use model::{
     Container, ContainerId, Tab, TabId, TabState, TabTier, Timestamp, Workspace, WorkspaceId,
 };
-pub use store::{HistoryEntry, Store, origin_of};
+pub use store::{Bookmark, HistoryEntry, Store, origin_of};
 
 /// Convenience alias used throughout the crate.
 pub type Result<T> = std::result::Result<T, CoreError>;

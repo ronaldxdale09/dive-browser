@@ -65,6 +65,40 @@ pub(crate) fn app_info() -> AppInfo {
     }
 }
 
+/// Toggle the bookmark for a tab's current URL; returns the new state.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn bookmark_toggle(state: State<'_, AppState>, id: TabId) -> AppResult<bool> {
+    let store = lock(&state.store);
+    let tab = store.tab(id)?;
+    if store.is_bookmarked(&tab.url)? {
+        store.remove_bookmark(&tab.url)?;
+        Ok(false)
+    } else {
+        store.add_bookmark(&tab.url, &tab.title, dive_core::Timestamp::now())?;
+        Ok(true)
+    }
+}
+
+/// Whether `url` is bookmarked.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn bookmark_status(state: State<'_, AppState>, url: String) -> AppResult<bool> {
+    Ok(lock(&state.store).is_bookmarked(&url)?)
+}
+
+/// Bookmarks matching `query`.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn bookmarks_search(
+    state: State<'_, AppState>,
+    query: String,
+    limit: u32,
+) -> AppResult<Vec<dive_core::Bookmark>> {
+    Ok(lock(&state.store)
+        .search_bookmarks(&query, usize::try_from(limit.min(200)).unwrap_or(50))?)
+}
+
 /// Recent history matching `query`, newest first.
 #[tauri::command]
 #[specta::specta]
@@ -128,6 +162,9 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             app_info,
             dev_servers,
             history_search,
+            bookmark_toggle,
+            bookmark_status,
+            bookmarks_search,
             share_url,
             crate::agent::agent_key_set,
             crate::agent::agent_key_present,

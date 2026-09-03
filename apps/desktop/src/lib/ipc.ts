@@ -9,7 +9,7 @@ import { commands, events } from "../generated/bindings";
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 export { events };
-export type { Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry } from "../generated/bindings";
+export type { Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
 export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
@@ -65,6 +65,9 @@ export const ipc = {
   requestCaptured: async (tabId: string, requestId: string) => unwrap(await commands.requestCaptured(tabId, requestId)),
   requestReplay: async (tabId: string, request: ReplayRequestInput) => unwrap(await commands.requestReplay(tabId, request)),
   devServers: () => commands.devServers(),
+  bookmarkToggle: async (id: string) => unwrap(await commands.bookmarkToggle(id)),
+  bookmarkStatus: async (url: string) => unwrap(await commands.bookmarkStatus(url)),
+  bookmarksSearch: async (query: string, limit = 20) => unwrap(await commands.bookmarksSearch(query, limit)),
   historySearch: async (query: string, limit = 20) => unwrap(await commands.historySearch(query, limit)),
   shareUrl: async (url: string) => unwrap(await commands.shareUrl(url)),
   agentKeySet: async (key: string) => unwrap(await commands.agentKeySet(key)),

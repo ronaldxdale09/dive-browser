@@ -1,10 +1,11 @@
-import { ArrowLeft, ArrowRight, Camera, Lock, PanelBottom, RotateCw, Search, Sparkles, Star } from "lucide-react";
+import { ArrowLeft, ArrowRight, Camera, Lock, PanelBottom, RotateCw, Search, Sparkles  } from "lucide-react";
 import { useState } from "react";
 import { useBrowser } from "../store/browser";
 import { selectErrorCount, useConsole } from "../store/console";
 import { Icon, IconButton } from "./Icon";
 import { DeviceMenu } from "./DeviceMenu";
 import { SharePopover } from "./SharePopover";
+import { BookmarkButton } from "./BookmarkButton";
 
 /** Navigation row: nav icons, the omnibox pill, page actions, dock and agent toggles. */
 export function Toolbar() {
@@ -55,7 +56,7 @@ export function Toolbar() {
           className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
         />
       </form>
-      <IconButton icon={Star} label="Bookmark" disabled={!current} />
+      <BookmarkButton />
       <SharePopover />
       <IconButton icon={Camera} label="Capture full page" disabled={!current} onClick={() => void capture(true)} />
       <DeviceMenu />

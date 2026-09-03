@@ -60,7 +60,24 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX history_by_url ON history(url);
     CREATE INDEX history_by_time ON history(visited_at);",
+    // v6: bookmarks.
+    "CREATE TABLE bookmarks (
+        url TEXT PRIMARY KEY,
+        title TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    );",
 ];
+
+/// A saved page.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct Bookmark {
+    /// URL.
+    pub url: String,
+    /// Title at save time.
+    pub title: String,
+    /// RFC 3339 creation time.
+    pub created_at: String,
+}
 
 /// One page in history, aggregated by URL.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
@@ -327,6 +344,53 @@ impl Store {
             Ok(data) => tab.favicon = data,
             Err(e) => tracing::debug!(origin, "favicon lookup failed: {e}"),
         }
+    }
+
+    // ----- bookmarks -----
+
+    /// Add or refresh a bookmark.
+    pub fn add_bookmark(&self, url: &str, title: &str, at: Timestamp) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO bookmarks (url, title, created_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(url) DO UPDATE SET title = CASE WHEN excluded.title != '' THEN excluded.title ELSE bookmarks.title END",
+            params![url, title, at.to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// Remove a bookmark; returns whether one existed.
+    pub fn remove_bookmark(&self, url: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .execute("DELETE FROM bookmarks WHERE url = ?1", [url])?
+            > 0)
+    }
+
+    /// Whether `url` is bookmarked.
+    pub fn is_bookmarked(&self, url: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .query_row("SELECT 1 FROM bookmarks WHERE url = ?1", [url], |_| Ok(()))
+            .optional()?
+            .is_some())
+    }
+
+    /// Bookmarks matching `query`, newest first.
+    pub fn search_bookmarks(&self, query: &str, limit: usize) -> Result<Vec<Bookmark>> {
+        let like = format!("%{}%", query.trim());
+        let mut stmt = self.conn.prepare("SELECT url, title, created_at FROM bookmarks WHERE url LIKE ?1 OR title LIKE ?1 ORDER BY created_at DESC LIMIT ?2")?;
+        let rows = stmt.query_map(
+            params![like, i64::try_from(limit).unwrap_or(i64::MAX)],
+            |r| {
+                Ok(Bookmark {
+                    url: r.get(0)?,
+                    title: r.get(1)?,
+                    created_at: r.get(2)?,
+                })
+            },
+        )?;
+        rows.collect::<std::result::Result<_, _>>()
+            .map_err(Into::into)
     }
 
     // ----- history -----
@@ -687,6 +751,23 @@ mod tests {
             store.last_active_tab(w.id).unwrap().unwrap().url,
             "https://newer"
         );
+    }
+
+    #[test]
+    fn bookmarks_roundtrip() {
+        let store = Store::in_memory().unwrap();
+        let now = Timestamp::now();
+        store.add_bookmark("https://a.dev/", "A", now).unwrap();
+        store.add_bookmark("https://a.dev/", "", now).unwrap();
+        assert!(store.is_bookmarked("https://a.dev/").unwrap());
+        assert_eq!(
+            store.search_bookmarks("a", 10).unwrap()[0].title,
+            "A",
+            "empty title must not clobber"
+        );
+        assert!(store.remove_bookmark("https://a.dev/").unwrap());
+        assert!(!store.remove_bookmark("https://a.dev/").unwrap());
+        assert!(!store.is_bookmarked("https://a.dev/").unwrap());
     }
 
     #[test]

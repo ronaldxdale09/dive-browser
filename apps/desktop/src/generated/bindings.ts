@@ -98,6 +98,12 @@ export const commands = {
 	devServers: () => __TAURI_INVOKE<DevServer[]>("dev_servers"),
 	/**  Recent history matching `query`, newest first. */
 	historySearch: (query: string, limit: number) => typedError<HistoryEntry[], AppError>(__TAURI_INVOKE("history_search", { query, limit })),
+	/**  Toggle the bookmark for a tab's current URL; returns the new state. */
+	bookmarkToggle: (id: TabId) => typedError<boolean, AppError>(__TAURI_INVOKE("bookmark_toggle", { id })),
+	/**  Whether `url` is bookmarked. */
+	bookmarkStatus: (url: string) => typedError<boolean, AppError>(__TAURI_INVOKE("bookmark_status", { url })),
+	/**  Bookmarks matching `query`. */
+	bookmarksSearch: (query: string, limit: number) => typedError<Bookmark[], AppError>(__TAURI_INVOKE("bookmarks_search", { query, limit })),
 	/**  LAN URL and QR code for opening `url` on another device. */
 	shareUrl: (url: string) => typedError<ShareInfo, AppError>(__TAURI_INVOKE("share_url", { url })),
 	/**  Store the Anthropic API key in the keychain. Empty removes it. */
@@ -149,6 +155,16 @@ export type AppInfo = {
 	mcp_url: string,
 	/**  Path of the bearer token file. */
 	mcp_token_path: string,
+};
+
+/**  A saved page. */
+export type Bookmark = {
+	/**  URL. */
+	url: string,
+	/**  Title at save time. */
+	title: string,
+	/**  RFC 3339 creation time. */
+	created_at: string,
 };
 
 /**  Rectangle of the content area in logical pixels, relative to the window. */

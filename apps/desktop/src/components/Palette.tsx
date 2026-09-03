@@ -1,9 +1,9 @@
 import { Command } from "cmdk";
-import { ArrowUpRight, Search, Terminal, Server, History } from "lucide-react";
+import { ArrowUpRight, Search, Terminal, Server, History, Star } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ipc } from "../lib/ipc";
 import { runCommand } from "../lib/commands";
-import type { Command as CommandDef, DevServer, HistoryEntry } from "../lib/ipc";
+import type { Bookmark, Command as CommandDef, DevServer, HistoryEntry } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { Favicon } from "./Favicon";
@@ -18,6 +18,7 @@ export function Palette() {
   const [cmds, setCmds] = useState<CommandDef[]>([]);
   const [servers, setServers] = useState<DevServer[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   useEffect(() => {
     let alive = true;
     const t = setTimeout(() => {
@@ -25,6 +26,10 @@ export function Palette() {
         .historySearch(query, 8)
         .then((h) => alive && setHistory(h))
         .catch(() => alive && setHistory([]));
+      ipc
+        .bookmarksSearch(query, 6)
+        .then((b) => alive && setBookmarks(b))
+        .catch(() => alive && setBookmarks([]));
     }, 60);
     return () => {
       alive = false;
@@ -69,6 +74,17 @@ export function Palette() {
               <span className="text-ink-2">{looksLikeUrl ? "Open" : "Search"}</span>
               <span className="truncate font-mono text-ink">{query}</span>
             </Command.Item>
+          )}
+          {bookmarks.length > 0 && (
+            <Command.Group heading="Bookmarks">
+              {bookmarks.map((b) => (
+                <Command.Item key={b.url} value={`bookmark ${b.title} ${b.url}`} onSelect={() => void go(b.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
+                  <Icon icon={Star} size={14} className="shrink-0 text-highlight" />
+                  <span className="truncate">{b.title || b.url}</span>
+                  <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(b.url)}</span>
+                </Command.Item>
+              ))}
+            </Command.Group>
           )}
           {history.length > 0 && (
             <Command.Group heading="History">
