@@ -22,6 +22,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ToolSpec { name: "page_type".into(), description: "Replace the text of a field behind a ref; submit presses Enter.".into(), input_schema: obj(json!({"tab_id": tab, "ref": {"type": "string"}, "text": {"type": "string"}, "submit": {"type": "boolean"}}), &["ref", "text"]) },
         ToolSpec { name: "tab_navigate".into(), description: "Navigate the tab to a URL.".into(), input_schema: obj(json!({"tab_id": tab, "url": {"type": "string"}}), &["url"]) },
         ToolSpec { name: "console_tail".into(), description: "Recent console output: logs, warnings, exceptions, failed loads.".into(), input_schema: obj(json!({"tab_id": tab, "limit": {"type": "integer"}}), &[]) },
+        ToolSpec { name: "page_report".into(), description: "Bug report for the tab: console errors/warnings and failed requests. Start here when something is broken.".into(), input_schema: obj(json!({"tab_id": tab}), &[]) },
         ToolSpec { name: "page_snapshot".into(), description: "Remember the page state now so page_diff can report what changed later.".into(), input_schema: obj(json!({"tab_id": tab}), &[]) },
         ToolSpec { name: "page_diff".into(), description: "What changed since the last page_snapshot: text, structure, errors, requests.".into(), input_schema: obj(json!({"tab_id": tab}), &[]) },
         ToolSpec { name: "network_list".into(), description: "Recent requests with method, status, type, size and errors. No bodies; use network_body for one.".into(), input_schema: obj(json!({"tab_id": tab, "limit": {"type": "integer"}}), &[]) },
@@ -55,6 +56,10 @@ pub async fn run<B: Browser>(
     }
 }
 
+fn err(e: impl std::fmt::Display) -> String {
+    e.to_string()
+}
+
 async fn execute<B: Browser>(
     browser: &B,
     default_tab: Option<TabId>,
@@ -80,24 +85,19 @@ async fn execute<B: Browser>(
             .ok_or_else(|| format!("missing {key}"))
     };
     match call.name.as_str() {
-        "tabs_list" => text(
-            serde_json::to_value(browser.tabs().await.map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?,
-        ),
-        "page_text" => Ok(Value::String(
-            browser.page_text(tab()?).await.map_err(|e| e.to_string())?,
-        )),
-        "page_state" => Ok(Value::String(
-            browser
-                .page_state(tab()?)
-                .await
-                .map_err(|e| e.to_string())?,
-        )),
+        "tabs_list" => text(serde_json::to_value(browser.tabs().await.map_err(err)?).map_err(err)?),
+        "page_text" => browser
+            .page_text(tab()?)
+            .await
+            .map(Value::String)
+            .map_err(err),
+        "page_state" => browser
+            .page_state(tab()?)
+            .await
+            .map(Value::String)
+            .map_err(err),
         "page_screenshot" => {
-            let png = browser
-                .screenshot(tab()?, false)
-                .await
-                .map_err(|e| e.to_string())?;
+            let png = browser.screenshot(tab()?, false).await.map_err(err)?;
             Ok(
                 json!([{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": base64::engine::general_purpose::STANDARD.encode(png)}}]),
             )
@@ -106,7 +106,7 @@ async fn execute<B: Browser>(
             .page_click(tab()?, s("ref")?)
             .await
             .map(|()| Value::String("clicked".into()))
-            .map_err(|e| e.to_string()),
+            .map_err(err),
         "page_type" => browser
             .page_type(
                 tab()?,
@@ -116,41 +116,35 @@ async fn execute<B: Browser>(
             )
             .await
             .map(|()| Value::String("typed".into()))
-            .map_err(|e| e.to_string()),
+            .map_err(err),
         "tab_navigate" => browser
             .navigate(tab()?, s("url")?)
             .await
             .map(|()| Value::String("navigating".into()))
-            .map_err(|e| e.to_string()),
-        "page_snapshot" => Ok(Value::String(
-            browser
-                .page_snapshot(tab()?)
-                .await
-                .map_err(|e| e.to_string())?,
-        )),
+            .map_err(err),
+        "page_report" => browser
+            .page_report(tab()?)
+            .await
+            .map(Value::String)
+            .map_err(err),
+        "page_snapshot" => browser
+            .page_snapshot(tab()?)
+            .await
+            .map(Value::String)
+            .map_err(err),
         "page_diff" => Ok(Value::String(
-            browser.page_diff(tab()?).await.map_err(|e| e.to_string())?["summary"]
+            browser.page_diff(tab()?).await.map_err(err)?["summary"]
                 .as_str()
                 .unwrap_or_default()
                 .to_owned(),
         )),
-        "console_tail" => text(
-            browser
-                .console_tail(tab()?, limit())
-                .await
-                .map_err(|e| e.to_string())?,
-        ),
-        "network_list" => text(
-            browser
-                .requests(tab()?, limit())
-                .await
-                .map_err(|e| e.to_string())?,
-        ),
+        "console_tail" => text(browser.console_tail(tab()?, limit()).await.map_err(err)?),
+        "network_list" => text(browser.requests(tab()?, limit()).await.map_err(err)?),
         "network_body" => text(
             browser
                 .request_body(tab()?, s("request_id")?)
                 .await
-                .map_err(|e| e.to_string())?,
+                .map_err(err)?,
         ),
         other => Err(format!("unknown tool {other}")),
     }

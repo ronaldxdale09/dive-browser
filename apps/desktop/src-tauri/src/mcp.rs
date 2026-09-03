@@ -308,6 +308,17 @@ impl Browser for AppBrowser {
         ))
     }
 
+    async fn page_report(&self, tab: TabId) -> Result<String, BrowserError> {
+        let state = self.state();
+        let tab_row = lock(&state.store).tab(tab).map_err(other)?;
+        Ok(crate::report::compose(
+            &tab_row,
+            &state.buffers.console_tail(tab, 500),
+            &state.buffers.requests(tab, 1000),
+            None,
+        ))
+    }
+
     async fn page_snapshot(&self, tab: TabId) -> Result<String, BrowserError> {
         let snap = self.take_snapshot(tab).await?;
         let taken = snap.taken_at.clone();
