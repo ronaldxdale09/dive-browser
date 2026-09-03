@@ -1,9 +1,10 @@
-import { ArrowLeft, ArrowRight, Camera, Lock, PanelBottom, RotateCw, Search, Share, Sparkles, Star } from "lucide-react";
+import { ArrowLeft, ArrowRight, Camera, Lock, PanelBottom, RotateCw, Search, Sparkles, Star } from "lucide-react";
 import { useState } from "react";
 import { useBrowser } from "../store/browser";
 import { selectErrorCount, useConsole } from "../store/console";
 import { Icon, IconButton } from "./Icon";
 import { DeviceMenu } from "./DeviceMenu";
+import { SharePopover } from "./SharePopover";
 
 /** Navigation row: nav icons, the omnibox pill, page actions, dock and agent toggles. */
 export function Toolbar() {
@@ -55,7 +56,7 @@ export function Toolbar() {
         />
       </form>
       <IconButton icon={Star} label="Bookmark" disabled={!current} />
-      <IconButton icon={Share} label="Share" disabled={!current} />
+      <SharePopover />
       <IconButton icon={Camera} label="Capture full page" disabled={!current} onClick={() => void capture(true)} />
       <DeviceMenu />
       <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />

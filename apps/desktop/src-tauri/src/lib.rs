@@ -9,6 +9,7 @@ mod buffers;
 mod cdp_feed;
 mod commands;
 mod console;
+mod devservers;
 mod emulate;
 mod engine;
 mod error;

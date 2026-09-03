@@ -9,7 +9,7 @@ import { commands, events } from "../generated/bindings";
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 export { events };
-export type { Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original } from "../generated/bindings";
+export type { Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, ShareInfo } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
 export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
@@ -57,6 +57,8 @@ export const ipc = {
     unwrap(await commands.layoutSetContentBounds(b)),
   commandsList: () => commands.commandsList(),
   appInfo: () => commands.appInfo(),
+  devServers: () => commands.devServers(),
+  shareUrl: async (url: string) => unwrap(await commands.shareUrl(url)),
   agentKeySet: async (key: string) => unwrap(await commands.agentKeySet(key)),
   agentKeyPresent: () => commands.agentKeyPresent(),
   /** Stream a reply; `onDelta` fires for each piece. Resolves when the stream ends. */

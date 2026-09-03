@@ -81,6 +81,10 @@ export const commands = {
 	 */
 	commandRun: (id: string, argsJson: string | null) => typedError<string, AppError>(__TAURI_INVOKE("command_run", { id, argsJson })),
 	appInfo: () => __TAURI_INVOKE<AppInfo>("app_info"),
+	/**  Dev servers listening on common localhost ports. */
+	devServers: () => __TAURI_INVOKE<DevServer[]>("dev_servers"),
+	/**  LAN URL and QR code for opening `url` on another device. */
+	shareUrl: (url: string) => typedError<ShareInfo, AppError>(__TAURI_INVOKE("share_url", { url })),
 	/**  Store the Anthropic API key in the keychain. Empty removes it. */
 	agentKeySet: (key: string) => typedError<null, AppError>(__TAURI_INVOKE("agent_key_set", { key })),
 	/**  Whether a key is configured. */
@@ -250,6 +254,18 @@ export type CoreEvent =
 /**  The focused tab changed. */
 { type: "tab_activated"; data: TabId };
 
+/**  A server that answered. */
+export type DevServer = {
+	/**  Port on localhost. */
+	port: number,
+	/**  `http://localhost:<port>/`. */
+	url: string,
+	/**  Detected tool, e.g. `Vite`, `Next.js`, `Storybook`, or `HTTP`. */
+	framework: string,
+	/**  `<title>` of the root document, when any. */
+	title: string,
+};
+
 /**  A device preset as sent by the chrome. */
 export type Device = {
 	/**  Viewport width in CSS pixels. */
@@ -392,6 +408,14 @@ export type Original = {
 	line: number,
 	/**  1-based column. */
 	column: number,
+};
+
+/**  LAN address plus a QR code for it. */
+export type ShareInfo = {
+	/**  The URL rewritten to this machine's LAN IP. */
+	lan_url: string,
+	/**  SVG markup of a QR code for `lan_url`. */
+	qr_svg: string,
 };
 
 /**  Everything the chrome needs to render on boot. */

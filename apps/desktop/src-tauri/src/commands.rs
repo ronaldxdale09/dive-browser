@@ -65,6 +65,20 @@ pub(crate) fn app_info() -> AppInfo {
     }
 }
 
+/// Dev servers listening on common localhost ports.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn dev_servers() -> Vec<crate::devservers::DevServer> {
+    crate::devservers::scan().await
+}
+
+/// LAN URL and QR code for opening `url` on another device.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn share_url(url: String) -> AppResult<crate::devservers::ShareInfo> {
+    crate::devservers::share(&url)
+}
+
 /// Build the specta command/event collection.
 pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
     tauri_specta::Builder::<Runtime>::new()
@@ -96,6 +110,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             commands_list,
             command_run,
             app_info,
+            dev_servers,
+            share_url,
             crate::agent::agent_key_set,
             crate::agent::agent_key_present,
             crate::agent::agent_send,

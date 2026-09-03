@@ -1,9 +1,9 @@
 import { Command } from "cmdk";
-import { ArrowUpRight, Search, Terminal } from "lucide-react";
+import { ArrowUpRight, Search, Terminal, Server } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ipc } from "../lib/ipc";
 import { runCommand } from "../lib/commands";
-import type { Command as CommandDef } from "../lib/ipc";
+import type { Command as CommandDef, DevServer } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { Favicon } from "./Favicon";
@@ -16,8 +16,10 @@ export function Palette() {
   const activateTab = useBrowser((s) => s.activateTab);
   const [query, setQuery] = useState("");
   const [cmds, setCmds] = useState<CommandDef[]>([]);
+  const [servers, setServers] = useState<DevServer[]>([]);
   useEffect(() => {
     void ipc.commandsList().then(setCmds);
+    void ipc.devServers().then(setServers).catch(() => setServers([]));
   }, []);
 
   const close = () => toggle("palette", false);
@@ -53,6 +55,18 @@ export function Palette() {
               <span className="text-ink-2">{looksLikeUrl ? "Open" : "Search"}</span>
               <span className="truncate font-mono text-ink">{query}</span>
             </Command.Item>
+          )}
+          {servers.length > 0 && (
+            <Command.Group heading="Local servers">
+              {servers.map((d) => (
+                <Command.Item key={d.port} value={`localhost ${d.port} ${d.framework} ${d.title}`} onSelect={() => void go(d.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
+                  <Icon icon={Server} size={14} className="shrink-0 text-highlight" />
+                  <span className="font-mono">localhost:{d.port}</span>
+                  <span className="text-ink-2">{d.framework}</span>
+                  {d.title && <span className="ml-auto truncate pl-3 text-[11px] text-ink-3">{d.title}</span>}
+                </Command.Item>
+              ))}
+            </Command.Group>
           )}
           {tabs.length > 0 && (
             <Command.Group heading="Tabs">
