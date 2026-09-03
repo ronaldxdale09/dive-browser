@@ -5,6 +5,7 @@ import type { ConsoleEntry } from "../lib/ipc";
 import { useAgent } from "../store/agent";
 import { selectErrors, useConsole } from "../store/console";
 import { render as renderSkill, useSkills } from "../store/skills";
+import { toPlaywrightSpec } from "../lib/playwright";
 import { useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
 
@@ -222,9 +223,24 @@ function Watchers({ onAsk }: { onAsk: () => void }) {
 /** Every tool call of the conversation, in order, with inputs and outcomes. */
 function Trace() {
   const messages = useAgent((s) => s.messages);
+  const current = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
   const steps = messages.flatMap((m) => (m.steps ?? []).map((s) => ({ ...s, messageId: m.id })));
+  const actions = steps.filter((s) => s.action && !s.error);
+  const [copied, setCopied] = useState(false);
+  const exportSpec = () => {
+    const spec = toPlaywrightSpec(steps, current?.url, current?.title || "recorded flow");
+    void navigator.clipboard.writeText(spec).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-auto px-3 py-2 font-mono text-[11px] select-text">
+      {actions.length > 0 && (
+        <button type="button" onClick={exportSpec} className="mb-2 h-7 self-start rounded-full border border-line px-3 font-sans text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink">
+          {copied ? "Copied Playwright test" : `Export ${actions.length} action${actions.length === 1 ? "" : "s"} as Playwright test`}
+        </button>
+      )}
       {steps.length === 0 && <p className="font-sans text-xs text-ink-3">Tool calls the agent makes will appear here with their inputs and results.</p>}
       {steps.map((s) => (
         <div key={s.id} className="border-b border-line/60 py-1.5">

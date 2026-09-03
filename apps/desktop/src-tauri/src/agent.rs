@@ -54,6 +54,8 @@ pub struct ToolStep {
     pub input: String,
     /// Whether the tool changes the page.
     pub action: bool,
+    /// Playwright-style locator for the target, when the tool used a ref.
+    pub locator: Option<String>,
 }
 
 /// A streamed piece of the reply.
@@ -200,6 +202,7 @@ pub(crate) async fn agent_send(
                         name: call.name.clone(),
                         input: call.input.to_string(),
                         action: crate::agent_tools::is_action(&call.name),
+                        locator: locator_for(&state, tab_id, &call.input),
                     };
                     let _ = on_delta.send(ChatDelta::ToolCall(tool_step));
                     calls.push(call);
@@ -248,6 +251,7 @@ async fn run_calls(
             name: call.name.clone(),
             input: call.input.to_string(),
             action: crate::agent_tools::is_action(&call.name),
+            locator: locator_for(state, tab_id, &call.input),
         };
         let result = if gate_step.action && !approved(state, on_delta, &gate_step).await {
             dive_agent::ToolResult {
@@ -278,6 +282,45 @@ async fn run_calls(
         results.push(result);
     }
     results
+}
+
+/// `getByRole('button', { name: 'Save' })` for the ref in `input`, if known.
+fn locator_for(
+    state: &AppState,
+    tab_id: Option<TabId>,
+    input: &serde_json::Value,
+) -> Option<String> {
+    let reference = input["ref"].as_str()?;
+    let tab = input["tab_id"]
+        .as_str()
+        .and_then(|s| s.parse().ok())
+        .or(tab_id)?;
+    let target = state.buffers.resolve_ref(tab, reference)?;
+    Some(playwright_locator(&target.role, &target.name))
+}
+
+/// Map an accessibility role and name to a Playwright locator.
+pub fn playwright_locator(role: &str, name: &str) -> String {
+    let role = match role {
+        "textbox" | "searchbox" => "textbox",
+        "link" => "link",
+        "button" => "button",
+        "checkbox" => "checkbox",
+        "radio" => "radio",
+        "combobox" => "combobox",
+        "option" => "option",
+        "menuitem" => "menuitem",
+        "tab" => "tab",
+        "switch" => "switch",
+        "slider" => "slider",
+        other => other,
+    };
+    if name.is_empty() {
+        format!("getByRole('{role}')")
+    } else {
+        let escaped = name.replace('\\', "\\\\").replace('\'', "\\'");
+        format!("getByRole('{role}', {{ name: '{escaped}' }})")
+    }
 }
 
 /// Stable instructions first (cached), page context last.
@@ -372,6 +415,19 @@ mod tests {
         assert!(p.starts_with("You are the agent inside Dive"));
         assert!(p.ends_with("</page_context>"));
         assert!(!system_prompt("").contains("page_context"));
+    }
+
+    #[test]
+    fn locators_follow_playwright_shape() {
+        assert_eq!(
+            playwright_locator("link", "Learn more"),
+            "getByRole('link', { name: 'Learn more' })"
+        );
+        assert_eq!(
+            playwright_locator("searchbox", "It's here"),
+            "getByRole('textbox', { name: 'It\\'s here' })"
+        );
+        assert_eq!(playwright_locator("button", ""), "getByRole('button')");
     }
 
     #[test]

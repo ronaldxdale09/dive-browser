@@ -22,8 +22,8 @@ export type ReplayRequestInput = { method: string; url: string; headers: Record<
 type ChatTurnInput = { role: string; content: string };
 export type ChatDeltaOut =
   | { type: "text"; data: string }
-  | { type: "tool_call"; data: { id: string; name: string; input: string; action: boolean } }
-  | { type: "needs_approval"; data: { id: string; name: string; input: string; action: boolean } }
+  | { type: "tool_call"; data: { id: string; name: string; input: string; action: boolean; locator: string | null } }
+  | { type: "needs_approval"; data: { id: string; name: string; input: string; action: boolean; locator: string | null } }
   | { type: "tool_done"; data: { id: string; summary: string; error: boolean } }
   | { type: "done"; data: string }
   | { type: "error"; data: string };

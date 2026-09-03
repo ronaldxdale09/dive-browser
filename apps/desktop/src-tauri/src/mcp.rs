@@ -105,6 +105,7 @@ impl AppBrowser {
         self.state()
             .buffers
             .resolve_ref(tab, reference)
+            .map(|t| t.backend_node_id)
             .ok_or_else(|| {
                 BrowserError::Other(format!("unknown ref {reference}; call page_state first"))
             })
@@ -225,7 +226,16 @@ impl Browser for AppBrowser {
         let nodes = crate::ax::flatten(&tree);
         let refs = nodes
             .iter()
-            .filter_map(|n| Some((n.reference.clone()?, n.backend_node_id?)))
+            .filter_map(|n| {
+                Some((
+                    n.reference.clone()?,
+                    crate::buffers::RefTarget {
+                        backend_node_id: n.backend_node_id?,
+                        role: n.role.clone(),
+                        name: n.name.clone(),
+                    },
+                ))
+            })
             .collect();
         self.state().buffers.set_refs(tab, refs);
         Ok(crate::ax::render(&nodes, 1500))

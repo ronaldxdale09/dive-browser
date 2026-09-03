@@ -12,6 +12,17 @@ use crate::network::NetworkEvent;
 const CONSOLE_CAP: usize = 500;
 const NETWORK_CAP: usize = 1000;
 
+/// What a `ref` from `page_state` points at.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct RefTarget {
+    /// Backend DOM node id for CDP calls.
+    pub backend_node_id: i64,
+    /// ARIA role.
+    pub role: String,
+    /// Accessible name.
+    pub name: String,
+}
+
 /// A merged view of one request, built from its lifecycle events.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct RequestSummary {
@@ -42,7 +53,7 @@ struct TabBuffers {
     console: VecDeque<ConsoleEntry>,
     requests: VecDeque<RequestSummary>,
     /// `ref` id -> backend DOM node id from the last `page_state` snapshot.
-    ax_refs: HashMap<String, i64>,
+    ax_refs: HashMap<String, RefTarget>,
     /// Last two page snapshots, oldest first.
     snapshots: VecDeque<crate::snapshot::PageSnapshot>,
 }
@@ -191,13 +202,13 @@ impl Buffers {
     }
 
     /// Remember the ref -> backend node mapping of the latest snapshot.
-    pub fn set_refs(&self, tab: TabId, refs: HashMap<String, i64>) {
+    pub fn set_refs(&self, tab: TabId, refs: HashMap<String, RefTarget>) {
         self.with(|m| m.entry(tab).or_default().ax_refs = refs);
     }
 
-    /// Backend DOM node id for `reference`, if the snapshot is current.
-    pub fn resolve_ref(&self, tab: TabId, reference: &str) -> Option<i64> {
-        self.with(|m| m.get(&tab).and_then(|b| b.ax_refs.get(reference).copied()))
+    /// Target of `reference`, if the snapshot is current.
+    pub fn resolve_ref(&self, tab: TabId, reference: &str) -> Option<RefTarget> {
+        self.with(|m| m.get(&tab).and_then(|b| b.ax_refs.get(reference).cloned()))
     }
 
     /// Store a snapshot, keeping the two most recent.

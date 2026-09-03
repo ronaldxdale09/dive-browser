@@ -78,7 +78,7 @@ export const commands = {
 	/**  Replay a (possibly edited) request, optionally with the tab's cookies. */
 	requestReplay: (tabId: TabId, request: ReplayRequest) => typedError<ReplayResponse, AppError>(__TAURI_INVOKE("request_replay", { tabId, request })),
 	/**
-	 *  OpenAPI 3.1 JSON inferred from the tab's captured traffic; also saved
+	 *  `OpenAPI` 3.1 JSON inferred from the tab's captured traffic; also saved
 	 *  under captures and copied to the clipboard.
 	 */
 	tabOpenapi: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_openapi", { id })),
@@ -542,6 +542,8 @@ export type ToolStep = {
 	input: string,
 	/**  Whether the tool changes the page. */
 	action: boolean,
+	/**  Playwright-style locator for the target, when the tool used a ref. */
+	locator: string | null,
 };
 
 /**  One failing rule. */

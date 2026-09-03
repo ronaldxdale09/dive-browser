@@ -7,6 +7,7 @@ export interface Step {
   name: string;
   input: string;
   action: boolean;
+  locator?: string | null;
   summary?: string;
   error?: boolean;
   /** Waiting for the user's Allow / Deny. */
