@@ -1,6 +1,7 @@
 import { ArrowLeft, ArrowRight, Camera, Lock, PanelBottom, RotateCw, Search, Share, Sparkles, Star } from "lucide-react";
 import { useState } from "react";
 import { useBrowser } from "../store/browser";
+import { selectErrorCount, useConsole } from "../store/console";
 import { Icon, IconButton } from "./Icon";
 import { DeviceMenu } from "./DeviceMenu";
 
@@ -16,6 +17,7 @@ export function Toolbar() {
   const toggle = useBrowser((s) => s.toggle);
   const open = useBrowser((s) => s.open);
   const current = tabs.find((t) => t.id === activeTab);
+  const errorCount = useConsole(selectErrorCount(activeTab));
   const url = current?.url ?? "";
   // Reset the draft whenever the active tab's URL changes (adjust-state-during-render).
   const [draft, setDraft] = useState({ url, value: url });
@@ -68,6 +70,11 @@ export function Toolbar() {
       >
         <Icon icon={Sparkles} size={14} />
         Agent
+        {errorCount > 0 && !open.sidecar && (
+          <span className="ml-0.5 rounded-full bg-danger px-1.5 py-px font-mono text-[10px] leading-4 text-white" aria-label={`${errorCount} errors`}>
+            {errorCount > 99 ? "99+" : errorCount}
+          </span>
+        )}
       </button>
     </div>
   );

@@ -1,6 +1,7 @@
 import { ArrowUp, KeyRound, ListTree, MessageSquare, Radar, Trash2, Wand2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useAgent } from "../store/agent";
+import { selectErrors, useConsole } from "../store/console";
 import { useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
 
@@ -30,7 +31,9 @@ export function Sidecar() {
           </button>
         ))}
       </div>
-      {tab === "chat" ? <Chat /> : <div className="flex-1 px-4 py-3 text-xs text-ink-3">Coming in Phase 3.</div>}
+      {tab === "chat" && <Chat />}
+      {tab === "watchers" && <Watchers onAsk={() => setTab("chat")} />}
+      {tab !== "chat" && tab !== "watchers" && <div className="flex-1 px-4 py-3 text-xs text-ink-3">Coming in Phase 3.</div>}
     </aside>
   );
 }
@@ -149,5 +152,44 @@ function Thread() {
         </div>
       </div>
     </>
+  );
+}
+
+/** Runtime watcher v1: errors from the active tab, one click to hand them to the agent. */
+function Watchers({ onAsk }: { onAsk: () => void }) {
+  const activeTab = useBrowser((s) => s.activeTab);
+  const errors = useConsole(selectErrors(activeTab));
+  const send = useAgent((s) => s.send);
+  const keyPresent = useAgent((s) => s.keyPresent);
+  const ask = (text: string, where: string) => {
+    onAsk();
+    void send(`This error appeared in the console${where ? ` at ${where}` : ""}:\n\n${text}\n\nExplain the likely cause and propose a concrete fix.`, activeTab);
+  };
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-auto px-3 py-2 text-xs">
+      <p className="mb-2 text-ink-3">Errors and uncaught exceptions on this tab. The watcher runs while the tab is open.</p>
+      {errors.length === 0 && <p className="text-ink-3">Nothing wrong so far.</p>}
+      {errors.slice(-30).reverse().map((e, i) => {
+        const where = e.url ? `${e.url.split("/").pop() ?? e.url}${e.line ? `:${e.line}` : ""}` : "";
+        return (
+          <div key={`${e.timestamp}-${i}`} className="mb-2 rounded-lg border border-line bg-surface-2 p-2">
+            <div className="mb-1 flex items-center gap-2 font-mono text-[10px] text-ink-3">
+              <span>{e.source}</span>
+              {where && <span className="truncate">{where}</span>}
+            </div>
+            <div className="line-clamp-4 font-mono text-[11px] whitespace-pre-wrap text-danger select-text">{e.text}</div>
+            <button
+              type="button"
+              disabled={!keyPresent}
+              onClick={() => ask(e.text, where)}
+              className="mt-1.5 h-6 rounded-full bg-accent px-2.5 text-[11px] font-medium text-accent-ink disabled:opacity-40"
+              title={keyPresent ? "Ask the agent about this error" : "Add an API key in Chat first"}
+            >
+              Explain and fix
+            </button>
+          </div>
+        );
+      })}
+    </div>
   );
 }

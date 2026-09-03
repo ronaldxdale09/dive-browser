@@ -39,3 +39,13 @@ export function listenConsole() {
 
 const EMPTY: ConsoleEntry[] = [];
 export const selectEntries = (tabId: string | null) => (s: ConsoleState) => (tabId ? (s.byTab[tabId] ?? EMPTY) : EMPTY);
+
+/** Errors and exceptions for a tab, newest last. */
+export const selectErrors = (tabId: string | null) => (s: ConsoleState) => {
+  const list = tabId ? (s.byTab[tabId] ?? EMPTY) : EMPTY;
+  return list === EMPTY ? EMPTY : list.filter((e) => e.level === "error");
+};
+
+/** Count of error-level entries for a tab; stable primitive for selectors. */
+export const selectErrorCount = (tabId: string | null) => (s: ConsoleState) =>
+  tabId ? (s.byTab[tabId] ?? EMPTY).reduce((n, e) => (e.level === "error" ? n + 1 : n), 0) : 0;
