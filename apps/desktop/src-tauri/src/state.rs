@@ -27,6 +27,10 @@ pub struct AppState {
     pub sourcemaps: crate::sourcemaps::Resolver,
     /// Agent actions waiting for the user's decision, by tool call id.
     pub approvals: Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<bool>>>,
+    /// Agent runs in flight, so the chrome can stop one.
+    pub agent_runs: crate::agent::Runs,
+    /// Model listings fetched from providers, reused for a while.
+    pub agent_models: crate::agent::ModelCache,
     /// Tab screen recordings in progress.
     pub screencast: crate::screencast::Registry,
     /// Mock and rewrite rules per workspace.
@@ -86,6 +90,8 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
         buffers: crate::buffers::Buffers::default(),
         sourcemaps: crate::sourcemaps::Resolver::default(),
         approvals: Mutex::new(std::collections::HashMap::new()),
+        agent_runs: Mutex::new(std::collections::HashMap::new()),
+        agent_models: Mutex::new(std::collections::HashMap::new()),
         screencast: crate::screencast::Registry::default(),
         rules: crate::rules::Registry::default(),
         prefs: crate::prefs::Registry::default(),

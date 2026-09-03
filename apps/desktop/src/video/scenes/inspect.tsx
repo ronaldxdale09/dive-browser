@@ -1,5 +1,6 @@
 import { interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { Chip, Pointer, Reveal, Scene, Skeleton, T, Window, pop, ramp, useScene } from "../primitives";
+import type { SceneProps } from "../primitives";
 
 /** Scenes about looking inside a page: traffic, console, rules, devices. */
 
@@ -11,12 +12,12 @@ const REQUESTS = [
   { method: "WS", path: "/realtime", status: 101, type: "ws", time: "↑ 12 ↓ 48" },
 ];
 
-export function Network() {
+export function Network({ index }: SceneProps) {
   const { frame } = useScene();
   const open = frame >= 74;
   const replayed = frame >= 108;
   return (
-    <Scene index={4} eyebrow="Inspect" title="Network, replayable" text="Every request with headers, bodies and WebSocket frames. Edit and replay one, copy it as cURL, or export the lot as HAR." keys="⌘⇧D">
+    <Scene index={index} eyebrow="Inspect" title="Network, replayable" text="Every request with headers, bodies and WebSocket frames. Edit and replay one, copy it as cURL, or export the lot as HAR." keys="⌘⇧D">
       <Window url="acme.test/checkout">
         <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
           <div style={{ height: 96, position: "relative", borderBottom: `1px solid ${T.line}` }}>
@@ -53,9 +54,9 @@ export function Network() {
               <div style={{ color: T.ink3, fontSize: 10.5, lineHeight: 1.7 }}>
                 content-type: application/json
                 <br />
-                <span style={{ color: replayed ? "#7fd8a0" : T.ink3 }}>idempotency-key: {replayed ? "9f2c…" : "—"}</span>
+                <span style={{ color: replayed ? T.ok : T.ink3 }}>idempotency-key: {replayed ? "9f2c…" : "—"}</span>
               </div>
-              <div style={{ marginTop: 10, padding: 8, borderRadius: 8, background: T.surface2, color: replayed ? "#7fd8a0" : T.danger, fontSize: 10.5 }}>
+              <div style={{ marginTop: 10, padding: 8, borderRadius: 8, background: T.surface2, color: replayed ? T.ok : T.danger, fontSize: 10.5 }}>
                 {replayed ? '{ "ok": true, "order": "A-1042" }' : '{ "error": "idempotency key required" }'}
               </div>
               <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
@@ -78,11 +79,11 @@ const LOGS = [
   { level: "error", text: "TypeError: cart is undefined · Checkout.tsx:48", tone: T.danger },
 ];
 
-export function ConsoleVitals() {
+export function ConsoleVitals({ index }: SceneProps) {
   const { frame } = useScene();
   const grow = ramp(frame, 30, 70);
   return (
-    <Scene index={5} eyebrow="Debug" title="Console, vitals, a11y, storage" text="Errors with source-mapped frames, Core Web Vitals as they happen, an axe audit and every cookie — one dock beside the page.">
+    <Scene index={index} eyebrow="Debug" title="Console, vitals, a11y, storage" text="Errors with source-mapped frames, Core Web Vitals as they happen, an axe audit and every cookie — one dock beside the page.">
       <Window url="acme.test/checkout">
         <div style={{ position: "absolute", inset: 0, display: "grid", gridTemplateColumns: "1.3fr 1fr", gridTemplateRows: "1fr 1fr", fontFamily: T.mono, fontSize: 11.5 }}>
           <Panel title="Console" style={{ gridRow: "1 / 3", borderRight: `1px solid ${T.line}` }}>
@@ -139,7 +140,7 @@ function Panel({ title, children, style }: { title: string; children: React.Reac
 }
 
 function Vital({ label, value, pct, good }: { label: string; value: string; pct: number; good: boolean }) {
-  const color = good ? "#7fd8a0" : T.danger;
+  const color = good ? T.ok : T.danger;
   return (
     <div style={{ flex: 1 }}>
       <div style={{ color: T.ink3, fontSize: 10 }}>{label}</div>
@@ -162,10 +163,10 @@ const LANE = [
   { at: 88, label: "/api/users", stamp: "+ X-Env", tone: "quiet" as const },
 ];
 
-export function Rules() {
+export function Rules({ index }: SceneProps) {
   const { frame } = useScene();
   return (
-    <Scene index={6} eyebrow="Control" title="Mock and rewrite rules" text="Block a script, answer an endpoint with a canned response, or add a header — per workspace, applied before the request leaves.">
+    <Scene index={index} eyebrow="Control" title="Mock and rewrite rules" text="Block a script, answer an endpoint with a canned response, or add a header — per workspace, applied before the request leaves.">
       <Window url="Rules · Client">
         <div style={{ position: "absolute", inset: 0, padding: "14px 18px", fontFamily: T.mono, fontSize: 11.5 }}>
           {RULES.map((r, i) => (
@@ -192,7 +193,7 @@ export function Rules() {
                     {l.label}
                   </span>
                   {stamped && (
-                    <span style={{ transform: `scale(${pop(frame, 30, l.at + 22, true)})`, transformOrigin: "left center" }}>
+                    <span style={{ scale: String(pop(frame, 30, l.at + 22, true)), transformOrigin: "left center" }}>
                       <Chip tone={l.tone}>{l.stamp}</Chip>
                     </span>
                   )}
@@ -208,14 +209,14 @@ export function Rules() {
 
 const DEVICE_CHIPS = ["iPhone 15 Pro · 3×", "Touch", "Slow 3G", "prefers-color-scheme: dark"];
 
-export function Mobile() {
+export function Mobile({ index }: SceneProps) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const p = spring({ frame: Math.max(0, frame - 28), fps, config: { damping: 18, stiffness: 90 } });
   const width = interpolate(p, [0, 1], [560, 214]);
   const narrow = width < 380;
   return (
-    <Scene index={7} eyebrow="Emulate" title="Mobile simulator" text="Real viewport, pixel ratio and touch, plus throttled networks and media features. Presets for the phones you actually test on.">
+    <Scene index={index} eyebrow="Emulate" title="Mobile simulator" text="Real viewport, pixel ratio and touch, plus throttled networks and media features. Presets for the phones you actually test on.">
       <Window url="acme.test">
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 28 }}>
           <div style={{ width, height: 300, borderRadius: narrow ? 26 : 10, border: `${narrow ? 6 : 1}px solid ${narrow ? T.surface3 : T.line2}`, background: T.ground, overflow: "hidden", position: "relative", transition: "none" }}>

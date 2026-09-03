@@ -1,5 +1,6 @@
 import { useCurrentFrame, useVideoConfig } from "remotion";
 import { Chip, Pointer, Reveal, Scene, Skeleton, T, Typed, Window, pop, ramp, useScene } from "../primitives";
+import type { SceneProps } from "../primitives";
 
 /** Scenes about how Dive is organised and who it talks to. */
 
@@ -10,11 +11,11 @@ const SPACES = [
 ];
 const TABS: Record<number, string[]> = { 0: ["Dashboard", "Docs", "Figma"], 1: ["client.dev", "Linear"] };
 
-export function Workspaces() {
+export function Workspaces({ index }: SceneProps) {
   const { frame } = useScene();
   const active = frame >= 52 ? 1 : 0;
   return (
-    <Scene index={1} eyebrow="Organise" title="A workspace per project" text="Tabs, cookies and logins kept apart. Be signed in as two people at once without a second browser." keys="⌘1 – ⌘9">
+    <Scene index={index} eyebrow="Organise" title="A workspace per project" text="Tabs, cookies and logins kept apart. Be signed in as two people at once without a second browser." keys="⌘1 – ⌘9">
       <Window>
         <div style={{ position: "absolute", inset: 0, display: "flex" }}>
           <div style={{ width: 180, borderRight: `1px solid ${T.line}`, padding: "10px 8px", background: T.ground }}>
@@ -93,7 +94,7 @@ function Mark({ color, size = 22 }: { color: string; size?: number }) {
       }}
     >
       <span style={{ position: "absolute", left: "18%", top: "22%", width: "38%", height: "38%", borderRadius: "50%", background: "#141414", opacity: 0.85 }} />
-      <span style={{ position: "absolute", right: "12%", bottom: "12%", width: "34%", height: "34%", background: "#f4f4f4", transform: "rotate(45deg)", opacity: 0.9 }} />
+      <span style={{ position: "absolute", right: "12%", bottom: "12%", width: "34%", height: "34%", background: "#f4f4f4", rotate: "45deg", opacity: 0.9 }} />
     </span>
   );
 }
@@ -108,9 +109,9 @@ function Shield() {
 
 const TOOLS = ["page_state", "page_screenshot", "console_tail", "network_body", "page_click", "page_report"];
 
-export function Mcp() {
+export function Mcp({ index }: SceneProps) {
   return (
-    <Scene index={2} eyebrow="Connect" title="Built for coding agents" text="Claude Code, Cursor and Codex plug in over MCP and read your tabs, console, network and screenshots.">
+    <Scene index={index} eyebrow="Connect" title="Built for coding agents" text="Claude Code, Cursor and Codex plug in over MCP and read your tabs, console, network and screenshots.">
       <Window url="MCP · 127.0.0.1:7391">
         <div style={{ position: "absolute", inset: 0, padding: "18px 22px", fontFamily: T.mono, fontSize: 12.5, lineHeight: 1.75, color: T.ink2 }}>
           <div>
@@ -118,7 +119,7 @@ export function Mcp() {
             <Typed text="claude mcp add --transport http dive http://127.0.0.1:7391/mcp" start={4} cps={60} style={{ color: T.ink }} />
           </div>
           <Reveal at={44}>
-            <div style={{ color: "#7fd8a0" }}>✓ Connected to Dive · 18 tools</div>
+            <div style={{ color: T.ok }}>✓ Connected to Dive · 18 tools</div>
           </Reveal>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "6px 0 10px" }}>
             {TOOLS.map((t, i) => (
@@ -127,10 +128,12 @@ export function Mcp() {
               </Reveal>
             ))}
           </div>
-          <div>
-            <span style={{ color: T.hi }}>$ </span>
-            <Typed text='claude "why is checkout failing?"' start={66} cps={48} style={{ color: T.ink }} />
-          </div>
+          <Reveal at={66} dx={0}>
+            <div>
+              <span style={{ color: T.hi }}>$ </span>
+              <Typed text='claude "why is checkout failing?"' start={66} cps={48} style={{ color: T.ink }} />
+            </div>
+          </Reveal>
           <Reveal at={88}>
             <div>
               <span style={{ color: T.ink3 }}>▸ console_tail </span>→ 2 errors
@@ -150,12 +153,12 @@ export function Mcp() {
   );
 }
 
-export function AgentActs() {
+export function AgentActs({ index }: SceneProps) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const allowed = frame >= 104;
   return (
-    <Scene index={3} eyebrow="Delegate" title="An agent that acts" text="Ask in plain words. It inspects the page, fills, clicks and navigates — and asks before anything irreversible." keys="⌘J">
+    <Scene index={index} eyebrow="Delegate" title="An agent that acts" text="Ask in plain words. It inspects the page, fills, clicks and navigates — and asks before anything irreversible." keys="⌘J">
       <Window url="app.local/signup">
         <div style={{ position: "absolute", inset: 0, display: "flex" }}>
           <div style={{ flex: 1, padding: "28px 34px" }}>
@@ -175,7 +178,7 @@ export function AgentActs() {
                 placeItems: "center",
                 fontSize: 12,
                 fontWeight: 500,
-                transform: `scale(${1 - 0.06 * pop(frame, fps, 104, true) * (frame < 112 ? 1 : 0)})`,
+                scale: String(1 - 0.06 * pop(frame, fps, 104, true) * (frame < 112 ? 1 : 0)),
               }}
             >
               {frame >= 116 ? "Welcome, Ada" : "Create account"}
@@ -238,8 +241,8 @@ function Field({ label, value, start }: { label: string; value: string; start: n
 function Step({ at, text, ok = false }: { at: number; text: string; ok?: boolean }) {
   return (
     <Reveal at={at}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, color: ok ? "#7fd8a0" : T.ink2 }}>
-        <span style={{ width: 6, height: 6, borderRadius: 3, background: ok ? "#7fd8a0" : T.hi }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 8, color: ok ? T.ok : T.ink2 }}>
+        <span style={{ width: 6, height: 6, borderRadius: 3, background: ok ? T.ok : T.hi }} />
         {text}
       </div>
     </Reveal>
@@ -252,11 +255,11 @@ const SERVERS = [
   { port: 8080, framework: "Go", title: "api" },
 ];
 
-export function Localhost() {
+export function Localhost({ index }: SceneProps) {
   const { frame } = useScene();
   const qr = ramp(frame, 58, 92);
   return (
-    <Scene index={12} eyebrow="Share" title="Localhost, found and shared" text="Dev servers show up in the palette by themselves. Any page becomes a QR code that opens on your phone over the LAN.">
+    <Scene index={index} eyebrow="Share" title="Localhost, found and shared" text="Dev servers show up in the palette by themselves. Any page becomes a QR code that opens on your phone over the LAN.">
       <Window bare>
         <div style={{ position: "absolute", inset: 0, display: "flex" }}>
           <div style={{ flex: 1, padding: 14 }}>

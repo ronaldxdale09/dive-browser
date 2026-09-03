@@ -1,0 +1,1040 @@
+{
+  "$comment": "Device simulator catalog. One source for the chrome (src/data/devices.ts) and the host (src-tauri/src/emulate.rs). Sizes are CSS pixels as the device's browser reports them.",
+  "groups": [
+    {
+      "id": "apple-phone",
+      "name": "Apple phones"
+    },
+    {
+      "id": "android-phone",
+      "name": "Android phones"
+    },
+    {
+      "id": "foldable",
+      "name": "Foldables"
+    },
+    {
+      "id": "tablet",
+      "name": "Tablets"
+    },
+    {
+      "id": "laptop",
+      "name": "Laptops and desktops"
+    }
+  ],
+  "ui": {
+    "island": {
+      "browser": "safari",
+      "portrait": {
+        "status": 59,
+        "top": 0,
+        "bottom": 134,
+        "home": 34,
+        "left": 0,
+        "right": 0
+      },
+      "landscape": {
+        "status": 0,
+        "top": 50,
+        "bottom": 21,
+        "home": 21,
+        "left": 59,
+        "right": 59
+      }
+    },
+    "notch": {
+      "browser": "safari",
+      "portrait": {
+        "status": 47,
+        "top": 0,
+        "bottom": 134,
+        "home": 34,
+        "left": 0,
+        "right": 0
+      },
+      "landscape": {
+        "status": 0,
+        "top": 50,
+        "bottom": 21,
+        "home": 21,
+        "left": 47,
+        "right": 47
+      }
+    },
+    "home": {
+      "browser": "safari",
+      "portrait": {
+        "status": 20,
+        "top": 44,
+        "bottom": 44,
+        "home": 0,
+        "left": 0,
+        "right": 0
+      },
+      "landscape": {
+        "status": 0,
+        "top": 44,
+        "bottom": 0,
+        "home": 0,
+        "left": 0,
+        "right": 0
+      }
+    },
+    "punch": {
+      "browser": "chrome",
+      "portrait": {
+        "status": 24,
+        "top": 56,
+        "bottom": 24,
+        "home": 24,
+        "left": 0,
+        "right": 0
+      },
+      "landscape": {
+        "status": 24,
+        "top": 56,
+        "bottom": 0,
+        "home": 0,
+        "left": 0,
+        "right": 0
+      }
+    },
+    "bezel": {
+      "browser": "safari",
+      "portrait": {
+        "status": 24,
+        "top": 70,
+        "bottom": 0,
+        "home": 20,
+        "left": 0,
+        "right": 0
+      },
+      "landscape": {
+        "status": 24,
+        "top": 70,
+        "bottom": 0,
+        "home": 20,
+        "left": 0,
+        "right": 0
+      }
+    },
+    "laptop": {
+      "browser": "none",
+      "portrait": {
+        "status": 0,
+        "top": 0,
+        "bottom": 0,
+        "home": 0,
+        "left": 0,
+        "right": 0
+      },
+      "landscape": {
+        "status": 0,
+        "top": 0,
+        "bottom": 0,
+        "home": 0,
+        "left": 0,
+        "right": 0
+      }
+    }
+  },
+  "devices": [
+    {
+      "id": "iphone-se",
+      "name": "iPhone SE",
+      "group": "apple-phone",
+      "width": 375,
+      "height": 667,
+      "dpr": 2,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ios",
+        "version": "18_0"
+      },
+      "frame": "home",
+      "radius": 0,
+      "safeArea": {
+        "top": 20,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "iphone-8-plus",
+      "name": "iPhone 8 Plus",
+      "group": "apple-phone",
+      "width": 414,
+      "height": 736,
+      "dpr": 3,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ios",
+        "version": "16_7"
+      },
+      "frame": "home",
+      "radius": 0,
+      "safeArea": {
+        "top": 20,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "iphone-x",
+      "name": "iPhone X / XS",
+      "group": "apple-phone",
+      "width": 375,
+      "height": 812,
+      "dpr": 3,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ios",
+        "version": "18_0"
+      },
+      "frame": "notch",
+      "radius": 40,
+      "safeArea": {
+        "top": 44,
+        "bottom": 34,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "iphone-xr",
+      "name": "iPhone XR / 11",
+      "group": "apple-phone",
+      "width": 414,
+      "height": 896,
+      "dpr": 2,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ios",
+        "version": "18_0"
+      },
+      "frame": "notch",
+      "radius": 40,
+      "safeArea": {
+        "top": 44,
+        "bottom": 34,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "iphone-12-mini",
+      "name": "iPhone 12 / 13 mini",
+      "group": "apple-phone",
+      "width": 375,
+      "height": 812,
+      "dpr": 3,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ios",
+        "version": "18_0"
+      },
+      "frame": "notch",
+      "radius": 44,
+      "safeArea": {
+        "top": 47,
+        "bottom": 34,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "iphone-12",
+      "name": "iPhone 12 / 13 / 14",
+      "group": "apple-phone",
+      "width": 390,
+      "height": 844,
+      "dpr": 3,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ios",
+        "version": "18_0"
+      },
+      "frame": "notch",
+      "radius": 47,
+      "safeArea": {
+        "top": 47,
+        "bottom": 34,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "iphone-13-pro-max",
+      "name": "iPhone 12 / 13 Pro Max",
+      "group": "apple-phone",
+      "width": 428,
+      "height": 926,
+      "dpr": 3,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ios",
+        "version": "18_0"
+      },
+      "frame": "notch",
+      "radius": 53,
+      "safeArea": {
+        "top": 47,
+        "bottom": 34,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "iphone-14-pro",
+      "name": "iPhone 14 Pro",
+      "group": "apple-phone",
+      "width": 393,
+      "height": 852,
+      "dpr": 3,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ios",
+        "version": "18_0"
+      },
+      "frame": "island",
+      "radius": 55,
+      "safeArea": {
+        "top": 59,
+        "bottom": 34,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "iphone-15",
+      "name": "iPhone 15",
+      "group": "apple-phone",
+      "width": 393,
+      "height": 852,
+      "dpr": 3,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ios",
+        "version": "18_0"
+      },
+      "frame": "island",
+      "radius": 55,
+      "safeArea": {
+        "top": 59,
+        "bottom": 34,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "iphone-15-pro-max",
+      "name": "iPhone 15 Pro Max",
+      "group": "apple-phone",
+      "width": 430,
+      "height": 932,
+      "dpr": 3,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ios",
+        "version": "18_0"
+      },
+      "frame": "island",
+      "radius": 55,
+      "safeArea": {
+        "top": 59,
+        "bottom": 34,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "iphone-16",
+      "name": "iPhone 16",
+      "group": "apple-phone",
+      "width": 393,
+      "height": 852,
+      "dpr": 3,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ios",
+        "version": "18_0"
+      },
+      "frame": "island",
+      "radius": 55,
+      "safeArea": {
+        "top": 59,
+        "bottom": 34,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "iphone-16-pro",
+      "name": "iPhone 16 Pro",
+      "group": "apple-phone",
+      "width": 402,
+      "height": 874,
+      "dpr": 3,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ios",
+        "version": "18_0"
+      },
+      "frame": "island",
+      "radius": 62,
+      "safeArea": {
+        "top": 59,
+        "bottom": 34,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "iphone-16-pro-max",
+      "name": "iPhone 16 Pro Max",
+      "group": "apple-phone",
+      "width": 440,
+      "height": 956,
+      "dpr": 3,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ios",
+        "version": "18_0"
+      },
+      "frame": "island",
+      "radius": 62,
+      "safeArea": {
+        "top": 59,
+        "bottom": 34,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "iphone-17",
+      "name": "iPhone 17",
+      "group": "apple-phone",
+      "width": 402,
+      "height": 874,
+      "dpr": 3,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ios",
+        "version": "26_0"
+      },
+      "frame": "island",
+      "radius": 62,
+      "safeArea": {
+        "top": 59,
+        "bottom": 34,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "iphone-17-pro-max",
+      "name": "iPhone 17 Pro Max",
+      "group": "apple-phone",
+      "width": 440,
+      "height": 956,
+      "dpr": 3,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ios",
+        "version": "26_0"
+      },
+      "frame": "island",
+      "radius": 62,
+      "safeArea": {
+        "top": 59,
+        "bottom": 34,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "pixel-5",
+      "name": "Pixel 5",
+      "group": "android-phone",
+      "width": 393,
+      "height": 851,
+      "dpr": 2.75,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "android",
+        "model": "Pixel 5"
+      },
+      "frame": "punch",
+      "radius": 28,
+      "safeArea": {
+        "top": 24,
+        "bottom": 24,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "pixel-7",
+      "name": "Pixel 7",
+      "group": "android-phone",
+      "width": 412,
+      "height": 915,
+      "dpr": 2.625,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "android",
+        "model": "Pixel 7"
+      },
+      "frame": "punch",
+      "radius": 28,
+      "safeArea": {
+        "top": 24,
+        "bottom": 24,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "pixel-8",
+      "name": "Pixel 8",
+      "group": "android-phone",
+      "width": 412,
+      "height": 915,
+      "dpr": 2.625,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "android",
+        "model": "Pixel 8"
+      },
+      "frame": "punch",
+      "radius": 28,
+      "safeArea": {
+        "top": 24,
+        "bottom": 24,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "pixel-9",
+      "name": "Pixel 9",
+      "group": "android-phone",
+      "width": 412,
+      "height": 923,
+      "dpr": 2.625,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "android",
+        "model": "Pixel 9"
+      },
+      "frame": "punch",
+      "radius": 28,
+      "safeArea": {
+        "top": 24,
+        "bottom": 24,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "galaxy-s8",
+      "name": "Galaxy S8",
+      "group": "android-phone",
+      "width": 360,
+      "height": 740,
+      "dpr": 3,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "android",
+        "model": "SM-G950U"
+      },
+      "frame": "punch",
+      "radius": 20,
+      "safeArea": {
+        "top": 24,
+        "bottom": 24,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "galaxy-s20-ultra",
+      "name": "Galaxy S20 Ultra",
+      "group": "android-phone",
+      "width": 412,
+      "height": 915,
+      "dpr": 3.5,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "android",
+        "model": "SM-G988B"
+      },
+      "frame": "punch",
+      "radius": 28,
+      "safeArea": {
+        "top": 24,
+        "bottom": 24,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "galaxy-s23",
+      "name": "Galaxy S23",
+      "group": "android-phone",
+      "width": 360,
+      "height": 780,
+      "dpr": 3,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "android",
+        "model": "SM-S911B"
+      },
+      "frame": "punch",
+      "radius": 28,
+      "safeArea": {
+        "top": 24,
+        "bottom": 24,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "galaxy-s24",
+      "name": "Galaxy S24",
+      "group": "android-phone",
+      "width": 360,
+      "height": 780,
+      "dpr": 3,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "android",
+        "model": "SM-S921B"
+      },
+      "frame": "punch",
+      "radius": 28,
+      "safeArea": {
+        "top": 24,
+        "bottom": 24,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "galaxy-a51",
+      "name": "Galaxy A51 / A71",
+      "group": "android-phone",
+      "width": 412,
+      "height": 914,
+      "dpr": 2.625,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "android",
+        "model": "SM-A515F"
+      },
+      "frame": "punch",
+      "radius": 24,
+      "safeArea": {
+        "top": 24,
+        "bottom": 24,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "galaxy-z-fold-5",
+      "name": "Galaxy Z Fold 5 (folded)",
+      "group": "foldable",
+      "width": 344,
+      "height": 882,
+      "dpr": 2.625,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "android",
+        "model": "SM-F946B"
+      },
+      "frame": "punch",
+      "radius": 24,
+      "safeArea": {
+        "top": 24,
+        "bottom": 24,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "galaxy-z-fold-5-open",
+      "name": "Galaxy Z Fold 5 (open)",
+      "group": "foldable",
+      "width": 904,
+      "height": 882,
+      "dpr": 2.625,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "android",
+        "model": "SM-F946B"
+      },
+      "frame": "bezel",
+      "radius": 16,
+      "safeArea": {
+        "top": 24,
+        "bottom": 24,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "surface-duo",
+      "name": "Surface Duo",
+      "group": "foldable",
+      "width": 540,
+      "height": 720,
+      "dpr": 2.5,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "android",
+        "model": "Surface Duo"
+      },
+      "frame": "bezel",
+      "radius": 8,
+      "safeArea": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "ipad-mini",
+      "name": "iPad Mini",
+      "group": "tablet",
+      "width": 768,
+      "height": 1024,
+      "dpr": 2,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ipad"
+      },
+      "frame": "bezel",
+      "radius": 18,
+      "safeArea": {
+        "top": 24,
+        "bottom": 20,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "ipad",
+      "name": "iPad (10th gen)",
+      "group": "tablet",
+      "width": 820,
+      "height": 1180,
+      "dpr": 2,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ipad"
+      },
+      "frame": "bezel",
+      "radius": 18,
+      "safeArea": {
+        "top": 24,
+        "bottom": 20,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "ipad-air",
+      "name": "iPad Air",
+      "group": "tablet",
+      "width": 820,
+      "height": 1180,
+      "dpr": 2,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ipad"
+      },
+      "frame": "bezel",
+      "radius": 18,
+      "safeArea": {
+        "top": 24,
+        "bottom": 20,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "ipad-pro-11",
+      "name": "iPad Pro 11",
+      "group": "tablet",
+      "width": 834,
+      "height": 1194,
+      "dpr": 2,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ipad"
+      },
+      "frame": "bezel",
+      "radius": 18,
+      "safeArea": {
+        "top": 24,
+        "bottom": 20,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "ipad-pro-13",
+      "name": "iPad Pro 13",
+      "group": "tablet",
+      "width": 1024,
+      "height": 1366,
+      "dpr": 2,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "ipad"
+      },
+      "frame": "bezel",
+      "radius": 18,
+      "safeArea": {
+        "top": 24,
+        "bottom": 20,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "galaxy-tab-s4",
+      "name": "Galaxy Tab S4",
+      "group": "tablet",
+      "width": 712,
+      "height": 1138,
+      "dpr": 2.25,
+      "mobile": true,
+      "touch": true,
+      "ua": {
+        "kind": "android",
+        "model": "SM-T830"
+      },
+      "frame": "bezel",
+      "radius": 12,
+      "safeArea": {
+        "top": 24,
+        "bottom": 24,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "surface-pro-7",
+      "name": "Surface Pro 7",
+      "group": "tablet",
+      "width": 912,
+      "height": 1368,
+      "dpr": 2,
+      "mobile": false,
+      "touch": true,
+      "ua": {
+        "kind": "desktop",
+        "platform": "Windows"
+      },
+      "frame": "bezel",
+      "radius": 6,
+      "safeArea": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "nest-hub",
+      "name": "Nest Hub",
+      "group": "tablet",
+      "width": 1024,
+      "height": 600,
+      "dpr": 2,
+      "mobile": false,
+      "touch": true,
+      "ua": {
+        "kind": "android",
+        "model": "Nest Hub"
+      },
+      "frame": "bezel",
+      "radius": 10,
+      "safeArea": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "nest-hub-max",
+      "name": "Nest Hub Max",
+      "group": "tablet",
+      "width": 1280,
+      "height": 800,
+      "dpr": 2,
+      "mobile": false,
+      "touch": true,
+      "ua": {
+        "kind": "android",
+        "model": "Nest Hub Max"
+      },
+      "frame": "bezel",
+      "radius": 10,
+      "safeArea": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "laptop",
+      "name": "Laptop 1366",
+      "group": "laptop",
+      "width": 1366,
+      "height": 768,
+      "dpr": 1,
+      "mobile": false,
+      "touch": false,
+      "ua": {
+        "kind": "desktop",
+        "platform": "Windows"
+      },
+      "frame": "laptop",
+      "radius": 8,
+      "safeArea": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "macbook-air",
+      "name": "MacBook Air 13",
+      "group": "laptop",
+      "width": 1440,
+      "height": 900,
+      "dpr": 2,
+      "mobile": false,
+      "touch": false,
+      "ua": {
+        "kind": "desktop",
+        "platform": "macOS"
+      },
+      "frame": "laptop",
+      "radius": 8,
+      "safeArea": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "macbook-pro-14",
+      "name": "MacBook Pro 14",
+      "group": "laptop",
+      "width": 1512,
+      "height": 982,
+      "dpr": 2,
+      "mobile": false,
+      "touch": false,
+      "ua": {
+        "kind": "desktop",
+        "platform": "macOS"
+      },
+      "frame": "laptop",
+      "radius": 8,
+      "safeArea": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "desktop",
+      "name": "Desktop 1920",
+      "group": "laptop",
+      "width": 1920,
+      "height": 1080,
+      "dpr": 1,
+      "mobile": false,
+      "touch": false,
+      "ua": {
+        "kind": "desktop",
+        "platform": "macOS"
+      },
+      "frame": "laptop",
+      "radius": 4,
+      "safeArea": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      }
+    },
+    {
+      "id": "desktop-qhd",
+      "name": "Desktop 2560",
+      "group": "laptop",
+      "width": 2560,
+      "height": 1440,
+      "dpr": 1,
+      "mobile": false,
+      "touch": false,
+      "ua": {
+        "kind": "desktop",
+        "platform": "macOS"
+      },
+      "frame": "laptop",
+      "radius": 4,
+      "safeArea": {
+        "top": 0,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      }
+    }
+  ]
+}

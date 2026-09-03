@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
+import { useDownloads } from "../store/downloads";
 import { useEmulation } from "../store/emulation";
+import { useNetwork } from "../store/network";
+import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { Toolbar } from "./Toolbar";
 
 const tab: Tab = {
@@ -31,6 +34,12 @@ beforeEach(() => {
     zoom: {},
   });
   useEmulation.setState({ byTab: {}, media: {}, throttle: {} });
+  useDownloads.setState({ items: [] });
+  useNetwork.setState({ byTab: {}, frames: {} });
+  usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
+  vi.spyOn(ipc, "downloadsReveal").mockResolvedValue(null);
+  vi.spyOn(ipc, "prefsSet").mockImplementation((p) => Promise.resolve(p));
+  vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
 
   vi.spyOn(ipc, "bookmarkStatus").mockResolvedValue(false);
   vi.spyOn(ipc, "bookmarkToggle").mockResolvedValue(true);
@@ -62,11 +71,10 @@ describe("Toolbar", () => {
       "Bookmark this page",
       "Share to another device",
       "Capture full page",
-      "Record tab as GIF",
-      "Device simulator",
       "Open DevTools",
       "Developer dock",
-      "Agent",
+      "Downloads",
+      "Protection",
     ];
 
     for (const label of labels) {
@@ -78,7 +86,7 @@ describe("Toolbar", () => {
     }
   });
 
-  it("routes clicks to navigation, bookmark, capture, recording and DevTools actions", async () => {
+  it("routes clicks to navigation, bookmark, capture and DevTools actions", async () => {
     render(<Toolbar />);
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
@@ -86,7 +94,6 @@ describe("Toolbar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reload" }));
     fireEvent.click(screen.getByRole("button", { name: "Bookmark this page" }));
     fireEvent.click(screen.getByRole("button", { name: "Capture full page" }));
-    fireEvent.click(screen.getByRole("button", { name: "Record tab as GIF" }));
     fireEvent.click(screen.getByRole("button", { name: "Open DevTools" }));
 
     await waitFor(() => {
@@ -95,25 +102,52 @@ describe("Toolbar", () => {
       expect(ipc.tabReload).toHaveBeenCalledWith(tab.id);
       expect(ipc.bookmarkToggle).toHaveBeenCalledWith(tab.id);
       expect(ipc.tabCapture).toHaveBeenCalledWith(tab.id, true);
-      expect(ipc.tabScreencastStart).toHaveBeenCalledWith(tab.id);
       expect(ipc.tabDevtools).toHaveBeenCalledWith(tab.id);
       expect(useBrowser.getState().annotating).toBe("/tmp/capture.png");
-      expect(useBrowser.getState().recordingTab).toBe(tab.id);
     });
   });
 
-  it("opens the share dialog, device menu, developer dock and agent surface", () => {
+  it("opens the share dialog and the developer dock", () => {
     render(<Toolbar />);
-
     fireEvent.click(screen.getByRole("button", { name: "Share to another device" }));
     expect(screen.getByRole("dialog", { name: "Share" })).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Device simulator" }));
-    expect(screen.getByRole("menu")).toBeTruthy();
-
     fireEvent.click(screen.getByRole("button", { name: "Developer dock" }));
-    fireEvent.click(screen.getByRole("button", { name: "Agent" }));
     expect(useBrowser.getState().open.dock).toBe(true);
-    expect(useBrowser.getState().open.sidecar).toBe(true);
+  });
+
+  it("lists downloads and reveals a finished one", () => {
+    useDownloads.setState({
+      items: [
+        { url: "https://cdn.example.com/report.pdf", path: "/Users/me/Downloads/report.pdf", name: "report.pdf", status: "finished", at: Date.now() },
+        { url: "https://cdn.example.com/big.zip", path: "/Users/me/Downloads/big.zip", name: "big.zip", status: "started", at: Date.now() },
+      ],
+    });
+    render(<Toolbar />);
+    expect(screen.getByLabelText("1 in progress")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Downloads" }));
+    expect(screen.getByRole("dialog", { name: "Downloads" })).toBeTruthy();
+    expect(screen.getByText("report.pdf")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show report.pdf in folder" }));
+    expect(ipc.downloadsReveal).toHaveBeenCalledWith("/Users/me/Downloads/report.pdf");
+    fireEvent.click(screen.getByRole("button", { name: /Open folder/ }));
+    expect(ipc.downloadsReveal).toHaveBeenCalledWith(null);
+  });
+
+  it("turns tracker blocking on from the protection menu and counts what it blocked", async () => {
+    useNetwork.setState({
+      byTab: {
+        [tab.id]: [
+          { id: "1", url: "https://www.google-analytics.com/g.js", method: "GET", resourceType: "Script", status: null, mimeType: "", fromCache: false, size: null, error: "net::ERR_BLOCKED_BY_CLIENT", startedAt: 0, durationMs: 4 },
+          { id: "2", url: "https://example.com/app.js", method: "GET", resourceType: "Script", status: 200, mimeType: "text/javascript", fromCache: false, size: 10, error: null, startedAt: 0, durationMs: 40 },
+        ],
+      },
+      frames: {},
+    });
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+    expect(screen.getByText("Tracker blocking is off")).toBeTruthy();
+    fireEvent.click(screen.getByRole("switch", { name: "Block trackers and ads" }));
+    await waitFor(() => expect(ipc.prefsSet).toHaveBeenCalledWith({ ...DEFAULT_PREFS, block_trackers: true }));
+    expect(screen.getByText("1 request blocked on this page")).toBeTruthy();
   });
 });

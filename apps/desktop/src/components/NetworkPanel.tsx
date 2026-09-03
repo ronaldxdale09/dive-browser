@@ -2,7 +2,8 @@ import { ArrowDownLeft, ArrowUpRight, Ban, FileDown, FileJson, Repeat, Sparkles 
 import { useState } from "react";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
-import { useAgent } from "../store/agent";
+import { isReady, useAgent } from "../store/agent";
+import { usePrefs } from "../store/prefs";
 import { selectFrames, selectRequests, useNetwork } from "../store/network";
 import type { RequestRow } from "../store/network";
 import { Icon, IconButton } from "./Icon";
@@ -60,7 +61,10 @@ export function NetworkPanel() {
   const [selected, setSelected] = useState<string | null>(null);
   const [replaying, setReplaying] = useState<string | null>(null);
   const send = useAgent((s) => s.send);
-  const keyPresent = useAgent((s) => s.keyPresent);
+  const providers = useAgent((s) => s.providers);
+  const keyed = useAgent((s) => s.keyed);
+  const providerId = usePrefs((s) => s.prefs.agent_provider);
+  const keyPresent = isReady(providers.find((p) => p.id === providerId), keyed);
   const askAgent = (r: RequestRow) => {
     useBrowser.getState().toggle("sidecar", true);
     const outcome = r.error ?? (r.status === null ? "no response yet" : `HTTP ${r.status}`);

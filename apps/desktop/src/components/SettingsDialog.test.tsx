@@ -12,6 +12,7 @@ beforeEach(() => {
     data_dir: "/tmp/dive",
     mcp_url: "http://127.0.0.1:7391/mcp",
     mcp_token_path: "/tmp/dive/mcp-token",
+    simulate: null,
   });
   vi.spyOn(ipc, "prefsGet").mockResolvedValue(DEFAULT_PREFS);
   vi.spyOn(ipc, "prefsSet").mockImplementation((prefs) => Promise.resolve(prefs));

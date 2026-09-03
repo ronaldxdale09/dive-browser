@@ -22,6 +22,7 @@
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
     "@remotion/player": "^4.0.520",
+    "@remotion/transitions": "4.0.520",
     "@tauri-apps/api": "^2.11.1",
     "axe-core": "^4.13.0",
     "cmdk": "^1.1.1",

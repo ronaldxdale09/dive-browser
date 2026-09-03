@@ -3,6 +3,7 @@
  * import the generated file directly. Regenerate with `cargo test -p dive-desktop`.
  */
 import { Channel } from "@tauri-apps/api/core";
+import type { ChatDelta, SendOptions } from "../generated/bindings";
 import { commands, events } from "../generated/bindings";
 import type { ClearRequest, NetworkProfile, Prefs, Rule } from "../generated/bindings";
 
@@ -10,7 +11,7 @@ import type { ClearRequest, NetworkProfile, Prefs, Rule } from "../generated/bin
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 export { events };
-export type { Prefs, ClearRequest, Rule, RuleAction, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark } from "../generated/bindings";
+export type { Prefs, ClearRequest, Rule, RuleAction, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
 export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
@@ -21,15 +22,24 @@ export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
 type WorkspaceDraftInput = { name: string; color: string; icon: string };
 export type ReplayRequestInput = { method: string; url: string; headers: Record<string, string>; body: string | null; with_cookies: boolean; captured_host: string };
 type ChatTurnInput = { role: string; content: string };
-export type ChatDeltaOut =
-  | { type: "text"; data: string }
-  | { type: "tool_call"; data: { id: string; name: string; input: string; action: boolean; locator: string | null } }
-  | { type: "needs_approval"; data: { id: string; name: string; input: string; action: boolean; locator: string | null } }
-  | { type: "tool_done"; data: { id: string; summary: string; error: boolean } }
-  | { type: "done"; data: string }
-  | { type: "error"; data: string };
-export type DeviceInput = { width: number; height: number; dpr: number; mobile: boolean; touch: boolean; user_agent: string; platform: string };
-export type MediaInput = { color_scheme: string | null; reduced_motion: string | null; media_type: string | null };
+export type ChatDeltaOut = ChatDelta;
+export type InsetsInput = { top: number; bottom: number; left: number; right: number };
+export type DeviceInput = {
+  width: number;
+  height: number;
+  dpr: number;
+  mobile: boolean;
+  touch: boolean;
+  user_agent: string;
+  platform: string;
+  /** Draw the viewport at this fraction of its size; `innerWidth` is unaffected. */
+  scale: number | null;
+  /** What `env(safe-area-inset-*)` reports. */
+  safe_area: InsetsInput | null;
+};
+export type MediaInput = { color_scheme: string | null; reduced_motion: string | null; media_type: string | null; display_mode: string | null };
+export type GeolocationInput = { latitude: number; longitude: number; accuracy: number };
+export type EnvironmentInput = { geolocation: GeolocationInput | null; timezone: string | null; locale: string | null };
 
 export const ipc = {
   snapshot: async () => unwrap(await commands.snapshot()),
@@ -62,7 +72,10 @@ export const ipc = {
   tabVitals: async (id: string) => unwrap(await commands.tabVitals(id)),
   tabFind: async (id: string, query: string, index: number) => unwrap(await commands.tabFind(id, query, index)),
   tabA11y: async (id: string, axeSource: string) => unwrap(await commands.tabA11y(id, axeSource)),
-  tabEmulate: async (id: string, device: DeviceInput | null) => unwrap(await commands.tabEmulate(id, device)),
+  /** `reload` only when the user agent changed; rotating or zooming keeps the page's state. */
+  tabEmulate: async (id: string, device: DeviceInput | null, reload: boolean) => unwrap(await commands.tabEmulate(id, device, reload)),
+  tabEnvironment: async (id: string, environment: EnvironmentInput) => unwrap(await commands.tabEnvironment(id, environment)),
+  devicePresets: () => commands.devicePresets(),
   tabMedia: async (id: string, media: MediaInput) => unwrap(await commands.tabMedia(id, media)),
   tabThrottle: async (id: string, profile: NetworkProfile | null) => unwrap(await commands.tabThrottle(id, profile)),
   setContentBounds: async (b: { x: number; y: number; width: number; height: number }) =>
@@ -73,6 +86,7 @@ export const ipc = {
   prefsGet: () => commands.prefsGet(),
   prefsSet: async (prefs: Prefs) => unwrap(await commands.prefsSet(prefs)),
   browsingDataClear: async (what: ClearRequest) => unwrap(await commands.browsingDataClear(what)),
+  downloadsReveal: async (path: string | null) => unwrap(await commands.downloadsReveal(path)),
   tabRecordStart: async (id: string) => unwrap(await commands.tabRecordStart(id)),
   tabRecordStop: (id: string) => commands.tabRecordStop(id),
   tabOpenapi: async (id: string) => unwrap(await commands.tabOpenapi(id)),
@@ -82,20 +96,32 @@ export const ipc = {
   tabBugReport: async (id: string) => unwrap(await commands.tabBugReport(id)),
   requestCaptured: async (tabId: string, requestId: string) => unwrap(await commands.requestCaptured(tabId, requestId)),
   requestReplay: async (tabId: string, request: ReplayRequestInput) => unwrap(await commands.requestReplay(tabId, request)),
-  devServers: () => commands.devServers(),
+  devServers: async () => unwrap(await commands.devServers()),
+  devServersWatch: async (on: boolean) => unwrap(await commands.devServersWatch(on)),
+  tabInspectStart: async (id: string) => unwrap(await commands.tabInspectStart(id)),
+  tabInspectCancel: async (id: string) => unwrap(await commands.tabInspectCancel(id)),
+  tabInspectState: (id: string) => commands.tabInspectState(id),
+  tabInspectStyle: async (id: string, property: string, value: string) =>
+    unwrap(await commands.tabInspectStyle(id, property, value)),
+  tabInspectRevert: async (id: string) => unwrap(await commands.tabInspectRevert(id)),
   bookmarkToggle: async (id: string) => unwrap(await commands.bookmarkToggle(id)),
   bookmarkStatus: async (url: string) => unwrap(await commands.bookmarkStatus(url)),
   bookmarksSearch: async (query: string, limit = 20) => unwrap(await commands.bookmarksSearch(query, limit)),
   historySearch: async (query: string, limit = 20) => unwrap(await commands.historySearch(query, limit)),
   shareUrl: async (url: string) => unwrap(await commands.shareUrl(url)),
-  agentKeySet: async (key: string) => unwrap(await commands.agentKeySet(key)),
-  agentKeyPresent: () => commands.agentKeyPresent(),
+  agentProviders: () => commands.agentProviders(),
+  agentKeys: () => commands.agentKeys(),
+  agentKeySet: async (provider: string, key: string) => unwrap(await commands.agentKeySet(provider, key)),
+  agentKeyPresent: async (provider: string) => unwrap(await commands.agentKeyPresent(provider)),
+  agentKeyVerify: async (provider: string, key: string | null) => unwrap(await commands.agentKeyVerify(provider, key)),
+  agentModels: async (provider: string, refresh = false) => unwrap(await commands.agentModels(provider, refresh)),
   agentApprove: async (id: string, allow: boolean) => unwrap(await commands.agentApprove(id, allow)),
+  agentStop: async (runId: string) => unwrap(await commands.agentStop(runId)),
   /** Stream a reply; `onDelta` fires for each piece. Resolves when the stream ends. */
-  agentSend: async (turns: ChatTurnInput[], tabId: string | null, onDelta: (d: ChatDeltaOut) => void) => {
+  agentSend: async (runId: string, turns: ChatTurnInput[], tabId: string | null, options: SendOptions, onDelta: (d: ChatDeltaOut) => void) => {
     const channel = new Channel<ChatDeltaOut>();
     channel.onmessage = onDelta;
-    unwrap(await commands.agentSend(turns, tabId, channel));
+    unwrap(await commands.agentSend(runId, turns, tabId, options, channel));
   },
   commandRun: async (id: string, args: unknown = null): Promise<unknown> =>
     JSON.parse(unwrap(await commands.commandRun(id, args === null ? null : JSON.stringify(args)))),

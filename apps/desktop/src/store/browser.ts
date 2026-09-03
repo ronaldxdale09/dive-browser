@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { ipc, events } from "../lib/ipc";
 import { listenConsole, useConsole } from "./console";
 import { listenNetwork, useNetwork } from "./network";
+import { useDownloads } from "./downloads";
 import type { CoreEvent, Snapshot, Tab, Workspace } from "../lib/ipc";
 
 export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings";
@@ -112,6 +113,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       unlisten ??= await events.stateChanged.listen((e) => get().applyEvent(e.payload));
       await events.downloadNotice.listen((e) => {
         const d = e.payload;
+        useDownloads.getState().apply(d);
         const name = d.path.split("/").pop() ?? d.url;
         set({ notice: d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : `Download failed: ${name}` });
         setTimeout(() => set({ notice: null }), 5000);

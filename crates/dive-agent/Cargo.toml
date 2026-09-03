@@ -1,6 +1,6 @@
 [package]
 name = "dive-agent"
-description = "LLM client for the Dive agent: Anthropic Messages API over HTTPS with streaming"
+description = "LLM client for the Dive agent: Anthropic Messages and OpenAI-compatible chat completions over HTTPS with streaming"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,7 @@ eventsource-stream = "0.2"
 futures-util = "0.3"
 serde = { workspace = true }
 serde_json = { workspace = true }
+specta = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

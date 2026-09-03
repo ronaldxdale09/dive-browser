@@ -93,6 +93,7 @@ pub fn run() {
             menu::install(app)?;
             restore_session(app);
             open_startup_urls(app);
+            open_startup_panels(app.handle().clone());
             mcp::start(app.handle().clone());
             housekeeping::start(app.handle().clone());
             devservers::start(app.handle().clone());
@@ -128,6 +129,29 @@ fn open_startup_urls(app: &tauri::App<Runtime>) {
             Err(e) => tracing::warn!(url, "failed to open startup tab: {e}"),
         }
     }
+}
+
+/// `DIVE_OPEN_PANEL=sidecar,dock`: toggle chrome panels once the chrome is
+/// listening, exactly as the matching menu item would. Same purpose as
+/// `DIVE_OPEN_URL`: automation without accessibility permission has no other
+/// way to reach the panels.
+fn open_startup_panels(app: tauri::AppHandle<Runtime>) {
+    use tauri_specta::Event as _;
+    let Ok(panels) = std::env::var("DIVE_OPEN_PANEL") else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        // The chrome subscribes to menu commands as it mounts; an event sent
+        // before that is lost, and a toggle cannot be safely repeated.
+        tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+        for panel in panels.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+            let id = format!("{panel}.toggle");
+            match menu::MenuCommand(id.clone()).emit_to(&app, CHROME_LABEL) {
+                Ok(()) => tracing::info!(command = id, "opened startup panel"),
+                Err(e) => tracing::warn!(command = id, "failed to open startup panel: {e}"),
+            }
+        }
+    });
 }
 
 /// `DIVE_SMOKE=1`: a few seconds after start, capture the active tab to a
@@ -194,6 +218,32 @@ async fn smoke_gif(
 
 /// Open what the startup preference asks for: the tab that was active when
 /// the app last ran, the home page, or nothing.
+/// What a launch opens, from the `startup` preference.
+#[derive(Debug, PartialEq, Eq)]
+enum Startup<'a> {
+    /// The welcome screen: no tab is activated, though the session's tabs are
+    /// still listed in the strip.
+    Welcome,
+    /// The home page, in a new tab.
+    Home(&'a str),
+    /// The tab the last session ended on.
+    Restore,
+}
+
+/// A home page that was never set means the welcome screen, not a silent
+/// fallback to the last session: someone who chose to start fresh should not
+/// be handed yesterday's tab because the field was left blank.
+fn startup_plan<'a>(startup: &str, homepage: &'a str) -> Startup<'a> {
+    match startup {
+        "none" => Startup::Welcome,
+        "home" => match homepage.trim() {
+            "" => Startup::Welcome,
+            url => Startup::Home(url),
+        },
+        _ => Startup::Restore,
+    }
+}
+
 fn restore_session(app: &tauri::App<Runtime>) {
     use tauri::Manager;
     let state = app.state::<state::AppState>();
@@ -201,16 +251,16 @@ fn restore_session(app: &tauri::App<Runtime>) {
         return;
     };
     let prefs = state.prefs.get(&state);
-    match prefs.startup.as_str() {
-        "none" => return,
-        "home" if !prefs.homepage.is_empty() => {
-            match commands::open_tab(app.handle(), &state, workspace, &prefs.homepage) {
+    match startup_plan(&prefs.startup, &prefs.homepage) {
+        Startup::Welcome => return,
+        Startup::Home(url) => {
+            match commands::open_tab(app.handle(), &state, workspace, url) {
                 Ok(tab) => tracing::info!(%tab.id, url = tab.url, "opened home page"),
                 Err(e) => tracing::warn!("failed to open home page: {e}"),
             }
             return;
         }
-        _ => {}
+        Startup::Restore => {}
     }
     let candidate = {
         let store = state::lock(&state.store);
@@ -230,5 +280,25 @@ fn restore_session(app: &tauri::App<Runtime>) {
             Ok(()) => tracing::info!(%tab.id, url = tab.url, "restored session tab"),
             Err(e) => tracing::warn!("failed to restore session tab: {e}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Startup, startup_plan};
+
+    #[test]
+    fn a_home_start_with_no_home_page_lands_on_the_welcome_screen() {
+        assert_eq!(startup_plan("home", ""), Startup::Welcome);
+        assert_eq!(startup_plan("home", "   "), Startup::Welcome);
+        assert_eq!(
+            startup_plan("home", " https://dive.dev "),
+            Startup::Home("https://dive.dev")
+        );
+        assert_eq!(startup_plan("none", "https://dive.dev"), Startup::Welcome);
+        assert_eq!(
+            startup_plan("restore", "https://dive.dev"),
+            Startup::Restore
+        );
     }
 }

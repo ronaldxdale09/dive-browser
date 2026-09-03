@@ -1,9 +1,13 @@
 import { Sparkles } from "lucide-react";
+import { lazy, Suspense } from "react";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { OrbBurst } from "./OrbBurst";
 import { CharacterBg } from "./CharacterBg";
-import { FeatureReel } from "./FeatureReel";
+
+// Remotion is sizeable and only appears in the no-tabs welcome screen. Keep
+// it off the browser chrome's startup path when a session restores real tabs.
+const FeatureReel = lazy(() => import("./FeatureReel").then((module) => ({ default: module.FeatureReel })));
 
 /** Empty-state landing: what Dive is and what it can do. */
 export function Welcome() {
@@ -40,7 +44,9 @@ export function Welcome() {
             twelve cards could, and it is drawn from the same tokens as the
             chrome around it. */}
         <div className="mt-8 w-full">
-          <FeatureReel />
+          <Suspense fallback={<div className="aspect-[16/9] w-full rounded-2xl border border-line bg-surface" />}>
+            <FeatureReel />
+          </Suspense>
         </div>
         <p className="mt-4 text-[11px] text-ink-3">
           Press <Kbd dim>⌘K</Kbd> anywhere to search tabs, history, bookmarks, local servers and every command.

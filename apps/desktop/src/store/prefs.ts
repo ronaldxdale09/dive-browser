@@ -17,7 +17,7 @@ export const DEFAULT_PREFS: Prefs = {
   theme: "system",
   accent: "#7FD8C8",
   tell_pages_theme: false,
-  startup: "restore",
+  startup: "home",
   homepage: "",
   search_engine: "duckduckgo",
   search_template: "",
@@ -30,8 +30,14 @@ export const DEFAULT_PREFS: Prefs = {
   download_dir: "",
   devtools_on_open: false,
   rail_expanded: true,
+  agent_provider: "anthropic",
   agent_model: "claude-opus-5",
+  agent_reasoning: "default",
+  agent_max_steps: 25,
   agent_auto_approve: false,
+  agent_include_page: true,
+  agent_custom_base_url: "",
+  preferred_editor: "vscode",
 };
 
 interface PrefsState {

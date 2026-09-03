@@ -30,8 +30,9 @@ pub struct Prefs {
     /// Force pages to see the chrome's color scheme. Ignored while the theme
     /// follows the system, since the host cannot read the OS setting.
     pub tell_pages_theme: bool,
-    /// What opens at launch: `restore` the last tab, the `home` page, or
-    /// `none` for the welcome screen.
+    /// What opens at launch: the `home` page, `restore` for the tab the last
+    /// session ended on, or `none` for the welcome screen. A `home` start with
+    /// no homepage set is the welcome screen.
     pub startup: String,
     /// Home page URL; empty means the welcome screen.
     pub homepage: String,
@@ -57,10 +58,27 @@ pub struct Prefs {
     pub devtools_on_open: bool,
     /// Workspace rail shows names and tab counts rather than marks alone.
     pub rail_expanded: bool,
-    /// Model the agent sidecar talks to.
+    /// Provider the agent talks to; a `dive_agent::Provider` id.
+    pub agent_provider: String,
+    /// Model the agent talks to, in the provider's naming.
     pub agent_model: String,
+    /// Reasoning depth: `default` | `low` | `medium` | `high` | `max`.
+    pub agent_reasoning: String,
+    /// Most tool calls one message may make before the run is stopped.
+    pub agent_max_steps: i32,
     /// Let the agent act on a page without asking first.
     pub agent_auto_approve: bool,
+    /// Send the current tab's title, URL, console and text with each message.
+    pub agent_include_page: bool,
+    /// Base URL of the custom OpenAI-compatible endpoint.
+    pub agent_custom_base_url: String,
+    /// Preferred code editor for Jump-to-Source: `vscode` | `cursor` | `zed`.
+    #[serde(default = "default_editor")]
+    pub preferred_editor: String,
+}
+
+fn default_editor() -> String {
+    "vscode".into()
 }
 
 impl Default for Prefs {
@@ -69,7 +87,7 @@ impl Default for Prefs {
             theme: "system".into(),
             accent: "#7FD8C8".into(),
             tell_pages_theme: false,
-            startup: "restore".into(),
+            startup: "home".into(),
             homepage: String::new(),
             search_engine: "duckduckgo".into(),
             search_template: String::new(),
@@ -82,8 +100,14 @@ impl Default for Prefs {
             download_dir: String::new(),
             devtools_on_open: false,
             rail_expanded: true,
+            agent_provider: dive_agent::Provider::Anthropic.id_str().to_owned(),
             agent_model: dive_agent::DEFAULT_MODEL.to_owned(),
+            agent_reasoning: "default".into(),
+            agent_max_steps: 25,
             agent_auto_approve: false,
+            agent_include_page: true,
+            agent_custom_base_url: String::new(),
+            preferred_editor: default_editor(),
         }
     }
 }
@@ -164,8 +188,31 @@ impl Prefs {
             .filter(|p| !p.is_empty())
             .take(MAX_PATTERNS)
             .collect();
-        if self.agent_model.trim().is_empty() {
-            self.agent_model = d.agent_model;
+        let provider = if let Some(provider) = dive_agent::Provider::parse(&self.agent_provider) {
+            provider
+        } else {
+            self.agent_provider = d.agent_provider;
+            dive_agent::Provider::Anthropic
+        };
+        self.agent_model = self.agent_model.trim().chars().take(256).collect();
+        if self.agent_model.is_empty() {
+            // The provider's own default, so switching providers never
+            // leaves a model name from another provider's naming behind.
+            self.agent_model = provider.info().default_model;
+        }
+        self.agent_reasoning = dive_agent::Effort::parse(&self.agent_reasoning)
+            .as_str()
+            .to_owned();
+        self.agent_max_steps = self.agent_max_steps.clamp(1, 200);
+        self.agent_custom_base_url = self
+            .agent_custom_base_url
+            .trim()
+            .trim_end_matches('/')
+            .chars()
+            .take(2048)
+            .collect();
+        if !matches!(self.preferred_editor.as_str(), "vscode" | "cursor" | "zed") {
+            self.preferred_editor = d.preferred_editor;
         }
         self
     }
@@ -422,17 +469,19 @@ mod tests {
             history_days: -5,
             blocked_patterns: vec!["  ads.dev ".into(), "   ".into()],
             agent_model: "  ".into(),
+            preferred_editor: "notepad".into(),
             ..Prefs::default()
         }
         .clamp();
         assert_eq!(prefs.theme, "system");
         assert_eq!(prefs.accent, Prefs::default().accent);
-        assert_eq!(prefs.startup, "restore");
+        assert_eq!(prefs.startup, Prefs::default().startup);
         assert_eq!(prefs.search_engine, "duckduckgo");
         assert!((prefs.default_zoom - 3.0).abs() < f64::EPSILON);
         assert_eq!(prefs.history_days, 0);
         assert_eq!(prefs.blocked_patterns, vec!["ads.dev".to_owned()]);
         assert_eq!(prefs.agent_model, dive_agent::DEFAULT_MODEL);
+        assert_eq!(prefs.preferred_editor, "vscode");
     }
 
     #[test]

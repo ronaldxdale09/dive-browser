@@ -1,6 +1,6 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ipc } from "../lib/ipc";
+import { events, ipc } from "../lib/ipc";
 import { Palette } from "./Palette";
 
 class ResizeObserverStub {
@@ -19,7 +19,8 @@ afterEach(() => {
 describe("Palette", () => {
   it("is an accessible new-tab dialog with a URL field and recent history", async () => {
     vi.spyOn(ipc, "commandsList").mockResolvedValue([]);
-    vi.spyOn(ipc, "devServers").mockResolvedValue([]);
+    vi.spyOn(ipc, "devServersWatch").mockResolvedValue([]);
+    vi.spyOn(events.devServersChanged, "listen").mockResolvedValue(() => undefined);
     vi.spyOn(ipc, "bookmarksSearch").mockResolvedValue([]);
     vi.spyOn(ipc, "historySearch").mockResolvedValue([
       {

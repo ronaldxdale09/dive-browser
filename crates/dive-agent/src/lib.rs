@@ -1,24 +1,34 @@
-//! Minimal Anthropic Messages API client used by the agent sidecar.
+//! LLM client for the Dive agent, provider-neutral.
 //!
-//! Raw HTTPS on purpose: there is no official Rust SDK, and the sidecar only
-//! needs streaming text and tool calls with a system prompt and prior turns.
-//! Defaults follow the current API: Claude Opus 5, adaptive thinking,
-//! server-side refusal fallbacks.
+//! Raw HTTPS on purpose: there is no official Rust SDK for any of these, and
+//! the agent only needs streaming text, tool calls, a system prompt and prior
+//! turns. Two wire protocols cover every provider a person brings a key for --
+//! Anthropic's Messages API and the `OpenAI` chat-completions shape -- and each
+//! lives in its own module. The transcript is kept in one internal shape
+//! (Anthropic-style content blocks) and translated at the edge, so the agent
+//! loop never learns which wire it is on.
 
-use eventsource_stream::Eventsource;
+pub mod anthropic;
+pub mod openai;
+pub mod providers;
+
 use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use specta::Type;
+
+pub use providers::{Provider, ProviderInfo, Wire, catalog};
 
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const RESPONSE_HEADER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const ERROR_BODY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const JSON_BODY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const MAX_ERROR_BODY: usize = 64 * 1024;
+const MAX_JSON_BODY: usize = 8 * 1024 * 1024;
+const MAX_STREAM_BYTES: usize = 32 * 1024 * 1024;
 
-/// Default model.
+/// Default model, for the default provider.
 pub const DEFAULT_MODEL: &str = "claude-opus-5";
-const API_URL: &str = "https://api.anthropic.com/v1/messages";
-const API_VERSION: &str = "2023-06-01";
-const BETAS: &str = "server-side-fallback-2026-07-01";
 
 /// Who said a turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,13 +41,18 @@ pub enum Role {
 }
 
 /// One conversation turn. `content` is either a string or an array of
-/// content blocks (text, `tool_use`, `tool_result`) in API shape.
+/// content blocks (text, `thinking`, `tool_use`, `tool_result`) in Anthropic
+/// Messages shape; the `OpenAI` wire translates on the way out.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Turn {
     /// Speaker.
     pub role: Role,
     /// Content in Messages API shape.
     pub content: Value,
+    /// Provider-specific state that has to travel with the turn when it is
+    /// replayed -- `OpenRouter`'s `reasoning_details`, for one. Opaque here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Value>,
 }
 
 impl Turn {
@@ -46,6 +61,7 @@ impl Turn {
         Self {
             role,
             content: Value::String(text.into()),
+            meta: None,
         }
     }
 
@@ -54,6 +70,7 @@ impl Turn {
         Self {
             role: Role::Assistant,
             content: Value::Array(blocks),
+            meta: None,
         }
     }
 
@@ -72,7 +89,24 @@ impl Turn {
         Self {
             role: Role::User,
             content: Value::Array(blocks),
+            meta: None,
         }
+    }
+
+    /// The `tool_use` blocks in this turn, if any.
+    pub fn tool_uses(&self) -> Vec<ToolUse> {
+        let Some(blocks) = self.content.as_array() else {
+            return Vec::new();
+        };
+        blocks
+            .iter()
+            .filter(|b| b["type"] == "tool_use")
+            .map(|b| ToolUse {
+                id: b["id"].as_str().unwrap_or_default().to_owned(),
+                name: b["name"].as_str().unwrap_or_default().to_owned(),
+                input: b["input"].clone(),
+            })
+            .collect()
     }
 }
 
@@ -98,12 +132,54 @@ pub struct ToolSpec {
     pub input_schema: Value,
 }
 
+/// How hard the model should think. Each wire maps this onto its own knob;
+/// `Default` sends nothing and lets the provider choose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Effort {
+    /// Whatever the provider does when not asked.
+    #[default]
+    Default,
+    /// Quick.
+    Low,
+    /// Balanced.
+    Medium,
+    /// Thorough.
+    High,
+    /// As much as the model allows.
+    Max,
+}
+
+impl Effort {
+    /// Parse a preferences value; anything unknown is `Default`.
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "low" => Self::Low,
+            "medium" => Self::Medium,
+            "high" => Self::High,
+            "max" => Self::Max,
+            _ => Self::Default,
+        }
+    }
+
+    /// The preferences value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Max => "max",
+        }
+    }
+}
+
 /// A chat request.
 #[derive(Debug, Clone)]
 pub struct Request {
-    /// Model id.
+    /// Model id, in the provider's own naming.
     pub model: String,
-    /// System prompt (stable prefix; cached).
+    /// System prompt (stable prefix; cached where the wire allows).
     pub system: String,
     /// Prior turns plus the new user turn, oldest first.
     pub turns: Vec<Turn>,
@@ -111,12 +187,12 @@ pub struct Request {
     pub tools: Vec<ToolSpec>,
     /// Output cap.
     pub max_tokens: u32,
-    /// `low` | `medium` | `high` | `xhigh` | `max`.
-    pub effort: &'static str,
+    /// Reasoning depth.
+    pub effort: Effort,
 }
 
 impl Request {
-    /// A request with the defaults the sidecar uses.
+    /// A request with the defaults the agent uses.
     pub fn new(system: impl Into<String>, turns: Vec<Turn>) -> Self {
         Self {
             model: DEFAULT_MODEL.into(),
@@ -124,26 +200,8 @@ impl Request {
             turns,
             tools: Vec::new(),
             max_tokens: 16_000,
-            effort: "medium",
+            effort: Effort::Default,
         }
-    }
-
-    /// JSON body for `POST /v1/messages`.
-    pub fn body(&self) -> Value {
-        let mut body = json!({
-            "model": self.model,
-            "max_tokens": self.max_tokens,
-            "stream": true,
-            "thinking": {"type": "adaptive"},
-            "output_config": {"effort": self.effort},
-            "fallbacks": "default",
-            "system": [{"type": "text", "text": self.system, "cache_control": {"type": "ephemeral"}}],
-            "messages": self.turns.iter().map(|t| json!({"role": t.role, "content": t.content})).collect::<Vec<_>>(),
-        });
-        if !self.tools.is_empty() {
-            body["tools"] = serde_json::to_value(&self.tools).unwrap_or(Value::Null);
-        }
-        body
     }
 }
 
@@ -158,15 +216,52 @@ pub struct ToolUse {
     pub input: Value,
 }
 
+/// Token accounting for one reply.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, Type)]
+pub struct Usage {
+    /// Prompt tokens, including cached ones.
+    pub input_tokens: u32,
+    /// Generated tokens, including reasoning.
+    pub output_tokens: u32,
+    /// Prompt tokens served from cache.
+    pub cache_read_tokens: u32,
+    /// Cost in USD when the provider reports it (`OpenRouter` does).
+    pub cost_usd: Option<f64>,
+}
+
+impl Usage {
+    /// Fold another reply's usage into this one.
+    pub fn add(&mut self, other: Usage) {
+        self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
+        self.cache_read_tokens = self
+            .cache_read_tokens
+            .saturating_add(other.cache_read_tokens);
+        self.cost_usd = match (self.cost_usd, other.cost_usd) {
+            (Some(a), Some(b)) => Some(a + b),
+            (a, None) => a,
+            (None, b) => b,
+        };
+    }
+}
+
 /// Streamed pieces of a reply.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum Delta {
     /// More answer text.
     Text(String),
+    /// More of the model's reasoning, when the provider shows it.
+    Reasoning(String),
     /// The model called a tool; the caller runs it and continues the loop.
     ToolUse(ToolUse),
-    /// Reply finished; carries the stop reason (`end_turn`, `tool_use`, `max_tokens`, `refusal`, ...).
+    /// Token accounting for this reply.
+    Usage(Usage),
+    /// The complete assistant turn, exactly as it must be replayed on the
+    /// next request. Arrives once, before `Done`.
+    Assistant(Turn),
+    /// Reply finished; carries the stop reason (`end_turn`, `tool_use`,
+    /// `max_tokens`, `refusal`, ...).
     Done(String),
     /// The API reported an error.
     Error(String),
@@ -175,9 +270,12 @@ pub enum Delta {
 /// Failures before the stream starts.
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
-    /// No API key configured.
+    /// No API key configured for a provider that needs one.
     #[error("no API key configured")]
     MissingKey,
+    /// No base URL for a custom endpoint.
+    #[error("no base URL configured for the custom endpoint")]
+    MissingBaseUrl,
     /// HTTP-level failure.
     #[error("request failed: {0}")]
     Http(String),
@@ -191,105 +289,135 @@ pub enum AgentError {
     },
 }
 
-/// Accumulates one streamed tool-use block until it is complete.
-#[derive(Debug, Default)]
-pub struct StreamState {
-    pending: Option<(usize, String, String, String)>, // (index, id, name, partial json)
-}
-
-impl StreamState {
-    /// Turn one SSE event into a delta, if it carries something the caller acts on.
-    pub fn parse_event(&mut self, event_name: &str, data: &str) -> Option<Delta> {
-        let v: Value = serde_json::from_str(data).ok()?;
-        match event_name {
-            "content_block_start" => {
-                let block = &v["content_block"];
-                if block["type"] == "tool_use" {
-                    let index = usize::try_from(v["index"].as_u64().unwrap_or(0)).unwrap_or(0);
-                    self.pending = Some((
-                        index,
-                        block["id"].as_str().unwrap_or_default().to_owned(),
-                        block["name"].as_str().unwrap_or_default().to_owned(),
-                        String::new(),
-                    ));
-                }
-                None
+impl AgentError {
+    /// Whether the provider rejected the credentials.
+    pub fn is_unauthorized(&self) -> bool {
+        matches!(
+            self,
+            Self::Api {
+                status: 401 | 403,
+                ..
             }
-            "content_block_delta" => {
-                let d = &v["delta"];
-                match d["type"].as_str() {
-                    Some("text_delta") => Some(Delta::Text(
-                        d["text"].as_str().unwrap_or_default().to_owned(),
-                    )),
-                    Some("input_json_delta") => {
-                        if let Some(p) = &mut self.pending {
-                            p.3.push_str(d["partial_json"].as_str().unwrap_or_default());
-                        }
-                        None
-                    }
-                    _ => None,
-                }
-            }
-            "content_block_stop" => {
-                let index = usize::try_from(v["index"].as_u64().unwrap_or(0)).unwrap_or(0);
-                match self.pending.take() {
-                    Some((i, id, name, raw)) if i == index => {
-                        let input = if raw.trim().is_empty() {
-                            json!({})
-                        } else {
-                            serde_json::from_str(&raw).unwrap_or(json!({}))
-                        };
-                        Some(Delta::ToolUse(ToolUse { id, name, input }))
-                    }
-                    other => {
-                        self.pending = other;
-                        None
-                    }
-                }
-            }
-            "message_delta" => v["delta"]["stop_reason"]
-                .as_str()
-                .map(|s| Delta::Done(s.to_owned())),
-            "error" => Some(Delta::Error(
-                v["error"]["message"]
-                    .as_str()
-                    .unwrap_or("unknown error")
-                    .to_owned(),
-            )),
-            _ => None,
-        }
+        )
     }
 }
 
-/// Anthropic API client.
+/// A model a provider offers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct ModelInfo {
+    /// Id to send.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Context window in tokens, when known.
+    pub context_length: Option<u32>,
+    /// Whether the provider says it supports tool calling. `None` when the
+    /// listing does not say; the agent needs tools, so the chrome can warn.
+    pub tools: Option<bool>,
+    /// Whether it can reason (think) before answering, when known.
+    pub reasoning: Option<bool>,
+    /// USD per million input tokens, when the listing carries prices.
+    pub input_per_mtok: Option<f64>,
+    /// USD per million output tokens.
+    pub output_per_mtok: Option<f64>,
+}
+
+/// Client for one provider and one key.
 #[derive(Clone)]
 pub struct Client {
-    http: reqwest::Client,
+    http: Result<reqwest::Client, String>,
+    provider: Provider,
+    base_url: String,
     api_key: String,
-    url: String,
 }
 
 impl Client {
-    /// Build a client for the given key.
-    pub fn new(api_key: impl Into<String>) -> Self {
+    /// Build a client. `base_url` overrides the catalog's, and is required
+    /// for [`Provider::Custom`].
+    pub fn new(provider: Provider, api_key: impl Into<String>, base_url: Option<&str>) -> Self {
+        let base_url = base_url
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map_or_else(
+                || provider.info().base_url,
+                |s| s.trim_end_matches('/').to_owned(),
+            );
         Self {
             http: reqwest::Client::builder()
                 .connect_timeout(CONNECT_TIMEOUT)
+                .redirect(reqwest::redirect::Policy::none())
                 .build()
-                .unwrap_or_else(|error| {
-                    tracing::warn!(%error, "could not configure agent HTTP client");
-                    reqwest::Client::new()
-                }),
+                .map_err(|error| error.to_string()),
+            provider,
+            base_url,
             api_key: api_key.into(),
-            url: API_URL.into(),
         }
     }
 
-    /// Point at a different endpoint (tests, proxies).
-    #[must_use]
-    pub fn with_url(mut self, url: impl Into<String>) -> Self {
-        self.url = url.into();
-        self
+    /// The provider this client talks to.
+    pub fn provider(&self) -> Provider {
+        self.provider
+    }
+
+    fn check_ready(&self) -> Result<(), AgentError> {
+        if self.base_url.is_empty() {
+            return Err(AgentError::MissingBaseUrl);
+        }
+        if self.provider.info().needs_key && self.api_key.trim().is_empty() {
+            return Err(AgentError::MissingKey);
+        }
+        let url = reqwest::Url::parse(&self.base_url)
+            .map_err(|error| AgentError::Http(format!("invalid base URL: {error}")))?;
+        if !matches!(url.scheme(), "http" | "https")
+            || url.host_str().is_none()
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return Err(AgentError::Http(
+                "base URL must be an HTTP(S) origin or path without credentials, query, or fragment"
+                    .into(),
+            ));
+        }
+        self.http()?;
+        Ok(())
+    }
+
+    fn http(&self) -> Result<&reqwest::Client, AgentError> {
+        self.http
+            .as_ref()
+            .map_err(|error| AgentError::Http(format!("could not configure HTTP client: {error}")))
+    }
+
+    async fn send(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, AgentError> {
+        tokio::time::timeout(RESPONSE_HEADER_TIMEOUT, request.send())
+            .await
+            .map_err(|_| AgentError::Http("request timed out waiting for response headers".into()))?
+            .map_err(|error| AgentError::Http(error.to_string()))
+    }
+
+    /// Auth and attribution headers for this provider.
+    fn headers(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        let request = match self.provider.info().wire {
+            Wire::Anthropic => request
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", anthropic::API_VERSION)
+                .header("anthropic-beta", anthropic::BETAS),
+            Wire::OpenAi if self.api_key.trim().is_empty() => request,
+            Wire::OpenAi => request.header("authorization", format!("Bearer {}", self.api_key)),
+        };
+        // OpenRouter shows the app name on its usage pages when told.
+        if self.provider == Provider::Openrouter {
+            request
+                .header("HTTP-Referer", "https://github.com/dive-browser/dive")
+                .header("X-OpenRouter-Title", "Dive")
+        } else {
+            request
+        }
     }
 
     /// Send a request and stream deltas until the reply ends.
@@ -297,20 +425,26 @@ impl Client {
         &self,
         request: &Request,
     ) -> Result<impl Stream<Item = Delta> + use<>, AgentError> {
-        if self.api_key.trim().is_empty() {
-            return Err(AgentError::MissingKey);
-        }
+        self.check_ready()?;
+        let wire = self.provider.info().wire;
+        let (url, body) = match wire {
+            Wire::Anthropic => (
+                format!("{}/v1/messages", self.base_url),
+                anthropic::body(request),
+            ),
+            Wire::OpenAi => (
+                format!("{}/chat/completions", self.base_url),
+                openai::body(request, self.provider),
+            ),
+        };
         let response = self
-            .http
-            .post(&self.url)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", API_VERSION)
-            .header("anthropic-beta", BETAS)
-            .header("content-type", "application/json")
-            .json(&request.body())
-            .send()
-            .await
-            .map_err(|e| AgentError::Http(e.to_string()))?;
+            .send(
+                self.headers(self.http()?.post(&url))
+                    .header("content-type", "application/json")
+                    .header("accept", "text/event-stream")
+                    .json(&body),
+            )
+            .await?;
         let status = response.status();
         if !status.is_success() {
             let message = tokio::time::timeout(ERROR_BODY_TIMEOUT, read_error_body(response))
@@ -318,24 +452,148 @@ impl Client {
                 .unwrap_or_else(|_| "error response timed out".to_owned());
             return Err(AgentError::Api {
                 status: status.as_u16(),
-                message,
+                message: tidy_error(&message),
             });
         }
-        let events = response.bytes_stream().eventsource();
-        let state = std::sync::Arc::new(std::sync::Mutex::new(StreamState::default()));
-        Ok(events.filter_map(move |item| {
-            let state = std::sync::Arc::clone(&state);
-            async move {
-                match item {
-                    Ok(ev) => state
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .parse_event(&ev.event, &ev.data),
-                    Err(e) => Some(Delta::Error(e.to_string())),
-                }
-            }
+        let bytes = response
+            .bytes_stream()
+            .scan((0usize, false), |(seen, finished), item| {
+                let next = if *finished {
+                    None
+                } else {
+                    Some(match item {
+                        Ok(chunk) if chunk.len() <= MAX_STREAM_BYTES.saturating_sub(*seen) => {
+                            *seen += chunk.len();
+                            Ok(chunk)
+                        }
+                        Ok(_) => {
+                            *finished = true;
+                            Err(StreamTransportError::TooLarge)
+                        }
+                        Err(error) => {
+                            *finished = true;
+                            Err(StreamTransportError::Http(error))
+                        }
+                    })
+                };
+                std::future::ready(next)
+            });
+        let events = eventsource_stream::Eventsource::eventsource(bytes);
+        let state = std::sync::Arc::new(std::sync::Mutex::new(Parser::new(wire, self.provider)));
+        Ok(events.flat_map(move |item| {
+            let deltas = match item {
+                Ok(ev) => state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .parse(&ev.event, &ev.data),
+                Err(e) => vec![Delta::Error(e.to_string())],
+            };
+            futures_util::stream::iter(deltas)
         }))
     }
+
+    /// The models this provider offers, most useful first.
+    pub async fn models(&self) -> Result<Vec<ModelInfo>, AgentError> {
+        self.check_ready()?;
+        let url = match self.provider.info().wire {
+            Wire::Anthropic => format!("{}/v1/models?limit=1000", self.base_url),
+            Wire::OpenAi => format!("{}/models", self.base_url),
+        };
+        let body = self.get_json(&url).await?;
+        let mut models = match self.provider.info().wire {
+            Wire::Anthropic => anthropic::parse_models(&body),
+            Wire::OpenAi => openai::parse_models(&body, self.provider),
+        };
+        models.sort_by_key(|model| model.name.to_lowercase());
+        Ok(models)
+    }
+
+    /// Check that the key is accepted, with the cheapest authenticated call
+    /// the provider has.
+    pub async fn verify(&self) -> Result<(), AgentError> {
+        self.check_ready()?;
+        let url = match (self.provider, self.provider.info().wire) {
+            (Provider::Openrouter, _) => format!("{}/key", self.base_url),
+            (_, Wire::Anthropic) => format!("{}/v1/models?limit=1", self.base_url),
+            (_, Wire::OpenAi) => format!("{}/models", self.base_url),
+        };
+        self.get_json(&url).await.map(|_| ())
+    }
+
+    async fn get_json(&self, url: &str) -> Result<Value, AgentError> {
+        let response = self.send(self.headers(self.http()?.get(url))).await?;
+        let status = response.status();
+        if !status.is_success() {
+            let message = tokio::time::timeout(ERROR_BODY_TIMEOUT, read_error_body(response))
+                .await
+                .unwrap_or_else(|_| "error response timed out".to_owned());
+            return Err(AgentError::Api {
+                status: status.as_u16(),
+                message: tidy_error(&message),
+            });
+        }
+        tokio::time::timeout(JSON_BODY_TIMEOUT, read_json_body(response))
+            .await
+            .map_err(|_| AgentError::Http("JSON response body timed out".into()))?
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum StreamTransportError {
+    #[error("{0}")]
+    Http(reqwest::Error),
+    #[error("stream response exceeded {MAX_STREAM_BYTES} bytes")]
+    TooLarge,
+}
+
+/// One SSE parser for whichever wire the client is on.
+enum Parser {
+    Anthropic(anthropic::StreamState),
+    OpenAi(openai::StreamState),
+}
+
+impl Parser {
+    fn new(wire: Wire, provider: Provider) -> Self {
+        match wire {
+            Wire::Anthropic => Self::Anthropic(anthropic::StreamState::default()),
+            Wire::OpenAi => Self::OpenAi(openai::StreamState::new(provider)),
+        }
+    }
+
+    fn parse(&mut self, event: &str, data: &str) -> Vec<Delta> {
+        match self {
+            Self::Anthropic(s) => s.parse_event(event, data),
+            Self::OpenAi(s) => s.parse_data(data),
+        }
+    }
+}
+
+/// A JSON number as a `u32`, which is what the chrome can hold without loss.
+pub(crate) fn u32_of(v: &Value) -> Option<u32> {
+    v.as_u64().and_then(|n| u32::try_from(n).ok())
+}
+
+/// Pull the human-readable message out of a provider's JSON error body, so
+/// the chrome shows "invalid x-api-key" rather than a wall of JSON.
+pub fn tidy_error(body: &str) -> String {
+    let Ok(v) = serde_json::from_str::<Value>(body) else {
+        return body.trim().chars().take(400).collect();
+    };
+    let candidates = [
+        &v["error"]["message"],
+        &v["error"]["metadata"]["raw"],
+        &v["message"],
+        &v["error"],
+        &v["detail"],
+    ];
+    for c in candidates {
+        if let Some(s) = c.as_str()
+            && !s.trim().is_empty()
+        {
+            return s.trim().chars().take(400).collect();
+        }
+    }
+    body.trim().chars().take(400).collect()
 }
 
 async fn read_error_body(response: reqwest::Response) -> String {
@@ -365,84 +623,32 @@ async fn read_error_body(response: reqwest::Response) -> String {
     message
 }
 
+async fn read_json_body(response: reqwest::Response) -> Result<Value, AgentError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_JSON_BODY as u64)
+    {
+        return Err(AgentError::Http(format!(
+            "JSON response exceeded {MAX_JSON_BODY} bytes"
+        )));
+    }
+    let mut chunks = response.bytes_stream();
+    let mut body = Vec::with_capacity(64 * 1024);
+    while let Some(chunk) = chunks.next().await {
+        let chunk = chunk.map_err(|error| AgentError::Http(error.to_string()))?;
+        if chunk.len() > MAX_JSON_BODY.saturating_sub(body.len()) {
+            return Err(AgentError::Http(format!(
+                "JSON response exceeded {MAX_JSON_BODY} bytes"
+            )));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&body).map_err(|error| AgentError::Http(error.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn body_has_current_api_shape() {
-        let mut r = Request::new("be brief", vec![Turn::text(Role::User, "hi")]);
-        let b = r.body();
-        assert_eq!(b["model"], DEFAULT_MODEL);
-        assert_eq!(b["thinking"]["type"], "adaptive");
-        assert_eq!(b["fallbacks"], "default");
-        assert_eq!(b["stream"], true);
-        assert!(b.get("temperature").is_none());
-        assert!(b.get("tools").is_none());
-        assert_eq!(b["system"][0]["cache_control"]["type"], "ephemeral");
-        assert_eq!(b["messages"][0]["role"], "user");
-        r.tools.push(ToolSpec {
-            name: "t".into(),
-            description: "d".into(),
-            input_schema: json!({"type": "object"}),
-        });
-        assert_eq!(r.body()["tools"][0]["name"], "t");
-    }
-
-    #[test]
-    fn parses_text_and_tool_use_stream() {
-        let mut st = StreamState::default();
-        assert_eq!(
-            st.parse_event(
-                "content_block_delta",
-                r#"{"delta":{"type":"text_delta","text":"Hel"}}"#
-            ),
-            Some(Delta::Text("Hel".into()))
-        );
-        assert_eq!(
-            st.parse_event(
-                "content_block_delta",
-                r#"{"delta":{"type":"thinking_delta","thinking":"..."}}"#
-            ),
-            None
-        );
-        assert_eq!(st.parse_event("content_block_start", r#"{"index":1,"content_block":{"type":"tool_use","id":"tu_1","name":"page_click","input":{}}}"#), None);
-        assert_eq!(
-            st.parse_event(
-                "content_block_delta",
-                r#"{"index":1,"delta":{"type":"input_json_delta","partial_json":"{\"ref\":"}}"#
-            ),
-            None
-        );
-        assert_eq!(
-            st.parse_event(
-                "content_block_delta",
-                r#"{"index":1,"delta":{"type":"input_json_delta","partial_json":"\"e2\"}"}}"#
-            ),
-            None
-        );
-        let done = st.parse_event("content_block_stop", r#"{"index":1}"#);
-        assert_eq!(
-            done,
-            Some(Delta::ToolUse(ToolUse {
-                id: "tu_1".into(),
-                name: "page_click".into(),
-                input: json!({"ref": "e2"})
-            }))
-        );
-        assert_eq!(
-            st.parse_event("message_delta", r#"{"delta":{"stop_reason":"tool_use"}}"#),
-            Some(Delta::Done("tool_use".into()))
-        );
-        assert_eq!(
-            st.parse_event(
-                "error",
-                r#"{"error":{"type":"overloaded_error","message":"busy"}}"#
-            ),
-            Some(Delta::Error("busy".into()))
-        );
-        assert_eq!(st.parse_event("ping", "{}"), None);
-    }
 
     #[test]
     fn tool_result_turn_shape() {
@@ -462,11 +668,114 @@ mod tests {
         assert_eq!(t.content[0]["type"], "tool_result");
         assert_eq!(t.content[1]["is_error"], true);
         assert!(t.content[0].get("is_error").is_none());
+        // `meta` is for provider state and must not leak into the wire body.
+        assert!(serde_json::to_value(&t).unwrap().get("meta").is_none());
+    }
+
+    #[test]
+    fn tool_uses_are_read_back_out_of_an_assistant_turn() {
+        let t = Turn::assistant_blocks(vec![
+            json!({"type": "text", "text": "ok"}),
+            json!({"type": "tool_use", "id": "a", "name": "page_click", "input": {"locator": "text=Go"}}),
+        ]);
+        let uses = t.tool_uses();
+        assert_eq!(uses.len(), 1);
+        assert_eq!(uses[0].name, "page_click");
+        assert_eq!(uses[0].input["locator"], "text=Go");
+        assert!(Turn::text(Role::Assistant, "hi").tool_uses().is_empty());
+    }
+
+    #[test]
+    fn effort_round_trips() {
+        for e in [
+            Effort::Default,
+            Effort::Low,
+            Effort::Medium,
+            Effort::High,
+            Effort::Max,
+        ] {
+            assert_eq!(Effort::parse(e.as_str()), e);
+        }
+        assert_eq!(Effort::parse("xhigh"), Effort::Default);
+    }
+
+    #[test]
+    fn usage_adds_up_and_keeps_cost_when_only_one_side_has_it() {
+        let mut a = Usage {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_read_tokens: 3,
+            cost_usd: None,
+        };
+        a.add(Usage {
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_read_tokens: 0,
+            cost_usd: Some(0.5),
+        });
+        assert_eq!(
+            (a.input_tokens, a.output_tokens, a.cache_read_tokens),
+            (11, 6, 3)
+        );
+        assert_eq!(a.cost_usd, Some(0.5));
+    }
+
+    #[test]
+    fn error_bodies_are_reduced_to_their_message() {
+        assert_eq!(
+            tidy_error(
+                r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#
+            ),
+            "invalid x-api-key"
+        );
+        assert_eq!(
+            tidy_error(
+                r#"{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"model not found"}}}"#
+            ),
+            "Provider returned error"
+        );
+        assert_eq!(
+            tidy_error("<html>bad gateway</html>"),
+            "<html>bad gateway</html>"
+        );
+    }
+
+    #[test]
+    fn custom_base_urls_are_trimmed_and_required() {
+        let c = Client::new(Provider::Custom, "", Some(" http://localhost:8080/v1/ "));
+        assert_eq!(c.base_url, "http://localhost:8080/v1");
+        assert!(matches!(
+            Client::new(Provider::Custom, "", None).check_ready(),
+            Err(AgentError::MissingBaseUrl)
+        ));
+        // Local servers need no key; hosted ones do.
+        assert!(
+            Client::new(Provider::Ollama, "", None)
+                .check_ready()
+                .is_ok()
+        );
+        assert!(matches!(
+            Client::new(Provider::Openai, "  ", None).check_ready(),
+            Err(AgentError::MissingKey)
+        ));
+        for invalid in [
+            "file:///tmp/socket",
+            "https://user:secret@example.com/v1",
+            "https://example.com/v1?token=secret",
+            "not a URL",
+        ] {
+            assert!(
+                Client::new(Provider::Custom, "", Some(invalid))
+                    .check_ready()
+                    .is_err(),
+                "accepted {invalid}"
+            );
+        }
     }
 
     #[tokio::test]
     async fn empty_key_is_rejected_before_any_request() {
-        let client = Client::new("  ");
+        let client = Client::new(Provider::Anthropic, "  ", None);
         let err = client
             .stream(&Request::new("s", vec![]))
             .await

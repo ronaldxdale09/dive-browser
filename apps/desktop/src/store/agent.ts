@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { ipc } from "../lib/ipc";
-import type { ChatDeltaOut } from "../lib/ipc";
+import type { ChatDeltaOut, KeyCheck, ModelInfo, Provider, ProviderInfo, Usage } from "../lib/ipc";
+import { usePrefs } from "./prefs";
 
 export interface Step {
   id: string;
@@ -21,21 +22,52 @@ export interface Message {
   pending?: boolean;
   error?: string;
   steps?: Step[];
+  /** The model's reasoning summary, when the provider streams one. */
+  reasoning?: string;
+  /** Token totals for this reply, across every tool round. */
+  usage?: Usage;
+  /** The user stopped this reply before the model finished. */
+  stopped?: boolean;
 }
 
 interface AgentState {
-  keyPresent: boolean | null;
+  /** The provider catalog, from the host. */
+  providers: ProviderInfo[];
+  /** Providers with a key in the keychain. */
+  keyed: Provider[];
+  /** `null` until the first `init` has answered. */
+  loaded: boolean;
+  /** Model listings by provider id. */
+  models: Record<string, ModelInfo[]>;
+  modelsLoading: string | null;
+  modelsError: string | null;
   messages: Message[];
   busy: boolean;
-  checkKey: () => Promise<void>;
-  saveKey: (key: string) => Promise<void>;
+  /** Id of the run in flight, for `stop`. */
+  runId: string | null;
+  /** Approve every action for the rest of this session. Not persisted. */
+  sessionAutoApprove: boolean;
+
+  init: () => Promise<void>;
+  refreshKeys: () => Promise<void>;
+  saveKey: (provider: Provider, key: string) => Promise<void>;
+  verifyKey: (provider: Provider, key: string | null) => Promise<KeyCheck>;
+  loadModels: (provider: Provider, refresh?: boolean) => Promise<ModelInfo[]>;
   send: (text: string, tabId: string | null) => Promise<void>;
+  stop: () => Promise<void>;
   approve: (id: string, allow: boolean) => Promise<void>;
+  setSessionAutoApprove: (v: boolean) => void;
   clear: () => void;
 }
 
 let seq = 0;
 const nextId = () => `m${++seq}`;
+const newRunId = () => `run-${Date.now().toString(36)}-${(++seq).toString(36)}`;
+
+/** The message's steps with no approval left pending, or nothing to patch. */
+function settle(m: Message): Partial<Message> {
+  return m.steps ? { steps: m.steps.map((s) => (s.awaiting ? { ...s, awaiting: false } : s)) } : {};
+}
 
 /** Apply one delta to the trailing assistant message. Pure for tests. */
 export function applyDelta(messages: Message[], delta: ChatDeltaOut): Message[] {
@@ -46,6 +78,9 @@ export function applyDelta(messages: Message[], delta: ChatDeltaOut): Message[] 
     case "text":
       patch = { content: last.content + delta.data };
       break;
+    case "reasoning":
+      patch = { reasoning: (last.reasoning ?? "") + delta.data };
+      break;
     case "tool_call":
       patch = { steps: [...(last.steps ?? []), { ...delta.data }] };
       break;
@@ -55,34 +90,92 @@ export function applyDelta(messages: Message[], delta: ChatDeltaOut): Message[] 
     case "tool_done":
       patch = { steps: (last.steps ?? []).map((s) => (s.id === delta.data.id ? { ...s, summary: delta.data.summary, error: delta.data.error, awaiting: false } : s)) };
       break;
+    case "usage":
+      patch = { usage: delta.data };
+      break;
     case "done":
       patch = {
         pending: false,
-        ...(delta.data === "max_tokens" ? { error: "Reply was cut off at the length limit." } : delta.data === "refusal" ? { error: "The model declined this request." } : {}),
+        // Every step still waiting is moot once the reply is over.
+        ...settle(last),
+        ...(delta.data === "stopped"
+          ? { stopped: true }
+          : delta.data === "max_tokens"
+            ? { error: "Reply was cut off at the length limit." }
+            : delta.data === "refusal"
+              ? { error: "The model declined this request." }
+              : {}),
       };
       break;
     case "error":
-      patch = { pending: false, error: delta.data };
+      patch = { pending: false, error: delta.data, ...settle(last) };
       break;
   }
   return [...messages.slice(0, -1), { ...last, ...patch }];
 }
 
+/** The provider currently selected in preferences, with its catalog row. */
+export function currentProvider(providers: ProviderInfo[]): ProviderInfo | undefined {
+  const id = usePrefs.getState().prefs.agent_provider;
+  return providers.find((p) => p.id === id);
+}
+
+/** Whether `provider` can be used right now: it has a key, or needs none. */
+export function isReady(provider: ProviderInfo | undefined, keyed: Provider[]): boolean {
+  if (!provider) return false;
+  return !provider.needs_key || keyed.includes(provider.id);
+}
+
 export const useAgent = create<AgentState>((set, get) => ({
-  keyPresent: null,
+  providers: [],
+  keyed: [],
+  loaded: false,
+  models: {},
+  modelsLoading: null,
+  modelsError: null,
   messages: [],
   busy: false,
+  runId: null,
+  sessionAutoApprove: false,
 
-  checkKey: async () => {
+  init: async () => {
     try {
-      set({ keyPresent: await ipc.agentKeyPresent() });
+      const [providers, keyed] = await Promise.all([ipc.agentProviders(), ipc.agentKeys()]);
+      set({ providers, keyed, loaded: true });
     } catch {
-      set({ keyPresent: false });
+      set({ loaded: true });
     }
   },
-  saveKey: async (key) => {
-    await ipc.agentKeySet(key);
-    set({ keyPresent: key.trim().length > 0 });
+  refreshKeys: async () => {
+    try {
+      set({ keyed: await ipc.agentKeys() });
+    } catch {
+      // keychain unavailable; keep what we had
+    }
+  },
+  saveKey: async (provider, key) => {
+    await ipc.agentKeySet(provider, key);
+    // A new key may list different models than the old one did.
+    set((s) => {
+      const models = { ...s.models };
+      delete models[provider];
+      return { models };
+    });
+    await get().refreshKeys();
+  },
+  verifyKey: (provider, key) => ipc.agentKeyVerify(provider, key),
+  loadModels: async (provider, refresh = false) => {
+    const cached = get().models[provider];
+    if (cached && !refresh) return cached;
+    set({ modelsLoading: provider, modelsError: null });
+    try {
+      const list = await ipc.agentModels(provider, refresh);
+      set((s) => ({ models: { ...s.models, [provider]: list }, modelsLoading: null }));
+      return list;
+    } catch (e) {
+      set({ modelsLoading: null, modelsError: e instanceof Error ? e.message : String(e) });
+      return [];
+    }
   },
   send: async (text, tabId) => {
     const prompt = text.trim();
@@ -90,19 +183,28 @@ export const useAgent = create<AgentState>((set, get) => ({
     const history = get().messages.filter((m) => !m.error || m.role === "user");
     const user: Message = { id: nextId(), role: "user", content: prompt };
     const reply: Message = { id: nextId(), role: "assistant", content: "", pending: true };
-    set({ messages: [...history, user, reply], busy: true });
+    const runId = newRunId();
+    set({ messages: [...history, user, reply], busy: true, runId });
     const turns = [...history, user].map((m) => ({ role: m.role, content: m.content }));
+    const prefs = usePrefs.getState().prefs;
+    const options = { include_page: prefs.agent_include_page, auto_approve: get().sessionAutoApprove };
     try {
-      await ipc.agentSend(turns, tabId, (d) => set((s) => ({ messages: applyDelta(s.messages, d) })));
+      await ipc.agentSend(runId, turns, tabId, options, (d) => set((s) => ({ messages: applyDelta(s.messages, d) })));
     } catch (e) {
       set((s) => ({ messages: applyDelta(s.messages, { type: "error", data: e instanceof Error ? e.message : String(e) }) }));
     } finally {
-      set((s) => ({ busy: false, messages: applyDelta(s.messages, { type: "done", data: "end_turn" }) }));
+      set((s) => ({ busy: false, runId: null, messages: applyDelta(s.messages, { type: "done", data: "end_turn" }) }));
     }
+  },
+  stop: async () => {
+    const { runId } = get();
+    if (!runId) return;
+    await ipc.agentStop(runId).catch(() => undefined);
   },
   approve: async (id, allow) => {
     set((s) => ({ messages: s.messages.map((m) => (m.steps ? { ...m, steps: m.steps.map((st) => (st.id === id ? { ...st, awaiting: false } : st)) } : m)) }));
     await ipc.agentApprove(id, allow).catch(() => undefined);
   },
+  setSessionAutoApprove: (sessionAutoApprove) => set({ sessionAutoApprove }),
   clear: () => set({ messages: [] }),
 }));

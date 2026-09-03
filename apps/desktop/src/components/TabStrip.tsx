@@ -1,7 +1,7 @@
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronDown, Pin, Plus, X } from "lucide-react";
+import { Pin, Plus, X } from "lucide-react";
 import { useState } from "react";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "../lib/ipc";
@@ -66,17 +66,6 @@ export function TabStrip() {
       </DndContext>
       <IconButton icon={Plus} label="New tab" onClick={() => toggle("palette", true)} />
       <div className="min-w-3 flex-1 self-stretch" data-tauri-drag-region />
-      {import.meta.env.DEV && (
-        <span
-          aria-label="Development environment"
-          title="Development environment"
-          className="flex h-5 shrink-0 items-center gap-1 rounded-full border border-danger/40 bg-danger/15 px-2 font-mono text-[10px] font-semibold tracking-[0.12em] text-danger"
-        >
-          <span className="size-1.5 rounded-full bg-danger" aria-hidden />
-          DEV
-        </span>
-      )}
-      <IconButton icon={ChevronDown} label="All tabs" onClick={() => toggle("palette", true)} size={14} />
       {menu && (
         <TabMenu
           x={menu.x}

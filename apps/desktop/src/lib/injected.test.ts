@@ -26,7 +26,7 @@ interface Failed {
 }
 type Result = Found | Failed;
 
-interface Element {
+interface ElementSummary {
   role: string;
   name: string;
   tag: string;
@@ -44,7 +44,7 @@ interface Locator {
   all(selector: string, limit?: number): { ok: true; matches: Found[] } | Failed;
   resolve(selector: string): Result;
   hold(selector: string): Result;
-  elements(limit?: number): { ok: true; elements: Element[]; truncated: boolean } | Failed;
+  elements(limit?: number): { ok: true; elements: ElementSummary[]; truncated: boolean } | Failed;
   page(textLimit?: number): Record<string, unknown> | Failed;
 }
 
@@ -61,7 +61,7 @@ declare global {
         | { ok: true; element: Record<string, unknown>; styleChanges: Record<string, unknown>[] }
         | { error: string };
     };
-    __diveHeld?: Element;
+    __diveHeld?: globalThis.Element;
   }
 }
 
@@ -419,7 +419,7 @@ describe("all and hold", () => {
 });
 
 describe("elements", () => {
-  function listed(html: string, limit?: number): Element[] {
+  function listed(html: string, limit?: number): ElementSummary[] {
     const engine = install(html);
     const result = engine.elements(limit);
     if ("error" in result) throw new Error(result.error);
@@ -470,8 +470,8 @@ describe("elements", () => {
       <button>Real</button>
     `);
     expect(elements.map((e) => e.name)).toEqual(["Disabled", "Real"]);
-    expect(elements[0].enabled).toBe(false);
-    expect(elements[1].enabled).toBe(true);
+    expect(elements[0]?.enabled).toBe(false);
+    expect(elements[1]?.enabled).toBe(true);
   });
 
   it("reports the current value of a field so a form's state is visible", () => {

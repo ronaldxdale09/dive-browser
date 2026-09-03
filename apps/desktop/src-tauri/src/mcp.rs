@@ -41,6 +41,8 @@ const TYPE_TEXT_CAP: usize = 256 * 1024;
 const WAIT_TEXT_CAP: usize = 8 * 1024;
 /// Largest wheel delta accepted in one action.
 const MAX_SCROLL_DELTA: f64 = 100_000.0;
+/// One compositor frame before reading the offset produced by wheel input.
+const SCROLL_SETTLE_MS: u64 = 50;
 /// Largest image handed back through MCP or the sidecar.
 const SCREENSHOT_TOOL_CAP: usize = 16 * 1024 * 1024;
 /// How often `page_wait_for` re-checks its conditions.
@@ -166,6 +168,18 @@ impl AppBrowser {
     /// discarded.
     fn session_for(&self, tab: TabId) -> Result<CdpSession, BrowserError> {
         self.ensure_view(tab)?;
+        self.session(tab)
+    }
+
+    /// A session that can accept real input. CEF stops acknowledging `Input`
+    /// events while a native child view is hidden, so a user-like action must
+    /// bring its target tab forward first.
+    fn action_session_for(&self, tab: TabId) -> Result<CdpSession, BrowserError> {
+        self.ensure_view(tab)?;
+        if !self.on_screen(tab) {
+            let state = self.state();
+            activate_tab(&self.app, &state, tab).map_err(|error| other(error.message))?;
+        }
         self.session(tab)
     }
 
@@ -302,14 +316,30 @@ impl AppBrowser {
         &self,
         tab: TabId,
         device: Option<crate::emulate::Device>,
-    ) -> Result<(), BrowserError> {
+    ) -> Result<bool, BrowserError> {
         let session = self.session_for(tab)?;
         crate::emulate::apply(&session, crate::emulate::device_calls(device.as_ref()))
             .await
             .map_err(|e| other(e.message))?;
-        session.call0("Page.reload").await.map_err(other)?;
-        Ok(())
+        // Metrics apply live; a user agent only takes effect on the next
+        // document. Reloading for a rotation would throw away the page's
+        // state for nothing.
+        let previous = self.state().buffers.device(tab);
+        let reload = browsing_identity(previous.as_ref()) != browsing_identity(device.as_ref());
+        self.state().buffers.set_device(tab, device);
+        if reload {
+            session.call0("Page.reload").await.map_err(other)?;
+        }
+        Ok(reload)
     }
+}
+
+/// Identity signals that affect the response a site returns. An exact-size
+/// desktop viewport has an empty override and is equivalent to no emulation.
+fn browsing_identity(device: Option<&crate::emulate::Device>) -> (&str, bool) {
+    device.map_or(("", false), |device| {
+        (device.user_agent.as_str(), device.mobile)
+    })
 }
 
 /// Centre of a node's content box in CSS pixels, scrolling it into view first.
@@ -351,6 +381,7 @@ fn other(e: impl std::fmt::Display) -> BrowserError {
     BrowserError::Other(e.to_string())
 }
 
+#[allow(clippy::too_many_lines)] // Browser adapter methods stay together so the MCP surface is auditable.
 #[async_trait]
 impl Browser for AppBrowser {
     async fn tabs(&self) -> Result<Vec<TabInfo>, BrowserError> {
@@ -540,7 +571,7 @@ impl Browser for AppBrowser {
     }
 
     async fn page_click(&self, tab: TabId, target: Target) -> Result<Value, BrowserError> {
-        let session = self.session_for(tab)?;
+        let session = self.action_session_for(tab)?;
         let described = target.locator.clone().or_else(|| target.r#ref.clone());
         self.tracked(tab, "page_click", described, async {
             let (x, y, label) = self.point_for(tab, &session, &target).await?;
@@ -573,7 +604,7 @@ impl Browser for AppBrowser {
                 "text is over the {TYPE_TEXT_CAP} character limit"
             )));
         }
-        let session = self.session_for(tab)?;
+        let session = self.action_session_for(tab)?;
         let described = target.locator.clone().or_else(|| target.r#ref.clone());
         self.tracked(tab, "page_type", described, async {
             let label = self
@@ -595,7 +626,7 @@ impl Browser for AppBrowser {
         key: String,
         modifiers: Vec<String>,
     ) -> Result<(), BrowserError> {
-        let session = self.session_for(tab)?;
+        let session = self.action_session_for(tab)?;
         self.tracked(tab, "page_press", Some(key.clone()), async {
             // Focusing is optional: pressing Escape to dismiss a dialog has
             // no element to aim at.
@@ -624,7 +655,7 @@ impl Browser for AppBrowser {
                 "scroll deltas must be finite and no larger than {MAX_SCROLL_DELTA}"
             )));
         }
-        let session = self.session_for(tab)?;
+        let session = self.action_session_for(tab)?;
         self.tracked(tab, "page_scroll", target.locator.clone(), async {
             // With no target, scroll the middle of the viewport: a wheel
             // event at (0,0) can land on a fixed header that swallows it.
@@ -639,6 +670,9 @@ impl Browser for AppBrowser {
             automation::scroll(&session, x, y, delta_x, delta_y)
                 .await
                 .map_err(|e| other(e.message))?;
+            // CDP acknowledges the wheel event before the compositor applies
+            // it. Waiting one frame keeps the returned offset truthful.
+            tokio::time::sleep(std::time::Duration::from_millis(SCROLL_SETTLE_MS)).await;
             let page = locator::page(&session, 0).await?;
             Ok(json!({"scroll": page["scroll"], "scroll_height": page["scroll_height"]}))
         })
@@ -766,6 +800,12 @@ impl Browser for AppBrowser {
                 "reset=true cannot be combined with a preset, size or orientation".into(),
             ));
         }
+        let ui = match params.ui.as_deref() {
+            None => crate::emulate::UiMode::Browser,
+            Some(name) => crate::emulate::UiMode::parse(name)
+                .map_err(|e| BrowserError::BadRequest(e.message))?,
+        };
+        // (id, device to apply, note)
         let requested = match (&params.preset, params.width, params.height, params.reset) {
             (Some(_), Some(_), _, _) | (Some(_), _, Some(_), _) => {
                 return Err(BrowserError::BadRequest(
@@ -779,29 +819,53 @@ impl Browser for AppBrowser {
                         "unknown preset {id:?}; call page_devices for the list"
                     ))
                 })?;
-                let landscape = params.orientation.as_deref() == Some("landscape");
+                // A preset's native orientation is portrait for phones and
+                // tablets; a laptop is already landscape.
                 let native_landscape = preset.device.width > preset.device.height;
-                Some(if landscape == native_landscape {
-                    preset
-                } else if let Some("landscape" | "portrait") = params.orientation.as_deref() {
-                    crate::emulate::rotate(preset)
+                let landscape = match params.orientation.as_deref() {
+                    Some("landscape") => true,
+                    Some("portrait") => false,
+                    _ => native_landscape,
+                };
+                let rotated = landscape != native_landscape;
+                let device = crate::emulate::realize(&preset, rotated, ui);
+                let strips = crate::emulate::strips_for(preset.frame, rotated, ui);
+                let (screen_w, screen_h) = if rotated {
+                    (preset.device.height, preset.device.width)
                 } else {
-                    preset
-                })
+                    (preset.device.width, preset.device.height)
+                };
+                let note = if strips == crate::emulate::Insets::default() {
+                    format!(
+                        "{}: the page gets the whole {screen_w}x{screen_h} screen.",
+                        preset.name
+                    )
+                } else {
+                    format!(
+                        "{} ({}): the page gets {}x{} of the {screen_w}x{screen_h} screen, with {} CSS px of status bar and browser chrome above and {} below, as it would on the device.",
+                        preset.name,
+                        params.ui.as_deref().unwrap_or("browser"),
+                        device.width,
+                        device.height,
+                        strips.top,
+                        strips.bottom
+                    )
+                };
+                Some((preset.id.clone(), device, note))
             }
             (None, Some(width), Some(height), _) => {
-                if params.orientation.is_some() {
+                if params.orientation.is_some() || params.ui.is_some() {
                     return Err(BrowserError::BadRequest(
-                        "orientation only applies to a preset".into(),
+                        "orientation and ui only apply to a preset".into(),
                     ));
                 }
                 let device = crate::emulate::exact(width, height)
                     .map_err(|e| BrowserError::BadRequest(e.message))?;
-                Some(crate::emulate::Preset {
-                    id: format!("{width}x{height}"),
-                    name: format!("{width} x {height}"),
+                Some((
+                    format!("{width}x{height}"),
                     device,
-                })
+                    "A bare viewport with Dive's own user agent.".into(),
+                ))
             }
             (None, Some(_), None, _) | (None, None, Some(_), _) => {
                 return Err(BrowserError::BadRequest(
@@ -814,16 +878,19 @@ impl Browser for AppBrowser {
                 ));
             }
         };
-        let described = requested.as_ref().map(|p| p.id.clone());
-        let device = requested.as_ref().map(|p| p.device.clone());
+        let described = requested.as_ref().map(|(id, _, _)| id.clone());
+        let device = requested.as_ref().map(|(_, d, _)| d.clone());
+        let note = requested.as_ref().map(|(_, _, n)| n.clone());
         self.tracked(tab, "page_resize", described.clone(), async {
-            self.emulate_device(tab, device).await?;
+            let reloaded = self.emulate_device(tab, device.clone()).await?;
             Ok(json!({
                 "preset": described,
-                "width": requested.as_ref().map(|p| p.device.width),
-                "height": requested.as_ref().map(|p| p.device.height),
+                "viewport": device.as_ref().map(|d| json!({"width": d.width, "height": d.height})),
+                "dpr": device.as_ref().map(|d| d.dpr),
+                "safe_area": device.as_ref().and_then(|d| d.safe_area),
                 "reset": requested.is_none(),
-                "note": "The tab reloaded so the new metrics apply to layout.",
+                "reloaded": reloaded,
+                "note": note.unwrap_or_else(|| "Emulation cleared; the page fills the window again.".into()),
             }))
         })
         .await
@@ -843,18 +910,21 @@ impl Browser for AppBrowser {
         if params.color_scheme.is_none()
             && params.reduced_motion.is_none()
             && params.media_type.is_none()
+            && params.display_mode.is_none()
         {
             return Err(BrowserError::BadRequest(
-                "give color_scheme, reduced_motion or media_type".into(),
+                "give color_scheme, reduced_motion, media_type or display_mode".into(),
             ));
         }
         let current = self.state().buffers.media(tab);
         let color_scheme = params.color_scheme.or(current.color_scheme);
         let reduced_motion = params.reduced_motion.or(current.reduced_motion);
         let media_type = params.media_type.or(current.media_type);
+        let display_mode = params.display_mode.or(current.display_mode);
         params.color_scheme = color_scheme;
         params.reduced_motion = reduced_motion;
         params.media_type = media_type;
+        params.display_mode = display_mode;
         let clearable =
             |value: Option<String>, allowed: &[&str]| -> Result<Option<String>, BrowserError> {
                 match value.as_deref().map(str::trim) {
@@ -870,6 +940,10 @@ impl Browser for AppBrowser {
             color_scheme: clearable(params.color_scheme, &["light", "dark"])?,
             reduced_motion: clearable(params.reduced_motion, &["reduce", "no-preference"])?,
             media_type: clearable(params.media_type, &["screen", "print"])?,
+            display_mode: clearable(
+                params.display_mode,
+                &["standalone", "browser", "fullscreen", "minimal-ui"],
+            )?,
         };
         let session = self.session_for(tab)?;
         let described = overrides.color_scheme.clone();
@@ -881,6 +955,7 @@ impl Browser for AppBrowser {
                 "color_scheme": overrides.color_scheme,
                 "reduced_motion": overrides.reduced_motion,
                 "media_type": overrides.media_type,
+                "display_mode": overrides.display_mode,
             }))
         })
         .await

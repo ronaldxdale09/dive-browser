@@ -1,4 +1,4 @@
-import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Easing, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
 import type { CSSProperties, ReactNode } from "react";
 
 /**
@@ -7,6 +7,12 @@ import type { CSSProperties, ReactNode } from "react";
  * Everything is drawn from the chrome's own design tokens — CSS variables the
  * Player resolves against the document it lives in — so the reel follows the
  * theme and accent the person chose rather than shipping a palette of its own.
+ *
+ * Motion follows Remotion's markup guidance: every animation is a function of
+ * `useCurrentFrame()` through `interpolate()` with an explicit easing and
+ * clamped ends, and transforms use the individual `scale` / `translate`
+ * properties rather than a `transform` string. CSS transitions are never used;
+ * they would not be deterministic per frame.
  */
 export const T = {
   ground: "var(--color-ground)",
@@ -21,6 +27,7 @@ export const T = {
   hi: "var(--color-highlight)",
   hiSoft: "var(--color-highlight-soft)",
   danger: "var(--color-danger)",
+  ok: "#7fd8a0",
   sans: "var(--font-sans)",
   mono: "var(--font-mono)",
 };
@@ -30,27 +37,32 @@ export const WIDTH = 1280;
 export const HEIGHT = 480;
 export const FPS = 30;
 
-/** Frame-relative progress of the current `<Sequence>`: a spring in, a fade out. */
+/** The "settle" curve used for nearly every entrance: fast out, soft landing. */
+export const SETTLE = Easing.bezier(0.16, 1, 0.3, 1);
+
+/** Props every feature scene receives from the series, so order lives in one place. */
+export type SceneProps = { index: number };
+
+/** Frame-relative timing of the current sequence. */
 export function useScene() {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
-  const enter = spring({ frame, fps, config: { damping: 200 }, durationInFrames: 22 });
-  const exit = interpolate(frame, [durationInFrames - 12, durationInFrames - 2], [1, 0], {
+  return { frame, fps, durationInFrames };
+}
+
+/**
+ * 0→1 starting `delay` frames in. The default settles in 0.6 s; `snappy`
+ * uses a spring easing with a little overshoot for clicks and stamps.
+ */
+export function pop(frame: number, fps: number, delay = 0, snappy = false): number {
+  return interpolate(frame, [delay, delay + (snappy ? 0.5 : 0.6) * fps], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
+    easing: snappy ? Easing.spring({ damping: 12, stiffness: 170, mass: 0.8 }) : SETTLE,
   });
-  return { frame, fps, durationInFrames, enter, exit, opacity: Math.min(enter, exit) };
 }
 
-/** A spring that starts `delay` frames in; `snappy` overshoots a little. */
-export function pop(frame: number, fps: number, delay = 0, snappy = false): number {
-  const at = Math.max(0, frame - delay);
-  return snappy
-    ? spring({ frame: at, fps, config: { damping: 14, stiffness: 160, mass: 0.8 } })
-    : spring({ frame: at, fps, config: { damping: 200 }, durationInFrames: 20 });
-}
-
-/** Linear 0→1 between two frames, clamped. */
+/** Linear 0→1 between two frames, clamped. For progress bars and sweeps. */
 export function ramp(frame: number, from: number, to: number): number {
   return interpolate(frame, [from, to], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
 }
@@ -71,13 +83,13 @@ export function Scene({
   keys?: string;
   children: ReactNode;
 }) {
-  const { frame, fps, opacity } = useScene();
-  const t = pop(frame, fps, 0);
-  const s = pop(frame, fps, 5);
+  const { frame, fps } = useScene();
+  const rise = (delay: number) => `0px ${interpolate(pop(frame, fps, delay), [0, 1], [18, 0])}px`;
   return (
-    <AbsoluteFill style={{ background: T.ground, color: T.ink, fontFamily: T.sans, opacity }}>
+    <AbsoluteFill style={{ background: T.ground, color: T.ink, fontFamily: T.sans }}>
       <Glow />
-      <div style={{ position: "absolute", left: 64, top: 0, bottom: 0, width: 400, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+      {/* Copy column. The safe area starts 80px in; nothing important sits closer to an edge. */}
+      <div style={{ position: "absolute", left: 80, top: 0, bottom: 0, width: 400, display: "flex", flexDirection: "column", justifyContent: "center" }}>
         <div
           style={{
             fontFamily: T.mono,
@@ -85,8 +97,8 @@ export function Scene({
             letterSpacing: "0.18em",
             textTransform: "uppercase",
             color: T.hi,
-            opacity: t,
-            transform: `translateY(${(1 - t) * 8}px)`,
+            opacity: pop(frame, fps, 0),
+            translate: rise(0),
           }}
         >
           {String(index).padStart(2, "0")} / 12 · {eyebrow}
@@ -94,12 +106,13 @@ export function Scene({
         <h2
           style={{
             margin: "12px 0 0",
-            fontSize: 34,
-            lineHeight: 1.1,
+            fontSize: 38,
+            lineHeight: 1.08,
             fontWeight: 600,
-            letterSpacing: "-0.025em",
-            opacity: t,
-            transform: `translateY(${(1 - t) * 18}px)`,
+            letterSpacing: "-0.028em",
+            textWrap: "balance",
+            opacity: pop(frame, fps, 3),
+            translate: rise(3),
           }}
         >
           {title}
@@ -107,22 +120,24 @@ export function Scene({
         <p
           style={{
             margin: "14px 0 0",
-            maxWidth: 340,
-            fontSize: 15,
+            maxWidth: 360,
+            fontSize: 16,
             lineHeight: 1.5,
             color: T.ink2,
-            opacity: pop(frame, fps, 4),
-            transform: `translateY(${(1 - pop(frame, fps, 4)) * 14}px)`,
+            textWrap: "pretty",
+            opacity: pop(frame, fps, 8),
+            translate: rise(8),
           }}
         >
           {text}
         </p>
         {keys && (
-          <div style={{ marginTop: 18, opacity: pop(frame, fps, 10) }}>
+          <div style={{ marginTop: 18, opacity: pop(frame, fps, 14) }}>
             <Kbd>{keys}</Kbd>
           </div>
         )}
       </div>
+      {/* The stage: what the viewer should notice first, so it gets the most room. */}
       <div
         style={{
           position: "absolute",
@@ -130,8 +145,16 @@ export function Scene({
           top: 50,
           width: 720,
           height: 380,
-          opacity: s,
-          transform: `translateY(${(1 - s) * 26}px) scale(${0.965 + 0.035 * s})`,
+          opacity: pop(frame, fps, 5),
+          translate: `0px ${interpolate(pop(frame, fps, 5), [0, 1], [28, 0])}px`,
+          scale: String(
+            interpolate(frame, [5, 5 + 0.6 * fps], [0.96, 1], {
+              extrapolateLeft: "clamp",
+              extrapolateRight: "clamp",
+              easing: SETTLE,
+              output: "perceptual-scale",
+            }),
+          ),
           transformOrigin: "50% 60%",
         }}
       >
@@ -161,7 +184,7 @@ export function Glow() {
   );
 }
 
-/** A miniature Dive window: rail dot column, tab, address bar, then whatever is inside. */
+/** A miniature Dive window: traffic lights, address bar, then whatever is inside. */
 export function Window({
   url,
   children,
@@ -227,7 +250,7 @@ export function Window({
   );
 }
 
-/** Text arriving one character at a time from `start`, with a caret while it types. */
+/** Text arriving one character at a time from `start`; the caret blinks while typing and for a beat after. */
 export function Typed({
   text,
   start,
@@ -244,14 +267,13 @@ export function Typed({
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const shown = Math.max(0, Math.min(text.length, Math.floor(((frame - start) / fps) * cps)));
+  const finishedAt = start + (text.length / cps) * fps;
   const typing = frame >= start && shown < text.length;
-  const blink = Math.floor(frame / 16) % 2 === 0;
+  const lingering = frame >= finishedAt && frame < finishedAt + 1.2 * fps && Math.floor(frame / 15) % 2 === 0;
   return (
     <span style={style}>
       {text.slice(0, shown)}
-      {caret && (typing || blink) && frame >= start && shown < text.length + 40 && (
-        <span style={{ display: "inline-block", width: 7, height: "1em", verticalAlign: "-0.15em", background: T.hi, marginLeft: 1 }} />
-      )}
+      {caret && (typing || lingering) && <span style={{ display: "inline-block", width: 7, height: "1em", verticalAlign: "-0.15em", background: T.hi, marginLeft: 1 }} />}
     </span>
   );
 }
@@ -285,7 +307,7 @@ export function Chip({ children, tone = "quiet", style }: { children: ReactNode;
       : tone === "danger"
         ? { background: "color-mix(in srgb, var(--color-danger) 18%, transparent)", color: T.danger, border: "transparent" }
         : tone === "ok"
-          ? { background: "color-mix(in srgb, #7fd8a0 18%, transparent)", color: "#7fd8a0", border: "transparent" }
+          ? { background: "color-mix(in srgb, #7fd8a0 18%, transparent)", color: T.ok, border: "transparent" }
           : { background: T.surface3, color: T.ink2, border: T.line2 };
   return (
     <span
@@ -310,12 +332,12 @@ export function Chip({ children, tone = "quiet", style }: { children: ReactNode;
   );
 }
 
-/** A row that slides in from the left once its turn comes. */
+/** Content that settles into place once its turn comes, from `dx` pixels to the side. */
 export function Reveal({ at, children, dx = -14, style }: { at: number; children: ReactNode; dx?: number; style?: CSSProperties }) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const p = pop(frame, fps, at);
-  return <div style={{ opacity: p, transform: `translateX(${(1 - p) * dx}px)`, ...style }}>{children}</div>;
+  return <div style={{ opacity: p, translate: `${interpolate(p, [0, 1], [dx, 0])}px 0px`, ...style }}>{children}</div>;
 }
 
 /** Mouse pointer gliding between waypoints; `clicks` are frames where it presses. */
@@ -328,7 +350,6 @@ export function Pointer({
   clicks?: number[];
 }) {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
   const first = path[0];
   if (!first || frame < first[0]) return null;
   let x = first[1];
@@ -336,11 +357,10 @@ export function Pointer({
   for (let i = 1; i < path.length; i++) {
     const a = path[i - 1]!;
     const b = path[i]!;
-    const p = spring({ frame: Math.max(0, frame - a[0]), fps, config: { damping: 22, stiffness: 120 }, durationInFrames: Math.max(8, b[0] - a[0]) });
-    if (frame >= a[0]) {
-      x = a[1] + (b[1] - a[1]) * p;
-      y = a[2] + (b[2] - a[2]) * p;
-    }
+    if (frame < a[0]) break;
+    const p = interpolate(frame, [a[0], Math.max(a[0] + 1, b[0])], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: SETTLE });
+    x = a[1] + (b[1] - a[1]) * p;
+    y = a[2] + (b[2] - a[2]) * p;
   }
   const press = clicks.reduce((acc, c) => Math.max(acc, frame >= c && frame < c + 14 ? 1 - (frame - c) / 14 : 0), 0);
   return (
@@ -356,7 +376,7 @@ export function Pointer({
             borderRadius: 14,
             border: `2px solid ${T.hi}`,
             opacity: press,
-            transform: `scale(${1.6 - press * 0.6})`,
+            scale: String(1.6 - press * 0.6),
           }}
         />
       )}

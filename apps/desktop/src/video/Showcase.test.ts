@@ -1,21 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { DURATION, POSTER_FRAME, SCENES } from "./Showcase";
+import { BOOKEND, DURATION, FEATURE, FEATURES, POSTER_FRAME, SEQUENCES, TRANSITION } from "./Showcase";
 import { FPS } from "./primitives";
 
 describe("Showcase", () => {
-  it("runs exactly one minute and loops without a gap", () => {
+  it("runs exactly one minute once the crossfade overlaps are taken off", () => {
     expect(DURATION).toBe(60 * FPS);
-    expect(SCENES.reduce((n, s) => n + s.duration, 0)).toBe(DURATION);
+    // The rule from @remotion/transitions: total = sum of sequences − transitions.
+    const sum = SEQUENCES.reduce((n, d) => n + d, 0);
+    expect(sum - TRANSITION * (SEQUENCES.length - 1)).toBe(DURATION);
+    expect(SEQUENCES).toEqual([BOOKEND, ...Array<number>(12).fill(FEATURE), BOOKEND]);
   });
 
-  it("gives every built-in feature its own scene between the bookends", () => {
-    expect(SCENES[0]?.name).toBe("intro");
-    expect(SCENES.at(-1)?.name).toBe("outro");
-    const features = SCENES.slice(1, -1);
-    expect(features).toHaveLength(12);
-    expect(new Set(features.map((s) => s.name)).size).toBe(12);
-    // Equal time each: no feature is the poor relation.
-    expect(new Set(features.map((s) => s.duration)).size).toBe(1);
+  it("gives every built-in feature its own scene, leading with the visible ones", () => {
+    expect(FEATURES).toHaveLength(12);
+    expect(new Set(FEATURES.map((f) => f.name)).size).toBe(12);
+    expect(FEATURES.slice(0, 4).map((f) => f.name)).toEqual(["recording", "capture", "mobile", "agent"]);
   });
 
   it("has a poster frame inside the reel for reduced motion", () => {

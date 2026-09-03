@@ -1,9 +1,9 @@
 //! Driving a page: clicks, typing, key presses, scrolling and waiting.
 //!
-//! Everything here dispatches real input events through CDP rather than
-//! calling DOM methods, so a page's own handlers, focus rules and event
-//! ordering behave the way they do for a person. `element.click()` skips
-//! pointer events entirely and passes tests that a real click would fail.
+//! Clicks, typing and key presses dispatch real input events through CDP, so
+//! a page's own handlers, focus rules and event ordering behave the way they
+//! do for a person. Scrolling uses the page context because CEF can silently
+//! drop the response to CDP's `mouseWheel` command and stall the action.
 //!
 //! Actions are announced to the chrome before they happen ([`AgentPointer`])
 //! so the person watching sees a cursor move to the target instead of the
@@ -21,7 +21,6 @@ use crate::Runtime;
 use crate::error::{AppError, AppResult};
 
 /// Where an agent is about to act, so the chrome can draw a cursor there.
-///
 /// Emitted just before the input is dispatched. The `move` phase arrives
 /// first, then `click` once the pointer has notionally arrived.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
@@ -266,7 +265,38 @@ pub async fn press(session: &CdpSession, key: &str, modifiers: u8) -> AppResult<
     Ok(())
 }
 
-/// Scroll by a wheel delta at a point.
+fn scroll_expression(x: f64, y: f64, delta_x: f64, delta_y: f64) -> String {
+    format!(
+        r"(() => {{
+  const dx = {delta_x};
+  const dy = {delta_y};
+  const canScroll = (el, axis, delta) => {{
+    if (!delta) return false;
+    const style = getComputedStyle(el);
+    const overflow = axis === 'x' ? style.overflowX : style.overflowY;
+    if (!/(auto|scroll|overlay)/.test(overflow)) return false;
+    const position = axis === 'x' ? el.scrollLeft : el.scrollTop;
+    const maximum = axis === 'x'
+      ? el.scrollWidth - el.clientWidth
+      : el.scrollHeight - el.clientHeight;
+    return delta < 0 ? position > 0 : position < maximum;
+  }};
+  let el = document.elementFromPoint({x}, {y});
+  while (el && el !== document.body && el !== document.documentElement) {{
+    if (canScroll(el, 'x', dx) || canScroll(el, 'y', dy)) {{
+      el.scrollBy({{ left: dx, top: dy, behavior: 'instant' }});
+      return 'element';
+    }}
+    const root = el.getRootNode?.();
+    el = el.parentElement || root?.host || null;
+  }}
+  window.scrollBy({{ left: dx, top: dy, behavior: 'instant' }});
+  return 'window';
+}})()"
+    )
+}
+
+/// Scroll by a delta at a point, preferring the nearest scrollable ancestor.
 pub async fn scroll(
     session: &CdpSession,
     x: f64,
@@ -274,20 +304,22 @@ pub async fn scroll(
     delta_x: f64,
     delta_y: f64,
 ) -> AppResult<()> {
-    session
+    let result = session
         .call(
-            "Input.dispatchMouseEvent",
+            "Runtime.evaluate",
             json!({
-                "type": "mouseWheel",
-                "x": x,
-                "y": y,
-                "deltaX": delta_x,
-                "deltaY": delta_y,
-                "pointerType": "mouse",
+                "expression": scroll_expression(x, y, delta_x, delta_y),
+                "returnByValue": true,
             }),
         )
         .await
         .map_err(AppError::new)?;
+    if let Some(message) = result["exceptionDetails"]["exception"]["description"]
+        .as_str()
+        .or_else(|| result["exceptionDetails"]["text"].as_str())
+    {
+        return Err(AppError::new(format!("scroll failed: {message}")));
+    }
     Ok(())
 }
 
@@ -363,5 +395,15 @@ mod tests {
         assert!(key_events("Shift", 0).is_err());
         // A multi-character string that is not a known name is a typo.
         assert!(key_events("abc", 0).is_err());
+    }
+
+    #[test]
+    fn scroll_finds_a_scrollable_ancestor_before_falling_back_to_the_window() {
+        let script = scroll_expression(10.5, 20.25, -3.0, 400.0);
+        assert!(script.contains("document.elementFromPoint(10.5, 20.25)"));
+        assert!(script.contains("el.scrollBy"));
+        assert!(script.contains("window.scrollBy"));
+        assert!(script.contains("const dx = -3"));
+        assert!(script.contains("const dy = 400"));
     }
 }

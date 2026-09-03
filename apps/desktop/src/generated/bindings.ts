@@ -79,7 +79,21 @@ export const commands = {
 	user_agent: string,
 	/**  `"iOS" | "Android" | "macOS" | "Windows"`, used for client hints. */
 	platform: string,
-} | null) => typedError<null, AppError>(__TAURI_INVOKE("tab_emulate", { id, device })),
+	/**
+	 *  Draw the viewport at this fraction of its size, so a 932-tall phone
+	 *  fits a laptop window while `innerHeight` still says 932.
+	 */
+	scale?: number | null,
+	/**  What `env(safe-area-inset-*)` reports. Absent leaves it alone. */
+	safe_area?: Insets | null,
+} | null, reload: boolean) => typedError<null, AppError>(__TAURI_INVOKE("tab_emulate", { id, device, reload })),
+	/**
+	 *  Override where and when the page thinks it is: geolocation, time zone,
+	 *  locale. Unset fields clear their override.
+	 */
+	tabEnvironment: (id: TabId, environment: Environment) => typedError<null, AppError>(__TAURI_INVOKE("tab_environment", { id, environment })),
+	/**  The device catalog, for the picker and for anything scripting Dive. */
+	devicePresets: () => __TAURI_INVOKE<Preset[]>("device_presets"),
 	/**  Override media features (color scheme, reduced motion, media type). */
 	tabMedia: (id: TabId, media: MediaOverrides) => typedError<null, AppError>(__TAURI_INVOKE("tab_media", { id, media })),
 	/**  Throttle a tab's network, or clear throttling with `None`. */
@@ -160,6 +174,8 @@ export const commands = {
 	prefsSet: (prefs: Prefs) => typedError<Prefs, AppError>(__TAURI_INVOKE("prefs_set", { prefs })),
 	/**  Delete browsing data; returns a one-line summary of what went. */
 	browsingDataClear: (what: ClearRequest) => typedError<string, AppError>(__TAURI_INVOKE("browsing_data_clear", { what })),
+	/**  Show a download in the system file manager, or the downloads folder when `path` is `None`. */
+	downloadsReveal: (path: string | null) => typedError<null, AppError>(__TAURI_INVOKE("downloads_reveal", { path })),
 	/**  Dev servers listening on localhost, discovered from the OS socket table. */
 	devServers: () => typedError<DevServer[], AppError>(__TAURI_INVOKE("dev_servers")),
 	/**  Enable or disable low-frequency dev-server change events while a panel is open. */
@@ -174,17 +190,34 @@ export const commands = {
 	bookmarksSearch: (query: string, limit: number) => typedError<Bookmark[], AppError>(__TAURI_INVOKE("bookmarks_search", { query, limit })),
 	/**  LAN URL and QR code for opening `url` on another device. */
 	shareUrl: (url: string) => typedError<ShareInfo, AppError>(__TAURI_INVOKE("share_url", { url })),
-	/**  Store the Anthropic API key in the keychain. Empty removes it. */
-	agentKeySet: (key: string) => typedError<null, AppError>(__TAURI_INVOKE("agent_key_set", { key })),
-	/**  Whether a key is configured. */
-	agentKeyPresent: () => __TAURI_INVOKE<boolean>("agent_key_present"),
+	/**  The provider catalog, for the chrome's pickers. */
+	agentProviders: () => __TAURI_INVOKE<ProviderInfo[]>("agent_providers"),
+	/**
+	 *  Providers that have a key stored. Local servers need none and are not
+	 *  listed; the chrome treats them as ready.
+	 */
+	agentKeys: () => __TAURI_INVOKE<Provider[]>("agent_keys"),
+	/**  Store a provider's API key in the keychain. Empty removes it. */
+	agentKeySet: (provider: string, key: string) => typedError<null, AppError>(__TAURI_INVOKE("agent_key_set", { provider, key })),
+	/**  Whether a key is configured for `provider`. */
+	agentKeyPresent: (provider: string) => typedError<boolean, AppError>(__TAURI_INVOKE("agent_key_present", { provider })),
+	/**
+	 *  Try `key` (or the stored one) against the provider with its cheapest
+	 *  authenticated call, so a typo is caught before the first message.
+	 */
+	agentKeyVerify: (provider: string, key: string | null) => typedError<KeyCheck, AppError>(__TAURI_INVOKE("agent_key_verify", { provider, key })),
+	/**  The models `provider` offers, cached for a while per provider. */
+	agentModels: (provider: string, refresh: boolean) => typedError<ModelInfo[], AppError>(__TAURI_INVOKE("agent_models", { provider, refresh })),
 	/**
 	 *  Send a conversation to the model; deltas stream back over `on_delta`.
-	 *  Tool calls are executed here and fed back until the model stops.
+	 *  Tool calls are executed here and fed back until the model stops, the
+	 *  step budget runs out, or the chrome stops the run.
 	 */
-	agentSend: (turns: ChatTurn[], tabId: string | null, onDelta: Channel<ChatDelta>) => typedError<null, AppError>(__TAURI_INVOKE("agent_send", { turns, tabId, onDelta })),
+	agentSend: (runId: string, turns: ChatTurn[], tabId: string | null, options: SendOptions, onDelta: Channel<ChatDelta>) => typedError<null, AppError>(__TAURI_INVOKE("agent_send", { runId, turns, tabId, options, onDelta })),
 	/**  Resolve a pending action approval from the chrome. */
 	agentApprove: (id: string, allow: boolean) => typedError<null, AppError>(__TAURI_INVOKE("agent_approve", { id, allow })),
+	/**  Stop a run. The loop notices at its next await and reports `stopped`. */
+	agentStop: (runId: string) => typedError<null, AppError>(__TAURI_INVOKE("agent_stop", { runId })),
 };
 
 /** Events */
@@ -214,7 +247,6 @@ export type A11yReport = {
 
 /**
  *  Where an agent is about to act, so the chrome can draw a cursor there.
- * 
  *  Emitted just before the input is dispatched. The `move` phase arrives
  *  first, then `click` once the pointer has notionally arrived.
  */
@@ -247,6 +279,12 @@ export type AppInfo = {
 	mcp_url: string,
 	/**  Path of the bearer token file. */
 	mcp_token_path: string,
+	/**
+	 *  Device preset to put the first tab on at startup, from `DIVE_SIMULATE`.
+	 *  Lets automation and smoke tests bring the simulator up without a
+	 *  click, the way `DIVE_OPEN_URL` opens a tab.
+	 */
+	simulate: string | null,
 };
 
 /**  A saved page. */
@@ -274,13 +312,15 @@ export type Bounds = {
 };
 
 /**  A streamed piece of the reply. */
-export type ChatDelta = 
+export type ChatDelta =
 /**  More text. */
-{ type: "text"; data: string } | 
+{ type: "text"; data: string } |
+/**  More of the model's reasoning. */
+{ type: "reasoning"; data: string } |
 /**  The agent is calling a tool. */
-{ type: "tool_call"; data: ToolStep } | 
+{ type: "tool_call"; data: ToolStep } |
 /**  An action needs the user's approval before it runs (answer with `agent_approve`). */
-{ type: "needs_approval"; data: ToolStep } | 
+{ type: "needs_approval"; data: ToolStep } |
 /**  A tool finished: id, short summary, error flag. */
 { type: "tool_done"; data: {
 	/**  Call id. */
@@ -289,13 +329,15 @@ export type ChatDelta =
 	summary: string,
 	/**  Failed. */
 	error: boolean,
-} } | 
-/**  Finished with a stop reason. */
-{ type: "done"; data: string } | 
+} } |
+/**  Running token totals for this reply. */
+{ type: "usage"; data: Usage } |
+/**  Finished with a stop reason (`end_turn`, `max_tokens`, `refusal`, `stopped`). */
+{ type: "done"; data: string } |
 /**  Failed. */
 { type: "error"; data: string };
 
-/**  One message in the sidecar conversation, as the chrome stores it. */
+/**  One message in the conversation, as the chrome stores it. */
 export type ChatTurn = {
 	/**  `user` or `assistant`. */
 	role: string,
@@ -331,13 +373,13 @@ export type Command = {
 };
 
 /**  Where a command applies; used to filter the palette. */
-export type CommandScope = 
+export type CommandScope =
 /**  Always available. */
-"global" | 
+"global" |
 /**  Needs a focused tab. */
-"tab" | 
+"tab" |
 /**  Needs a workspace. */
-"workspace" | 
+"workspace" |
 /**  Only inside the agent sidecar. */
 "agent";
 
@@ -385,17 +427,17 @@ export type Cookie = {
 };
 
 /**  Something changed in the core state. */
-export type CoreEvent = 
+export type CoreEvent =
 /**  A workspace was created or updated. */
-{ type: "workspace_upserted"; data: Workspace } | 
+{ type: "workspace_upserted"; data: Workspace } |
 /**  A workspace was removed. */
-{ type: "workspace_removed"; data: WorkspaceId } | 
+{ type: "workspace_removed"; data: WorkspaceId } |
 /**  The active workspace changed. */
-{ type: "workspace_activated"; data: WorkspaceId } | 
+{ type: "workspace_activated"; data: WorkspaceId } |
 /**  A tab was created or updated. */
-{ type: "tab_upserted"; data: Tab } | 
+{ type: "tab_upserted"; data: Tab } |
 /**  A tab was closed. */
-{ type: "tab_closed"; data: TabId } | 
+{ type: "tab_closed"; data: TabId } |
 /**  The focused tab changed. */
 { type: "tab_activated"; data: TabId };
 
@@ -421,7 +463,7 @@ export type DevServersChanged = {
 	servers: DevServer[],
 };
 
-/**  A device preset as sent by the chrome. */
+/**  A device as sent by the chrome, or built from a catalog preset. */
 export type Device = {
 	/**  Viewport width in CSS pixels. */
 	width: number,
@@ -437,6 +479,13 @@ export type Device = {
 	user_agent: string,
 	/**  `"iOS" | "Android" | "macOS" | "Windows"`, used for client hints. */
 	platform: string,
+	/**
+	 *  Draw the viewport at this fraction of its size, so a 932-tall phone
+	 *  fits a laptop window while `innerHeight` still says 932.
+	 */
+	scale?: number | null,
+	/**  What `env(safe-area-inset-*)` reports. Absent leaves it alone. */
+	safe_area?: Insets | null,
 };
 
 /**  A download started or finished; shown as a toast. */
@@ -449,12 +498,47 @@ export type DownloadNotice = {
 	status: string,
 };
 
+/**  Where and when the page thinks it is. */
+export type Environment = {
+	/**  Reported by `navigator.geolocation`; none clears the override. */
+	geolocation: Geolocation | null,
+	/**  IANA zone such as `Asia/Tokyo`; none clears the override. */
+	timezone: string | null,
+	/**  ICU locale such as `ja_JP`; none clears the override. */
+	locale: string | null,
+};
+
 /**  Result of a find step. */
 export type FindResult = {
 	/**  Total matches in the document. */
 	total: number,
 	/**  1-based index of the selected match, 0 when none. */
 	current: number,
+};
+
+/**  How the bezel is drawn, and which browser's bars go with it. */
+export type Frame =
+/**  iPhone with a dynamic island. */
+"island" |
+/**  iPhone with a notch. */
+"notch" |
+/**  Classic iPhone with a home button. */
+"home" |
+/**  Android with a punch-hole camera. */
+"punch" |
+/**  Uniform bezel: tablets, foldables open. */
+"bezel" |
+/**  Laptop or desktop: no phone chrome at all. */
+"laptop";
+
+/**  A position for `navigator.geolocation`. */
+export type Geolocation = {
+	/**  Degrees north. */
+	latitude: number | null,
+	/**  Degrees east. */
+	longitude: number | null,
+	/**  Metres. */
+	accuracy: number | null,
 };
 
 /**  One page in history, aggregated by URL. */
@@ -469,6 +553,18 @@ export type HistoryEntry = {
 	visits: number,
 	/**  The site's remembered icon as a `data:` URL, when one is known. */
 	favicon: string | null,
+};
+
+/**  Insets in CSS pixels. */
+export type Insets = {
+	/**  Top. */
+	top: number,
+	/**  Bottom. */
+	bottom: number,
+	/**  Left. */
+	left: number,
+	/**  Right. */
+	right: number,
 };
 
 /**  Emitted when the person picks an element or cancels. */
@@ -504,14 +600,22 @@ export type InspectorSnapshot_Serialize = {
 	description: string | null,
 };
 
+/**  Outcome of trying a key against its provider. */
+export type KeyCheck = {
+	/**  The provider accepted it. */
+	ok: boolean,
+	/**  What happened, for the person. */
+	message: string,
+};
+
 /**  Severity of a console entry. */
-export type Level = 
+export type Level =
 /**  `console.debug`, verbose logs. */
-"debug" | 
+"debug" |
 /**  `console.log` / `console.info`. */
-"info" | 
+"info" |
 /**  `console.warn`. */
-"warn" | 
+"warn" |
 /**  `console.error`, uncaught exceptions, failed loads. */
 "error";
 
@@ -523,6 +627,12 @@ export type MediaOverrides = {
 	reduced_motion: string | null,
 	/**  `print` | `screen`, or none to clear. */
 	media_type: string | null,
+	/**
+	 *  `standalone` | `browser` | `fullscreen` | `minimal-ui`, or none to
+	 *  clear. What `@media (display-mode: standalone)` matches, which is how
+	 *  an installed web app tells itself apart from a tab.
+	 */
+	display_mode?: string | null,
 };
 
 /**  A menu item the chrome owns; the payload is a command id from `UI_COMMANDS`. */
@@ -550,8 +660,29 @@ export type MetaSnapshot = {
 	icons: string[],
 };
 
+/**  A model a provider offers. */
+export type ModelInfo = {
+	/**  Id to send. */
+	id: string,
+	/**  Display name. */
+	name: string,
+	/**  Context window in tokens, when known. */
+	context_length: number | null,
+	/**
+	 *  Whether the provider says it supports tool calling. `None` when the
+	 *  listing does not say; the agent needs tools, so the chrome can warn.
+	 */
+	tools: boolean | null,
+	/**  Whether it can reason (think) before answering, when known. */
+	reasoning: boolean | null,
+	/**  USD per million input tokens, when the listing carries prices. */
+	input_per_mtok: number | null,
+	/**  USD per million output tokens. */
+	output_per_mtok: number | null,
+};
+
 /**  One step in a request's life. The chrome merges these by `request_id`. */
-export type NetworkEvent = 
+export type NetworkEvent =
 /**  A request left the browser. */
 { type: "sent"; data: {
 	/**  Tab that issued it. */
@@ -572,7 +703,7 @@ export type NetworkEvent =
 	timestamp: number | null,
 	/**  Seconds since the epoch, for exports. */
 	wall_time: number | null,
-} } | 
+} } |
 /**  Headers arrived. */
 { type: "response"; data: {
 	/**  Tab. */
@@ -589,7 +720,7 @@ export type NetworkEvent =
 	headers: { [key in string]: string },
 	/**  Seconds. */
 	timestamp: number | null,
-} } | 
+} } |
 /**  Body fully received. */
 { type: "finished"; data: {
 	/**  Tab. */
@@ -600,7 +731,7 @@ export type NetworkEvent =
 	encoded_length: number | null,
 	/**  Seconds. */
 	timestamp: number | null,
-} } | 
+} } |
 /**  A WebSocket handshake started; shown as a request row. */
 { type: "socket"; data: {
 	/**  Tab. */
@@ -611,7 +742,7 @@ export type NetworkEvent =
 	url: string,
 	/**  Seconds. */
 	timestamp: number | null,
-} } | 
+} } |
 /**  A WebSocket frame or a server-sent event. */
 { type: "frame"; data: {
 	/**  Tab. */
@@ -624,7 +755,7 @@ export type NetworkEvent =
 	payload: string,
 	/**  Seconds. */
 	timestamp: number | null,
-} } | 
+} } |
 /**  Request failed or was blocked. */
 { type: "failed"; data: {
 	/**  Tab. */
@@ -701,8 +832,9 @@ export type Prefs = {
 	 */
 	tell_pages_theme: boolean,
 	/**
-	 *  What opens at launch: `restore` the last tab, the `home` page, or
-	 *  `none` for the welcome screen.
+	 *  What opens at launch: the `home` page, `restore` for the tab the last
+	 *  session ended on, or `none` for the welcome screen. A `home` start with
+	 *  no homepage set is the welcome screen.
 	 */
 	startup: string,
 	/**  Home page URL; empty means the welcome screen. */
@@ -729,10 +861,95 @@ export type Prefs = {
 	devtools_on_open: boolean,
 	/**  Workspace rail shows names and tab counts rather than marks alone. */
 	rail_expanded: boolean,
-	/**  Model the agent sidecar talks to. */
+	/**  Provider the agent talks to; a `dive_agent::Provider` id. */
+	agent_provider: string,
+	/**  Model the agent talks to, in the provider's naming. */
 	agent_model: string,
+	/**  Reasoning depth: `default` | `low` | `medium` | `high` | `max`. */
+	agent_reasoning: string,
+	/**  Most tool calls one message may make before the run is stopped. */
+	agent_max_steps: number,
 	/**  Let the agent act on a page without asking first. */
 	agent_auto_approve: boolean,
+	/**  Send the current tab's title, URL, console and text with each message. */
+	agent_include_page: boolean,
+	/**  Base URL of the custom OpenAI-compatible endpoint. */
+	agent_custom_base_url: string,
+	/**  Preferred code editor for Jump-to-Source: `vscode` | `cursor` | `zed`. */
+	preferred_editor?: string,
+};
+
+/**  A named device, as the chrome's simulator and `page_resize` both see it. */
+export type Preset = {
+	/**  Stable id, for example `iphone-15`. */
+	id: string,
+	/**  Display name. */
+	name: string,
+	/**  Catalog group, for example `apple-phone`. */
+	group: string,
+	/**  Which frame it is drawn in. */
+	frame: Frame,
+	/**  Which browser's bars are drawn: `safari`, `chrome` or `none`. */
+	browser: string,
+	/**  Safe-area insets in portrait with `viewport-fit=cover`. */
+	safe_area: Insets,
+	/**  The device itself. */
+	device: Device,
+};
+
+/**  A provider in the catalog. */
+export type Provider =
+/**  Anthropic, first party. */
+"anthropic" |
+/**  `OpenRouter`: one key, every model. */
+"openrouter" |
+/**  `OpenAI`. */
+"openai" |
+/**  Google Gemini through its OpenAI-compatible endpoint. */
+"google" |
+/**  xAI Grok. */
+"xai" |
+/**  Groq. */
+"groq" |
+/**  Mistral. */
+"mistral" |
+/**  `DeepSeek`. */
+"deepseek" |
+/**  Together AI. */
+"together" |
+/**  Fireworks AI. */
+"fireworks" |
+/**  Cerebras. */
+"cerebras" |
+/**  Ollama, running locally. */
+"ollama" |
+/**  LM Studio, running locally. */
+"lmstudio" |
+/**  Any other OpenAI-compatible server, by base URL. */
+"custom";
+
+/**  Everything the chrome and the client need to know about one provider. */
+export type ProviderInfo = {
+	/**  Stable id, also the preferences value. */
+	id: Provider,
+	/**  Display name. */
+	name: string,
+	/**  Protocol. */
+	wire: Wire,
+	/**  Base URL; the client appends the endpoint path. */
+	base_url: string,
+	/**  Where to create an API key. */
+	key_url: string,
+	/**  What a key from this provider starts with, for the placeholder. */
+	key_hint: string,
+	/**  Whether requests need a key at all. Local servers do not. */
+	needs_key: boolean,
+	/**  Whether `GET /models` answers with something worth showing. */
+	lists_models: boolean,
+	/**  Model chosen when the provider is first selected. */
+	default_model: string,
+	/**  One line for the picker. */
+	note: string,
 };
 
 /**  One recorded interaction. */
@@ -797,13 +1014,21 @@ export type Rule = {
 };
 
 /**  What happens to a matching request. */
-export type RuleAction = 
+export type RuleAction =
 /**  Fail the request as blocked by the client. */
-{ kind: "block" } | 
+{ kind: "block" } |
 /**  Answer without hitting the network. */
-{ kind: "mock"; status: number; content_type: string; body: string } | 
+{ kind: "mock"; status: number; content_type: string; body: string } |
 /**  Add or replace one request header. */
 { kind: "header"; name: string; value: string };
+
+/**  Per-message switches from the chrome. */
+export type SendOptions = {
+	/**  Attach the current tab's title, URL, console, failed requests and text. */
+	include_page: boolean,
+	/**  Run actions without asking, for this message only. */
+	auto_approve: boolean,
+};
 
 /**  LAN address plus a QR code for it. */
 export type ShareInfo = {
@@ -932,24 +1157,24 @@ export type TabCrashed = {
 export type TabId = string;
 
 /**  Lifecycle state of a tab's renderer. */
-export type TabState = 
+export type TabState =
 /**  Renderer alive and painting. */
-"active" | 
+"active" |
 /**  Renderer alive but throttled. */
-"sleeping" | 
+"sleeping" |
 /**  Renderer torn down; only metadata kept. */
 "discarded";
 
 /**  Which strip a tab lives in. */
-export type TabTier = 
+export type TabTier =
 /**  Global, shown in every workspace. */
-"essential" | 
+"essential" |
 /**  Pinned to one workspace, never auto-archived. */
-"pinned" | 
+"pinned" |
 /**  Ordinary tab, auto-archived after inactivity. */
 "today";
 
-/**  A tool call shown in the Trace tab. */
+/**  A tool call, as shown in the thread. */
 export type ToolStep = {
 	/**  Call id. */
 	id: string,
@@ -961,6 +1186,18 @@ export type ToolStep = {
 	action: boolean,
 	/**  Playwright-style locator for the target, when the tool used a ref. */
 	locator: string | null,
+};
+
+/**  Token accounting for one reply. */
+export type Usage = {
+	/**  Prompt tokens, including cached ones. */
+	input_tokens: number,
+	/**  Generated tokens, including reasoning. */
+	output_tokens: number,
+	/**  Prompt tokens served from cache. */
+	cache_read_tokens: number,
+	/**  Cost in USD when the provider reports it (`OpenRouter` does). */
+	cost_usd: number | null,
 };
 
 /**  One failing rule. */
@@ -1000,6 +1237,13 @@ export type Vitals = {
 	/**  Element description of the LCP candidate, when known. */
 	lcp_element: string | null,
 };
+
+/**  Request and response shape a provider speaks. */
+export type Wire =
+/**  Anthropic Messages API: `POST /v1/messages`, content blocks, `tool_use`. */
+"anthropic" |
+/**  `OpenAI` chat completions: `POST /chat/completions`, `tool_calls`. */
+"open_ai";
 
 /**  A named set of tabs bound to one container. */
 export type Workspace = {

@@ -17,9 +17,8 @@
 //! from a stale classification.
 
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt as _;
@@ -201,13 +200,13 @@ struct Cached {
     expires: Instant,
 }
 
-/// Discovery state: the last published list, the probe cache, and whether the
-/// chrome is currently interested in updates.
+/// Discovery state: the last published list, the probe cache, and how many
+/// chrome panels are currently interested in updates.
 #[derive(Default)]
 pub struct Registry {
     last: Mutex<Vec<DevServer>>,
     cache: Mutex<HashMap<u16, Cached>>,
-    watched: AtomicBool,
+    watchers: AtomicUsize,
 }
 
 impl Registry {
@@ -219,11 +218,19 @@ impl Registry {
     /// Start or stop watching. Polling costs an `lsof` and a handful of HTTP
     /// probes every few seconds, so it only runs while a panel is open.
     pub fn watch(&self, on: bool) {
-        self.watched.store(on, Ordering::Relaxed);
+        if on {
+            self.watchers.fetch_add(1, Ordering::Relaxed);
+        } else {
+            let _ = self
+                .watchers
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                    Some(count.saturating_sub(1))
+                });
+        }
     }
 
     fn watched(&self) -> bool {
-        self.watched.load(Ordering::Relaxed)
+        self.watchers.load(Ordering::Relaxed) > 0
     }
 
     /// Whether `port` is known to be (or not to be) a web server.
@@ -326,48 +333,44 @@ async fn scan_with(registry: &Registry) -> Vec<DevServer> {
 /// is a web server worth listing.
 async fn probe(client: &reqwest::Client, listener: &Listener) -> Option<DevServer> {
     let port = listener.port;
-    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
-    let open = tokio::time::timeout(
-        Duration::from_millis(300),
-        tokio::net::TcpStream::connect(addr),
-    )
-    .await;
-    if !matches!(open, Ok(Ok(_))) {
-        return None;
-    }
     for scheme in ["http", "https"] {
-        let url = format!("{scheme}://localhost:{port}/");
-        let Ok(response) = client.get(&url).send().await else {
-            continue;
-        };
-        let status = response.status();
-        let headers = response.headers().clone();
-        let server_header = headers
-            .get("server")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default()
-            .to_owned();
-        let content_type = headers
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        // A redirect from `/` is how plenty of dev servers greet you; the
-        // target is still a page a person would open. Redirects are not
-        // followed, which keeps every probe on loopback.
-        let redirects = status.is_redirection() && headers.contains_key("location");
-        let body = read_text_capped(response).await;
-        if !redirects && !looks_like_a_page(&content_type, &body) {
-            continue;
+        // Resolve explicitly. Some resolver configurations try only ::1 for
+        // `localhost`, which made an IPv4-only Vite/Python server disappear;
+        // the inverse can happen for IPv6-only listeners.
+        for host in ["127.0.0.1", "[::1]"] {
+            let probe_url = format!("{scheme}://{host}:{port}/");
+            let Ok(response) = client.get(&probe_url).send().await else {
+                continue;
+            };
+            let status = response.status();
+            let headers = response.headers().clone();
+            let server_header = headers
+                .get("server")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_owned();
+            let content_type = headers
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            // A redirect from `/` is how plenty of dev servers greet you; the
+            // target is still a page a person would open. Redirects are not
+            // followed, which keeps every probe on loopback.
+            let redirects = status.is_redirection() && headers.contains_key("location");
+            let body = read_text_capped(response).await;
+            if !redirects && !looks_like_a_page(&content_type, &body) {
+                continue;
+            }
+            return Some(DevServer {
+                port,
+                url: format!("{scheme}://localhost:{port}/"),
+                framework: detect(&body, &server_header),
+                title: title_of(&body),
+                process: listener.command.clone(),
+                pid: listener.pid,
+            });
         }
-        return Some(DevServer {
-            port,
-            url,
-            framework: detect(&body, &server_header),
-            title: title_of(&body),
-            process: listener.command.clone(),
-            pid: listener.pid,
-        });
     }
     None
 }
@@ -655,5 +658,58 @@ fnot-a-tag
         // An unbalanced release must not wrap around into "watched forever".
         registry.watch(false);
         assert!(!registry.watched());
+    }
+
+    #[tokio::test]
+    async fn probing_reaches_a_server_bound_only_to_ipv4_loopback() {
+        use std::io::{Read as _, Write as _};
+
+        let socket = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = socket.accept().unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            let body = b"<!doctype html><title>IPv4 only</title><body>ready</body>";
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .unwrap();
+            stream.write_all(body).unwrap();
+        });
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(2))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let Some(found) = probe(
+            &client,
+            &Listener {
+                port,
+                pid: Some(7),
+                command: Some("test-server".into()),
+            },
+        )
+        .await
+        else {
+            if let Err(e) = reqwest::Client::new()
+                .get(format!("http://127.0.0.1:{port}/"))
+                .send()
+                .await
+            {
+                let msg = format!("{e:?}");
+                if msg.contains("PermissionDenied") || msg.contains("Operation not permitted") {
+                    eprintln!("skipping test: sandbox blocked loopback TCP connection");
+                    return;
+                }
+            }
+            panic!("IPv4-only server should be visible");
+        };
+        let _ = server.join();
+        assert_eq!(found.port, port);
+        assert_eq!(found.title, "IPv4 only");
+        assert_eq!(found.process.as_deref(), Some("test-server"));
     }
 }

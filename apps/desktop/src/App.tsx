@@ -1,20 +1,22 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Rail, RAIL_WIDTH } from "./components/Rail";
 import { TabStrip } from "./components/TabStrip";
 import { WorkspaceChip } from "./components/WorkspaceChip";
+import { FeatureBar } from "./components/FeatureBar";
 import { Toolbar } from "./components/Toolbar";
 import { Content } from "./components/Content";
-import { Sidecar } from "./components/Sidecar";
-import { Dock } from "./components/Dock";
-import { Palette } from "./components/Palette";
 import { WorkspaceDialog } from "./components/WorkspaceDialog";
 import { FindBar } from "./components/FindBar";
-import { SettingsDialog } from "./components/SettingsDialog";
-import { Annotator } from "./components/Annotator";
 import { Splash } from "./components/Splash";
 import { useBrowser } from "./store/browser";
 import { usePrefs, watchSystemTheme } from "./store/prefs";
 import { useShortcuts } from "./lib/shortcuts";
+
+const Sidecar = lazy(() => import("./components/Sidecar").then(({ Sidecar }) => ({ default: Sidecar })));
+const Dock = lazy(() => import("./components/Dock").then(({ Dock }) => ({ default: Dock })));
+const Palette = lazy(() => import("./components/Palette").then(({ Palette }) => ({ default: Palette })));
+const SettingsDialog = lazy(() => import("./components/SettingsDialog").then(({ SettingsDialog }) => ({ default: SettingsDialog })));
+const Annotator = lazy(() => import("./components/Annotator").then(({ Annotator }) => ({ default: Annotator })));
 
 export function App() {
   const boot = useBrowser((s) => s.boot);
@@ -46,6 +48,7 @@ export function App() {
         <div className="h-full min-w-0 flex-1">
           <TabStrip />
         </div>
+        <FeatureBar />
       </div>
       <div className="relative col-start-1 row-span-2 row-start-2 bg-ground">
         <Rail />
@@ -69,13 +72,15 @@ export function App() {
         >
           {open.find && <FindBar />}
           <Content />
-          {open.dock && <Dock />}
+          <Suspense fallback={null}>{open.dock && <Dock />}</Suspense>
         </div>
-        {open.sidecar && <Sidecar />}
+        <Suspense fallback={null}>{open.sidecar && <Sidecar />}</Suspense>
       </div>
-      {open.palette && <Palette />}
-      {open.settings && <SettingsDialog />}
-      {annotating && <Annotator path={annotating} />}
+      <Suspense fallback={null}>
+        {open.palette && <Palette />}
+        {open.settings && <SettingsDialog />}
+        {annotating && <Annotator path={annotating} />}
+      </Suspense>
       <Splash />
       <WorkspaceDialog key={editing?.id ?? (editing ? "new" : "closed")} />
       {notice && (

@@ -44,6 +44,10 @@ pub struct AppInfo {
     pub mcp_url: String,
     /// Path of the bearer token file.
     pub mcp_token_path: String,
+    /// Device preset to put the first tab on at startup, from `DIVE_SIMULATE`.
+    /// Lets automation and smoke tests bring the simulator up without a
+    /// click, the way `DIVE_OPEN_URL` opens a tab.
+    pub simulate: Option<String>,
 }
 
 /// Last element picked in a tab plus the live style experiment on it.
@@ -73,6 +77,10 @@ pub(crate) fn app_info() -> AppInfo {
             format!("http://127.0.0.1:{port}/mcp")
         },
         mcp_token_path: crate::mcp::token_path().to_string_lossy().into_owned(),
+        simulate: std::env::var("DIVE_SIMULATE")
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty()),
     }
 }
 
@@ -258,6 +266,53 @@ pub(crate) async fn browsing_data_clear(
     crate::prefs::clear(&state, what).await
 }
 
+/// Show a download in the system file manager, or the downloads folder when `path` is `None`.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn downloads_reveal(state: State<'_, AppState>, path: Option<String>) -> AppResult<()> {
+    let target = match path {
+        Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+        _ => state.prefs.get(&state).download_dir(),
+    };
+    if !target.exists() {
+        return Err(AppError::new("that file is no longer there"));
+    }
+    reveal(&target)
+}
+
+/// Open `path` in the platform file manager, selecting it when it is a file.
+fn reveal(path: &std::path::Path) -> AppResult<()> {
+    #[cfg(target_os = "macos")]
+    let status = {
+        let mut cmd = std::process::Command::new("open");
+        if path.is_file() {
+            cmd.arg("-R");
+        }
+        cmd.arg(path).status()
+    };
+    #[cfg(target_os = "linux")]
+    let status = std::process::Command::new("xdg-open")
+        .arg(if path.is_file() {
+            path.parent().unwrap_or(path)
+        } else {
+            path
+        })
+        .status();
+    #[cfg(target_os = "windows")]
+    let status = std::process::Command::new("explorer")
+        .arg(if path.is_file() {
+            format!("/select,{}", path.display())
+        } else {
+            path.display().to_string()
+        })
+        .status();
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(AppError::new(format!("file manager exited with {s}"))),
+        Err(e) => Err(AppError::new(e)),
+    }
+}
+
 /// Build the specta command/event collection.
 pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
     tauri_specta::Builder::<Runtime>::new()
@@ -286,6 +341,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             capture_read,
             capture_save,
             tab_emulate,
+            tab_environment,
+            device_presets,
             tab_media,
             tab_throttle,
             rules_list,
@@ -316,6 +373,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             prefs_get,
             prefs_set,
             browsing_data_clear,
+            downloads_reveal,
             dev_servers,
             dev_servers_watch,
             history_search,
@@ -323,10 +381,15 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             bookmark_status,
             bookmarks_search,
             share_url,
+            crate::agent::agent_providers,
+            crate::agent::agent_keys,
             crate::agent::agent_key_set,
             crate::agent::agent_key_present,
+            crate::agent::agent_key_verify,
+            crate::agent::agent_models,
             crate::agent::agent_send,
             crate::agent::agent_approve,
+            crate::agent::agent_stop,
         ])
         .events(collect_events![
             crate::automation::AgentPointer,
@@ -1038,12 +1101,37 @@ pub(crate) async fn tab_emulate(
     state: State<'_, AppState>,
     id: TabId,
     device: Option<crate::emulate::Device>,
+    reload: bool,
 ) -> AppResult<()> {
     let session = cdp_for(&state, id)?;
     crate::emulate::apply(&session, crate::emulate::device_calls(device.as_ref())).await?;
-    // Emulation only takes effect on the next layout; a reload is the cheapest way there.
-    session.call0("Page.reload").await.map_err(AppError::new)?;
+    // Metrics take effect live; the user agent does not. The chrome asks for
+    // a reload only when the UA changed, so rotating or zooming a phone does
+    // not throw the page's state away.
+    if reload {
+        session.call0("Page.reload").await.map_err(AppError::new)?;
+    }
     Ok(())
+}
+
+/// Override where and when the page thinks it is: geolocation, time zone,
+/// locale. Unset fields clear their override.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_environment(
+    state: State<'_, AppState>,
+    id: TabId,
+    environment: crate::emulate::Environment,
+) -> AppResult<()> {
+    let session = cdp_for(&state, id)?;
+    crate::emulate::apply(&session, crate::emulate::environment_calls(&environment)).await
+}
+
+/// The device catalog, for the picker and for anything scripting Dive.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn device_presets() -> Vec<crate::emulate::Preset> {
+    crate::emulate::presets()
 }
 
 /// Override media features (color scheme, reduced motion, media type).
@@ -1477,6 +1565,16 @@ mod tests {
                 path,
             )
             .expect("export bindings");
+        // Specta currently leaves spaces after multiline union separators.
+        // Keep generated output deterministic and friendly to `git diff --check`.
+        let generated = std::fs::read_to_string(path).expect("read generated bindings");
+        let generated = generated
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        std::fs::write(path, generated).expect("normalize generated bindings");
         assert!(std::path::Path::new(path).exists());
     }
 }

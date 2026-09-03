@@ -113,6 +113,9 @@ struct TabBuffers {
     /// Media emulation currently applied to the tab. Shared by the UI and
     /// automation so changing one preference does not clear the others.
     media: crate::emulate::MediaOverrides,
+    /// Device last applied to the tab, so the next change can tell whether
+    /// the user agent moved and a reload is due.
+    device: Option<crate::emulate::Device>,
 }
 
 impl RequestSummary {
@@ -550,6 +553,16 @@ impl Buffers {
         self.with(|m| m.entry(tab).or_default().media = media);
     }
 
+    /// Device last applied to a tab, if any.
+    pub fn device(&self, tab: TabId) -> Option<crate::emulate::Device> {
+        self.with(|m| m.get(&tab).and_then(|b| b.device.clone()))
+    }
+
+    /// Remember the device after CDP accepted it.
+    pub fn set_device(&self, tab: TabId, device: Option<crate::emulate::Device>) {
+        self.with(|m| m.entry(tab).or_default().device = device);
+    }
+
     /// Forget a closed tab.
     pub fn drop_tab(&self, tab: TabId) {
         self.with(|m| {
@@ -693,6 +706,7 @@ mod tests {
             color_scheme: Some("dark".into()),
             reduced_motion: Some("reduce".into()),
             media_type: None,
+            display_mode: Some("standalone".into()),
         };
         b.set_media(tab, media.clone());
         assert_eq!(b.media(tab), media);

@@ -1,15 +1,16 @@
 import { interpolate } from "remotion";
 import { Chip, Pointer, Reveal, Scene, Skeleton, T, Typed, Window, pop, ramp, useScene } from "../primitives";
+import type { SceneProps } from "../primitives";
 
 /** Scenes about getting something out of the browser: pixels, tests, reports. */
 
-export function Recording() {
+export function Recording({ index }: SceneProps) {
   const { frame, fps } = useScene();
   const seconds = Math.min(4, Math.floor(frame / fps));
   const bar = ramp(frame, 10, 100);
   const done = frame >= 96;
   return (
-    <Scene index={8} eyebrow="Capture" title="Record a tab as a GIF" text="One chord starts recording, the same one stops it. The GIF lands on disk and in your clipboard, ready for the pull request." keys="⌘⇧R">
+    <Scene index={index} eyebrow="Capture" title="Record a tab as a GIF" text="One chord starts recording, the same one stops it. The GIF lands on disk and in your clipboard, ready for the pull request." keys="⌘⇧R">
       <Window url="acme.test/analytics">
         <div style={{ position: "absolute", inset: 0, padding: "26px 30px" }}>
           <Skeleton lines={2} width={180} top={26} left={30} />
@@ -25,9 +26,9 @@ export function Recording() {
             </div>
           )}
           <div style={{ position: "absolute", left: 30, right: 30, bottom: 26, height: 3, borderRadius: 2, background: T.surface3 }}>
-            <div style={{ width: `${bar * 100}%`, height: "100%", borderRadius: 2, background: done ? "#7fd8a0" : T.danger }} />
+            <div style={{ width: `${bar * 100}%`, height: "100%", borderRadius: 2, background: done ? T.ok : T.danger }} />
           </div>
-          <Reveal at={96} dx={0} style={{ position: "absolute", left: "50%", bottom: 44, transform: "translateX(-50%)" }}>
+          <Reveal at={96} dx={0} style={{ position: "absolute", left: "50%", bottom: 44, translate: "-50% 0px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 14, background: T.surface, border: `1px solid ${T.line2}`, boxShadow: "0 20px 50px -20px rgba(0,0,0,.7)" }}>
               <div style={{ width: 64, height: 40, borderRadius: 6, background: T.surface2, border: `1px solid ${T.line}`, display: "flex", alignItems: "flex-end", gap: 2, padding: 4 }}>
                 {[0.4, 0.7, 0.55, 0.9, 0.65].map((h, i) => (
@@ -47,12 +48,12 @@ export function Recording() {
   );
 }
 
-export function FullPage() {
+export function FullPage({ index }: SceneProps) {
   const { frame } = useScene();
   const scroll = interpolate(ramp(frame, 10, 58), [0, 1], [0, -420]);
   const dash = ramp(frame, 70, 92);
   return (
-    <Scene index={9} eyebrow="Capture" title="Full-page capture and annotate" text="The whole document in one image, then arrows, boxes and notes drawn right on it. Copied the moment you are done." keys="⌘⇧S">
+    <Scene index={index} eyebrow="Capture" title="Full-page capture and annotate" text="The whole document in one image, then arrows, boxes and notes drawn right on it. Copied the moment you are done." keys="⌘⇧S">
       <Window url="acme.test/pricing">
         <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
           <div style={{ position: "absolute", left: 0, right: 0, top: scroll, height: 760, padding: "26px 40px" }}>
@@ -130,29 +131,29 @@ const STEPS = [
   { at: 104, code: "await expect(page).toHaveURL('/dashboard');" },
 ];
 
-export function Recorder() {
+export function Recorder({ index }: SceneProps) {
   const { frame, fps } = useScene();
   const finished = frame >= 110;
   return (
-    <Scene index={10} eyebrow="Automate" title="Recorder to Playwright" text="Click through a flow once. Dive picks stable locators — roles, labels, test ids — and writes the test you would have written.">
+    <Scene index={index} eyebrow="Automate" title="Recorder to Playwright" text="Click through a flow once. Dive picks stable locators — roles, labels, test ids — and writes the test you would have written.">
       <Window url="acme.test/login">
         <div style={{ position: "absolute", inset: 0, display: "flex" }}>
           <div style={{ flex: 1, padding: "30px 34px" }}>
             <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 16 }}>Sign in</div>
             <Input label="Email" value="dev@acme.test" start={22} active={frame >= 20 && frame < 50} />
             <Input label="Password" value="••••••••••" start={52} active={frame >= 50 && frame < 80} />
-            <div style={{ marginTop: 14, width: 110, height: 30, borderRadius: 15, background: T.hi, color: T.ground, display: "grid", placeItems: "center", fontSize: 12, fontWeight: 500, transform: `scale(${1 - 0.07 * (frame >= 82 && frame < 92 ? 1 - (frame - 82) / 10 : 0)})` }}>
+            <div style={{ marginTop: 14, width: 110, height: 30, borderRadius: 15, background: T.hi, color: T.ground, display: "grid", placeItems: "center", fontSize: 12, fontWeight: 500, scale: String(1 - 0.07 * (frame >= 82 && frame < 92 ? 1 - (frame - 82) / 10 : 0)) }}>
               Sign in
             </div>
           </div>
           <div style={{ width: 330, borderLeft: `1px solid ${T.line}`, background: T.ground, padding: 14, fontFamily: T.mono, fontSize: 10.5, lineHeight: 1.7 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 4, background: finished ? "#7fd8a0" : T.danger, opacity: finished || Math.floor(frame / 15) % 2 ? 1 : 0.35 }} />
+              <span style={{ width: 8, height: 8, borderRadius: 4, background: finished ? T.ok : T.danger, opacity: finished || Math.floor(frame / 15) % 2 ? 1 : 0.35 }} />
               <span style={{ color: T.ink2, fontSize: 10.5 }}>{finished ? "Playwright · copied" : `Recording · ${STEPS.filter((s) => frame >= s.at).length} steps`}</span>
             </div>
             <div style={{ color: T.ink3 }}>test('sign in', async ({'{'} page {'}'}) =&gt; {'{'}</div>
             {STEPS.map((s) => (
-              <div key={s.code} style={{ paddingLeft: 14, color: T.ink, opacity: frame >= s.at ? 1 : 0, transform: `translateY(${(1 - pop(frame, fps, s.at)) * 6}px)` }}>
+              <div key={s.code} style={{ paddingLeft: 14, color: T.ink, opacity: frame >= s.at ? 1 : 0, translate: `0px ${(1 - pop(frame, fps, s.at)) * 6}px` }}>
                 <Typed text={s.code} start={s.at} cps={90} caret={false} />
               </div>
             ))}
@@ -184,11 +185,11 @@ const PARTS = [
   { at: 68, icon: "⌂", label: "Environment", detail: "Chromium 151 · macOS 15 · 1512×982" },
 ];
 
-export function BugReport() {
+export function BugReport({ index }: SceneProps) {
   const { frame } = useScene();
   const copied = frame >= 92;
   return (
-    <Scene index={11} eyebrow="Report" title="Bug report composer" text="Screenshot, console errors, failed requests, the steps you took and the environment — bundled into Markdown you can paste anywhere." keys="⌘⇧B">
+    <Scene index={index} eyebrow="Report" title="Bug report composer" text="Screenshot, console errors, failed requests, the steps you took and the environment — bundled into Markdown you can paste anywhere." keys="⌘⇧B">
       <Window bare>
         <div style={{ position: "absolute", inset: 0, padding: "22px 28px", display: "flex", gap: 24 }}>
           <div style={{ flex: 1 }}>
@@ -211,7 +212,7 @@ export function BugReport() {
           </div>
           <Reveal at={80} dx={16} style={{ width: 200, alignSelf: "center" }}>
             <div style={{ padding: 16, borderRadius: 14, border: `1px solid ${T.line2}`, background: T.ground, textAlign: "center" }}>
-              <div style={{ width: 44, height: 44, borderRadius: 22, margin: "0 auto 10px", background: copied ? "#7fd8a0" : T.surface3, color: T.ground, display: "grid", placeItems: "center", fontSize: 20, transform: `scale(${copied ? pop(frame, 30, 92, true) : 1})` }}>
+              <div style={{ width: 44, height: 44, borderRadius: 22, margin: "0 auto 10px", background: copied ? T.ok : T.surface3, color: T.ground, display: "grid", placeItems: "center", fontSize: 20, scale: String(copied ? pop(frame, 30, 92, true) : 1) }}>
                 {copied ? "✓" : "…"}
               </div>
               <div style={{ fontSize: 12.5, color: T.ink }}>{copied ? "Copied as Markdown" : "Composing…"}</div>

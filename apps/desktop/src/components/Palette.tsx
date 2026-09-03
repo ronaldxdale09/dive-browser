@@ -1,7 +1,7 @@
 import { Command } from "cmdk";
 import { ArrowUpRight, Search, Terminal, Server, History, Star } from "lucide-react";
 import { useEffect, useState } from "react";
-import { ipc } from "../lib/ipc";
+import { events, ipc } from "../lib/ipc";
 import { runCommand } from "../lib/commands";
 import type { Bookmark, Command as CommandDef, DevServer, HistoryEntry } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
@@ -47,8 +47,17 @@ export function Palette() {
     };
   }, [query]);
   useEffect(() => {
+    let alive = true;
     void ipc.commandsList().then(setCmds);
-    void ipc.devServers().then(setServers).catch(() => setServers([]));
+    void ipc.devServersWatch(true).then((found) => alive && setServers(found)).catch(() => alive && setServers([]));
+    const listener = events.devServersChanged.listen((event) => {
+      if (alive) setServers(event.payload.servers);
+    });
+    return () => {
+      alive = false;
+      void ipc.devServersWatch(false).catch(() => undefined);
+      void listener.then((unlisten) => unlisten());
+    };
   }, []);
 
   const close = () => toggle("palette", false);

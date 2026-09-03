@@ -8,6 +8,8 @@ use dive_core::TabId;
 use dive_mcp::{AppearanceParams, Browser, ResizeParams, Target, WaitForParams};
 use serde_json::{Value, json};
 
+const MAX_AGENT_SCREENSHOT_BYTES: usize = 8 * 1024 * 1024;
+
 /// Tools offered to the model. Kept small and described for a developer's
 /// page: read cheaply first, act only when asked.
 ///
@@ -74,13 +76,13 @@ pub fn specs() -> Vec<ToolSpec> {
         spec(
             "page_resize",
             "Resize the viewport to check responsive layout: a preset from page_devices, an exact width and height, or reset to fill the window.".into(),
-            obj(json!({"tab_id": tab, "preset": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}, "orientation": {"type": "string", "enum": ["portrait", "landscape"]}, "reset": {"type": "boolean"}}), &[]),
+            obj(json!({"tab_id": tab, "preset": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}, "orientation": {"type": "string", "enum": ["portrait", "landscape"]}, "ui": {"type": "string", "enum": ["browser", "standalone", "none"], "description": "What surrounds the page: the device's browser bars (default), an installed web app, or nothing."}, "reset": {"type": "boolean"}}), &[]),
         ),
         spec("page_devices", "Device presets page_resize accepts.".into(), obj(json!({}), &[])),
         spec(
             "page_appearance",
-            "Emulate media preferences: color_scheme light or dark to check dark mode, reduced_motion reduce, media_type print. Pass system to clear one.".into(),
-            obj(json!({"tab_id": tab, "color_scheme": {"type": "string"}, "reduced_motion": {"type": "string"}, "media_type": {"type": "string"}}), &[]),
+            "Emulate media preferences: color_scheme light or dark, reduced_motion reduce, media_type print, or display_mode standalone. Pass system to clear one.".into(),
+            obj(json!({"tab_id": tab, "color_scheme": {"type": "string"}, "reduced_motion": {"type": "string"}, "media_type": {"type": "string"}, "display_mode": {"type": "string"}}), &[]),
         ),
         spec(
             "page_throttle",
@@ -233,6 +235,11 @@ async fn execute<B: Browser>(
             .map_err(err),
         "page_screenshot" => {
             let png = browser.screenshot(tab()?, false).await.map_err(err)?;
+            if png.len() > MAX_AGENT_SCREENSHOT_BYTES {
+                return Err(format!(
+                    "screenshot is over the {MAX_AGENT_SCREENSHOT_BYTES} byte agent limit; resize the page and try again"
+                ));
+            }
             Ok(
                 json!([{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": base64::engine::general_purpose::STANDARD.encode(png)}}]),
             )
@@ -303,6 +310,7 @@ async fn execute<B: Browser>(
                         width: input["width"].as_u64().and_then(|v| u32::try_from(v).ok()),
                         height: input["height"].as_u64().and_then(|v| u32::try_from(v).ok()),
                         orientation: input["orientation"].as_str().map(str::to_owned),
+                        ui: input["ui"].as_str().map(str::to_owned),
                         reset: input["reset"].as_bool().unwrap_or(false),
                     },
                 )
@@ -319,6 +327,7 @@ async fn execute<B: Browser>(
                         color_scheme: input["color_scheme"].as_str().map(str::to_owned),
                         reduced_motion: input["reduced_motion"].as_str().map(str::to_owned),
                         media_type: input["media_type"].as_str().map(str::to_owned),
+                        display_mode: input["display_mode"].as_str().map(str::to_owned),
                     },
                 )
                 .await
