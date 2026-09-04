@@ -12,6 +12,8 @@ export interface ConsoleRow extends ConsoleEntry {
 interface ConsoleState {
   byTab: Record<string, ConsoleRow[]>;
   push: (entry: ConsoleEntry) => void;
+  enqueue: (entry: ConsoleEntry) => void;
+  flush: () => void;
   clear: (tabId: string) => void;
   drop: (tabId: string) => void;
 }
@@ -25,23 +27,54 @@ export function append(list: ConsoleRow[] | undefined, entry: ConsoleEntry): Con
   return next.length > CAP ? next.slice(next.length - CAP) : next;
 }
 
-export const useConsole = create<ConsoleState>((set) => ({
+const pending = new Map<string, ConsoleRow[]>();
+let flushTimer: ReturnType<typeof setTimeout> | undefined;
+
+function cancelPending(tabId: string) {
+  pending.delete(tabId);
+  if (!pending.size) { clearTimeout(flushTimer); flushTimer = undefined; }
+}
+
+export const useConsole = create<ConsoleState>((set, get) => ({
   byTab: {},
-  push: (entry) => set((s) => ({ byTab: { ...s.byTab, [entry.tab_id]: append(s.byTab[entry.tab_id], entry) } })),
-  clear: (tabId) => set((s) => ({ byTab: { ...s.byTab, [tabId]: [] } })),
-  drop: (tabId) =>
+  push: (entry) => {
+    get().flush();
+    set((s) => ({ byTab: { ...s.byTab, [entry.tab_id]: append(s.byTab[entry.tab_id], entry) } }));
+  },
+  enqueue: (entry) => {
+    let rows = pending.get(entry.tab_id);
+    if (!rows) { rows = [...(get().byTab[entry.tab_id] ?? [])]; pending.set(entry.tab_id, rows); }
+    rows.push({ ...entry, id: ++seq });
+    if (rows.length > CAP) rows.shift();
+    flushTimer ??= setTimeout(() => get().flush(), 33);
+  },
+  flush: () => {
+    clearTimeout(flushTimer);
+    flushTimer = undefined;
+    if (!pending.size) return;
+    const changes = Object.fromEntries(pending);
+    pending.clear();
+    set((s) => ({ byTab: { ...s.byTab, ...changes } }));
+  },
+  clear: (tabId) => {
+    cancelPending(tabId);
+    set((s) => ({ byTab: { ...s.byTab, [tabId]: [] } }));
+  },
+  drop: (tabId) => {
+    cancelPending(tabId);
     set((s) => {
       const byTab = { ...s.byTab };
       delete byTab[tabId];
       return { byTab };
-    }),
+    });
+  },
 }));
 
 let listening: Promise<() => void> | null = null;
 
 /** Subscribe once to console events from the engine. */
 export function listenConsole() {
-  listening ??= events.consoleEntry.listen((e) => useConsole.getState().push(e.payload));
+  listening ??= events.consoleEntry.listen((e) => useConsole.getState().enqueue(e.payload));
   return listening;
 }
 

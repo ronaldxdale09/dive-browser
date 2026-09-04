@@ -1,6 +1,6 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { createElement } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fold, selectFrames, selectRequests, useNetwork } from "./network";
 import type { NetworkEvent } from "../lib/ipc";
 
@@ -76,5 +76,75 @@ describe("selectRequests", () => {
     expect(renders).toBe(2);
     expect(screen.getByText("2")).toBeTruthy();
     cleanup();
+  });
+});
+
+describe("network UI batches", () => {
+  it("flushes on its real 33ms schedule without mutating the published frame snapshot", async () => {
+    vi.useFakeTimers();
+    try {
+      useNetwork.setState({ byTab: {}, frames: {} });
+      const state = useNetwork.getState();
+      state.apply({ type: "socket", data: { tab_id: "t", request_id: "s", url: "wss://a.dev", timestamp: 1 } });
+      state.apply({ type: "frame", data: { tab_id: "t", request_id: "s", direction: "received", payload: "before", timestamp: 2 } });
+      const published = selectFrames("t", "s")(useNetwork.getState());
+      state.enqueue({ type: "frame", data: { tab_id: "t", request_id: "s", direction: "received", payload: "after", timestamp: 3 } });
+      await vi.advanceTimersByTimeAsync(32);
+      expect(selectFrames("t", "s")(useNetwork.getState())).toBe(published);
+      expect(published).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(selectFrames("t", "s")(useNetwork.getState()).map((row) => row.payload)).toEqual(["before", "after"]);
+      expect(published).toHaveLength(1);
+    } finally { useNetwork.getState().flush(); vi.useRealTimers(); }
+  });
+
+  it("publishes a burst once while retaining final request state and ordered frames", () => {
+    useNetwork.setState({ byTab: {}, frames: {} });
+    let notifications = 0;
+    const unsubscribe = useNetwork.subscribe(() => { notifications++; });
+    const state = useNetwork.getState();
+    state.enqueue(sent("burst", "https://a.dev/api"));
+    state.enqueue({ type: "response", data: { tab_id: "t", request_id: "burst", status: 200, mime_type: "application/json", from_cache: false, headers: {}, timestamp: 1.05 } });
+    state.enqueue({ type: "finished", data: { tab_id: "t", request_id: "burst", encoded_length: 512, timestamp: 1.25 } });
+    state.enqueue({ type: "socket", data: { tab_id: "t", request_id: "s", url: "wss://a.dev/ws", timestamp: 2 } });
+    for (let i = 0; i < 5000; i++) state.enqueue({ type: "frame", data: { tab_id: "t", request_id: "s", direction: "received", payload: String(i), timestamp: i } });
+    expect(notifications).toBe(0);
+    state.flush();
+    expect(notifications).toBe(1);
+    expect(selectRequests("t")(useNetwork.getState())[0]).toMatchObject({ status: 200, size: 512, durationMs: 250 });
+    const frames = selectFrames("t", "s")(useNetwork.getState());
+    expect(frames).toHaveLength(200);
+    expect(frames[0]?.payload).toBe("4800");
+    expect(frames.at(-1)?.payload).toBe("4999");
+    unsubscribe();
+  });
+
+  it("cannot resurrect cleared or closed tabs from a pending burst", () => {
+    useNetwork.setState({ byTab: {}, frames: {} });
+    const state = useNetwork.getState();
+    state.enqueue(sent("old", "https://a.dev/old"));
+    state.enqueue(sent("other", "https://a.dev/other", 1, "other"));
+    state.drop("t");
+    state.flush();
+    expect(useNetwork.getState().byTab.t).toBeUndefined();
+    expect(useNetwork.getState().byTab.other).toHaveLength(1);
+    state.enqueue(sent("old", "https://a.dev/old", 1, "other"));
+    state.clear("other");
+    state.flush();
+    expect(useNetwork.getState().byTab.other).toEqual([]);
+  });
+
+  it("rejects late frames for evicted requests and keeps unaffected tab references", () => {
+    useNetwork.setState({ byTab: {}, frames: {} });
+    const state = useNetwork.getState();
+    state.apply(sent("untouched", "https://a.dev", 1, "other"));
+    const before = useNetwork.getState().byTab.other;
+    state.enqueue({ type: "socket", data: { tab_id: "t", request_id: "old", url: "wss://a.dev/ws", timestamp: 1 } });
+    for (let i = 0; i < 1001; i++) state.enqueue(sent(String(i), "https://a.dev"));
+    state.enqueue({ type: "frame", data: { tab_id: "t", request_id: "old", direction: "received", payload: "late", timestamp: 2 } });
+    state.flush();
+    expect(selectRequests("t")(useNetwork.getState())).toHaveLength(1000);
+    expect(selectFrames("t", "old")(useNetwork.getState())).toEqual([]);
+    expect(useNetwork.getState().byTab.other).toBe(before);
   });
 });

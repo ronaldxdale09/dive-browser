@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { append, isNoise, selectEntries, useConsole } from "./console";
 import type { ConsoleRow } from "./console";
 import type { ConsoleEntry } from "../lib/ipc";
@@ -43,5 +43,55 @@ describe("selectEntries", () => {
     expect(after).not.toBe(before);
     expect(after[0]).toBe(first);
     expect(after[1]?.id).not.toBe(first?.id);
+  });
+});
+
+describe("console UI batches", () => {
+  it("flushes after33ms and preserves unaffected tab references", async () => {
+    vi.useFakeTimers();
+    try {
+      useConsole.setState({ byTab: {} });
+      const state = useConsole.getState();
+      state.push({ ...entry(0), tab_id: "other" });
+      const before = useConsole.getState().byTab.other;
+      state.enqueue(entry(1));
+      await vi.advanceTimersByTimeAsync(32);
+      expect(useConsole.getState().byTab.t).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(useConsole.getState().byTab.t?.[0]?.text).toBe("1");
+      expect(useConsole.getState().byTab.other).toBe(before);
+    } finally { useConsole.getState().flush(); vi.useRealTimers(); }
+  });
+
+  it("publishes once per burst, keeps newest 500 in order and preserves stable IDs", () => {
+    useConsole.setState({ byTab: {} });
+    const state = useConsole.getState();
+    state.push(entry(-1));
+    const id = useConsole.getState().byTab.t![0]!.id;
+    let notifications = 0;
+    const unsubscribe = useConsole.subscribe(() => { notifications++; });
+    for (let i = 0; i < 5000; i++) state.enqueue(entry(i));
+    expect(notifications).toBe(0);
+    state.flush();
+    expect(notifications).toBe(1);
+    const rows = useConsole.getState().byTab.t!;
+    expect(rows).toHaveLength(500);
+    expect(rows[0]?.text).toBe("4500");
+    expect(rows.at(-1)?.text).toBe("4999");
+    expect(rows[0]!.id).toBeGreaterThan(id);
+    unsubscribe();
+  });
+
+  it("drops pending entries when a tab is cleared or removed", () => {
+    useConsole.setState({ byTab: {} });
+    const state = useConsole.getState();
+    state.enqueue(entry(1));
+    state.clear("t");
+    state.flush();
+    expect(useConsole.getState().byTab.t).toEqual([]);
+    state.enqueue(entry(2));
+    state.drop("t");
+    state.flush();
+    expect(useConsole.getState().byTab.t).toBeUndefined();
   });
 });
