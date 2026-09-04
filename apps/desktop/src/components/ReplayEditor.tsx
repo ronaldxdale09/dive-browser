@@ -1,6 +1,7 @@
 import { Play, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
+import { useFocusTrap } from "../lib/useFocusTrap";
 import type { ReplayRequestInput, ReplayResponse } from "../lib/ipc";
 import { Icon, IconButton } from "./Icon";
 
@@ -30,6 +31,8 @@ export function ReplayEditor({ tabId, requestId, onClose }: { tabId: string; req
   const [response, setResponse] = useState<ReplayResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const dialog = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialog, { onEscape: onClose });
 
   useEffect(() => {
     let alive = true;
@@ -61,13 +64,13 @@ export function ReplayEditor({ tabId, requestId, onClose }: { tabId: string; req
 
   const field = "w-full rounded-md border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink outline-none focus:border-line-2";
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto border-t border-line bg-surface-2 p-2 text-xs select-text">
+    <div ref={dialog} role="dialog" aria-label="Replay request" className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto border-t border-line bg-surface-2 p-2 text-xs select-text">
       <div className="flex items-center gap-2">
         <span className="text-[10px] tracking-wider text-ink-3 uppercase">Replay</span>
         <span className="flex-1" />
         <IconButton icon={X} label="Close replay" size={12} onClick={onClose} />
       </div>
-      {error && <div className="text-danger">{error}</div>}
+      {error && <div role="alert" className="text-danger">{error}</div>}
       {draft && (
         <>
           <div className="flex gap-2">
