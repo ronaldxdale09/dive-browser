@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { DEFAULT_PREFS, applyAppearance } from "./prefs";
+import { DEFAULT_PREFS, accentInk, applyAppearance } from "./prefs";
 
 afterEach(() => {
   document.documentElement.removeAttribute("data-theme");
@@ -23,8 +23,15 @@ describe("applyAppearance", () => {
     applyAppearance({ ...DEFAULT_PREFS, accent: "#8FB8F0" });
     expect(root.style.getPropertyValue("--color-highlight")).toBe("#8FB8F0");
     expect(root.style.getPropertyValue("--color-highlight-soft")).toContain("color-mix");
+    expect(root.style.getPropertyValue("--color-highlight-ink")).toBe("#111111");
 
     applyAppearance(DEFAULT_PREFS);
     expect(root.style.getPropertyValue("--color-highlight")).toBe("");
+    expect(root.style.getPropertyValue("--color-highlight-ink")).toBe("");
+  });
+
+  it("chooses a readable foreground for pale and dark custom accents", () => {
+    expect(accentInk("#E9E9E9")).toBe("#111111");
+    expect(accentInk("#28534D")).toBe("#FFFFFF");
   });
 });

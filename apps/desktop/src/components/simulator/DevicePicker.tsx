@@ -58,7 +58,7 @@ export function DevicePicker() {
   const choose = (d: DevicePreset) => void setDevice(tab, d.id);
 
   return (
-    <aside role="dialog" aria-label="Device simulator" className="flex h-full w-[min(400px,42%)] min-w-[280px] shrink-0 flex-col border-l border-line bg-surface">
+    <aside role="dialog" aria-label="Device simulator" className="surface-enter flex h-full w-[min(420px,46%)] min-w-[300px] shrink-0 flex-col border-l border-line bg-surface">
       <div className="flex h-full min-h-0 flex-col">
         <div className="flex items-center gap-2 px-4 pt-3 pb-2">
           <Icon icon={Smartphone} size={14} className="text-highlight" />
@@ -107,7 +107,7 @@ export function DevicePicker() {
             if (devices.length === 0) return null;
             return (
               <Section key={group.id} title={group.name}>
-                <div className="grid gap-1.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))" }}>
+                <div className="grid gap-1.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(145px, 1fr))" }}>
                   {devices.map((d) => (
                     <DeviceCard key={d.id} device={d} selected={sel?.deviceId === d.id} onClick={() => choose(d)} />
                   ))}
@@ -174,14 +174,16 @@ function DeviceCard({ device, selected, onClick }: { device: DevicePreset; selec
       aria-label={`${device.name} ${device.width}×${device.height} @${device.dpr}x`}
       aria-pressed={selected}
       onClick={onClick}
-      className="flex flex-col items-center gap-1.5 rounded-lg border border-line px-1.5 pt-2.5 pb-2 text-center hover:border-line-2 hover:bg-surface-2 aria-pressed:border-highlight aria-pressed:bg-highlight-soft"
+      className="pressable flex min-w-0 items-center gap-2.5 rounded-lg border border-line px-2.5 py-2 text-left transition-[color,background-color,border-color,transform] hover:border-line-2 hover:bg-surface-2 aria-pressed:border-highlight aria-pressed:bg-highlight-soft"
     >
-      <span aria-hidden className="grid h-8 place-items-center">
+      <span aria-hidden className="grid h-8 w-7 shrink-0 place-items-center">
         <span className="rounded-[3px] border border-ink-3 bg-surface-3" style={{ width: tall ? 14 : 24, height: tall ? 24 : 14 }} />
       </span>
-      <span className="line-clamp-2 text-[11px] leading-tight text-ink">{device.name}</span>
-      <span className="font-mono text-[9.5px] text-ink-3">
-        {device.width}×{device.height} @{device.dpr}x
+      <span className="min-w-0">
+        <span className="block truncate text-[11px] leading-tight text-ink">{device.name}</span>
+        <span className="mt-1 block font-mono text-[9.5px] text-ink-3">
+          {device.width}×{device.height} @{device.dpr}x
+        </span>
       </span>
     </button>
   );

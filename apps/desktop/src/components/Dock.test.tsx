@@ -56,6 +56,13 @@ afterEach(() => {
 const mountedRows = (container: HTMLElement) => container.querySelectorAll("[data-index]");
 
 describe("Dock console panel", () => {
+  it("can be closed from its own header", () => {
+    useBrowser.setState({ open: { ...useBrowser.getState().open, dock: true } });
+    render(<Dock />);
+    fireEvent.click(screen.getByRole("button", { name: "Close developer dock" }));
+    expect(useBrowser.getState().open.dock).toBe(false);
+  });
+
   it("opens on the console and renders the active tab's entries", () => {
     push([entry(1, "first line"), entry(2, "second line", "error")]);
     render(<Dock />);

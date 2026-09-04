@@ -1,10 +1,10 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
-import { contentCoverDepth, resetContentCover } from "../lib/overlay";
+import { contentCoverDepth, resetContentCover, useCoversContent } from "../lib/overlay";
 import { useBrowser } from "../store/browser";
-import { Content } from "./Content";
+import { Content, describePermission } from "./Content";
 
 // The welcome screen, the device simulator and its picker have tests of
 // their own and lean on browser APIs jsdom lacks.
@@ -26,8 +26,10 @@ const tab: Tab = {
 const initial = useBrowser.getState();
 
 beforeEach(() => {
-  useBrowser.setState({ tabs: [tab], activeTab: tab.id, activeWorkspace: tab.workspace_id, navError: {}, crashedTabs: {}, loading: {} });
+  useBrowser.setState({ tabs: [tab], activeTab: tab.id, activeWorkspace: tab.workspace_id, navError: {}, crashedTabs: {}, loading: {}, permissionRequests: {} });
+  vi.spyOn(ipc, "permissionSet").mockResolvedValue(null);
   vi.spyOn(ipc, "setContentBounds").mockResolvedValue(null);
+  vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
   vi.spyOn(ipc, "appInfo").mockRejectedValue(new Error("no app"));
   vi.spyOn(ipc, "tabReload").mockResolvedValue(null);
@@ -41,13 +43,32 @@ afterEach(() => {
 });
 
 describe("Content error panel", () => {
+  it("shows a frozen copy of the real page while chrome covers the native view", async () => {
+    vi.mocked(ipc.prepareContentCover).mockResolvedValue([{ tab_id: "t1", data_url: "data:image/jpeg;base64,real-page" }]);
+    function DialogCover() {
+      useCoversContent(true);
+      return null;
+    }
+
+    const { container } = render(
+      <>
+        <Content />
+        <DialogCover />
+      </>,
+    );
+
+    await waitFor(() => expect(container.querySelector('img[src="data:image/jpeg;base64,real-page"]')).not.toBeNull());
+    await waitFor(() => expect(ipc.setContentCovered).toHaveBeenCalledWith(true));
+    expect(container.textContent).not.toContain("Loading page");
+  });
+
   it("shows nothing over the page while the tab is healthy", () => {
     render(<Content />);
     expect(screen.queryByRole("alert")).toBeNull();
     expect(contentCoverDepth()).toBe(0);
   });
 
-  it("explains a refused connection, covers the page, and retries with a reload", () => {
+  it("explains a refused connection, covers the page, and retries with a reload", async () => {
     useBrowser.setState({ navError: { t1: { url: "http://localhost:3000/", error: "net::ERR_CONNECTION_REFUSED" } } });
     render(<Content />);
 
@@ -56,18 +77,19 @@ describe("Content error panel", () => {
     expect(panel.textContent).toContain("check it is running on port 3000");
     expect(panel.textContent).toContain("http://localhost:3000/");
     expect(contentCoverDepth()).toBe(1);
-    expect(ipc.setContentCovered).toHaveBeenLastCalledWith(true);
+    await waitFor(() => expect(ipc.setContentCovered).toHaveBeenLastCalledWith(true));
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(ipc.tabReload).toHaveBeenCalledWith("t1");
   });
 
-  it("uncovers the page once the error clears", () => {
+  it("uncovers the page once the error clears", async () => {
     useBrowser.setState({ navError: { t1: { url: "https://nope.test/", error: "net::ERR_NAME_NOT_RESOLVED" } } });
     render(<Content />);
     expect(screen.getByRole("alert").textContent).toContain("This site can't be reached");
     expect(screen.getByRole("alert").textContent).toContain("DNS lookup failed");
 
+    await waitFor(() => expect(ipc.setContentCovered).toHaveBeenLastCalledWith(true));
     act(() => useBrowser.getState().applyLoad({ tab_id: "t1", phase: "started", url: "https://nope.test/", error: null }));
     expect(screen.queryByRole("alert")).toBeNull();
     expect(contentCoverDepth()).toBe(0);
@@ -110,5 +132,54 @@ describe("Content crash banner", () => {
     render(<Content />);
     act(() => useBrowser.getState().applyLoad({ tab_id: "t1", phase: "stopped", url: null, error: null }));
     expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
+describe("Content permission banner", () => {
+  const camera = { origin: "https://meet.test", kind: "camera" };
+
+  it("names what the page wants in plain words", () => {
+    expect(describePermission("camera")).toBe("use your camera");
+    expect(describePermission("microphone")).toBe("use your microphone");
+    expect(describePermission("geolocation")).toBe("know your location");
+    expect(describePermission("notifications")).toBe("show notifications");
+    expect(describePermission("clipboard_read")).toBe("read your clipboard");
+    expect(describePermission("display_capture")).toBe("capture your screen");
+    expect(describePermission("midi_sysex")).toBe("use midi sysex");
+  });
+
+  it("asks above the page without covering it, and blocks", async () => {
+    useBrowser.setState({ permissionRequests: { t1: [camera] } });
+    const { container } = render(<Content />);
+    const banner = screen.getByRole("status");
+    expect(banner.textContent).toContain("https://meet.test");
+    expect(banner.textContent).toContain("wants to use your camera");
+    expect(contentCoverDepth()).toBe(0);
+    expect(container.firstElementChild!.firstElementChild).toBe(banner);
+
+    fireEvent.click(screen.getByRole("button", { name: "Block" }));
+    expect(ipc.permissionSet).toHaveBeenCalledWith("https://meet.test", "camera", "deny");
+    await waitFor(() => expect(useBrowser.getState().permissionRequests).toEqual({}));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("after Allow offers a reload that applies it", async () => {
+    useBrowser.setState({ permissionRequests: { t1: [camera] } });
+    render(<Content />);
+    fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+    expect(ipc.permissionSet).toHaveBeenCalledWith("https://meet.test", "camera", "allow");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("reload to apply"));
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    expect(ipc.tabReload).toHaveBeenCalledWith("t1");
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("queues a second request behind the first and only speaks for the active tab", async () => {
+    useBrowser.setState({ permissionRequests: { t1: [camera, { origin: "https://meet.test", kind: "microphone" }], other: [{ origin: "https://x", kind: "geolocation" }] } });
+    render(<Content />);
+    expect(screen.getByRole("status").textContent).toContain("camera");
+    fireEvent.click(screen.getByRole("button", { name: "Block" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("microphone"));
+    expect(screen.getByRole("status").textContent).not.toContain("location");
   });
 });

@@ -1,5 +1,5 @@
 import { ArrowRight } from "lucide-react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { events, ipc } from "../lib/ipc";
 import type { DevServer } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
@@ -11,6 +11,14 @@ import { AgentIcon } from "./agent/AgentIcon";
 // it off the browser chrome's startup path when a session restores real tabs.
 const FeatureReel = lazy(() => import("./FeatureReel").then((module) => ({ default: module.FeatureReel })));
 
+const INITIAL_SERVER_COUNT = 3;
+
+/** Put identified frameworks first and keep the welcome screen compact. */
+export function visibleDevServers(servers: DevServer[], expanded: boolean): DevServer[] {
+  const ranked = [...servers].sort((a, b) => Number(b.framework !== "HTTP") - Number(a.framework !== "HTTP"));
+  return expanded ? ranked : ranked.slice(0, INITIAL_SERVER_COUNT);
+}
+
 /** Empty-state landing: what Dive is and what it can do. */
 export function Welcome() {
   const toggle = useBrowser((s) => s.toggle);
@@ -18,26 +26,25 @@ export function Welcome() {
     <div className="welcome absolute inset-0 overflow-auto">
       <CharacterBg
         gridText="DIVE"
+        gap={18}
+        speed={45}
         colors={{ paletteCount: 1, color1: "#70C2E9" }}
         style={{ position: "absolute", inset: 0, opacity: 0.04 }}
       />
-      <div className="relative z-10 mx-auto flex min-h-full w-full max-w-[1040px] flex-col items-center px-8 pt-6 pb-12">
+      <div className="relative z-10 mx-auto flex min-h-full w-full max-w-[1040px] flex-col items-center px-4 pt-4 pb-10 sm:px-8 sm:pt-6">
         <OrbBurst width={190} height={190} className="-mb-4" />
         <p className="text-[10px] font-medium tracking-[0.18em] text-highlight uppercase">Dive</p>
-        <h1 className="mt-2 text-center text-[30px] leading-tight font-semibold tracking-[-0.025em] text-balance">
+        <h1 className="mt-2 max-w-full text-center text-[clamp(26px,4vw,34px)] leading-tight font-semibold tracking-[-0.025em] text-balance">
           The browser built for developers
         </h1>
         <p className="mt-2 max-w-[520px] text-center text-[13px] leading-relaxed text-ink-2 text-balance">
           Chromium, a workspace per project, a developer toolkit that lives next to the page, and an agent that can work in your tabs.
         </p>
-        <div className="mt-5 flex items-center gap-2">
-          <button type="button" onClick={() => toggle("palette", true)} className="flex h-9 items-center gap-2 rounded-full bg-highlight px-4 text-xs font-medium text-ground transition-opacity hover:opacity-90">
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+          <button type="button" onClick={() => toggle("palette", true)} className="pressable flex h-9 items-center gap-2 rounded-full bg-highlight px-4 text-xs font-medium text-highlight-ink transition-[opacity,transform] hover:opacity-90">
             Open a tab <Kbd>⌘T</Kbd>
           </button>
-          <button type="button" onClick={() => toggle("palette", true)} className="flex h-9 items-center gap-2 rounded-full border border-line-2 px-4 text-xs font-medium text-ink-2 hover:bg-surface-2 hover:text-ink">
-            Command palette <Kbd dim>⌘K</Kbd>
-          </button>
-          <button type="button" onClick={() => toggle("sidecar", true)} className="flex h-9 items-center gap-2 rounded-full border border-line-2 px-4 text-xs font-medium text-ink-2 hover:bg-surface-2 hover:text-ink">
+          <button type="button" onClick={() => toggle("sidecar", true)} className="pressable flex h-9 items-center gap-2 rounded-full border border-line-2 px-4 text-xs font-medium text-ink-2 transition-[color,background-color,transform] hover:bg-surface-2 hover:text-ink">
             <AgentIcon size={13} className="text-highlight" /> Agent <Kbd dim>⌘J</Kbd>
           </button>
         </div>
@@ -47,15 +54,40 @@ export function Welcome() {
         {/* One minute, every feature, looping: it says more than a grid of
             twelve cards could, and it is drawn from the same tokens as the
             chrome around it. */}
-        <div className="mt-8 w-full">
-          <Suspense fallback={<div className="aspect-[16/9] w-full rounded-2xl border border-line bg-surface" />}>
-            <FeatureReel />
-          </Suspense>
-        </div>
+        <DeferredFeatureReel />
         <p className="mt-4 text-[11px] text-ink-3">
           Press <Kbd dim>⌘K</Kbd> anywhere to search tabs, history, bookmarks, local servers and every command.
         </p>
       </div>
+    </div>
+  );
+}
+
+/** Do not fetch or mount Remotion until its frame is close to the viewport. */
+function DeferredFeatureReel() {
+  const root = useRef<HTMLDivElement>(null);
+  const [nearby, setNearby] = useState(false);
+  useEffect(() => {
+    const element = root.current;
+    if (!element || typeof IntersectionObserver === "undefined") {
+      setNearby(true);
+      return;
+    }
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry?.isIntersecting) return;
+      setNearby(true);
+      observer.disconnect();
+    }, { rootMargin: "240px" });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div ref={root} className="mt-8 aspect-[16/9] w-full rounded-2xl">
+      {nearby ? (
+        <Suspense fallback={<div role="status" aria-label="Loading feature tour" className="skeleton-enter size-full rounded-2xl bg-surface-2/35" />}>
+          <FeatureReel />
+        </Suspense>
+      ) : <div className="size-full rounded-2xl border border-line bg-surface" aria-hidden />}
     </div>
   );
 }
@@ -65,6 +97,7 @@ function Kbd({ children, dim = false }: { children: string; dim?: boolean }) {
 
 function ActiveDevServers() {
   const [servers, setServers] = useState<DevServer[]>([]);
+  const [expanded, setExpanded] = useState(false);
   const openTab = useBrowser((s) => s.openTab);
 
   useEffect(() => {
@@ -91,6 +124,7 @@ function ActiveDevServers() {
   }, []);
 
   if (servers.length === 0) return null;
+  const visible = visibleDevServers(servers, expanded);
 
   return (
     <div className="mt-6 w-full max-w-[560px] rounded-2xl border border-line bg-surface-2/60 p-3 shadow-sm">
@@ -101,28 +135,33 @@ function ActiveDevServers() {
         </span>
       </div>
       <div className="flex flex-col gap-1.5">
-        {servers.map((s) => (
+        {visible.map((s) => (
           <div
             key={s.port}
-            className="flex items-center justify-between rounded-xl border border-line bg-surface px-3 py-2 transition-colors hover:border-line-2"
+            className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-surface px-3 py-2 transition-colors hover:border-line-2"
           >
-            <div className="flex items-center gap-2.5">
+            <div className="flex min-w-0 items-center gap-2.5">
               <span className="rounded-md bg-highlight-soft px-1.5 py-0.5 font-mono text-[11px] font-semibold text-highlight">
                 :{s.port}
               </span>
               <span className="text-xs font-medium text-ink">{s.framework || "Web Server"}</span>
-              {s.title && <span className="text-xs text-ink-3">({s.title})</span>}
+              {s.title && <span className="truncate text-xs text-ink-3">({s.title})</span>}
             </div>
             <button
               type="button"
               onClick={() => void openTab(s.url)}
-              className="flex h-7 items-center gap-1 rounded-lg bg-surface-2 px-2.5 text-xs font-medium text-ink transition-colors hover:bg-highlight hover:text-ground"
+              className="pressable flex h-7 items-center gap-1 rounded-lg bg-surface-2 px-2.5 text-xs font-medium text-ink transition-[color,background-color,transform] hover:bg-highlight hover:text-highlight-ink"
             >
               Open Tab
               <ArrowRight size={12} />
             </button>
           </div>
         ))}
+        {servers.length > INITIAL_SERVER_COUNT && (
+          <button type="button" onClick={() => setExpanded((value) => !value)} className="pressable mt-0.5 h-7 rounded-lg text-[11px] text-ink-3 hover:bg-surface hover:text-ink">
+            {expanded ? "Show fewer" : `Show ${servers.length - INITIAL_SERVER_COUNT} more`}
+          </button>
+        )}
       </div>
     </div>
   );

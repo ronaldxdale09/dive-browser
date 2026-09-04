@@ -132,7 +132,13 @@ pub struct TabHost {
     /// Tabs torn off into their own window. Their views are children of that
     /// window, not the main one, so the main layout leaves them alone.
     popouts: HashMap<TabId, Popout>,
+    /// Tabs whose page is one of Dive's own (`dive://…`), drawn by the chrome
+    /// in the content area: they have no native view at all.
+    internal: std::collections::HashSet<TabId>,
 }
+
+/// Scheme of Dive's built-in pages.
+pub const INTERNAL_SCHEME: &str = "dive";
 
 /// One pane of a split view: which tab, and where it sits.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
@@ -155,9 +161,18 @@ struct Popout {
 /// again never reuses a label the runtime may still be tearing down.
 static POPOUT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-/// Height of the strip a popout window reserves for its own small toolbar
-/// until the chrome in it reports the real content rectangle.
-const POPOUT_TOOLBAR: f64 = 44.0;
+/// Height of a detached window's tab strip and navigation toolbar until its
+/// chrome reports the exact content rectangle.
+const POPOUT_CHROME_HEIGHT: f64 = 84.0;
+
+fn popout_content_bounds(width: f64, height: f64) -> Bounds {
+    Bounds {
+        x: 0.0,
+        y: POPOUT_CHROME_HEIGHT,
+        width,
+        height: (height - POPOUT_CHROME_HEIGHT).max(1.0),
+    }
+}
 
 /// Window label for the `seq`th popout, holding `id`.
 fn popout_label(seq: u64, id: TabId) -> String {
@@ -187,6 +202,7 @@ impl TabHost {
             covered: false,
             panes: Vec::new(),
             popouts: HashMap::new(),
+            internal: std::collections::HashSet::new(),
         }
     }
 
@@ -204,11 +220,21 @@ impl TabHost {
             .parse()
             .map_err(|_| tauri::Error::InvalidUrl(url::ParseError::RelativeUrlWithoutBase))?;
         let tab_id = tab.id;
+        if url.scheme() == INTERNAL_SCHEME {
+            // Drawn by the chrome; nothing native to create. Registered so
+            // activation treats it as present.
+            self.internal.insert(tab_id);
+            return Ok(());
+        }
 
         let title_app = app.clone();
         #[allow(unused_mut)]
         let mut builder = WebviewBuilder::new(label_for(tab_id), WebviewUrl::External(blank_url()))
             .data_directory(self.profiles_root.join(&container.cache_dir))
+            // A container that does not keep cookies is a private session:
+            // the engine holds its storage in memory and drops it with the
+            // last view.
+            .incognito(!container.persist_cookies)
             .on_document_title_changed(move |_, title| {
                 if title == PLACEHOLDER_TITLE {
                     return;
@@ -220,7 +246,12 @@ impl TabHost {
                 {
                     host.retitle_popout(tab_id, &title);
                 }
-                update_tab(&title_app, tab_id, |t| t.title = title);
+                // Off the engine's stack: the store write and the event to
+                // the chrome must not re-enter CEF from inside its callback.
+                let app = title_app.clone();
+                tauri::async_runtime::spawn(async move {
+                    update_tab(&app, tab_id, |t| t.title = title);
+                });
             });
 
         let dl_app = app.clone();
@@ -280,7 +311,18 @@ impl TabHost {
                     return;
                 }
                 let url = url.to_string();
-                update_tab(&nav_app, tab_id, |t| t.url = url);
+                // Deferred a loop turn: zoom talks to the engine, and the
+                // store write emits to the chrome; neither belongs inside
+                // the callback that reported the navigation.
+                let zoom_app = nav_app.clone();
+                let zoom_url = url.clone();
+                let _ = nav_app.run_on_main_thread(move || {
+                    apply_site_zoom(&zoom_app, tab_id, &zoom_url);
+                });
+                let app = nav_app.clone();
+                tauri::async_runtime::spawn(async move {
+                    update_tab(&app, tab_id, |t| t.url = url);
+                });
             });
         }
 
@@ -303,13 +345,24 @@ impl TabHost {
                     return Err(error);
                 }
             };
-            let console_ready = crate::console::attach(app.clone(), tab_id, session.clone());
-            let network_ready = crate::network::attach(app.clone(), tab_id, session.clone());
-            crate::favicon::attach(app.clone(), tab_id, session.clone());
-            crate::loading::attach(app.clone(), tab_id, session.clone());
-            crate::rules::attach(app.clone(), tab_id, tab.workspace_id, session.clone());
-            crate::inspect::watch(app.clone(), tab_id, &session);
-            crate::crash::watch(app.clone(), tab_id, session.clone());
+            // `DIVE_DISABLE_FEEDS=1` leaves the DevTools session idle, to
+            // tell an engine fault apart from one our own traffic provokes.
+            let feeds = std::env::var_os("DIVE_DISABLE_FEEDS").is_none();
+            let (console_ready, network_ready) = if feeds {
+                let c = crate::console::attach(app.clone(), tab_id, session.clone());
+                let n = crate::network::attach(app.clone(), tab_id, session.clone());
+                crate::favicon::attach(app.clone(), tab_id, session.clone());
+                crate::loading::attach(app.clone(), tab_id, session.clone());
+                crate::rules::attach(app.clone(), tab_id, tab.workspace_id, session.clone());
+                crate::inspect::watch(app.clone(), tab_id, &session);
+                crate::crash::watch(app.clone(), tab_id, session.clone());
+                (c, n)
+            } else {
+                let (ct, cr) = tokio::sync::oneshot::channel();
+                let (nt, nr) = tokio::sync::oneshot::channel();
+                let _ = (ct.send(()), nt.send(()));
+                (cr, nr)
+            };
             let session_for_prefs = session.clone();
             self.cdp.insert(tab_id, session);
             let nav = view.clone();
@@ -353,6 +406,16 @@ impl TabHost {
     /// Every live `DevTools` session, for changes that touch all open tabs.
     pub fn sessions(&self) -> Vec<(TabId, CdpSession)> {
         self.cdp.iter().map(|(id, s)| (*id, s.clone())).collect()
+    }
+
+    /// `DevTools` sessions whose views are about to be hidden by a chrome
+    /// overlay. Popout views live in other windows and are deliberately left
+    /// alone.
+    pub fn covered_sessions(&self) -> Vec<(TabId, CdpSession)> {
+        self.on_screen()
+            .into_iter()
+            .filter_map(|id| self.cdp(id).map(|session| (id, session)))
+            .collect()
     }
 
     /// Run `f` against the view for `id`.
@@ -483,11 +546,13 @@ impl TabHost {
             .cloned()
             .ok_or(tauri::Error::WebviewNotFound)?;
         let width = self.bounds.width.clamp(480.0, 1100.0);
-        let height = (self.bounds.height + POPOUT_TOOLBAR).clamp(360.0, 900.0);
+        let height = (self.bounds.height + POPOUT_CHROME_HEIGHT).clamp(360.0, 900.0);
         let seq = POPOUT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let chrome = popout_chrome_label(seq, id);
         let mut builder = tauri::window::WindowBuilder::new(app, popout_label(seq, id))
             .title(if title.is_empty() { "Dive" } else { title })
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true)
             .inner_size(width, height)
             .min_inner_size(360.0, 240.0);
         if let Some((x, y)) = at {
@@ -514,12 +579,7 @@ impl TabHost {
             let _ = window.destroy();
             return Err(error);
         }
-        let bounds = Bounds {
-            x: 0.0,
-            y: POPOUT_TOOLBAR,
-            width,
-            height: height - POPOUT_TOOLBAR,
-        };
+        let bounds = popout_content_bounds(width, height);
         self.popouts.insert(
             id,
             Popout {
@@ -674,6 +734,7 @@ impl TabHost {
         if let Some(popout) = self.popouts.remove(&id) {
             let _ = popout.window.destroy();
         }
+        self.internal.remove(&id);
         self.panes.retain(|p| p.tab != id);
         if self.active == Some(id) {
             self.active = None;
@@ -703,7 +764,7 @@ impl TabHost {
 
     /// Whether a view exists for `id`.
     pub fn has(&self, id: TabId) -> bool {
-        self.views.contains_key(&id)
+        self.views.contains_key(&id) || self.internal.contains(&id)
     }
 }
 
@@ -767,6 +828,36 @@ fn label_for(id: TabId) -> String {
 /// Label of the chrome webview inside the `seq`th popout window, for `id`.
 fn popout_chrome_label(seq: u64, id: TabId) -> String {
     format!("chrome-pop-{seq}-{id}")
+}
+
+/// Settings key prefix for a site's remembered zoom factor.
+pub const SITE_ZOOM_PREFIX: &str = "zoom:";
+
+/// Put the view at the zoom the person last chose for `url`'s origin, or
+/// the default. Skipped when the host is busy: a zoom that lands one
+/// navigation late is better than a stall inside an engine callback.
+fn apply_site_zoom(app: &AppHandle<Runtime>, tab_id: TabId, url: &str) {
+    let state = app.state::<AppState>();
+    let Some(origin) = dive_core::origin_of(url) else {
+        return;
+    };
+    let factor = {
+        let Ok(store) = state.store.try_lock() else {
+            return;
+        };
+        store
+            .setting(&format!("{SITE_ZOOM_PREFIX}{origin}"))
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or_else(|| state.prefs.get(&state).default_zoom)
+    };
+    if let Ok(host) = state.host.try_lock()
+        && let Some(host) = host.as_ref()
+        && let Err(e) = host.with_view(tab_id, |v| v.set_zoom(factor))
+    {
+        tracing::debug!(%tab_id, "site zoom not applied: {e}");
+    }
 }
 
 /// Apply `f` to the stored tab, persist it, and broadcast the change.
@@ -931,6 +1022,19 @@ mod tests {
         assert_eq!(WindowBounds::parse(&b.serialize()), Some(b));
         assert_eq!(WindowBounds::parse("1,2,100,100"), None);
         assert_eq!(WindowBounds::parse("garbage"), None);
+    }
+
+    #[test]
+    fn popout_page_starts_below_full_dive_chrome() {
+        assert_eq!(
+            popout_content_bounds(900.0, 700.0),
+            Bounds {
+                x: 0.0,
+                y: 84.0,
+                width: 900.0,
+                height: 616.0,
+            }
+        );
     }
 
     #[test]

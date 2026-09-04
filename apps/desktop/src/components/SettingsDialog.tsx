@@ -2,6 +2,7 @@ import {
   Check as CheckIcon,
   Copy,
   Download,
+  ArrowDownToLine,
   Info,
   KeyRound,
   Keyboard,
@@ -14,9 +15,12 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { ipc } from "../lib/ipc";
-import type { AppInfo, Command, ProviderInfo } from "../lib/ipc";
+import type { AppInfo, Command, Decision, ProviderInfo, SitePermission } from "../lib/ipc";
 import { isReady, useAgent } from "../store/agent";
 import { useBrowser } from "../store/browser";
+import type { SettingsSection } from "../store/browser";
+import { useUpdates } from "../store/updates";
+import { formatChord } from "../lib/commands";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import type { Prefs } from "../store/prefs";
 import { Icon, IconButton } from "./Icon";
@@ -26,7 +30,7 @@ import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { AgentIcon } from "./agent/AgentIcon";
 
-type SectionId = "general" | "appearance" | "privacy" | "downloads" | "developer" | "agent" | "shortcuts" | "about";
+type SectionId = SettingsSection;
 
 const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
   { id: "general", label: "General", icon: SlidersHorizontal },
@@ -43,7 +47,9 @@ const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
 export function SettingsDialog() {
   useCoversContent(true);
   const toggle = useBrowser((s) => s.toggle);
-  const [section, setSection] = useState<SectionId>("general");
+  // Opened on whichever panel the caller asked for (`openSettings("about")`).
+  const initial = useBrowser((s) => s.settingsSection);
+  const [section, setSection] = useState<SectionId>(initial);
   const [info, setInfo] = useState<AppInfo | null>(null);
   const load = usePrefs((s) => s.load);
   useEffect(() => {
@@ -64,7 +70,7 @@ export function SettingsDialog() {
   };
 
   return (
-    <div ref={root} className={`fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-[2px] ${className}`} onMouseDown={close}>
+    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 grid place-items-center ${className}`} onMouseDown={close}>
       <div
         role="dialog"
         aria-modal="true"
@@ -383,7 +389,78 @@ function Privacy() {
       </Group>
 
       <ClearData />
+
+      <SitePermissions />
     </>
+  );
+}
+
+/** The kinds a page can ask for, as the rows name them. */
+export const PERMISSION_KINDS: Record<string, string> = {
+  camera: "Camera",
+  microphone: "Microphone",
+  geolocation: "Location",
+  notifications: "Notifications",
+  clipboard_read: "Read clipboard",
+  display_capture: "Screen capture",
+};
+
+const DECISIONS: { value: Decision; label: string }[] = [
+  { value: "allow", label: "Allow" },
+  { value: "deny", label: "Block" },
+  { value: "ask", label: "Ask" },
+];
+
+/** Remembered decisions, by origin; setting one back to Ask forgets it. */
+export function groupPermissions(list: SitePermission[]): { origin: string; kinds: SitePermission[] }[] {
+  const byOrigin = new Map<string, SitePermission[]>();
+  for (const p of list) byOrigin.set(p.origin, [...(byOrigin.get(p.origin) ?? []), p]);
+  return [...byOrigin.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([origin, kinds]) => ({ origin, kinds: kinds.sort((a, b) => a.kind.localeCompare(b.kind)) }));
+}
+
+function SitePermissions() {
+  const [list, setList] = useState<SitePermission[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    ipc
+      .permissionsList()
+      .then((l) => alive && setList(l))
+      .catch(() => alive && setList([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const decide = (p: SitePermission, decision: Decision) => {
+    setList((l) => (l ?? []).flatMap((x) => (x.origin === p.origin && x.kind === p.kind ? (decision === "ask" ? [] : [{ ...x, decision }]) : [x])));
+    void ipc.permissionSet(p.origin, p.kind, decision).catch(() => undefined);
+  };
+  const groups = groupPermissions(list ?? []);
+  return (
+    <Group title="Site permissions" description="What you have allowed or blocked, by site. A page asks again for anything set back to Ask.">
+      {list === null && <p className="py-3 text-xs text-ink-3">Loading…</p>}
+      {list !== null && groups.length === 0 && <p className="py-3 text-xs text-ink-3">No site has asked for anything yet.</p>}
+      {groups.map((g) => (
+        <div key={g.origin} className="border-b border-line py-3 last:border-b-0">
+          <p className="mb-1.5 truncate font-mono text-xs text-ink">{g.origin}</p>
+          <div className="flex flex-col gap-1.5">
+            {g.kinds.map((p) => (
+              <div key={p.kind} className="flex items-center gap-3">
+                <span className="min-w-0 flex-1 text-[11px] text-ink-2">{PERMISSION_KINDS[p.kind] ?? p.kind}</span>
+                <Select label={`${g.origin} ${PERMISSION_KINDS[p.kind] ?? p.kind}`} value={p.decision} onChange={(d) => decide(p, d)} options={DECISIONS} />
+                <button
+                  type="button"
+                  aria-label={`Forget ${g.origin} ${PERMISSION_KINDS[p.kind] ?? p.kind}`}
+                  onClick={() => decide(p, "ask")}
+                  className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-ink"
+                >
+                  <Icon icon={X} size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </Group>
   );
 }
 
@@ -732,38 +809,89 @@ const CHROME_CHORDS = [
 ];
 
 /** "mod+shift+s" as the glyphs the menus show. */
-function chord(k: string): string {
-  return k.replace("mod", "⌘").replace("shift", "⇧").replace("alt", "⌥").replaceAll("+", "").toUpperCase();
-}
+const chord = (k: string) => formatChord(k);
 
 function About({ info }: { info: AppInfo | null }) {
   return (
-    <Group title="This build">
-      <Row label="Version" control={<span className="font-mono text-[11px] text-ink-2 select-text">{info?.version ?? "…"}</span>} />
-      <Row label="Engine" hint="Chromium through CEF, one process tree per container." control={<span className="font-mono text-[11px] text-ink-2">CEF</span>} />
+    <>
+      <Group title="This build">
+        <Row label="Version" control={<span className="font-mono text-[11px] text-ink-2 select-text">{info?.version ?? "…"}</span>} />
+        <Row label="Engine" hint="Chromium through CEF, one process tree per container." control={<span className="font-mono text-[11px] text-ink-2">CEF</span>} />
+        <Row
+          stacked
+          label="Data folder"
+          hint="Profiles, history, bookmarks, captures and preferences."
+          control={<code className="block font-mono text-[11px] break-all text-ink-2 select-text">{info?.data_dir ?? "…"}</code>}
+        />
+        <Row
+          stacked
+          label="MCP endpoint"
+          hint={info?.mcp_url ? "Coding agents on this Mac connect here; the Developer section has the full command." : "Disabled in this build."}
+          control={info?.mcp_url ? <CopyBlock text={info.mcp_url} label="Copy MCP URL" /> : <code className="block font-mono text-[11px] text-ink-2">disabled</code>}
+        />
+      </Group>
+      <Updates />
+    </>
+  );
+}
+
+/** Check for a newer build and install it. */
+function Updates() {
+  const status = useUpdates((s) => s.status);
+  const update = useUpdates((s) => s.update);
+  const error = useUpdates((s) => s.error);
+  const installing = useUpdates((s) => s.installing);
+  const check = useUpdates((s) => s.check);
+  const install = useUpdates((s) => s.install);
+  return (
+    <Group title="Updates">
       <Row
-        stacked
-        label="Data folder"
-        hint="Profiles, history, bookmarks, captures and preferences."
-        control={<code className="block font-mono text-[11px] break-all text-ink-2 select-text">{info?.data_dir ?? "…"}</code>}
+        label={status === "available" && update ? `Dive ${update.version} is available` : "Check for updates"}
+        hint={
+          status === "available" ? (
+            update?.notes ? <span className="block whitespace-pre-wrap">{update.notes}</span> : "Installing restarts Dive."
+          ) : status === "none" ? (
+            "You're up to date, or this build has no updater."
+          ) : status === "error" ? (
+            <span className="text-danger">{error}</span>
+          ) : (
+            "Dive checks once shortly after launch."
+          )
+        }
+        control={
+          status === "available" ? (
+            <Button variant="primary" disabled={installing} onClick={() => void install()}>
+              {installing ? "Installing…" : "Install and restart"}
+            </Button>
+          ) : (
+            <Button variant="quiet" disabled={status === "checking"} onClick={() => void check()}>
+              {status === "checking" ? "Checking…" : status === "none" ? "Check again" : "Check for updates"}
+            </Button>
+          )
+        }
       />
-      <Row
-        stacked
-        label="MCP endpoint"
-        control={<code className="block font-mono text-[11px] break-all text-ink-2 select-text">{info?.mcp_url || "disabled"}</code>}
-      />
+      {status === "none" && (
+        <p role="status" className="flex items-center gap-1.5 py-2.5 text-[11px] text-ink-2">
+          <Icon icon={CheckIcon} size={12} className="text-highlight" /> You're up to date
+        </p>
+      )}
+      {status === "available" && (
+        <p role="status" className="flex items-center gap-1.5 py-2.5 text-[11px] text-ink-2">
+          <Icon icon={ArrowDownToLine} size={12} className="text-highlight" /> Update available: {update?.version}
+        </p>
+      )}
     </Group>
   );
 }
 
-function CopyBlock({ text }: { text: string }) {
+function CopyBlock({ text, label = "Copy command" }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex items-start gap-2 rounded-lg border border-line bg-surface-2 p-2">
       <code className="min-w-0 flex-1 font-mono text-[11px] break-all text-ink select-text">{text || "…"}</code>
       <button
         type="button"
-        aria-label="Copy command"
+        aria-label={label}
         disabled={!text}
         onClick={() => {
           void navigator.clipboard.writeText(text).then(() => {

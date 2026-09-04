@@ -152,11 +152,18 @@ pub fn device_calls(device: Option<&Device>) -> Vec<Call> {
     };
     let max_touch_points = if d.touch { 5 } else { 1 };
     let touch_config = if d.mobile { "mobile" } else { "desktop" };
+    // `dontSetVisibleSize` is load-bearing. Without it Chromium resizes the
+    // widget's visible area to the emulated width and height, overriding the
+    // bounds the chrome gave the native view and ignoring `scale`: the page
+    // painted at full device size straight past the drawn phone. With it the
+    // view keeps the slot's bounds and the page is drawn scaled inside them,
+    // which is how DevTools' own device mode works.
     let mut metrics = json!({
         "width": d.width,
         "height": d.height,
         "deviceScaleFactor": d.dpr,
         "mobile": d.mobile,
+        "dontSetVisibleSize": true,
         "screenOrientation": { "type": orientation, "angle": angle }
     });
     if let Some(scale) = d
@@ -880,6 +887,17 @@ mod tests {
         // Scrollbar hiding is experimental; an engine without it must not
         // fail the whole device.
         assert!(!find(&calls, "Emulation.setScrollbarsHidden").required);
+    }
+
+    #[test]
+    fn metrics_never_resize_the_widget() {
+        // The stage sizes the native view; the override must not fight it.
+        let d = exact(375, 667).unwrap();
+        let calls = device_calls(Some(&d));
+        assert_eq!(
+            find(&calls, "Emulation.setDeviceMetricsOverride").params["dontSetVisibleSize"],
+            json!(true)
+        );
     }
 
     #[test]

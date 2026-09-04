@@ -336,12 +336,69 @@ pub fn build_chromium_args(renderer_limit: Option<&str>) -> Vec<(&'static str, O
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "6".to_string());
 
-    vec![
+    let mut args = vec![
         ("use-mock-keychain", Some(String::new())),
         ("--disable-extensions", None),
-        ("--process-per-site", None),
-        ("renderer-process-limit", Some(limit)),
-    ]
+    ];
+    // `DIVE_DEFAULT_PROCESS_MODEL=1` leaves Chromium's own process model in
+    // place, for telling a process-model fault apart from anything else.
+    if std::env::var_os("DIVE_DEFAULT_PROCESS_MODEL").is_none() {
+        args.push(("--process-per-site", None));
+        args.push(("renderer-process-limit", Some(limit)));
+    }
+    let mut extra = extra_chromium_args(&std::env::var("DIVE_CHROMIUM_FLAGS").unwrap_or_default());
+    // Chromium honours only the last `disable-features`, so ours and any
+    // from the environment are folded into one switch.
+    let mut disabled: Vec<String> = DISABLED_FEATURES.iter().map(|f| (*f).to_owned()).collect();
+    extra.retain(|(name, value)| {
+        if *name == "disable-features" {
+            if let Some(v) = value {
+                disabled.extend(v.split(',').filter(|f| !f.is_empty()).map(str::to_owned));
+            }
+            false
+        } else {
+            true
+        }
+    });
+    args.push(("disable-features", Some(disabled.join(","))));
+    args.extend(extra);
+    args
+}
+
+/// Chromium features that must stay off in an embedded engine.
+///
+/// `ImmersiveReadAnything` (reading mode) installs a soft-navigation observer
+/// that asks `tabs::TabInterface::GetFromContents` for the Chrome tab behind
+/// a page. There is no such tab in CEF, and the observer dereferences the
+/// null it gets back, taking the whole browser process down the first time
+/// a page navigates within itself. `YouTube` does that as soon as a video
+/// starts. Symbolised from the crash on CEF 151.3.12; Chromium 151.
+pub const DISABLED_FEATURES: &[&str] = &["ImmersiveReadAnything"];
+
+/// Parse `DIVE_CHROMIUM_FLAGS`: whitespace-separated switches, either
+/// `--name` (valueless) or `name=value`, for experiments without a rebuild.
+pub fn extra_chromium_args(spec: &str) -> Vec<(&'static str, Option<String>)> {
+    spec.split_whitespace()
+        .filter_map(|item| {
+            if let Some((name, value)) = item.split_once('=') {
+                let name = name.trim_start_matches('-');
+                (!name.is_empty()).then(|| {
+                    (
+                        Box::leak(name.to_owned().into_boxed_str()) as &'static str,
+                        Some(value.to_owned()),
+                    )
+                })
+            } else {
+                let name = item.trim_start_matches('-');
+                (!name.is_empty()).then(|| {
+                    (
+                        Box::leak(format!("--{name}").into_boxed_str()) as &'static str,
+                        None,
+                    )
+                })
+            }
+        })
+        .collect()
 }
 
 /// Validate that Chromium switches adhere to CEF command-line processing rules.
@@ -381,17 +438,64 @@ pub fn reset_for_test(new_launch: Option<Instant>) {
 #[cfg(test)]
 #[allow(clippy::float_cmp)]
 mod tests {
+    #[test]
+    fn reading_mode_is_always_disabled_and_merged_with_extra_disable_features() {
+        let args = build_chromium_args(None);
+        let disabled = args
+            .iter()
+            .find(|(n, _)| *n == "disable-features")
+            .and_then(|(_, v)| v.clone())
+            .expect("a disable-features switch");
+        assert!(disabled.contains("ImmersiveReadAnything"), "{disabled}");
+        assert_eq!(
+            args.iter()
+                .filter(|(n, _)| *n == "disable-features")
+                .count(),
+            1,
+            "one switch, or Chromium keeps only the last"
+        );
+        let mut merged = extra_chromium_args("disable-features=A,B --x");
+        let mut folded: Vec<String> = DISABLED_FEATURES.iter().map(|f| (*f).to_owned()).collect();
+        merged.retain(|(n, v)| {
+            if *n == "disable-features" {
+                folded.extend(v.iter().flat_map(|v| v.split(',')).map(str::to_owned));
+                false
+            } else {
+                true
+            }
+        });
+        assert_eq!(folded, ["ImmersiveReadAnything", "A", "B"]);
+        assert_eq!(merged, [("--x", None)]);
+    }
+
+    #[test]
+    fn extra_flags_parse_both_forms_and_survive_switch_validation() {
+        let args = extra_chromium_args("--disable-gpu disable-features=A,B  --x= ");
+        assert_eq!(args[0], ("--disable-gpu", None));
+        assert_eq!(args[1], ("disable-features", Some("A,B".to_string())));
+        assert_eq!(args[2], ("x", Some(String::new())));
+        assert!(validate_switch_syntax(&args).is_ok());
+        assert!(extra_chromium_args("").is_empty());
+    }
+
     use super::*;
 
     #[test]
     fn test_chromium_args_default_formatting() {
         let args = build_chromium_args(None);
-        assert_eq!(args.len(), 4);
+        assert_eq!(args.len(), 5);
 
         assert_eq!(args[0], ("use-mock-keychain", Some(String::new())));
         assert_eq!(args[1], ("--disable-extensions", None));
         assert_eq!(args[2], ("--process-per-site", None));
         assert_eq!(args[3], ("renderer-process-limit", Some("6".to_string())));
+        assert_eq!(
+            args[4],
+            (
+                "disable-features",
+                Some("ImmersiveReadAnything".to_string())
+            )
+        );
 
         assert!(validate_switch_syntax(&args).is_ok());
     }

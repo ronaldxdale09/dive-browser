@@ -2,6 +2,7 @@ import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
+import { useContentPreview } from "../lib/overlay";
 import type { Tab } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { MAX_PANES, MIN_PANE, useLayout, type Split } from "../store/layout";
@@ -64,7 +65,7 @@ export function SplitView({ split, workspace }: { split: Split; workspace: strin
       ro.disconnect();
       window.removeEventListener("resize", report);
     };
-  }, [split, sizes]);
+  }, [split.tabs]);
 
   // Leaving the split returns the engine to a single page.
   useEffect(() => () => void ipc.setPanes([]).catch(() => undefined), []);
@@ -108,6 +109,7 @@ export function SplitView({ split, workspace }: { split: Split; workspace: strin
 
 function PaneAndDivider({ tab, active, last, onActivate, onClose, onResize, register }: { tab: Tab; active: boolean; last: boolean; onActivate: () => void; onClose: () => void; onResize: (e: React.PointerEvent<HTMLDivElement>) => void; register: (el: HTMLDivElement | null) => void }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: paneId(tab.id) });
+  const preview = useContentPreview(tab.id);
   return (
     <>
       <section aria-label={tabLabel(tab)} aria-current={active ? "true" : undefined} className={`flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border ${active ? "border-line-2" : "border-line"} ${isDragging ? "opacity-50" : ""}`}>
@@ -128,7 +130,9 @@ function PaneAndDivider({ tab, active, last, onActivate, onClose, onResize, regi
             <Icon icon={X} size={11} />
           </button>
         </header>
-        <div ref={register} className="min-h-0 flex-1 bg-surface" />
+        <div ref={register} className="relative min-h-0 flex-1 bg-surface">
+          {preview && <img aria-hidden src={preview} className="pointer-events-none absolute inset-0 size-full object-fill" />}
+        </div>
       </section>
       {!last && <div role="separator" aria-orientation="vertical" onPointerDown={onResize} className="cursor-col-resize rounded-full hover:bg-line-2" style={{ width: GAP }} />}
     </>
@@ -164,7 +168,7 @@ function Zone({ index, keyName, side }: { index: number; keyName: string; side: 
   const { setNodeRef, isOver } = useDroppable({ id: zoneId(index, keyName) });
   return (
     <div ref={setNodeRef} className={`p-1 ${side === "left" ? "pr-0.5" : "pl-0.5"}`}>
-      <div className={`grid h-full place-items-center rounded-lg border-2 border-dashed text-xs transition-colors ${isOver ? "border-highlight bg-highlight-soft text-ink" : "border-line-2 text-ink-3"}`}>{side === "left" ? "Open on the left" : "Open on the right"}</div>
+      <div className={`tab-drop-zone grid h-full place-items-center rounded-lg border-2 border-dashed text-xs transition-[border-color,background-color,color,transform] duration-150 ${isOver ? "scale-[0.992] border-highlight bg-highlight-soft text-ink" : "border-line-2 text-ink-3"}`}>{side === "left" ? "Open on the left" : "Open on the right"}</div>
     </div>
   );
 }

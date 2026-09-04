@@ -41,7 +41,7 @@ export function WorkspaceDialog() {
   };
 
   return (
-    <div ref={root} className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] ${className}`} onMouseDown={close}>
+    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 ${className}`} onMouseDown={close}>
       <form
         onSubmit={submit}
         onMouseDown={(e) => e.stopPropagation()}
@@ -131,7 +131,7 @@ export function WorkspaceDialog() {
               <button
                 type="button"
                 onClick={() => existing && void remove(existing.id)}
-                className="h-8 rounded-full bg-danger px-4 text-xs font-medium text-accent-ink"
+                className="h-8 rounded-full bg-danger px-4 text-xs font-medium text-danger-ink"
               >
                 Delete workspace
               </button>

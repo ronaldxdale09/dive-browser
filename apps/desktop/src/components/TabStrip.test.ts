@@ -1,9 +1,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { orderTabs, roveTab, TabStrip } from "./TabStrip";
+import { essentialTabs, orderTabs, roveTab, TabStrip } from "./TabStrip";
 import type { Tab } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
+import { ipc } from "../lib/ipc";
 
 const t = (id: string, tier: Tab["tier"], position: number, state: Tab["state"] = "active"): Tab =>
   ({ id, workspace_id: "w", tier, url: "https://x", title: "", position, state, last_active_at: "2026-01-01T00:00:00Z" }) as Tab;
@@ -16,13 +17,83 @@ afterEach(() => {
 });
 
 describe("orderTabs", () => {
-  it("puts pinned first, sorts by position, hides essentials, keeps sleeping tabs", () => {
-    const out = orderTabs([t("c", "today", 2), t("p", "pinned", 9), t("a", "today", 0), t("e", "essential", 0), t("d", "today", 1, "discarded")]);
-    expect(out.map((x) => x.id)).toEqual(["p", "a", "d", "c"]);
+  it("puts pinned first, sorts by position, leaves essentials to their rail, keeps sleeping tabs", () => {
+    const all = [t("c", "today", 2), t("p", "pinned", 9), t("a", "today", 0), t("e2", "essential", 1), t("e", "essential", 0), t("d", "today", 1, "discarded")];
+    expect(orderTabs(all).map((x) => x.id)).toEqual(["p", "a", "d", "c"]);
+    expect(essentialTabs(all).map((x) => x.id)).toEqual(["e", "e2"]);
+  });
+});
+
+describe("Essentials rail", () => {
+  it("shows essentials icon-only ahead of the strip, behind a divider, and activates on click", () => {
+    const activateTab = vi.fn().mockResolvedValue(undefined);
+    useBrowser.setState({ tabs: [{ ...t("e", "essential", 0), title: "Mail", workspace_id: null }, { ...t("a", "today", 0), title: "Docs" }], activeTab: "a", activateTab });
+    const { container } = render(createElement(TabStrip));
+
+    const rail = screen.getByRole("tablist", { name: "Essentials" });
+    const essential = rail.querySelector('[role="tab"]')!;
+    expect(essential.getAttribute("data-essential")).not.toBeNull();
+    expect(essential.textContent).toBe("");
+    expect(essential.getAttribute("title")).toBe("Mail");
+    const divider = screen.getByTestId("essentials-divider");
+    expect(rail.compareDocumentPosition(divider) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(divider.compareDocumentPosition(screen.getByRole("tablist", { name: "Tabs" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Essentials stay out of the sortable strip.
+    expect(screen.getByRole("tablist", { name: "Tabs" }).querySelectorAll('[role="tab"]').length).toBe(1);
+    expect(container.querySelector('[data-tauri-drag-region="true"] [role=tab]')).toBeNull();
+
+    fireEvent.click(essential);
+    expect(activateTab).toHaveBeenCalledWith("e");
+  });
+
+  it("renders no rail when nothing is essential", () => {
+    useBrowser.setState({ tabs: [t("a", "today", 0)], activeTab: "a" });
+    render(createElement(TabStrip));
+    expect(screen.queryByRole("tablist", { name: "Essentials" })).toBeNull();
+    expect(screen.queryByTestId("essentials-divider")).toBeNull();
+  });
+
+  it("makes a tab essential and back from the context menu", () => {
+    const setTier = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
+    useBrowser.setState({ tabs: [{ ...t("e", "essential", 0), workspace_id: null }, { ...t("a", "today", 0), title: "Docs" }], activeTab: "a", setTier });
+    render(createElement(TabStrip));
+
+    // dnd-kit's attributes give the strip tab a composite name, so go by its title.
+    fireEvent.contextMenu(screen.getByText("Docs").closest('[role="tab"]')!);
+    expect(screen.getByRole("menuitem", { name: "Pin tab" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make essential" }));
+    expect(setTier).toHaveBeenCalledWith("a", "essential");
+
+    fireEvent.contextMenu(screen.getByRole("tablist", { name: "Essentials" }).querySelector('[role="tab"]')!);
+    expect(screen.queryByRole("menuitem", { name: /Pin tab|Unpin tab/ })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove from essentials" }));
+    expect(setTier).toHaveBeenCalledWith("e", "today");
   });
 });
 
 describe("TabStrip controls", () => {
+  it("keeps a tab gesture away from Tauri's document-level window drag listener", () => {
+    useBrowser.setState({ tabs: [{ ...t("a", "today", 0), title: "Example" }], activeTab: "a" });
+    const reachedDocument = vi.fn();
+    document.addEventListener("mousedown", reachedDocument);
+    try {
+      const { container } = render(createElement(TabStrip));
+      const tab = screen.getByRole("tab");
+
+      fireEvent.mouseDown(tab, { button: 0 });
+
+      expect(reachedDocument).not.toHaveBeenCalled();
+      expect(tab.closest("[data-tab-drag-handle]")?.getAttribute("data-tauri-drag-region")).toBe("false");
+      expect(container.querySelectorAll('[data-tauri-drag-region="true"]')).toHaveLength(1);
+
+      fireEvent.mouseDown(container.querySelector('[data-tauri-drag-region="true"]')!, { button: 0 });
+      expect(reachedDocument).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener("mousedown", reachedDocument);
+    }
+  });
+
   it("shows a sleeping tab dimmed and wakes it on click", () => {
     const activateTab = vi.fn();
     useBrowser.setState({ tabs: [t("d", "today", 0, "discarded")], activeTab: null, activateTab });
@@ -52,13 +123,16 @@ describe("TabStrip controls", () => {
     useBrowser.setState({ tabs: [{ ...t("a", "today", 0), title: "Example" }], activeTab: "a", closeTab, activateTab });
 
     const { container } = render(createElement(TabStrip));
-    const close = screen.getByRole("button", { name: "Close Example" });
+    const tab = screen.getByRole("tab");
+    const close = container.querySelector<HTMLElement>("[data-close-tab]")!;
     fireEvent.pointerDown(close);
     fireEvent.click(close);
 
     expect(closeTab).toHaveBeenCalledWith("a");
     expect(activateTab).not.toHaveBeenCalled();
-    expect(container.querySelector("[data-tauri-drag-region] button")).toBeNull();
+    fireEvent.keyDown(tab, { key: "Delete" });
+    expect(closeTab).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[data-tauri-drag-region="true"] button')).toBeNull();
   });
 
   it("swaps the favicon for a spinner while the tab loads", () => {

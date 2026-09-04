@@ -21,7 +21,7 @@ describe("planDrop", () => {
     expect(plan).toEqual({ kind: "detach", tab: "a", at: { x: 1300, y: 120 } });
   });
 
-  it("opens a window when let go below the strip, anywhere but a drop zone", () => {
+  it("opens a window when a strip tab is released after clearly leaving the strip", () => {
     expect(planDrop({ dragged: "a", fromPane: false, over: null, ordered, pointer: { x: 600, y: 300 }, viewport, stripBottom })).toEqual({ kind: "detach", tab: "a", at: { x: 600, y: 300 } });
   });
 

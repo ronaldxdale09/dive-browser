@@ -43,7 +43,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
   const on = prefs.block_trackers;
   return (
     <div ref={ref} className="relative">
-      <FeatureButton icon={on ? ShieldCheck : Shield} label="Protection" iconOnly={compact} tone={on ? "hi" : "quiet"} active={open} onClick={() => setOpen((o) => !o)}>
+      <FeatureButton icon={on ? ShieldCheck : Shield} label="Protection" iconOnly={compact} tone={on ? "hi" : "quiet"} active={open} onClick={() => setOpen((o) => !o)} tooltipAlign="end">
         {on && blocked > 0 && (
           <span className="ml-0.5 rounded-full bg-highlight-soft px-1.5 py-px font-mono text-[10px] leading-4 text-highlight" aria-label={`${blocked} blocked on this page`}>
             {blocked}

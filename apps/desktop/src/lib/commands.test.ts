@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import menuSource from "../../src-tauri/src/menu.rs?raw";
-import { SHORTCUTS, UI_COMMANDS, chordOf, isEditable, isMac, shortcutFor } from "./commands";
+import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, shortcutFor } from "./commands";
 import { ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "./ipc";
@@ -43,6 +43,60 @@ describe("command dispatch", () => {
     const ids = [...menuSource.matchAll(/item\(\s*(?:app,\s*)?"([\w.]+)"/g)].map((m) => m[1]!);
     expect(ids.length).toBeGreaterThan(10);
     for (const id of ids) expect(UI_COMMANDS[id], id).toBeTypeOf("function");
+  });
+
+  it("names every chrome-side command", () => {
+    for (const id of Object.keys(UI_COMMANDS)) expect(COMMAND_TITLES[id], id).toBeTypeOf("string");
+  });
+
+  it("binds the library, cheatsheet, settings and print", () => {
+    expect(SHORTCUTS["mod+y"]).toBe("library.open");
+    expect(SHORTCUTS["mod+/"]).toBe("shortcuts.open");
+    expect(SHORTCUTS["mod+,"]).toBe("settings.open");
+    expect(SHORTCUTS["mod+p"]).toBe("tab.print");
+    expect(chordOf(key({ key: "/", metaKey: true }))).toBe("mod+/");
+    expect(shortcutFor(key({ key: "y", metaKey: true, target: document.createElement("div") }))).toBe("library.open");
+  });
+
+  it("routes the new commands to the store", async () => {
+    const print = vi.spyOn(ipc, "tabPrint").mockResolvedValue(null);
+    const stop = vi.spyOn(ipc, "tabStop").mockResolvedValue(null);
+    useBrowser.setState({ tabs: [tab("a")], activeTab: "a" });
+    await UI_COMMANDS["tab.print"]!();
+    await UI_COMMANDS["tab.stop"]!();
+    expect(print).toHaveBeenCalledWith("a");
+    expect(stop).toHaveBeenCalledWith("a");
+    await UI_COMMANDS["library.open"]!();
+    await UI_COMMANDS["shortcuts.open"]!();
+    await UI_COMMANDS["settings.open"]!();
+    const { open } = useBrowser.getState();
+    expect(open.library).toBe(true);
+    expect(open.shortcuts).toBe(true);
+    expect(open.settings).toBe(true);
+    useBrowser.setState({ open: { ...open, library: false, shortcuts: false, settings: false } });
+  });
+
+  it("formats chords for each platform", () => {
+    expect(formatChord("mod+shift+s", true)).toBe("⌘⇧S");
+    expect(formatChord("mod+alt+i", true)).toBe("⌘⌥I");
+    expect(formatChord("ctrl+shift+tab", true)).toBe("⌃⇧Tab");
+    expect(formatChord("mod+/", true)).toBe("⌘/");
+    expect(formatChord("mod+shift+]", true)).toBe("⌘⇧]");
+    expect(formatChord("mod+shift+s", false)).toBe("Ctrl+Shift+S");
+    expect(formatChord("ctrl+tab", false)).toBe("Ctrl+Tab");
+    expect(formatChord("mod+t")).toBe("⌘T");
+  });
+
+  it("offers the palette only the chrome commands the host does not list", () => {
+    const known = [{ id: "tab.new", title: "New tab", keybinding: "mod+t", scope: "workspace" as const }];
+    const extra = chromeCommands(known);
+    const ids = extra.map((c) => c.id);
+    expect(ids).not.toContain("tab.new");
+    expect(ids).toContain("tab.print");
+    expect(ids).toContain("library.open");
+    expect(ids.some((id) => id.startsWith("workspace.jump."))).toBe(false);
+    expect(extra.find((c) => c.id === "tab.print")).toEqual({ id: "tab.print", title: "Print…", keybinding: "mod+p", scope: "global" });
+    expect(chordsByCommand()["tab.next"]).toBe("mod+shift+]");
   });
 
   it("parses chords", () => {

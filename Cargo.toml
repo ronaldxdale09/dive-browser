@@ -25,8 +25,8 @@ specta-typescript = "0.0.12"
 tauri-specta = { version = "2.0.0-rc.25", features = ["derive", "typescript"] }
 # Tauri's CEF runtime lives on the feat/cef branch; every tauri crate is
 # pinned to one revision so crates.io plugins resolve to the same copy.
-tauri = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79", default-features = false }
-tauri-build = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79" }
+tauri = { git = "https://github.com/tauri-apps/tauri", rev = "713203057982a38d810f64fe0930c9f7670b3a0d", default-features = false }
+tauri-build = { git = "https://github.com/tauri-apps/tauri", rev = "713203057982a38d810f64fe0930c9f7670b3a0d" }
 
 [workspace.lints.rust]
 unsafe_code = "warn"
@@ -47,10 +47,10 @@ codegen-units = 1
 strip = true
 
 [patch.crates-io]
-tauri = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79" }
-tauri-runtime = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79" }
-tauri-utils = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79" }
-tauri-build = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79" }
-tauri-macros = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79" }
-tauri-codegen = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79" }
-tauri-plugin = { git = "https://github.com/tauri-apps/tauri", rev = "dd2e5d91b60a6402ce270ceb03b0ff9679664d79" }
+tauri = { git = "https://github.com/tauri-apps/tauri", rev = "713203057982a38d810f64fe0930c9f7670b3a0d" }
+tauri-runtime = { git = "https://github.com/tauri-apps/tauri", rev = "713203057982a38d810f64fe0930c9f7670b3a0d" }
+tauri-utils = { git = "https://github.com/tauri-apps/tauri", rev = "713203057982a38d810f64fe0930c9f7670b3a0d" }
+tauri-build = { git = "https://github.com/tauri-apps/tauri", rev = "713203057982a38d810f64fe0930c9f7670b3a0d" }
+tauri-macros = { git = "https://github.com/tauri-apps/tauri", rev = "713203057982a38d810f64fe0930c9f7670b3a0d" }
+tauri-codegen = { git = "https://github.com/tauri-apps/tauri", rev = "713203057982a38d810f64fe0930c9f7670b3a0d" }
+tauri-plugin = { git = "https://github.com/tauri-apps/tauri", rev = "713203057982a38d810f64fe0930c9f7670b3a0d" }

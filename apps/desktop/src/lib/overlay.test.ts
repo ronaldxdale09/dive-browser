@@ -1,4 +1,4 @@
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "./ipc";
@@ -12,6 +12,7 @@ function Cover({ active }: { active: boolean }) {
 
 beforeEach(() => {
   resetContentCover();
+  vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
 });
 
@@ -21,10 +22,10 @@ afterEach(() => {
 });
 
 describe("useCoversContent", () => {
-  it("hides the page while mounted active and shows it again on unmount", () => {
+  it("hides the page while mounted active and shows it again on unmount", async () => {
     const view = render(createElement(Cover, { active: true }));
     expect(contentCoverDepth()).toBe(1);
-    expect(ipc.setContentCovered).toHaveBeenLastCalledWith(true);
+    await waitFor(() => expect(ipc.setContentCovered).toHaveBeenLastCalledWith(true));
 
     act(() => view.unmount());
     expect(contentCoverDepth()).toBe(0);
@@ -37,10 +38,10 @@ describe("useCoversContent", () => {
     expect(ipc.setContentCovered).not.toHaveBeenCalled();
   });
 
-  it("tells the engine once for a stack of overlays, not once each", () => {
+  it("tells the engine once for a stack of overlays, not once each", async () => {
     const view = render(createElement("div", null, createElement(Cover, { active: true, key: "a" }), createElement(Cover, { active: true, key: "b" })));
     expect(contentCoverDepth()).toBe(2);
-    expect(ipc.setContentCovered).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(ipc.setContentCovered).toHaveBeenCalledTimes(1));
 
     // The page stays hidden until the last overlay lets go.
     act(() => view.unmount());
@@ -49,9 +50,10 @@ describe("useCoversContent", () => {
     expect(ipc.setContentCovered).toHaveBeenLastCalledWith(false);
   });
 
-  it("releases the page when an overlay goes inactive without unmounting", () => {
+  it("releases the page when an overlay goes inactive without unmounting", async () => {
     const view = render(createElement(Cover, { active: true }));
     expect(contentCoverDepth()).toBe(1);
+    await waitFor(() => expect(ipc.setContentCovered).toHaveBeenCalledWith(true));
 
     act(() => view.rerender(createElement(Cover, { active: false })));
     expect(contentCoverDepth()).toBe(0);

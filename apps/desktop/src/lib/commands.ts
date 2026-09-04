@@ -1,6 +1,8 @@
 import { ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
+import { useRecording } from "../store/recording";
 import { usePicker } from "../store/simulator";
+import type { Command } from "./ipc";
 
 /** Rail positions a workspace chord can reach. */
 const WORKSPACE_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
@@ -21,7 +23,7 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "tab.reload": () => useBrowser.getState().reload(),
   "tab.devtools": () => useBrowser.getState().devtools(),
   "report.compose": () => useBrowser.getState().bugReport(),
-  "screencast.toggle": () => useBrowser.getState().screencastToggle(),
+  "screencast.toggle": () => useRecording.getState().toggle(),
   "zoom.in": () => useBrowser.getState().zoomStep(1),
   "zoom.out": () => useBrowser.getState().zoomStep(-1),
   "zoom.reset": () => useBrowser.getState().zoomStep(0),
@@ -30,6 +32,11 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "simulator.toggle": () => usePicker.getState().toggle(),
   "capture.fullpage": () => useBrowser.getState().capture(true),
   "find.open": () => useBrowser.getState().toggle("find", true),
+  "library.open": () => useBrowser.getState().toggle("library", true),
+  "shortcuts.open": () => useBrowser.getState().toggle("shortcuts", true),
+  "settings.open": () => useBrowser.getState().openSettings(),
+  "tab.print": () => useBrowser.getState().print(),
+  "tab.stop": () => useBrowser.getState().stop(),
   "address.focus": () => void window.dispatchEvent(new CustomEvent(FOCUS_ADDRESS)),
   "tab.back": () => useBrowser.getState().back(),
   "tab.forward": () => useBrowser.getState().forward(),
@@ -92,6 +99,10 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+shift+m": "simulator.toggle",
   "mod+shift+s": "capture.fullpage",
   "mod+f": "find.open",
+  "mod+y": "library.open",
+  "mod+/": "shortcuts.open",
+  "mod+,": "settings.open",
+  "mod+p": "tab.print",
   "mod+l": "address.focus",
   "mod+[": "tab.back",
   "mod+]": "tab.forward",
@@ -103,6 +114,81 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+shift+e": "workspace.edit",
   ...Object.fromEntries(WORKSPACE_SLOTS.map((n) => [`mod+${n}`, `workspace.jump.${n}`])),
 };
+
+/**
+ * What every chrome-side command is called, for the palette and the shortcut
+ * cheatsheet. The host's registry names the ones it knows about; these cover
+ * the ids that never reach it.
+ */
+export const COMMAND_TITLES: Record<string, string> = {
+  "palette.open": "Command palette",
+  "tab.new": "New tab",
+  "tab.close": "Close tab",
+  "tab.reload": "Reload",
+  "tab.stop": "Stop loading",
+  "tab.print": "Print…",
+  "tab.devtools": "Open DevTools",
+  "report.compose": "Copy bug report",
+  "screencast.toggle": "Record tab / stop",
+  "zoom.in": "Zoom in",
+  "zoom.out": "Zoom out",
+  "zoom.reset": "Reset zoom",
+  "sidecar.toggle": "Toggle agent sidecar",
+  "dock.toggle": "Toggle dev dock",
+  "simulator.toggle": "Toggle device simulator",
+  "capture.fullpage": "Capture full page",
+  "find.open": "Find in page",
+  "address.focus": "Focus the address bar",
+  "library.open": "Library: bookmarks and history",
+  "shortcuts.open": "Keyboard shortcuts",
+  "settings.open": "Settings",
+  "tab.back": "Back",
+  "tab.forward": "Forward",
+  "tab.prev": "Previous tab",
+  "tab.next": "Next tab",
+  "workspace.new": "New workspace",
+  "workspace.edit": "Edit current workspace",
+  ...Object.fromEntries(WORKSPACE_SLOTS.map((n) => [`workspace.jump.${n}`, `Switch to workspace ${n}`])),
+};
+
+/** The first chord bound to each command, by command id. */
+export function chordsByCommand(shortcuts: Record<string, string> = SHORTCUTS): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [chord, id] of Object.entries(shortcuts)) out[id] ??= chord;
+  return out;
+}
+
+/**
+ * Commands that run in the chrome and that the host's registry does not
+ * list, so the palette has to add them itself. Anything the host already
+ * names is left out to avoid two rows for one command.
+ */
+export function chromeCommands(known: Command[] = []): Command[] {
+  const seen = new Set(known.map((c) => c.id));
+  const chords = chordsByCommand();
+  return Object.keys(UI_COMMANDS)
+    .filter((id) => !seen.has(id) && id in COMMAND_TITLES && !id.startsWith("workspace.jump."))
+    .map((id) => ({ id, title: COMMAND_TITLES[id]!, keybinding: chords[id] ?? null, scope: "global" as const }));
+}
+
+const MAC_GLYPHS: Record<string, string> = { mod: "⌘", shift: "⇧", alt: "⌥", ctrl: "⌃", meta: "⌘" };
+const OTHER_NAMES: Record<string, string> = { mod: "Ctrl", shift: "Shift", alt: "Alt", ctrl: "Ctrl", meta: "Win" };
+const KEY_NAMES: Record<string, string> = { tab: "Tab", escape: "Esc", enter: "↵", backspace: "⌫", delete: "⌦", space: "Space", arrowleft: "←", arrowright: "→", arrowup: "↑", arrowdown: "↓", home: "Home", end: "End", pageup: "PgUp", pagedown: "PgDn" };
+
+/**
+ * A chord in the notation people read: "mod+shift+s" is ⌘⇧S on a Mac and
+ * Ctrl+Shift+S elsewhere.
+ */
+export function formatChord(chord: string, mac: boolean = isMac()): string {
+  const parts = chord.split("+");
+  const key = parts.pop() ?? "";
+  // The chrome's own tooltips spell ⌘⇧S and ⌘⌥I, so the platform key leads.
+  const order = ["mod", "meta", "ctrl", "alt", "shift"];
+  const mods = parts.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  const keyName = KEY_NAMES[key] ?? (key.length === 1 ? key.toUpperCase() : key.toUpperCase());
+  if (mac) return mods.map((m) => MAC_GLYPHS[m] ?? m).join("") + keyName;
+  return [...mods.map((m) => OTHER_NAMES[m] ?? m), keyName].join("+");
+}
 
 /**
  * Chords that keep working while the omnibox or any other field has focus.

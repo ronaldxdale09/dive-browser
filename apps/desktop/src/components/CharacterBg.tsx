@@ -120,7 +120,11 @@ export function CharacterBg({
   useEffect(() => {
     const element = containerRef.current;
     if (!element) return;
-    const measure = () => setDimensions({ width: element.offsetWidth, height: element.offsetHeight });
+    const measure = () => {
+      const width = element.offsetWidth;
+      const height = element.offsetHeight;
+      setDimensions((current) => (current.width === width && current.height === height ? current : { width, height }));
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(element);
@@ -132,7 +136,9 @@ export function CharacterBg({
     let animationFrame = 0;
     let time = 0;
     let lastFrameTime = 0;
-    const frameInterval = 1000 / 30;
+    // This field is texture, not the focal animation. Fifteen updates a
+    // second preserve its slow wave while halving style recalculation work.
+    const frameInterval = 1000 / 15;
     const updateTime = (timestamp: number) => {
       if (!lastFrameTime || timestamp - lastFrameTime >= frameInterval) {
         time = (time + (reverse ? -10 : 10)) % 86_400_000;
@@ -174,7 +180,6 @@ export function CharacterBg({
   color: var(--base-color);
   opacity: max(var(--l), 0.05);
   text-align: center;
-  will-change: opacity;
 }`;
 
   return (
@@ -192,6 +197,7 @@ export function CharacterBg({
         minHeight: 0,
         backgroundColor,
         pointerEvents: "none",
+        contain: "strict",
         ...style,
         ...font,
       }}

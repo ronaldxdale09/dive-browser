@@ -25,3 +25,12 @@ if (!globalThis.ResizeObserver) {
     disconnect() {}
   } as typeof ResizeObserver;
 }
+
+/**
+ * jsdom reports no platform. Dive's chords render as ⌘ glyphs on a Mac and as
+ * "Ctrl+" elsewhere, so tests read a definite answer; the ones that care about
+ * the other platform set `navigator.platform` themselves.
+ */
+if (!navigator.platform) {
+  Object.defineProperty(navigator, "platform", { value: "MacIntel", configurable: true });
+}

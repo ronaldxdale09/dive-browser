@@ -28,11 +28,13 @@ mod meta;
 mod network;
 mod openapi;
 mod pagescript;
+mod permissions;
 mod prefs;
 mod recorder;
 mod replay;
 mod report;
 mod rules;
+mod screen;
 mod screencast;
 mod snapshot;
 mod sourcemaps;
@@ -123,9 +125,10 @@ pub fn run() {
         // the DevTools signal; the crash registry folds the two together.
         builder = builder.on_web_content_process_terminate(crash::on_native_terminate);
     }
+    builder = builder.on_permission_request(|webview, kind| permissions::decide(&webview, kind));
     // Signed updates need the release public key compiled in; a build
     // without one (development, CI checks) simply has no updater.
-    if option_env!("DIVE_UPDATER_PUBKEY").is_some_and(|k| !k.trim().is_empty()) {
+    if commands::updater_configured(option_env!("DIVE_UPDATER_PUBKEY")) {
         builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     }
 
@@ -378,7 +381,7 @@ fn smoke_test(app: tauri::AppHandle<Runtime>) {
         let outcome = match active {
             Some(id) => match commands::capture_tab(&state, id, true).await {
                 Ok(path) if std::env::var_os("DIVE_SMOKE_GIF").is_some() => {
-                    smoke_gif(&state, id).await.map(|gif| {
+                    smoke_gif(&app, &state, id).await.map(|gif| {
                         tracing::info!(path = %gif.display(), "smoke: gif ok");
                         path
                     })
@@ -469,6 +472,7 @@ fn stress_test(app: tauri::AppHandle<Runtime>) {
 
 /// Record three seconds of the tab while scrolling it, then encode the GIF.
 async fn smoke_gif(
+    app: &tauri::AppHandle<Runtime>,
     state: &state::AppState,
     id: dive_core::TabId,
 ) -> Result<std::path::PathBuf, AppError> {
@@ -476,7 +480,16 @@ async fn smoke_gif(
         .as_ref()
         .and_then(|h| h.cdp(id))
         .ok_or_else(|| AppError::new("no devtools session"))?;
-    state.screencast.start(id, session.clone()).await?;
+    state
+        .screencast
+        .start(
+            app.clone(),
+            id,
+            session.clone(),
+            screencast::RecordOptions::default(),
+            None,
+        )
+        .await?;
     for step in 0..6 {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         let _ = session
@@ -486,7 +499,8 @@ async fn smoke_gif(
             )
             .await;
     }
-    state.screencast.stop(id, &session).await
+    let result = state.screencast.stop(id, &session).await?;
+    Ok(std::path::PathBuf::from(result.path))
 }
 
 /// Open what the startup preference asks for: the tab that was active when
@@ -581,11 +595,18 @@ mod tests {
     #[test]
     fn test_chromium_switches_configuration() {
         let args = crate::startup::build_chromium_args(None);
-        assert_eq!(args.len(), 4);
+        assert_eq!(args.len(), 5);
         assert_eq!(args[0], ("use-mock-keychain", Some(String::new())));
         assert_eq!(args[1], ("--disable-extensions", None));
         assert_eq!(args[2], ("--process-per-site", None));
         assert_eq!(args[3], ("renderer-process-limit", Some("6".to_string())));
+        assert_eq!(
+            args[4],
+            (
+                "disable-features",
+                Some("ImmersiveReadAnything".to_string())
+            )
+        );
         assert!(crate::startup::validate_switch_syntax(&args).is_ok());
     }
 

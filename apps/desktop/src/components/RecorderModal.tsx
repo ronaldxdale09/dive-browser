@@ -55,7 +55,7 @@ export function RecorderModal() {
   return (
     <div
       ref={root}
-      className={`fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-[2px] ${className}`}
+      className={`overlay-backdrop fixed inset-0 z-50 grid place-items-center ${className}`}
       onMouseDown={close}
     >
       <div

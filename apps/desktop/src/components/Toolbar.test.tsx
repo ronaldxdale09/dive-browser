@@ -26,7 +26,7 @@ beforeEach(() => {
     tabs: [tab],
     activeTab: tab.id,
     activeWorkspace: tab.workspace_id,
-    open: { sidecar: false, dock: false, palette: false, find: false, settings: false },
+    open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false },
     error: null,
     notice: null,
     annotating: null,
@@ -51,6 +51,7 @@ beforeEach(() => {
   vi.spyOn(ipc, "tabBack").mockResolvedValue(null);
   vi.spyOn(ipc, "tabForward").mockResolvedValue(null);
   vi.spyOn(ipc, "tabReload").mockResolvedValue(null);
+  vi.spyOn(ipc, "tabStop").mockResolvedValue(null);
   vi.spyOn(ipc, "tabCapture").mockResolvedValue("/tmp/capture.png");
   vi.spyOn(ipc, "tabScreencastStart").mockResolvedValue(null);
   vi.spyOn(ipc, "tabDevtools").mockResolvedValue(null);
@@ -167,5 +168,27 @@ describe("Toolbar", () => {
       useBrowser.getState().applyLoad({ tab_id: tab.id, phase: "stopped", url: tab.url, error: null });
     });
     expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("turns reload into stop while the page loads", async () => {
+    render(<Toolbar />);
+    expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
+    act(() => useBrowser.getState().applyLoad({ tab_id: tab.id, phase: "started", url: tab.url, error: null }));
+    expect(screen.queryByRole("button", { name: "Reload" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stop loading" }));
+    await waitFor(() => expect(ipc.tabStop).toHaveBeenCalledWith(tab.id));
+    act(() => useBrowser.getState().applyLoad({ tab_id: tab.id, phase: "stopped", url: tab.url, error: null }));
+    expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop loading" })).toBeNull();
+  });
+
+  it("moves secondary actions into a tray in compact chrome", () => {
+    render(<Toolbar compact />);
+
+    expect(screen.queryByRole("button", { name: "Capture full page" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "More page actions" }));
+    expect(screen.getByRole("dialog", { name: "Page actions" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Capture full page" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open DevTools" })).toBeTruthy();
   });
 });

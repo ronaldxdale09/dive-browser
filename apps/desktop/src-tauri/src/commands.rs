@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use specta::Type;
 use tauri::{AppHandle, State};
+use tauri_plugin_updater::UpdaterExt as _;
 use tauri_specta::{Event, collect_commands, collect_events};
 
 use crate::Runtime;
@@ -42,6 +43,16 @@ pub struct TabWindowChanged {
     pub tab: TabId,
     /// Whether it now lives in its own window.
     pub detached: bool,
+}
+
+/// A frozen viewport shown behind a chrome dialog while its native CEF view
+/// is hidden. It is ephemeral and never written to disk.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ContentPreview {
+    /// Tab whose viewport was captured.
+    pub tab_id: TabId,
+    /// JPEG data URL ready for an `<img>` in the chrome.
+    pub data_url: String,
 }
 
 /// Facts the Settings dialog shows.
@@ -325,6 +336,7 @@ fn reveal(path: &std::path::Path) -> AppResult<()> {
 }
 
 /// Build the specta command/event collection.
+#[allow(clippy::too_many_lines)] // The command list is the registry; one place to read it.
 pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
     tauri_specta::Builder::<Runtime>::new()
         .commands(collect_commands![
@@ -345,9 +357,31 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_forward,
             tab_reload,
             tab_zoom,
+            tab_stop,
+            tab_print,
+            tab_set_tier,
+            bookmark_remove,
+            permission_set,
+            permissions_list,
+            update_check,
+            update_install,
             tab_devtools,
             tab_screencast_start,
+            tab_screencast_pause,
             tab_screencast_stop,
+            tab_screencast_cancel,
+            recording_capabilities,
+            recording_read,
+            recording_open,
+            recording_delete,
+            crate::screen::screen_media_info,
+            crate::screen::screen_project_read,
+            crate::screen::screen_project_write,
+            crate::screen::file_read_chunk,
+            crate::screen::file_size,
+            crate::screen::screen_export_begin,
+            crate::screen::screen_export_append,
+            crate::screen::screen_export_finish,
             tab_capture,
             capture_read,
             capture_save,
@@ -377,6 +411,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_record_start,
             tab_record_stop,
             layout_set_content_bounds,
+            layout_prepare_content_cover,
             layout_set_content_covered,
             layout_set_panes,
             tab_detach,
@@ -412,6 +447,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::devservers::DevServersChanged,
             crate::inspect::InspectEvent,
             crate::recorder::RecorderEvent,
+            crate::screencast::RecordingEvent,
             crate::menu::MenuCommand,
             StateChanged,
             TabWindowChanged,
@@ -419,6 +455,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::network::NetworkEvent,
             crate::engine::DownloadNotice,
             crate::loading::TabLoad,
+            crate::permissions::PermissionAsked,
         ])
 }
 
@@ -787,7 +824,12 @@ pub fn open_tab(
         let container = store.container(workspace.container_id)?;
         let position =
             i32::try_from(store.tabs_for_workspace(workspace_id)?.len()).unwrap_or(i32::MAX);
-        let tab = Tab::new(workspace_id, url.as_str(), position);
+        let mut tab = Tab::new(workspace_id, url.as_str(), position);
+        // A built-in page has no document to name it; the chrome's name for
+        // it is the title from the start.
+        if url.scheme() == crate::engine::INTERNAL_SCHEME {
+            tab.title = internal_title(&url);
+        }
         store.upsert_tab(&tab)?;
         (tab, container)
     };
@@ -962,6 +1004,15 @@ pub(crate) fn tab_navigate(state: State<'_, AppState>, id: TabId, url: String) -
     Ok(())
 }
 
+/// What a `dive://` page is called in the strip.
+pub fn internal_title(url: &url::Url) -> String {
+    match url.host_str() {
+        Some("screen") => "DiveScreen".into(),
+        Some(other) => format!("Dive {other}"),
+        None => "Dive".into(),
+    }
+}
+
 /// Persist a new order for the tabs of `workspace_id`. Ids not listed keep
 /// their relative order after the listed ones.
 #[tauri::command]
@@ -1048,24 +1099,161 @@ pub(crate) fn tab_devtools(state: State<'_, AppState>, id: TabId) -> AppResult<(
     })
 }
 
-/// Start recording a tab's screencast frames.
+/// Start recording a tab with these options.
 #[tauri::command]
 #[specta::specta]
-pub(crate) async fn tab_screencast_start(state: State<'_, AppState>, id: TabId) -> AppResult<()> {
+pub(crate) async fn tab_screencast_start(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: TabId,
+    options: crate::screencast::RecordOptions,
+) -> AppResult<()> {
     let session = cdp_for(&state, id)?;
-    state.screencast.start(id, session).await
+    let window = window_rect(&app);
+    state
+        .screencast
+        .start(app, id, session, options, window)
+        .await
 }
 
-/// Stop recording and encode the GIF; returns its path.
+/// Where the main window sits on its display, in that display's physical
+/// pixels, for a whole-window screen capture.
+fn window_rect(app: &AppHandle<Runtime>) -> Option<crate::screencast::WindowRect> {
+    use tauri::Manager;
+    let window = app.get_window(crate::MAIN_WINDOW)?;
+    let monitor = window.current_monitor().ok().flatten()?;
+    let monitors = window.available_monitors().ok()?;
+    let screen = monitors
+        .iter()
+        .position(|m| m.position() == monitor.position())
+        .unwrap_or(0);
+    let pos = window.outer_position().ok()?;
+    let size = window.outer_size().ok()?;
+    let x = u32::try_from(pos.x - monitor.position().x).unwrap_or(0);
+    let y = u32::try_from(pos.y - monitor.position().y).unwrap_or(0);
+    Some(crate::screencast::WindowRect {
+        x,
+        y,
+        width: size.width.min(monitor.size().width.saturating_sub(x)),
+        height: size.height.min(monitor.size().height.saturating_sub(y)),
+        screen,
+    })
+}
+
+/// Pause or resume a recording; paused time is cut out of the file.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_screencast_pause(
+    state: State<'_, AppState>,
+    id: TabId,
+    paused: bool,
+) -> AppResult<()> {
+    state.screencast.set_paused(id, paused)
+}
+
+/// Stop recording and encode the file; returns what was written.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn tab_screencast_stop(
     state: State<'_, AppState>,
     id: TabId,
-) -> AppResult<String> {
+) -> AppResult<crate::screencast::RecordingResult> {
     let session = cdp_for(&state, id)?;
-    let path = state.screencast.stop(id, &session).await?;
-    Ok(path.to_string_lossy().into_owned())
+    state.screencast.stop(id, &session).await
+}
+
+/// Throw a recording away without encoding it.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_screencast_cancel(state: State<'_, AppState>, id: TabId) -> AppResult<()> {
+    if let Ok(session) = cdp_for(&state, id) {
+        let _ = session.call0("Page.stopScreencast").await;
+    }
+    state.screencast.discard(id);
+    Ok(())
+}
+
+/// What the recording dialog may offer on this machine.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn recording_capabilities()
+-> Result<crate::screencast::RecordingCapabilities, AppError> {
+    tauri::async_runtime::spawn_blocking(crate::screencast::capabilities)
+        .await
+        .map_err(AppError::new)
+}
+
+/// Largest recording the chrome previews inline, as base64.
+const PREVIEW_MAX_BYTES: u64 = 80 * 1024 * 1024;
+
+/// A finished recording inside the captures directory, resolved and checked.
+fn recording_file(path: &str) -> AppResult<std::path::PathBuf> {
+    let dir = captures_dir()?.canonicalize()?;
+    let file = std::path::Path::new(path).canonicalize()?;
+    let ok = file.starts_with(&dir)
+        && file
+            .extension()
+            .is_some_and(|e| e == "mp4" || e == "gif" || e == "png" || e == "webm" || e == "json");
+    if !ok {
+        return Err(AppError::new("not a recording"));
+    }
+    Ok(file)
+}
+
+/// Read a recording as base64 for the preview. Refuses files too large to
+/// hold in the chrome's memory; those are opened with the system player.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn recording_read(path: String) -> Result<String, AppError> {
+    use base64::Engine as _;
+    let file = recording_file(&path)?;
+    if std::fs::metadata(&file)?.len() > PREVIEW_MAX_BYTES {
+        return Err(AppError::new("too large to preview here"));
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(base64::engine::general_purpose::STANDARD.encode(std::fs::read(file)?))
+    })
+    .await
+    .map_err(AppError::new)?
+}
+
+/// Open a recording with whatever the system uses for it.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn recording_open(path: String) -> AppResult<()> {
+    let file = recording_file(&path)?;
+    #[cfg(target_os = "macos")]
+    let status = std::process::Command::new("open").arg(&file).status();
+    #[cfg(target_os = "linux")]
+    let status = std::process::Command::new("xdg-open").arg(&file).status();
+    #[cfg(target_os = "windows")]
+    let status = std::process::Command::new("cmd")
+        .args(["/C", "start", ""])
+        .arg(&file)
+        .status();
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(AppError::new(format!("could not open the file ({s})"))),
+        Err(e) => Err(AppError::new(e)),
+    }
+}
+
+/// Delete a recording.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn recording_delete(path: String) -> AppResult<()> {
+    let file = recording_file(&path)?;
+    std::fs::remove_file(&file)?;
+    // The preview companion goes with it.
+    if let Some(stem) = file.file_stem()
+        && let Some(dir) = file.parent()
+    {
+        let preview = dir
+            .join(crate::screencast::PREVIEW_DIR)
+            .join(format!("{}.webm", stem.to_string_lossy()));
+        let _ = std::fs::remove_file(preview);
+    }
+    Ok(())
 }
 
 /// Zoom levels the chrome steps through; `1.0` is the default.
@@ -1078,7 +1266,157 @@ pub const ZOOM_STEPS: &[f64] = &[
 #[specta::specta]
 pub(crate) fn tab_zoom(state: State<'_, AppState>, id: TabId, factor: f64) -> AppResult<()> {
     let factor = factor.clamp(ZOOM_STEPS[0], ZOOM_STEPS[ZOOM_STEPS.len() - 1]);
-    with_view(&state, id, |v| v.set_zoom(factor))
+    with_view(&state, id, |v| v.set_zoom(factor))?;
+    // Zoom is a per-site preference, as in every browser: remember it for
+    // the origin so the next visit opens at the same size.
+    let origin = lock(&state.store)
+        .tab(id)
+        .ok()
+        .and_then(|t| dive_core::origin_of(&t.url));
+    if let Some(origin) = origin {
+        let key = format!("{}{origin}", crate::engine::SITE_ZOOM_PREFIX);
+        let store = lock(&state.store);
+        if (factor - state.prefs.get(&state).default_zoom).abs() < f64::EPSILON {
+            store.remove_setting(&key)?;
+        } else {
+            store.set_setting(&key, &factor.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Stop the tab's current load.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_stop(state: State<'_, AppState>, id: TabId) -> AppResult<()> {
+    let session = lock(&state.host)
+        .as_ref()
+        .and_then(|h| h.cdp(id))
+        .ok_or_else(|| AppError::new("no devtools session"))?;
+    session
+        .call0("Page.stopLoading")
+        .await
+        .map_err(|e| AppError::new(e.to_string()))?;
+    Ok(())
+}
+
+/// Open the system print dialog for the tab's page.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_print(app: AppHandle<Runtime>, id: TabId) -> AppResult<()> {
+    on_main(&app, move |_, _, state| {
+        with_view(state, id, tauri::Webview::print)
+    })
+}
+
+/// Move a tab between the Essential, Pinned and Today strips.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_set_tier(
+    state: State<'_, AppState>,
+    id: TabId,
+    tier: dive_core::TabTier,
+) -> AppResult<()> {
+    let tab = {
+        let store = lock(&state.store);
+        let mut tab = store.tab(id)?;
+        tab.tier = tier;
+        store.upsert_tab(&tab)?;
+        tab
+    };
+    state.bus.publish(CoreEvent::TabUpserted(tab));
+    Ok(())
+}
+
+/// Forget a bookmark by URL.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn bookmark_remove(state: State<'_, AppState>, url: String) -> AppResult<bool> {
+    Ok(lock(&state.store).remove_bookmark(&url)?)
+}
+
+/// Remember or forget a site permission decision.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn permission_set(
+    state: State<'_, AppState>,
+    origin: String,
+    kind: String,
+    decision: crate::permissions::Decision,
+) -> AppResult<()> {
+    crate::permissions::set(&state, &origin, &kind, decision)?;
+    Ok(())
+}
+
+/// Every remembered site permission.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn permissions_list(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<crate::permissions::SitePermission>> {
+    Ok(crate::permissions::all(&state)?)
+}
+
+/// An update the release channel offers.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct UpdateInfo {
+    /// Version string of the update.
+    pub version: String,
+    /// Release notes, if the manifest carried any.
+    pub notes: Option<String>,
+}
+
+/// Whether this binary registered the updater plugin during startup.
+///
+/// `UpdaterExt::updater` currently panics before it can return an error when
+/// the plugin state was never managed, so every command must guard the call.
+pub(crate) fn updater_configured(public_key: Option<&str>) -> bool {
+    public_key.is_some_and(|key| !key.trim().is_empty())
+}
+
+/// Ask the release channel for a newer build. `None` when this build has
+/// no updater (development) or is current.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn update_check(app: AppHandle<Runtime>) -> AppResult<Option<UpdateInfo>> {
+    if !updater_configured(option_env!("DIVE_UPDATER_PUBKEY")) {
+        return Ok(None);
+    }
+    let Ok(updater) = app.updater() else {
+        return Ok(None);
+    };
+    let found = updater
+        .check()
+        .await
+        .map_err(|e| AppError::new(e.to_string()))?;
+    Ok(found.map(|u| UpdateInfo {
+        version: u.version.clone(),
+        notes: u.body.clone(),
+    }))
+}
+
+/// Download and install the offered update; the app restarts when done.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn update_install(app: AppHandle<Runtime>) -> AppResult<()> {
+    if !updater_configured(option_env!("DIVE_UPDATER_PUBKEY")) {
+        return Err(AppError::new("this build has no updater"));
+    }
+    let updater = app
+        .updater()
+        .map_err(|_| AppError::new("this build has no updater"))?;
+    let Some(update) = updater
+        .check()
+        .await
+        .map_err(|e| AppError::new(e.to_string()))?
+    else {
+        return Err(AppError::new("already up to date"));
+    };
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|e| AppError::new(e.to_string()))?;
+    app.restart();
 }
 
 /// Screenshot a tab (viewport, or the whole document when `full_page`) to a
@@ -1523,6 +1861,52 @@ pub(crate) fn layout_set_content_bounds(
     Ok(())
 }
 
+/// Freeze every page shown in the main window before a DOM overlay hides its
+/// native child view. Unlike a user capture, these previews stay in memory and
+/// never touch the captures folder or clipboard.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn layout_prepare_content_cover(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<ContentPreview>> {
+    use base64::Engine as _;
+    use futures_util::future::join_all;
+
+    let sessions = lock(&state.host)
+        .as_ref()
+        .map_or_else(Vec::new, crate::engine::TabHost::covered_sessions);
+    let captures = join_all(sessions.into_iter().map(|(tab_id, session)| async move {
+        let result = dive_cdp::page::capture_screenshot(
+            &session,
+            dive_cdp::page::ScreenshotOptions {
+                format: dive_cdp::page::ImageFormat::Jpeg,
+                quality: Some(82),
+                ..Default::default()
+            },
+        )
+        .await;
+        (tab_id, result)
+    }))
+    .await;
+
+    Ok(captures
+        .into_iter()
+        .filter_map(|(tab_id, result)| match result {
+            Ok(bytes) => Some(ContentPreview {
+                tab_id,
+                data_url: format!(
+                    "data:image/jpeg;base64,{}",
+                    base64::engine::general_purpose::STANDARD.encode(bytes)
+                ),
+            }),
+            Err(error) => {
+                tracing::debug!(%tab_id, %error, "could not freeze page for chrome overlay");
+                None
+            }
+        })
+        .collect())
+}
+
 #[tauri::command]
 #[specta::specta]
 /// Hide the native content view while a DOM overlay (dialog, menu, popover)
@@ -1718,7 +2102,7 @@ pub fn normalize_url_with(input: &str, template: &str) -> AppResult<url::Url> {
     if let Ok(url) = url::Url::parse(trimmed)
         && matches!(
             url.scheme(),
-            "http" | "https" | "file" | "about" | "data" | "blob"
+            "http" | "https" | "file" | "about" | "data" | "blob" | crate::engine::INTERNAL_SCHEME
         )
     {
         return Ok(url);
@@ -1746,6 +2130,14 @@ pub fn normalize_url_with(input: &str, template: &str) -> AppResult<url::Url> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn updater_calls_are_skipped_when_the_plugin_was_not_built() {
+        assert!(!updater_configured(None));
+        assert!(!updater_configured(Some("")));
+        assert!(!updater_configured(Some("   ")));
+        assert!(updater_configured(Some("release-public-key")));
+    }
 
     #[test]
     fn normalizes_user_input() {

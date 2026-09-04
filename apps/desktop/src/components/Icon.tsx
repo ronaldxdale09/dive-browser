@@ -16,6 +16,7 @@ export function IconButton({
   size = 15,
   shortcut,
   tooltipAlign,
+  tooltipSide,
 }: {
   icon: LucideIcon;
   label: string;
@@ -25,16 +26,17 @@ export function IconButton({
   size?: number;
   shortcut?: string;
   tooltipAlign?: "start" | "center" | "end";
+  tooltipSide?: "top" | "bottom" | "left" | "right";
 }) {
   return (
-    <Tooltip label={label} shortcut={shortcut} align={tooltipAlign}>
+    <Tooltip label={label} shortcut={shortcut} align={tooltipAlign} side={tooltipSide}>
       <button
         type="button"
         aria-label={label}
         aria-pressed={active}
         disabled={disabled}
         onClick={onClick}
-        className="grid size-7 place-items-center rounded-full text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink"
+        className="pressable grid size-7 place-items-center rounded-full text-ink-2 transition-[color,background-color,transform] duration-150 hover:bg-surface-3 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink"
       >
         <Icon icon={icon} size={size} />
       </button>

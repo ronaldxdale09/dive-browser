@@ -3,9 +3,15 @@ import { ipc, events } from "../lib/ipc";
 import { listenConsole, useConsole } from "./console";
 import { listenNetwork, useNetwork } from "./network";
 import { useDownloads } from "./downloads";
-import type { CoreEvent, Snapshot, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
+import type { CoreEvent, Decision, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace } from "../lib/ipc";
 
-export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings";
+export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "shortcuts";
+
+/** The panels of the settings dialog; `openSettings` can land on any of them. */
+export type SettingsSection = "general" | "appearance" | "privacy" | "downloads" | "developer" | "agent" | "shortcuts" | "about";
+
+/** A page's outstanding request for a capability, awaiting the person's answer. */
+export type PermissionRequest = { origin: string; kind: string };
 
 interface BrowserState {
   ready: boolean;
@@ -27,6 +33,19 @@ interface BrowserState {
   crashedTabs: Record<string, CrashState>;
   applyLoad: (load: TabLoad) => void;
   applyCrash: (crash: TabCrashed) => void;
+  /** Pages asking for a capability, per tab; one entry per origin and kind. */
+  permissionRequests: Record<string, PermissionRequest[]>;
+  applyPermissionAsked: (asked: PermissionAsked) => void;
+  /** Remember the decision for that origin and drop the request. */
+  decidePermission: (tabId: string, request: PermissionRequest, decision: Decision) => Promise<void>;
+  /** Stop the active tab's load. */
+  stop: () => Promise<void>;
+  /** Open the print dialog for the active tab. */
+  print: () => Promise<void>;
+  setTier: (id: string, tier: TabTier) => Promise<void>;
+  /** Which settings panel opens next; `openSettings` sets it and the dialog reads it once. */
+  settingsSection: SettingsSection;
+  openSettings: (section?: SettingsSection) => void;
   boot: () => Promise<void>;
   openTab: (url: string) => Promise<void>;
   closeTab: (id: string) => Promise<void>;
@@ -93,6 +112,22 @@ export function reduceLoad(state: LoadState, load: TabLoad): Partial<LoadState> 
   }
 }
 
+/**
+ * Queue a page's request. Chromium may ask again for the same thing while the
+ * banner is up (a page that retries), so an origin and kind appear once.
+ */
+export function reducePermissionAsked(requests: Record<string, PermissionRequest[]>, asked: PermissionAsked): Record<string, PermissionRequest[]> {
+  const list = requests[asked.tab_id] ?? [];
+  if (list.some((r) => r.origin === asked.origin && r.kind === asked.kind)) return requests;
+  return { ...requests, [asked.tab_id]: [...list, { origin: asked.origin, kind: asked.kind }] };
+}
+
+/** Drop one request; a tab with none left leaves the record. */
+export function withoutRequest(requests: Record<string, PermissionRequest[]>, tabId: string, request: PermissionRequest): Record<string, PermissionRequest[]> {
+  const rest = (requests[tabId] ?? []).filter((r) => !(r.origin === request.origin && r.kind === request.kind));
+  return rest.length === 0 ? without(requests, tabId) : { ...requests, [tabId]: rest };
+}
+
 export function reduceCrash(state: Pick<LoadState, "crashedTabs" | "loading">, crash: TabCrashed): Partial<LoadState> {
   return {
     crashedTabs: { ...state.crashedTabs, [crash.tab_id]: { attempt: crash.attempt, recovering: crash.recovering } },
@@ -152,6 +187,7 @@ export function reduceWindowChange(state: Pick<BrowserState, "detached" | "activ
 let unlisten: (() => void) | null = null;
 let unlistenLoad: (() => void) | null = null;
 let unlistenCrash: (() => void) | null = null;
+let unlistenPermission: (() => void) | null = null;
 
 export const useBrowser = create<BrowserState>((set, get) => ({
   ready: false,
@@ -160,7 +196,15 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   tabs: [],
   activeTab: null,
   detached: [],
-  open: { sidecar: false, dock: false, palette: false, find: false, settings: false },
+  open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false },
+  settingsSection: "general",
+  openSettings: (section = "general") => set((s) => ({ settingsSection: section, open: { ...s.open, settings: true } })),
+  permissionRequests: {},
+  applyPermissionAsked: (asked) => set((s) => ({ permissionRequests: reducePermissionAsked(s.permissionRequests, asked) })),
+  decidePermission: async (tabId, request, decision) => {
+    await run(set, () => ipc.permissionSet(request.origin, request.kind, decision));
+    set((s) => ({ permissionRequests: withoutRequest(s.permissionRequests, tabId, request) }));
+  },
   counts: {},
   error: null,
   notice: null,
@@ -181,6 +225,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       unlisten ??= await events.stateChanged.listen((e) => get().applyEvent(e.payload));
       unlistenLoad ??= await events.tabLoad.listen((e) => get().applyLoad(e.payload));
       unlistenCrash ??= await events.tabCrashed.listen((e) => get().applyCrash(e.payload));
+      unlistenPermission ??= await events.permissionAsked.listen((e) => get().applyPermissionAsked(e.payload));
       await events.tabWindowChanged.listen((e) => set(reduceWindowChange(get(), e.payload.tab, e.payload.detached)));
       await events.downloadNotice.listen((e) => {
         const d = e.payload;
@@ -241,22 +286,21 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     const id = get().activeTab;
     if (id) await run(set, () => ipc.tabReload(id));
   },
-  screencastToggle: async () => {
-    const recording = get().recordingTab;
-    if (recording) {
-      await run(set, async () => {
-        const path = await ipc.tabScreencastStop(recording);
-        set({ recordingTab: null, notice: `Saved ${path.split("/").pop() ?? path}` });
-        setTimeout(() => set({ notice: null }), 6000);
-      });
-      return;
-    }
+  stop: async () => {
     const id = get().activeTab;
-    if (!id) return;
-    await run(set, async () => {
-      await ipc.tabScreencastStart(id);
-      set({ recordingTab: id });
-    });
+    if (id) await run(set, () => ipc.tabStop(id));
+  },
+  print: async () => {
+    const id = get().activeTab;
+    if (id) await run(set, () => ipc.tabPrint(id));
+  },
+  setTier: async (id, tier) => run(set, () => ipc.tabSetTier(id, tier)),
+  // The recorder lives in its own store; this stays for callers that only
+  // know the browser store. `recordingTab` mirrors it for the strip and the
+  // idle sweep.
+  screencastToggle: async () => {
+    const { useRecording } = await import("./recording");
+    await useRecording.getState().toggle();
   },
   bugReport: async () => {
     const id = get().activeTab;
@@ -348,7 +392,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     set((s) => reduceEvent(s, event));
     if (event.type === "tab_closed") {
       const id = event.data;
-      set((s) => ({ loading: without(s.loading, id), navError: without(s.navError, id), crashedTabs: without(s.crashedTabs, id) }));
+      set((s) => ({ loading: without(s.loading, id), navError: without(s.navError, id), crashedTabs: without(s.crashedTabs, id), permissionRequests: without(s.permissionRequests, id) }));
     }
     // Tabs of other workspaces never reach this store, so their badges come
     // from the host. Coalesced: a page load can emit several tab updates.

@@ -1,14 +1,18 @@
-import { ArrowLeft, ArrowRight, Lock, PanelsTopLeft, RotateCw, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, Lock, PanelsTopLeft, RotateCw, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { events, ipc } from "../lib/ipc";
+import { createBoundsReporter, elementBounds } from "../lib/boundsReporter";
 import { useBrowser } from "../store/browser";
 import { usePrefs, watchSystemTheme } from "../store/prefs";
 import { Icon, IconButton } from "./Icon";
+import { Favicon } from "./Favicon";
+import { tabLabel } from "./TabStrip";
 
 /**
- * The chrome of a window holding one torn-off tab: a navigation row and the
- * page. The tab still belongs to its workspace; the strip in the main window
- * shows it dimmed and a click there raises this window.
+ * A complete Dive window around one torn-off tab. The live native page is
+ * reparented into this window, so navigation state, scroll and session data
+ * survive the move. The tab still belongs to its workspace; the strip in the
+ * main window shows it dimmed and a click there raises this window.
  */
 export function Popout({ tabId }: { tabId: string }) {
   const boot = useBrowser((s) => s.boot);
@@ -29,17 +33,18 @@ export function Popout({ tabId }: { tabId: string }) {
   useEffect(() => {
     const el = body.current;
     if (!el) return;
-    const report = () => {
-      const r = el.getBoundingClientRect();
-      void ipc.popoutSetBounds(tabId, { x: r.left, y: r.top, width: r.width, height: r.height }).catch(() => undefined);
-    };
-    report();
-    const ro = new ResizeObserver(report);
+    const reporter = createBoundsReporter(
+      () => elementBounds(el),
+      (bounds) => void ipc.popoutSetBounds(tabId, bounds).catch(() => undefined),
+    );
+    reporter.schedule();
+    const ro = new ResizeObserver(reporter.schedule);
     ro.observe(el);
-    window.addEventListener("resize", report);
+    window.addEventListener("resize", reporter.schedule);
     return () => {
+      reporter.dispose();
       ro.disconnect();
-      window.removeEventListener("resize", report);
+      window.removeEventListener("resize", reporter.schedule);
     };
   }, [tabId]);
 
@@ -98,9 +103,40 @@ export function Popout({ tabId }: { tabId: string }) {
   }, [tabId]);
 
   const secure = url.startsWith("https://");
+  const title = tab ? tabLabel(tab) : "Opening tab";
   return (
-    <div className="flex h-full flex-col bg-ground text-ink">
-      <div className="flex h-11 shrink-0 items-center gap-1 px-2">
+    <div className="grid h-full grid-rows-[40px_44px_minmax(0,1fr)] bg-ground text-ink">
+      <header className="flex min-w-0 items-center gap-1.5 border-b border-line/70 pr-2 pl-[84px]">
+        <div role="tablist" aria-label="Window tabs" className="flex min-w-0 max-w-72 flex-1 items-center">
+          <div className="group flex h-8 min-w-0 flex-1 items-center rounded-lg bg-surface-2 text-xs text-ink ring-1 ring-line-2">
+            <button
+              type="button"
+              role="tab"
+              aria-label={title}
+              aria-selected="true"
+              data-tab-drag-handle
+              data-tauri-drag-region="false"
+              onMouseDown={(e) => e.stopPropagation()}
+              className="flex h-full min-w-0 flex-1 items-center gap-2 bg-transparent px-2.5 outline-none"
+            >
+              <Favicon src={tab?.favicon ?? null} size={14} />
+              <span className="truncate">{title}</span>
+            </button>
+            <button
+              type="button"
+              aria-label={`Close ${title}`}
+              data-tauri-drag-region="false"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => void ipc.tabClose(tabId)}
+              className="mr-1 grid size-5 shrink-0 place-items-center rounded-full text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink"
+            >
+              <Icon icon={X} size={12} />
+            </button>
+          </div>
+        </div>
+        <div className="min-w-8 flex-1 self-stretch" data-tauri-drag-region="true" />
+      </header>
+      <nav aria-label="Browser controls" className="flex min-w-0 items-center gap-1 border-b border-line px-2">
         <IconButton icon={ArrowLeft} label="Back" onClick={() => void ipc.tabBack(tabId)} />
         <IconButton icon={ArrowRight} label="Forward" onClick={() => void ipc.tabForward(tabId)} />
         <IconButton icon={RotateCw} label="Reload" shortcut="⌘R" size={14} onClick={() => void ipc.tabReload(tabId)} />
@@ -115,7 +151,7 @@ export function Popout({ tabId }: { tabId: string }) {
           <input ref={inputRef} aria-label="Address" value={draft.value} onChange={(e) => setDraft({ url, value: e.target.value })} onFocus={(e) => e.target.select()} spellCheck={false} className="min-w-0 flex-1 bg-transparent text-xs text-ink outline-none placeholder:text-ink-3" placeholder="Search or enter address" />
         </form>
         <IconButton icon={PanelsTopLeft} label="Move back to main window" tooltipAlign="end" onClick={() => void ipc.tabAttach(tabId)} />
-      </div>
+      </nav>
       <div ref={body} className="min-h-0 flex-1 bg-surface" />
     </div>
   );

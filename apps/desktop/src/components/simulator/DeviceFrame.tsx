@@ -11,6 +11,7 @@
 import { useEffect, useRef } from "react";
 import type { DevicePreset } from "../../data/devices";
 import { stripsFor } from "../../data/devices";
+import { createBoundsReporter, elementBounds } from "../../lib/boundsReporter";
 import { BottomBar, Cutout, HomeIndicator, StatusBar, TopBar } from "./Chrome";
 import type { Layout, UiMode } from "./geometry";
 
@@ -24,6 +25,8 @@ export interface DeviceFrameProps {
   dark: boolean;
   url: string;
   secure: boolean;
+  /** Frozen live viewport shown while a chrome dialog covers the native view. */
+  preview?: string | null;
   /** Called with the page slot's rectangle whenever it moves or resizes. */
   onPageRect: (rect: { x: number; y: number; width: number; height: number }) => void;
   /** Optional caption under the frame. */
@@ -106,7 +109,7 @@ function SideButtons({ device, landscape, outer, scale }: { device: DevicePreset
   );
 }
 
-export function DeviceFrame({ device, landscape, mode, layout, dark, url, secure, onPageRect, caption }: DeviceFrameProps) {
+export function DeviceFrame({ device, landscape, mode, layout, dark, url, secure, preview, onPageRect, caption }: DeviceFrameProps) {
   const slot = useRef<HTMLDivElement>(null);
   const { scale, screen, strips, bezel, outer } = layout;
   const body = bodyStyle(device, scale);
@@ -115,17 +118,15 @@ export function DeviceFrame({ device, landscape, mode, layout, dark, url, secure
   useEffect(() => {
     const el = slot.current;
     if (!el) return;
-    const report = () => {
-      const r = el.getBoundingClientRect();
-      onPageRect({ x: r.left, y: r.top, width: r.width, height: r.height });
-    };
-    report();
-    const ro = new ResizeObserver(report);
+    const reporter = createBoundsReporter(() => elementBounds(el), onPageRect);
+    reporter.schedule();
+    const ro = new ResizeObserver(reporter.schedule);
     ro.observe(el);
-    window.addEventListener("resize", report);
+    window.addEventListener("resize", reporter.schedule);
     return () => {
+      reporter.dispose();
       ro.disconnect();
-      window.removeEventListener("resize", report);
+      window.removeEventListener("resize", reporter.schedule);
     };
     // Layout changes move the slot without resizing it (a zoom change at the
     // same fit), so the effect re-runs on every layout as well.
@@ -193,7 +194,9 @@ export function DeviceFrame({ device, landscape, mode, layout, dark, url, secure
             )}
             <div className="flex min-h-0 flex-1" style={{ paddingLeft: strips.left, paddingRight: strips.right }}>
               {/* The page: a native view is positioned over this element. */}
-              <div ref={slot} className="min-h-0 flex-1" style={{ background: dark ? "#000" : "#fff" }} />
+              <div ref={slot} className="relative min-h-0 flex-1 overflow-hidden" style={{ background: dark ? "#000" : "#fff" }}>
+                {preview && <img aria-hidden src={preview} className="pointer-events-none absolute inset-0 size-full object-fill" />}
+              </div>
             </div>
             {strips.bottom > 0 && (
               <div className="shrink-0" style={{ height: strips.bottom }}>

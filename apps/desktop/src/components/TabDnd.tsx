@@ -78,11 +78,10 @@ export function planDrop(args: {
   if (over && !fromPane && over !== tab && ordered.includes(over) && ordered.includes(tab)) {
     return { kind: "reorder", ordered: arrayMove(ordered, ordered.indexOf(tab), ordered.indexOf(over)) };
   }
-  // No slot and no zone under the pointer: the tab was carried somewhere
-  // that is not the strip, whether past the window's edge or onto the rail
-  // or toolbar. Chrome makes that a window of its own; so does Dive. A drag
-  // that never left the strip's row (a wobble, or a release on the "+")
-  // stays a no-op.
+  // A split zone always wins above. With no target, leaving the strip is the
+  // familiar browser tear-off gesture; accepting it before the OS boundary
+  // also matters because CEF may stop reporting pointer movement at that
+  // boundary. The stripBottom value already includes a small wobble margin.
   if (!over && pointer && !fromPane) {
     const out = pointer.x < -OUTSIDE || pointer.y < -OUTSIDE || pointer.x > viewport.width + OUTSIDE || pointer.y > viewport.height + OUTSIDE;
     if (out || pointer.y > args.stripBottom) return { kind: "detach", tab, at: pointer };
@@ -161,7 +160,7 @@ export function TabDnd({ children }: { children: ReactNode }) {
       {children}
       <DragOverlay dropAnimation={null}>
         {ghost && (
-          <div className="flex h-8 max-w-56 items-center gap-2 rounded-lg border border-line-2 bg-surface-2 px-2.5 text-xs text-ink shadow-xl">
+          <div className="tab-drag-ghost pointer-events-none flex h-8 max-w-56 cursor-grabbing items-center gap-2 rounded-lg border border-line-2 bg-surface-2 px-2.5 text-xs text-ink shadow-2xl ring-1 ring-black/15">
             <Favicon src={ghost.favicon} size={14} />
             <span className="truncate">{tabLabel(ghost)}</span>
           </div>

@@ -93,6 +93,18 @@ export function systemTheme(): "dark" | "light" {
   return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
+/** Pick the foreground with the stronger WCAG contrast against a hex accent. */
+export function accentInk(hex: string): "#111111" | "#FFFFFF" {
+  const value = hex.replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(value)) return "#111111";
+  const channels = [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16) / 255);
+  const [r, g, b] = channels.map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4));
+  const luminance = 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  const darkContrast = (luminance + 0.05) / 0.0586;
+  const lightContrast = 1.05 / (luminance + 0.05);
+  return darkContrast >= lightContrast ? "#111111" : "#FFFFFF";
+}
+
 /**
  * Put theme and accent on the document root. `data-theme` selects the palette
  * in styles.css; a chosen accent overrides the two highlight tokens, and the
@@ -107,10 +119,12 @@ export function applyAppearance(prefs: Prefs) {
   if (prefs.accent.toUpperCase() === DEFAULT_PREFS.accent.toUpperCase()) {
     root.style.removeProperty("--color-highlight");
     root.style.removeProperty("--color-highlight-soft");
+    root.style.removeProperty("--color-highlight-ink");
     return;
   }
   root.style.setProperty("--color-highlight", prefs.accent);
   root.style.setProperty("--color-highlight-soft", `color-mix(in oklab, ${prefs.accent} 22%, var(--color-ground))`);
+  root.style.setProperty("--color-highlight-ink", accentInk(prefs.accent));
 }
 
 /** Re-apply the palette when the OS scheme changes while following it. */

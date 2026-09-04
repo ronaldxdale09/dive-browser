@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@tauri-apps/api/event";
-import { reduceCrash, reduceEvent, reduceLoad, reduceWindowChange, useBrowser } from "./browser";
+import { reduceCrash, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, useBrowser, withoutRequest } from "./browser";
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
-import type { Tab, TabCrashed, TabLoad } from "../lib/ipc";
+import type { PermissionAsked, Tab, TabCrashed, TabLoad } from "../lib/ipc";
 
 const tab = (id: string, url = "https://x"): Tab => ({
   id, workspace_id: "w", tier: "today", url, title: "", position: 0, state: "active", last_active_at: "2026-01-01T00:00:00Z", favicon: null,
@@ -161,6 +161,8 @@ describe("boot", () => {
     const loadListen = vi.spyOn(events.tabLoad, "listen").mockImplementation(async (cb) => ((onLoad = cb), () => undefined));
     const crashListen = vi.spyOn(events.tabCrashed, "listen").mockImplementation(async (cb) => ((onCrash = cb), () => undefined));
     vi.spyOn(events.stateChanged, "listen").mockResolvedValue(() => undefined);
+    let onAsked!: (e: Event<PermissionAsked>) => void;
+    const askedListen = vi.spyOn(events.permissionAsked, "listen").mockImplementation(async (cb) => ((onAsked = cb), () => undefined));
     vi.spyOn(events.tabWindowChanged, "listen").mockResolvedValue(() => undefined);
     vi.spyOn(events.downloadNotice, "listen").mockResolvedValue(() => undefined);
     vi.spyOn(events.consoleEntry, "listen").mockResolvedValue(() => undefined);
@@ -172,6 +174,10 @@ describe("boot", () => {
     await useBrowser.getState().boot();
     expect(loadListen).toHaveBeenCalledTimes(1);
     expect(crashListen).toHaveBeenCalledTimes(1);
+    expect(askedListen).toHaveBeenCalledTimes(1);
+
+    onAsked({ event: "permission-asked", id: 3, payload: { tab_id: "a", origin: "https://meet.test", kind: "camera" } });
+    expect(useBrowser.getState().permissionRequests).toEqual({ a: [{ origin: "https://meet.test", kind: "camera" }] });
 
     onLoad({ event: "tab-load", id: 1, payload: load("a", "started") });
     expect(useBrowser.getState().loading).toEqual({ a: true });
@@ -180,5 +186,61 @@ describe("boot", () => {
 
     useBrowser.setState(initial, true);
     vi.restoreAllMocks();
+  });
+});
+
+describe("permission requests", () => {
+  const asked = (tab_id: string, kind: string, origin = "https://meet.test"): PermissionAsked => ({ tab_id, origin, kind });
+
+  it("queues one request per origin and kind", () => {
+    let reqs = reducePermissionAsked({}, asked("a", "camera"));
+    reqs = reducePermissionAsked(reqs, asked("a", "camera"));
+    reqs = reducePermissionAsked(reqs, asked("a", "microphone"));
+    reqs = reducePermissionAsked(reqs, asked("b", "camera"));
+    expect(reqs).toEqual({
+      a: [
+        { origin: "https://meet.test", kind: "camera" },
+        { origin: "https://meet.test", kind: "microphone" },
+      ],
+      b: [{ origin: "https://meet.test", kind: "camera" }],
+    });
+    const same = reducePermissionAsked(reqs, asked("a", "camera"));
+    expect(same).toBe(reqs);
+  });
+
+  it("drops a request and forgets a tab with none left", () => {
+    const reqs = reducePermissionAsked(reducePermissionAsked({}, asked("a", "camera")), asked("a", "microphone"));
+    const one = withoutRequest(reqs, "a", { origin: "https://meet.test", kind: "camera" });
+    expect(one).toEqual({ a: [{ origin: "https://meet.test", kind: "microphone" }] });
+    expect(withoutRequest(one, "a", { origin: "https://meet.test", kind: "microphone" })).toEqual({});
+  });
+
+  it("remembers the decision and clears the banner", async () => {
+    const initial = useBrowser.getState();
+    const set = vi.spyOn(ipc, "permissionSet").mockResolvedValue(null);
+    useBrowser.setState({ permissionRequests: { a: [{ origin: "https://meet.test", kind: "camera" }] } });
+    await useBrowser.getState().decidePermission("a", { origin: "https://meet.test", kind: "camera" }, "allow");
+    expect(set).toHaveBeenCalledWith("https://meet.test", "camera", "allow");
+    expect(useBrowser.getState().permissionRequests).toEqual({});
+    useBrowser.setState(initial, true);
+    vi.restoreAllMocks();
+  });
+
+  it("closing a tab drops its requests", () => {
+    const initial = useBrowser.getState();
+    vi.spyOn(ipc, "workspaceTabCounts").mockResolvedValue([]);
+    useBrowser.setState({ tabs: [tab("a")], permissionRequests: { a: [{ origin: "https://meet.test", kind: "camera" }] } });
+    useBrowser.getState().applyEvent({ type: "tab_closed", data: "a" });
+    expect(useBrowser.getState().permissionRequests).toEqual({});
+    useBrowser.setState(initial, true);
+    vi.restoreAllMocks();
+  });
+
+  it("openSettings lands on the asked-for panel", () => {
+    const initial = useBrowser.getState();
+    useBrowser.getState().openSettings("about");
+    expect(useBrowser.getState().open.settings).toBe(true);
+    expect(useBrowser.getState().settingsSection).toBe("about");
+    useBrowser.setState(initial, true);
   });
 });

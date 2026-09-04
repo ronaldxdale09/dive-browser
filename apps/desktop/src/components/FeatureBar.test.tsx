@@ -4,8 +4,10 @@ import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { useEmulation } from "../store/emulation";
+import { useRecording } from "../store/recording";
 import { COLLAPSE_BELOW, FeatureBar } from "./FeatureBar";
 import { usePicker } from "./simulator/DevicePicker";
+import { useUpdates } from "../store/updates";
 
 const tab: Tab = {
   id: "tab-1",
@@ -24,7 +26,7 @@ beforeEach(() => {
     tabs: [tab],
     activeTab: tab.id,
     activeWorkspace: tab.workspace_id,
-    open: { sidecar: false, dock: false, palette: false, find: false, settings: false },
+    open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false },
     error: null,
     notice: null,
     annotating: null,
@@ -32,8 +34,13 @@ beforeEach(() => {
   });
   useEmulation.setState({ byTab: {}, media: {}, throttle: {} });
   usePicker.setState({ open: false });
+  useRecording.setState({ phase: "idle", tab: null, result: null, error: null, startedAt: null, pausedAt: null, pausedTotal: 0 });
   vi.spyOn(ipc, "tabScreencastStart").mockResolvedValue(null);
+  vi.spyOn(ipc, "tabScreencastPause").mockResolvedValue(null);
+  vi.spyOn(ipc, "tabScreencastCancel").mockResolvedValue(null);
+  vi.spyOn(ipc, "recordingCapabilities").mockResolvedValue({ ffmpeg: true, microphones: [], video_max_seconds: 600, gif_max_seconds: 60 });
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
+  useUpdates.setState({ status: "idle", update: null, error: null, installing: false });
 });
 
 afterEach(() => {
@@ -42,23 +49,49 @@ afterEach(() => {
 });
 
 describe("FeatureBar", () => {
+  it("shows an update pill only when a newer build waits, and opens About", () => {
+    const { rerender } = render(<FeatureBar />);
+    expect(screen.queryByRole("button", { name: "Update available" })).toBeNull();
+    act(() => useUpdates.setState({ status: "available", update: { version: "0.2.0", notes: null } }));
+    rerender(<FeatureBar />);
+    fireEvent.click(screen.getByRole("button", { name: "Update available" }));
+    expect(useBrowser.getState().open.settings).toBe(true);
+    expect(useBrowser.getState().settingsSection).toBe("about");
+  });
+
   it("names record, the emulator and the agent, and keeps a tooltip on each", () => {
     render(<FeatureBar />);
     for (const word of ["Record", "Mobile", "Agent"]) expect(screen.getAllByText(word).length).toBeGreaterThan(0);
     // Page actions live beside the URL, not up here.
     expect(screen.queryByText("Capture")).toBeNull();
     expect(screen.queryByText("Downloads")).toBeNull();
-    const record = screen.getByRole("button", { name: "Record tab as GIF" });
+    const record = screen.getByRole("button", { name: "Record a tab as video or GIF" });
     const tooltip = document.getElementById(record.getAttribute("aria-describedby") ?? "");
     expect(tooltip?.getAttribute("role")).toBe("tooltip");
   });
 
-  it("starts and stops recording the active tab", async () => {
+  it("opens the setup dialog, then shows the recording's controls once it runs", async () => {
     render(<FeatureBar />);
-    fireEvent.click(screen.getByRole("button", { name: "Record tab as GIF" }));
-    await waitFor(() => expect(ipc.tabScreencastStart).toHaveBeenCalledWith(tab.id));
+    fireEvent.click(screen.getByRole("button", { name: "Record a tab as video or GIF" }));
+    expect(useRecording.getState().phase).toBe("setup");
+    expect(useRecording.getState().tab).toBe(tab.id);
+
+    // Straight to recording, no countdown: the bar becomes the controls.
+    useRecording.getState().setSettings({ countdown: false, format: "gif", microphone: null });
+    await act(() => useRecording.getState().start());
+    await waitFor(() => expect(ipc.tabScreencastStart).toHaveBeenCalledWith(tab.id, expect.objectContaining({ format: "gif" })));
     expect(useBrowser.getState().recordingTab).toBe(tab.id);
-    expect(screen.getByRole("button", { name: "Stop recording" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stop and save" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Pause recording" })).toBeTruthy();
+
+    await act(() => useRecording.getState().pause());
+    expect(screen.getByRole("button", { name: "Resume recording" })).toBeTruthy();
+    expect(ipc.tabScreencastPause).toHaveBeenCalledWith(tab.id, true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard recording" }));
+    await waitFor(() => expect(useRecording.getState().phase).toBe("idle"));
+    expect(useBrowser.getState().recordingTab).toBeNull();
+    expect(screen.getByRole("button", { name: "Record a tab as video or GIF" })).toBeTruthy();
   });
 
   it("opens the device menu, agent and all-tabs surfaces", () => {
@@ -96,7 +129,7 @@ describe("FeatureBar", () => {
     expect(screen.queryByText("Mobile")).toBeNull();
     expect(agent().textContent).not.toContain("Agent");
     // Every action is still there by name.
-    expect(screen.getByRole("button", { name: "Record tab as GIF" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Record a tab as video or GIF" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Device simulator" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Agent" })).toBeTruthy();
 

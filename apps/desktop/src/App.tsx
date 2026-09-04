@@ -6,22 +6,32 @@ import { WorkspaceChip } from "./components/WorkspaceChip";
 import { FeatureBar } from "./components/FeatureBar";
 import { Toolbar } from "./components/Toolbar";
 import { Content } from "./components/Content";
-import { WorkspaceDialog } from "./components/WorkspaceDialog";
 import { FindBar } from "./components/FindBar";
 import { Splash } from "./components/Splash";
-import { RecorderModal } from "./components/RecorderModal";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { DOCK_LIMITS, SIDECAR_LIMITS } from "./lib/resize";
 import { useBrowser } from "./store/browser";
 import { useLayout } from "./store/layout";
 import { usePrefs, watchSystemTheme } from "./store/prefs";
 import { useShortcuts } from "./lib/shortcuts";
+import { useChromeLayout } from "./lib/adaptiveLayout";
+import { PanelSkeleton, ToastViewport } from "./components/ChromeFeedback";
+import { usePicker } from "./store/simulator";
+import { scheduleBootCheck } from "./store/updates";
+import { useRecording } from "./store/recording";
+import { useRecorder } from "./store/recorder";
 
 const Sidecar = lazy(() => import("./components/Sidecar").then(({ Sidecar }) => ({ default: Sidecar })));
 const Dock = lazy(() => import("./components/Dock").then(({ Dock }) => ({ default: Dock })));
 const Palette = lazy(() => import("./components/Palette").then(({ Palette }) => ({ default: Palette })));
 const SettingsDialog = lazy(() => import("./components/SettingsDialog").then(({ SettingsDialog }) => ({ default: SettingsDialog })));
 const Annotator = lazy(() => import("./components/Annotator").then(({ Annotator }) => ({ default: Annotator })));
+const Library = lazy(() => import("./components/Library").then(({ Library }) => ({ default: Library })));
+const Shortcuts = lazy(() => import("./components/Shortcuts").then(({ Shortcuts }) => ({ default: Shortcuts })));
+const WorkspaceDialog = lazy(() => import("./components/WorkspaceDialog").then(({ WorkspaceDialog }) => ({ default: WorkspaceDialog })));
+const RecorderModal = lazy(() => import("./components/RecorderModal").then(({ RecorderModal }) => ({ default: RecorderModal })));
+const RecordDialog = lazy(() => import("./components/record/RecordDialog").then(({ RecordDialog }) => ({ default: RecordDialog })));
+const RecordingDoneDialog = lazy(() => import("./components/record/RecordingDoneDialog").then(({ RecordingDoneDialog }) => ({ default: RecordingDoneDialog })));
 
 export function App() {
   const boot = useBrowser((s) => s.boot);
@@ -32,6 +42,10 @@ export function App() {
   const open = useBrowser((s) => s.open);
   const loadPrefs = usePrefs((s) => s.load);
   const railExpanded = usePrefs((s) => s.prefs.rail_expanded);
+  const responsive = useChromeLayout();
+  const pickerOpen = usePicker((s) => s.open);
+  const recordingPhase = useRecording((s) => s.phase);
+  const recorderOpen = useRecorder((s) => s.isOpen);
   const toggle = useBrowser((s) => s.toggle);
   const dockHeight = useLayout((s) => s.dockHeight);
   const sidecarWidth = useLayout((s) => s.sidecarWidth);
@@ -40,6 +54,8 @@ export function App() {
   // The size under the pointer mid-drag; the store gets it on release.
   const [live, setLive] = useState<{ dock: number | null; sidecar: number | null }>({ dock: null, sidecar: null });
   useEffect(() => void boot(), [boot]);
+  // One look at the release channel, well after startup has settled.
+  useEffect(() => scheduleBootCheck(), []);
   // Which panels were open last time is remembered here rather than in the
   // browser store, whose `open` map is per-window state. Applied once at
   // boot, then followed.
@@ -58,23 +74,32 @@ export function App() {
   }, [loadPrefs]);
   useShortcuts();
 
+  const effectiveRailExpanded = railExpanded && !responsive.collapseRail;
+  const railWidth = effectiveRailExpanded ? RAIL_WIDTH.expanded : RAIL_WIDTH.collapsed;
+  const showSidecar = open.sidecar && !(responsive.singleAuxPanel && pickerOpen);
+  // On compact windows one auxiliary surface gets the available space. The
+  // agent wins while explicitly open; the dock preference is left intact and
+  // returns when the sidecar closes.
+  const showDock = open.dock && !(responsive.singleAuxPanel && (showSidecar || pickerOpen));
+  const shownSidecarWidth = Math.min(live.sidecar ?? sidecarWidth, Math.max(280, window.innerWidth - railWidth - 360));
+
   return (
     <TabDnd>
     <div
       className="grid h-full grid-rows-[40px_44px_minmax(0,1fr)] bg-ground text-ink"
-      style={{ gridTemplateColumns: `${railExpanded ? RAIL_WIDTH.expanded : RAIL_WIDTH.collapsed}px minmax(0,1fr)` }}
+      style={{ gridTemplateColumns: `${railWidth}px minmax(0,1fr)` }}
     >
       {/* Title-bar row: the workspace you are in, then its tabs, beside the
           traffic lights (overlay title bar). */}
-      <div className="col-span-2 row-start-1 flex items-center gap-2 pl-[84px]">
+      <header className="col-span-2 row-start-1 flex items-center gap-2 pl-[84px]">
         <WorkspaceChip />
         <div className="h-full min-w-0 flex-1">
           <TabStrip />
         </div>
-        <FeatureBar />
-      </div>
+        <FeatureBar compact={responsive.collapseRail} />
+      </header>
       <div className="relative col-start-1 row-span-2 row-start-2 bg-ground">
-        <Rail />
+        <Rail forceCollapsed={responsive.collapseRail} />
         {/* The rail cannot reach the title bar -- the traffic lights own that
             corner -- so a plain right border begins as a hairline hanging in
             mid-air under the tab strip. Fading it in over the first few pixels
@@ -85,13 +110,13 @@ export function App() {
           style={{ background: "linear-gradient(to bottom, transparent, var(--color-line) 20px)" }}
         />
       </div>
-      <div className="col-start-2 row-start-2">
-        <Toolbar />
-      </div>
-      <div className="col-start-2 row-start-3 grid min-h-0 bg-line" style={{ gridTemplateColumns: open.sidecar ? `minmax(0,1fr) auto ${live.sidecar ?? sidecarWidth}px` : "minmax(0,1fr)" }}>
+      <nav aria-label="Browser controls" className="col-start-2 row-start-2 min-w-0">
+        <Toolbar compact={responsive.compactToolbar} />
+      </nav>
+      <main className="col-start-2 row-start-3 grid min-h-0 min-w-0 bg-line" style={{ gridTemplateColumns: showSidecar ? `minmax(0,1fr) auto ${shownSidecarWidth}px` : "minmax(0,1fr)" }}>
         <div
           className="relative grid min-h-0 bg-line"
-          style={{ gridTemplateRows: `${open.find ? "44px " : ""}minmax(0,1fr)${open.dock ? ` auto ${live.dock ?? dockHeight}px` : ""}` }}
+          style={{ gridTemplateRows: `${open.find ? "44px " : ""}minmax(0,1fr)${showDock ? ` auto ${live.dock ?? dockHeight}px` : ""}` }}
         >
           {open.find && (
             <div className="min-h-0 border-b border-line">
@@ -99,7 +124,7 @@ export function App() {
             </div>
           )}
           <Content />
-          {open.dock && (
+          {showDock && (
             <ResizeHandle
               orientation="horizontal"
               label="Resize dock"
@@ -112,9 +137,9 @@ export function App() {
               }}
             />
           )}
-          <Suspense fallback={null}>{open.dock && <Dock />}</Suspense>
+          <Suspense fallback={showDock ? <PanelSkeleton label="developer dock" horizontal /> : null}>{showDock && <Dock />}</Suspense>
         </div>
-        {open.sidecar && (
+        {showSidecar && (
           <ResizeHandle
             orientation="vertical"
             label="Resize agent panel"
@@ -127,26 +152,28 @@ export function App() {
             }}
           />
         )}
-        <Suspense fallback={null}>{open.sidecar && <Sidecar />}</Suspense>
-      </div>
-      <Suspense fallback={null}>
+        <Suspense fallback={showSidecar ? <PanelSkeleton label="agent" /> : null}>{showSidecar && <Sidecar />}</Suspense>
+      </main>
+      <Suspense fallback={(open.palette || open.settings || open.library || open.shortcuts || annotating) ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
         {open.palette && <Palette />}
         {open.settings && <SettingsDialog />}
+        {open.library && <Library />}
+        {open.shortcuts && <Shortcuts />}
         {annotating && <Annotator path={annotating} />}
       </Suspense>
       <Splash />
-      <WorkspaceDialog key={editing?.id ?? (editing ? "new" : "closed")} />
-      <RecorderModal />
-      {notice && (
-        <div role="status" className="fixed bottom-3 left-16 rounded-full border border-line-2 bg-surface-2 px-3 py-1.5 font-mono text-[11px] text-ink-2 shadow-lg">
-          {notice}
-        </div>
-      )}
-      {error && (
-        <div role="alert" className="fixed bottom-3 left-16 rounded-full border border-line-2 bg-surface-2 px-3 py-1.5 text-xs text-ink-2 shadow-lg">
-          {error}
-        </div>
-      )}
+      <Suspense fallback={(editing || recorderOpen || recordingPhase === "setup" || recordingPhase === "done") ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
+        {editing && <WorkspaceDialog key={editing.id ?? "new"} />}
+        {recorderOpen && <RecorderModal />}
+        {recordingPhase === "setup" && <RecordDialog />}
+        {recordingPhase === "done" && <RecordingDoneDialog />}
+      </Suspense>
+      <ToastViewport
+        notice={notice}
+        error={error}
+        onDismissNotice={() => useBrowser.setState({ notice: null })}
+        onDismissError={() => useBrowser.setState({ error: null })}
+      />
     </div>
     </TabDnd>
   );

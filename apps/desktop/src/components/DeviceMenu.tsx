@@ -3,7 +3,7 @@ import { useBrowser } from "../store/browser";
 import { selectDevice, useEmulation } from "../store/emulation";
 import { Icon } from "./Icon";
 import { Tooltip } from "./Tooltip";
-import { usePicker } from "./simulator/DevicePicker";
+import { usePicker } from "../store/simulator";
 
 /**
  * The button that opens the device simulator. Lit while a device is on the
@@ -14,21 +14,28 @@ export function DeviceMenu({ label }: { label?: string } = {}) {
   const sel = useEmulation(selectDevice(activeTab));
   const open = usePicker((s) => s.open);
   const setOpen = usePicker((s) => s.setOpen);
+  const toggle = useBrowser((s) => s.toggle);
   const active = !!sel;
 
   return (
-    <Tooltip label={active ? "Device simulator (on)" : "Device simulator"}>
+    <Tooltip label={active ? "Device simulator (on)" : "Device simulator"} side="bottom">
       <button
         type="button"
         aria-label="Device simulator"
         aria-pressed={active}
         aria-expanded={open}
         disabled={!activeTab}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          if (!open && !label) {
+            toggle("sidecar", false);
+            toggle("dock", false);
+          }
+          setOpen(!open);
+        }}
         className={
           label
-            ? "flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11.5px] text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent aria-pressed:text-highlight"
-            : "grid size-7 place-items-center rounded-full text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-35 aria-pressed:bg-surface-3 aria-pressed:text-highlight"
+            ? "pressable flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11.5px] text-ink-2 transition-[color,background-color,transform] hover:bg-surface-2 hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent aria-pressed:text-highlight"
+            : "pressable grid size-7 place-items-center rounded-full text-ink-2 transition-[color,background-color,transform] hover:bg-surface-3 hover:text-ink disabled:opacity-35 aria-pressed:bg-surface-3 aria-pressed:text-highlight"
         }
       >
         <Icon icon={Smartphone} size={label ? 13 : 15} />

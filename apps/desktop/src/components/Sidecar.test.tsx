@@ -79,6 +79,12 @@ afterEach(() => {
 });
 
 describe("Sidecar", () => {
+  it("can be closed from its own header", () => {
+    render(<Sidecar />);
+    fireEvent.click(screen.getByRole("button", { name: "Close agent" }));
+    expect(useBrowser.getState().toggle).toHaveBeenCalledWith("sidecar", false);
+  });
+
   it("loads the provider catalog and shows the thread with the ready provider", () => {
     render(<Sidecar />);
     expect(useAgent.getState().init).toHaveBeenCalledTimes(1);

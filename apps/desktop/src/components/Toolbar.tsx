@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Bug, Camera, Lock, PanelBottom, RotateCw, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bug, Camera, Lock, MoreHorizontal, PanelBottom, RotateCw, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { FOCUS_ADDRESS } from "../lib/commands";
 import { useBrowser } from "../store/browser";
@@ -8,19 +8,23 @@ import { BookmarkButton } from "./BookmarkButton";
 import { DownloadsMenu } from "./DownloadsMenu";
 import { ProtectionMenu } from "./ProtectionMenu";
 import { Tooltip } from "./Tooltip";
+import { usePicker } from "../store/simulator";
 
 /** Navigation row: nav icons, the omnibox pill and, as glyphs, the actions that act on the page. */
-export function Toolbar() {
+export function Toolbar({ compact = false }: { compact?: boolean }) {
   const tabs = useBrowser((s) => s.tabs);
   const activeTab = useBrowser((s) => s.activeTab);
   const navigate = useBrowser((s) => s.navigate);
   const back = useBrowser((s) => s.back);
   const forward = useBrowser((s) => s.forward);
   const reload = useBrowser((s) => s.reload);
+  const stop = useBrowser((s) => s.stop);
   const capture = useBrowser((s) => s.capture);
   const devtools = useBrowser((s) => s.devtools);
   const toggle = useBrowser((s) => s.toggle);
   const open = useBrowser((s) => s.open);
+  const pickerOpen = usePicker((s) => s.open);
+  const setPickerOpen = usePicker((s) => s.setOpen);
   const loading = useBrowser((s) => (s.activeTab ? s.loading[s.activeTab] === true : false));
   const current = tabs.find((t) => t.id === activeTab);
   const url = current?.url ?? "";
@@ -32,6 +36,19 @@ export function Toolbar() {
   const secure = url.startsWith("https://");
   const display = pretty(url);
   const inputRef = useRef<HTMLInputElement>(null);
+  const toggleDock = () => {
+    if (!compact) {
+      toggle("dock");
+      return;
+    }
+    if (open.dock && !open.sidecar && !pickerOpen) {
+      toggle("dock", false);
+      return;
+    }
+    setPickerOpen(false);
+    toggle("sidecar", false);
+    toggle("dock", true);
+  };
   // Cmd+L, from the menu or the palette.
   useEffect(() => {
     const focus = () => inputRef.current?.focus();
@@ -43,7 +60,12 @@ export function Toolbar() {
     <div className="relative flex h-full items-center gap-1 px-2">
       <IconButton icon={ArrowLeft} label="Back" disabled={!current} onClick={() => void back()} />
       <IconButton icon={ArrowRight} label="Forward" disabled={!current} onClick={() => void forward()} />
-      <IconButton icon={RotateCw} label="Reload" shortcut="⌘R" disabled={!current} onClick={() => void reload()} size={14} />
+      {/* While the page loads the same slot stops it, as in every browser. */}
+      {loading ? (
+        <IconButton icon={X} label="Stop loading" shortcut="Esc" disabled={!current} onClick={() => void stop()} size={14} />
+      ) : (
+        <IconButton icon={RotateCw} label="Reload" shortcut="⌘R" disabled={!current} onClick={() => void reload()} size={14} />
+      )}
       <form
         className="mx-1 flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2"
         onSubmit={(e) => {
@@ -67,16 +89,59 @@ export function Toolbar() {
           className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
         />
       </form>
-      <ZoomBadge />
-      <BookmarkButton />
-      <SharePopover />
-      <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />
-      <IconButton icon={Camera} label="Capture full page" shortcut="⌘⇧S" disabled={!current} onClick={() => void capture(true)} />
-      <IconButton icon={Bug} label="Open DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
-      <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={open.dock} onClick={() => toggle("dock")} />
-      <DownloadsMenu compact />
+      {compact ? (
+        <ToolbarMore>
+          <ZoomBadge />
+          <BookmarkButton />
+          <SharePopover />
+          <IconButton icon={Camera} label="Capture full page" shortcut="⌘⇧S" disabled={!current} onClick={() => void capture(true)} />
+          <IconButton icon={Bug} label="Open DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
+          <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={open.dock && !open.sidecar} onClick={toggleDock} />
+          <DownloadsMenu compact />
+        </ToolbarMore>
+      ) : (
+        <>
+          <ZoomBadge />
+          <BookmarkButton />
+          <SharePopover />
+          <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />
+          <IconButton icon={Camera} label="Capture full page" shortcut="⌘⇧S" disabled={!current} onClick={() => void capture(true)} />
+          <IconButton icon={Bug} label="Open DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
+          <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={open.dock} onClick={toggleDock} />
+          <DownloadsMenu compact />
+        </>
+      )}
       <ProtectionMenu compact />
       {loading && <LoadingLine />}
+    </div>
+  );
+}
+
+/** Secondary page actions collapse into a small tray before the omnibox does. */
+function ToolbarMore({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const key = (event: KeyboardEvent) => event.key === "Escape" && setOpen(false);
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", key);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", key);
+    };
+  }, [open]);
+  return (
+    <div ref={root} className="relative shrink-0">
+      <IconButton icon={MoreHorizontal} label="More page actions" active={open} onClick={() => setOpen((value) => !value)} tooltipAlign="end" />
+      {open && (
+        <div role="dialog" aria-label="Page actions" className="surface-enter absolute top-full right-0 z-50 mt-1 flex items-center gap-0.5 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl">
+          {children}
+        </div>
+      )}
     </div>
   );
 }

@@ -42,12 +42,73 @@ export const commands = {
 	tabReload: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_reload", { id })),
 	/**  Set a tab's zoom factor (clamped to the step range). */
 	tabZoom: (id: TabId, factor: number | null) => typedError<null, AppError>(__TAURI_INVOKE("tab_zoom", { id, factor })),
+	/**  Stop the tab's current load. */
+	tabStop: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_stop", { id })),
+	/**  Open the system print dialog for the tab's page. */
+	tabPrint: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_print", { id })),
+	/**  Move a tab between the Essential, Pinned and Today strips. */
+	tabSetTier: (id: TabId, tier: TabTier) => typedError<null, AppError>(__TAURI_INVOKE("tab_set_tier", { id, tier })),
+	/**  Forget a bookmark by URL. */
+	bookmarkRemove: (url: string) => typedError<boolean, AppError>(__TAURI_INVOKE("bookmark_remove", { url })),
+	/**  Remember or forget a site permission decision. */
+	permissionSet: (origin: string, kind: string, decision: Decision) => typedError<null, AppError>(__TAURI_INVOKE("permission_set", { origin, kind, decision })),
+	/**  Every remembered site permission. */
+	permissionsList: () => typedError<SitePermission[], AppError>(__TAURI_INVOKE("permissions_list")),
+	/**
+	 *  Ask the release channel for a newer build. `None` when this build has
+	 *  no updater (development) or is current.
+	 */
+	updateCheck: () => typedError<{
+	/**  Version string of the update. */
+	version: string,
+	/**  Release notes, if the manifest carried any. */
+	notes: string | null,
+} | null, AppError>(__TAURI_INVOKE("update_check")),
+	/**  Download and install the offered update; the app restarts when done. */
+	updateInstall: () => typedError<null, AppError>(__TAURI_INVOKE("update_install")),
 	/**  Open Chromium's `DevTools` window for a tab. */
 	tabDevtools: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_devtools", { id })),
-	/**  Start recording a tab's screencast frames. */
-	tabScreencastStart: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_screencast_start", { id })),
-	/**  Stop recording and encode the GIF; returns its path. */
-	tabScreencastStop: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_screencast_stop", { id })),
+	/**  Start recording a tab with these options. */
+	tabScreencastStart: (id: TabId, options: RecordOptions) => typedError<null, AppError>(__TAURI_INVOKE("tab_screencast_start", { id, options })),
+	/**  Pause or resume a recording; paused time is cut out of the file. */
+	tabScreencastPause: (id: TabId, paused: boolean) => typedError<null, AppError>(__TAURI_INVOKE("tab_screencast_pause", { id, paused })),
+	/**  Stop recording and encode the file; returns what was written. */
+	tabScreencastStop: (id: TabId) => typedError<RecordingResult, AppError>(__TAURI_INVOKE("tab_screencast_stop", { id })),
+	/**  Throw a recording away without encoding it. */
+	tabScreencastCancel: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_screencast_cancel", { id })),
+	/**  What the recording dialog may offer on this machine. */
+	recordingCapabilities: () => typedError<RecordingCapabilities, AppError>(__TAURI_INVOKE("recording_capabilities")),
+	/**
+	 *  Read a recording as base64 for the preview. Refuses files too large to
+	 *  hold in the chrome's memory; those are opened with the system player.
+	 */
+	recordingRead: (path: string) => typedError<string, AppError>(__TAURI_INVOKE("recording_read", { path })),
+	/**  Open a recording with whatever the system uses for it. */
+	recordingOpen: (path: string) => typedError<null, AppError>(__TAURI_INVOKE("recording_open", { path })),
+	/**  Delete a recording. */
+	recordingDelete: (path: string) => typedError<null, AppError>(__TAURI_INVOKE("recording_delete", { path })),
+	/**  What a recording is, so the editor can open it. */
+	screenMediaInfo: (source: string) => typedError<MediaInfo, AppError>(__TAURI_INVOKE("screen_media_info", { source })),
+	/**  The saved project for a recording, if any. */
+	screenProjectRead: (source: string) => typedError<string | null, AppError>(__TAURI_INVOKE("screen_project_read", { source })),
+	/**  Save the project for a recording. */
+	screenProjectWrite: (source: string, json: string) => typedError<null, AppError>(__TAURI_INVOKE("screen_project_write", { source, json })),
+	/**
+	 *  A piece of a recording (or its companion) as base64, so a large file
+	 *  reaches the chrome without one giant string.
+	 */
+	fileReadChunk: (path: string, offset: number | null, len: number | null) => typedError<string, AppError>(__TAURI_INVOKE("file_read_chunk", { path, offset, len })),
+	/**  Size of a recording or companion, for chunked reads. */
+	fileSize: (path: string) => typedError<number | null, AppError>(__TAURI_INVOKE("file_size", { path })),
+	/**  Open a staging file for the editor's rendered `WebM`; returns its path. */
+	screenExportBegin: () => typedError<string, AppError>(__TAURI_INVOKE("screen_export_begin")),
+	/**  Append a base64 piece to the staging file. */
+	screenExportAppend: (path: string, base64: string) => typedError<null, AppError>(__TAURI_INVOKE("screen_export_append", { path, base64 })),
+	/**
+	 *  Encode the staged render into the final file, with the source's sound
+	 *  cut and sped the same way, and a preview companion beside it.
+	 */
+	screenExportFinish: (request: ExportRequest) => typedError<RecordingResult, AppError>(__TAURI_INVOKE("screen_export_finish", { request })),
 	/**
 	 *  Screenshot a tab (viewport, or the whole document when `full_page`) to a
 	 *  PNG under the app data dir and return its path.
@@ -154,6 +215,12 @@ export const commands = {
 	tabRecordStop: (id: TabId) => __TAURI_INVOKE<RecordedStep[]>("tab_record_stop", { id }),
 	layoutSetContentBounds: (bounds: Bounds) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_bounds", { bounds })),
 	/**
+	 *  Freeze every page shown in the main window before a DOM overlay hides its
+	 *  native child view. Unlike a user capture, these previews stay in memory and
+	 *  never touch the captures folder or clipboard.
+	 */
+	layoutPrepareContentCover: () => typedError<ContentPreview[], AppError>(__TAURI_INVOKE("layout_prepare_content_cover")),
+	/**
 	 *  Hide the native content view while a DOM overlay (dialog, menu, popover)
 	 *  is on screen, since child webviews always paint above the main webview.
 	 */
@@ -243,7 +310,9 @@ export const events = {
 	inspectEvent: makeEvent<InspectEvent>("inspect-event"),
 	menuCommand: makeEvent<MenuCommand>("menu-command"),
 	networkEvent: makeEvent<NetworkEvent>("network-event"),
+	permissionAsked: makeEvent<PermissionAsked>("permission-asked"),
 	recorderEvent: makeEvent<RecorderEvent>("recorder-event"),
+	recordingEvent: makeEvent<RecordingEvent>("recording-event"),
 	stateChanged: makeEvent<StateChanged>("state-changed"),
 	tabCrashed: makeEvent<TabCrashed>("tab-crashed"),
 	tabLoad: makeEvent<TabLoad>("tab-load"),
@@ -422,6 +491,17 @@ export type ConsoleEntry = {
 /**  Identifies a [`Container`]. */
 export type ContainerId = string;
 
+/**
+ *  A frozen viewport shown behind a chrome dialog while its native CEF view
+ *  is hidden. It is ephemeral and never written to disk.
+ */
+export type ContentPreview = {
+	/**  Tab whose viewport was captured. */
+	tab_id: TabId,
+	/**  JPEG data URL ready for an `<img>` in the chrome. */
+	data_url: string,
+};
+
 /**  One cookie. */
 export type Cookie = {
 	/**  Name. */
@@ -456,6 +536,15 @@ export type CoreEvent =
 { type: "tab_closed"; data: TabId } |
 /**  The focused tab changed. */
 { type: "tab_activated"; data: TabId };
+
+/**  What the person decided for one origin and kind. */
+export type Decision =
+/**  Granted. */
+"allow" |
+/**  Refused. */
+"deny" |
+/**  Not decided; the engine refuses and the chrome asks. */
+"ask";
 
 /**  A server that answered. */
 export type DevServer = {
@@ -522,6 +611,24 @@ export type Environment = {
 	timezone: string | null,
 	/**  ICU locale such as `ja_JP`; none clears the override. */
 	locale: string | null,
+};
+
+/**  What the editor asks for when it hands over its rendered frames. */
+export type ExportRequest = {
+	/**  The staged `WebM` the chrome rendered and uploaded. */
+	staged: string,
+	/**  The recording the project belongs to (for its sound). */
+	source: string,
+	/**  `mp4` or `gif`. */
+	format: string,
+	/**  Frames per second of the rendered video. */
+	fps: number,
+	/**  GIF frame rate. */
+	gif_fps: number,
+	/**  Kept stretches, so the sound follows the cuts and speed changes. */
+	segments: KeptSegment[],
+	/**  Take the source's sound along. */
+	with_audio: boolean,
 };
 
 /**  Result of a find step. */
@@ -616,6 +723,13 @@ export type InspectorSnapshot_Serialize = {
 	description: string | null,
 };
 
+/**  One stretch of the source kept in the export, in order. */
+export type KeptSegment = {
+	src_start_ms: number | null,
+	src_end_ms: number | null,
+	speed: number | null,
+};
+
 /**  Outcome of trying a key against its provider. */
 export type KeyCheck = {
 	/**  The provider accepted it. */
@@ -643,6 +757,19 @@ export type LoadPhase =
 "stopped" |
 /**  The document request itself failed (DNS, refused, offline). */
 "failed";
+
+/**  A recording's facts the editor needs before it can draw anything. */
+export type MediaInfo = {
+	duration_ms: number | null,
+	width: number,
+	height: number,
+	/**  Whether the file carries sound. */
+	has_audio: boolean,
+	/**  The decodable companion, if one exists beside the file. */
+	playable: string | null,
+	/**  The pointer track, if one was written. */
+	events: string | null,
+};
 
 /**  Media feature overrides. */
 export type MediaOverrides = {
@@ -683,6 +810,14 @@ export type MetaSnapshot = {
 	twitter: { [key in string]: string },
 	/**  Icon hrefs from `<link rel*="icon">`. */
 	icons: string[],
+};
+
+/**  A microphone ffmpeg can capture from. */
+export type Microphone = {
+	/**  Capture-device id, as ffmpeg wants it. */
+	id: string,
+	/**  What the system calls it. */
+	name: string,
 };
 
 /**  A model a provider offers. */
@@ -812,6 +947,16 @@ export type PaneBounds = {
 	tab: TabId,
 	/**  Its rectangle, relative to the main window. */
 	bounds: Bounds,
+};
+
+/**  A page asked for something no decision covers yet. */
+export type PermissionAsked = {
+	/**  The tab whose page asked. */
+	tab_id: TabId,
+	/**  The page's origin. */
+	origin: string,
+	/**  What it asked for, as in [`SitePermission::kind`]. */
+	kind: string,
 };
 
 /**  What the picker found. */
@@ -985,6 +1130,24 @@ export type ProviderInfo = {
 	note: string,
 };
 
+/**  What the person asked for in the recording dialog. */
+export type RecordOptions = {
+	/**  `mp4` or `gif`. */
+	format: string,
+	/**  Frames per second of the encoded video. */
+	fps: number,
+	/**  Widest the captured frames may be, in CSS pixels. */
+	max_width: number,
+	/**  Microphone to record alongside, by capture-device id; `None` for none. */
+	microphone: string | null,
+	/**
+	 *  `page` (the tab's own paint, through `DevTools`) or `window` (Dive's
+	 *  window as it appears on screen, pointer included, through native
+	 *  screen capture).
+	 */
+	source?: string,
+};
+
 /**  One recorded interaction. */
 export type RecordedStep = {
 	/**  `click` | `type` | `navigate`. */
@@ -1007,6 +1170,58 @@ export type RecorderEvent = {
 	tab_id: TabId,
 	/**  The step. */
 	step: RecordedStep,
+};
+
+/**  What this machine can do, so the dialog offers only what will work. */
+export type RecordingCapabilities = {
+	/**  ffmpeg was found; without it only GIF is possible. */
+	ffmpeg: boolean,
+	/**  Microphones, when ffmpeg can list them. */
+	microphones: Microphone[],
+	/**  Length cap of a video, seconds. */
+	video_max_seconds: number,
+	/**  Length cap of a GIF, seconds. */
+	gif_max_seconds: number,
+};
+
+/**  Something the chrome should react to while a recording runs. */
+export type RecordingEvent = {
+	/**  The tab being recorded. */
+	tab: TabId,
+	/**  `limit` when the length cap was reached and no more frames are kept. */
+	kind: string,
+};
+
+/**  The finished file. */
+export type RecordingResult = {
+	/**  Where it was written. */
+	path: string,
+	/**  Length in seconds, pauses excluded. */
+	duration_secs: number | null,
+	/**  Size on disk. A float because the bindings cannot carry a u64. */
+	bytes: number | null,
+	/**  Pixel size of the encoded picture. */
+	width: number,
+	/**  Pixel size of the encoded picture. */
+	height: number,
+	/**  `mp4` or `gif`. */
+	format: string,
+	/**  Frames captured. */
+	frames: number,
+	/**  Whether a microphone track is in the file. */
+	has_audio: boolean,
+	/**
+	 *  Pointer positions and clicks over the recording, for the editor's
+	 *  cursor and zoom effects. A JSON sidecar; `None` when nothing was
+	 *  tracked (window captures carry the pointer in the picture already).
+	 */
+	events: string | null,
+	/**
+	 *  A small `WebM` the chrome can play, beside the MP4: the embedded
+	 *  Chromium ships without H.264, so the file itself cannot be previewed.
+	 *  `None` for a GIF, which previews as is.
+	 */
+	preview: string | null,
 };
 
 /**  What to send. Starts as the captured request; the user may edit it. */
@@ -1069,6 +1284,19 @@ export type ShareInfo = {
 	lan_url: string,
 	/**  SVG markup of a QR code for `lan_url`. */
 	qr_svg: string,
+};
+
+/**  A remembered decision, for the settings UI. */
+export type SitePermission = {
+	/**  Scheme and host the decision applies to. */
+	origin: string,
+	/**
+	 *  `camera`, `microphone`, `geolocation`, `notifications`,
+	 *  `clipboard_read` or `display_capture`.
+	 */
+	kind: string,
+	/**  The decision. */
+	decision: Decision,
 };
 
 /**  Everything the chrome needs to render on boot. */
@@ -1241,6 +1469,14 @@ export type ToolStep = {
 	action: boolean,
 	/**  Playwright-style locator for the target, when the tool used a ref. */
 	locator: string | null,
+};
+
+/**  An update the release channel offers. */
+export type UpdateInfo = {
+	/**  Version string of the update. */
+	version: string,
+	/**  Release notes, if the manifest carried any. */
+	notes: string | null,
 };
 
 /**  Token accounting for one reply. */

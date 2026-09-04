@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { events, ipc } from "../lib/ipc";
-import { Welcome } from "./Welcome";
+import { Welcome, visibleDevServers } from "./Welcome";
 
 // The feature reel is a Remotion Player with its own tests; jsdom cannot
 // drive it and this test is about the background layer.
@@ -43,6 +43,18 @@ afterEach(() => {
 });
 
 describe("Welcome", () => {
+  it("prioritizes recognized tools and caps the initial server list", () => {
+    const servers = [
+      { port: 9334, url: "http://localhost:9334", framework: "HTTP", title: "", process: "node", pid: 1 },
+      { port: 3000, url: "http://localhost:3000", framework: "Next.js", title: "App", process: "node", pid: 2 },
+      { port: 5173, url: "http://localhost:5173", framework: "Vite", title: "UI", process: "node", pid: 3 },
+      { port: 4173, url: "http://localhost:4173", framework: "Vite preview", title: "", process: "node", pid: 4 },
+    ];
+
+    expect(visibleDevServers(servers, false).map((server) => server.port)).toEqual([3000, 5173, 4173]);
+    expect(visibleDevServers(servers, true)).toHaveLength(4);
+  });
+
   it("releases the dev-server listener even when it resolves after unmount", async () => {
     const unlisten = vi.fn();
     let resolveListen: (u: () => void) => void = () => undefined;

@@ -140,7 +140,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
                   ? "Page context is included with each message. Click to send only prompt."
                   : "Page context is off. Click to include tab DOM, title, URL and console."
               }
-              className={`flex h-6 min-w-0 max-w-[65%] items-center gap-1.5 rounded-full border px-2 text-[10.5px] transition-all ${
+              className={`flex h-6 min-w-0 max-w-[65%] items-center gap-1.5 rounded-full border px-2 text-[10.5px] transition-[color,background-color,border-color,box-shadow,opacity] ${
                 includePage
                   ? "border-line-2 bg-surface-3 text-ink shadow-2xs"
                   : "border-dashed border-line text-ink-3 line-through opacity-70"
@@ -164,7 +164,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
         </div>
 
         {/* Composer Card */}
-        <div className="rounded-2xl border border-line-2 bg-surface-2/90 p-2.5 shadow-sm focus-within:border-highlight/60 focus-within:ring-1 focus-within:ring-highlight/30 transition-all">
+        <div className="rounded-2xl border border-line-2 bg-surface-2/90 p-2.5 shadow-sm transition-[border-color,box-shadow] focus-within:border-highlight/60 focus-within:ring-1 focus-within:ring-highlight/30">
           <textarea
             ref={textRef}
             value={draft}
@@ -203,7 +203,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
                 aria-label="Send"
                 disabled={!draft.trim()}
                 onClick={() => submit()}
-                className="grid size-7 place-items-center rounded-full bg-accent text-accent-ink hover:opacity-90 disabled:opacity-35 transition-all active:scale-95 shadow-xs"
+                className="grid size-7 place-items-center rounded-full bg-accent text-accent-ink shadow-xs transition-[opacity,transform] hover:opacity-90 disabled:opacity-35 active:scale-95"
               >
                 <Icon icon={ArrowUp} size={14} />
               </button>

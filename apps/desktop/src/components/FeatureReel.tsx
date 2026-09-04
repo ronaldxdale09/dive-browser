@@ -15,6 +15,7 @@ import { FPS, HEIGHT, WIDTH } from "../video/primitives";
  */
 export function FeatureReel() {
   const ref = useRef<PlayerRef>(null);
+  const root = useRef<HTMLDivElement>(null);
   const reduced = useReducedMotion();
 
   // Thirty React renders a second are not free; stop when the window is
@@ -28,19 +29,29 @@ export function FeatureReel() {
       player.seekTo(POSTER_FRAME);
       return;
     }
-    if (!document.hidden) player.play();
-    const onVisibility = () => {
+    let inView = true;
+    const sync = () => {
       const player = ref.current;
       if (!player) return;
-      if (document.hidden) player.pause();
+      if (document.hidden || !inView) player.pause();
       else player.play();
     };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
+    const observer = new IntersectionObserver(([entry]) => {
+      inView = entry?.isIntersecting ?? true;
+      sync();
+    }, { rootMargin: "120px" });
+    if (root.current) observer.observe(root.current);
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", sync);
+    };
   }, [reduced]);
 
   return (
     <div
+      ref={root}
       role="img"
       aria-label="A tour of what Dive can do: workspaces, coding agents, an agent that acts, network and console inspection, mock rules, a mobile simulator, GIF recording, full-page capture, a Playwright recorder, bug reports and local server sharing."
       className="w-full overflow-hidden rounded-2xl border border-line bg-surface shadow-[0_40px_90px_-50px_rgba(0,0,0,.8)]"

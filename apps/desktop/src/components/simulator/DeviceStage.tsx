@@ -10,13 +10,14 @@
 import { Camera, Maximize2, MonitorSmartphone, RotateCw, Smartphone, X, ZoomIn } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ipc } from "../../lib/ipc";
+import { useContentPreview } from "../../lib/overlay";
 import { useBrowser } from "../../store/browser";
-import { baseFor, selectMedia, useEmulation } from "../../store/emulation";
+import { baseFor, selectEnvironment, selectMedia, selectThrottle, useEmulation } from "../../store/emulation";
 import type { DeviceSelection } from "../../store/emulation";
+import { usePicker } from "../../store/simulator";
 import { IconButton } from "../Icon";
 import { useBarsDark } from "./Chrome";
 import { DeviceFrame } from "./DeviceFrame";
-import { usePicker } from "./DevicePicker";
 import { captureFramed } from "./frameCapture";
 import { layoutFor } from "./geometry";
 import type { UiMode, Zoom } from "./geometry";
@@ -39,6 +40,8 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
   const [available, setAvailable] = useState({ width: 0, height: 0 });
   const tab = useBrowser((s) => s.tabs.find((t) => t.id === tabId));
   const media = useEmulation(selectMedia(tabId));
+  const throttle = useEmulation(selectThrottle(tabId));
+  const environment = useEmulation(selectEnvironment(tabId));
   const setScale = useEmulation((s) => s.setScale);
   const toggleLandscape = useEmulation((s) => s.toggleLandscape);
   const setZoom = useEmulation((s) => s.setZoom);
@@ -47,6 +50,7 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
   const openPicker = usePicker((s) => s.setOpen);
   const setNotice = useCallback((notice: string | null) => useBrowser.setState({ notice }), []);
   const dark = useBarsDark(sel.ui, media.colorScheme);
+  const preview = useContentPreview(tabId);
 
   useEffect(() => {
     const el = stage.current;
@@ -62,11 +66,12 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
 
   const device = baseFor(sel);
   const layout = device && available.width > 0 ? layoutFor(device, sel.landscape, sel.ui, sel.zoom, available) : null;
+  const layoutScale = layout?.scale;
 
   // The engine hears the scale after the stage has measured it, never a guess.
   useEffect(() => {
-    if (layout) void setScale(tabId, layout.scale);
-  }, [layout?.scale, tabId, setScale, layout]);
+    if (layoutScale !== undefined) void setScale(tabId, layoutScale);
+  }, [layoutScale, tabId, setScale]);
 
   const onPageRect = useCallback((rect: { x: number; y: number; width: number; height: number }) => {
     void ipc.setContentBounds(rect).catch(() => undefined);
@@ -91,6 +96,7 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
   const nextZoom = ZOOMS[(ZOOMS.indexOf(sel.zoom) + 1) % ZOOMS.length] ?? "fit";
   const nextUi = UI_MODES[(UI_MODES.findIndex((m) => m.id === sel.ui) + 1) % UI_MODES.length]?.id ?? "browser";
   const uiLabel = UI_MODES.find((m) => m.id === sel.ui)?.label ?? "Browser";
+  const conditions = [media.colorScheme, media.reducedMotion ? "reduced motion" : null, media.print ? "print" : null, throttle, environment.place].filter(Boolean).join(" · ");
 
   const snapshot = async () => {
     try {
@@ -104,6 +110,12 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
 
   return (
     <div ref={stage} className="relative flex min-h-0 min-w-0 items-stretch bg-ground">
+      {conditions && (
+        <button type="button" onClick={() => openPicker(true)} className="pressable absolute bottom-2 left-2 z-10 max-w-[calc(100%-60px)] truncate rounded-full border border-line-2 bg-surface/90 px-2.5 py-1 font-mono text-[9.5px] text-ink-2 shadow-lg backdrop-blur-md" title="Edit emulation conditions">
+          <span className="mr-1.5 inline-block size-1.5 rounded-full bg-highlight" aria-hidden />
+          {conditions}
+        </button>
+      )}
       <div className="scroll-hidden grid min-w-0 flex-1 place-items-center overflow-auto p-6" style={{ background: "radial-gradient(ellipse at 50% 40%, rgba(255,255,255,0.035), transparent 60%)" }}>
         {layout && (
           <DeviceFrame
@@ -114,22 +126,23 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
             dark={dark}
             url={url}
             secure={secure}
+            preview={preview}
             onPageRect={onPageRect}
             caption={`${device.name} · ${layout.viewport.width}×${layout.viewport.height} @${device.dpr}x · ${Math.round(layout.scale * 100)}%`}
           />
         )}
       </div>
       <div className="flex shrink-0 flex-col items-center gap-1 border-l border-line py-2" style={{ width: TOOLS_WIDTH }}>
-        <IconButton icon={Smartphone} label="Choose device" onClick={() => openPicker(true)} tooltipAlign="end" />
-        <IconButton icon={RotateCw} label="Rotate" shortcut="R" disabled={sel.deviceId === "custom"} onClick={() => void toggleLandscape(tabId)} tooltipAlign="end" />
-        <IconButton icon={MonitorSmartphone} label={`Around the page: ${uiLabel}`} disabled={isLaptop} onClick={() => void setUi(tabId, nextUi)} tooltipAlign="end" active={sel.ui !== "browser" && !isLaptop} />
+        <IconButton icon={Smartphone} label="Choose device" onClick={() => openPicker(true)} tooltipSide="left" />
+        <IconButton icon={RotateCw} label="Rotate" shortcut="R" disabled={sel.deviceId === "custom"} onClick={() => void toggleLandscape(tabId)} tooltipSide="left" />
+        <IconButton icon={MonitorSmartphone} label={`Around the page: ${uiLabel}`} disabled={isLaptop} onClick={() => void setUi(tabId, nextUi)} tooltipSide="left" active={sel.ui !== "browser" && !isLaptop} />
         <Tool label={`Zoom ${zoomLabel}`} onClick={() => setZoom(tabId, nextZoom)}>
           <ZoomIn size={15} strokeWidth={1.75} aria-hidden />
         </Tool>
-        <IconButton icon={Maximize2} label="Fit to window" active={sel.zoom === "fit"} onClick={() => setZoom(tabId, "fit")} tooltipAlign="end" />
-        <IconButton icon={Camera} label="Screenshot with device frame" onClick={() => void snapshot()} tooltipAlign="end" />
+        <IconButton icon={Maximize2} label="Fit to window" active={sel.zoom === "fit"} onClick={() => setZoom(tabId, "fit")} tooltipSide="left" />
+        <IconButton icon={Camera} label="Screenshot with device frame" onClick={() => void snapshot()} tooltipSide="left" />
         <span className="flex-1" />
-        <IconButton icon={X} label="Leave the simulator" onClick={() => void setDevice(tabId, null)} tooltipAlign="end" />
+        <IconButton icon={X} label="Leave the simulator" onClick={() => void setDevice(tabId, null)} tooltipSide="left" />
       </div>
     </div>
   );

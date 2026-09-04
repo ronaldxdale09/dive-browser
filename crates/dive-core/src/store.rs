@@ -660,6 +660,30 @@ impl Store {
             .map_err(Into::into)
     }
 
+    /// Every setting whose key starts with `prefix`, as `(key, value)` pairs.
+    pub fn settings_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT key, value FROM settings WHERE key LIKE ?1 ESCAPE '\\' ORDER BY key",
+        )?;
+        let pattern = format!(
+            "{}%",
+            prefix
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        );
+        let rows = stmt.query_map([pattern], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Forget a setting; `Ok(false)` when there was none.
+    pub fn remove_setting(&self, key: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .execute("DELETE FROM settings WHERE key = ?1", [key])?
+            == 1)
+    }
+
     /// Write a setting.
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
         self.conn.execute(
@@ -1301,5 +1325,25 @@ mod tests {
         assert!(backup.is_file(), "no backup at {}", backup.display());
         assert_eq!(Store::file_version(&backup).unwrap(), 3);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn settings_can_be_listed_by_prefix_and_removed() {
+        let store = Store::in_memory().unwrap();
+        store
+            .set_setting("perm:https://a.dev:camera", "allow")
+            .unwrap();
+        store.set_setting("perm:https://b.dev:mic", "deny").unwrap();
+        store.set_setting("zoom:https://a.dev", "1.25").unwrap();
+        let perms = store.settings_with_prefix("perm:").unwrap();
+        assert_eq!(perms.len(), 2);
+        assert_eq!(perms[0].0, "perm:https://a.dev:camera");
+        assert!(store.remove_setting("perm:https://b.dev:mic").unwrap());
+        assert!(!store.remove_setting("perm:https://b.dev:mic").unwrap());
+        assert_eq!(store.settings_with_prefix("perm:").unwrap().len(), 1);
+        // A literal underscore in the prefix must not act as a wildcard.
+        store.set_setting("a_b", "1").unwrap();
+        store.set_setting("axb", "2").unwrap();
+        assert_eq!(store.settings_with_prefix("a_").unwrap().len(), 1);
     }
 }

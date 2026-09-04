@@ -1,14 +1,17 @@
-import { ChevronDown, CircleDot, Square, Video } from "lucide-react";
+import { ArrowDownToLine, ChevronDown, Loader2, Pause, Play, Square, Video, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import { useBrowser } from "../store/browser";
+import { useUpdates } from "../store/updates";
 import { selectErrorCount, useConsole } from "../store/console";
-import { useRecorder } from "../store/recorder";
+import { elapsedSeconds, useRecording } from "../store/recording";
+import { recordingClock } from "../lib/recordingFormat";
 import { DeviceMenu } from "./DeviceMenu";
 import { Icon, IconButton } from "./Icon";
 import { Tooltip } from "./Tooltip";
 import { AgentIcon } from "./agent/AgentIcon";
+import { usePicker } from "../store/simulator";
 
 /**
  * Below this many pixels of title bar, the labelled buttons drop their words.
@@ -39,20 +42,21 @@ function useNarrow(ref: RefObject<HTMLElement | null>): boolean {
 
 /**
  * The title-bar action cluster: the features people reach for by name —
- * record, the device emulator, test interaction recorder, the agent.
+ * record, the device emulator, the agent.
  */
-export function FeatureBar() {
+export function FeatureBar({ compact = false }: { compact?: boolean }) {
   const toggle = useBrowser((s) => s.toggle);
   const ref = useRef<HTMLDivElement>(null);
-  const narrow = useNarrow(ref);
+  const measuredNarrow = useNarrow(ref);
+  const narrow = compact || measuredNarrow;
 
   return (
     <div ref={ref} data-narrow={narrow || undefined} className="flex h-full shrink-0 items-center gap-0.5 pr-2">
       <RecordAction compact={narrow} />
-      <TestRecorderAction compact={narrow} />
       {narrow ? <DeviceMenu /> : <DeviceMenu label="Mobile" />}
       <AgentAction compact={narrow} />
       <span className="mx-1.5 h-4 w-px bg-line-2" aria-hidden />
+      <UpdatePill compact={narrow} />
       {import.meta.env.DEV && (
         <span
           aria-label="Development environment"
@@ -63,8 +67,32 @@ export function FeatureBar() {
           DEV
         </span>
       )}
-      <IconButton icon={ChevronDown} label="All tabs" onClick={() => toggle("palette", true)} size={14} tooltipAlign="end" />
+      <IconButton icon={ChevronDown} label="All tabs" onClick={() => toggle("palette", true)} size={14} tooltipAlign="end" tooltipSide="bottom" />
     </div>
+  );
+}
+
+/**
+ * A newer build is waiting. A pill rather than a dialog: it sits here until
+ * the person has a moment, and opens the About panel that installs it.
+ */
+function UpdatePill({ compact }: { compact: boolean }) {
+  const status = useUpdates((s) => s.status);
+  const version = useUpdates((s) => s.update?.version);
+  const openSettings = useBrowser((s) => s.openSettings);
+  if (status !== "available") return null;
+  return (
+    <Tooltip label={`Dive ${version ?? ""} is ready to install`} side="bottom">
+      <button
+        type="button"
+        aria-label="Update available"
+        onClick={() => openSettings("about")}
+        className="mr-1 flex h-6 shrink-0 items-center gap-1 rounded-full border border-highlight/40 bg-highlight/15 px-2 text-[10.5px] font-medium text-highlight hover:bg-highlight/25"
+      >
+        <Icon icon={ArrowDownToLine} size={11} />
+        {!compact && "Update available"}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -79,6 +107,7 @@ export function FeatureButton({
   disabled = false,
   tone = "quiet",
   iconOnly = false,
+  tooltipAlign,
   children,
 }: {
   icon: LucideIcon;
@@ -92,11 +121,12 @@ export function FeatureButton({
   tone?: "quiet" | "hi" | "danger";
   /** Round glyph-only button for the address row; the label becomes the tooltip. */
   iconOnly?: boolean;
+  tooltipAlign?: "start" | "center" | "end";
   children?: ReactNode;
 }) {
   const color = tone === "danger" ? "text-danger" : tone === "hi" ? "text-highlight" : "text-ink-2";
   return (
-    <Tooltip label={tip ?? label} shortcut={shortcut}>
+    <Tooltip label={tip ?? label} shortcut={shortcut} side="bottom" align={tooltipAlign}>
       <button
         type="button"
         aria-label={tip ?? label}
@@ -105,8 +135,8 @@ export function FeatureButton({
         onClick={onClick}
         className={
           iconOnly
-            ? `relative grid size-7 place-items-center rounded-full transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink ${color}`
-            : `flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11.5px] transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink ${color}`
+            ? `pressable relative grid size-7 place-items-center rounded-full transition-[color,background-color,transform] duration-150 hover:bg-surface-3 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink ${color}`
+            : `pressable flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11.5px] transition-[color,background-color,transform] duration-150 hover:bg-surface-2 hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink ${color}`
         }
       >
         <Icon icon={icon} size={iconOnly ? 15 : 13} />
@@ -117,58 +147,92 @@ export function FeatureButton({
   );
 }
 
-/** Start/stop recording the active tab as a GIF; pulses while recording. */
+/**
+ * Record: opens the setup dialog when idle; while a recording runs it turns
+ * into the recording's controls (time, pause, stop, discard) so they are
+ * always on screen without covering the page.
+ */
 function RecordAction({ compact }: { compact: boolean }) {
   const active = useBrowser((s) => s.activeTab);
-  const recordingTab = useBrowser((s) => s.recordingTab);
-  const toggle = useBrowser((s) => s.screencastToggle);
-  const recording = recordingTab !== null;
+  const phase = useRecording((s) => s.phase);
+  const openSetup = useRecording((s) => s.openSetup);
+  if (phase === "countdown" || phase === "recording" || phase === "paused" || phase === "finishing") {
+    return <RecordingHud compact={compact} />;
+  }
   return (
     <FeatureButton
-      icon={recording ? Square : Video}
-      label={recording ? "Stop" : "Record"}
-      tip={recording ? "Stop recording" : "Record tab as GIF"}
+      icon={Video}
+      label="Record"
+      tip="Record a tab as video or GIF"
       shortcut="⌘⇧R"
-      tone={recording ? "danger" : "quiet"}
-      active={recording}
-      disabled={!active && !recording}
+      disabled={!active}
       iconOnly={compact}
-      onClick={() => void toggle()}
-    >
-      {recording && <span className="size-1.5 animate-pulse rounded-full bg-danger motion-reduce:animate-none" aria-hidden />}
-    </FeatureButton>
+      onClick={() => openSetup()}
+    />
   );
 }
 
-/** Start/stop recording user interactions into a Playwright test. */
-function TestRecorderAction({ compact }: { compact: boolean }) {
-  const active = useBrowser((s) => s.activeTab);
-  const recordingTab = useRecorder((s) => s.recordingTab);
-  const start = useRecorder((s) => s.start);
-  const stop = useRecorder((s) => s.stop);
-  const steps = useRecorder((s) => s.steps);
-  const recording = recordingTab !== null;
+/** The live controls of a recording in progress. */
+function RecordingHud({ compact }: { compact: boolean }) {
+  const phase = useRecording((s) => s.phase);
+  const countdown = useRecording((s) => s.countdown);
+  const pause = useRecording((s) => s.pause);
+  const resume = useRecording((s) => s.resume);
+  const stop = useRecording((s) => s.stop);
+  const cancel = useRecording((s) => s.cancel);
+  const elapsed = useElapsed(phase === "recording");
+  const paused = phase === "paused";
 
+  if (phase === "countdown") {
+    return (
+      <div role="status" aria-live="polite" className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 pr-1 pl-2.5 text-[11.5px] text-ink">
+        <span className="size-2 rounded-full bg-danger" aria-hidden />
+        {compact ? countdown : `Recording in ${countdown}…`}
+        <IconButton icon={X} label="Cancel recording" size={13} onClick={() => void cancel()} />
+      </div>
+    );
+  }
+  if (phase === "finishing") {
+    return (
+      <div role="status" aria-live="polite" className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 px-2.5 text-[11.5px] text-ink-2">
+        <Icon icon={Loader2} size={13} className="motion-safe:animate-spin" />
+        {!compact && "Saving…"}
+      </div>
+    );
+  }
   return (
-    <FeatureButton
-      icon={recording ? Square : CircleDot}
-      label={recording ? `Test (${steps.length})` : "Record Test"}
-      tip={recording ? "Stop and export Playwright test" : "Record clicks and input to Playwright test"}
-      tone={recording ? "hi" : "quiet"}
-      active={recording}
-      disabled={!active && !recording}
-      iconOnly={compact}
-      onClick={() => {
-        if (recording) {
-          void stop();
-        } else if (active) {
-          void start(active);
-        }
-      }}
-    >
-      {recording && <span className="size-1.5 animate-pulse rounded-full bg-highlight motion-reduce:animate-none" aria-hidden />}
-    </FeatureButton>
+    <div role="group" aria-label={paused ? "Recording paused" : "Recording"} className={`flex h-7 items-center gap-1 rounded-lg pr-1 pl-2.5 text-[11.5px] ${paused ? "bg-surface-2 text-ink-2" : "bg-danger/15 text-ink"}`}>
+      <span className={`size-2 rounded-full ${paused ? "bg-ink-3" : "bg-danger motion-safe:animate-pulse"}`} aria-hidden />
+      <span className="min-w-8 font-mono tabular-nums" aria-live="off">
+        {recordingClock(elapsed)}
+      </span>
+      {paused && !compact && <span className="text-ink-3">paused</span>}
+      <IconButton icon={paused ? Play : Pause} label={paused ? "Resume recording" : "Pause recording"} size={13} onClick={() => void (paused ? resume() : pause())} />
+      <Tooltip label="Stop and save" shortcut="⌘⇧R">
+        <button type="button" aria-label="Stop and save" onClick={() => void stop()} className="grid size-7 place-items-center rounded-full text-danger transition-colors hover:bg-danger/20">
+          <Icon icon={Square} size={12} className="fill-current" />
+        </button>
+      </Tooltip>
+      <IconButton icon={X} label="Discard recording" size={13} onClick={() => void cancel()} />
+    </div>
   );
+}
+
+/** Seconds recorded, ticking while recording; frozen at the pause while paused. */
+function useElapsed(ticking: boolean): number {
+  const [tick, setTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!ticking) return;
+    // The label is whole seconds, so repainting it four times a second only
+    // burns chrome work without changing what the person can read.
+    const id = window.setInterval(() => setTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [ticking]);
+  const startedAt = useRecording((s) => s.startedAt);
+  const pausedAt = useRecording((s) => s.pausedAt);
+  const pausedTotal = useRecording((s) => s.pausedTotal);
+  // Paused: the clock reads exactly the moment of the pause.
+  return elapsedSeconds({ startedAt, pausedAt, pausedTotal }, ticking ? tick : (pausedAt ?? tick));
 }
 
 /** Opens the agent sidecar; carries the active tab's error count while it is closed. */
@@ -176,18 +240,25 @@ function AgentAction({ compact }: { compact: boolean }) {
   const activeTab = useBrowser((s) => s.activeTab);
   const open = useBrowser((s) => s.open.sidecar);
   const toggle = useBrowser((s) => s.toggle);
+  const setPickerOpen = usePicker((s) => s.setOpen);
   const errorCount = useConsole(selectErrorCount(activeTab));
   return (
-    <Tooltip label="Agent" shortcut="⌘J" align="end">
+    <Tooltip label="Agent" shortcut="⌘J" align="end" side="bottom">
       <button
         type="button"
         aria-label="Agent"
         aria-pressed={open}
-        onClick={() => toggle("sidecar")}
+        onClick={() => {
+          if (compact && !open) {
+            setPickerOpen(false);
+            toggle("dock", false);
+          }
+          toggle("sidecar");
+        }}
         className={
           compact
-            ? `relative ml-0.5 grid size-7 place-items-center rounded-full transition-colors ${open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-3 hover:text-ink"}`
-            : `ml-0.5 flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] font-medium transition-colors ${
+            ? `pressable relative ml-0.5 grid size-7 place-items-center rounded-full transition-[color,background-color,transform] ${open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-3 hover:text-ink"}`
+            : `pressable ml-0.5 flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] font-medium transition-[color,background-color,transform] ${
                 open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
               }`
         }

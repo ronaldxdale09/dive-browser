@@ -165,6 +165,11 @@ type RGBA = [number, number, number, number];
 function parseColor(input: string | undefined, fb: RGBA): RGBA {
   if (!input) return fb;
   const str = String(input).trim();
+  const variable = str.match(/^var\((--[^)]+)\)$/);
+  if (variable && typeof document !== "undefined") {
+    const resolved = getComputedStyle(document.documentElement).getPropertyValue(variable[1]!).trim();
+    return resolved ? parseColor(resolved, fb) : fb;
+  }
   if (str.charAt(0) === "#") {
     let hex = str.slice(1);
     if (hex.length === 3 || hex.length === 4) {
@@ -231,8 +236,8 @@ export function OrbBurst(props: OrbBurstProps) {
   const {
     style,
     className,
-    dotColor = "#ECECEC",
-    accentColor = "#7FD8C8",
+    dotColor = "var(--color-ink)",
+    accentColor = "var(--color-highlight)",
     density = 300,
     dotSize = 150,
     speed = 50,

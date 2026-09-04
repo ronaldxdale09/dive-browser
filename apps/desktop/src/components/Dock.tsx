@@ -1,4 +1,4 @@
-import { Accessibility, Activity, Ban, ClipboardList, Database, ExternalLink, FileSearch, Network, Shuffle, Terminal } from "lucide-react";
+import { Accessibility, Activity, Ban, ClipboardList, Database, ExternalLink, FileSearch, Network, Shuffle, Terminal, X } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useLayout } from "../store/layout";
@@ -33,25 +33,29 @@ export function Dock() {
   // come back to.
   const panel: PanelId = useLayout((s) => s.dockPanel);
   const setPanel = useLayout((s) => s.setDockPanel);
+  const toggle = useBrowser((s) => s.toggle);
   return (
     <section aria-label="Developer dock" className="flex min-h-0 flex-col bg-surface">
-      <div className="flex items-center gap-1 px-2 pt-2 pb-1">
-        {PANELS.map((p) => (
+      <div className="flex min-w-0 items-center gap-1 px-2 pt-2 pb-1">
+        <div className="scroll-hidden flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          {PANELS.map((p) => (
           <button
             key={p.id}
             type="button"
             aria-pressed={panel === p.id}
             onClick={() => setPanel(p.id)}
-            className="flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs text-ink-3 hover:bg-surface-2 hover:text-ink aria-pressed:bg-surface-3 aria-pressed:text-ink"
+            className="pressable flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs text-ink-3 hover:bg-surface-2 hover:text-ink aria-pressed:bg-surface-3 aria-pressed:text-ink"
           >
             <Icon icon={p.icon} size={13} />
             {p.label}
           </button>
-        ))}
-        <span className="flex-1" />
+          ))}
+        </div>
         {panel === "console" && <ConsoleTools />}
         {panel === "network" && <NetworkTools />}
         {panel === "rules" && <RulesTools />}
+        <span className="mx-0.5 h-4 w-px shrink-0 bg-line-2" aria-hidden />
+        <IconButton icon={X} label="Close developer dock" size={13} onClick={() => toggle("dock", false)} tooltipAlign="end" />
       </div>
       {panel === "console" && <ConsolePanel />}
       {panel === "network" && <NetworkPanel />}

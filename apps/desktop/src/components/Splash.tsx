@@ -1,12 +1,15 @@
-import { useEffect, useState } from "react";
-import { OrbBurst } from "./OrbBurst";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useBrowser } from "../store/browser";
 import { useCoversContent } from "../lib/overlay";
 
-/** Shortest time the splash stays up, so a fast boot doesn't flash it. */
-const MIN_MS = 900;
-/** Length of the fade-out; must match the transition duration below. */
-const FADE_MS = 420;
+const OrbBurst = lazy(() => import("./OrbBurst").then(({ OrbBurst }) => ({ default: OrbBurst })));
+
+/** A fast boot never paints a splash at all. */
+export const SPLASH_DELAY_MS = 160;
+/** Once shown, stay long enough to read as intentional rather than a flash. */
+export const SPLASH_MIN_VISIBLE_MS = 180;
+/** Fast compositor-only exit. */
+export const SPLASH_FADE_MS = 160;
 
 /**
  * Full-window loading cover shown until the store has its first snapshot back
@@ -15,37 +18,52 @@ const FADE_MS = 420;
  */
 export function Splash() {
   const ready = useBrowser((s) => s.ready);
-  const [held, setHeld] = useState(true);
+  const [visible, setVisible] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const [gone, setGone] = useState(false);
-  useCoversContent(!gone);
+  const shownAt = useRef(0);
+  useCoversContent(visible && !gone);
 
   useEffect(() => {
-    const t = setTimeout(() => setHeld(false), MIN_MS);
+    if (ready) return;
+    const t = setTimeout(() => {
+      shownAt.current = Date.now();
+      setVisible(true);
+    }, SPLASH_DELAY_MS);
     return () => clearTimeout(t);
-  }, []);
+  }, [ready]);
 
-  const leaving = ready && !held;
   useEffect(() => {
-    if (!leaving) return;
-    const t = setTimeout(() => setGone(true), FADE_MS);
-    return () => clearTimeout(t);
-  }, [leaving]);
+    if (!ready || !visible) return;
+    const hold = Math.max(0, SPLASH_MIN_VISIBLE_MS - (Date.now() - shownAt.current));
+    let fade: ReturnType<typeof setTimeout> | undefined;
+    const leave = setTimeout(() => {
+      setLeaving(true);
+      fade = setTimeout(() => setGone(true), SPLASH_FADE_MS);
+    }, hold);
+    return () => {
+      clearTimeout(leave);
+      if (fade) clearTimeout(fade);
+    };
+  }, [ready, visible]);
 
-  if (gone) return null;
+  if (gone || (ready && !visible)) return null;
 
   return (
     <div
       aria-hidden
-      className="fixed inset-0 z-50 grid place-items-center bg-ground transition-opacity duration-[420ms] ease-out"
-      style={{ opacity: leaving ? 0 : 1 }}
+      className="fixed inset-0 z-50 grid place-items-center bg-ground transition-opacity duration-150 ease-out"
+      style={{ opacity: visible && !leaving ? 1 : 0, pointerEvents: visible && !leaving ? "auto" : "none" }}
     >
-      <div className="flex flex-col items-center">
-        <OrbBurst width={260} height={260} pointer={{ drag: 0 }} />
+      {visible && <div className="flex flex-col items-center">
+        <Suspense fallback={<div className="size-[260px]" aria-hidden />}>
+          <OrbBurst width={260} height={260} pointer={{ drag: 0 }} />
+        </Suspense>
         <p className="-mt-2 text-base font-semibold tracking-tight">Dive</p>
         <p className="mt-1 font-mono text-[11px] tracking-[0.14em] text-ink-3 uppercase">
           Starting engine
         </p>
-      </div>
+      </div>}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { Plus, Settings2 } from "lucide-react";
+import { Plus, Settings2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { isReady, useAgent } from "../store/agent";
 import { useBrowser } from "../store/browser";
@@ -43,8 +43,7 @@ export function Sidecar() {
   return (
     <aside aria-label="Agent" className="flex min-h-0 flex-col bg-surface select-none">
       {/* Header */}
-      {(!showSetup || !ready) && (
-        <div className="flex h-10 items-center gap-2 border-b border-line px-3 shrink-0">
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
           <AgentIcon size={14} className="text-highlight shrink-0" />
           <h2 className="text-xs font-semibold text-ink">Agent</h2>
 
@@ -74,10 +73,16 @@ export function Sidecar() {
               />
             </>
           )}
+          <IconButton icon={X} label="Close agent" size={14} onClick={() => toggle("sidecar", false)} tooltipAlign="end" />
+      </div>
+
+      {!loaded && (
+        <div role="status" aria-label="Loading agent" className="skeleton-enter flex flex-1 flex-col gap-3 p-3">
+          <div className="h-20 rounded-xl bg-surface-2" />
+          <div className="h-12 rounded-xl bg-surface-2/70" />
+          <div className="mt-auto h-20 rounded-xl border border-line bg-surface-2/50" />
         </div>
       )}
-
-      {!loaded && <div className="flex-1" />}
       {loaded && showSetup && <Setup canGoBack={ready} onDone={() => setWantsSetup(false)} />}
       {loaded && !showSetup && <Thread onAddProvider={() => setWantsSetup(true)} />}
     </aside>

@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import { contentCoverDepth, resetContentCover } from "../lib/overlay";
@@ -10,6 +10,7 @@ beforeEach(() => {
   resetContentCover();
   useRecorder.setState({ isOpen: false, steps: [], recordingTab: null });
   useBrowser.setState({ tabs: [], activeTab: null });
+  vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
 });
 
@@ -29,13 +30,13 @@ describe("RecorderModal", () => {
     expect(ipc.setContentCovered).not.toHaveBeenCalled();
   });
 
-  it("covers the page only while it is open, and releases it on close", () => {
+  it("covers the page only while it is open, and releases it on close", async () => {
     render(<RecorderModal />);
 
     act(() => useRecorder.setState({ isOpen: true, steps: [] }));
     expect(screen.getByRole("dialog", { name: "Recorded Test" })).toBeTruthy();
     expect(contentCoverDepth()).toBe(1);
-    expect(ipc.setContentCovered).toHaveBeenLastCalledWith(true);
+    await waitFor(() => expect(ipc.setContentCovered).toHaveBeenLastCalledWith(true));
 
     act(() => useRecorder.setState({ isOpen: false }));
     expect(screen.queryByRole("dialog")).toBeNull();

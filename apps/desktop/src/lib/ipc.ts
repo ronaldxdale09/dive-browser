@@ -5,13 +5,13 @@
 import { Channel } from "@tauri-apps/api/core";
 import type { ChatDelta, SendOptions } from "../generated/bindings";
 import { commands, events } from "../generated/bindings";
-import type { ClearRequest, NetworkProfile, PaneBounds, Prefs, Rule } from "../generated/bindings";
+import type { ClearRequest, Decision, ExportRequest, NetworkProfile, PaneBounds, Prefs, RecordOptions, Rule, TabTier } from "../generated/bindings";
 
 /** Shape tauri-specta returns for fallible commands. */
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 export { events };
-export type { Prefs, ClearRequest, Rule, RuleAction, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions } from "../generated/bindings";
+export type { Prefs, ClearRequest, Rule, RuleAction, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, RecordOptions, RecordingResult, RecordingCapabilities, RecordingEvent, Microphone, MediaInfo, ExportRequest, KeptSegment, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions, SitePermission, Decision, UpdateInfo, PermissionAsked, TabTier } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
 export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
@@ -59,10 +59,27 @@ export const ipc = {
   tabBack: async (id: string) => unwrap(await commands.tabBack(id)),
   tabForward: async (id: string) => unwrap(await commands.tabForward(id)),
   tabReload: async (id: string) => unwrap(await commands.tabReload(id)),
+  tabStop: async (id: string) => unwrap(await commands.tabStop(id)),
+  tabPrint: async (id: string) => unwrap(await commands.tabPrint(id)),
+  tabSetTier: async (id: string, tier: TabTier) => unwrap(await commands.tabSetTier(id, tier)),
   tabZoom: async (id: string, factor: number) => unwrap(await commands.tabZoom(id, factor)),
   tabDevtools: async (id: string) => unwrap(await commands.tabDevtools(id)),
-  tabScreencastStart: async (id: string) => unwrap(await commands.tabScreencastStart(id)),
+  tabScreencastStart: async (id: string, options: RecordOptions) => unwrap(await commands.tabScreencastStart(id, options)),
+  tabScreencastPause: async (id: string, paused: boolean) => unwrap(await commands.tabScreencastPause(id, paused)),
   tabScreencastStop: async (id: string) => unwrap(await commands.tabScreencastStop(id)),
+  tabScreencastCancel: async (id: string) => unwrap(await commands.tabScreencastCancel(id)),
+  recordingCapabilities: async () => unwrap(await commands.recordingCapabilities()),
+  recordingRead: async (path: string) => unwrap(await commands.recordingRead(path)),
+  recordingOpen: async (path: string) => unwrap(await commands.recordingOpen(path)),
+  recordingDelete: async (path: string) => unwrap(await commands.recordingDelete(path)),
+  screenMediaInfo: async (source: string) => unwrap(await commands.screenMediaInfo(source)),
+  screenProjectRead: async (source: string) => unwrap(await commands.screenProjectRead(source)),
+  screenProjectWrite: async (source: string, json: string) => unwrap(await commands.screenProjectWrite(source, json)),
+  fileSize: async (path: string) => unwrap(await commands.fileSize(path)),
+  fileReadChunk: async (path: string, offset: number, len: number) => unwrap(await commands.fileReadChunk(path, offset, len)),
+  screenExportBegin: async () => unwrap(await commands.screenExportBegin()),
+  screenExportAppend: async (path: string, base64: string) => unwrap(await commands.screenExportAppend(path, base64)),
+  screenExportFinish: async (request: ExportRequest) => unwrap(await commands.screenExportFinish(request)),
   tabCapture: async (id: string, fullPage: boolean) => unwrap(await commands.tabCapture(id, fullPage)),
   captureRead: async (path: string) => unwrap(await commands.captureRead(path)),
   captureSave: async (pngBase64: string) => unwrap(await commands.captureSave(pngBase64)),
@@ -80,6 +97,7 @@ export const ipc = {
   tabThrottle: async (id: string, profile: NetworkProfile | null) => unwrap(await commands.tabThrottle(id, profile)),
   setContentBounds: async (b: { x: number; y: number; width: number; height: number }) =>
     unwrap(await commands.layoutSetContentBounds(b)),
+  prepareContentCover: async () => unwrap(await commands.layoutPrepareContentCover()),
   setContentCovered: async (covered: boolean) => unwrap(await commands.layoutSetContentCovered(covered)),
   /** Show these tabs side by side; an empty list returns to a single page. */
   setPanes: async (panes: PaneBounds[]) => unwrap(await commands.layoutSetPanes(panes)),
@@ -112,7 +130,13 @@ export const ipc = {
   tabInspectRevert: async (id: string) => unwrap(await commands.tabInspectRevert(id)),
   bookmarkToggle: async (id: string) => unwrap(await commands.bookmarkToggle(id)),
   bookmarkStatus: async (url: string) => unwrap(await commands.bookmarkStatus(url)),
+  bookmarkRemove: async (url: string) => unwrap(await commands.bookmarkRemove(url)),
   bookmarksSearch: async (query: string, limit = 20) => unwrap(await commands.bookmarksSearch(query, limit)),
+  permissionSet: async (origin: string, kind: string, decision: Decision) => unwrap(await commands.permissionSet(origin, kind, decision)),
+  permissionsList: async () => unwrap(await commands.permissionsList()),
+  /** The update the release channel offers, or null when current or when this build has no updater. */
+  updateCheck: async () => unwrap(await commands.updateCheck()),
+  updateInstall: async () => unwrap(await commands.updateInstall()),
   historySearch: async (query: string, limit = 20) => unwrap(await commands.historySearch(query, limit)),
   shareUrl: async (url: string) => unwrap(await commands.shareUrl(url)),
   agentProviders: () => commands.agentProviders(),

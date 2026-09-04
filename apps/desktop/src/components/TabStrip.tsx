@@ -1,6 +1,6 @@
 import { SortableContext, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AppWindow, Columns2, Loader2, Moon, Pin, Plus, X } from "lucide-react";
+import { AppWindow, Columns2, Loader2, Moon, Pin, Plus, Star, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useBrowser } from "../store/browser";
 import { useLayout } from "../store/layout";
@@ -8,6 +8,7 @@ import type { Tab } from "../lib/ipc";
 import { Favicon } from "./Favicon";
 import { Icon, IconButton } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
+import { clampFloatingPosition } from "../lib/floating";
 
 /** What a tab is called in the strip: its title, else its host. */
 export function tabLabel(t: Tab) {
@@ -21,11 +22,17 @@ export function tabLabel(t: Tab) {
 const label = tabLabel;
 
 /** Sort for display: pinned first, then by position. Sleeping (discarded)
- * tabs stay in the strip so one click wakes them. */
+ * tabs stay in the strip so one click wakes them. Essentials have a rail of
+ * their own (see `essentialTabs`). */
 export function orderTabs(tabs: Tab[]): Tab[] {
   return tabs
     .filter((t) => t.tier !== "essential")
     .sort((a, b) => (a.tier === b.tier ? a.position - b.position : a.tier === "pinned" ? -1 : 1));
+}
+
+/** The essentials, in position order: the tabs every workspace shows. */
+export function essentialTabs(tabs: Tab[]): Tab[] {
+  return tabs.filter((t) => t.tier === "essential").sort((a, b) => a.position - b.position);
 }
 
 /**
@@ -42,11 +49,13 @@ export function TabStrip() {
   const close = useBrowser((s) => s.closeTab);
   const toggle = useBrowser((s) => s.toggle);
   const setPinned = useBrowser((s) => s.setPinned);
+  const setTier = useBrowser((s) => s.setTier);
   const detachTab = useBrowser((s) => s.detachTab);
   const attachTab = useBrowser((s) => s.attachTab);
   const insertPane = useLayout((s) => s.insert);
   const loading = useBrowser((s) => s.loading);
   const tabs = orderTabs(all);
+  const essentials = essentialTabs(all);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [tablistRef, narrow] = useNarrowTabs(tabs.length);
   // Roving tabindex: one tab is in the Tab order at a time, the focused one
@@ -56,6 +65,26 @@ export function TabStrip() {
 
   return (
     <div className="flex h-full items-center gap-1 pr-2 pl-2" onClick={() => menu && setMenu(null)}>
+      {essentials.length > 0 && (
+        <>
+          {/* Essentials: icon-only and present in every workspace. Not
+              sortable -- their order is the engine's -- and set apart by a
+              hairline so they read as a fixture, not the first few tabs. */}
+          <div role="tablist" aria-label="Essentials" className="flex shrink-0 items-center gap-1">
+            {essentials.map((t) => (
+              <EssentialTab
+                key={t.id}
+                tab={t}
+                active={t.id === active}
+                loading={loading[t.id] === true}
+                onActivate={() => void activate(t.id)}
+                onMenu={(x, y) => setMenu({ id: t.id, x, y })}
+              />
+            ))}
+          </div>
+          <span className="mx-0.5 h-4 w-px shrink-0 bg-line-2" aria-hidden data-testid="essentials-divider" />
+        </>
+      )}
       <SortableContext items={tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
         {/* Tabs share the row the way Chrome's do: each starts at a
             comfortable width and they shrink together as more open, down to
@@ -91,16 +120,20 @@ export function TabStrip() {
         </div>
       </SortableContext>
       <IconButton icon={Plus} label="New tab" onClick={() => toggle("palette", true)} />
-      <div className="min-w-3 flex-1 self-stretch" data-tauri-drag-region />
+      <div className="min-w-3 flex-1 self-stretch" data-tauri-drag-region="true" />
       {menu && (
         <TabMenu
           x={menu.x}
           y={menu.y}
-          pinned={all.find((t) => t.id === menu.id)?.tier === "pinned"}
+          tier={all.find((t) => t.id === menu.id)?.tier ?? "today"}
           detached={detached.includes(menu.id)}
           canSplit={!!active && active !== menu.id && !detached.includes(menu.id)}
           onPin={(v) => {
             void setPinned(menu.id, v);
+            setMenu(null);
+          }}
+          onEssential={(v) => {
+            void setTier(menu.id, v ? "essential" : "today");
             setMenu(null);
           }}
           onWindow={(out) => {
@@ -174,31 +207,25 @@ type Narrow = { close: boolean; title: boolean };
 
 function SortableTab({ tab: t, active, loading, detached, narrow, inTabOrder, onFocus, onActivate, onClose, onMenu }: { tab: Tab; active: boolean; loading: boolean; detached: boolean; narrow: Narrow; inTabOrder: boolean; onFocus: () => void; onActivate: () => void; onClose: () => void; onMenu: (x: number, y: number) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id });
-  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.6 : 1 };
+  // DragOverlay is the one tab that follows the pointer. The sortable item
+  // becomes an invisible placeholder so the strip does not show a second,
+  // half-opacity copy moving underneath it.
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 };
   const pinned = t.tier === "pinned";
   const sleeping = t.state === "discarded";
   return (
     <div
       ref={setNodeRef}
+      role="presentation"
       style={style}
-      {...attributes}
-      {...listeners}
-      role="tab"
-      aria-selected={active}
-      tabIndex={inTabOrder ? 0 : -1}
-      onFocus={onFocus}
-      onClick={onActivate}
-      onKeyDown={(e) => {
-        if (e.key !== "Enter" && e.key !== " ") return;
-        e.preventDefault();
-        onActivate();
-      }}
+      data-tauri-drag-region="false"
+      onMouseDown={(e) => e.stopPropagation()}
       onAuxClick={(e) => e.button === 1 && onClose()}
       onContextMenu={(e) => {
         e.preventDefault();
         onMenu(e.clientX, e.clientY);
       }}
-      className={`group flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2.5 text-xs transition-colors ${pinned ? "w-9 shrink-0 justify-center px-0" : `min-w-9 basis-56 max-w-56 shrink ${narrow.title ? "justify-center px-0" : ""}`} ${
+      className={`group flex h-8 cursor-pointer items-center rounded-lg text-xs transition-colors ${pinned ? "w-9 shrink-0 justify-center" : `min-w-9 basis-56 max-w-56 shrink ${narrow.title ? "justify-center" : ""}`} ${
         active ? "bg-surface-2 text-ink ring-1 ring-line-2" : "text-ink-2 hover:bg-surface hover:text-ink"
       } ${sleeping || detached ? "opacity-55 hover:opacity-100" : ""}`}
       title={detached ? `${label(t)} (in its own window)` : sleeping ? `${label(t)} (sleeping, click to wake)` : pinned ? label(t) : undefined}
@@ -206,58 +233,136 @@ function SortableTab({ tab: t, active, loading, detached, narrow, inTabOrder, on
       data-detached={detached || undefined}
       data-pinned={pinned || undefined}
     >
-      {/* A pinned tab is icon-only, so the site's own mark is the only thing
-          left to tell it apart; the pin itself moves to a corner dot. */}
-      <span className="relative grid shrink-0 place-items-center">
-        {loading ? (
-          <span className="grid place-items-center text-ink-2 motion-safe:animate-spin motion-reduce:animate-none" aria-label="Loading" role="img">
-            <Icon icon={Loader2} size={pinned ? 16 : 14} />
-          </span>
-        ) : (
-          <Favicon src={t.favicon} size={pinned ? 16 : 14} />
-        )}
-        {pinned && (
-          <span className="absolute -right-1.5 -bottom-1 grid size-3 place-items-center rounded-full bg-surface-2 text-ink-3" aria-hidden>
-            <Icon icon={Pin} size={8} />
-          </span>
-        )}
-      </span>
-      {!pinned && !narrow.title && <span className="truncate">{label(t)}</span>}
-      {sleeping && !pinned && (
-        <span className="grid shrink-0 place-items-center text-ink-3" aria-label="Sleeping">
-          <Icon icon={Moon} size={11} />
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        data-tab-drag-handle
+        data-tauri-drag-region="false"
+        role="tab"
+        id={`dive-tab-${t.id}`}
+        aria-label={label(t)}
+        aria-keyshortcuts={!pinned ? "Delete" : undefined}
+        aria-selected={active}
+        tabIndex={inTabOrder ? 0 : -1}
+        // Tauri installs a document-level mousedown listener for native
+        // window movement. Keep the tab gesture inside React so dnd-kit owns
+        // it from pointer-down through drop; only the empty filler may move
+        // the native window.
+        onMouseDown={(e) => e.stopPropagation()}
+        onFocus={onFocus}
+        onClick={onActivate}
+        onKeyDown={(e) => {
+          if (e.key === "Delete" && !pinned) {
+            e.preventDefault();
+            onClose();
+            return;
+          }
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          onActivate();
+        }}
+        data-sleeping={sleeping || undefined}
+        data-detached={detached || undefined}
+        data-pinned={pinned || undefined}
+        className={`flex h-full min-w-0 flex-1 items-center gap-2 bg-transparent outline-none ${pinned || narrow.title ? "justify-center px-0" : "px-2.5"}`}
+      >
+        {/* A pinned tab is icon-only, so the site's own mark is the only thing
+            left to tell it apart; the pin itself moves to a corner dot. */}
+        <span className="relative grid shrink-0 place-items-center">
+          {loading ? (
+            <span className="grid place-items-center text-ink-2 motion-safe:animate-spin motion-reduce:animate-none" aria-label="Loading" role="img">
+              <Icon icon={Loader2} size={pinned ? 16 : 14} />
+            </span>
+          ) : (
+            <Favicon src={t.favicon} size={pinned ? 16 : 14} />
+          )}
+          {pinned && (
+            <span className="absolute -right-1.5 -bottom-1 grid size-3 place-items-center rounded-full bg-surface-2 text-ink-3" aria-hidden>
+              <Icon icon={Pin} size={8} />
+            </span>
+          )}
         </span>
-      )}
-      {detached && !pinned && (
-        <span className="grid shrink-0 place-items-center text-ink-3" aria-label="In its own window">
-          <Icon icon={AppWindow} size={11} />
-        </span>
-      )}
+        {!pinned && !narrow.title && <span className="truncate">{label(t)}</span>}
+        {sleeping && !pinned && (
+          <span className="grid shrink-0 place-items-center text-ink-3" aria-label="Sleeping">
+            <Icon icon={Moon} size={11} />
+          </span>
+        )}
+        {detached && !pinned && (
+          <span className="grid shrink-0 place-items-center text-ink-3" aria-label="In its own window">
+            <Icon icon={AppWindow} size={11} />
+          </span>
+        )}
+      </button>
       {!pinned && !narrow.title && (!narrow.close || active) && (
-        <button
-          type="button"
-          aria-label={`Close ${label(t)}`}
+        <span
+          data-close-tab
+          data-tauri-drag-region="false"
+          aria-hidden="true"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
             onClose();
           }}
-          className="ml-auto grid size-5 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100 group-aria-selected:opacity-100"
+          className={`mr-1 grid size-5 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100 ${active ? "opacity-100" : ""}`}
         >
           <Icon icon={X} size={12} />
-        </button>
+        </span>
       )}
     </div>
   );
 }
 
-function TabMenu({ x, y, pinned, detached, canSplit, onPin, onWindow, onSplit, onClose, onCloseOthers }: { x: number; y: number; pinned: boolean; detached: boolean; canSplit: boolean; onPin: (v: boolean) => void; onWindow: (out: boolean) => void; onSplit: () => void; onClose: () => void; onCloseOthers: () => void }) {
-  useCoversContent(true);
-  const item = "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink";
+/** An essential in the rail: the site's icon, and nothing else, in every workspace. */
+function EssentialTab({ tab: t, active, loading, onActivate, onMenu }: { tab: Tab; active: boolean; loading: boolean; onActivate: () => void; onMenu: (x: number, y: number) => void }) {
   return (
-    <div role="menu" style={{ left: x, top: y }} className="fixed z-50 w-44 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-      <button type="button" role="menuitem" className={item} onClick={() => onPin(!pinned)}>
-        <Icon icon={Pin} size={13} /> {pinned ? "Unpin tab" : "Pin tab"}
+    <div
+      role="tab"
+      aria-selected={active}
+      tabIndex={active ? 0 : -1}
+      onClick={onActivate}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        onActivate();
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onMenu(e.clientX, e.clientY);
+      }}
+      title={label(t)}
+      data-essential
+      data-tauri-drag-region="false"
+      onMouseDown={(e) => e.stopPropagation()}
+      className={`grid size-8 shrink-0 cursor-pointer place-items-center rounded-lg text-xs transition-colors ${active ? "bg-surface-2 text-ink ring-1 ring-line-2" : "text-ink-2 hover:bg-surface hover:text-ink"}`}
+    >
+      {loading ? (
+        <span className="grid place-items-center text-ink-2 motion-safe:animate-spin motion-reduce:animate-none" aria-label="Loading" role="img">
+          <Icon icon={Loader2} size={16} />
+        </span>
+      ) : (
+        <Favicon src={t.favicon} size={16} />
+      )}
+    </div>
+  );
+}
+
+function TabMenu({ x, y, tier, detached, canSplit, onPin, onEssential, onWindow, onSplit, onClose, onCloseOthers }: { x: number; y: number; tier: Tab["tier"]; detached: boolean; canSplit: boolean; onPin: (v: boolean) => void; onEssential: (v: boolean) => void; onWindow: (out: boolean) => void; onSplit: () => void; onClose: () => void; onCloseOthers: () => void }) {
+  useCoversContent(true);
+  const pinned = tier === "pinned";
+  const essential = tier === "essential";
+  const item = "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink";
+  const position = clampFloatingPosition({ x, y, width: 192, height: canSplit ? 200 : 170, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
+  return (
+    <div role="menu" style={{ left: position.x, top: position.y }} className="surface-enter fixed z-50 w-48 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      {!essential && (
+        <button type="button" role="menuitem" className={item} onClick={() => onPin(!pinned)}>
+          <Icon icon={Pin} size={13} /> {pinned ? "Unpin tab" : "Pin tab"}
+        </button>
+      )}
+      <button type="button" role="menuitem" className={item} onClick={() => onEssential(!essential)}>
+        <Icon icon={Star} size={13} /> {essential ? "Remove from essentials" : "Make essential"}
       </button>
       {canSplit && (
         <button type="button" role="menuitem" className={item} onClick={onSplit}>

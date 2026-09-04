@@ -2,7 +2,7 @@ import { Command } from "cmdk";
 import { ArrowUpRight, Search, Terminal, Server, History, Star } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { events, ipc } from "../lib/ipc";
-import { runCommand } from "../lib/commands";
+import { chromeCommands, formatChord, runCommand } from "../lib/commands";
 import type { Bookmark, Command as CommandDef, DevServer, HistoryEntry } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
@@ -55,7 +55,7 @@ export function Palette() {
   }, [query]);
   useEffect(() => {
     let alive = true;
-    void ipc.commandsList().then(setCmds);
+    void ipc.commandsList().then((list) => setCmds([...list, ...chromeCommands(list)]));
     void ipc.devServersWatch(true).then((found) => alive && setServers(found)).catch(() => alive && setServers([]));
     const listener = events.devServersChanged.listen((event) => {
       if (alive) setServers(event.payload.servers);
@@ -75,14 +75,14 @@ export function Palette() {
   const looksLikeUrl = /^[\w-]+(\.[\w-]+)+|^localhost|^https?:\/\//i.test(query.trim());
 
   return (
-    <div ref={root} className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] ${className}`} onMouseDown={close}>
+    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 ${className}`} onMouseDown={close}>
       <Command
         label="Command palette"
         role="dialog"
         aria-label="New tab"
         aria-modal="true"
         shouldFilter={!!query}
-        className="mx-auto mt-24 w-[600px] overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
+        className="mx-auto mt-[min(12vh,96px)] w-[min(600px,calc(100vw-24px))] overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.key === "Escape" && close()}
       >
@@ -170,7 +170,7 @@ export function Palette() {
               >
                 <Icon icon={Terminal} size={14} className="shrink-0 text-ink-3" />
                 <span>{c.title}</span>
-                {c.keybinding && <kbd className="ml-auto rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-2">{chord(c.keybinding)}</kbd>}
+                {c.keybinding && <kbd className="ml-auto rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-2">{formatChord(c.keybinding)}</kbd>}
               </Command.Item>
             ))}
           </Command.Group>
@@ -186,8 +186,4 @@ function host(url: string) {
   } catch {
     return "";
   }
-}
-
-function chord(k: string) {
-  return k.replace("mod", "⌘").replace("shift", "⇧").replaceAll("+", "").toUpperCase();
 }

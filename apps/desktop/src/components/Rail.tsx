@@ -12,6 +12,7 @@ import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { AiShortcuts } from "./AiShortcuts";
+import { clampFloatingPosition } from "../lib/floating";
 
 /** Rail width in each mode; App.tsx sizes the grid column from these. */
 export const RAIL_WIDTH = { collapsed: 52, expanded: 208 };
@@ -25,13 +26,14 @@ export const RAIL_WIDTH = { collapsed: 52, expanded: 208 };
  * workspace is a set of tabs with, optionally, its own logins, and none of
  * that is guessable from a coloured circle.
  */
-export function Rail() {
+export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
   const workspaces = useBrowser((s) => s.workspaces);
   const active = useBrowser((s) => s.activeWorkspace);
   const activate = useBrowser((s) => s.activateWorkspace);
   const reorder = useBrowser((s) => s.reorderWorkspaces);
   const setEditing = useBrowser((s) => s.setEditing);
-  const expanded = usePrefs((s) => s.prefs.rail_expanded);
+  const preferredExpanded = usePrefs((s) => s.prefs.rail_expanded);
+  const expanded = preferredExpanded && !forceCollapsed;
   const update = usePrefs((s) => s.update);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -90,7 +92,7 @@ export function Rail() {
           {expanded && "New workspace"}
         </button>
       </div>
-      {!expanded && <RailButton icon={PanelLeftOpen} label="Expand workspaces" onClick={() => void update({ rail_expanded: true })} />}
+      {!expanded && !forceCollapsed && <RailButton icon={PanelLeftOpen} label="Expand workspaces" onClick={() => void update({ rail_expanded: true })} />}
       <button
         type="button"
         aria-label="Settings"
@@ -170,7 +172,7 @@ function WorkspaceRow({
       className={
         expanded
           ? `relative flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-2 transition-colors ${active ? "bg-surface-3 text-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"}`
-          : `relative grid size-9 shrink-0 place-items-center rounded-full transition-all ${active ? "bg-surface-3 ring-1 ring-line-2" : "hover:bg-surface-2"}`
+          : `relative grid size-9 shrink-0 place-items-center rounded-full transition-[background-color,box-shadow,transform] ${active ? "bg-surface-3 ring-1 ring-line-2" : "hover:bg-surface-2"}`
       }
     >
       {/* A generated mark rather than a shared glyph: every workspace gets a
@@ -216,6 +218,7 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
   const toggle = useBrowser((s) => s.toggle);
   const [confirming, setConfirming] = useState(false);
   const workspace = workspaces.find((w) => w.id === id);
+  const position = clampFloatingPosition({ x, y, width: 224, height: confirming ? 150 : 176, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
   const item = "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink";
   if (!workspace) return null;
 
@@ -226,8 +229,8 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
         ref={root}
         role="menu"
         aria-label={workspace.name}
-        style={{ left: x, top: y }}
-        className="fixed z-50 w-56 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl"
+        style={{ left: position.x, top: position.y }}
+        className="surface-enter fixed z-50 w-56 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl"
         onKeyDown={(e) => e.key === "Escape" && onClose()}
       >
         <div className="flex items-center gap-2 px-2 pt-1 pb-2">
@@ -250,7 +253,7 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
                   void remove(id);
                   onClose();
                 }}
-                className="h-7 flex-1 rounded-full bg-danger text-[11px] font-medium text-accent-ink"
+                className="h-7 flex-1 rounded-full bg-danger text-[11px] font-medium text-danger-ink"
               >
                 Delete
               </button>

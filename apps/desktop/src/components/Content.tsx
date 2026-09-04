@@ -1,17 +1,22 @@
-import { AlertTriangle, RotateCw, WifiOff } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { AlertTriangle, Check, RotateCw, ShieldQuestion, WifiOff, X } from "lucide-react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
+import { createBoundsReporter, elementBounds } from "../lib/boundsReporter";
 import { describeNavError } from "../lib/navError";
-import { useCoversContent } from "../lib/overlay";
+import { useContentPreview, useCoversContent } from "../lib/overlay";
 import { useBrowser } from "../store/browser";
+import type { PermissionRequest } from "../store/browser";
 import { Icon } from "./Icon";
 import { selectDevice, useEmulation } from "../store/emulation";
 import { useLayout, visibleSplit } from "../store/layout";
-import { Welcome } from "./Welcome";
-import { DevicePicker } from "./simulator/DevicePicker";
-import { DeviceStage } from "./simulator/DeviceStage";
+import { usePicker } from "../store/simulator";
 import { DropZones, SplitView } from "./SplitView";
 import { useTabDrag } from "./TabDnd";
+import { InternalPage, isInternalUrl } from "./internal/InternalPage";
+
+const DevicePicker = lazy(() => import("./simulator/DevicePicker").then(({ DevicePicker }) => ({ default: DevicePicker })));
+const DeviceStage = lazy(() => import("./simulator/DeviceStage").then(({ DeviceStage }) => ({ default: DeviceStage })));
+const Welcome = lazy(() => import("./Welcome").then(({ Welcome }) => ({ default: Welcome })));
 
 /**
  * The content area. The real page is a native child webview positioned over
@@ -28,9 +33,13 @@ export function Content() {
   const remove = useLayout((s) => s.remove);
   const shown = visibleSplit(split, activeTab, tabs, detached);
   const sel = useEmulation(selectDevice(activeTab));
+  const pickerOpen = usePicker((s) => s.open);
+  // One of Dive's own pages: drawn here by the chrome, no native view.
+  const internal = tabs.find((t) => t.id === activeTab && isInternalUrl(t.url));
   const dragging = useTabDrag((s) => s.dragging);
   const crash = useBrowser((s) => (activeTab ? s.crashedTabs[activeTab] : undefined));
   const navError = useBrowser((s) => (activeTab ? s.navError[activeTab] : undefined));
+  const asked = useBrowser((s) => (activeTab ? s.permissionRequests[activeTab]?.[0] : undefined));
   useStartupDevice(activeTab);
 
   // A closed or torn-off tab leaves its split, so the split does not wait on
@@ -51,13 +60,26 @@ export function Content() {
     // native view down instead of vanishing behind it.
     <div className="relative flex min-h-0 min-w-0 flex-col bg-surface">
       {activeTab && crash && <CrashBanner attempt={crash.attempt} recovering={crash.recovering} />}
+      {activeTab && <PermissionBanner key={activeTab} tabId={activeTab} request={asked} />}
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <div className="relative grid min-h-0 min-w-0 flex-1">
-          {activeTab && sel ? <DeviceStage key={activeTab} tabId={activeTab} sel={sel} /> : shown && workspace ? <SplitView split={shown} workspace={workspace} /> : <FullPage />}
+          {internal ? (
+            <InternalPage key={internal.id} tab={internal} />
+          ) : activeTab && sel ? (
+            <Suspense fallback={<div className="min-h-0 bg-ground" aria-label="Loading device simulator" />}>
+              <DeviceStage key={activeTab} tabId={activeTab} sel={sel} />
+            </Suspense>
+          ) : shown && workspace ? (
+            <SplitView split={shown} workspace={workspace} />
+          ) : (
+            <FullPage />
+          )}
           {dragging && !sel && <DropZones dragging={dragging} split={shown} activeTab={activeTab} />}
           {activeTab && navError && <NavErrorPanel url={navError.url} error={navError.error} />}
         </div>
-        <DevicePicker />
+        <Suspense fallback={pickerOpen ? <div className="h-full w-[min(420px,46%)] min-w-[300px] shrink-0 border-l border-line bg-surface" aria-label="Loading device picker" /> : null}>
+          {pickerOpen && <DevicePicker />}
+        </Suspense>
       </div>
     </div>
   );
@@ -77,6 +99,80 @@ function CrashBanner({ attempt, recovering }: { attempt: number; recovering: boo
           <Icon icon={RotateCw} size={11} /> Reload
         </button>
       )}
+    </div>
+  );
+}
+
+/** What a page is asking for, as the banner says it. */
+export function describePermission(kind: string): string {
+  switch (kind) {
+    case "camera":
+      return "use your camera";
+    case "microphone":
+      return "use your microphone";
+    case "geolocation":
+      return "know your location";
+    case "notifications":
+      return "show notifications";
+    case "clipboard_read":
+      return "read your clipboard";
+    case "display_capture":
+      return "capture your screen";
+    default:
+      return `use ${kind.replaceAll("_", " ")}`;
+  }
+}
+
+/**
+ * A page asked for a capability. A row above the page, like the crash notice:
+ * the request must not hide what is asking. Allow remembers the decision but
+ * the engine only applies it on the next load, so the row then offers one.
+ * Keyed on the tab, so an answer given on one tab never lingers on another.
+ */
+function PermissionBanner({ tabId, request }: { tabId: string; request: PermissionRequest | undefined }) {
+  const decide = useBrowser((s) => s.decidePermission);
+  const reload = useBrowser((s) => s.reload);
+  const [allowed, setAllowed] = useState<PermissionRequest | null>(null);
+  if (request) {
+    const answer = (decision: "allow" | "deny") => {
+      setAllowed(decision === "allow" ? request : null);
+      void decide(tabId, request, decision);
+    };
+    return (
+      <div role="status" className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-surface-2 px-3 text-xs text-ink-2">
+        <Icon icon={ShieldQuestion} size={13} className="shrink-0 text-ink-3" />
+        <span className="min-w-0 flex-1 truncate">
+          <span className="font-medium text-ink">{request.origin}</span> wants to {describePermission(request.kind)}
+        </span>
+        <button type="button" onClick={() => answer("deny")} className="flex h-6 items-center gap-1 rounded-md border border-line-2 px-2 text-ink hover:bg-surface-3">
+          <Icon icon={X} size={11} /> Block
+        </button>
+        <button type="button" onClick={() => answer("allow")} className="flex h-6 items-center gap-1 rounded-md bg-accent px-2 text-accent-ink hover:opacity-90">
+          <Icon icon={Check} size={11} /> Allow
+        </button>
+      </div>
+    );
+  }
+  if (!allowed) return null;
+  return (
+    <div role="status" className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-surface-2 px-3 text-xs text-ink-2">
+      <Icon icon={Check} size={13} className="shrink-0 text-highlight" />
+      <span className="min-w-0 flex-1 truncate">
+        Allowed <span className="font-medium text-ink">{allowed.origin}</span> to {describePermission(allowed.kind)} — reload to apply
+      </span>
+      <button
+        type="button"
+        onClick={() => {
+          setAllowed(null);
+          void reload();
+        }}
+        className="flex h-6 items-center gap-1 rounded-md border border-line-2 px-2 text-ink hover:bg-surface-3"
+      >
+        <Icon icon={RotateCw} size={11} /> Reload
+      </button>
+      <button type="button" aria-label="Dismiss" onClick={() => setAllowed(null)} className="grid size-6 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-ink">
+        <Icon icon={X} size={12} />
+      </button>
     </div>
   );
 }
@@ -116,27 +212,34 @@ function NavErrorPanel({ url, error }: { url: string; error: string }) {
 function FullPage() {
   const ref = useRef<HTMLDivElement>(null);
   const activeTab = useBrowser((s) => s.activeTab);
+  const preview = useContentPreview(activeTab);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const report = () => {
-      const r = el.getBoundingClientRect();
-      void ipc.setContentBounds({ x: r.left, y: r.top, width: r.width, height: r.height }).catch(() => undefined);
-    };
-    report();
-    const ro = new ResizeObserver(report);
+    const reporter = createBoundsReporter(
+      () => elementBounds(el),
+      (bounds) => void ipc.setContentBounds(bounds).catch(() => undefined),
+    );
+    reporter.schedule();
+    const ro = new ResizeObserver(reporter.schedule);
     ro.observe(el);
-    window.addEventListener("resize", report);
+    window.addEventListener("resize", reporter.schedule);
     return () => {
+      reporter.dispose();
       ro.disconnect();
-      window.removeEventListener("resize", report);
+      window.removeEventListener("resize", reporter.schedule);
     };
   }, []);
 
   return (
     <div ref={ref} className="relative min-h-0 bg-surface">
-      {!activeTab && <Welcome />}
+      {!activeTab && (
+        <Suspense fallback={<div className="absolute inset-0 bg-ground" aria-label="Loading start page" />}>
+          <Welcome />
+        </Suspense>
+      )}
+      {preview && <img aria-hidden src={preview} className="pointer-events-none absolute inset-0 size-full object-fill" />}
     </div>
   );
 }

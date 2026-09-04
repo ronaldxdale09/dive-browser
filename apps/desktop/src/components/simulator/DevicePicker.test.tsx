@@ -4,7 +4,8 @@ import type { Tab } from "../../lib/ipc";
 import { ipc } from "../../lib/ipc";
 import { useBrowser } from "../../store/browser";
 import { resetPushed, useEmulation } from "../../store/emulation";
-import { DevicePicker, usePicker } from "./DevicePicker";
+import { usePicker } from "../../store/simulator";
+import { DevicePicker } from "./DevicePicker";
 
 const tab: Tab = {
   id: "tab-1",

@@ -59,19 +59,23 @@ export function AiLogo({ id, size = 16, className = "" }: { id: AiSite["id"]; si
 export function AiShortcuts() {
   const openTab = useBrowser((s) => s.openTab);
   return (
-    <div role="group" aria-label="AI assistants" className="flex shrink-0 items-center gap-1 pb-1">
-      {AI_SITES.map((site) => (
-        <button
-          key={site.id}
-          type="button"
-          aria-label={`Open ${site.name} in a new tab`}
-          title={`${site.name} — opens in a new tab`}
-          onClick={() => void openTab(site.url)}
-          className="grid h-8 flex-1 place-items-center rounded-lg text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
-        >
-          <AiLogo id={site.id} size={16} />
-        </button>
-      ))}
+    <div role="group" aria-label="AI shortcuts" className="shrink-0 pb-1">
+      <p className="px-2 pb-1.5 text-[9.5px] font-medium tracking-[0.08em] text-ink-3 uppercase">AI shortcuts</p>
+      <div className="grid grid-cols-3 gap-1">
+        {AI_SITES.map((site) => (
+          <button
+            key={site.id}
+            type="button"
+            aria-label={`Open ${site.name} in a new tab`}
+            title={`${site.name} — opens in a new tab`}
+            onClick={() => void openTab(site.url)}
+            className="pressable flex h-10 flex-col items-center justify-center gap-1 rounded-lg text-ink-3 transition-[color,background-color,transform] hover:bg-surface-2 hover:text-ink"
+          >
+            <AiLogo id={site.id} size={14} />
+            <span className="text-[9px] leading-none">{site.name}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
