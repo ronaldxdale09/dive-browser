@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { ipc } from "../lib/ipc";
 import type { Prefs as WirePrefs } from "../lib/ipc";
 import { useBrowser } from "./browser";
+import { APPEARANCE_KEYS, THEME_VARS, accentInk, resolveScheme, themeCss } from "../lib/theme";
 
 /**
  * User preferences. The host owns them (it clamps and persists), so writes go
@@ -40,7 +41,23 @@ export const DEFAULT_PREFS: Prefs = {
   agent_include_page: true,
   agent_custom_base_url: "",
   preferred_editor: "vscode",
+  appearance_preset: "graphite",
+  custom_ground: "#111111",
+  custom_ink: "#ECECEC",
+  custom_highlight: "#7FD8C8",
+  ui_font: "geist",
+  ui_scale: 1,
+  density: "comfortable",
+  corner_radius: "round",
+  tab_style: "pill",
+  motion: "system",
+  welcome_background: "orbs",
 };
+
+/** The appearance fields at their defaults, for "Reset appearance". */
+export const DEFAULT_APPEARANCE: Pick<Prefs, (typeof APPEARANCE_KEYS)[number]> = Object.fromEntries(
+  APPEARANCE_KEYS.map((key) => [key, DEFAULT_PREFS[key]]),
+) as Pick<Prefs, (typeof APPEARANCE_KEYS)[number]>;
 
 interface PrefsState {
   prefs: Prefs;
@@ -109,38 +126,52 @@ export function systemTheme(): "dark" | "light" {
   return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
-/** Pick the foreground with the stronger WCAG contrast against a hex accent. */
-export function accentInk(hex: string): "#111111" | "#FFFFFF" {
-  const value = hex.replace("#", "");
-  if (!/^[0-9a-f]{6}$/i.test(value)) return "#111111";
-  const channels = [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16) / 255);
-  const [r, g, b] = channels.map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4));
-  const luminance = 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
-  const darkContrast = (luminance + 0.05) / 0.0586;
-  const lightContrast = 1.05 / (luminance + 0.05);
-  return darkContrast >= lightContrast ? "#111111" : "#FFFFFF";
+export { accentInk };
+
+/** Whether the OS asks for reduced motion right now. */
+export function systemReducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/** The motion the chrome should show: the preference, or the OS when following it. */
+export function resolveMotion(prefs: Prefs): "reduce" | "full" {
+  if (prefs.motion === "reduce") return "reduce";
+  if (prefs.motion === "full") return "full";
+  return systemReducedMotion() ? "reduce" : "full";
+}
+
+/** True when no appearance field differs from its default. */
+export function isDefaultAppearance(prefs: Prefs): boolean {
+  return APPEARANCE_KEYS.every((key) => {
+    const value = prefs[key];
+    const fallback = DEFAULT_PREFS[key];
+    return typeof value === "string" && typeof fallback === "string" ? value.toUpperCase() === fallback.toUpperCase() : value === fallback;
+  });
 }
 
 /**
- * Put theme and accent on the document root. `data-theme` selects the palette
- * in styles.css; a chosen accent overrides the two highlight tokens, and the
- * soft one is mixed from it so a custom accent keeps its quiet companion.
- *
- * The default accent is left to the stylesheet on purpose: each palette tunes
- * its own highlight, and the dark one's mint is too pale on a light ground.
+ * Put the appearance on the document root. `data-theme` selects the
+ * palette in styles.css, the other data attributes switch layout and motion
+ * rules, and the theme engine's custom properties override the stylesheet's
+ * tokens. At the defaults the inline properties are removed instead, so the
+ * stylesheet's own values apply and the root carries nothing extra.
  */
 export function applyAppearance(prefs: Prefs) {
   const root = document.documentElement;
-  root.dataset.theme = prefs.theme === "system" ? systemTheme() : prefs.theme;
-  if (prefs.accent.toUpperCase() === DEFAULT_PREFS.accent.toUpperCase()) {
-    root.style.removeProperty("--color-highlight");
-    root.style.removeProperty("--color-highlight-soft");
-    root.style.removeProperty("--color-highlight-ink");
+  const scheme = resolveScheme(prefs, systemTheme);
+  root.dataset.theme = scheme;
+  root.dataset.density = prefs.density;
+  root.dataset.tabStyle = prefs.tab_style;
+  root.dataset.motion = resolveMotion(prefs);
+  if (isDefaultAppearance(prefs)) {
+    for (const name of THEME_VARS) root.style.removeProperty(name);
+    root.style.removeProperty("font-size");
     return;
   }
-  root.style.setProperty("--color-highlight", prefs.accent);
-  root.style.setProperty("--color-highlight-soft", `color-mix(in oklab, ${prefs.accent} 22%, var(--color-ground))`);
-  root.style.setProperty("--color-highlight-ink", accentInk(prefs.accent));
+  for (const [name, value] of themeCss(prefs, scheme)) root.style.setProperty(name, value);
+  const scale = Math.min(1.3, Math.max(0.8, prefs.ui_scale || 1));
+  if (scale === 1) root.style.removeProperty("font-size");
+  else root.style.fontSize = `${16 * scale}px`;
 }
 
 /** Re-apply the palette when the OS scheme changes while following it. */
@@ -149,6 +180,17 @@ export function watchSystemTheme(): () => void {
   const onChange = () => {
     const { prefs } = usePrefs.getState();
     if (prefs.theme === "system") applyAppearance(prefs);
+  };
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+/** Re-apply motion when the OS reduce-motion setting changes while following it. */
+export function watchReducedMotion(): () => void {
+  const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const onChange = () => {
+    const { prefs } = usePrefs.getState();
+    if (prefs.motion === "system") applyAppearance(prefs);
   };
   query.addEventListener("change", onChange);
   return () => query.removeEventListener("change", onChange);

@@ -81,6 +81,82 @@ pub struct Prefs {
     /// Preferred code editor for Jump-to-Source: `vscode` | `cursor` | `zed`.
     #[serde(default = "default_editor")]
     pub preferred_editor: String,
+    /// Chrome palette template; one of [`APPEARANCE_PRESETS`] or `custom`.
+    #[serde(default = "default_preset")]
+    pub appearance_preset: String,
+    /// Custom template seed: the ground (window) colour as CSS hex.
+    #[serde(default = "default_custom_ground")]
+    pub custom_ground: String,
+    /// Custom template seed: the text colour as CSS hex.
+    #[serde(default = "default_custom_ink")]
+    pub custom_ink: String,
+    /// Custom template seed: the highlight colour as CSS hex.
+    #[serde(default = "default_custom_highlight")]
+    pub custom_highlight: String,
+    /// Chrome typeface: `geist` | `system` | `mono` | `serif`.
+    #[serde(default = "default_ui_font")]
+    pub ui_font: String,
+    /// Chrome size multiplier, 0.8 to 1.3; everything in the chrome scales.
+    #[serde(default = "default_ui_scale")]
+    pub ui_scale: f64,
+    /// Row heights and gaps: `compact` | `comfortable` | `relaxed`.
+    #[serde(default = "default_density")]
+    pub density: String,
+    /// Corner rounding of chrome controls: `sharp` | `soft` | `round`.
+    #[serde(default = "default_radius")]
+    pub corner_radius: String,
+    /// Tab strip look: `pill` | `flat`.
+    #[serde(default = "default_tab_style")]
+    pub tab_style: String,
+    /// Chrome motion: follow the `system`, `reduce`, or always `full`.
+    #[serde(default = "default_motion")]
+    pub motion: String,
+    /// Welcome screen backdrop: `orbs` | `plain` | `gradient`.
+    #[serde(default = "default_welcome_background")]
+    pub welcome_background: String,
+}
+
+/// Built-in palette templates the chrome knows how to draw.
+pub const APPEARANCE_PRESETS: &[&str] = &[
+    "graphite", "midnight", "paper", "sepia", "forest", "ocean", "rose", "custom",
+];
+/// Chrome typefaces that ship with the app or come from the OS.
+pub const UI_FONTS: &[&str] = &["geist", "system", "mono", "serif"];
+/// Chrome scale bounds.
+pub const UI_SCALE_RANGE: (f64, f64) = (0.8, 1.3);
+
+fn default_preset() -> String {
+    "graphite".into()
+}
+fn default_custom_ground() -> String {
+    "#111111".into()
+}
+fn default_custom_ink() -> String {
+    "#ECECEC".into()
+}
+fn default_custom_highlight() -> String {
+    "#7FD8C8".into()
+}
+fn default_ui_font() -> String {
+    "geist".into()
+}
+fn default_ui_scale() -> f64 {
+    1.0
+}
+fn default_density() -> String {
+    "comfortable".into()
+}
+fn default_radius() -> String {
+    "round".into()
+}
+fn default_tab_style() -> String {
+    "pill".into()
+}
+fn default_motion() -> String {
+    "system".into()
+}
+fn default_welcome_background() -> String {
+    "orbs".into()
 }
 
 fn default_editor() -> String {
@@ -120,6 +196,17 @@ impl Default for Prefs {
             agent_include_page: true,
             agent_custom_base_url: String::new(),
             preferred_editor: default_editor(),
+            appearance_preset: default_preset(),
+            custom_ground: default_custom_ground(),
+            custom_ink: default_custom_ink(),
+            custom_highlight: default_custom_highlight(),
+            ui_font: default_ui_font(),
+            ui_scale: default_ui_scale(),
+            density: default_density(),
+            corner_radius: default_radius(),
+            tab_style: default_tab_style(),
+            motion: default_motion(),
+            welcome_background: default_welcome_background(),
         }
     }
 }
@@ -153,6 +240,44 @@ impl Prefs {
         }
         if !is_hex_color(&self.accent) {
             self.accent = d.accent;
+        }
+        if !APPEARANCE_PRESETS.contains(&self.appearance_preset.as_str()) {
+            self.appearance_preset = d.appearance_preset;
+        }
+        if !is_hex_color(&self.custom_ground) {
+            self.custom_ground = d.custom_ground;
+        }
+        if !is_hex_color(&self.custom_ink) {
+            self.custom_ink = d.custom_ink;
+        }
+        if !is_hex_color(&self.custom_highlight) {
+            self.custom_highlight = d.custom_highlight;
+        }
+        if !UI_FONTS.contains(&self.ui_font.as_str()) {
+            self.ui_font = d.ui_font;
+        }
+        self.ui_scale = if self.ui_scale.is_finite() {
+            (self.ui_scale.clamp(UI_SCALE_RANGE.0, UI_SCALE_RANGE.1) * 100.0).round() / 100.0
+        } else {
+            d.ui_scale
+        };
+        if !matches!(self.density.as_str(), "compact" | "comfortable" | "relaxed") {
+            self.density = d.density;
+        }
+        if !matches!(self.corner_radius.as_str(), "sharp" | "soft" | "round") {
+            self.corner_radius = d.corner_radius;
+        }
+        if !matches!(self.tab_style.as_str(), "pill" | "flat") {
+            self.tab_style = d.tab_style;
+        }
+        if !matches!(self.motion.as_str(), "system" | "reduce" | "full") {
+            self.motion = d.motion;
+        }
+        if !matches!(
+            self.welcome_background.as_str(),
+            "orbs" | "plain" | "gradient"
+        ) {
+            self.welcome_background = d.welcome_background;
         }
         if !matches!(self.startup.as_str(), "restore" | "home" | "none") {
             self.startup = d.startup;
@@ -887,5 +1012,45 @@ mod tests {
         };
         assert_eq!(calls(&system).len(), 3);
         assert_eq!(calls(&system)[0].1["headers"], json!({}));
+    }
+
+    #[test]
+    fn appearance_fields_default_and_clamp() {
+        let prefs = parse_stored(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(prefs.appearance_preset, "graphite");
+        assert!((prefs.ui_scale - 1.0).abs() < f64::EPSILON);
+        let wild = Prefs {
+            appearance_preset: "neon".into(),
+            custom_ground: "not-a-colour".into(),
+            ui_font: "comic".into(),
+            ui_scale: 9.0,
+            density: "cramped".into(),
+            corner_radius: "square".into(),
+            tab_style: "tabs".into(),
+            motion: "lots".into(),
+            welcome_background: "video".into(),
+            ..Prefs::default()
+        }
+        .clamp();
+        let d = Prefs::default();
+        assert_eq!(wild.appearance_preset, d.appearance_preset);
+        assert_eq!(wild.custom_ground, d.custom_ground);
+        assert_eq!(wild.ui_font, d.ui_font);
+        assert!((wild.ui_scale - UI_SCALE_RANGE.1).abs() < f64::EPSILON);
+        assert_eq!(wild.density, d.density);
+        assert_eq!(wild.corner_radius, d.corner_radius);
+        assert_eq!(wild.tab_style, d.tab_style);
+        assert_eq!(wild.motion, d.motion);
+        assert_eq!(wild.welcome_background, d.welcome_background);
+        let fine = Prefs {
+            appearance_preset: "custom".into(),
+            custom_ground: "#0b0f14".into(),
+            ui_scale: 1.126,
+            ..Prefs::default()
+        }
+        .clamp();
+        assert_eq!(fine.appearance_preset, "custom");
+        assert_eq!(fine.custom_ground, "#0b0f14");
+        assert!((fine.ui_scale - 1.13).abs() < 1e-9);
     }
 }

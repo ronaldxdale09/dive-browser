@@ -1140,6 +1140,28 @@ export type Prefs = {
 	agent_custom_base_url: string,
 	/**  Preferred code editor for Jump-to-Source: `vscode` | `cursor` | `zed`. */
 	preferred_editor?: string,
+	/**  Chrome palette template; one of [`APPEARANCE_PRESETS`] or `custom`. */
+	appearance_preset?: string,
+	/**  Custom template seed: the ground (window) colour as CSS hex. */
+	custom_ground?: string,
+	/**  Custom template seed: the text colour as CSS hex. */
+	custom_ink?: string,
+	/**  Custom template seed: the highlight colour as CSS hex. */
+	custom_highlight?: string,
+	/**  Chrome typeface: `geist` | `system` | `mono` | `serif`. */
+	ui_font?: string,
+	/**  Chrome size multiplier, 0.8 to 1.3; everything in the chrome scales. */
+	ui_scale?: number | null,
+	/**  Row heights and gaps: `compact` | `comfortable` | `relaxed`. */
+	density?: string,
+	/**  Corner rounding of chrome controls: `sharp` | `soft` | `round`. */
+	corner_radius?: string,
+	/**  Tab strip look: `pill` | `flat`. */
+	tab_style?: string,
+	/**  Chrome motion: follow the `system`, `reduce`, or always `full`. */
+	motion?: string,
+	/**  Welcome screen backdrop: `orbs` | `plain` | `gradient`. */
+	welcome_background?: string,
 };
 
 /**  A named device, as the chrome's simulator and `page_resize` both see it. */

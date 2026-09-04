@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { events, ipc } from "../lib/ipc";
 import type { DevServer } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
+import { usePrefs } from "../store/prefs";
 import { OrbBurst } from "./OrbBurst";
 import { CharacterBg } from "./CharacterBg";
 import { AgentIcon } from "./agent/AgentIcon";
@@ -22,17 +23,20 @@ export function visibleDevServers(servers: DevServer[], expanded: boolean): DevS
 /** Empty-state landing: what Dive is and what it can do. */
 export function Welcome() {
   const toggle = useBrowser((s) => s.toggle);
+  const background = useWelcomeBackground();
   return (
-    <div className="welcome absolute inset-0 overflow-auto">
-      <CharacterBg
-        gridText="DIVE"
-        gap={18}
-        speed={45}
-        colors={{ paletteCount: 1, color1: "#70C2E9" }}
-        style={{ position: "absolute", inset: 0, opacity: 0.04 }}
-      />
+    <div className={`welcome absolute inset-0 overflow-auto ${background === "gradient" ? "welcome-gradient" : ""}`} data-background={background}>
+      {background === "orbs" && (
+        <CharacterBg
+          gridText="DIVE"
+          gap={18}
+          speed={45}
+          colors={{ paletteCount: 1, color1: "#70C2E9" }}
+          style={{ position: "absolute", inset: 0, opacity: 0.04 }}
+        />
+      )}
       <div className="relative z-10 mx-auto flex min-h-full w-full max-w-[1040px] flex-col items-center px-4 pt-4 pb-10 sm:px-8 sm:pt-6">
-        <OrbBurst width={190} height={190} className="-mb-4" />
+        {background === "orbs" ? <OrbBurst width={190} height={190} className="-mb-4" /> : <div className="h-10" aria-hidden />}
         <p className="text-[10px] font-medium tracking-[0.18em] text-highlight uppercase">Dive</p>
         <h1 className="mt-2 max-w-full text-center text-[clamp(26px,4vw,34px)] leading-tight font-semibold tracking-[-0.025em] text-balance">
           The browser built for developers
@@ -61,6 +65,14 @@ export function Welcome() {
       </div>
     </div>
   );
+}
+
+type WelcomeBackground = "orbs" | "plain" | "gradient";
+
+/** The backdrop preference, with anything unknown falling back to the orbs. */
+function useWelcomeBackground(): WelcomeBackground {
+  const value = usePrefs((s) => s.prefs.welcome_background);
+  return value === "plain" || value === "gradient" ? value : "orbs";
 }
 
 /** Do not fetch or mount Remotion until its frame is close to the viewport. */

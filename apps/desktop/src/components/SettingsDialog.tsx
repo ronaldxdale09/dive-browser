@@ -21,7 +21,7 @@ import { useBrowser } from "../store/browser";
 import type { SettingsSection } from "../store/browser";
 import { useUpdates } from "../store/updates";
 import { formatChord } from "../lib/commands";
-import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
+import { usePrefs } from "../store/prefs";
 import type { Prefs } from "../store/prefs";
 import { usePrivacy } from "../store/privacy";
 import { Icon, IconButton } from "./Icon";
@@ -30,6 +30,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { AgentIcon } from "./agent/AgentIcon";
+import { Appearance } from "./settings/Appearance";
 
 type SectionId = SettingsSection;
 
@@ -252,69 +253,6 @@ function General() {
               value={String(Math.round(prefs.default_zoom * 100))}
               onChange={(z) => set({ default_zoom: Number(z) / 100 })}
               options={ZOOMS}
-            />
-          }
-        />
-      </Group>
-    </>
-  );
-}
-
-const ACCENTS = ["#7FD8C8", "#8FB8F0", "#B79CF0", "#F0B35E", "#E58C8C", "#9ED67B", "#E9E9E9"];
-
-function Appearance() {
-  const [prefs, set] = usePref();
-  return (
-    <>
-      <Group title="Theme">
-        <Row
-          label="Appearance"
-          control={
-            <Segmented
-              label="Appearance"
-              value={prefs.theme}
-              onChange={(theme) => set({ theme })}
-              options={[
-                { value: "system", label: "System" },
-                { value: "dark", label: "Dark" },
-                { value: "light", label: "Light" },
-              ]}
-            />
-          }
-        />
-        <Row
-          label="Accent"
-          hint="Highlights, focus rings and the active state. The first swatch keeps each theme's own accent."
-          control={
-            <div className="flex gap-2" role="radiogroup" aria-label="Accent">
-              {ACCENTS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  role="radio"
-                  aria-checked={c.toUpperCase() === prefs.accent.toUpperCase()}
-                  aria-label={c === DEFAULT_PREFS.accent ? "Theme accent" : c}
-                  onClick={() => set({ accent: c })}
-                  className="size-5 rounded-full ring-offset-2 ring-offset-surface aria-checked:ring-2 aria-checked:ring-ink"
-                  style={{ background: c }}
-                />
-              ))}
-            </div>
-          }
-        />
-        <Row
-          label="Tell pages the theme"
-          hint={
-            prefs.theme === "system"
-              ? "Available once the theme is set to Dark or Light; Dive cannot read the system setting on the page's behalf."
-              : "Pages see prefers-color-scheme: " + prefs.theme + ". The device menu's per-tab override still wins."
-          }
-          control={
-            <Switch
-              label="Tell pages the theme"
-              disabled={prefs.theme === "system"}
-              checked={prefs.tell_pages_theme && prefs.theme !== "system"}
-              onChange={(tell_pages_theme) => set({ tell_pages_theme })}
             />
           }
         />

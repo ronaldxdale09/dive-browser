@@ -30,6 +30,11 @@
   --font-sans: "Geist Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
   --radius-pill: 999px;
+  /* Density: the height of a rail row and the gap between chrome controls.
+     Tabs and the omnibox are 4px shorter than a row. The theme engine
+     (lib/theme.ts) overrides these per the density preference. */
+  --row-h: 36px;
+  --ui-gap: 4px;
 }
 
 /* Light palette. The theme preference resolves to `data-theme` on the root,
@@ -137,6 +142,35 @@ button:not(:disabled):active,
   display: none;
 }
 
+/* Tabs in the strip. The pill look is the default; `data-tab-style="flat"`
+   on the root drops the background for a 2px highlight line underneath, in
+   the manner of a document editor's tab bar. */
+.tab-item {
+  border-radius: var(--radius-lg);
+  color: var(--color-ink-2);
+}
+.tab-item:hover {
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+.tab-item[data-active] {
+  background: var(--color-surface-2);
+  color: var(--color-ink);
+  box-shadow: inset 0 0 0 1px var(--color-line-2);
+}
+:root[data-tab-style="flat"] .tab-item {
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  box-shadow: none;
+}
+:root[data-tab-style="flat"] .tab-item:hover {
+  background: transparent;
+}
+:root[data-tab-style="flat"] .tab-item[data-active] {
+  background: transparent;
+  border-bottom-color: var(--color-highlight);
+}
+
 /* cmdk */
 [cmdk-item][data-selected="true"] { background: var(--color-surface-3); }
 [cmdk-group-heading] { padding: 6px 12px 4px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
@@ -144,6 +178,13 @@ button:not(:disabled):active,
 /* Welcome screen ground; the animated character field is rendered separately. */
 .welcome {
   background-color: var(--color-surface);
+}
+/* The `gradient` welcome backdrop: a soft pool of the highlight's quiet
+   companion fading into the ground. Pure CSS, no canvas. */
+.welcome-gradient {
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 12%, var(--color-highlight-soft), transparent 70%),
+    var(--color-ground);
 }
 
 /* Agent panel and onboarding animations */
@@ -378,13 +419,57 @@ button:not(:disabled):active,
   }
 }
 
+/* Reduced motion applies when the OS asks for it and the motion preference
+   follows the system, or when the preference says reduce outright. A `full`
+   preference opts out of the OS setting for the chrome alone. Both forms
+   share one rule list via the `:root` prefix below. */
 @media (prefers-reduced-motion: reduce) {
-  :root {
+  :root:not([data-motion="full"]) {
     --dialog-fade: 0ms;
   }
-  .rail-cta::after {
+  :root:not([data-motion="full"]) .rail-cta::after {
     display: none;
   }
+  :root:not([data-motion="full"]) :is(
+    .animate-agent-pulse,
+    .animate-agent-float,
+    .animate-agent-slide-up,
+    .animate-agent-pop,
+    .animate-pulse,
+    .animate-ping,
+    .animate-spin,
+    .animate-bounce,
+    .dialog-enter,
+    .dialog-enter > *,
+    .dialog-leave,
+    .dialog-leave > *,
+    .surface-enter,
+    .skeleton-enter,
+    .tab-drag-ghost,
+    .tab-drop-zone,
+    .privacy-motion
+  ) {
+    animation: none !important;
+    transition: none !important;
+    will-change: auto;
+  }
+  :root:not([data-motion="full"]) .animate-ping {
+    display: none;
+  }
+  :root:not([data-motion="full"]) :is(*, *::before, *::after) {
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+:root[data-motion="reduce"] {
+  --dialog-fade: 0ms;
+}
+:root[data-motion="reduce"] .rail-cta::after {
+  display: none;
+}
+:root[data-motion="reduce"] :is(
   .animate-agent-pulse,
   .animate-agent-float,
   .animate-agent-slide-up,
@@ -401,19 +486,17 @@ button:not(:disabled):active,
   .skeleton-enter,
   .tab-drag-ghost,
   .tab-drop-zone,
-  .privacy-motion {
-    animation: none !important;
-    transition: none !important;
-    will-change: auto;
-  }
-  .animate-ping {
-    display: none;
-  }
-  *,
-  *::before,
-  *::after {
-    transition-duration: 1ms !important;
-    transition-delay: 0ms !important;
-    scroll-behavior: auto !important;
-  }
+  .privacy-motion
+) {
+  animation: none !important;
+  transition: none !important;
+  will-change: auto;
+}
+:root[data-motion="reduce"] .animate-ping {
+  display: none;
+}
+:root[data-motion="reduce"] :is(*, *::before, *::after) {
+  transition-duration: 1ms !important;
+  transition-delay: 0ms !important;
+  scroll-behavior: auto !important;
 }

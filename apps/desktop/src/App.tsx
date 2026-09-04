@@ -13,7 +13,7 @@ import { ResizeHandle } from "./components/ResizeHandle";
 import { DOCK_LIMITS, SIDECAR_LIMITS } from "./lib/resize";
 import { useBrowser } from "./store/browser";
 import { useLayout } from "./store/layout";
-import { usePrefs, watchSystemTheme } from "./store/prefs";
+import { usePrefs, watchReducedMotion, watchSystemTheme } from "./store/prefs";
 import { useShortcuts } from "./lib/shortcuts";
 import { useChromeLayout } from "./lib/adaptiveLayout";
 import { PanelSkeleton, ToastViewport } from "./components/ChromeFeedback";
@@ -73,7 +73,12 @@ export function App() {
   // root as soon as the chrome can read them.
   useEffect(() => {
     void loadPrefs();
-    return watchSystemTheme();
+    const stopTheme = watchSystemTheme();
+    const stopMotion = watchReducedMotion();
+    return () => {
+      stopTheme();
+      stopMotion();
+    };
   }, [loadPrefs]);
   useShortcuts();
 

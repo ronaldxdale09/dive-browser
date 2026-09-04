@@ -24,6 +24,20 @@ describe("orderTabs", () => {
   });
 });
 
+describe("tab style", () => {
+  it("marks tabs with the tab-item class and the active one with data-active, leaving the look to the stylesheet", () => {
+    useBrowser.setState({ tabs: [{ ...t("a", "today", 0), title: "Docs" }, { ...t("b", "today", 1), title: "Mail" }], activeTab: "a" });
+    render(createElement(TabStrip));
+    const items = screen.getByRole("tablist", { name: "Tabs" }).querySelectorAll(".tab-item");
+    expect(items.length).toBe(2);
+    expect(items[0]!.hasAttribute("data-active")).toBe(true);
+    expect(items[1]!.hasAttribute("data-active")).toBe(false);
+    // No per-style conditionals in the markup: flat vs pill is `data-tab-style` on the root.
+    expect(items[0]!.className).not.toContain("bg-surface-2");
+    expect(items[0]!.className).toContain("h-[calc(var(--row-h)-4px)]");
+  });
+});
+
 describe("Essentials rail", () => {
   it("shows essentials icon-only ahead of the strip, behind a divider, and activates on click", () => {
     const activateTab = vi.fn().mockResolvedValue(undefined);

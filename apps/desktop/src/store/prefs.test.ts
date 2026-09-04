@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "./browser";
-import { DEFAULT_PREFS, accentInk, applyAppearance, usePrefs } from "./prefs";
+import { DEFAULT_APPEARANCE, DEFAULT_PREFS, accentInk, applyAppearance, isDefaultAppearance, resolveMotion, usePrefs, watchReducedMotion } from "./prefs";
 
 afterEach(() => {
-  document.documentElement.removeAttribute("data-theme");
-  document.documentElement.removeAttribute("style");
+  for (const name of ["data-theme", "data-density", "data-tab-style", "data-motion", "style"]) document.documentElement.removeAttribute(name);
   usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: false });
   useBrowser.setState({ error: null });
   vi.restoreAllMocks();
@@ -84,6 +83,90 @@ describe("applyAppearance", () => {
     applyAppearance(DEFAULT_PREFS);
     expect(root.style.getPropertyValue("--color-highlight")).toBe("");
     expect(root.style.getPropertyValue("--color-highlight-ink")).toBe("");
+  });
+
+  it("puts density, tab style and motion on the root as data attributes", () => {
+    const root = document.documentElement;
+    applyAppearance({ ...DEFAULT_PREFS, density: "compact", tab_style: "flat", motion: "reduce" });
+    expect(root.dataset.density).toBe("compact");
+    expect(root.dataset.tabStyle).toBe("flat");
+    expect(root.dataset.motion).toBe("reduce");
+    applyAppearance(DEFAULT_PREFS);
+    expect(root.dataset.density).toBe("comfortable");
+    expect(root.dataset.tabStyle).toBe("pill");
+    // jsdom answers no to every media query, so following the system is full motion.
+    expect(root.dataset.motion).toBe("full");
+  });
+
+  it("resolves motion from the preference, then the OS", () => {
+    expect(resolveMotion({ ...DEFAULT_PREFS, motion: "reduce" })).toBe("reduce");
+    expect(resolveMotion({ ...DEFAULT_PREFS, motion: "full" })).toBe("full");
+    const query = { matches: true, addEventListener: () => undefined, removeEventListener: () => undefined } as unknown as MediaQueryList;
+    vi.spyOn(window, "matchMedia").mockReturnValue(query);
+    expect(resolveMotion({ ...DEFAULT_PREFS, motion: "system" })).toBe("reduce");
+    expect(resolveMotion({ ...DEFAULT_PREFS, motion: "full" })).toBe("full");
+  });
+
+  it("sets every theme variable for a non-default appearance and clears them at the defaults", () => {
+    const root = document.documentElement;
+    applyAppearance({ ...DEFAULT_PREFS, appearance_preset: "sepia", corner_radius: "sharp", density: "relaxed", ui_font: "serif" });
+    expect(root.dataset.theme).toBe("dark");
+    expect(root.style.getPropertyValue("--color-ground")).toBe("#231a14");
+    expect(root.style.getPropertyValue("--color-surface")).toContain("color-mix(in oklab");
+    expect(root.style.getPropertyValue("--radius-lg")).toBe("3px");
+    expect(root.style.getPropertyValue("--row-h")).toBe("40px");
+    expect(root.style.getPropertyValue("--font-sans")).toContain("Georgia");
+
+    applyAppearance(DEFAULT_PREFS);
+    expect(root.style.getPropertyValue("--color-ground")).toBe("");
+    expect(root.style.getPropertyValue("--radius-lg")).toBe("");
+    expect(root.style.getPropertyValue("--row-h")).toBe("");
+    expect(root.style.getPropertyValue("--font-sans")).toBe("");
+  });
+
+  it("lets a fixed template force its scheme over the theme", () => {
+    applyAppearance({ ...DEFAULT_PREFS, theme: "light", appearance_preset: "midnight" });
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    applyAppearance({ ...DEFAULT_PREFS, theme: "dark", appearance_preset: "paper" });
+    expect(document.documentElement.dataset.theme).toBe("light");
+  });
+
+  it("scales the root font size with the interface size, clamped", () => {
+    const root = document.documentElement;
+    applyAppearance({ ...DEFAULT_PREFS, ui_scale: 1.2 });
+    expect(root.style.fontSize).toBe("19.2px");
+    applyAppearance({ ...DEFAULT_PREFS, ui_scale: 3 });
+    expect(root.style.fontSize).toBe("20.8px");
+    applyAppearance(DEFAULT_PREFS);
+    expect(root.style.fontSize).toBe("");
+  });
+
+  it("knows when nothing but the accent's case differs from the defaults", () => {
+    expect(isDefaultAppearance(DEFAULT_PREFS)).toBe(true);
+    expect(isDefaultAppearance({ ...DEFAULT_PREFS, accent: "#7fd8c8" })).toBe(true);
+    expect(isDefaultAppearance({ ...DEFAULT_PREFS, tab_style: "flat" })).toBe(false);
+    expect(Object.keys(DEFAULT_APPEARANCE)).toContain("welcome_background");
+    expect(Object.keys(DEFAULT_APPEARANCE)).not.toContain("homepage");
+  });
+
+  it("re-applies motion when the OS setting changes while following it", () => {
+    let fire: (() => void) | undefined;
+    const query = {
+      matches: false,
+      addEventListener: (_: string, cb: () => void) => {
+        fire = cb;
+      },
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList;
+    const spy = vi.spyOn(window, "matchMedia").mockReturnValue(query);
+    usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
+    const stop = watchReducedMotion();
+    expect(spy).toHaveBeenCalledWith("(prefers-reduced-motion: reduce)");
+    (query as { matches: boolean }).matches = true;
+    fire!();
+    expect(document.documentElement.dataset.motion).toBe("reduce");
+    stop();
+    expect(query.removeEventListener).toHaveBeenCalled();
   });
 
   it("chooses a readable foreground for pale and dark custom accents", () => {

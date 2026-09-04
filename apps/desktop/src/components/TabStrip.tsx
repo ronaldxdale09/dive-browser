@@ -64,7 +64,7 @@ export function TabStrip() {
   const stop = tabs.some((t) => t.id === focused) ? focused : active;
 
   return (
-    <div className="flex h-full items-center gap-1 pr-2 pl-2" onClick={() => menu && setMenu(null)}>
+    <div className="flex h-full items-center gap-[var(--ui-gap)] pr-2 pl-2" onClick={() => menu && setMenu(null)}>
       {essentials.length > 0 && (
         <>
           {/* Essentials: icon-only and present in every workspace. Not
@@ -225,9 +225,8 @@ function SortableTab({ tab: t, active, loading, detached, narrow, inTabOrder, on
         e.preventDefault();
         onMenu(e.clientX, e.clientY);
       }}
-      className={`group flex h-8 cursor-pointer items-center rounded-lg text-xs transition-colors ${pinned ? "w-9 shrink-0 justify-center" : `min-w-9 basis-56 max-w-56 shrink ${narrow.title ? "justify-center" : ""}`} ${
-        active ? "bg-surface-2 text-ink ring-1 ring-line-2" : "text-ink-2 hover:bg-surface hover:text-ink"
-      } ${sleeping || detached ? "opacity-55 hover:opacity-100" : ""}`}
+      className={`tab-item group flex h-[calc(var(--row-h)-4px)] cursor-pointer items-center text-xs transition-colors ${pinned ? "w-9 shrink-0 justify-center" : `min-w-9 basis-56 max-w-56 shrink ${narrow.title ? "justify-center" : ""}`} ${sleeping || detached ? "opacity-55 hover:opacity-100" : ""}`}
+      data-active={active || undefined}
       title={detached ? `${label(t)} (in its own window)` : sleeping ? `${label(t)} (sleeping, click to wake)` : pinned ? label(t) : undefined}
       data-sleeping={sleeping || undefined}
       data-detached={detached || undefined}
@@ -335,7 +334,8 @@ function EssentialTab({ tab: t, active, loading, onActivate, onMenu }: { tab: Ta
       data-essential
       data-tauri-drag-region="false"
       onMouseDown={(e) => e.stopPropagation()}
-      className={`grid size-8 shrink-0 cursor-pointer place-items-center rounded-lg text-xs transition-colors ${active ? "bg-surface-2 text-ink ring-1 ring-line-2" : "text-ink-2 hover:bg-surface hover:text-ink"}`}
+      data-active={active || undefined}
+      className="tab-item grid h-[calc(var(--row-h)-4px)] w-8 shrink-0 cursor-pointer place-items-center text-xs transition-colors"
     >
       {loading ? (
         <span className="grid place-items-center text-ink-2 motion-safe:animate-spin motion-reduce:animate-none" aria-label="Loading" role="img">

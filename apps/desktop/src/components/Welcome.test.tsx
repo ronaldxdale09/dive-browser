@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { events, ipc } from "../lib/ipc";
+import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { Welcome, visibleDevServers } from "./Welcome";
 
 // The feature reel is a Remotion Player with its own tests; jsdom cannot
@@ -39,6 +40,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
   vi.restoreAllMocks();
 });
 
@@ -80,5 +82,29 @@ describe("Welcome", () => {
     expect(background.getAttribute("aria-hidden")).toBe("true");
     expect(background.style.opacity).toBe("0.04");
     expect(background.style.position).toBe("absolute");
+  });
+
+  it("drops the canvas layers for a plain background", () => {
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, welcome_background: "plain" }, loaded: true });
+    const { container } = render(<Welcome />);
+    expect(screen.queryByTestId("character-background")).toBeNull();
+    expect(container.querySelector("canvas")).toBeNull();
+    const root = container.querySelector(".welcome")!;
+    expect(root.getAttribute("data-background")).toBe("plain");
+    expect(root.className).not.toContain("welcome-gradient");
+  });
+
+  it("draws a CSS gradient instead of the canvas for the gradient background", () => {
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, welcome_background: "gradient" }, loaded: true });
+    const { container } = render(<Welcome />);
+    expect(screen.queryByTestId("character-background")).toBeNull();
+    expect(container.querySelector("canvas")).toBeNull();
+    expect(container.querySelector(".welcome")!.className).toContain("welcome-gradient");
+  });
+
+  it("keeps the orbs and character field by default", () => {
+    const { container } = render(<Welcome />);
+    expect(screen.getByTestId("character-background")).toBeTruthy();
+    expect(container.querySelector("canvas")).not.toBeNull();
   });
 });

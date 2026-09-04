@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { events, ipc } from "../lib/ipc";
 import { createBoundsReporter, elementBounds } from "../lib/boundsReporter";
 import { useBrowser } from "../store/browser";
-import { usePrefs, watchSystemTheme } from "../store/prefs";
+import { usePrefs, watchReducedMotion, watchSystemTheme } from "../store/prefs";
 import { Icon, IconButton } from "./Icon";
 import { Favicon } from "./Favicon";
 import { tabLabel } from "./TabStrip";
@@ -33,7 +33,12 @@ export function Popout({ tabId }: { tabId: string }) {
   useEffect(() => void boot(), [boot]);
   useEffect(() => {
     void loadPrefs();
-    return watchSystemTheme();
+    const stopTheme = watchSystemTheme();
+    const stopMotion = watchReducedMotion();
+    return () => {
+      stopTheme();
+      stopMotion();
+    };
   }, [loadPrefs]);
   useEffect(() => {
     const el = body.current;

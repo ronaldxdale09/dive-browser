@@ -87,8 +87,8 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
           onClick={() => setEditing({ id: null })}
           className={
             expanded
-              ? "flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-2 text-xs text-ink-3 hover:bg-surface-2 hover:text-ink"
-              : "grid size-9 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink"
+              ? "flex h-[var(--row-h)] shrink-0 items-center gap-2.5 rounded-lg px-2 text-xs text-ink-3 hover:bg-surface-2 hover:text-ink"
+              : "grid h-[var(--row-h)] w-9 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink"
           }
         >
           <span className="grid size-7 shrink-0 place-items-center rounded-[10px] border border-dashed border-line-2">
@@ -106,8 +106,8 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
         onClick={() => useBrowser.getState().toggle("settings", true)}
         className={
           expanded
-            ? "flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-2 text-xs text-ink-3 hover:bg-surface-2 hover:text-ink"
-            : "grid size-9 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink"
+            ? "flex h-[var(--row-h)] shrink-0 items-center gap-2.5 rounded-lg px-2 text-xs text-ink-3 hover:bg-surface-2 hover:text-ink"
+            : "grid h-[var(--row-h)] w-9 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink"
         }
       >
         <span className="grid size-7 shrink-0 place-items-center">
@@ -140,7 +140,7 @@ function DefaultBrowserButton({ expanded }: { expanded: boolean }) {
   // Until Dive is the default this is the one invitation on the rail: a
   // hairline pill with a slow light sweep. Once it is, the sweep goes and
   // the row settles into the same quiet weight as Settings below it.
-  const shape = expanded ? "flex h-9 items-center gap-2.5 rounded-lg px-2" : "grid size-9 place-items-center rounded-full";
+  const shape = expanded ? "flex h-[var(--row-h)] items-center gap-2.5 rounded-lg px-2" : "grid h-[var(--row-h)] w-9 place-items-center rounded-full";
   const tone = isDefault ? "rail-cta is-default text-ink-3 hover:bg-surface-2 hover:text-ink" : "rail-cta text-ink-2 hover:text-ink";
   return (
     <button
@@ -231,8 +231,8 @@ function WorkspaceRow({
       }}
       className={
         expanded
-          ? `relative flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-2 transition-colors ${active ? "bg-surface-3 text-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"}`
-          : `relative grid size-9 shrink-0 place-items-center rounded-full transition-[background-color,box-shadow,transform] ${active ? "bg-surface-3 ring-1 ring-line-2" : "hover:bg-surface-2"}`
+          ? `relative flex h-[var(--row-h)] shrink-0 items-center gap-2.5 rounded-lg px-2 transition-colors ${active ? "bg-surface-3 text-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"}`
+          : `relative grid h-[var(--row-h)] w-9 shrink-0 place-items-center rounded-full transition-[background-color,box-shadow,transform] ${active ? "bg-surface-3 ring-1 ring-line-2" : "hover:bg-surface-2"}`
       }
     >
       {/* A generated mark rather than a shared glyph: every workspace gets a

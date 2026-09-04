@@ -69,7 +69,7 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
         <IconButton icon={RotateCw} label="Reload" shortcut="⌘R" disabled={!current} onClick={() => void reload()} size={14} />
       )}
       <form
-        className="mx-1 flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2"
+        className="mx-1 flex h-[calc(var(--row-h)-4px)] min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2"
         onSubmit={(e) => {
           e.preventDefault();
           void navigate(value);
