@@ -218,6 +218,7 @@ const BALL_DEFAULTS: Required<Ball> = { spread: 100, turn: 0, tilt: 0 };
 const POINTER_DEFAULTS: Required<Pointer> = { drag: 100, damping: 20 };
 
 export interface OrbBurstProps {
+  animated?: boolean;
   style?: CSSProperties;
   className?: string;
   width?: number;
@@ -255,7 +256,8 @@ export function OrbBurst(props: OrbBurstProps) {
   const pointer_ = { ...POINTER_DEFAULTS, ...(pointer || {}) };
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const reduced = useReducedMotion();
+  const motionReduced = useReducedMotion();
+  const reduced = motionReduced || props.animated === false;
 
   const size = { w: num(width, 0), h: num(height, 0) };
   // Every live input is read from a ref inside the loop. Putting any of them in
@@ -277,11 +279,14 @@ export function OrbBurst(props: OrbBurstProps) {
 
   const sizeRef = useRef(size);
   const vRef = useRef(v);
+  const redraw = useRef<() => void>(() => {});
   // Synced in an effect rather than during render, and declared before the
   // animation effect so the loop never reads a stale first value.
   useEffect(() => {
+    const changed = sizeRef.current.w !== size.w || sizeRef.current.h !== size.h || Object.keys(v).some((key) => vRef.current[key] !== v[key]);
     sizeRef.current = size;
     vRef.current = v;
+    if (changed) redraw.current();
   });
 
   useEffect(() => {
@@ -401,6 +406,20 @@ export function OrbBurst(props: OrbBurstProps) {
       if (!reduced || drag.active) raf = requestAnimationFrame(render);
     };
 
+    // Static artwork still needs a single fresh paint after appearance or
+    // layout changes. Coalesce invalidations; never start a recurring loop.
+    const invalidate = () => {
+      if (!reduced || document.hidden) return;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(render);
+    };
+    redraw.current = invalidate;
+    const appearance = new MutationObserver(invalidate);
+    appearance.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "data-theme"] });
+    const resize = new ResizeObserver(invalidate);
+    resize.observe(canvas);
+    window.addEventListener("resize", invalidate);
+
     // A hidden window paints nothing; when it comes back the clock resumes
     // from now rather than jumping the whole time it was away.
     const onVisibility = () => {
@@ -462,6 +481,10 @@ export function OrbBurst(props: OrbBurstProps) {
     if (!document.hidden) raf = requestAnimationFrame(render);
     return () => {
       cancelAnimationFrame(raf);
+      redraw.current = () => {};
+      appearance.disconnect();
+      resize.disconnect();
+      window.removeEventListener("resize", invalidate);
       document.removeEventListener("visibilitychange", onVisibility);
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);

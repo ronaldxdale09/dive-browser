@@ -26,6 +26,8 @@ def main():
                    'DIVE_NATIVE_LIFECYCLE_PROBE': mode, 'RUST_LOG': 'info', 'NO_COLOR': '1'}
             for key in ('DIVE_STARTUP_BENCHMARK', 'DIVE_STRESS_TABS', 'DIVE_SMOKE', 'DIVE_WINDOW_HIDDEN'):
                 env.pop(key, None)
+            if index != 1:
+                env.pop('DIVE_WELCOME_PROBE', None)
             if 'DIVE_AVATAR_PROBE' in env:
                 env['DIVE_AVATAR_PROBE'] = 'cold' if index == 1 else 'warm'
             log = evidence / f'{index}-{mode}.log'
@@ -50,6 +52,10 @@ def main():
                 raise RuntimeError(f'permission cache evidence incomplete: {log}')
             if 'DIVE_PERMISSION_CACHE_PROBE' in env and 'DIVE_PERMISSION_LEGACY_PROBE: seeded native AR, partitioned storage-access pair and sensor ALLOW reset/readback verified' not in content:
                 raise RuntimeError(f'legacy permission evidence incomplete: {log}')
+            if 'DIVE_WELCOME_PROBE' in env and 'DIVE_WELCOME_PROBE: static native artwork and on-demand tour open/close verified' not in content:
+                raise RuntimeError(f'welcome evidence incomplete: {log}')
+            if 'DIVE_PERMISSION_WEBUI_PROBE' in env and 'DIVE_PERMISSION_WEBUI_PROBE: effective chooser/protocol services verified' not in content:
+                raise RuntimeError(f'permission WebUI evidence incomplete: {log}')
             if 'DIVE_AVATAR_PROBE' in env and f"DIVE_AVATAR_PROBE: {env['DIVE_AVATAR_PROBE']} artwork verified" not in content:
                 raise RuntimeError(f'avatar evidence incomplete: {log}')
             records.append({'avatar_cache': env.get('DIVE_AVATAR_PROBE'), 'mode': mode, 'elapsed_seconds': round(elapsed, 2), 'permission_cache_checked': 'DIVE_PERMISSION_CACHE_PROBE' in env, 'log': str(log)})

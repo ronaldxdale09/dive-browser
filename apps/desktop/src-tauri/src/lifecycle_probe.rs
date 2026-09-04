@@ -28,6 +28,10 @@ fn popout(app: &tauri::AppHandle<Runtime>, id: TabId) -> Option<tauri::Window<Ru
 
 async fn run(app: &tauri::AppHandle<Runtime>, mode: &str) -> Result<(), AppError> {
     #[cfg(feature = "cef")]
+    if std::env::var_os("DIVE_WELCOME_PROBE").is_some() {
+        verify_welcome(app).await?;
+    }
+    #[cfg(feature = "cef")]
     if let Ok(expected) = std::env::var("DIVE_AVATAR_PROBE") {
         verify_avatars(app, &expected).await?;
     }
@@ -203,6 +207,61 @@ async fn wait_ipc_ready(session: &dive_cdp::CdpSession) -> Result<(), AppError> 
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }).await.map_err(AppError::new)?
+}
+
+#[cfg(feature = "cef")]
+async fn verify_welcome(app: &tauri::AppHandle<Runtime>) -> Result<(), AppError> {
+    let chrome = on_main(app, |handle| {
+        chrome_probe_session(
+            &handle
+                .get_webview(crate::CHROME_LABEL)
+                .ok_or_else(|| AppError::new("chrome missing"))?,
+        )
+    })
+    .await?;
+    let wait = |expression: &'static str| {
+        let chrome = chrome.clone();
+        async move {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    if read_probe_value(&chrome, expression).await? == true {
+                        return Ok::<_, AppError>(());
+                    }
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
+            })
+            .await
+            .map_err(AppError::new)?
+        }
+    };
+    wait("!!document.querySelector('.welcome canvas') && [...document.querySelectorAll('button')].some(button => button.textContent === 'Watch the feature tour')").await?;
+    if read_probe_value(
+        &chrome,
+        "performance.getEntriesByType('resource').some(entry => /FeatureReel-/.test(entry.name))",
+    )
+    .await?
+        != false
+    {
+        return Err(AppError::new(
+            "welcome loaded feature tour without a request",
+        ));
+    }
+    let artwork = "({orb: document.querySelector('.welcome canvas').toDataURL(), field: document.querySelector('[data-testid=character-background] > div').style.getPropertyValue('--t')})";
+    // Allow the initial canvas/ResizeObserver paints to settle, then compare a
+    // real native canvas and CSS animation clock across an idle interval.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let before = read_probe_value(&chrome, artwork).await?;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    if read_probe_value(&chrome, artwork).await? != before || before["field"] != "0" {
+        return Err(AppError::new("default welcome artwork keeps animating"));
+    }
+    probe_evaluate(&chrome, "[...document.querySelectorAll('button')].find(button => button.textContent === 'Watch the feature tour').click()").await?;
+    wait("!!document.querySelector('[role=region][aria-label^=\"A tour of\"]')").await?;
+    probe_evaluate(&chrome, "[...document.querySelectorAll('button')].find(button => button.textContent === 'Hide tour').click()").await?;
+    wait("!document.querySelector('[role=region][aria-label^=\"A tour of\"]') && [...document.querySelectorAll('button')].some(button => button.textContent === 'Watch the feature tour')").await?;
+    chrome.close();
+    println!("DIVE_WELCOME_PROBE: static native artwork and on-demand tour open/close verified");
+    Ok(())
 }
 
 #[cfg(feature = "cef")]

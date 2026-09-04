@@ -1,3 +1,4 @@
+import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { act, cleanup, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prefersReducedMotion, useReducedMotion } from "./useReducedMotion";
@@ -32,10 +33,23 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
   window.matchMedia = original;
 });
 
 describe("useReducedMotion", () => {
+  it("honors live Reduce/Full choices and resumes OS tracking in System", () => {
+    const { result } = renderHook(() => useReducedMotion());
+    act(() => usePrefs.setState({ prefs: { ...DEFAULT_PREFS, motion: "reduce" }, loaded: true }));
+    expect(result.current).toBe(true);
+    expect(prefersReducedMotion()).toBe(true);
+    act(() => media.set(true));
+    act(() => usePrefs.setState({ prefs: { ...DEFAULT_PREFS, motion: "full" }, loaded: true }));
+    expect(result.current).toBe(false);
+    act(() => usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true }));
+    expect(result.current).toBe(true);
+  });
+
   it("reports the current preference and follows it when it changes", () => {
     const { result } = renderHook(() => useReducedMotion());
     expect(result.current).toBe(false);

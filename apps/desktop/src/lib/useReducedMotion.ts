@@ -1,3 +1,4 @@
+import { usePrefs } from "../store/prefs";
 import { useSyncExternalStore } from "react";
 
 const QUERY = "(prefers-reduced-motion: reduce)";
@@ -8,19 +9,24 @@ function list(): MediaQueryList | null {
 
 function subscribe(onChange: () => void) {
   const query = list();
-  if (!query) return () => undefined;
-  query.addEventListener("change", onChange);
-  return () => query.removeEventListener("change", onChange);
+  query?.addEventListener("change", onChange);
+  const off = usePrefs.subscribe((state, previous) => {
+    if (state.prefs.motion !== previous.prefs.motion) onChange();
+  });
+  return () => { query?.removeEventListener("change", onChange); off(); };
 }
 
-/** Whether the OS asks for reduced motion right now; for code outside React. */
+/** Resolve Dive's motion choice, following the OS only in System mode. */
 export function prefersReducedMotion(): boolean {
+  const choice = usePrefs.getState().prefs.motion;
+  if (choice === "reduce") return true;
+  if (choice === "full") return false;
   return list()?.matches ?? false;
 }
 
 /**
- * The OS "reduce motion" setting, kept current: flipping it in System
- * Settings re-renders every subscriber, so a loop that was running stops and
+ * The effective motion setting, kept current across Dive and OS changes,
+ * re-renders every subscriber, so a loop that was running stops and
  * a reel that was paused starts, without a relaunch.
  */
 export function useReducedMotion(): boolean {

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { events, ipc } from "../lib/ipc";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
@@ -6,7 +6,11 @@ import { Welcome, visibleDevServers } from "./Welcome";
 
 // The feature reel is a Remotion Player with its own tests; jsdom cannot
 // drive it and this test is about the background layer.
-vi.mock("./FeatureReel", () => ({ FeatureReel: () => null }));
+const reelState = vi.hoisted(() => ({ broken: false }));
+vi.mock("./FeatureReel", () => ({ FeatureReel: () => {
+  if (reelState.broken) throw Error("tour failed");
+  return <div data-testid="feature-tour-player" />;
+} }));
 
 class ResizeObserverStub {
   observe() {}
@@ -40,11 +44,32 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  reelState.broken = false;
   usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
   vi.restoreAllMocks();
 });
 
 describe("Welcome", () => {
+  it("contains a broken tour while browsing controls remain usable", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    reelState.broken = true;
+    render(<Welcome />);
+    fireEvent.click(screen.getByRole("button", { name: "Watch the feature tour" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("You can keep browsing"));
+    expect(screen.getByRole("button", { name: /Open a tab/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Hide tour" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("mounts the tour only on request and removes it when hidden", async () => {
+    render(<Welcome />);
+    expect(screen.queryByTestId("feature-tour-player")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Watch the feature tour" }));
+    await waitFor(() => expect(screen.getByTestId("feature-tour-player")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Hide tour" }));
+    expect(screen.queryByTestId("feature-tour-player")).toBeNull();
+  });
+
   it("prioritizes recognized tools and caps the initial server list", () => {
     const servers = [
       { port: 9334, url: "http://localhost:9334", framework: "HTTP", title: "", process: "node", pid: 1 },

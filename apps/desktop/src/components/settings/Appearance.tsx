@@ -192,6 +192,7 @@ export function Appearance() {
       <Group title="Welcome screen">
         <Row
           label="Background"
+          hint="Welcome backgrounds stay still unless Motion is set to Full."
           control={
             <Segmented
               label="Welcome background"

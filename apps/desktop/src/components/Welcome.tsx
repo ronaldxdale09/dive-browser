@@ -1,5 +1,6 @@
+import { PanelErrorBoundary } from "./PanelErrorBoundary";
 import { ArrowRight } from "lucide-react";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useId, useState } from "react";
 import { events, ipc } from "../lib/ipc";
 import type { DevServer } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
@@ -8,8 +9,7 @@ import { OrbBurst } from "./OrbBurst";
 import { CharacterBg } from "./CharacterBg";
 import { AgentIcon } from "./agent/AgentIcon";
 
-// Remotion is sizeable and only appears in the no-tabs welcome screen. Keep
-// it off the browser chrome's startup path when a session restores real tabs.
+// Load the tour only after an explicit request, never on recurring empty tabs.
 const FeatureReel = lazy(() => import("./FeatureReel").then((module) => ({ default: module.FeatureReel })));
 
 const INITIAL_SERVER_COUNT = 3;
@@ -24,10 +24,12 @@ export function visibleDevServers(servers: DevServer[], expanded: boolean): DevS
 export function Welcome() {
   const toggle = useBrowser((s) => s.toggle);
   const background = useWelcomeBackground();
+  const animateBackground = usePrefs((s) => s.prefs.motion === "full");
   return (
     <div className={`welcome absolute inset-0 overflow-auto ${background === "gradient" ? "welcome-gradient" : ""}`} data-background={background}>
       {background === "orbs" && (
         <CharacterBg
+          animated={animateBackground}
           gridText="DIVE"
           gap={18}
           speed={45}
@@ -36,7 +38,7 @@ export function Welcome() {
         />
       )}
       <div className="relative z-10 mx-auto flex min-h-full w-full max-w-[1040px] flex-col items-center px-4 pt-4 pb-10 sm:px-8 sm:pt-6">
-        {background === "orbs" ? <OrbBurst width={190} height={190} className="-mb-4" /> : <div className="h-10" aria-hidden />}
+        {background === "orbs" ? <OrbBurst animated={animateBackground} pointer={{ drag: 0 }} width={190} height={190} className="-mb-4" /> : <div className="h-10" aria-hidden />}
         <p className="text-[10px] font-medium tracking-[0.18em] text-highlight uppercase">Dive</p>
         <h1 className="mt-2 max-w-full text-center text-[clamp(26px,4vw,34px)] leading-tight font-semibold tracking-[-0.025em] text-balance">
           The browser built for developers
@@ -55,10 +57,7 @@ export function Welcome() {
 
         <ActiveDevServers />
 
-        {/* One minute, every feature, looping: it says more than a grid of
-            twelve cards could, and it is drawn from the same tokens as the
-            chrome around it. */}
-        <DeferredFeatureReel />
+        <OptionalFeatureTour />
         <p className="mt-4 text-[11px] text-ink-3">
           Press <Kbd dim>⌘K</Kbd> anywhere to search tabs, history, bookmarks, local servers and every command.
         </p>
@@ -75,32 +74,25 @@ function useWelcomeBackground(): WelcomeBackground {
   return value === "plain" || value === "gradient" ? value : "orbs";
 }
 
-/** Do not fetch or mount Remotion until its frame is close to the viewport. */
-function DeferredFeatureReel() {
-  const root = useRef<HTMLDivElement>(null);
-  const [nearby, setNearby] = useState(false);
-  useEffect(() => {
-    const element = root.current;
-    if (!element || typeof IntersectionObserver === "undefined") {
-      setNearby(true);
-      return;
-    }
-    const observer = new IntersectionObserver(([entry]) => {
-      if (!entry?.isIntersecting) return;
-      setNearby(true);
-      observer.disconnect();
-    }, { rootMargin: "240px" });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
+/** Each visit stays quiet until the person explicitly opens the tour. */
+function OptionalFeatureTour() {
+  const [open, setOpen] = useState(false);
+  const id = useId();
   return (
-    <div ref={root} className="mt-8 aspect-[16/9] w-full rounded-2xl">
-      {nearby ? (
-        <Suspense fallback={<div role="status" aria-label="Loading feature tour" className="skeleton-enter size-full rounded-2xl bg-surface-2/35" />}>
-          <FeatureReel />
-        </Suspense>
-      ) : <div className="size-full rounded-2xl border border-line bg-surface" aria-hidden />}
-    </div>
+    <section className="mt-6 w-full text-center">
+      <button type="button" aria-expanded={open} aria-controls={id} onClick={() => setOpen((value) => !value)} className="h-9 rounded-full border border-line-2 px-4 text-xs font-medium text-ink-2 hover:bg-surface-2 hover:text-ink">
+        {open ? "Hide tour" : "Watch the feature tour"}
+      </button>
+      <div id={id}>
+        {open && <div className="mt-4 aspect-[16/9] w-full rounded-2xl">
+          <PanelErrorBoundary label="The feature tour">
+          <Suspense fallback={<div role="status" aria-label="Loading feature tour" className="size-full rounded-2xl bg-surface-2/35" />}>
+            <FeatureReel />
+          </Suspense>
+          </PanelErrorBoundary>
+        </div>}
+      </div>
+    </section>
   );
 }
 function Kbd({ children, dim = false }: { children: string; dim?: boolean }) {
