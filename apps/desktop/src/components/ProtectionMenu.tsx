@@ -2,7 +2,6 @@ import { Megaphone, Play, Radar, Shield, ShieldCheck, SlidersHorizontal } from "
 import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { ipc } from "../lib/ipc";
 import { useCoversContent } from "../lib/overlay";
 import { privacyGuardian } from "../lib/privacyAvatar";
 import { useFocusTrap } from "../lib/useFocusTrap";
@@ -27,6 +26,8 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
   const [siteSaving, setSiteSaving] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
+  const siteControl = useRef<HTMLSpanElement>(null);
+  const previousGlobalOn = useRef(prefs.block_trackers);
   useCoversContent(open);
   useFocusTrap(panel, { active: open, onEscape: () => setOpen(false) });
 
@@ -38,12 +39,19 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
   const youtubeSite = host === "www.youtube.com" || host === "m.youtube.com";
   const youtubeActive = siteOn && youtubeSite && prefs.youtube_protection;
   const total = counts.ads + counts.trackers + counts.youtube;
-  const headline = !globalOn ? "DivePrivacy is off" : paused ? "Protection paused here" : "Protected on this site";
+  const headline = !globalOn ? "DivePrivacy is off" : !host ? "Protection unavailable here" : paused ? "Protection paused here" : "Protected on this site";
   const summary = total === 0 ? "Clean so far" : `${total} stopped so far`;
 
   useEffect(() => {
     if (open && !info) void loadInfo().catch(() => undefined);
   }, [info, loadInfo, open]);
+
+  useEffect(() => {
+    if (open && globalOn && !previousGlobalOn.current && !panel.current?.contains(document.activeElement)) {
+      siteControl.current?.querySelector("button")?.focus({ preventScroll: true });
+    }
+    previousGlobalOn.current = globalOn;
+  }, [globalOn, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -62,11 +70,6 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
       : [...prefs.privacy_exceptions.filter((exception) => exception !== host), host];
     try {
       await update({ privacy_exceptions: exceptions });
-      const stored = usePrefs.getState().prefs.privacy_exceptions;
-      const persisted = enabled ? !stored.includes(host) : stored.includes(host);
-      if (persisted) await ipc.tabReload(activeTab);
-    } catch (error) {
-      reportError(error);
     } finally {
       setSiteSaving(false);
     }
@@ -87,7 +90,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
           <span
             key={total}
             className="privacy-count privacy-motion ml-0.5 rounded-full bg-highlight-soft px-1.5 py-px font-mono text-[10px] leading-4 text-highlight"
-            aria-label={`${total} blocked on this page`}
+            aria-label={`${total} privacy actions on this page`}
           >
             {total}
           </span>
@@ -147,7 +150,9 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
                   {!host ? "Site controls unavailable" : paused ? `Resume on ${host}` : `Pause only on ${host}`}
                 </p>
               </div>
-              <Switch label="Protection on this site" checked={siteOn} disabled={!globalOn || !host || siteSaving} onChange={(enabled) => void changeSite(enabled)} />
+              <span ref={siteControl} className="shrink-0">
+                <Switch label="Protection on this site" checked={siteOn} disabled={!globalOn || !host || siteSaving} onChange={(enabled) => void changeSite(enabled)} />
+              </span>
             </div>
 
             {!globalOn && (
@@ -218,8 +223,4 @@ function pageHost(raw: string | undefined): string | null {
   } catch {
     return null;
   }
-}
-
-function reportError(error: unknown) {
-  useBrowser.setState({ error: error instanceof Error ? error.message : String(error) });
 }

@@ -247,8 +247,11 @@ impl Prefs {
     /// Whether `DivePrivacy` applies to this document URL.
     pub fn privacy_enabled_for(&self, document_url: &str) -> bool {
         let Some(host) = url::Url::parse(document_url).ok().and_then(|url| {
-            url.host_str()
-                .map(|host| host.trim_end_matches('.').to_ascii_lowercase())
+            url.host().map(|host| match host {
+                url::Host::Domain(host) => host.trim_end_matches('.').to_ascii_lowercase(),
+                url::Host::Ipv4(host) => host.to_string(),
+                url::Host::Ipv6(host) => format!("[{host}]"),
+            })
         }) else {
             return true;
         };
@@ -259,19 +262,35 @@ impl Prefs {
     }
 }
 
-/// Keep only exact, registrable hostnames suitable for disabling `DivePrivacy`.
+/// Keep only exact, registrable hostnames or IP literals suitable for disabling `DivePrivacy`.
 pub fn normalize_privacy_exceptions(exceptions: Vec<String>) -> Vec<String> {
     let mut normalized = exceptions
         .into_iter()
         .filter_map(|exception| {
             if exception.is_empty()
                 || exception.chars().any(char::is_whitespace)
-                || exception.contains(['/', '*', ':', '?', '#', '@'])
+                || exception.contains(['/', '*', '?', '#', '@'])
             {
                 return None;
             }
             let host = exception.strip_suffix('.').unwrap_or(&exception);
-            if host.is_empty() || host.split('.').any(str::is_empty) {
+            if let Some(ipv6) = host
+                .strip_prefix('[')
+                .and_then(|host| host.strip_suffix(']'))
+                .and_then(|host| host.parse::<std::net::Ipv6Addr>().ok())
+            {
+                return Some(format!("[{ipv6}]"));
+            }
+            if let Ok(ipv4) = host.parse::<std::net::Ipv4Addr>() {
+                return Some(ipv4.to_string());
+            }
+            if let Ok(ipv6) = host.parse::<std::net::Ipv6Addr>() {
+                return Some(format!("[{ipv6}]"));
+            }
+            if host.is_empty()
+                || host.contains([':', '[', ']'])
+                || host.split('.').any(str::is_empty)
+            {
                 return None;
             }
             let url::Host::Domain(host) = url::Host::parse(host).ok()? else {
@@ -532,6 +551,28 @@ mod tests {
         assert_eq!(prefs.privacy_exceptions, vec!["example.com"]);
         assert!(!prefs.privacy_enabled_for("https://example.com/page"));
         assert!(prefs.privacy_enabled_for("https://sub.example.com/page"));
+    }
+
+    #[test]
+    fn privacy_exceptions_accept_exact_ip_literals() {
+        let normalized = normalize_privacy_exceptions(vec![
+            "127.0.0.1".into(),
+            "[2001:0DB8:0:0::1]".into(),
+            "2001:db8::2".into(),
+        ]);
+
+        assert_eq!(
+            normalized,
+            vec!["127.0.0.1", "[2001:db8::1]", "[2001:db8::2]"]
+        );
+        let prefs = Prefs {
+            privacy_exceptions: normalized,
+            ..Prefs::default()
+        };
+        assert!(!prefs.privacy_enabled_for("http://127.0.0.1:4173/fixture"));
+        assert!(!prefs.privacy_enabled_for("https://[2001:db8::1]/page"));
+        assert!(!prefs.privacy_enabled_for("https://[2001:db8::2]/page"));
+        assert!(prefs.privacy_enabled_for("http://127.0.0.2:4173/fixture"));
     }
 
     #[test]

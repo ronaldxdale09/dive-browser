@@ -201,7 +201,7 @@ fn page_configuration(prefs: &crate::prefs::Prefs, document_url: &str) -> PageCo
     let site_enabled = prefs.privacy_enabled_for(document_url);
     let youtube_host = matches!(host.as_str(), "www.youtube.com" | "m.youtube.com");
     PageConfiguration {
-        enabled: site_enabled && youtube_host && prefs.youtube_protection,
+        enabled: prefs.block_trackers && site_enabled && youtube_host && prefs.youtube_protection,
         cosmetic_css: if site_enabled && prefs.block_trackers {
             cosmetic_css(&host)
         } else {
@@ -539,6 +539,20 @@ mod tests {
         let paused = page_configuration(&prefs, "https://www.youtube.com/watch?v=abc");
         assert!(!paused.enabled);
         assert!(paused.cosmetic_css.is_empty());
+    }
+
+    #[test]
+    fn page_configuration_disables_youtube_when_global_protection_is_off() {
+        let prefs = crate::prefs::Prefs {
+            block_trackers: false,
+            youtube_protection: true,
+            ..crate::prefs::Prefs::default()
+        };
+
+        let youtube = page_configuration(&prefs, "https://www.youtube.com/watch?v=abc");
+
+        assert!(!youtube.enabled);
+        assert!(youtube.cosmetic_css.is_empty());
     }
 
     #[test]

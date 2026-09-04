@@ -45,6 +45,7 @@ beforeEach(() => {
   usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
   vi.spyOn(ipc, "downloadsReveal").mockResolvedValue(null);
   vi.spyOn(ipc, "prefsSet").mockImplementation((p) => Promise.resolve(p));
+  vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
 
   vi.spyOn(ipc, "bookmarkStatus").mockResolvedValue(false);
@@ -161,33 +162,30 @@ describe("Toolbar", () => {
 
   it("reports typed per-layer counts without treating generic network failures as privacy actions", () => {
     usePrefs.setState({ prefs: { ...DEFAULT_PREFS, block_trackers: true }, loaded: true });
-    usePrivacy.setState({ byTab: { [tab.id]: { ads: 2, trackers: 1, youtube: 0 } } });
+    usePrivacy.setState({ byTab: { [tab.id]: { ads: 2, trackers: 1, youtube: 1 } } });
 
     render(<Toolbar />);
     fireEvent.click(screen.getByRole("button", { name: "Protection" }));
 
     expect(screen.getByText("Protected on this site")).toBeTruthy();
-    expect(screen.getByText("3 stopped so far")).toBeTruthy();
+    expect(screen.getByText("4 stopped so far")).toBeTruthy();
     expect(screen.getByTestId("privacy-halo").className).toContain("privacy-halo");
     expect(screen.getByText("Ads blocked").nextSibling?.textContent).toBe("2");
     expect(screen.getByText("Trackers stopped").nextSibling?.textContent).toBe("1");
-    expect(screen.getByLabelText("3 blocked on this page")).toBeTruthy();
+    expect(screen.getByLabelText("4 privacy actions on this page")).toBeTruthy();
   });
 
-  it("persists an exact-host pause before reloading the active tab", async () => {
+  it("persists an exact IP-host pause without duplicating the backend reload", async () => {
+    useBrowser.setState({ tabs: [{ ...tab, url: "http://127.0.0.1:4173/fixture" }] });
     usePrefs.setState({ prefs: { ...DEFAULT_PREFS, block_trackers: true }, loaded: true });
-    let finishWrite!: (prefs: typeof DEFAULT_PREFS) => void;
-    vi.mocked(ipc.prefsSet).mockReturnValueOnce(new Promise((resolve) => (finishWrite = resolve)));
 
     render(<Toolbar />);
     fireEvent.click(screen.getByRole("button", { name: "Protection" }));
     fireEvent.click(screen.getByRole("switch", { name: "Protection on this site" }));
 
-    await waitFor(() => expect(ipc.prefsSet).toHaveBeenCalledWith({ ...DEFAULT_PREFS, block_trackers: true, privacy_exceptions: ["example.com"] }));
+    await waitFor(() => expect(ipc.prefsSet).toHaveBeenCalledWith({ ...DEFAULT_PREFS, block_trackers: true, privacy_exceptions: ["127.0.0.1"] }));
+    expect(ipc.prefsSet).toHaveBeenCalledTimes(1);
     expect(ipc.tabReload).not.toHaveBeenCalled();
-
-    finishWrite({ ...DEFAULT_PREFS, block_trackers: true, privacy_exceptions: ["example.com"] });
-    await waitFor(() => expect(ipc.tabReload).toHaveBeenCalledWith(tab.id));
     expect(screen.getByText("Protection paused here")).toBeTruthy();
   });
 
@@ -204,7 +202,8 @@ describe("Toolbar", () => {
     fireEvent.click(site);
 
     await waitFor(() => expect(ipc.prefsSet).toHaveBeenCalledWith({ ...DEFAULT_PREFS, block_trackers: true, privacy_exceptions: ["other.example"] }));
-    await waitFor(() => expect(ipc.tabReload).toHaveBeenCalledWith(tab.id));
+    expect(ipc.prefsSet).toHaveBeenCalledTimes(1);
+    expect(ipc.tabReload).not.toHaveBeenCalled();
   });
 
   it("offers global enablement when DivePrivacy is off", async () => {
@@ -215,6 +214,19 @@ describe("Toolbar", () => {
     await waitFor(() => expect(ipc.prefsSet).toHaveBeenCalledWith({ ...DEFAULT_PREFS, block_trackers: true }));
     expect(screen.queryByRole("switch", { name: "DivePrivacy protection" })).toBeNull();
     expect(screen.getByText("Protected on this site")).toBeTruthy();
+  });
+
+  it("moves focus to the stable site control after global protection is enabled", async () => {
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+    const global = screen.getByRole("switch", { name: "DivePrivacy protection" });
+    global.focus();
+    fireEvent.click(global);
+
+    const site = screen.getByRole("switch", { name: "Protection on this site" });
+    await waitFor(() => expect(document.activeElement).toBe(site));
+    fireEvent.keyDown(site, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "All privacy settings" }));
   });
 
   it("shows and changes YouTube protection only on supported YouTube hosts", async () => {
@@ -242,6 +254,18 @@ describe("Toolbar", () => {
 
     expect((screen.getByRole("switch", { name: "Protection on this site" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("Site controls unavailable")).toBeTruthy();
+    expect(screen.getByText("Protection unavailable here")).toBeTruthy();
+  });
+
+  it("does not claim an absent active tab is protected", () => {
+    useBrowser.setState({ tabs: [], activeTab: null });
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, block_trackers: true }, loaded: true });
+
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+
+    expect(screen.getByText("Protection unavailable here")).toBeTruthy();
+    expect(screen.queryByText("Protected on this site")).toBeNull();
   });
 
   it("does not reload when preference persistence fails", async () => {
@@ -253,6 +277,7 @@ describe("Toolbar", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Protection on this site" }));
 
     await waitFor(() => expect(useBrowser.getState().error).toBe("disk full"));
+    expect(ipc.prefsSet).toHaveBeenCalledTimes(1);
     expect(usePrefs.getState().prefs.privacy_exceptions).toEqual([]);
     expect(ipc.tabReload).not.toHaveBeenCalled();
   });
@@ -270,6 +295,17 @@ describe("Toolbar", () => {
 
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "DivePrivacy protection" })).toBeNull());
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it("covers the native page only until an outside click closes the card", async () => {
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+    await waitFor(() => expect(ipc.setContentCovered).toHaveBeenCalledWith(true));
+
+    fireEvent.mouseDown(document.body);
+
+    expect(screen.queryByRole("dialog", { name: "DivePrivacy protection" })).toBeNull();
+    await waitFor(() => expect(ipc.setContentCovered).toHaveBeenCalledWith(false));
   });
 
   it("opens all privacy settings from the card footer", () => {
