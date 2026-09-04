@@ -969,6 +969,11 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
     if let Some(b) = remembered {
         builder = builder.position(b.x, b.y);
     }
+    // `DIVE_WINDOW_HIDDEN=1`: harness runs keep the window off screen so a
+    // person at the machine cannot close a trial by accident.
+    if std::env::var_os("DIVE_WINDOW_HIDDEN").is_some() {
+        builder = builder.visible(false);
+    }
     let window = builder.build()?;
 
     // Keep production's Dock icon clean. macOS renders this label directly on

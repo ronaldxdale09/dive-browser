@@ -195,8 +195,27 @@ pub fn run() {
             startup::on_setup_completed(app.handle().clone());
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("failed to run dive");
+        .build(tauri::generate_context!())
+        .expect("failed to build dive")
+        .run(|_, event| match event {
+            // Why the process is going away is the first question after an
+            // unexpected exit; say so in the log.
+            tauri::RunEvent::ExitRequested { code, .. } => {
+                tracing::info!(?code, "exit requested");
+            }
+            tauri::RunEvent::Exit => tracing::info!("event loop exited"),
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::Destroyed,
+                ..
+            } => tracing::info!(%label, "window destroyed"),
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::CloseRequested { .. },
+                ..
+            } => tracing::info!(%label, "window close requested"),
+            _ => {}
+        });
 }
 
 /// Open tabs for URLs given on the command line or in `DIVE_OPEN_URL`
