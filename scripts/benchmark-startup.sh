@@ -24,8 +24,10 @@ echo "        Dive Browser Startup Performance Benchmark (R1)          "
 echo "================================================================="
 
 # 1. Locate or build binary
+EXPLICIT_BIN=0
 if [[ -n "${DIVE_BIN:-}" && -x "${DIVE_BIN}" ]]; then
     BIN="${DIVE_BIN}"
+    EXPLICIT_BIN=1
 elif [[ -x "${REPO_ROOT}/target/debug/bundle/macos/Dive.app/Contents/MacOS/dive-desktop" ]]; then
     BIN="${REPO_ROOT}/target/debug/bundle/macos/Dive.app/Contents/MacOS/dive-desktop"
 elif [[ -x "${REPO_ROOT}/target/release/bundle/macos/Dive.app/Contents/MacOS/dive-desktop" ]]; then
@@ -39,7 +41,7 @@ else
 fi
 
 # Ensure Dive.app bundle binary is in sync with target/debug/dive-desktop if on macOS
-if [[ -f "${REPO_ROOT}/target/debug/dive-desktop" && -d "${REPO_ROOT}/target/debug/bundle/macos/Dive.app/Contents/MacOS" ]]; then
+if [[ ${EXPLICIT_BIN} -eq 0 && -f "${REPO_ROOT}/target/debug/dive-desktop" && -d "${REPO_ROOT}/target/debug/bundle/macos/Dive.app/Contents/MacOS" ]]; then
     cp -f "${REPO_ROOT}/target/debug/dive-desktop" "${REPO_ROOT}/target/debug/bundle/macos/Dive.app/Contents/MacOS/dive-desktop"
     BIN="${REPO_ROOT}/target/debug/bundle/macos/Dive.app/Contents/MacOS/dive-desktop"
 fi
@@ -65,6 +67,8 @@ run_instance() {
     DIVE_COLD_START="${is_cold}" \
     DIVE_BENCHMARK_OUTPUT="${output_json}" \
     DIVE_BENCHMARK_TIMEOUT_MS="${TIMEOUT_MS}" \
+    DIVE_WINDOW_HIDDEN=1 \
+    DIVE_MCP_PORT=0 \
     "${BIN}" "${EXTRA_FLAGS[@]}" > /dev/null 2>&1 || true
 }
 
