@@ -370,7 +370,9 @@ async fn reset_interception(session: &CdpSession, rules: &[Rule], prefs: &Prefs)
     if let Err(error) = session.call0("Fetch.disable").await {
         tracing::debug!("Fetch.disable recovery failed: {error}");
     }
-    if let Err(error) = apply(session, rules, prefs).await {
+    if interception_required(rules, prefs)
+        && let Err(error) = apply(session, rules, prefs).await
+    {
         tracing::debug!("Fetch recovery re-enable failed: {error}");
     }
 }
@@ -934,5 +936,28 @@ mod tests {
             .map(|message| message["method"].as_str().unwrap().to_owned())
             .collect::<Vec<_>>();
         assert_eq!(methods, vec!["Fetch.disable", "Fetch.enable"]);
+    }
+
+    #[tokio::test]
+    async fn missing_request_id_recovery_does_not_disable_twice_when_it_stays_off() {
+        let (session, sent) = scripted_session(vec![Reply::Ok]);
+
+        let request_id = request_id_or_reset(
+            &session,
+            TabId::new(),
+            &json!({"request": {"url": "https://example.test/"}}),
+            &[],
+            &Prefs::default(),
+        )
+        .await;
+
+        assert_eq!(request_id, None);
+        let methods = sent
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .map(|message| message["method"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(methods, vec!["Fetch.disable"]);
     }
 }
