@@ -39,6 +39,11 @@ afterEach(() => {
 });
 
 describe("SettingsDialog", () => {
+  it("uses the complete DivePrivacy defaults fixture", () => {
+    expect(DEFAULT_PREFS.youtube_protection).toBe(true);
+    expect(DEFAULT_PREFS.privacy_exceptions).toEqual([]);
+  });
+
   it("opens on General and moves between sections", async () => {
     render(<SettingsDialog />);
     expect(screen.getByLabelText("Search engine")).toBeTruthy();

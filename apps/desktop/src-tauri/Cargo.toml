@@ -35,6 +35,7 @@ tauri-plugin-updater = "2"
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
+psl = "2"
 time = { workspace = true }
 base64 = "0.22"
 sourcemap = "9"

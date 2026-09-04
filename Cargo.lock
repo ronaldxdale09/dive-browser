@@ -1396,6 +1396,7 @@ dependencies = [
  "image",
  "keyring-core",
  "local-ip-address",
+ "psl",
  "qrcode",
  "reqwest",
  "serde",

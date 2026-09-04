@@ -1029,6 +1029,10 @@ export type Prefs = {
 	block_trackers: boolean,
 	/**  Extra hosts or URL globs to block, one per entry. */
 	blocked_patterns: string[],
+	/**  Remove invasive YouTube components when DivePrivacy is active. */
+	youtube_protection?: boolean,
+	/**  Exact document hosts where DivePrivacy is disabled. */
+	privacy_exceptions?: string[],
 	/**  Run page scripts. Off makes every tab script-free. */
 	javascript: boolean,
 	/**  Days of history to keep; `0` keeps it forever. */

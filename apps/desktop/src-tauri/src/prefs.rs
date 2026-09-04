@@ -48,6 +48,12 @@ pub struct Prefs {
     pub block_trackers: bool,
     /// Extra hosts or URL globs to block, one per entry.
     pub blocked_patterns: Vec<String>,
+    /// Remove invasive YouTube components when DivePrivacy is active.
+    #[serde(default = "default_youtube_protection")]
+    pub youtube_protection: bool,
+    /// Exact document hosts where DivePrivacy is disabled.
+    #[serde(default)]
+    pub privacy_exceptions: Vec<String>,
     /// Run page scripts. Off makes every tab script-free.
     pub javascript: bool,
     /// Days of history to keep; `0` keeps it forever.
@@ -81,6 +87,10 @@ fn default_editor() -> String {
     "vscode".into()
 }
 
+fn default_youtube_protection() -> bool {
+    true
+}
+
 impl Default for Prefs {
     fn default() -> Self {
         Self {
@@ -95,6 +105,8 @@ impl Default for Prefs {
             do_not_track: false,
             block_trackers: false,
             blocked_patterns: Vec::new(),
+            youtube_protection: default_youtube_protection(),
+            privacy_exceptions: Vec::new(),
             javascript: true,
             history_days: 0,
             download_dir: String::new(),
@@ -123,28 +135,6 @@ pub const ENGINES: &[(&str, &str)] = &[
         "startpage",
         "https://www.startpage.com/sp/search?query={query}",
     ),
-];
-
-/// Hosts blocked when "block trackers" is on. Deliberately short and
-/// analytics-only: a developer browser must not silently break the site
-/// under test, so CDN and consent hosts are left alone.
-pub const TRACKERS: &[&str] = &[
-    "*://*.doubleclick.net/*",
-    "*://*.googlesyndication.com/*",
-    "*://*.googletagmanager.com/*",
-    "*://*.google-analytics.com/*",
-    "*://*.analytics.google.com/*",
-    "*://*.adservice.google.com/*",
-    "*://*.facebook.net/*",
-    "*://*.scorecardresearch.com/*",
-    "*://*.hotjar.com/*",
-    "*://*.mixpanel.com/*",
-    "*://*.amplitude.com/*",
-    "*://*.segment.io/*",
-    "*://*.fullstory.com/*",
-    "*://*.criteo.com/*",
-    "*://*.taboola.com/*",
-    "*://*.outbrain.com/*",
 ];
 
 /// Largest number of custom block patterns kept.
@@ -188,6 +178,7 @@ impl Prefs {
             .filter(|p| !p.is_empty())
             .take(MAX_PATTERNS)
             .collect();
+        self.privacy_exceptions = normalize_privacy_exceptions(self.privacy_exceptions);
         let provider = if let Some(provider) = dive_agent::Provider::parse(&self.agent_provider) {
             provider
         } else {
@@ -239,25 +230,65 @@ impl Prefs {
 
     /// URL patterns the engine should refuse to load.
     pub fn blocked_urls(&self) -> Vec<String> {
-        let custom = self.blocked_patterns.iter().map(|p| {
-            // A bare host is the common case; widen it so it matches the
-            // scheme and path the request actually carries.
-            if p.contains('*') || p.contains('/') {
-                p.clone()
-            } else {
-                format!("*{p}*")
-            }
-        });
-        if self.block_trackers {
-            TRACKERS
-                .iter()
-                .map(|s| (*s).to_owned())
-                .chain(custom)
-                .collect()
-        } else {
-            custom.collect()
-        }
+        self.blocked_patterns
+            .iter()
+            .map(|p| {
+                // A bare host is the common case; widen it so it matches the
+                // scheme and path the request actually carries.
+                if p.contains('*') || p.contains('/') {
+                    p.clone()
+                } else {
+                    format!("*{p}*")
+                }
+            })
+            .collect()
     }
+
+    /// Whether DivePrivacy applies to this document URL.
+    pub fn privacy_enabled_for(&self, document_url: &str) -> bool {
+        let Some(host) = url::Url::parse(document_url).ok().and_then(|url| {
+            url.host_str()
+                .map(|host| host.trim_end_matches('.').to_ascii_lowercase())
+        }) else {
+            return true;
+        };
+        !self
+            .privacy_exceptions
+            .iter()
+            .any(|exception| exception == &host)
+    }
+}
+
+/// Keep only exact, registrable hostnames suitable for disabling DivePrivacy.
+pub fn normalize_privacy_exceptions(exceptions: Vec<String>) -> Vec<String> {
+    let mut normalized = exceptions
+        .into_iter()
+        .filter_map(|exception| {
+            if exception.is_empty()
+                || exception.chars().any(char::is_whitespace)
+                || exception.contains(['/', '*', ':', '?', '#', '@'])
+            {
+                return None;
+            }
+            let host = exception.strip_suffix('.').unwrap_or(&exception);
+            if host.is_empty() || host.split('.').any(str::is_empty) {
+                return None;
+            }
+            let url::Host::Domain(host) = url::Host::parse(host).ok()? else {
+                return None;
+            };
+            if psl::suffix(host.as_bytes())
+                .is_some_and(|suffix| suffix.is_known() && suffix.as_bytes() == host.as_bytes())
+            {
+                return None;
+            }
+            Some(host)
+        })
+        .collect::<Vec<_>>();
+    normalized.sort_unstable();
+    normalized.dedup();
+    normalized.truncate(MAX_PATTERNS);
+    normalized
 }
 
 fn is_hex_color(s: &str) -> bool {
@@ -459,6 +490,49 @@ mod tests {
     }
 
     #[test]
+    fn old_profiles_receive_diveprivacy_defaults() {
+        let prefs =
+            parse_stored(r#"{"block_trackers":true,"blocked_patterns":["ads.test"]}"#).unwrap();
+        assert!(prefs.block_trackers);
+        assert_eq!(prefs.blocked_patterns, vec!["ads.test"]);
+        assert!(prefs.youtube_protection);
+        assert!(prefs.privacy_exceptions.is_empty());
+    }
+
+    #[test]
+    fn privacy_exceptions_are_exact_hosts() {
+        let prefs = Prefs {
+            privacy_exceptions: vec![
+                "Example.COM.".into(),
+                "https://bad.test/path".into(),
+                "*.wide.test".into(),
+                "example.com".into(),
+            ],
+            ..Prefs::default()
+        }
+        .clamp();
+        assert_eq!(prefs.privacy_exceptions, vec!["example.com"]);
+        assert!(!prefs.privacy_enabled_for("https://example.com/page"));
+        assert!(prefs.privacy_enabled_for("https://sub.example.com/page"));
+    }
+
+    #[test]
+    fn privacy_exceptions_reject_broad_hosts_and_cap_the_list() {
+        let mut exceptions = vec![
+            "com".into(),
+            "co.uk".into(),
+            "has whitespace.test".into(),
+            "double..label.test".into(),
+        ];
+        exceptions.extend((0..201).map(|index| format!("site{index}.test")));
+        let normalized = normalize_privacy_exceptions(exceptions);
+        assert_eq!(normalized.len(), 200);
+        assert!(!normalized.iter().any(|host| {
+            matches!(host.as_str(), "com" | "co.uk" | "has whitespace.test" | "double..label.test")
+        }));
+    }
+
+    #[test]
     fn clamp_rejects_nonsense() {
         let prefs = Prefs {
             theme: "neon".into(),
@@ -515,11 +589,12 @@ mod tests {
             prefs.blocked_urls(),
             vec!["*ads.dev*".to_owned(), "*://x.dev/track*".to_owned()]
         );
+        let expected = prefs.blocked_urls();
         let blocking = Prefs {
             block_trackers: true,
             ..prefs
         };
-        assert_eq!(blocking.blocked_urls().len(), TRACKERS.len() + 2);
+        assert_eq!(blocking.blocked_urls(), expected);
     }
 
     #[test]

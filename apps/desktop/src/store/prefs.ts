@@ -25,6 +25,8 @@ export const DEFAULT_PREFS: Prefs = {
   do_not_track: false,
   block_trackers: false,
   blocked_patterns: [],
+  youtube_protection: true,
+  privacy_exceptions: [],
   javascript: true,
   history_days: 0,
   download_dir: "",
