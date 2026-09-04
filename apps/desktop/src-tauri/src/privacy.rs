@@ -19,7 +19,7 @@ const PAGE_BINDING_PREFIX: &str = "__divePrivacy_";
 const MAX_PAGE_EVENT: usize = 64;
 
 /// Version of the rule assets bundled with this application.
-pub const DIVE_PRIVACY_VERSION: &str = "2026.09.04.1";
+pub const DIVE_PRIVACY_VERSION: &str = "2026.09.04.2";
 
 /// Categories reported for network requests blocked by `DivePrivacy`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Type)]
@@ -404,6 +404,29 @@ mod tests {
     }
 
     #[test]
+    fn bundled_rules_block_the_live_fixture_endpoints() {
+        let privacy = DivePrivacy::new();
+        let document = "http://127.0.0.1:18765/";
+
+        assert_eq!(
+            privacy.decide(&ctx(
+                "https://ads.doubleclick.net/diveprivacy-fixture.gif",
+                document,
+                "image",
+            )),
+            PrivacyDecision::Block(PrivacyCategory::Ads)
+        );
+        assert_eq!(
+            privacy.decide(&ctx(
+                "https://www.google-analytics.com/diveprivacy-fixture.js",
+                document,
+                "script",
+            )),
+            PrivacyDecision::Block(PrivacyCategory::Tracker)
+        );
+    }
+
+    #[test]
     fn exceptions_and_documents_fail_open() {
         let privacy =
             DivePrivacy::from_text("||metrics.test^", "", "@@||metrics.test/required.js$script");
@@ -507,9 +530,9 @@ mod tests {
         assert_eq!(
             privacy_info(),
             PrivacyInfo {
-                version: "2026.09.04.1".into(),
+                version: "2026.09.04.2".into(),
                 ad_rules: 63,
-                tracker_rules: 62,
+                tracker_rules: 60,
                 cosmetic_hosts: 3,
             }
         );

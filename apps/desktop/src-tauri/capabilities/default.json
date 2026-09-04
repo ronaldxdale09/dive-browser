@@ -15,6 +15,8 @@
     "core:window:allow-set-title",
     "core:window:allow-start-dragging",
     "core:webview:allow-webview-size",
-    "core:webview:allow-webview-position"
+    "core:webview:allow-webview-position",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen"
   ]
 }

@@ -310,6 +310,11 @@ impl Recording {
             return true;
         }
         let mut frames = lock(&self.frames);
+        // stop() drains this vector under the same mutex. Recheck after
+        // acquiring it so a frame cannot be written into a removed work dir.
+        if self.paused.load(Ordering::Relaxed) || self.done() {
+            return self.limit_hit.load(Ordering::Relaxed);
+        }
         let path = self.dir.join(format!("f{:06}.jpg", frames.len()));
         if let Err(e) = std::fs::write(&path, jpeg) {
             tracing::warn!("could not keep a frame: {e}");
@@ -538,6 +543,10 @@ impl Registry {
         rec.start_audio_segment();
         // Pointer tracking: a binding the page calls, installed now and on
         // every navigation while the recording runs.
+        // Subscribed before the script runs: its first message (the viewport)
+        // arrives at once. `bindingCalled` only fires while Runtime is on.
+        let mut track_events = session.subscribe();
+        let _ = session.call0("Runtime.enable").await;
         let _ = session
             .call("Runtime.addBinding", json!({"name": TRACK_BINDING}))
             .await;
@@ -552,7 +561,6 @@ impl Registry {
             .await;
         {
             let track_rec = rec.clone();
-            let mut track_events = session.subscribe();
             tauri::async_runtime::spawn(async move {
                 loop {
                     let event = match track_events.recv().await {
@@ -731,6 +739,7 @@ async fn capture_frame(session: &CdpSession) -> Option<Vec<u8>> {
                 "quality": 75,
                 "fromSurface": true,
                 "captureBeyondViewport": false,
+                "optimizeForSpeed": true,
             }),
         )
         .await
@@ -742,15 +751,26 @@ async fn capture_frame(session: &CdpSession) -> Option<Vec<u8>> {
 
 /// Compatibility recorder used only when `Page.screencastFrame` is absent.
 async fn poll_frames(rec: Arc<Recording>, session: CdpSession) {
-    let interval = Duration::from_millis(1000 / u64::from(rec.options.fps().min(10)));
+    let mut ticker = tokio::time::interval(poll_period(rec.options.fps()));
+    // captureScreenshot is serialized by CDP. If one capture takes longer
+    // than a frame slot, resume at the next current slot rather than adding a
+    // second fixed sleep and compounding the slowdown.
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     while !rec.stopped.load(Ordering::Relaxed) {
+        ticker.tick().await;
+        if rec.stopped.load(Ordering::Relaxed) {
+            break;
+        }
         if let Some(jpeg) = capture_frame(&session).await
             && (rec.stopped.load(Ordering::Relaxed) || rec.push(&jpeg))
         {
             break;
         }
-        tokio::time::sleep(interval).await;
     }
+}
+
+fn poll_period(fps: u32) -> Duration {
+    Duration::from_secs_f64(1.0 / f64::from(fps.clamp(5, 60)))
 }
 
 /// Where ffmpeg is, if anywhere on this machine.
@@ -1002,7 +1022,7 @@ fn finish_window(
     if options.is_gif() {
         let path = dir.join(format!("{stem}.gif"));
         let filter = format!(
-            "fps={GIF_FPS},scale='min({GIF_WIDTH},iw)':-2:flags=lanczos,split[a][b];[a]palettegen=max_colors=200:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle"
+            "scale='min({GIF_WIDTH},iw)':-2:flags=lanczos,split[a][b];[a]palettegen=max_colors=200:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle"
         );
         run_ffmpeg(&ffmpeg, |cmd| {
             cmd.arg("-i")
@@ -1017,8 +1037,6 @@ fn finish_window(
     let preview_dir = dir.join(PREVIEW_DIR);
     std::fs::create_dir_all(&preview_dir)?;
     let preview = preview_dir.join(format!("{stem}.webm"));
-    // One pass writes both: the MP4 scaled to the asked-for size, and the
-    // VP9 companion the chrome can play.
     run_ffmpeg(&ffmpeg, |cmd| {
         cmd.arg("-i").arg(&joined);
         cmd.args([
@@ -1039,36 +1057,10 @@ fn finish_window(
             cmd.arg("-an");
         }
         cmd.arg(&path);
-        cmd.args([
-            "-vf",
-            &format!("scale='min({max_width},iw)':-2,format=yuv420p"),
-            "-c:v",
-            "libvpx-vp9",
-            "-deadline",
-            "realtime",
-            "-cpu-used",
-            "8",
-            "-crf",
-            "32",
-            "-b:v",
-            "0",
-            "-row-mt",
-            "1",
-            "-g",
-            "30",
-        ]);
-        if has_audio {
-            cmd.args(["-c:a", "libopus", "-b:a", "64k"]);
-        } else {
-            cmd.arg("-an");
-        }
-        cmd.arg(&preview);
     })?;
     let (w, h) = probe_size(&path).unwrap_or((0, 0));
     let mut result = finish(&path, "mp4", duration, w, h, 0, has_audio)?;
-    result.preview = preview
-        .exists()
-        .then(|| preview.to_string_lossy().into_owned());
+    result.preview = write_companion(&path, &preview, max_width, has_audio);
     Ok(result)
 }
 
@@ -1092,6 +1084,53 @@ fn write_events(dir: &Path, recording: &str, events: Vec<TrackedEvent>) -> Optio
     Some(path.to_string_lossy().into_owned())
 }
 
+/// Write the VP8 `WebM` companion of a finished MP4 at `out`: what the
+/// chrome plays in the "saved" dialog and edits in `DiveScreen`, since it
+/// cannot decode H.264. VP8 rather than VP9 on purpose: the embedded
+/// Chromium decodes VP9 in hardware and allows exactly one such decoder,
+/// so a second element (the editor beside the dialog, or an export) fails
+/// with a decode error; VP8 is software-decoded and any number play at
+/// once. Its own ffmpeg pass, from the finished file: a second output of
+/// the frame-encoding run produced a container the demuxer would not open.
+pub fn write_companion(mp4: &Path, out: &Path, max_width: u32, with_audio: bool) -> Option<String> {
+    let ffmpeg = ffmpeg_path()?;
+    if let Some(dir) = out.parent() {
+        std::fs::create_dir_all(dir).ok()?;
+    }
+    let mut cmd = Command::new(ffmpeg);
+    cmd.args(["-hide_banner", "-loglevel", "error", "-y"])
+        .arg("-i")
+        .arg(mp4)
+        .args([
+            "-vf",
+            &format!("scale='min({max_width},iw)':-2,format=yuv420p"),
+            "-c:v",
+            "libvpx",
+            "-deadline",
+            "realtime",
+            "-cpu-used",
+            "8",
+            "-crf",
+            "10",
+            "-b:v",
+            "6M",
+            "-qmin",
+            "4",
+            "-qmax",
+            "40",
+            "-g",
+            "30",
+        ]);
+    if with_audio {
+        cmd.args(["-c:a", "libopus", "-b:a", "64k"]);
+    } else {
+        cmd.arg("-an");
+    }
+    cmd.arg(out).stdin(Stdio::null());
+    let ok = cmd.output().is_ok_and(|o| o.status.success());
+    (ok && out.exists()).then(|| out.to_string_lossy().into_owned())
+}
+
 /// Run one ffmpeg invocation to completion, turning a failure into a message.
 fn run_ffmpeg(ffmpeg: &Path, args: impl FnOnce(&mut Command)) -> AppResult<()> {
     let mut cmd = Command::new(ffmpeg);
@@ -1108,24 +1147,27 @@ fn run_ffmpeg(ffmpeg: &Path, args: impl FnOnce(&mut Command)) -> AppResult<()> {
     )))
 }
 
-/// ffconcat playlist naming each frame and how long it is on screen.
-fn write_playlist(frames: &[Frame], end: f64, path: &Path) -> AppResult<()> {
+/// ffconcat playlist at a constant `fps`: for every output tick, the frame
+/// that was on screen then. Frames repeat across stalls and are skipped when
+/// the page painted faster than the output rate, so the file's length is the
+/// recording's length however many frames arrived. (The demuxer's per-entry
+/// `duration` is not honoured for image files.)
+fn write_playlist(frames: &[Frame], end: f64, fps: u32, path: &Path) -> AppResult<usize> {
+    let fps = f64::from(fps.max(1));
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // Bounded by the length cap.
+    let ticks = ((end * fps).ceil() as usize).max(1);
     let mut out = String::from("ffconcat version 1.0\n");
-    for (i, frame) in frames.iter().enumerate() {
-        let next_at = frames.get(i + 1).map_or(end, |n| n.at);
-        let duration = (next_at - frame.at).max(0.001);
-        let _ = writeln!(
-            out,
-            "file '{}'\nduration {duration:.4}",
-            frame.path.display()
-        );
-    }
-    // The concat demuxer drops the last duration unless the file repeats.
-    if let Some(last) = frames.last() {
-        let _ = writeln!(out, "file '{}'", last.path.display());
+    let mut idx = 0;
+    for i in 0..ticks {
+        #[allow(clippy::cast_precision_loss)]
+        let t = i as f64 / fps;
+        while idx + 1 < frames.len() && frames[idx + 1].at <= t {
+            idx += 1;
+        }
+        let _ = writeln!(out, "file '{}'", frames[idx].path.display());
     }
     std::fs::write(path, out)?;
-    Ok(())
+    Ok(ticks)
 }
 
 /// Encode frames (and microphone segments) to an MP4 with ffmpeg.
@@ -1142,7 +1184,8 @@ fn encode_video(
         .parent()
         .ok_or_else(|| AppError::new("frame directory vanished"))?;
     let playlist = work.join("frames.ffconcat");
-    write_playlist(frames, end, &playlist)?;
+    let fps = options.fps();
+    write_playlist(frames, end, fps, &playlist)?;
     let audio_list = work.join("audio.ffconcat");
     let with_audio = !audio.is_empty();
     if with_audio {
@@ -1157,11 +1200,10 @@ fn encode_video(
     let preview_dir = dir.join(PREVIEW_DIR);
     std::fs::create_dir_all(&preview_dir)?;
     let preview = preview_dir.join(format!("{stem}.webm"));
-    let fps = options.fps();
     let max_width = options.max_width.clamp(320, 3840);
     let mut cmd = Command::new(ffmpeg);
     cmd.args(["-hide_banner", "-loglevel", "error", "-y"])
-        .args(["-f", "concat", "-safe", "0", "-i"])
+        .args(["-f", "concat", "-safe", "0", "-r", &fps.to_string(), "-i"])
         .arg(&playlist);
     if with_audio {
         cmd.args(["-f", "concat", "-safe", "0", "-i"])
@@ -1169,7 +1211,7 @@ fn encode_video(
     }
     cmd.args([
         "-vf",
-        &format!("scale='min({max_width},iw)':-2:flags=lanczos,fps={fps},format=yuv420p"),
+        &format!("scale='min({max_width},iw)':-2:flags=lanczos,format=yuv420p"),
         "-c:v",
         "libx264",
         "-preset",
@@ -1184,33 +1226,7 @@ fn encode_video(
     } else {
         cmd.arg("-an");
     }
-    cmd.arg(&path);
-    // Second output from the same inputs: the VP9 companion the chrome can
-    // play and edit from, at the picture's own size, fastest setting.
-    cmd.args([
-        "-vf",
-        &format!("scale='min({max_width},iw)':-2,fps={fps},format=yuv420p"),
-        "-c:v",
-        "libvpx-vp9",
-        "-deadline",
-        "realtime",
-        "-cpu-used",
-        "8",
-        "-crf",
-        "32",
-        "-b:v",
-        "0",
-        "-row-mt",
-        "1",
-        "-g",
-        "30",
-    ]);
-    if with_audio {
-        cmd.args(["-c:a", "libopus", "-b:a", "64k", "-shortest"]);
-    } else {
-        cmd.arg("-an");
-    }
-    cmd.arg(&preview).stdin(Stdio::null());
+    cmd.arg(&path).stdin(Stdio::null());
     let out = cmd.output().map_err(AppError::new)?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
@@ -1224,9 +1240,7 @@ fn encode_video(
             .map_or((0, 0), |i| (i.width().min(max_width), i.height()))
     });
     let mut result = finish(&path, "mp4", end, width, height, frames.len(), with_audio)?;
-    result.preview = preview
-        .exists()
-        .then(|| preview.to_string_lossy().into_owned());
+    result.preview = write_companion(&path, &preview, max_width, with_audio);
     Ok(result)
 }
 
@@ -1297,14 +1311,22 @@ fn encode_gif_ffmpeg(frames: &[Frame], dir: &Path, end: f64) -> AppResult<Record
         .parent()
         .ok_or_else(|| AppError::new("frame directory vanished"))?;
     let playlist = work.join("frames.ffconcat");
-    write_playlist(frames, end, &playlist)?;
+    write_playlist(frames, end, GIF_FPS, &playlist)?;
     let path = dir.join(format!("{}.gif", file_stem()));
     let filter = format!(
-        "fps={GIF_FPS},scale='min({GIF_WIDTH},iw)':-2:flags=lanczos,split[a][b];[a]palettegen=max_colors=200:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle"
+        "scale='min({GIF_WIDTH},iw)':-2:flags=lanczos,split[a][b];[a]palettegen=max_colors=200:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle"
     );
     let out = Command::new(ffmpeg)
         .args(["-hide_banner", "-loglevel", "error", "-y"])
-        .args(["-f", "concat", "-safe", "0", "-i"])
+        .args([
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-r",
+            &GIF_FPS.to_string(),
+            "-i",
+        ])
         .arg(&playlist)
         .args(["-filter_complex", &filter, "-loop", "0"])
         .arg(&path)
@@ -1409,9 +1431,11 @@ mod tests {
     }
 
     #[test]
-    fn playlist_holds_each_frame_for_its_gap_and_repeats_the_last() {
+    fn playlist_samples_frames_at_the_output_rate() {
         let dir = std::env::temp_dir().join(format!("dive-rec-{}", TabId::new()));
         std::fs::create_dir_all(&dir).unwrap();
+        // Two frames over two seconds: the first holds for half a second,
+        // the second for the rest, whatever rate the page painted at.
         let frames = vec![
             Frame {
                 at: 0.0,
@@ -1423,11 +1447,11 @@ mod tests {
             },
         ];
         let list = dir.join("frames.ffconcat");
-        write_playlist(&frames, 2.0, &list).unwrap();
+        let ticks = write_playlist(&frames, 2.0, 10, &list).unwrap();
         let text = std::fs::read_to_string(&list).unwrap();
-        assert!(text.contains("duration 0.5000\n"), "{text}");
-        assert!(text.contains("duration 1.5000\n"), "{text}");
-        assert_eq!(text.matches("f000001.jpg").count(), 2, "{text}");
+        assert_eq!(ticks, 20);
+        assert_eq!(text.matches("f000000.jpg").count(), 5, "{text}");
+        assert_eq!(text.matches("f000001.jpg").count(), 15, "{text}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1466,6 +1490,13 @@ mod tests {
         assert_eq!(kept.len(), 10, "a second at 30 fps thins to 10");
         assert!(kept[0].at.abs() < 1e-9);
         assert!(kept[1].at >= 0.1 - 1e-9);
+    }
+
+    #[test]
+    fn compatibility_capture_uses_the_requested_cadence() {
+        assert_eq!(poll_period(30), Duration::from_nanos(33_333_333));
+        assert_eq!(poll_period(15), Duration::from_nanos(66_666_667));
+        assert_eq!(poll_period(0), Duration::from_millis(200));
     }
 
     #[test]

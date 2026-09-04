@@ -1,4 +1,4 @@
-import { AppWindow, Check, FileText, Mic, MicOff, Timer, Video } from "lucide-react";
+import { AppWindow, Check, FileText, Loader2, Mic, MicOff, Timer, Video } from "lucide-react";
 import { useRef } from "react";
 import type { ReactNode } from "react";
 import { useCoversContent } from "../../lib/overlay";
@@ -28,7 +28,8 @@ export function RecordDialog() {
   const closeSetup = useRecording((s) => s.closeSetup);
   const tabs = useBrowser((s) => s.tabs);
   const detached = useBrowser((s) => s.detached);
-  const open = phase === "setup";
+  const starting = phase === "starting";
+  const open = phase === "setup" || starting;
   useCoversContent(open);
   const root = useRef<HTMLDivElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
@@ -52,6 +53,7 @@ export function RecordDialog() {
         role="dialog"
         aria-modal="true"
         aria-label="New recording"
+        aria-busy={starting}
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.key === "Escape" && close()}
         onSubmit={(e) => {
@@ -175,13 +177,13 @@ export function RecordDialog() {
 
         <footer className="flex items-center gap-3 border-t border-line px-5 py-3">
           <p className="min-w-0 flex-1 text-[11px] text-ink-3">{error ? <span className="text-danger">{error}</span> : describeLimits(live, caps)}</p>
-          <button type="button" onClick={close} className="h-8 rounded-lg px-3 text-xs text-ink-2 hover:bg-surface-2 hover:text-ink">
+          <button type="button" disabled={starting} onClick={close} className="h-8 rounded-lg px-3 text-xs text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
             Cancel
           </button>
-          <button ref={primary} type="submit" disabled={!chosen} className="flex h-8 items-center gap-1.5 rounded-lg bg-danger px-3.5 text-xs font-medium text-white hover:brightness-110 disabled:opacity-40">
-            <span className="size-2 rounded-full bg-white" aria-hidden />
-            Start recording
-            <kbd className="ml-1 font-mono text-[10px] opacity-70">⏎</kbd>
+          <button ref={primary} type="submit" disabled={!chosen || starting} className="flex h-8 min-w-32 items-center justify-center gap-1.5 rounded-lg bg-danger px-3.5 text-xs font-medium text-white hover:brightness-110 disabled:opacity-60">
+            {starting ? <Icon icon={Loader2} size={13} className="motion-safe:animate-spin" /> : <span className="size-2 rounded-full bg-white" aria-hidden />}
+            {starting ? "Preparing…" : "Start recording"}
+            {!starting && <kbd className="ml-1 font-mono text-[10px] opacity-70">⏎</kbd>}
           </button>
         </footer>
       </form>

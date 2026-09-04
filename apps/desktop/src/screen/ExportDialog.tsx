@@ -37,12 +37,18 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     setError(null);
     setResult(null);
     abort.current = new AbortController();
+    const store = useEditor.getState();
+    store.setPlaying(false);
+    store.setExporting(true);
     try {
-      const r = await exportProject({ project, playable, segments, cursorRaw, cursorSmooth, onProgress: setProgress, signal: abort.current.signal });
+      const r = await exportProject({ project, playable, segments, cursorRaw, cursorSmooth, onProgress: setProgress, signal: abort.current.signal, video: store.videoEl });
       setResult(r);
     } catch (e) {
+      console.error("[divescreen] export failed", e);
       setProgress(null);
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      useEditor.getState().setExporting(false);
     }
   };
 

@@ -21,7 +21,7 @@ dive-agent = { path = "../../../crates/dive-agent" }
 keyring-core = "1"
 futures-util = "0.3"
 async-trait = "0.1"
-tauri = { workspace = true, features = ["unstable", "devtools", "specta"] }
+tauri = { workspace = true, features = ["unstable", "devtools", "specta", "protocol-asset"] }
 tauri-specta = { workspace = true }
 specta = { workspace = true }
 specta-typescript = { workspace = true }

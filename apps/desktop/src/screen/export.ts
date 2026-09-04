@@ -28,6 +28,8 @@ export interface ExportInput {
   cursorSmooth: CursorSample[];
   onProgress: (p: ExportProgress) => void;
   signal?: AbortSignal;
+  /** The stage's element, when there is one: a second decoder on the same clip fails. */
+  video?: HTMLVideoElement | null;
 }
 
 /** Seek a video element and wait until the frame at that time is decoded. */
@@ -63,14 +65,52 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
   const frames = Math.max(1, Math.round((durationMs / 1000) * fps));
   onProgress({ phase: "preparing", progress: 0 });
 
-  const video = document.createElement("video");
-  video.src = playable;
-  video.muted = true;
-  video.preload = "auto";
-  await new Promise<void>((resolve, reject) => {
-    video.addEventListener("loadeddata", () => resolve(), { once: true });
-    video.addEventListener("error", () => reject(new Error("the video could not be opened")), { once: true });
-  });
+  // Borrow the stage's element when it is there; otherwise make one in the
+  // document (hidden) and nudge it with a play/pause, since a detached
+  // element never fetches its metadata under the embedded Chromium.
+  const borrowed = input.video ?? null;
+  const video = borrowed ?? document.createElement("video");
+  const release = () => {
+    if (borrowed) {
+      borrowed.pause();
+      return;
+    }
+    video.remove();
+  };
+  if (!borrowed) {
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.style.cssText = "position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none";
+    document.body.appendChild(video);
+    video.src = playable;
+  } else {
+    video.pause();
+  }
+  try {
+    // Never `load()` an element that already has the clip: re-opening the
+    // decoder is exactly what fails.
+    if (video.readyState < 2) {
+      await new Promise<void>((resolve, reject) => {
+        const done = () => {
+          if (video.readyState >= 2) resolve();
+        };
+        video.addEventListener("loadeddata", done);
+        video.addEventListener("canplay", done);
+        video.addEventListener("error", () => reject(new Error("the video could not be opened")), { once: true });
+        if (!borrowed) video.load();
+        window.setTimeout(() => {
+          if (video.readyState < 2) void video.play().then(() => video.pause()).catch(() => undefined);
+        }, 400);
+        window.setTimeout(() => reject(new Error("the video took too long to open")), 20_000);
+      });
+    }
+    await seekTo(video, 0);
+    video.pause();
+  } catch (err) {
+    release();
+    throw err;
+  }
 
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -95,6 +135,7 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
   for (let i = 0; i < frames; i++) {
     if (signal?.aborted) {
       encoder.close();
+      release();
       throw new Error("export cancelled");
     }
     if (encodeError) throw encodeError;
@@ -112,6 +153,7 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
   await encoder.flush();
   encoder.close();
   muxer.finalize();
+  release();
   const webm = new Uint8Array(target.buffer);
 
   onProgress({ phase: "uploading", progress: 0 });

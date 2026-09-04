@@ -1,8 +1,11 @@
-import { Download, MessageSquare, MoveUpRight, Redo2, Scissors, Undo2, Wand2, Gauge, ZoomIn, EyeOff, Image as ImageIcon } from "lucide-react";
+import { Download, FolderOpen, Redo2, RefreshCw, Save, Undo2, Video } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Icon } from "../components/Icon";
 import { Tooltip } from "../components/Tooltip";
+import { ipc } from "../lib/ipc";
+import { useBrowser } from "../store/browser";
+import { useRecording } from "../store/recording";
 import { ExportDialog } from "./ExportDialog";
 import { SettingsPanel } from "./SettingsPanel";
 import { Stage } from "./Stage";
@@ -11,7 +14,8 @@ import { useEditor } from "./store";
 
 /**
  * DiveScreen: the editor for a finished recording, in a tab of its own.
- * Stage and settings above, timeline below; everything saves as it goes.
+ * A thin top bar; the stage and the settings panel side by side; the
+ * timeline below. Everything saves as it goes.
  */
 export function DiveScreen({ src, tabId }: { src: string | null; tabId: string }) {
   const open = useEditor((s) => s.open);
@@ -23,8 +27,10 @@ export function DiveScreen({ src, tabId }: { src: string | null; tabId: string }
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
+    if (import.meta.env.DEV) console.debug("[divescreen] mount", src);
     if (src && src !== source) void open(src);
     return () => {
+      if (import.meta.env.DEV) console.debug("[divescreen] unmount", src);
       if (src) close();
     };
     // Open once per source; the store guards against duplicate opens.
@@ -40,6 +46,14 @@ export function DiveScreen({ src, tabId }: { src: string | null; tabId: string }
         <div>
           <p className="text-ink">This recording could not be opened.</p>
           <p className="mt-1 text-xs">{error}</p>
+          <div className="mt-4 flex items-center justify-center gap-2">
+            <button type="button" onClick={() => void open(src)} className="flex h-8 items-center gap-1.5 rounded-lg bg-ink px-3 text-xs font-medium text-ground hover:brightness-90">
+              <Icon icon={RefreshCw} size={13} /> Try again
+            </button>
+            <button type="button" onClick={() => void ipc.downloadsReveal(src).catch((cause) => useEditor.setState({ error: cause instanceof Error ? cause.message : String(cause) }))} className="flex h-8 items-center gap-1.5 rounded-lg bg-surface-2 px-3 text-xs text-ink hover:bg-surface-3">
+              <Icon icon={FolderOpen} size={13} /> Show file
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -54,11 +68,11 @@ export function DiveScreen({ src, tabId }: { src: string | null; tabId: string }
   return (
     <div className="flex h-full min-h-0 flex-col bg-ground text-ink" data-tab={tabId}>
       <TopBar onExport={() => setExporting(true)} />
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 gap-3 px-3">
         <Stage />
-        <SettingsPanel />
+        <SettingsPanel onExport={() => setExporting(true)} />
       </div>
-      <div className="h-[212px] shrink-0 border-t border-line">
+      <div className="h-[236px] shrink-0 p-3">
         <Timeline />
       </div>
       {exporting && <ExportDialog onClose={() => setExporting(false)} />}
@@ -73,44 +87,41 @@ function TopBar({ onExport }: { onExport: () => void }) {
   const dirty = useEditor((s) => s.dirty);
   const undo = useEditor((s) => s.undo);
   const redo = useEditor((s) => s.redo);
-  const addZoom = useEditor((s) => s.addZoom);
-  const addTrim = useEditor((s) => s.addTrim);
-  const addSpeed = useEditor((s) => s.addSpeed);
-  const addAnnotation = useEditor((s) => s.addAnnotation);
-  const autoZoom = useEditor((s) => s.autoZoom);
-  const hasPointer = useEditor((s) => s.cursorRaw.length > 0);
+  const save = useEditor((s) => s.save);
+  const openSetup = useRecording((s) => s.openSetup);
   const name = source?.split("/").pop() ?? "";
   return (
-    <div className="flex h-11 shrink-0 items-center gap-1 border-b border-line bg-surface px-3">
-      <span className="mr-2 text-xs font-semibold">DiveScreen</span>
-      <span className="truncate font-mono text-[11px] text-ink-3" title={source ?? ""}>
+    <div className="flex h-12 shrink-0 items-center gap-1 px-4">
+      <span className="mr-3 text-[13px] font-semibold tracking-tight">DiveScreen</span>
+      <Bar icon={Video} label="Return to Recorder" onClick={() => openSetup()} />
+      <Bar icon={FolderOpen} label="Show in Finder" onClick={() => source && void ipc.downloadsReveal(source).catch(() => undefined)} />
+      <Bar icon={Save} label={dirty ? "Save Project" : "Saved"} onClick={() => void save()} />
+      <span className="flex-1" />
+      <span className="mr-3 truncate font-mono text-[11px] text-ink-3" title={source ?? ""}>
         {name}
       </span>
-      <span className="ml-2 text-[10px] text-ink-3">{dirty ? "Saving…" : "Saved"}</span>
-      <span className="flex-1" />
       <Tool icon={Undo2} label="Undo" shortcut="⌘Z" disabled={past === 0} onClick={undo} />
       <Tool icon={Redo2} label="Redo" shortcut="⇧⌘Z" disabled={future === 0} onClick={redo} />
-      <span className="mx-2 h-4 w-px bg-line-2" />
-      <Tool icon={ZoomIn} label="Add zoom" shortcut="Z" onClick={() => addZoom()} />
-      <Tool icon={Wand2} label="Suggest zooms from the pointer" disabled={!hasPointer} onClick={autoZoom} />
-      <Tool icon={Scissors} label="Cut a stretch" shortcut="T" onClick={() => addTrim()} />
-      <Tool icon={Gauge} label="Change speed" shortcut="S" onClick={() => addSpeed()} />
-      <Tool icon={MessageSquare} label="Add text" shortcut="A" onClick={() => addAnnotation("text")} />
-      <Tool icon={MoveUpRight} label="Add arrow" onClick={() => addAnnotation("arrow")} />
-      <Tool icon={ImageIcon} label="Add picture" onClick={() => addAnnotation("image")} />
-      <Tool icon={EyeOff} label="Blur an area" shortcut="B" onClick={() => addAnnotation("blur")} />
-      <span className="mx-2 h-4 w-px bg-line-2" />
-      <button type="button" onClick={onExport} className="flex h-7 items-center gap-1.5 rounded-lg bg-accent px-3 text-[11.5px] font-medium text-accent-ink hover:brightness-110">
+      <button type="button" onClick={onExport} className="ml-2 flex h-8 items-center gap-1.5 rounded-lg bg-emerald-500 px-3.5 text-[12px] font-medium text-black hover:brightness-110">
         <Icon icon={Download} size={13} /> Export
       </button>
     </div>
   );
 }
 
+function Bar({ icon, label, onClick }: { icon: LucideIcon; label: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] text-ink-2 hover:bg-surface-2 hover:text-ink">
+      <Icon icon={icon} size={14} />
+      {label}
+    </button>
+  );
+}
+
 function Tool({ icon, label, shortcut, disabled, onClick }: { icon: LucideIcon; label: string; shortcut?: string; disabled?: boolean; onClick: () => void }) {
   return (
     <Tooltip label={label} shortcut={shortcut}>
-      <button type="button" aria-label={label} disabled={disabled} onClick={onClick} className="grid size-7 place-items-center rounded-full text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent">
+      <button type="button" aria-label={label} disabled={disabled} onClick={onClick} className="grid size-8 place-items-center rounded-lg text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent">
         <Icon icon={icon} size={14} />
       </button>
     </Tooltip>
@@ -130,6 +141,11 @@ function useShortcuts(active: boolean) {
         e.preventDefault();
         if (e.shiftKey) s.redo();
         else s.undo();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void s.save();
         return;
       }
       if (mod) return;
@@ -183,9 +199,16 @@ function useShortcuts(active: boolean) {
 }
 
 function Empty() {
+  const openSetup = useRecording((s) => s.openSetup);
+  const active = useBrowser((s) => s.activeTab);
   return (
     <div className="grid h-full place-items-center text-sm text-ink-3">
-      <p>Open a recording to edit it: record a tab, then choose “Edit in DiveScreen”.</p>
+      <div className="text-center">
+        <p>Open a recording to edit it.</p>
+        <button type="button" disabled={!active} onClick={() => openSetup()} className="mt-3 rounded-lg bg-surface-2 px-3 py-1.5 text-xs text-ink hover:bg-surface-3 disabled:opacity-40">
+          Record a tab
+        </button>
+      </div>
     </div>
   );
 }

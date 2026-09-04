@@ -400,23 +400,20 @@ impl Client {
             .map_err(|error| AgentError::Http(error.to_string()))
     }
 
-    /// Auth and attribution headers for this provider.
+    /// Authentication headers for this provider.
+    ///
+    /// Deliberately omit optional app-attribution headers. In particular,
+    /// `OpenRouter` uses `HTTP-Referer` and `X-OpenRouter-Title` to publish and
+    /// analyze where a key is being used; authentication does not require
+    /// either header.
     fn headers(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        let request = match self.provider.info().wire {
+        match self.provider.info().wire {
             Wire::Anthropic => request
                 .header("x-api-key", &self.api_key)
                 .header("anthropic-version", anthropic::API_VERSION)
                 .header("anthropic-beta", anthropic::BETAS),
             Wire::OpenAi if self.api_key.trim().is_empty() => request,
             Wire::OpenAi => request.header("authorization", format!("Bearer {}", self.api_key)),
-        };
-        // OpenRouter shows the app name on its usage pages when told.
-        if self.provider == Provider::Openrouter {
-            request
-                .header("HTTP-Referer", "https://github.com/dive-browser/dive")
-                .header("X-OpenRouter-Title", "Dive")
-        } else {
-            request
         }
     }
 
@@ -782,5 +779,42 @@ mod tests {
             .err()
             .unwrap();
         assert!(matches!(err, AgentError::MissingKey));
+    }
+
+    #[tokio::test]
+    async fn openrouter_requests_do_not_disclose_the_app_or_page_origin() {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 8 * 1024];
+            let read = stream.read(&mut buffer).unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+                .unwrap();
+            String::from_utf8_lossy(&buffer[..read]).to_ascii_lowercase()
+        });
+
+        Client::new(Provider::Openrouter, "secret", Some(&base_url))
+            .verify()
+            .await
+            .unwrap();
+        let request = server.join().unwrap();
+
+        assert!(request.contains("authorization: bearer secret\r\n"));
+        for identifying_header in [
+            "http-referer",
+            "x-openrouter-title",
+            "x-title",
+            "origin",
+            "referer",
+        ] {
+            assert!(
+                !request.contains(&format!("{identifying_header}:")),
+                "OpenRouter request disclosed {identifying_header}"
+            );
+        }
     }
 }

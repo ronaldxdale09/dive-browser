@@ -1,7 +1,8 @@
 import { Check, Copy, ExternalLink, FolderOpen, Trash2, Video, Wand2 } from "lucide-react";
 import { screenUrl } from "../internal/InternalPage";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ipc } from "../../lib/ipc";
+import { captureMediaUrl } from "../../lib/mediaUrl";
 import { recordingBytes, recordingClock } from "../../lib/recordingFormat";
 import { useCoversContent } from "../../lib/overlay";
 import { useFadeClose } from "../../lib/useFadeClose";
@@ -29,7 +30,8 @@ export function RecordingDoneDialog() {
   const { close, className } = useFadeClose(dismiss);
   const [confirming, setConfirming] = useState(false);
   const [copied, setCopied] = useState(false);
-  const preview = usePreview(open ? { path: result.preview ?? result.path, format: result.preview ? "webm" : result.format } : null);
+  const previewSource = open ? { path: result.preview ?? result.path, format: result.preview ? "webm" : result.format } : null;
+  const [preview, previewFailed] = usePreview(previewSource);
 
   if (!open || !result) return null;
   const name = result.path.split("/").pop() ?? result.path;
@@ -68,9 +70,9 @@ export function RecordingDoneDialog() {
         </header>
 
         <div className="mx-5 grid aspect-video place-items-center overflow-hidden rounded-xl border border-line bg-black">
-          {preview.status === "ready" && result.format === "gif" && <img src={preview.url} alt="The recording" className="max-h-full max-w-full" />}
+          {preview.status === "ready" && result.format === "gif" && <img src={preview.url} alt="The recording" onError={previewFailed} className="max-h-full max-w-full" />}
           {preview.status === "ready" && result.format !== "gif" && (
-            <video src={preview.url} controls autoPlay playsInline className="max-h-full max-w-full" />
+            <video src={preview.url} controls autoPlay playsInline onError={previewFailed} className="max-h-full max-w-full" />
           )}
           {preview.status === "loading" && <p className="text-xs text-ink-3">Loading preview…</p>}
           {preview.status === "unavailable" && (
@@ -156,32 +158,14 @@ export function RecordingDoneDialog() {
 
 type Preview = { status: "loading" } | { status: "ready"; url: string } | { status: "unavailable"; reason: string };
 
-/** The file as a blob URL for the player; large files go to the system player instead. */
-function usePreview(result: { path: string; format: string } | null): Preview {
-  // Keyed by path: a new file starts out loading without an extra render.
-  const [loaded, setLoaded] = useState<{ path: string; preview: Preview } | null>(null);
-  const setPreview = (path: string, preview: Preview) => setLoaded({ path, preview });
-  useEffect(() => {
-    if (!result) return;
-    let url: string | null = null;
-    let live = true;
-    ipc
-      .recordingRead(result.path)
-      .then((base64) => {
-        if (!live) return;
-        const bin = atob(base64);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        url = URL.createObjectURL(new Blob([bytes], { type: result.format === "gif" ? "image/gif" : result.format === "webm" ? "video/webm" : "video/mp4" }));
-        setPreview(result.path, { status: "ready", url });
-      })
-      .catch((e: unknown) => live && setPreview(result.path, { status: "unavailable", reason: e instanceof Error ? e.message : String(e) }));
-    return () => {
-      live = false;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [result]);
-  return result && loaded?.path === result.path ? loaded.preview : { status: "loading" };
+/** Stream the capture from disk and retain a useful fallback if decoding fails. */
+function usePreview(result: { path: string; format: string } | null): [Preview, () => void] {
+  const [failedPath, setFailedPath] = useState<string | null>(null);
+  if (!result) return [{ status: "loading" }, () => undefined];
+  if (failedPath === result.path) {
+    return [{ status: "unavailable", reason: "Dive could not decode this preview. The recording is still saved and can be opened in your system player." }, () => undefined];
+  }
+  return [{ status: "ready", url: captureMediaUrl(result.path) }, () => setFailedPath(result.path)];
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

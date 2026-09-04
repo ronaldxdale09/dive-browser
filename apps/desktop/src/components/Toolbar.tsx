@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Bug, Camera, Lock, MoreHorizontal, PanelBottom, RotateCw, Search, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bug, Camera, Lock, MoreHorizontal, PanelBottom, RotateCw, Search, X, Menu } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { FOCUS_ADDRESS } from "../lib/commands";
 import { useBrowser } from "../store/browser";
@@ -7,6 +7,7 @@ import { SharePopover } from "./SharePopover";
 import { BookmarkButton } from "./BookmarkButton";
 import { DownloadsMenu } from "./DownloadsMenu";
 import { ProtectionMenu } from "./ProtectionMenu";
+import { MainMenu } from "./MainMenu";
 import { Tooltip } from "./Tooltip";
 import { usePicker } from "../store/simulator";
 
@@ -112,6 +113,8 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
         </>
       )}
       <ProtectionMenu compact />
+      <IconButton icon={Menu} label="Menu" active={open.menu} onClick={() => toggle("menu")} tooltipAlign="end" />
+      {open.menu && <MainMenu />}
       {loading && <LoadingLine />}
     </div>
   );
@@ -162,6 +165,8 @@ function LoadingLine() {
 
 /** Hostname plus path, scheme dropped, for the resting omnibox. */
 function pretty(url: string) {
+  // Dive's own pages keep their scheme: "dive://screen" says what it is.
+  if (url.startsWith("dive://")) return url.split("?")[0] ?? url;
   try {
     const u = new URL(url);
     const path = u.pathname === "/" && !u.search ? "" : u.pathname + u.search;

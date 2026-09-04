@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { ipc } from "../lib/ipc";
+import { captureMediaUrl } from "../lib/mediaUrl";
 import { buildSegments, outputDuration, smoothCursorPath, suggestZooms } from "./math";
 import type { Segment } from "./math";
 import { cursorSamples, newId, newProject, normalizeProject, DEFAULT_ANNOTATION_STYLE } from "./model";
@@ -16,7 +17,7 @@ export type Selection = { kind: "zoom" | "trim" | "speed" | "annotation"; id: st
 export interface EditorState {
   source: string | null;
   project: Project | null;
-  /** Playable file as a blob URL, once loaded. */
+  /** Playable file as a scoped, streamable asset URL. */
   playable: string | null;
   loading: string | null;
   error: string | null;
@@ -34,6 +35,13 @@ export interface EditorState {
   future: Project["editor"][];
   dirty: boolean;
   saved: boolean;
+  /** The stage's video element, lent to the exporter: the embedded
+   * Chromium refuses a second decoder on the same clip. */
+  videoEl: HTMLVideoElement | null;
+  setVideoEl: (v: HTMLVideoElement | null) => void;
+  /** An export is driving the video; the stage keeps its hands off. */
+  exporting: boolean;
+  setExporting: (v: boolean) => void;
 
   open: (source: string) => Promise<void>;
   close: () => void;
@@ -93,6 +101,10 @@ export const useEditor = create<EditorState>((set, get) => ({
   future: [],
   dirty: false,
   saved: false,
+  videoEl: null,
+  setVideoEl: (videoEl) => set({ videoEl }),
+  exporting: false,
+  setExporting: (exporting) => set({ exporting }),
 
   open: async (source) => {
     get().close();
@@ -114,7 +126,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       set({ loading: "Loading the video…" });
       const playableFile = info.playable ?? (source.endsWith(".gif") ? null : null);
       if (!playableFile) throw new Error("This recording has no playable copy to edit. Record again with the video format.");
-      const url = await readBlobUrl(playableFile, source.endsWith(".webm") ? "video/webm" : "video/webm");
+      const url = captureMediaUrl(playableFile);
       const derived = derive(project, project.editor.cursor.smoothing, raw);
       set({ project, playable: url, cursorRaw: raw, ...derived, loading: null, playhead: 0, past: [], future: [], saved: Boolean(saved) });
       // A fresh project gets automatic zooms from the pointer's dwells.
@@ -126,7 +138,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   close: () => {
     const { playable } = get();
-    if (playable) URL.revokeObjectURL(playable);
+    if (playable?.startsWith("blob:")) URL.revokeObjectURL(playable);
     window.clearTimeout(saveTimer);
     set({ source: null, project: null, playable: null, cursorRaw: [], cursorSmooth: [], segments: [], duration: 0, playhead: 0, playing: false, selection: null, past: [], future: [], dirty: false });
   },
@@ -264,22 +276,6 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 }));
 
-/** Read a captured file in pieces into a blob URL. */
-export async function readBlobUrl(path: string, mime: string): Promise<string> {
-  const size = await ipc.fileSize(path);
-  if (size === null) throw new Error(`Could not read file size: ${path}`);
-  const CHUNK = 8 * 1024 * 1024;
-  const parts: Uint8Array[] = [];
-  for (let offset = 0; offset < size; offset += CHUNK) {
-    const b64 = await ipc.fileReadChunk(path, offset, Math.min(CHUNK, size - offset));
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    parts.push(bytes);
-  }
-  return URL.createObjectURL(new Blob(parts as BlobPart[], { type: mime }));
-}
-
 async function readText(path: string): Promise<string> {
   const size = await ipc.fileSize(path);
   if (size === null) throw new Error(`Could not read file size: ${path}`);
@@ -291,3 +287,6 @@ async function readText(path: string): Promise<string> {
   }
   return out;
 }
+
+// Reachable from the DevTools console while developing.
+if (import.meta.env.DEV) (window as unknown as { __diveEditor?: typeof useEditor }).__diveEditor = useEditor;

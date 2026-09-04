@@ -87,6 +87,8 @@ export const commands = {
 	recordingOpen: (path: string) => typedError<null, AppError>(__TAURI_INVOKE("recording_open", { path })),
 	/**  Delete a recording. */
 	recordingDelete: (path: string) => typedError<null, AppError>(__TAURI_INVOKE("recording_delete", { path })),
+	/**  Every recording on disk, newest first. */
+	recordingsList: () => typedError<RecordingInfo[], AppError>(__TAURI_INVOKE("recordings_list")),
 	/**  What a recording is, so the editor can open it. */
 	screenMediaInfo: (source: string) => typedError<MediaInfo, AppError>(__TAURI_INVOKE("screen_media_info", { source })),
 	/**  The saved project for a recording, if any. */
@@ -1233,6 +1235,22 @@ export type RecordingEvent = {
 	tab: TabId,
 	/**  `limit` when the length cap was reached and no more frames are kept. */
 	kind: string,
+};
+
+/**  One finished recording in the captures directory. */
+export type RecordingInfo = {
+	path: string,
+	name: string,
+	/**  `mp4` or `gif`. */
+	format: string,
+	/**  Size on disk. A float because the bindings cannot carry a u64. */
+	bytes: number | null,
+	/**  Last modified, milliseconds since the epoch. */
+	modified_ms: number | null,
+	/**  Whether a playable companion exists (so it can open in `DiveScreen`). */
+	editable: boolean,
+	/**  Whether a project file exists beside it. */
+	has_project: boolean,
 };
 
 /**  The finished file. */

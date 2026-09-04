@@ -26,6 +26,13 @@ if (!globalThis.ResizeObserver) {
   } as typeof ResizeObserver;
 }
 
+/** Canvas rendering is exercised by native/browser integration tests. In
+ * jsdom its placeholder only prints a noisy "not implemented" error. */
+Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+  configurable: true,
+  value: () => null,
+});
+
 /**
  * jsdom reports no platform. Dive's chords render as ⌘ glyphs on a Mac and as
  * "Ctrl+" elsewhere, so tests read a definite answer; the ones that care about

@@ -296,11 +296,16 @@ export function suggestZooms(samples: CursorSample[], durationMs: number, existi
   const dwells: Dwell[] = [];
   let runStart = 0;
   for (let i = 1; i <= samples.length; i++) {
-    const moved = i < samples.length && Math.hypot(samples[i]!.cx - samples[i - 1]!.cx, samples[i]!.cy - samples[i - 1]!.cy) < 0.02;
-    if (moved) continue;
+    // Still: a small step from the last sample, and not far from where the
+    // run began (a slow sweep is many small steps but is not a dwell).
+    const still =
+      i < samples.length &&
+      Math.hypot(samples[i]!.cx - samples[i - 1]!.cx, samples[i]!.cy - samples[i - 1]!.cy) < 0.02 &&
+      Math.hypot(samples[i]!.cx - samples[runStart]!.cx, samples[i]!.cy - samples[runStart]!.cy) < 0.06;
+    if (still) continue;
     const run = samples.slice(runStart, i);
     const length = run[run.length - 1]!.timeMs - run[0]!.timeMs;
-    if (length >= 450 && length <= 2600) {
+    if (length >= 450 && length <= 4000) {
       const cx = run.reduce((a, s) => a + s.cx, 0) / run.length;
       const cy = run.reduce((a, s) => a + s.cy, 0) / run.length;
       dwells.push({ start: run[0]!.timeMs, end: run[run.length - 1]!.timeMs, cx, cy, strength: length });

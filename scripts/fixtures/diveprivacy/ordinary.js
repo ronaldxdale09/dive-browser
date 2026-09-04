@@ -1,0 +1,1 @@
+window.ordinaryLoaded = true;

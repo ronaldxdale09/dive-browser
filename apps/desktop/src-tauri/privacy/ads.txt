@@ -2,8 +2,8 @@
 ! documentation or reproducible browser traffic; no third-party filter lists are included.
 ! Google and DoubleClick advertising delivery.
 ! Provenance: Google Ads endpoint documentation and reproduced third-party browser traffic (2026-09).
-! DoubleClick page advertising endpoint.
-||ads.doubleclick.net/pagead/$third-party
+! DoubleClick advertising host (dedicated ad delivery infrastructure).
+||ads.doubleclick.net^$third-party
 ! DoubleClick ad-serving endpoint.
 ||ad.doubleclick.net/$third-party
 ! DoubleClick display auction endpoint.

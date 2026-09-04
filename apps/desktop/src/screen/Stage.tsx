@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Pause, Play, SkipBack, SkipForward } from "lucide-react";
-import { IconButton } from "../components/Icon";
+import { Maximize2, Minimize2, Pause, Play } from "lucide-react";
+import { Icon } from "../components/Icon";
 import { recordingClock } from "../lib/recordingFormat";
 import { RATIO_VALUE, contentBox, outputTime, sourceTime } from "./math";
+import { previewNeedsFrame } from "./previewLoop";
 import { Renderer } from "./render";
 import { useEditor } from "./store";
-import { previewNeedsFrame } from "./previewLoop";
 import type { Project } from "./model";
 
 /**
@@ -18,7 +18,6 @@ export function Stage() {
   const project = useEditor((s) => s.project);
   const playable = useEditor((s) => s.playable);
   const playing = useEditor((s) => s.playing);
-  const playhead = useEditor((s) => s.playhead);
   const segments = useEditor((s) => s.segments);
   const duration = useEditor((s) => s.duration);
   const cursorRaw = useEditor((s) => s.cursorRaw);
@@ -31,12 +30,12 @@ export function Stage() {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const video = useRef<HTMLVideoElement>(null);
+  const currentTimeLabel = useRef<HTMLSpanElement>(null);
+  const positionControl = useRef<HTMLInputElement>(null);
   const renderer = useRef(new Renderer());
   const [size, setSize] = useState({ w: 960, h: 540 });
+  const [fill, setFill] = useState(false);
   const ratio = project ? (RATIO_VALUE[project.editor.aspectRatio] ?? project.media.width / Math.max(1, project.media.height)) : 16 / 9;
-  // While playing, store updates move the playhead every frame and must not
-  // restart this effect. While paused, a seek needs exactly one fresh draw.
-  const idlePlayhead = playing ? null : playhead;
 
   // Fit the canvas to the stage at the project's ratio.
   useEffect(() => {
@@ -44,7 +43,7 @@ export function Stage() {
     if (!el) return;
     const fit = () => {
       const r = el.getBoundingClientRect();
-      const pad = 24;
+      const pad = fill ? 0 : 20;
       let w = r.width - pad * 2;
       let h = w / ratio;
       if (h > r.height - pad * 2) {
@@ -58,7 +57,7 @@ export function Stage() {
     const ro = new ResizeObserver(fit);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [ratio]);
+  }, [ratio, fill]);
 
   // Draw loop: while playing, advance in output time with the clock, seek
   // the video to the matching source time; otherwise draw the playhead.
@@ -81,8 +80,20 @@ export function Stage() {
     const drawAt = (srcMs: number, isPlaying: boolean) => {
       renderer.current.draw(ctx, project, v.readyState >= 2 ? v : null, srcMs, cursorSmooth, cursorRaw, { width: W, height: H, playing: isPlaying });
     };
+    const paintControls = (positionMs: number) => {
+      if (currentTimeLabel.current) currentTimeLabel.current.textContent = recordingClock(positionMs / 1000);
+      if (positionControl.current) positionControl.current.value = String(Math.min(duration, positionMs));
+    };
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(tick);
+    };
     const tick = (now: number) => {
+      raf = 0;
       const state = useEditor.getState();
+      if (state.exporting) {
+        last = now;
+        return;
+      }
       if (state.playing) {
         outMs += now - last;
         if (outMs >= duration) {
@@ -90,40 +101,69 @@ export function Stage() {
           setPlaying(false);
         }
         const src = sourceTime(segments, outMs) ?? project.media.durationMs;
-        // Keep the video near the wanted source time; let it run between
-        // seeks so decoding stays smooth.
         const seg = segments.find((s) => outMs >= s.outStartMs && outMs < s.outEndMs);
         const rate = seg?.speed ?? 1;
         if (v.paused) void v.play().catch(() => undefined);
         if (v.playbackRate !== rate) v.playbackRate = Math.min(16, Math.max(0.0625, rate));
         if (Math.abs(v.currentTime * 1000 - src) > 120) v.currentTime = src / 1000;
         useEditor.setState({ playhead: src });
+        paintControls(outMs);
         drawAt(src, true);
       } else {
         if (!v.paused) v.pause();
         const src = state.playhead;
         outMs = outputTime(segments, src);
         if (Math.abs(v.currentTime * 1000 - src) > 8) v.currentTime = src / 1000;
+        paintControls(outMs);
         drawAt(src, false);
       }
       last = now;
-      const current = useEditor.getState();
-      if (previewNeedsFrame(current.playing, v.readyState, v.seeking)) {
-        raf = requestAnimationFrame(tick);
-      }
+      if (previewNeedsFrame(state.playing, v.readyState, v.seeking)) schedule();
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [project, segments, duration, cursorRaw, cursorSmooth, size, setPlaying, playing, idlePlayhead]);
+    const unsubscribe = useEditor.subscribe((state, previous) => {
+      if (state.exporting !== previous.exporting && !state.exporting) {
+        renderer.current.snap();
+        schedule();
+      } else if (state.playing !== previous.playing) {
+        outMs = outputTime(segments, state.playhead);
+        last = performance.now();
+        schedule();
+      } else if (state.playhead !== previous.playhead && !state.playing) {
+        renderer.current.snap();
+        schedule();
+      }
+    });
+    v.addEventListener("loadeddata", schedule);
+    v.addEventListener("seeked", schedule);
+    schedule();
+    return () => {
+      unsubscribe();
+      v.removeEventListener("loadeddata", schedule);
+      v.removeEventListener("seeked", schedule);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [project, segments, duration, cursorRaw, cursorSmooth, size, setPlaying]);
 
-  // A seek from the timeline lands the camera rather than chasing.
+  // Lend the element to the exporter for as long as the stage is up.
+  const setVideoEl = useEditor((s) => s.setVideoEl);
   useEffect(() => {
-    if (!playing) renderer.current.snap();
-  }, [playhead, playing]);
+    setVideoEl(video.current);
+    return () => setVideoEl(null);
+  }, [setVideoEl, playable]);
+
+  // The hidden video needs a nudge to fetch its metadata under CEF.
+  useEffect(() => {
+    const v = video.current;
+    if (!v || !playable) return;
+    v.load();
+    const id = window.setTimeout(() => {
+      if (v.readyState < 1) void v.play().then(() => v.pause()).catch(() => undefined);
+    }, 400);
+    return () => window.clearTimeout(id);
+  }, [playable]);
 
   if (!project) return null;
 
-  // Dragging on the stage: the selected zoom's focus, or a selected annotation.
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const sel = selection;
     if (!sel || (sel.kind !== "zoom" && sel.kind !== "annotation")) return;
@@ -150,27 +190,38 @@ export function Stage() {
 
   const selZoom = selection?.kind === "zoom" ? project.editor.zooms.find((z) => z.id === selection.id) : undefined;
   const focusDot = selZoom ? frameToStage(project, selZoom.focus.cx, selZoom.focus.cy, size.w, size.h) : null;
+  const outNow = outputTime(segments, useEditor.getState().playhead);
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div ref={wrap} className="relative grid min-h-0 flex-1 place-items-center overflow-hidden bg-ground">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col rounded-2xl border border-line bg-surface">
+      <div ref={wrap} className="relative grid min-h-0 flex-1 place-items-center overflow-hidden rounded-t-2xl">
         <div className="relative" style={{ width: size.w, height: size.h }}>
-          <canvas ref={canvas} onPointerDown={onPointerDown} className={`h-full w-full rounded-lg shadow-2xl ${selection?.kind === "zoom" || selection?.kind === "annotation" ? "cursor-crosshair" : ""}`} style={{ width: size.w, height: size.h }} aria-label="Preview" />
+          <canvas ref={canvas} onPointerDown={onPointerDown} className={`h-full w-full rounded-xl ${selection?.kind === "zoom" || selection?.kind === "annotation" ? "cursor-crosshair" : ""}`} style={{ width: size.w, height: size.h }} aria-label="Preview" />
           {focusDot && !(project.editor.autoFocusAll || selZoom?.focusMode === "auto") && (
             <span aria-hidden className="pointer-events-none absolute size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-highlight bg-highlight/30 shadow" style={{ left: focusDot.x, top: focusDot.y }} />
           )}
-          <video ref={video} src={playable ?? undefined} muted playsInline preload="auto" className="pointer-events-none absolute -left-[9999px] size-px opacity-0" />
+          <video
+            ref={video}
+            src={playable ?? undefined}
+            muted
+            playsInline
+            preload="auto"
+            onError={() => useEditor.setState({ playing: false, error: "Dive could not decode this recording preview. The original file is still safe." })}
+            className="pointer-events-none absolute -left-[9999px] size-px opacity-0"
+          />
         </div>
       </div>
-      <div className="flex h-11 shrink-0 items-center gap-1 border-t border-line px-3">
-        <IconButton icon={SkipBack} label="Back a second" onClick={() => seek(Math.max(0, playhead - 1000))} />
-        <IconButton icon={playing ? Pause : Play} label={playing ? "Pause" : "Play"} shortcut="Space" onClick={() => setPlaying(!playing)} />
-        <IconButton icon={SkipForward} label="Forward a second" onClick={() => seek(playhead + 1000)} />
-        <span className="ml-2 font-mono text-[11px] tabular-nums text-ink-2">
-          {recordingClock(outputTime(segments, playhead) / 1000)} <span className="text-ink-3">/ {recordingClock(duration / 1000)}</span>
-        </span>
-        <span className="flex-1" />
-        <span className="text-[11px] text-ink-3">{project.media.width}×{project.media.height} source</span>
+      {/* Playback bar, the way a player has one: play, time, scrubber, length. */}
+      <div className="flex h-14 shrink-0 items-center gap-3 px-5">
+        <button type="button" aria-label={playing ? "Pause" : "Play"} title="Space" onClick={() => setPlaying(!playing)} className="grid size-9 shrink-0 place-items-center rounded-full bg-ink text-ground transition hover:brightness-90">
+          <Icon icon={playing ? Pause : Play} size={15} className="fill-current" />
+        </button>
+        <span ref={currentTimeLabel} className="w-10 font-mono text-[11px] tabular-nums text-ink-2">{recordingClock(outNow / 1000)}</span>
+        <input ref={positionControl} type="range" aria-label="Position" min={0} max={Math.max(1, duration)} step={1} defaultValue={Math.min(duration, outNow)} onChange={(e) => seek(sourceTime(segments, Number(e.target.value)) ?? 0)} className="h-1 flex-1 accent-ink" />
+        <span className="w-10 text-right font-mono text-[11px] tabular-nums text-ink-3">{recordingClock(duration / 1000)}</span>
+        <button type="button" aria-label={fill ? "Fit preview" : "Fill preview"} onClick={() => setFill(!fill)} className="grid size-7 place-items-center rounded-full text-ink-2 hover:bg-surface-2 hover:text-ink">
+          <Icon icon={fill ? Minimize2 : Maximize2} size={14} />
+        </button>
       </div>
     </div>
   );

@@ -1,7 +1,10 @@
-import { History, Search, Star, Trash2, X } from "lucide-react";
+import { Clapperboard, Download, ExternalLink, FolderOpen, History, Search, Star, Trash2, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
-import type { Bookmark, HistoryEntry } from "../lib/ipc";
+import type { Bookmark, HistoryEntry, RecordingInfo } from "../lib/ipc";
+import { recordingBytes } from "../lib/recordingFormat";
+import { useDownloads } from "../store/downloads";
+import { screenUrl } from "./internal/InternalPage";
 import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
@@ -12,7 +15,13 @@ import { Icon, IconButton } from "./Icon";
 /** How many rows each list loads; the filter box narrows from there. */
 export const LIBRARY_LIMIT = 200;
 
-type LibraryTab = "bookmarks" | "history";
+type LibraryTab = "bookmarks" | "history" | "downloads" | "recordings";
+const TABS: { id: LibraryTab; label: string; icon: typeof Star }[] = [
+  { id: "bookmarks", label: "Bookmarks", icon: Star },
+  { id: "history", label: "History", icon: History },
+  { id: "downloads", label: "Downloads", icon: Download },
+  { id: "recordings", label: "Recordings", icon: Clapperboard },
+];
 
 /** Bookmarks and history in one dialog: ⌘Y. */
 export function Library() {
@@ -22,7 +31,8 @@ export function Library() {
   const input = useRef<HTMLInputElement>(null);
   const { close, className } = useFadeClose(() => toggle("library", false));
   useFocusTrap(root, { initialFocus: input, onEscape: close });
-  const [tab, setTab] = useState<LibraryTab>("bookmarks");
+  const initial = useBrowser((s) => s.libraryTab);
+  const [tab, setTab] = useState<LibraryTab>(initial);
   const [query, setQuery] = useState("");
 
   return (
@@ -36,7 +46,7 @@ export function Library() {
       >
         <header className="flex h-12 shrink-0 items-center gap-1 border-b border-line px-3">
           <div role="tablist" aria-label="Library sections" className="flex items-center gap-0.5">
-            {(["bookmarks", "history"] as const).map((id) => (
+            {TABS.map(({ id, label, icon }) => (
               <button
                 key={id}
                 type="button"
@@ -47,8 +57,8 @@ export function Library() {
                 onClick={() => setTab(id)}
                 className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-ink-2 hover:bg-surface-2 hover:text-ink aria-selected:bg-surface-3 aria-selected:text-ink"
               >
-                <Icon icon={id === "bookmarks" ? Star : History} size={13} />
-                {id === "bookmarks" ? "Bookmarks" : "History"}
+                <Icon icon={icon} size={13} />
+                {label}
               </button>
             ))}
           </div>
@@ -56,10 +66,10 @@ export function Library() {
             <Icon icon={Search} size={13} className="shrink-0 text-ink-3" />
             <input
               ref={input}
-              aria-label={tab === "bookmarks" ? "Filter bookmarks" : "Filter history"}
+              aria-label={`Filter ${tab}`}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={tab === "bookmarks" ? "Filter bookmarks" : "Filter history"}
+              placeholder={`Filter ${tab}`}
               spellCheck={false}
               className="min-w-0 flex-1 bg-transparent text-xs text-ink outline-none placeholder:text-ink-3"
             />
@@ -67,7 +77,7 @@ export function Library() {
           <IconButton icon={X} label="Close library" onClick={close} />
         </header>
         <div role="tabpanel" id={`library-panel-${tab}`} aria-labelledby={`library-tab-${tab}`} className="min-h-0 flex-1 overflow-y-auto p-2">
-          {tab === "bookmarks" ? <Bookmarks query={query} onOpened={close} /> : <HistoryList query={query} onOpened={close} />}
+          {tab === "bookmarks" ? <Bookmarks query={query} onOpened={close} /> : tab === "history" ? <HistoryList query={query} onOpened={close} /> : tab === "downloads" ? <DownloadsList query={query} /> : <Recordings query={query} onOpened={close} />}
         </div>
       </div>
     </div>
@@ -217,4 +227,88 @@ function host(url: string) {
   } catch {
     return "";
   }
+}
+
+/** This session's downloads, newest first, with a way to the file. */
+function DownloadsList({ query }: { query: string }) {
+  const items = useDownloads((s) => s.items);
+  const shown = items.filter((d) => matches(query, d.name, d.url));
+  if (shown.length === 0) return <Empty>{items.length === 0 ? "Nothing downloaded in this session yet." : "Nothing matches."}</Empty>;
+  return (
+    <ul className="flex flex-col">
+      {shown.map((d) => (
+        <li key={`${d.url}-${d.at}`} className="group flex items-center gap-1">
+          <button type="button" onClick={() => void ipc.downloadsReveal(d.path).catch(() => undefined)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
+            <Icon icon={Download} size={14} className="shrink-0 text-ink-3" />
+            <span className="truncate text-ink">{d.name}</span>
+            <span className="ml-auto shrink-0 pl-3 text-[11px] text-ink-3">{d.status}</span>
+          </button>
+          <button type="button" aria-label={`Show ${d.name} in Finder`} onClick={() => void ipc.downloadsReveal(d.path).catch(() => undefined)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
+            <Icon icon={FolderOpen} size={13} />
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Every recording on disk: open it, find it, or edit it in DiveScreen. */
+function Recordings({ query, onOpened }: { query: string; onOpened: () => void }) {
+  const [items, setItems] = useState<RecordingInfo[] | null>(null);
+  const openTab = useBrowser((s) => s.openTab);
+  useEffect(() => {
+    let alive = true;
+    ipc
+      .recordingsList()
+      .then((r) => alive && setItems(r))
+      .catch(() => alive && setItems([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const remove = (path: string) => {
+    setItems((list) => (list ?? []).filter((r) => r.path !== path));
+    void ipc.recordingDelete(path).catch(() => undefined);
+  };
+  if (items === null) return <p className="p-3 text-xs text-ink-3">Loading…</p>;
+  const shown = items.filter((r) => matches(query, r.name, r.format));
+  if (shown.length === 0) return <Empty>{items.length === 0 ? "No recordings yet. Press Record in the title bar to make one." : "Nothing matches."}</Empty>;
+  return (
+    <ul className="flex flex-col">
+      {shown.map((r) => (
+        <li key={r.path} className="group flex items-center gap-1">
+          <button type="button" onClick={() => void ipc.recordingOpen(r.path).catch(() => undefined)} className="flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
+            <Icon icon={Clapperboard} size={14} className="shrink-0 text-ink-3" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-ink">{r.name}</span>
+              <span className="block truncate font-mono text-[10.5px] text-ink-3">
+                {r.format.toUpperCase()} · {recordingBytes(r.bytes ?? 0)} · {new Date(r.modified_ms ?? 0).toLocaleString()}
+                {r.has_project ? " · edited" : ""}
+              </span>
+            </span>
+          </button>
+          {r.editable && (
+            <button
+              type="button"
+              aria-label={`Edit ${r.name} in DiveScreen`}
+              title="Edit in DiveScreen"
+              onClick={() => {
+                onOpened();
+                void openTab(screenUrl(r.path));
+              }}
+              className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-highlight"
+            >
+              <Icon icon={Wand2} size={13} />
+            </button>
+          )}
+          <button type="button" aria-label={`Show ${r.name} in Finder`} onClick={() => void ipc.downloadsReveal(r.path).catch(() => undefined)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
+            <Icon icon={ExternalLink} size={13} />
+          </button>
+          <button type="button" aria-label={`Delete ${r.name}`} onClick={() => remove(r.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100">
+            <Icon icon={Trash2} size={13} />
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
 }

@@ -1,4 +1,4 @@
-import { ArrowDownToLine, ChevronDown, Loader2, Pause, Play, Square, Video, X } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, ChevronDown, Loader2, Pause, Play, Square, Video, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
@@ -156,7 +156,7 @@ function RecordAction({ compact }: { compact: boolean }) {
   const active = useBrowser((s) => s.activeTab);
   const phase = useRecording((s) => s.phase);
   const openSetup = useRecording((s) => s.openSetup);
-  if (phase === "countdown" || phase === "recording" || phase === "paused" || phase === "finishing") {
+  if (phase === "starting" || phase === "countdown" || phase === "recording" || phase === "paused" || phase === "finishing") {
     return <RecordingHud compact={compact} />;
   }
   return (
@@ -180,8 +180,18 @@ function RecordingHud({ compact }: { compact: boolean }) {
   const resume = useRecording((s) => s.resume);
   const stop = useRecording((s) => s.stop);
   const cancel = useRecording((s) => s.cancel);
+  const error = useRecording((s) => s.error);
   const elapsed = useElapsed(phase === "recording");
   const paused = phase === "paused";
+
+  if (phase === "starting") {
+    return (
+      <div role="status" aria-live="polite" className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 px-2.5 text-[11.5px] text-ink-2">
+        <Icon icon={Loader2} size={13} className="motion-safe:animate-spin" />
+        {!compact && "Preparing…"}
+      </div>
+    );
+  }
 
   if (phase === "countdown") {
     return (
@@ -207,6 +217,7 @@ function RecordingHud({ compact }: { compact: boolean }) {
         {recordingClock(elapsed)}
       </span>
       {paused && !compact && <span className="text-ink-3">paused</span>}
+      {error && <Icon icon={AlertTriangle} size={13} role="img" aria-label={error} className="text-danger" />}
       <IconButton icon={paused ? Play : Pause} label={paused ? "Resume recording" : "Pause recording"} size={13} onClick={() => void (paused ? resume() : pause())} />
       <Tooltip label="Stop and save" shortcut="⌘⇧R">
         <button type="button" aria-label="Stop and save" onClick={() => void stop()} className="grid size-7 place-items-center rounded-full text-danger transition-colors hover:bg-danger/20">

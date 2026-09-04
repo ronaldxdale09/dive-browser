@@ -400,6 +400,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             recording_read,
             recording_open,
             recording_delete,
+            crate::screen::recordings_list,
             crate::screen::screen_media_info,
             crate::screen::screen_project_read,
             crate::screen::screen_project_write,

@@ -2,12 +2,8 @@
 ! documentation or reproducible browser traffic; no third-party filter lists are included.
 ! Google Analytics collection endpoints.
 ! Provenance: Google Analytics measurement documentation and reproduced third-party browser traffic (2026-09).
-! Google Analytics measurement protocol endpoint.
-||www.google-analytics.com/g/collect$third-party
-! Google Analytics legacy collection endpoint.
-||www.google-analytics.com/collect$third-party
-! Google Analytics analytics script endpoint.
-||www.google-analytics.com/analytics.js$third-party,script
+! Google Analytics host (dedicated analytics scripts and collection infrastructure).
+||www.google-analytics.com^$third-party
 ! Google Analytics gtag script endpoint.
 ||www.googletagmanager.com/gtag/js$third-party,script
 ! Google Analytics mobile measurement endpoint.

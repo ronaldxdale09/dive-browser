@@ -6,7 +6,9 @@ import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
 import { useDownloads } from "./downloads";
 import type { CoreEvent, Decision, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace } from "../lib/ipc";
 
-export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "shortcuts";
+export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "shortcuts" | "menu";
+/** The sections of the library dialog. */
+export type LibraryTab = "bookmarks" | "history" | "downloads" | "recordings";
 
 /** The panels of the settings dialog; `openSettings` can land on any of them. */
 export type SettingsSection = "general" | "appearance" | "privacy" | "downloads" | "developer" | "agent" | "shortcuts" | "about";
@@ -81,6 +83,9 @@ interface BrowserState {
   editing: { id: string | null } | null;
   setEditing: (v: { id: string | null } | null) => void;
   toggle: (panel: UiPanel, value?: boolean) => void;
+  /** Which library section opens next; the dialog reads it once. */
+  libraryTab: LibraryTab;
+  openLibrary: (tab: LibraryTab) => void;
   applyEvent: (event: CoreEvent) => void;
 }
 
@@ -197,7 +202,9 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   tabs: [],
   activeTab: null,
   detached: [],
-  open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false },
+  open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false, menu: false },
+  libraryTab: "bookmarks",
+  openLibrary: (libraryTab) => set((s) => ({ libraryTab, open: { ...s.open, library: true, menu: false } })),
   settingsSection: "general",
   openSettings: (section = "general") => set((s) => ({ settingsSection: section, open: { ...s.open, settings: true } })),
   permissionRequests: {},

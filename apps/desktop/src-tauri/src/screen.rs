@@ -56,6 +56,65 @@ pub struct ExportRequest {
     pub with_audio: bool,
 }
 
+/// One finished recording in the captures directory.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct RecordingInfo {
+    pub path: String,
+    pub name: String,
+    /// `mp4` or `gif`.
+    pub format: String,
+    /// Size on disk. A float because the bindings cannot carry a u64.
+    pub bytes: f64,
+    /// Last modified, milliseconds since the epoch.
+    pub modified_ms: f64,
+    /// Whether a playable companion exists (so it can open in `DiveScreen`).
+    pub editable: bool,
+    /// Whether a project file exists beside it.
+    pub has_project: bool,
+}
+
+/// Every recording on disk, newest first.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn recordings_list() -> AppResult<Vec<RecordingInfo>> {
+    let dir = crate::commands::captures_dir()?;
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(&dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        if ext != "mp4" && ext != "gif" {
+            continue;
+        }
+        let meta = entry.metadata()?;
+        #[allow(clippy::cast_precision_loss)]
+        let modified_ms = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0.0, |d| d.as_millis() as f64);
+        #[allow(clippy::cast_precision_loss)]
+        let bytes = meta.len() as f64;
+        out.push(RecordingInfo {
+            name: path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            format: ext,
+            bytes,
+            modified_ms,
+            editable: companion(&path, "webm").is_some(),
+            has_project: project_path(&path).is_ok_and(|p| p.exists()),
+            path: path.to_string_lossy().into_owned(),
+        });
+    }
+    out.sort_by(|a, b| b.modified_ms.total_cmp(&a.modified_ms));
+    Ok(out)
+}
+
 /// A file the editor may touch: inside the captures directory only.
 fn captured(path: &str) -> AppResult<PathBuf> {
     let dir = crate::commands::captures_dir()?.canonicalize()?;
@@ -364,37 +423,8 @@ fn finish(staged: &Path, source: &Path, req: &ExportRequest) -> AppResult<Record
     let preview = if gif {
         None
     } else {
-        let preview_dir = dir.join(PREVIEW_DIR);
-        std::fs::create_dir_all(&preview_dir)?;
-        let p = preview_dir.join(format!("{stem}.webm"));
-        let mut c = Command::new(&ffmpeg);
-        c.args(["-hide_banner", "-loglevel", "error", "-y"])
-            .arg("-i")
-            .arg(&path)
-            .args([
-                "-vf",
-                "scale='min(1280,iw)':-2,format=yuv420p",
-                "-c:v",
-                "libvpx-vp9",
-                "-deadline",
-                "realtime",
-                "-cpu-used",
-                "8",
-                "-crf",
-                "34",
-                "-b:v",
-                "0",
-                "-row-mt",
-                "1",
-            ]);
-        if with_audio {
-            c.args(["-c:a", "libopus", "-b:a", "64k"]);
-        } else {
-            c.arg("-an");
-        }
-        c.arg(&p).stdin(Stdio::null());
-        let _ = c.output();
-        p.exists().then(|| p.to_string_lossy().into_owned())
+        let p = dir.join(PREVIEW_DIR).join(format!("{stem}.webm"));
+        crate::screencast::write_companion(&path, &p, 1280, with_audio)
     };
     #[allow(clippy::cast_precision_loss)]
     let bytes = std::fs::metadata(&path)?.len() as f64;
