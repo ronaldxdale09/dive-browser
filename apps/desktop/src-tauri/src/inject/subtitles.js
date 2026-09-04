@@ -12,6 +12,8 @@ if (window.__diveSubtitles) {
   let ctx = null;
   let source = null;
   let node = null;
+  let stream = null;
+  let tappedElement = false;
   let video = null;
   let acc = [];
   let accCount = 0;
@@ -79,13 +81,37 @@ if (window.__diveSubtitles) {
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       ctx = new AC();
-      source = ctx.createMediaElementSource(video);
+      const capture = video.captureStream || video.mozCaptureStream;
+      if (capture) {
+        // Non-destructive tap: mirror the element's audio into a stream while
+        // the element keeps playing to the speakers through its own path. The
+        // graph only reads the samples, so audio never stops even if the
+        // context is briefly suspended. This is the path YouTube takes.
+        stream = capture.call(video);
+        if (!stream.getAudioTracks || stream.getAudioTracks().length === 0) {
+          throw new Error("no-audio-track");
+        }
+        source = ctx.createMediaStreamSource(stream);
+        tappedElement = false;
+      } else {
+        // Fallback taps the element itself, which reroutes its output, so the
+        // processor must pass the audio through to keep it audible.
+        source = ctx.createMediaElementSource(video);
+        tappedElement = true;
+      }
       // ScriptProcessor is deprecated but universally available and fine for
       // a 16 kHz voice tap; an AudioWorklet would need a separate module URL
       // that the page CSP may block.
       node = ctx.createScriptProcessor(4096, 1, 1);
       node.onaudioprocess = (e) => {
-        pushDownsampled(e.inputBuffer.getChannelData(0), ctx.sampleRate);
+        const input = e.inputBuffer.getChannelData(0);
+        pushDownsampled(input, ctx.sampleRate);
+        // Only the element-tap fallback must relay audio to the speakers; the
+        // captureStream path leaves the element's own output untouched, so the
+        // node stays silent to avoid doubling it.
+        const out = e.outputBuffer.getChannelData(0);
+        if (tappedElement) out.set(input);
+        else out.fill(0);
       };
       source.connect(node);
       node.connect(ctx.destination);
@@ -95,7 +121,7 @@ if (window.__diveSubtitles) {
         // and nudge the viewer meanwhile.
         ctx.resume().catch(() => {});
         if (ctx.state === "suspended") {
-          show("Captions on \u2014 click the video to start");
+          if (tappedElement) show("Captions on \u2014 click the video to start");
           const resume = () => {
             ctx.resume().catch(() => {});
             document.removeEventListener("pointerdown", resume, true);
@@ -114,9 +140,10 @@ if (window.__diveSubtitles) {
 
   function stop() {
     try { if (node) node.disconnect(); } catch (_) {}
-    try { if (source) { source.disconnect(); source.connect(ctx.destination); } } catch (_) {}
+    try { if (source) source.disconnect(); } catch (_) {}
+    try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
     try { if (ctx) ctx.close(); } catch (_) {}
-    node = null; source = null; ctx = null;
+    node = null; source = null; stream = null; ctx = null; tappedElement = false;
     if (overlay) { overlay.remove(); overlay = null; }
     clearTimeout(hideTimer);
   }
