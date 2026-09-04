@@ -1,5 +1,7 @@
 import { lazy, Suspense } from "react";
 import type { Tab } from "../../lib/ipc";
+import { useBrowser } from "../../store/browser";
+import { IsolatedPanel } from "../IsolatedPanel";
 
 /**
  * Dive's own pages live at `dive://…` and are drawn by the chrome in the
@@ -34,6 +36,7 @@ export function InternalPage({ tab }: { tab: Tab }) {
   const { page, params } = parseInternal(tab.url);
   return (
     <div className="relative min-h-0 min-w-0 overflow-hidden bg-ground">
+      <IsolatedPanel key={tab.url} label={page === "screen" ? "Recording editor" : "Capture editor"} onClose={() => void useBrowser.getState().closeTab(tab.id)}>
       <Suspense fallback={<p className="p-6 text-xs text-ink-3">Loading…</p>}>
         {page === "screen" ? (
           <DiveScreen src={params.get("src")} tabId={tab.id} />
@@ -43,6 +46,7 @@ export function InternalPage({ tab }: { tab: Tab }) {
           <Unknown page={page} />
         )}
       </Suspense>
+      </IsolatedPanel>
     </div>
   );
 }
