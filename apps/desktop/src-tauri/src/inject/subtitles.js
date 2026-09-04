@@ -5,7 +5,7 @@
 if (window.__diveSubtitles) {
   // Already installed; just make sure the overlay is present.
 } else {
-  const BINDING = window.__AUDIO_BINDING__ || "__diveSubtitleAudio";
+  const BINDING = "__AUDIO_BINDING__";
   const TARGET_RATE = 16000;
   const FRAME_MS = 100;
 
