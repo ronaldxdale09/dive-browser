@@ -1,26 +1,42 @@
 name: release
 
-# A tag `v*` produces a signed, notarized macOS build with updater artifacts
-# and publishes a GitHub release carrying `latest.json` for the in-app
-# updater. Every secret below is documented in RELEASING.md.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      kind:
+        description: 'Release kind (rc, patch, minor, major)'
+        required: true
+        type: choice
+        options:
+          - rc
+          - patch
+          - minor
+          - major
+        default: rc
+      dry_run:
+        description: 'Dry run (validate without pushing tags or publishing release)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
   CEF_PATH: ${{ github.workspace }}/.cef
 
-permissions:
-  contents: write
-
 jobs:
-  macos:
-    name: build (macos-15)
+  build-and-release:
+    name: Build & Release (macOS)
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -30,6 +46,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: brew install cmake ninja
 
@@ -39,12 +57,60 @@ jobs:
           path: .cef
           key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
 
-      - name: Import signing certificate
-        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      # 1. If triggered by workflow_dispatch, cut and push the tag
+      - name: Cut release tag
+        if: github.event_name == 'workflow_dispatch'
+        id: cut
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            node scripts/release/release.mjs cut "${{ inputs.kind }}" --dry-run
+            echo "dry_run=true" >> "$GITHUB_OUTPUT"
+          else
+            node scripts/release/release.mjs cut "${{ inputs.kind }}" --push
+            VERSION=$(node scripts/release/release.mjs check "${{ inputs.kind }}")
+            echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "dry_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 2. Determine active release tag and version
+      - name: Set Release Metadata
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ steps.cut.outputs.dry_run }}" = "true" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            TAG="${{ steps.cut.outputs.tag }}"
+            VERSION="${{ steps.cut.outputs.version }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      # 3. Fast preflight check
+      - name: Preflight verification
+        if: steps.meta.outputs.skip != 'true'
+        run: |
+          pnpm typecheck
+          pnpm lint
+          pnpm test
+
+      # 4. Optional Apple Developer ID Certificate Import (if configured)
+      - name: Import Apple signing certificate
+        if: steps.meta.outputs.skip != 'true' && secrets.APPLE_CERTIFICATE != ''
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD || 'ephemeral-keychain' }}
         run: |
           set -euo pipefail
           echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
@@ -55,7 +121,9 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
           rm certificate.p12
 
-      - name: Build, sign, notarize
+      # 5. Build Desktop Application Bundle
+      - name: Build macOS application & updater bundle
+        if: steps.meta.outputs.skip != 'true'
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -74,15 +142,18 @@ jobs:
           fi
           scripts/release/prepare-bundle.sh target/release/bundle/macos/Dive.app
 
-      - name: Collect artifacts
-        id: collect
+      # 6. Package artifacts and updater manifest (latest.json)
+      - name: Package release artifacts
+        if: steps.meta.outputs.skip != 'true'
         run: |
           set -euo pipefail
           mkdir -p out
           cp target/release/bundle/dmg/*.dmg out/ 2>/dev/null || true
           cp target/release/bundle/macos/*.tar.gz out/ 2>/dev/null || true
           cp target/release/bundle/macos/*.tar.gz.sig out/ 2>/dev/null || true
-          VERSION="${GITHUB_REF_NAME#v}"
+
+          TAG="${{ steps.meta.outputs.tag }}"
+          VERSION="${{ steps.meta.outputs.version }}"
           SIG=""
           if compgen -G "out/*.tar.gz.sig" > /dev/null; then
             SIG=$(cat out/*.tar.gz.sig | head -n 1)
@@ -91,6 +162,7 @@ jobs:
           if compgen -G "out/*.tar.gz" > /dev/null; then
             ARCHIVE=$(basename $(ls out/*.tar.gz | head -n 1))
           fi
+
           cat > out/latest.json <<JSON
           {
             "version": "${VERSION}",
@@ -99,15 +171,30 @@ jobs:
             "platforms": {
               "darwin-aarch64": {
                 "signature": "${SIG}",
-                "url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${ARCHIVE}"
+                "url": "https://github.com/${{ github.repository }}/releases/download/${TAG}/${ARCHIVE}"
               }
             }
           }
           JSON
           ls -la out
 
-      - name: Publish release
+      # 7. Publish GitHub Release
+      - name: Publish to GitHub Releases
+        if: steps.meta.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.meta.outputs.tag }}
           files: out/*
           generate_release_notes: true
+          prerelease: ${{ contains(steps.meta.outputs.tag, '-rc.') }}
+
+      - name: Summary
+        run: |
+          echo "## Release Summary 🚀" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Event:** \`${{ github.event_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.meta.outputs.skip }}" = "true" ]; then
+            echo "- **Result:** Dry run completed successfully (no releases created)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- **Tag:** \`${{ steps.meta.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **Release:** https://github.com/${{ github.repository }}/releases/tag/${{ steps.meta.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          fi

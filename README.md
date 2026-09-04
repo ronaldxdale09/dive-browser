@@ -82,8 +82,8 @@ Powered by a high-performance **Rust + Chromium Embedded Framework (CEF)** core 
 - **Isolated Workspaces**: Separate tabs, cookies, and mock rules across personal, work, and client projects with instant keyboard switching.
 
 ### 5. 🚀 Production Push Update & Release System
-- **Automated Release Pipeline (`release-cut.yml`)**: Modeled after enterprise browser release engineering (Orca) with semantic floor protection, preflight quality gates, multi-manifest synchronization, draft staging, asset completeness validation, and atomic publishing.
-- **Seamless In-App Updates**: Built-in cryptographic verification via Tauri updater plugin with zero-disruption background update checks and one-click restart.
+- **One-Command Release**: Cut and publish updates with `pnpm release rc --push` or via GitHub Actions.
+- **Seamless In-App Updates**: Built-in cryptographic verification via Tauri updater with zero-disruption background update checks and one-click restart.
 
 ---
 
@@ -102,9 +102,9 @@ dive-browser/
 │   ├── dive-integration/         # Multi-tier integration and stress test suites
 │   └── dive-mcp/                 # Model Context Protocol HTTP Server
 ├── scripts/
-│   └── release/                  # Semantic release, asset verification & bumper scripts
+│   └── release/                  # Unified release CLI & manifest synchronizer
 └── .github/
-    └── workflows/                # CI & Release Cut GitHub Actions
+    └── workflows/                # CI & Release GitHub Actions
 ```
 
 ---
@@ -175,17 +175,19 @@ cargo clippy       # Strict Rust linter (-D warnings)
 
 ## 🚢 Releasing & Push Updates
 
-Dive uses an automated release pipeline. Releases are cut via GitHub Actions or local helper scripts:
+Dive makes releases effortless. You can cut and publish updates directly from your terminal or via GitHub Actions:
 
 ```bash
 # Inspect next calculated semver release
 pnpm release:check rc       # e.g. 0.1.1-rc.0
 pnpm release:check patch    # e.g. 0.1.1
 pnpm release:check minor    # e.g. 0.2.0
-pnpm release:check major    # e.g. 1.0.0
 
-# Atomically bump workspace manifests (Cargo.toml, package.json, tauri.conf.json)
-pnpm release:bump 0.2.0
+# Preview changes with dry-run
+pnpm release rc --dry-run
+
+# Cut, commit, tag, and push release in one command
+pnpm release rc --push
 ```
 
 Refer to [`RELEASING.md`](RELEASING.md) for full instructions on signing, notarization, and updater manifest distribution.
