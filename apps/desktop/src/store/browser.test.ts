@@ -4,6 +4,7 @@ import { reduceCrash, reduceEvent, reduceLoad, reducePermissionAsked, reduceWind
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
 import type { PermissionAsked, Tab, TabCrashed, TabLoad } from "../lib/ipc";
+import { usePrivacy } from "./privacy";
 
 const tab = (id: string, url = "https://x"): Tab => ({
   id, workspace_id: "w", tier: "today", url, title: "", position: 0, state: "active", last_active_at: "2026-01-01T00:00:00Z", favicon: null,
@@ -75,6 +76,15 @@ describe("reduceLoad", () => {
     useBrowser.getState().applyEvent({ type: "tab_closed", data: "a" });
     const s = useBrowser.getState();
     expect([s.loading, s.navError, s.crashedTabs]).toEqual([{}, {}, {}]);
+  });
+
+  it("clears privacy results at the next main-frame start and drops them on close", () => {
+    usePrivacy.getState().apply({ type: "blocked", data: { tab_id: "a", category: "ads" } });
+    useBrowser.getState().applyLoad(load("a", "started"));
+    expect(usePrivacy.getState().byTab.a).toBeUndefined();
+    usePrivacy.getState().apply({ type: "blocked", data: { tab_id: "a", category: "ads" } });
+    useBrowser.getState().applyEvent({ type: "tab_closed", data: "a" });
+    expect(usePrivacy.getState().byTab.a).toBeUndefined();
   });
 });
 

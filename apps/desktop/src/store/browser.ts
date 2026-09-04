@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { ipc, events } from "../lib/ipc";
 import { listenConsole, useConsole } from "./console";
 import { listenNetwork, useNetwork } from "./network";
+import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
 import { useDownloads } from "./downloads";
 import type { CoreEvent, Decision, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace } from "../lib/ipc";
 
@@ -214,7 +215,10 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   navError: {},
   crashedTabs: {},
   recordingTab: null,
-  applyLoad: (load) => set((s) => reduceLoad(s, load)),
+  applyLoad: (load) => {
+    if (load.phase === "started") clearPrivacy(load.tab_id);
+    set((s) => reduceLoad(s, load));
+  },
   applyCrash: (crash) => set((s) => reduceCrash(s, crash)),
   setAnnotating: (path) => set({ annotating: path }),
   editing: null,
@@ -234,7 +238,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
         set({ notice: d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : `Download failed: ${name}` });
         setTimeout(() => set({ notice: null }), 5000);
       });
-      await Promise.all([listenConsole(), listenNetwork()]);
+      await Promise.all([listenConsole(), listenNetwork(), listenPrivacy(), usePrivacy.getState().loadInfo()]);
       set({ ...fromSnapshot(await ipc.snapshot()), ready: true, error: null });
       void get().refreshCounts();
     } catch (e) {
@@ -253,6 +257,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     await run(set, () => ipc.tabClose(id));
     useConsole.getState().drop(id);
     useNetwork.getState().drop(id);
+    usePrivacy.getState().drop(id);
   },
   activateTab: async (id) => {
     // Optimistic: the strip highlights the tab at once and `tab_activated`
@@ -393,6 +398,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     if (event.type === "tab_closed") {
       const id = event.data;
       set((s) => ({ loading: without(s.loading, id), navError: without(s.navError, id), crashedTabs: without(s.crashedTabs, id), permissionRequests: without(s.permissionRequests, id) }));
+      usePrivacy.getState().drop(id);
     }
     // Tabs of other workspaces never reach this store, so their badges come
     // from the host. Coalesced: a page load can emit several tab updates.
