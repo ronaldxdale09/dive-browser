@@ -303,6 +303,10 @@ impl DivePrivacy {
             return PrivacyDecision::Allow;
         }
 
+        if exact_host(context.document_url).is_none() {
+            return PrivacyDecision::Allow;
+        }
+
         let Ok(request) = Request::new(
             context.url,
             context.document_url,
@@ -424,6 +428,23 @@ mod tests {
             )),
             PrivacyDecision::Block(PrivacyCategory::Tracker)
         );
+    }
+
+    #[test]
+    fn requests_without_valid_page_context_fail_open() {
+        let privacy = DivePrivacy::new();
+
+        for document_url in ["", "not a url", "about:blank"] {
+            assert_eq!(
+                privacy.decide(&ctx(
+                    "https://ads.doubleclick.net/diveprivacy-fixture.gif",
+                    document_url,
+                    "image",
+                )),
+                PrivacyDecision::Allow,
+                "document URL {document_url:?} must fail open",
+            );
+        }
     }
 
     #[test]
