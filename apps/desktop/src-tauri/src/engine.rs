@@ -227,9 +227,10 @@ impl TabHost {
             return Ok(());
         }
 
+        let blank = url::Url::parse(BLANK_URL).map_err(tauri::Error::InvalidUrl)?;
         let title_app = app.clone();
         #[allow(unused_mut)]
-        let mut builder = WebviewBuilder::new(label_for(tab_id), WebviewUrl::External(blank_url()))
+        let mut builder = WebviewBuilder::new(label_for(tab_id), WebviewUrl::External(blank))
             .data_directory(self.profiles_root.join(&container.cache_dir))
             // A container that does not keep cookies is a private session:
             // the engine holds its storage in memory and drops it with the
@@ -307,7 +308,7 @@ impl TabHost {
             builder = builder.on_address_change(move |_, url| {
                 // Views start on about:blank; that hop must not replace the
                 // tab's real URL or a restart would restore an empty tab.
-                if *url == blank_url() {
+                if url.as_str() == BLANK_URL {
                     return;
                 }
                 let url = url.to_string();
@@ -823,9 +824,7 @@ fn attach_cdp(view: &Webview<Runtime>) -> tauri::Result<CdpSession> {
 /// Title of the runtime's internal initial-load document; never persist it.
 const PLACEHOLDER_TITLE: &str = "Tauri CEF Initial Load";
 
-fn blank_url() -> url::Url {
-    url::Url::parse("about:blank").expect("static url")
-}
+const BLANK_URL: &str = "about:blank";
 
 fn label_for(id: TabId) -> String {
     format!("tab-{id}")

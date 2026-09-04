@@ -398,7 +398,7 @@ struct Strips {
     right: u32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct UiEntry {
     browser: String,
     portrait: Strips,
@@ -436,7 +436,7 @@ struct Group {
     id: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct Catalog {
     #[cfg_attr(not(test), allow(dead_code))]
     groups: Vec<Group>,
@@ -444,9 +444,18 @@ struct Catalog {
     devices: Vec<RawDevice>,
 }
 
+fn parse_catalog(source: &str) -> Result<Catalog, serde_json::Error> {
+    serde_json::from_str(source)
+}
+
 fn catalog() -> &'static Catalog {
     static PARSED: OnceLock<Catalog> = OnceLock::new();
-    PARSED.get_or_init(|| serde_json::from_str(CATALOG).expect("devices.json is well-formed"))
+    PARSED.get_or_init(|| {
+        parse_catalog(CATALOG).unwrap_or_else(|error| {
+            tracing::error!(%error, "embedded device catalog is invalid; simulator presets disabled");
+            Catalog::default()
+        })
+    })
 }
 
 fn frame_key(frame: Frame) -> &'static str {
@@ -460,11 +469,12 @@ fn frame_key(frame: Frame) -> &'static str {
     }
 }
 
-fn ui_for(frame: Frame) -> &'static UiEntry {
-    catalog()
-        .ui
-        .get(frame_key(frame))
-        .expect("every frame kind has ui geometry")
+fn ui_for_catalog(catalog: &Catalog, frame: Frame) -> Option<&UiEntry> {
+    catalog.ui.get(frame_key(frame))
+}
+
+fn ui_for(frame: Frame) -> Option<&'static UiEntry> {
+    ui_for_catalog(catalog(), frame)
 }
 
 /// Mirrors `iosUa` in devices.ts.
@@ -498,14 +508,15 @@ pub fn presets() -> Vec<Preset> {
     catalog()
         .devices
         .iter()
-        .map(|d| {
+        .filter_map(|d| {
+            let ui = ui_for(d.frame)?;
             let (user_agent, platform) = user_agent(&d.ua);
-            Preset {
+            Some(Preset {
                 id: d.id.clone(),
                 name: d.name.clone(),
                 group: d.group.clone(),
                 frame: d.frame,
-                browser: ui_for(d.frame).browser.clone(),
+                browser: ui.browser.clone(),
                 safe_area: d.safe_area,
                 device: Device {
                     width: d.width,
@@ -518,7 +529,7 @@ pub fn presets() -> Vec<Preset> {
                     scale: None,
                     safe_area: None,
                 },
-            }
+            })
         })
         .collect()
 }
@@ -543,7 +554,9 @@ pub fn strips_for(frame: Frame, landscape: bool, mode: UiMode) -> Insets {
     if mode == UiMode::None || frame == Frame::Laptop {
         return Insets::default();
     }
-    let entry = ui_for(frame);
+    let Some(entry) = ui_for(frame) else {
+        return Insets::default();
+    };
     let ui = if landscape {
         entry.landscape
     } else {
@@ -576,7 +589,9 @@ pub fn safe_area_for(preset: &Preset, landscape: bool, mode: UiMode) -> Insets {
     if !landscape {
         return preset.safe_area;
     }
-    let ui = ui_for(preset.frame).landscape;
+    let Some(ui) = ui_for(preset.frame).map(|entry| entry.landscape) else {
+        return Insets::default();
+    };
     Insets {
         top: 0,
         bottom: ui.home,
@@ -716,6 +731,14 @@ mod tests {
             // Every frame kind has strip geometry, or the stage would panic.
             let _ = ui_for(preset.frame);
         }
+    }
+
+    #[test]
+    fn malformed_or_incomplete_catalog_data_is_fallible() {
+        assert!(parse_catalog("{").is_err());
+        let incomplete = parse_catalog(r#"{"groups":[],"ui":{},"devices":[]}"#)
+            .expect("minimal catalog is valid JSON");
+        assert!(ui_for_catalog(&incomplete, Frame::Island).is_none());
     }
 
     #[test]

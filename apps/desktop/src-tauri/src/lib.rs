@@ -136,7 +136,7 @@ pub fn run() {
 
     let specta_handler = specta.invoke_handler();
 
-    builder
+    let app = builder
         .invoke_handler(move |invoke: tauri::ipc::Invoke<Runtime>| {
             if invoke.message.command() == "report_startup_milestone" {
                 handle_startup_invoke(invoke)
@@ -195,27 +195,33 @@ pub fn run() {
             startup::on_setup_completed(app.handle().clone());
             Ok(())
         })
-        .build(tauri::generate_context!())
-        .expect("failed to build dive")
-        .run(|_, event| match event {
-            // Why the process is going away is the first question after an
-            // unexpected exit; say so in the log.
-            tauri::RunEvent::ExitRequested { code, .. } => {
-                tracing::info!(?code, "exit requested");
-            }
-            tauri::RunEvent::Exit => tracing::info!("event loop exited"),
-            tauri::RunEvent::WindowEvent {
-                label,
-                event: tauri::WindowEvent::Destroyed,
-                ..
-            } => tracing::info!(%label, "window destroyed"),
-            tauri::RunEvent::WindowEvent {
-                label,
-                event: tauri::WindowEvent::CloseRequested { .. },
-                ..
-            } => tracing::info!(%label, "window close requested"),
-            _ => {}
-        });
+        .build(tauri::generate_context!());
+    let app = match app {
+        Ok(app) => app,
+        Err(error) => {
+            tracing::error!(%error, "failed to build Dive");
+            return;
+        }
+    };
+    app.run(|_, event| match event {
+        // Why the process is going away is the first question after an
+        // unexpected exit; say so in the log.
+        tauri::RunEvent::ExitRequested { code, .. } => {
+            tracing::info!(?code, "exit requested");
+        }
+        tauri::RunEvent::Exit => tracing::info!("event loop exited"),
+        tauri::RunEvent::WindowEvent {
+            label,
+            event: tauri::WindowEvent::Destroyed,
+            ..
+        } => tracing::info!(%label, "window destroyed"),
+        tauri::RunEvent::WindowEvent {
+            label,
+            event: tauri::WindowEvent::CloseRequested { .. },
+            ..
+        } => tracing::info!(%label, "window close requested"),
+        _ => {}
+    });
 }
 
 /// Open tabs for URLs given on the command line or in `DIVE_OPEN_URL`
