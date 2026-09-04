@@ -42,8 +42,11 @@ must_use_candidate = "allow"
 unused_async_trait_impl = "allow"
 
 [profile.release]
+# codegen-units=1 + LTO squeezes a few percent of runtime speed for a large
+# multiple of build time. Dive's heavy code is the prebuilt CEF framework, not
+# our Rust, so 16 units keeps release builds fast for almost no runtime cost.
 lto = "thin"
-codegen-units = 1
+codegen-units = 16
 strip = true
 
 [patch.crates-io]
