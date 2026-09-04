@@ -1,0 +1,1 @@
+! Compatibility exceptions are intentionally empty until a reproducible regression needs one.

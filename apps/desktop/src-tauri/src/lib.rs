@@ -30,6 +30,8 @@ mod openapi;
 mod pagescript;
 mod permissions;
 mod prefs;
+/// Dive-owned network privacy matching.
+pub mod privacy;
 mod recorder;
 mod replay;
 mod report;

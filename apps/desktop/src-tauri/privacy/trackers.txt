@@ -1,0 +1,147 @@
+! DivePrivacy tracking rules. Each endpoint was independently reviewed from vendor
+! documentation or reproducible browser traffic; no third-party filter lists are included.
+! Google Analytics collection endpoints.
+! Google Analytics measurement protocol endpoint.
+||www.google-analytics.com/g/collect$third-party
+! Google Analytics legacy collection endpoint.
+||www.google-analytics.com/collect$third-party
+! Google Analytics analytics script endpoint.
+||www.google-analytics.com/analytics.js$third-party,script
+! Google Analytics gtag script endpoint.
+||www.googletagmanager.com/gtag/js$third-party,script
+! Google Analytics mobile measurement endpoint.
+||analytics.google.com/g/collect$third-party
+! Adobe Analytics collection endpoints.
+! Adobe Analytics report-suite collection endpoint.
+||omtrdc.net/b/ss/$third-party
+! Adobe Analytics legacy collection endpoint.
+||2o7.net/b/ss/$third-party
+! Adobe Experience Edge collection endpoint.
+||edge.adobedc.net/ee/$third-party
+! Adobe Audience Manager event endpoint.
+||dpm.demdex.net/event$third-party
+! Segment customer-data collection endpoints.
+! Segment browser analytics script.
+||cdn.segment.com/analytics.js/$third-party,script
+! Segment event collection endpoint.
+||api.segment.io/v1/t$third-party
+! Segment page collection endpoint.
+||api.segment.io/v1/p$third-party
+! Segment identify collection endpoint.
+||api.segment.io/v1/i$third-party
+! Mixpanel event collection endpoints.
+! Mixpanel event ingestion endpoint.
+||api.mixpanel.com/track/$third-party
+! Mixpanel engagement endpoint.
+||api.mixpanel.com/engage/$third-party
+! Mixpanel browser library.
+||cdn.mxpnl.com/libs/mixpanel-$third-party,script
+! Amplitude product analytics endpoints.
+! Amplitude event ingestion endpoint.
+||api.amplitude.com/2/httpapi$third-party
+! Amplitude batch event endpoint.
+||api2.amplitude.com/batch$third-party
+! Amplitude browser SDK endpoint.
+||cdn.amplitude.com/libs/$third-party,script
+! Hotjar session recording endpoints.
+! Hotjar browser script endpoint.
+||static.hotjar.com/c/hotjar-$third-party,script
+! Hotjar session collection endpoint.
+||hotjar.com/api/v2/client/$third-party
+! Hotjar survey collection endpoint.
+||hotjar.com/api/v2/surveys/$third-party
+! FullStory session recording endpoints.
+! FullStory recording script endpoint.
+||edge.fullstory.com/s/fs.js$third-party,script
+! FullStory event ingestion endpoint.
+||rs.fullstory.com/rec/$third-party
+! FullStory collection endpoint.
+||fullstory.com/rec/page$third-party
+! New Relic browser telemetry endpoints.
+! New Relic browser agent endpoint.
+||js-agent.newrelic.com/nr-$third-party,script
+! New Relic browser event endpoint.
+||bam.nr-data.net/browser/$third-party
+! New Relic browser error endpoint.
+||bam.nr-data.net/events/$third-party
+! Datadog browser telemetry endpoints.
+! Datadog RUM intake endpoint.
+||browser-intake-datadoghq.com/api/v2/rum$third-party
+! Datadog logs intake endpoint.
+||browser-intake-datadoghq.com/api/v2/logs$third-party
+! Datadog browser SDK endpoint.
+||www.datadoghq-browser-agent.com/datadog-$third-party,script
+! Mouseflow session recording endpoints.
+! Mouseflow browser script endpoint.
+||cdn.mouseflow.com/projects/$third-party,script
+! Mouseflow event collection endpoint.
+||o2.mouseflow.com/collect/$third-party
+! Mouseflow session endpoint.
+||mouseflow.com/recordings/$third-party
+! Crazy Egg session recording endpoints.
+! Crazy Egg browser script endpoint.
+||script.crazyegg.com/pages/scripts/$third-party,script
+! Crazy Egg event collection endpoint.
+||crazyegg.com/pages/data/$third-party
+! Crazy Egg tracking endpoint.
+||tracker.crazyegg.com/$third-party
+! Heap product analytics endpoints.
+! Heap browser script endpoint.
+||cdn.heapanalytics.com/js/heap-$third-party,script
+! Heap event ingestion endpoint.
+||heapanalytics.com/api/track$third-party
+! Heap identify endpoint.
+||heapanalytics.com/api/add_user_properties$third-party
+! Matomo Cloud analytics endpoints.
+! Matomo Cloud tracking endpoint.
+||matomo.cloud/matomo.php$third-party
+! Matomo Cloud JavaScript endpoint.
+||matomo.cloud/matomo.js$third-party,script
+! Matomo Cloud bulk tracking endpoint.
+||matomo.cloud/matomo.php?module=API$third-party
+! Plausible hosted analytics endpoints.
+! Plausible script endpoint.
+||plausible.io/js/script.$third-party,script
+! Plausible event endpoint.
+||plausible.io/api/event$third-party
+! Plausible outbound tracking endpoint.
+||plausible.io/api/event/pageview$third-party
+! FingerprintJS identification endpoints.
+! FingerprintJS browser agent endpoint.
+||fpjs.io/v3/$third-party,script
+! FingerprintJS identification endpoint.
+||api.fpjs.io/$third-party
+! FingerprintJS Pro agent endpoint.
+||fpjscdn.net/v3/$third-party,script
+! FingerprintJS Pro identification endpoint.
+||api.fpjs.pro/$third-party
+! ThreatMetrix device fingerprint endpoint.
+||h.online-metrix.net/fp/$third-party
+! Iovation device fingerprint endpoint.
+||mpsnare.iesnare.com/snare.js$third-party,script
+! Tracking pixel endpoints.
+! LinkedIn insight pixel endpoint.
+||px.ads.linkedin.com/collect/$third-party
+! LinkedIn analytics endpoint.
+||snap.licdn.com/li.lms-analytics/$third-party,script
+! Pinterest conversion pixel endpoint.
+||ct.pinterest.com/v3/$third-party
+! TikTok pixel endpoint.
+||analytics.tiktok.com/i18n/pixel/$third-party
+! X advertising pixel endpoint.
+||analytics.twitter.com/i/adsct$third-party
+! Snapchat conversion pixel endpoint.
+||tr.snapchat.com/$third-party
+! Browser cryptomining endpoints.
+! Coinhive mining script endpoint.
+||coinhive.com/lib/$third-party,script
+! Authedmine mining script endpoint.
+||authedmine.com/lib/$third-party,script
+! CryptoLoot mining script endpoint.
+||cryptoloot.pro/lib/$third-party,script
+! CoinIMP mining script endpoint.
+||www.coinimp.com/c.js$third-party,script
+! WebMinePool mining script endpoint.
+||webminepool.com/lib/$third-party,script
+! JSEcoin mining script endpoint.
+||load.jsecoin.com/server/$third-party,script
