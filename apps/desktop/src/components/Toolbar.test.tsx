@@ -73,6 +73,78 @@ afterEach(() => {
 });
 
 describe("Toolbar", () => {
+  it("shows and selects the complete URL when editing, including scheme and fragment", async () => {
+    const url = "https://example.com/docs?q=hello#details";
+    useBrowser.setState({ tabs: [{ ...tab, url }] });
+    render(<Toolbar />);
+    const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
+    act(() => input.focus());
+    expect(input.value).toBe(url);
+    await waitFor(() => {
+      expect(input.selectionStart).toBe(0);
+      expect(input.selectionEnd).toBe(url.length);
+    });
+  });
+
+  it("keeps typed text during a page redirect and Escape restores the current address", () => {
+    render(<Toolbar />);
+    const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "my unfinished search" } });
+    act(() => useBrowser.setState({ tabs: [{ ...tab, url: "https://example.com/redirected" }] }));
+    expect(input.value).toBe("my unfinished search");
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input.value).toBe("example.com/redirected");
+    expect(document.activeElement).not.toBe(input);
+    expect(ipc.tabStop).not.toHaveBeenCalled();
+  });
+
+  it("resets the editable address when switching between tabs with the same URL", () => {
+    render(<Toolbar />);
+    const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "old draft" } });
+    act(() => useBrowser.setState({ tabs: [tab, { ...tab, id: "second" }], activeTab: "second" }));
+    expect(input.value).toBe(tab.url);
+  });
+
+  it("covers native content for the compact tray and restores trigger focus on Escape", async () => {
+    render(<Toolbar compact />);
+    const trigger = screen.getByRole("button", { name: "More page actions" });
+    act(() => trigger.focus());
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Page actions" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    await waitFor(() => expect(ipc.setContentCovered).toHaveBeenCalledWith(true));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Page actions" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    await waitFor(() => expect(ipc.setContentCovered).toHaveBeenLastCalledWith(false));
+  });
+
+  it("closes a nested Share popover without closing the compact actions tray", () => {
+    render(<Toolbar compact />);
+    fireEvent.click(screen.getByRole("button", { name: "More page actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share to another device" }));
+    const share = screen.getByRole("dialog", { name: "Share" });
+    fireEvent.keyDown(share, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Share" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Page actions" })).toBeTruthy();
+  });
+
+  it("finishes editing after Enter so the final navigation URL replaces the submitted text", async () => {
+    vi.spyOn(ipc, "tabNavigate").mockResolvedValue(null);
+    render(<Toolbar />);
+    const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "example.com/start" } });
+    fireEvent.submit(input.closest("form")!);
+    await waitFor(() => expect(ipc.tabNavigate).toHaveBeenCalledWith(tab.id, "example.com/start"));
+    act(() => useBrowser.setState({ tabs: [{ ...tab, url: "https://example.com/final" }] }));
+    expect(input.value).toBe("example.com/final");
+    expect(document.activeElement).not.toBe(input);
+  });
+
   it("associates every button around the address field with a custom tooltip", () => {
     render(<Toolbar />);
 

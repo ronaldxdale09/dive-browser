@@ -90,7 +90,7 @@ impl MainFrame {
     }
 }
 
-/// Map one DevTools event to a main-frame load-state change. Only the latest
+/// Map one `DevTools` event to a main-frame load-state change. Only the latest
 /// proven main document request can produce a navigation error.
 pub fn map_event(tab_id: TabId, event: &CdpEvent, main: &MainFrame) -> Option<TabLoad> {
     let p = &event.params;
