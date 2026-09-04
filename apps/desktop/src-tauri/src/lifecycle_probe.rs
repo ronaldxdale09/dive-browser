@@ -45,6 +45,14 @@ async fn run(app: &tauri::AppHandle<Runtime>, mode: &str) -> Result<(), AppError
     verify_navigation(app, ids[1]).await?;
     #[cfg(feature = "cef")]
     verify_ipc_boundary(app).await?;
+    #[cfg(feature = "cef")]
+    if std::env::var_os("DIVE_PERMISSION_CACHE_PROBE").is_some() {
+        crate::permission_probe::verify(app).await?;
+    }
+    #[cfg(feature = "cef")]
+    if let Ok(url) = std::env::var("DIVE_NETWORK_CAPTURE_PROBE_URL") {
+        crate::network_probe::verify(app, ids[1], &url).await?;
+    }
     on_main(app, move |handle| {
         commands::tab_detach(handle.clone(), ids[0], None)?;
         popout(handle, ids[0])
@@ -143,11 +151,49 @@ async fn probe_evaluate(
     Ok(response["result"]["value"].clone())
 }
 
+/// Only side-effect-free readiness expressions use this retry path. Commands
+/// and history mutations are issued once, outside these bounded polls.
+async fn read_probe_value(
+    session: &dive_cdp::CdpSession,
+    expression: &str,
+) -> Result<serde_json::Value, AppError> {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match session
+                .call(
+                    "Runtime.evaluate",
+                    serde_json::json!({"expression":expression,"returnByValue":true}),
+                )
+                .await
+            {
+                Ok(value) => {
+                    if value.get("exceptionDetails").is_some() {
+                        return Err(AppError::new("readiness expression threw"));
+                    }
+                    return Ok(value["result"]["value"].clone());
+                }
+                Err(dive_cdp::CdpError::Protocol {
+                    code: -32000,
+                    message,
+                }) if !session.is_closed()
+                    && matches!(
+                        message.as_str(),
+                        "Inspected target navigated or closed" | "Not attached to an active page"
+                    ) => {}
+                Err(error) => return Err(AppError::new(error)),
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .map_err(AppError::new)?
+}
+
 #[cfg(feature = "cef")]
 async fn wait_ipc_ready(session: &dive_cdp::CdpSession) -> Result<(), AppError> {
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            if probe_evaluate(session, "location.origin === 'http://tauri.localhost' && typeof window.__TAURI_INTERNALS__?.invoke === 'function'").await? == true {
+            if read_probe_value(session, "document.readyState === 'complete' && location.origin === 'http://tauri.localhost' && typeof window.__TAURI_INTERNALS__?.invoke === 'function'").await? == true {
                 return Ok::<_, AppError>(());
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -202,14 +248,19 @@ async fn verify_navigation(app: &tauri::AppHandle<Runtime>, id: TabId) -> Result
         .ok_or_else(|| AppError::new("missing history probe session"))?;
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            let ready = session.call("Runtime.evaluate", serde_json::json!({
-                "expression": "document.title === 'Dive navigation probe' && document.readyState === 'complete'",
-                "returnByValue": true
-            })).await.map_err(AppError::new)?;
-            if ready["result"]["value"] == true { return Ok::<_, AppError>(()); }
+            let ready = read_probe_value(
+                &session,
+                "document.title === 'Dive navigation probe' && document.readyState === 'complete'",
+            )
+            .await?;
+            if ready == true {
+                return Ok::<_, AppError>(());
+            }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-    }).await.map_err(AppError::new)??;
+    })
+    .await
+    .map_err(AppError::new)??;
     let initial = crate::navigation::tab_history(app.state(), id).await?;
     let result = session.call("Runtime.evaluate", serde_json::json!({
         "expression": "history.pushState({diveProbe:1}, ''); history.pushState({diveProbe:2}, ''); true",
@@ -285,13 +336,21 @@ async fn wait_history_index(
                         Err(dive_cdp::CdpError::Protocol {
                             code: -32000,
                             message,
-                        }) if message == "Not attached to an active page" => {}
+                        }) if matches!(
+                            message.as_str(),
+                            "Not attached to an active page"
+                                | "Inspected target navigated or closed"
+                        ) => {}
                         Err(error) => return Err(AppError::new(error)),
                     }
                 }
                 Ok(_) => {}
                 Err(error)
-                    if error.message == "cdp error -32000: Not attached to an active page" => {}
+                    if matches!(
+                        error.message.as_str(),
+                        "cdp error -32000: Not attached to an active page"
+                            | "cdp error -32000: Inspected target navigated or closed"
+                    ) => {}
                 Err(error) => return Err(error),
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -306,17 +365,8 @@ async fn assert_renderer_alive(app: &tauri::AppHandle<Runtime>, id: TabId) -> Re
         .as_ref()
         .and_then(|host| host.cdp(id))
         .ok_or_else(|| AppError::new("missing CDP session"))?;
-    let value = tokio::time::timeout(
-        Duration::from_secs(5),
-        session.call(
-            "Runtime.evaluate",
-            serde_json::json!({"expression": "6 * 7", "returnByValue": true}),
-        ),
-    )
-    .await
-    .map_err(AppError::new)?
-    .map_err(AppError::new)?;
-    if value["result"]["value"] != 42 {
+    let value = read_probe_value(&session, "6 * 7").await?;
+    if value != 42 {
         return Err(AppError::new(
             "renderer did not return expected evaluation result",
         ));
@@ -374,14 +424,8 @@ pub(crate) async fn verify_discarded_and_wake(
     );
     tokio::time::timeout(Duration::from_secs(15), async {
         loop {
-            let reply = session
-                .call(
-                    "Runtime.evaluate",
-                    serde_json::json!({"expression": expression, "returnByValue": true}),
-                )
-                .await
-                .map_err(AppError::new)?;
-            if reply["result"]["value"] == true {
+            let reply = read_probe_value(&session, &expression).await?;
+            if reply == true {
                 return Ok::<_, AppError>(());
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -428,4 +472,71 @@ pub(crate) fn start(app: tauri::AppHandle<Runtime>) {
             app.exit(1);
         }
     });
+}
+
+#[cfg(all(test, feature = "cef"))]
+mod tests {
+    use super::*;
+    use serde_json::{Value, json};
+
+    struct Messages(tokio::sync::mpsc::UnboundedSender<Value>);
+    impl dive_cdp::Transport for Messages {
+        fn send(&self, message: &str) -> Result<(), dive_cdp::CdpError> {
+            self.0.send(serde_json::from_str(message).unwrap()).unwrap();
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn readiness_does_not_retry_closed_sessions_or_unrelated_errors() {
+        let (tx, mut calls) = tokio::sync::mpsc::unbounded_channel();
+        let session = dive_cdp::CdpSession::new(Messages(tx));
+        let waiting = session.clone();
+        let task = tokio::spawn(async move { read_probe_value(&waiting, "6 * 7").await });
+        let first = calls.recv().await.unwrap();
+        session
+            .handle_incoming(
+                &json!({"id":first["id"],"error":{"code":-32000,"message":"unrelated failure"}})
+                    .to_string(),
+            )
+            .unwrap();
+        assert!(task.await.unwrap().is_err());
+        assert!(calls.try_recv().is_err());
+        session.close();
+        assert!(read_probe_value(&session, "6 * 7").await.is_err());
+        assert!(calls.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn ipc_readiness_waits_through_navigation_without_replaying_commands() {
+        let (tx, mut calls) = tokio::sync::mpsc::unbounded_channel();
+        let session = dive_cdp::CdpSession::new(Messages(tx));
+        let waiting = session.clone();
+        let task = tokio::spawn(async move { wait_ipc_ready(&waiting).await });
+        let first = calls.recv().await.unwrap();
+        session.handle_incoming(&json!({"id":first["id"],"error":{"code":-32000,"message":"Inspected target navigated or closed"}}).to_string()).unwrap();
+        tokio::task::yield_now().await;
+        assert!(
+            !task.is_finished(),
+            "a navigation transition is not a failed IPC boundary"
+        );
+        let second = tokio::time::timeout(Duration::from_secs(1), calls.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(second["method"], "Runtime.evaluate");
+        assert!(
+            second["params"]["expression"]
+                .as_str()
+                .unwrap()
+                .starts_with("document.readyState")
+        );
+        session
+            .handle_incoming(
+                &json!({"id":second["id"],"result":{"result":{"value":true}}}).to_string(),
+            )
+            .unwrap();
+        task.await.unwrap().unwrap();
+        assert!(calls.try_recv().is_err());
+    }
 }

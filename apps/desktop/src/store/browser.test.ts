@@ -3,7 +3,7 @@ import type { Event } from "@tauri-apps/api/event";
 import { reduceCrash, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, useBrowser, withoutRequest } from "./browser";
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
-import type { PermissionAsked, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
+import type { PermissionAsked, PermissionDismissed, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
 import { usePrivacy } from "./privacy";
 
 const tab = (id: string, url = "https://x"): Tab => ({
@@ -46,18 +46,17 @@ describe("reduceWindowChange", () => {
   });
 });
 
+const request = (id: string, tab = "t1"): PermissionAsked => ({page_lifetime:true,request_id:id,tab_id:tab,origin:"https://a.test",kinds:["camera"],scope:{profile_id:"p1",container_id:"c1"}});
 describe("permission helpers", () => {
-  it("deduplicates requests for the same origin and kind", () => {
-    const r1 = reducePermissionAsked({}, { tab_id: "t1", origin: "https://a.test", kind: "camera" });
-    expect(r1.t1).toEqual([{ origin: "https://a.test", kind: "camera" }]);
-    const r2 = reducePermissionAsked(r1, { tab_id: "t1", origin: "https://a.test", kind: "camera" });
-    expect(r2.t1?.length).toBe(1);
+  it("deduplicates event delivery by opaque native request, not origin", () => {
+    const r1=reducePermissionAsked({},request("r1"));
+    expect(reducePermissionAsked(r1,request("r1"))).toBe(r1);
+    const r2=reducePermissionAsked(r1,request("r2"));
+    expect(r2.t1).toHaveLength(2);
+    expect(withoutRequest(r2,"t1",request("r1"))).toEqual({t1:[request("r2")]});
   });
-
-  it("removes single request and cleans up empty tab list", () => {
-    const req = { origin: "https://a.test", kind: "camera" };
-    const r1 = { t1: [req] };
-    expect(withoutRequest(r1, "t1", req)).toEqual({});
+  it("removes a single request and cleans up the empty tab list", () => {
+    expect(withoutRequest({t1:[request("r1")]},"t1",request("r1"))).toEqual({});
   });
 });
 
@@ -218,6 +217,8 @@ describe("boot", () => {
     const loadListen = vi.spyOn(events.tabLoad, "listen").mockImplementation(async (cb) => ((onLoad = cb), () => undefined));
     const crashListen = vi.spyOn(events.tabCrashed, "listen").mockImplementation(async (cb) => ((onCrash = cb), () => undefined));
     vi.spyOn(events.stateChanged, "listen").mockResolvedValue(() => undefined);
+    let onDismissed!: (e: Event<PermissionDismissed>) => void;
+    vi.spyOn(events.permissionDismissed,"listen").mockImplementation(async(cb)=>((onDismissed=cb),()=>undefined));
     let onAsked!: (e: Event<PermissionAsked>) => void;
     const askedListen = vi.spyOn(events.permissionAsked, "listen").mockImplementation(async (cb) => ((onAsked = cb), () => undefined));
     vi.spyOn(events.tabWindowChanged, "listen").mockResolvedValue(() => undefined);
@@ -233,8 +234,10 @@ describe("boot", () => {
     expect(crashListen).toHaveBeenCalledTimes(1);
     expect(askedListen).toHaveBeenCalledTimes(1);
 
-    onAsked({ event: "permission-asked", id: 3, payload: { tab_id: "a", origin: "https://meet.test", kind: "camera" } });
-    expect(useBrowser.getState().permissionRequests).toEqual({ a: [{ origin: "https://meet.test", kind: "camera" }] });
+    onAsked({ event: "permission-asked", id: 3, payload: request("r1","a") });
+    expect(useBrowser.getState().permissionRequests).toEqual({ a: [request("r1","a")] });
+    onDismissed({event:"permission-dismissed",id:4,payload:{request_id:"r1",tab_id:"a"}});
+    expect(useBrowser.getState().permissionRequests).toEqual({});
 
     onLoad({ event: "tab-load", id: 1, payload: load("a", "started") });
     expect(useBrowser.getState().loading).toEqual({ a: true });

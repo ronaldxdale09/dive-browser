@@ -1,15 +1,16 @@
-//! Site permissions: camera, microphone, location, notifications, clipboard
-//! reading and screen capture.
-//!
-//! The engine asks synchronously, so an origin with no remembered decision
-//! is refused for now and the chrome is told to ask the person. Their
-//! answer is stored per origin and kind, and the page gets it on its next
-//! request (the prompt offers a reload).
+//! Native permission callbacks, scoped decisions, and trusted chrome prompts.
+//! No Browser.setPermission overrides or renderer-reported permission identity.
+
+#[path = "permission_policy.rs"]
+mod policy;
+pub use policy::Scope;
+pub use requests::Registry;
+#[path = "permission_requests.rs"]
+mod requests;
 
 use dive_cdp::CdpSession;
 use dive_core::TabId;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use specta::Type;
 use tauri::Manager;
 use tauri::webview::{PermissionKind, PermissionResponse};
@@ -18,8 +19,6 @@ use tauri_specta::Event;
 use crate::Runtime;
 use crate::state::{AppState, lock};
 
-const PREFIX: &str = "perm:";
-const BINDING: &str = "__divePermissionRequest";
 const KINDS: &[&str] = &[
     "camera",
     "microphone",
@@ -37,7 +36,7 @@ pub enum Decision {
     Allow,
     /// Refused.
     Deny,
-    /// Not decided; the engine refuses and the chrome asks.
+    /// Not decided; the original native request waits for the chrome.
     Ask,
 }
 
@@ -69,167 +68,335 @@ pub struct SitePermission {
     pub kind: String,
     /// The decision.
     pub decision: Decision,
+    pub scope: policy::Scope,
 }
 
 /// A page asked for something no decision covers yet.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Event)]
 pub struct PermissionAsked {
-    /// The tab whose page asked.
+    pub page_lifetime: bool,
+    pub request_id: String,
     pub tab_id: TabId,
-    /// The page's origin.
     pub origin: String,
-    /// What it asked for, as in [`SitePermission::kind`].
-    pub kind: String,
+    pub kinds: Vec<String>,
+    pub scope: policy::Scope,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum Duration {
+    Page,
+    Remember,
 }
 
-/// The stable name of a permission kind, as stored and shown.
-pub fn kind_name(kind: PermissionKind) -> &'static str {
-    match kind {
-        PermissionKind::Camera => "camera",
-        PermissionKind::Microphone => "microphone",
-        PermissionKind::Geolocation => "geolocation",
-        PermissionKind::Notifications => "notifications",
-        PermissionKind::ClipboardRead => "clipboard_read",
-        PermissionKind::DisplayCapture => "display_capture",
-        _ => "other",
-    }
+/// A pending native request ended, including navigation, closure and timeout.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct PermissionDismissed {
+    pub request_id: String,
+    pub tab_id: TabId,
 }
 
-fn key(origin: &str, kind: &str) -> String {
-    format!("{PREFIX}{origin}:{kind}")
+/// Settings are scoped to the currently selected workspace's real CEF container.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct PermissionList {
+    pub scope: Scope,
+    pub profile_name: String,
+    pub container_name: String,
+    pub legacy_ignored: bool,
+    pub permissions: Vec<SitePermission>,
 }
-
-/// Look up the decision for `origin` and `kind`.
-pub fn decision(state: &AppState, origin: &str, kind: &str) -> Decision {
-    lock(&state.store)
-        .setting(&key(origin, kind))
-        .ok()
-        .flatten()
-        .map_or(Decision::Ask, |v| Decision::parse(&v))
+fn active_scope(state: &AppState, store: &dive_core::Store) -> dive_core::Result<Scope> {
+    let workspace = lock(&state.active_workspace)
+        .ok_or_else(|| dive_core::CoreError::Invalid("No active permission scope".into()))?;
+    Scope::for_workspace(store, workspace)
 }
-
-/// Remember (or, with `Ask`, forget) a decision.
+/// Persist only into the authoritative active scope; a stale settings panel cannot edit another profile.
 pub fn set(
+    app: &tauri::AppHandle<Runtime>,
     state: &AppState,
+    expected: &Scope,
     origin: &str,
     kind: &str,
-    decision: Decision,
-) -> dive_core::Result<()> {
+    choice: Decision,
+) -> crate::error::AppResult<()> {
+    let host = lock(&state.host);
     let store = lock(&state.store);
-    match decision {
-        Decision::Ask => store.remove_setting(&key(origin, kind)).map(|_| ()),
-        d => store.set_setting(&key(origin, kind), d.as_str()),
+    let scope = active_scope(state, &store)?;
+    if &scope != expected {
+        return Err(crate::error::AppError::new(
+            "Permission profile changed; reopen settings",
+        ));
+    }
+    let origin = policy::canonical_origin(origin)?;
+    if !KINDS.contains(&kind) {
+        return Err(crate::error::AppError::new("Unknown permission kind"));
+    }
+    let (dismissed, reset) = state.permissions.revoke_and_reset(&scope, &origin, kind);
+    let result = reset.map_err(crate::error::AppError::new).and_then(|()| {
+        policy::write(&store, &scope, &origin, kind, choice).map_err(crate::error::AppError::new)
+    });
+    drop(store);
+    drop(host);
+    for (tab_id, request_id) in dismissed {
+        let _ = PermissionDismissed { request_id, tab_id }.emit(app);
+    }
+    result
+}
+/// List only this scope; legacy unscoped records remain available for audit but never grant.
+pub fn all(state: &AppState) -> dive_core::Result<PermissionList> {
+    let store = lock(&state.store);
+    let scope = active_scope(state, &store)?;
+    Ok(PermissionList {
+        profile_name: store.profile(scope.profile_id)?.name,
+        container_name: store.container(scope.container_id)?.name,
+        legacy_ignored: store
+            .settings_with_prefix("perm:")?
+            .iter()
+            .any(|(key, _)| !key.starts_with("perm:v2:")),
+        permissions: policy::all(&store, &scope)?,
+        scope,
+    })
+}
+/// Kind-only callbacks do not identify the requesting frame. Never grant from them.
+pub fn decide(_webview: &tauri::Webview<Runtime>, _kind: PermissionKind) -> PermissionResponse {
+    PermissionResponse::Deny
+}
+
+/// Permission commands have no renderer-supplied identity authority.
+/// Must run on guarded UI because reading the native URL is synchronous.
+pub fn require_chrome(view: &tauri::Webview<Runtime>) -> crate::error::AppResult<()> {
+    let dev = if cfg!(debug_assertions) {
+        view.app_handle().config().build.dev_url.as_ref()
+    } else {
+        None
+    };
+    if crate::ipc_security::trusted_chrome_label(view.label(), view.window().label())
+        && crate::ipc_security::allowed_chrome_navigation(&view.url()?, dev)
+    {
+        Ok(())
+    } else {
+        Err(crate::error::AppError::new(
+            "Permission controls require trusted browser chrome",
+        ))
     }
 }
-
-/// Every remembered decision.
-pub fn all(state: &AppState) -> dive_core::Result<Vec<SitePermission>> {
-    Ok(lock(&state.store)
-        .settings_with_prefix(PREFIX)?
-        .into_iter()
-        .filter_map(|(k, v)| {
-            let rest = k.strip_prefix(PREFIX)?;
-            let (origin, kind) = rest.rsplit_once(':')?;
-            Some(SitePermission {
-                origin: origin.to_owned(),
-                kind: kind.to_owned(),
-                decision: Decision::parse(&v),
-            })
-        })
-        .collect())
+/// Only the app's own chrome receives clipboard reads without a site prompt.
+#[cfg(feature = "cef")]
+pub fn attach_chrome(view: &tauri::Webview<Runtime>) -> tauri::Result<()> {
+    let label = view.label().to_owned();
+    let window = view.window().label().to_owned();
+    let dev = if cfg!(debug_assertions) {
+        view.app_handle().config().build.dev_url.clone()
+    } else {
+        None
+    };
+    view.with_webview(move |native| {
+        native.set_permission_handler(
+            move |request| {
+                let allowed = crate::ipc_security::trusted_chrome_label(&label, &window)
+                    && request.kinds == ["clipboard_read"]
+                    && url::Url::parse(&request.top_level_url).is_ok_and(|url| {
+                        crate::ipc_security::allowed_chrome_navigation(&url, dev.as_ref())
+                            && url.origin().ascii_serialization() == request.origin
+                    });
+                request.respond(allowed.then_some(true));
+            },
+            |_| {},
+            |_, _| {},
+        );
+    })
 }
 
-/// The engine's question for one webview: answer from memory, or refuse
-/// and have the chrome ask.
-pub fn decide(webview: &tauri::Webview<Runtime>, kind: PermissionKind) -> PermissionResponse {
-    let Some(tab_id) = crate::engine::tab_from_label(webview.label()) else {
-        // The chrome itself (clipboard reads for paste, for instance).
-        return PermissionResponse::Allow;
+/// Called on the guarded native UI thread, with host -> store lock order.
+pub fn reply(
+    state: &AppState,
+    tab: TabId,
+    id: &str,
+    choice: Decision,
+    duration: Duration,
+) -> crate::error::AppResult<()> {
+    let answer = {
+        let host = lock(&state.host);
+        let host = host
+            .as_ref()
+            .ok_or_else(|| crate::error::AppError::new("Engine not ready"))?;
+        let label = host.with_view(tab, |view| Ok(view.label().to_owned()))?;
+        state
+            .permissions
+            .answer(&lock(&state.store), tab, &label, id, choice, duration)?
     };
-    let app = webview.app_handle();
+    answer(Some(choice == Decision::Allow));
+    Ok(())
+}
+#[cfg(feature = "cef")]
+fn receive(app: &tauri::AppHandle<Runtime>, incoming: requests::Incoming) {
     let state = app.state::<AppState>();
-    let origin = {
+    let admission = {
+        let host = lock(&state.host);
+        let current = host.as_ref().and_then(|host| {
+            host.with_view(incoming.tab, |view| Ok(view.label().to_owned()))
+                .ok()
+        });
+        if current.as_deref() != Some(&incoming.label) {
+            (incoming.answer)(None);
+            return;
+        }
+        state.permissions.admit(&lock(&state.store), incoming)
+    };
+    match admission {
+        Ok(requests::Admission::Prompt(event)) => {
+            let _ = event.emit(app);
+        }
+        Ok(requests::Admission::Complete(answer, allow)) => answer(allow),
+        Err(error) => {
+            tracing::warn!(%error,"invalid native permission request; native deadline will deny");
+        }
+    }
+}
+/// Install the per-webview callback before first navigation. Default-deny remains
+/// enforced by the native adapter if setup fails or its deadline expires.
+#[cfg(feature = "cef")]
+pub async fn attach_page(
+    app: tauri::AppHandle<Runtime>,
+    tab_id: TabId,
+    session: CdpSession,
+    view: tauri::Webview<Runtime>,
+    workspace: Option<dive_core::WorkspaceId>,
+    container: dive_core::ContainerId,
+) {
+    let Some(workspace) = workspace else {
+        return;
+    };
+    let mut events = session.subscribe();
+    let label = view.label().to_owned();
+    let (dismissed, scope) = {
+        let state = app.state::<AppState>();
+        let host = lock(&state.host);
         let store = lock(&state.store);
-        store
-            .tab(tab_id)
-            .ok()
-            .and_then(|t| dive_core::origin_of(&t.url))
-    };
-    let Some(origin) = origin else {
-        return PermissionResponse::Deny;
-    };
-    let name = kind_name(kind);
-    match decision(&state, &origin, name) {
-        Decision::Allow => PermissionResponse::Allow,
-        Decision::Deny => PermissionResponse::Deny,
-        Decision::Ask => {
-            let _ = PermissionAsked {
-                tab_id,
-                origin,
-                kind: name.to_owned(),
-            }
-            .emit(app);
-            PermissionResponse::Deny
-        }
-    }
-}
-
-fn cdp_name(kind: &str) -> Option<&'static str> {
-    match kind {
-        "camera" => Some("camera"),
-        "microphone" => Some("microphone"),
-        "geolocation" => Some("geolocation"),
-        "notifications" => Some("notifications"),
-        "clipboard_read" => Some("clipboard-read"),
-        "display_capture" => Some("display-capture"),
-        _ => None,
-    }
-}
-
-fn cdp_setting(decision: Decision) -> &'static str {
-    match decision {
-        Decision::Allow => "granted",
-        Decision::Deny | Decision::Ask => "denied",
-    }
-}
-
-fn cdp_params(origin: &str, kind: &str, choice: Decision) -> Option<serde_json::Value> {
-    Some(json!({
-        "permission": {"name": cdp_name(kind)?},
-        "setting": cdp_setting(choice),
-        "origin": origin,
-    }))
-}
-
-/// Apply all remembered decisions for one origin through Chromium's native
-/// permission policy. Undecided capabilities fail closed until the user acts.
-pub async fn apply_origin(state: &AppState, session: &CdpSession, origin: &str) {
-    for kind in KINDS {
-        let Some(params) = cdp_params(origin, kind, decision(state, origin, kind)) else {
-            continue;
+        let Some(current) = host.as_ref().and_then(|host| {
+            host.with_view(tab_id, |view| Ok(view.label().to_owned()))
+                .ok()
+        }) else {
+            return;
         };
-        if let Err(error) = session.call("Browser.setPermission", params).await {
-            tracing::debug!(%origin, %kind, %error, "applying browser permission failed");
+        let Ok(scope) = Scope::for_view(&store, tab_id, workspace, container) else {
+            return;
+        };
+        let Some(ids) = state.permissions.begin_current(
+            tab_id,
+            label.clone(),
+            &current,
+            scope.clone(),
+            workspace,
+        ) else {
+            return;
+        };
+        (ids, scope)
+    };
+    dismiss(&app, tab_id, dismissed);
+    let handler_app = app.clone();
+    let handler_label = label.clone();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let result = view.with_webview(move |native| {
+        if install_page_callbacks(&native, &handler_app, tab_id, &handler_label, scope) {
+            let _ = tx.send(());
         }
+    });
+    if result.is_err()
+        || !matches!(
+            tokio::time::timeout(std::time::Duration::from_secs(5), rx).await,
+            Ok(Ok(()))
+        )
+    {
+        tracing::warn!(%tab_id,"native permission bridge setup failed; requests remain denied");
     }
+    tauri::async_runtime::spawn(async move {
+        while next_permission_event(&mut events, tab_id).await.is_some() {}
+        dismiss(
+            &app,
+            tab_id,
+            app.state::<AppState>()
+                .permissions
+                .drop_session(tab_id, &label),
+        );
+    });
 }
-
-#[derive(Deserialize)]
-struct BindingRequest {
-    nonce: String,
-    id: u64,
-    kind: String,
+#[cfg(feature = "cef")]
+fn install_page_callbacks(
+    native: &tauri::webview::PlatformWebview<Runtime>,
+    app: &tauri::AppHandle<Runtime>,
+    tab_id: TabId,
+    label: &str,
+    scope: Scope,
+) -> bool {
+    let handler_app = app.clone();
+    let cancel_app = app.clone();
+    let navigation_app = app.clone();
+    let handler_label = label.to_owned();
+    let cancel_label = label.to_owned();
+    let navigation_label = label.to_owned();
+    let Some(context) = native.permission_context() else {
+        return false;
+    };
+    handler_app
+        .state::<AppState>()
+        .permissions
+        .register_context(
+            scope,
+            context.identity(),
+            std::sync::Arc::new(move |request| match request {
+                Some((origin, kind)) => context.reset(origin, kind),
+                None => Ok(context.is_alive()),
+            }),
+        );
+    native.set_permission_handler(
+        move |request| {
+            let live = request.clone();
+            let answer = request.clone();
+            let incoming = requests::Incoming {
+                native_id: request.id,
+                tab: tab_id,
+                label: handler_label.clone(),
+                origin: request.origin,
+                kinds: request.kinds,
+                frame: request.frame_id,
+                page_lifetime: request.page_lifetime,
+                deadline: request.deadline,
+                live: Box::new(move || live.can_respond()),
+                answer: Box::new(move |allow| answer.respond(allow)),
+            };
+            // CEF callbacks may execute outside Winit's dispatch guard. Defer
+            // before entering a main task rather than blocking CEF on a getter.
+            let app = handler_app.clone();
+            tauri::async_runtime::spawn(async move {
+                let handle = app.clone();
+                let _ = app.run_on_main_thread(move || receive(&handle, incoming));
+            });
+        },
+        move |native_id| {
+            for request_id in
+                cancel_app
+                    .state::<AppState>()
+                    .permissions
+                    .cancel(tab_id, &cancel_label, native_id)
+            {
+                let _ = PermissionDismissed { request_id, tab_id }.emit(&cancel_app);
+            }
+        },
+        move |frame, main| {
+            navigation_app.state::<AppState>().permissions.navigating(
+                tab_id,
+                &navigation_label,
+                frame.as_deref(),
+                main,
+            );
+        },
+    );
+    true
 }
-
-fn binding_request(event: &dive_cdp::CdpEvent, nonce: &str) -> Option<(BindingRequest, i64)> {
-    if event.method != "Runtime.bindingCalled" || event.params["name"].as_str() != Some(BINDING) {
-        return None;
+fn dismiss(app: &tauri::AppHandle<Runtime>, tab_id: TabId, ids: Vec<String>) {
+    for request_id in ids {
+        let _ = PermissionDismissed { request_id, tab_id }.emit(app);
     }
-    let request: BindingRequest = serde_json::from_str(event.params["payload"].as_str()?).ok()?;
-    if request.nonce != nonce || !KINDS.contains(&request.kind.as_str()) {
-        return None;
-    }
-    Some((request, event.params["executionContextId"].as_i64()?))
 }
 
 /// Keep the permission service alive until the session itself ends.
@@ -246,84 +413,6 @@ async fn next_permission_event(
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
         }
     }
-}
-
-/// Install the media-attempt reporter and keep permission policy synchronized
-/// as the main frame moves between origins.
-pub async fn attach_page(app: tauri::AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
-    let mut events = session.subscribe();
-    let nonce = TabId::new().to_string().replace('-', "");
-    let script = crate::pagescript::build(
-        "media-guard.js",
-        &[
-            (
-                "__NONCE__",
-                serde_json::to_string(&nonce).unwrap_or_else(|_| "null".into()),
-            ),
-            ("__BINDING__", BINDING.to_owned()),
-        ],
-    );
-    for (method, params) in [
-        ("Runtime.enable", json!({})),
-        ("Page.enable", json!({})),
-        ("Runtime.addBinding", json!({"name": BINDING})),
-        (
-            "Page.addScriptToEvaluateOnNewDocument",
-            json!({"source": script}),
-        ),
-        ("Runtime.evaluate", json!({"expression": script})),
-    ] {
-        match session.call(method, params).await {
-            Ok(_) => tracing::debug!(%tab_id, %method, "permission page setup step complete"),
-            Err(error) => {
-                tracing::warn!(%tab_id, %method, %error, "permission page setup step failed");
-            }
-        }
-    }
-    tracing::debug!(%tab_id, "permission page setup complete");
-
-    tauri::async_runtime::spawn(async move {
-        while let Some(event) = next_permission_event(&mut events, tab_id).await {
-            if let Some((request, context_id)) = binding_request(&event, &nonce) {
-                let origin = session.call("Runtime.evaluate", json!({"expression": "location.origin", "contextId": context_id, "returnByValue": true})).await
-                    .ok().and_then(|result| result["result"]["value"].as_str().map(str::to_owned));
-                let allowed = if let Some(origin) = origin {
-                    let state = app.state::<AppState>();
-                    let choice = decision(&state, &origin, &request.kind);
-                    if choice == Decision::Ask {
-                        let _ = PermissionAsked {
-                            tab_id,
-                            origin: origin.clone(),
-                            kind: request.kind.clone(),
-                        }
-                        .emit(&app);
-                    }
-                    apply_origin(&state, &session, &origin).await;
-                    choice == Decision::Allow
-                } else {
-                    false
-                };
-                let expression = format!(
-                    "window.__divePermissionResolve({}, {})",
-                    request.id,
-                    if allowed { "true" } else { "false" }
-                );
-                let _ = session
-                    .call(
-                        "Runtime.evaluate",
-                        json!({"expression": expression, "contextId": context_id}),
-                    )
-                    .await;
-            }
-            if event.method == "Page.frameNavigated"
-                && event.params["frame"]["parentId"].is_null()
-                && let Some(url) = event.params["frame"]["url"].as_str()
-                && let Some(origin) = dive_core::origin_of(url)
-            {
-                apply_origin(&app.state::<AppState>(), &session, &origin).await;
-            }
-        }
-    });
 }
 
 #[cfg(test)]
@@ -370,53 +459,5 @@ mod tests {
             assert_eq!(Decision::parse(d.as_str()), d);
         }
         assert_eq!(Decision::parse("nonsense"), Decision::Ask);
-    }
-
-    #[test]
-    fn keys_keep_origin_and_kind_apart() {
-        let k = key("https://a.dev:8080", "camera");
-        assert_eq!(k, "perm:https://a.dev:8080:camera");
-        let rest = k.strip_prefix(PREFIX).unwrap();
-        let (origin, kind) = rest.rsplit_once(':').unwrap();
-        assert_eq!((origin, kind), ("https://a.dev:8080", "camera"));
-    }
-
-    #[test]
-    fn every_kind_has_a_name() {
-        assert_eq!(kind_name(PermissionKind::Camera), "camera");
-        assert_eq!(kind_name(PermissionKind::DisplayCapture), "display_capture");
-    }
-
-    #[test]
-    fn undecided_permissions_fail_closed_in_chromium() {
-        assert_eq!(cdp_setting(Decision::Ask), "denied");
-        assert_eq!(cdp_setting(Decision::Deny), "denied");
-        assert_eq!(cdp_setting(Decision::Allow), "granted");
-        assert_eq!(cdp_name("camera"), Some("camera"));
-        assert_eq!(cdp_name("microphone"), Some("microphone"));
-        assert_eq!(cdp_name("unknown"), None);
-        assert_eq!(
-            cdp_params("https://example.com", "camera", Decision::Allow).unwrap(),
-            json!({"permission": {"name": "camera"}, "setting": "granted", "origin": "https://example.com"})
-        );
-    }
-
-    #[test]
-    fn recognizes_only_authenticated_media_binding_messages() {
-        let event = dive_cdp::CdpEvent {
-            method: "Runtime.bindingCalled".into(),
-            params: json!({"name": BINDING, "payload":"{\"nonce\":\"n\",\"id\":7,\"kind\":\"camera\"}", "executionContextId": 3}),
-        };
-        let (request, context) = binding_request(&event, "n").unwrap();
-        assert_eq!(
-            (request.id, request.kind.as_str(), context),
-            (7, "camera", 3)
-        );
-        assert!(binding_request(&event, "wrong").is_none());
-        let forged = dive_cdp::CdpEvent {
-            method: event.method.clone(),
-            params: json!({"name": BINDING, "payload":"{\"nonce\":\"n\",\"id\":7,\"kind\":\"filesystem\"}", "executionContextId": 3}),
-        };
-        assert!(binding_request(&forged, "n").is_none());
     }
 }

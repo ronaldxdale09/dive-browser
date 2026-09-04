@@ -22,11 +22,11 @@ beforeEach(() => {
     { id: "tab.new", title: "New tab", keybinding: "mod+t", scope: "workspace" },
   ]);
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
-  vi.spyOn(ipc, "permissionsList").mockResolvedValue([
-    { origin: "https://meet.test", kind: "microphone", decision: "allow" },
-    { origin: "https://meet.test", kind: "camera", decision: "allow" },
-    { origin: "https://maps.test", kind: "geolocation", decision: "deny" },
-  ]);
+  vi.spyOn(ipc, "permissionsList").mockResolvedValue({scope:{profile_id:"p1",container_id:"c1"},profile_name:"Personal",container_name:"Shared",legacy_ignored:true,permissions:[
+    { origin: "https://meet.test", kind: "microphone", decision: "allow", scope:{profile_id:"p1",container_id:"c1"} },
+    { origin: "https://meet.test", kind: "camera", decision: "allow", scope:{profile_id:"p1",container_id:"c1"} },
+    { origin: "https://maps.test", kind: "geolocation", decision: "deny", scope:{profile_id:"p1",container_id:"c1"} },
+  ]});
   vi.spyOn(ipc, "permissionSet").mockResolvedValue(null);
   vi.spyOn(ipc, "updateCheck").mockResolvedValue(null);
   vi.spyOn(ipc, "updateInstall").mockResolvedValue(null);
@@ -167,9 +167,9 @@ describe("SettingsDialog", () => {
 describe("Site permissions", () => {
   it("groups decisions by origin, kinds sorted", () => {
     const groups = groupPermissions([
-      { origin: "https://b.test", kind: "camera", decision: "allow" },
-      { origin: "https://a.test", kind: "microphone", decision: "deny" },
-      { origin: "https://a.test", kind: "camera", decision: "allow" },
+      { origin: "https://b.test", kind: "camera", decision: "allow", scope:{profile_id:"p1",container_id:"c1"} },
+      { origin: "https://a.test", kind: "microphone", decision: "deny", scope:{profile_id:"p1",container_id:"c1"} },
+      { origin: "https://a.test", kind: "camera", decision: "allow", scope:{profile_id:"p1",container_id:"c1"} },
     ]);
     expect(groups.map((g) => [g.origin, g.kinds.map((k) => k.kind)])).toEqual([
       ["https://a.test", ["camera", "microphone"]],
@@ -184,7 +184,7 @@ describe("Site permissions", () => {
     const select = screen.getByLabelText("https://maps.test Location") as HTMLSelectElement;
     expect(select.value).toBe("deny");
     fireEvent.change(select, { target: { value: "allow" } });
-    expect(ipc.permissionSet).toHaveBeenCalledWith("https://maps.test", "geolocation", "allow");
+    expect(ipc.permissionSet).toHaveBeenCalledWith({profile_id:"p1",container_id:"c1"}, "https://maps.test", "geolocation", "allow");
     expect((screen.getByLabelText("https://maps.test Location") as HTMLSelectElement).value).toBe("allow");
   });
 
@@ -193,7 +193,7 @@ describe("Site permissions", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
     await waitFor(() => expect(screen.getByText("https://maps.test")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Forget https://maps.test Location" }));
-    expect(ipc.permissionSet).toHaveBeenCalledWith("https://maps.test", "geolocation", "ask");
+    expect(ipc.permissionSet).toHaveBeenCalledWith({profile_id:"p1",container_id:"c1"}, "https://maps.test", "geolocation", "ask");
     expect(screen.queryByText("https://maps.test")).toBeNull();
     expect(screen.getByText("https://meet.test")).toBeTruthy();
   });

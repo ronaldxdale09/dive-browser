@@ -238,10 +238,11 @@ pub fn attach(
     tauri::async_runtime::spawn(async move {
         let main = MainFrame::default();
         let mut events = session.subscribe();
-        for method in ["Page.enable", "Network.enable"] {
-            if let Err(error) = session.call0(method).await {
-                tracing::warn!(%tab_id, %error, method, "loading feed setup failed");
-            }
+        if let Err(error) = session.call0("Page.enable").await {
+            tracing::warn!(%tab_id, %error, "loading page feed setup failed");
+        }
+        if let Err(error) = crate::network::enable(&session).await {
+            tracing::warn!(%tab_id, %error, "loading network feed setup failed");
         }
         refresh_main(&session, &main).await;
         let _ = ready_tx.send(());

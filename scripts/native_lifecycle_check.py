@@ -44,7 +44,9 @@ def main():
                     or 'DIVE_LIFECYCLE_PROBE: ' + ('quit requested with detached window' if mode == 'quit' else 'main window close requested') not in content
                     or 'event loop exited' not in content):
                 raise RuntimeError(f'lifecycle evidence incomplete: {log}')
-            records.append({'mode': mode, 'elapsed_seconds': round(elapsed, 2), 'log': str(log)})
+            if 'DIVE_PERMISSION_CACHE_PROBE' in env and 'DIVE_PERMISSION_PROBE: native scalar/structured reset, shared-context reuse, container isolation and closed-context Ask/reopen verified' not in content:
+                raise RuntimeError(f'permission cache evidence incomplete: {log}')
+            records.append({'mode': mode, 'elapsed_seconds': round(elapsed, 2), 'permission_cache_checked': 'DIVE_PERMISSION_CACHE_PROBE' in env, 'log': str(log)})
             print(f'{index}: {mode}, tab/window checks passed, exited normally in {elapsed:.2f}s', flush=True)
     # The native runtime must preserve failure status after asynchronous CEF
     # shutdown, not merely log app.exit(1) and return success to its launcher.

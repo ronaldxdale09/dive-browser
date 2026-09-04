@@ -55,6 +55,7 @@ wrap_life_span_handler! {
     context: RuntimeContext<T>,
     new_window_handler: Option<Arc<tauri_runtime::webview::NewWindowHandler<T, CefRuntime<T>>>>,
     initial_url: Option<String>,
+    permissions: Arc<super::permission::PermissionBridge>,
   }
 
   impl LifeSpanHandler {
@@ -160,6 +161,7 @@ wrap_life_span_handler! {
     }
 
     fn on_before_close(&self, browser: Option<&mut Browser>) {
+      self.permissions.navigating(None);
       if browser.is_none() {
         return;
       }

@@ -4,7 +4,7 @@ import { listenConsole, useConsole } from "./console";
 import { listenNetwork, useNetwork } from "./network";
 import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
 import { useDownloads } from "./downloads";
-import type { CoreEvent, Decision, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
+import type { CoreEvent, Decision, Duration, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
 
 export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser" | "subtitles";
 /** The sections of the library dialog. */
@@ -14,7 +14,7 @@ export type LibraryTab = "bookmarks" | "history" | "downloads" | "recordings";
 export type SettingsSection = "general" | "appearance" | "privacy" | "downloads" | "developer" | "agent" | "subtitles" | "shortcuts" | "about";
 
 /** A page's outstanding request for a capability, awaiting the person's answer. */
-export type PermissionRequest = { origin: string; kind: string };
+export type PermissionRequest = PermissionAsked;
 
 interface BrowserState {
   ready: boolean;
@@ -46,11 +46,11 @@ interface BrowserState {
   crashedTabs: Record<string, CrashState>;
   applyLoad: (load: TabLoad) => void;
   applyCrash: (crash: TabCrashed) => void;
-  /** Pages asking for a capability, per tab; one entry per origin and kind. */
+  /** Pages asking for a capability, per tab; one entry per native request. */
   permissionRequests: Record<string, PermissionRequest[]>;
   applyPermissionAsked: (asked: PermissionAsked) => void;
-  /** Remember the decision for that origin and drop the request. */
-  decidePermission: (tabId: string, request: PermissionRequest, decision: Decision) => Promise<void>;
+  /** Resolve the original native request, removing it only after success. */
+  decidePermission: (tabId: string, request: PermissionRequest, decision: Decision, duration: Duration) => Promise<void>;
   /** Stop the active tab's load. */
   stop: () => Promise<void>;
   /** Open the print dialog for the active tab. */
@@ -134,17 +134,17 @@ export function reduceLoad(state: LoadState, load: TabLoad): Partial<LoadState> 
 
 /**
  * Queue a page's request. Chromium may ask again for the same thing while the
- * banner is up (a page that retries), so an origin and kind appear once.
+ * banner is up (a page that retries), so an opaque native request ID appears once.
  */
 export function reducePermissionAsked(requests: Record<string, PermissionRequest[]>, asked: PermissionAsked): Record<string, PermissionRequest[]> {
   const list = requests[asked.tab_id] ?? [];
-  if (list.some((r) => r.origin === asked.origin && r.kind === asked.kind)) return requests;
-  return { ...requests, [asked.tab_id]: [...list, { origin: asked.origin, kind: asked.kind }] };
+  if (list.some((r) => r.request_id === asked.request_id)) return requests;
+  return { ...requests, [asked.tab_id]: [...list, asked] };
 }
 
 /** Drop one request; a tab with none left leaves the record. */
-export function withoutRequest(requests: Record<string, PermissionRequest[]>, tabId: string, request: PermissionRequest): Record<string, PermissionRequest[]> {
-  const rest = (requests[tabId] ?? []).filter((r) => !(r.origin === request.origin && r.kind === request.kind));
+export function withoutRequest(requests: Record<string, PermissionRequest[]>, tabId: string, request: Pick<PermissionRequest, "request_id">): Record<string, PermissionRequest[]> {
+  const rest = (requests[tabId] ?? []).filter((r) => r.request_id !== request.request_id);
   return rest.length === 0 ? without(requests, tabId) : { ...requests, [tabId]: rest };
 }
 
@@ -218,6 +218,7 @@ let unlisten: (() => void) | null = null;
 let unlistenLoad: (() => void) | null = null;
 let unlistenCrash: (() => void) | null = null;
 let unlistenPermission: (() => void) | null = null;
+let unlistenPermissionDismissed: (() => void) | null = null;
 
 export const useBrowser = create<BrowserState>((set, get) => ({
   ready: false,
@@ -257,8 +258,8 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   openSettings: (section = "general") => set((s) => ({ settingsSection: section, open: { ...s.open, settings: true } })),
   permissionRequests: {},
   applyPermissionAsked: (asked) => set((s) => ({ permissionRequests: reducePermissionAsked(s.permissionRequests, asked) })),
-  decidePermission: async (tabId, request, decision) => {
-    await run(set, () => ipc.permissionSet(request.origin, request.kind, decision));
+  decidePermission: async (tabId, request, decision, duration) => {
+    await ipc.permissionReply(tabId, request.request_id, decision, duration);
     set((s) => ({ permissionRequests: withoutRequest(s.permissionRequests, tabId, request) }));
   },
   counts: {},
@@ -286,6 +287,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       unlistenLoad ??= await events.tabLoad.listen((e) => get().applyLoad(e.payload));
       unlistenCrash ??= await events.tabCrashed.listen((e) => get().applyCrash(e.payload));
       unlistenPermission ??= await events.permissionAsked.listen((e) => get().applyPermissionAsked(e.payload));
+      unlistenPermissionDismissed ??= await events.permissionDismissed.listen((e) => set((s) => ({permissionRequests: withoutRequest(s.permissionRequests,e.payload.tab_id,e.payload)})));
       await events.tabWindowChanged.listen((e) => set(reduceWindowChange(get(), e.payload.tab, e.payload.detached)));
       await events.downloadNotice.listen((e) => {
         const d = e.payload;

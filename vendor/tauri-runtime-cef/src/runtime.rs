@@ -1504,7 +1504,8 @@ impl<T: UserEvent> CefRuntime<T> {
       cache_path: Arc::new(cache_path.clone()),
     };
 
-    command_line_args.push(("--enable-media-stream".to_string(), None));
+    // Media requests must reach the per-webview permission policy.
+    crate::cef_impl::client::permission::filter_command_line_args(&mut command_line_args);
     let mut app = TauriCefApp::new(
       context.clone(),
       context_initialized.clone(),

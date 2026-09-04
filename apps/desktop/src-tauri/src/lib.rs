@@ -33,8 +33,12 @@ mod menu;
 mod meta;
 mod navigation;
 mod network;
+#[cfg(feature = "cef")]
+mod network_probe;
 mod openapi;
 mod pagescript;
+#[cfg(feature = "cef")]
+mod permission_probe;
 mod permissions;
 mod prefs;
 /// Dive-owned network privacy matching.
@@ -262,18 +266,28 @@ pub fn run() {
     }
 }
 
+fn startup_urls(mut args: impl Iterator<Item = String>, from_env: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    while let Some(arg) = args.next() {
+        if arg == "-ApplePersistenceIgnoreState" {
+            // AppKit's per-launch preference consumes its own value. Neither
+            // token is a destination handed to the browser.
+            let _ = args.next();
+        } else if !arg.starts_with("--") && !arg.starts_with("-psn_") && !arg.trim().is_empty() {
+            urls.push(arg);
+        }
+    }
+    urls.extend(from_env.split_whitespace().map(str::to_owned));
+    urls
+}
+
 /// Open tabs for URLs given on the command line or in `DIVE_OPEN_URL`
 /// (whitespace-separated). Lets `dive https://example.com` work and gives
 /// automation a way to drive the app without accessibility permissions.
 fn open_startup_urls(app: &tauri::App<Runtime>) {
     use tauri::Manager;
     let from_env = std::env::var("DIVE_OPEN_URL").unwrap_or_default();
-    let urls = std::env::args()
-        .skip(1)
-        .filter(|a| !a.starts_with("--"))
-        .chain(from_env.split_whitespace().map(str::to_owned))
-        .filter(|u| !u.trim().is_empty())
-        .collect::<Vec<_>>();
+    let urls = startup_urls(std::env::args().skip(1), &from_env);
     if urls.is_empty() {
         return;
     }
@@ -687,6 +701,43 @@ fn restore_session(app: &tauri::App<Runtime>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn startup_urls_ignore_appkit_override_pairs_and_launch_services_tokens() {
+        let args = [
+            "-ApplePersistenceIgnoreState",
+            "YES",
+            "https://first.test/",
+            "-psn_0_42",
+            "--disable-gpu",
+            "https://second.test/",
+        ];
+        assert_eq!(
+            super::startup_urls(args.into_iter().map(str::to_owned), "https://env.test/"),
+            [
+                "https://first.test/",
+                "https://second.test/",
+                "https://env.test/"
+            ]
+        );
+    }
+
+    #[test]
+    fn startup_urls_accept_normal_urls_and_explicit_environment_values() {
+        assert_eq!(
+            super::startup_urls(
+                ["https://test/", "", "data:text/plain,hello"]
+                    .into_iter()
+                    .map(str::to_owned),
+                "https://env-a/ https://env-b/"
+            ),
+            [
+                "https://test/",
+                "data:text/plain,hello",
+                "https://env-a/",
+                "https://env-b/"
+            ]
+        );
+    }
     use super::{Startup, startup_plan};
 
     #[test]

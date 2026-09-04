@@ -60,7 +60,7 @@ export function Content() {
     // native view down instead of vanishing behind it.
     <div className="relative flex min-h-0 min-w-0 flex-col bg-surface">
       {activeTab && crash && <CrashBanner attempt={crash.attempt} recovering={crash.recovering} />}
-      {activeTab && <PermissionBanner key={activeTab} tabId={activeTab} request={asked} />}
+      {activeTab && <PermissionBanner key={`${activeTab}-${asked?.request_id ?? "none"}`} tabId={activeTab} request={asked} />}
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <div className="relative grid min-h-0 min-w-0 flex-1">
           {internal ? (
@@ -131,48 +131,36 @@ export function describePermission(kind: string): string {
  */
 function PermissionBanner({ tabId, request }: { tabId: string; request: PermissionRequest | undefined }) {
   const decide = useBrowser((s) => s.decidePermission);
-  const reload = useBrowser((s) => s.reload);
-  const [allowed, setAllowed] = useState<PermissionRequest | null>(null);
-  if (request) {
-    const answer = (decision: "allow" | "deny") => {
-      setAllowed(decision === "allow" ? request : null);
-      void decide(tabId, request, decision);
-    };
-    return (
-      <div role="status" className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-surface-2 px-3 text-xs text-ink-2">
-        <Icon icon={ShieldQuestion} size={13} className="shrink-0 text-ink-3" />
-        <span className="min-w-0 flex-1 truncate">
-          <span className="font-medium text-ink">{request.origin}</span> wants to {describePermission(request.kind)}
-        </span>
-        <button type="button" onClick={() => answer("deny")} className="flex h-6 items-center gap-1 rounded-md border border-line-2 px-2 text-ink hover:bg-surface-3">
-          <Icon icon={X} size={11} /> Block
-        </button>
-        <button type="button" onClick={() => answer("allow")} className="flex h-6 items-center gap-1 rounded-md bg-accent px-2 text-accent-ink hover:opacity-90">
-          <Icon icon={Check} size={11} /> Allow
-        </button>
-      </div>
-    );
-  }
-  if (!allowed) return null;
+  const profile = useBrowser((s) => s.profiles.find((profile) => profile.id === request?.scope.profile_id)?.name ?? "this profile");
+  const [duration, setDuration] = useState<"remember" | "page">("remember");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!request) return null;
+  const answer = async (decision: "allow" | "deny") => {
+    setBusy(true); setError(null);
+    try { await decide(tabId, request, decision, duration); }
+    catch (error) { setError(error instanceof Error ? error.message : String(error)); }
+    finally { setBusy(false); }
+  };
   return (
-    <div role="status" className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-surface-2 px-3 text-xs text-ink-2">
-      <Icon icon={Check} size={13} className="shrink-0 text-highlight" />
-      <span className="min-w-0 flex-1 truncate">
-        Allowed <span className="font-medium text-ink">{allowed.origin}</span> to {describePermission(allowed.kind)} — reload to apply
+    <div role="status" className="flex min-h-9 shrink-0 flex-wrap items-center gap-2 border-b border-line bg-surface-2 px-3 py-1 text-xs text-ink-2">
+      <Icon icon={ShieldQuestion} size={13} className="shrink-0 text-ink-3" />
+      <span className="min-w-0 flex-1">
+        <span className="font-medium text-ink">{request.origin}</span> wants to {request.kinds.map(describePermission).join(" and ")}
+        <span className="ml-2 text-ink-3">{profile} · this container</span>
       </span>
-      <button
-        type="button"
-        onClick={() => {
-          setAllowed(null);
-          void reload();
-        }}
-        className="flex h-6 items-center gap-1 rounded-md border border-line-2 px-2 text-ink hover:bg-surface-3"
-      >
-        <Icon icon={RotateCw} size={11} /> Reload
+      <select aria-label="Permission duration" disabled={busy} value={duration} onChange={(e) => setDuration(e.target.value as "remember" | "page")} className="rounded-md border border-line-2 bg-surface-2 px-2 py-1 text-ink">
+        <option value="remember">Remember in this profile and container</option>
+        {request.page_lifetime && <option value="page">Until this page navigates or closes</option>}
+      </select>
+      {!request.page_lifetime && <span className="text-ink-3">This permission is remembered; page-only access is unavailable.</span>}
+      <button type="button" disabled={busy} onClick={() => void answer("deny")} className="flex h-6 items-center gap-1 rounded-md border border-line-2 px-2 text-ink hover:bg-surface-3 disabled:opacity-50">
+        <Icon icon={X} size={11} /> Block
       </button>
-      <button type="button" aria-label="Dismiss" onClick={() => setAllowed(null)} className="grid size-6 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-ink">
-        <Icon icon={X} size={12} />
+      <button type="button" disabled={busy} onClick={() => void answer("allow")} className="flex h-6 items-center gap-1 rounded-md bg-accent px-2 text-accent-ink hover:opacity-90 disabled:opacity-50">
+        <Icon icon={Check} size={11} /> Allow
       </button>
+      {error && <span role="alert" className="w-full text-danger">{error}</span>}
     </div>
   );
 }

@@ -116,6 +116,7 @@ wrap_request_handler! {
     drag_drop_handler_enabled: bool,
     drag_drop_state: Arc<Mutex<DragDropState>>,
     web_content_process_terminate_handler: Option<Arc<dyn Fn() + Send>>,
+    permissions: Arc<crate::cef_impl::client::permission::PermissionBridge>,
   }
 
   impl RequestHandler {
@@ -139,6 +140,7 @@ wrap_request_handler! {
       _user_gesture: ::std::os::raw::c_int,
       _is_redirect: ::std::os::raw::c_int,
     ) -> ::std::os::raw::c_int {
+      self.permissions.navigating(frame.as_deref());
       let _ = (&self.context, self.window_id, self.webview_id);
 
       let Some(frame) = frame else {

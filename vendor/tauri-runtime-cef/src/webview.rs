@@ -28,6 +28,8 @@ use crate::cef_impl::{client as browser_client, cookie, request_context, request
 use crate::runtime::{CefRuntime, Message, RuntimeContext, WinitCefApp};
 use crate::window::AppWindow;
 
+pub use browser_client::permission::{NativePermissionRequest, PermissionContext};
+
 /// A handle to the native CEF browser backing a Tauri webview.
 ///
 /// This is the runtime-specific webview object exposed through
@@ -35,11 +37,44 @@ use crate::window::AppWindow;
 #[derive(Clone)]
 pub struct Webview {
   browser: cef::Browser,
+  permissions: Arc<browser_client::permission::PermissionBridge>,
 }
 
 impl Webview {
-  pub(crate) fn new(browser: cef::Browser) -> Self {
-    Self { browser }
+  pub(crate) fn new(
+    browser: cef::Browser,
+    permissions: Arc<browser_client::permission::PermissionBridge>,
+  ) -> Self {
+    Self {
+      browser,
+      permissions,
+    }
+  }
+
+  /// Install policy on this native view. Requests default to denial before installation.
+  pub fn set_permission_handler(
+    &self,
+    handler: impl Fn(NativePermissionRequest) + Send + Sync + 'static,
+    cancelled: impl Fn(u64) + Send + Sync + 'static,
+    navigating: impl Fn(Option<String>, bool) + Send + Sync + 'static,
+  ) {
+    self
+      .permissions
+      .install(Arc::new(handler), Arc::new(cancelled), Arc::new(navigating));
+  }
+
+  /// A weak cache handle remains usable after a view closes while its context survives.
+  pub fn permission_context(&self) -> Option<PermissionContext> {
+    self.permissions.permission_context()
+  }
+  /// Clear the native cached decision in this view's actual shared context.
+  /// Must run on CEF UI; success includes read-back verification.
+  pub fn reset_permission_cache(
+    &self,
+    origin: &str,
+    kind: &str,
+  ) -> std::result::Result<(), String> {
+    self.permissions.reset_permission_cache(origin, kind)
   }
 
   /// Returns the [`cef::Browser`] backing this webview.
@@ -189,6 +224,7 @@ impl Default for BoundsRate {
 }
 
 pub(crate) struct AppWebview {
+  pub(crate) permissions: Arc<browser_client::permission::PermissionBridge>,
   pub(crate) webview_id: u32,
   pub(crate) label: String,
   pub(crate) browser: cef::Browser,
@@ -358,7 +394,9 @@ impl<T: UserEvent> WinitCefApp<T> {
       .map(|handler| Arc::from(handler) as Arc<dyn Fn() + Send>);
     #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     let web_content_process_terminate_handler: Option<Arc<dyn Fn() + Send>> = None;
+    let permissions = Arc::new(browser_client::permission::PermissionBridge::default());
     let handlers = browser_client::TauriCefBrowserClientHandlers {
+      permissions: permissions.clone(),
       ipc_handler: pending.ipc_handler.map(Arc::from),
       on_page_load_handler,
       document_title_changed_handler,
@@ -437,7 +475,16 @@ impl<T: UserEvent> WinitCefApp<T> {
       let custom_protocol_scheme = custom_protocol_scheme.clone();
       let custom_scheme_domain_names = custom_scheme_domain_names.clone();
       let label = pending.label.clone();
+      let permissions = permissions.clone();
       move |mut request_context| {
+        let reset = request_context
+          .as_ref()
+          .ok_or_else(|| "CEF request context unavailable".to_owned())
+          .and_then(|context| permissions.initialize_context(context));
+        if let Err(error) = reset {
+          log::error!("refusing to create webview {label:?}: {error}");
+          return;
+        }
         request_context::apply_theme_scheme(request_context.as_ref(), theme);
 
         // Create with an inert document so the BrowserHost exists before the real
@@ -492,6 +539,7 @@ impl<T: UserEvent> WinitCefApp<T> {
 
         browser_tx
           .send(AppWebview {
+            permissions,
             webview_id,
             label,
             browser,
@@ -648,7 +696,10 @@ impl<T: UserEvent> WinitCefApp<T> {
         let size = bounds.map(|b| b.size.to_physical::<u32>(appwindow.window.scale_factor()));
         let _ = tx.send(size);
       }
-      WebviewMessage::WithWebview(f) => f(Webview::new(child.browser.clone())),
+      WebviewMessage::WithWebview(f) => f(Webview::new(
+        child.browser.clone(),
+        child.permissions.clone(),
+      )),
       WebviewMessage::Print => child.host.print(),
       WebviewMessage::AddEventListener(event_id, handler) => {
         child.listeners.lock().unwrap().insert(event_id, handler);

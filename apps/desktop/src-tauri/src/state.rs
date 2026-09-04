@@ -59,6 +59,8 @@ pub struct AppState {
     pub crashes: crate::crash::Registry,
     /// Native receipt generations and pending activity for safe discard.
     pub activity: std::sync::Arc<crate::activity::Registry>,
+    /// Native permission requests and page-lifetime decisions.
+    pub permissions: crate::permissions::Registry,
     /// Live-subtitle transcription sessions per tab.
     pub subtitles: crate::subtitles::Registry,
 }
@@ -119,6 +121,7 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
         inspector: crate::inspect::Registry::default(),
         crashes: crate::crash::Registry::default(),
         activity: std::sync::Arc::default(),
+        permissions: crate::permissions::Registry::default(),
         subtitles: crate::subtitles::Registry::default(),
     };
     crate::commands::register_builtin(&state.commands);

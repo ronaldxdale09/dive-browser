@@ -240,6 +240,12 @@ impl TabHost {
             return Ok(());
         }
 
+        #[cfg(feature = "cef")]
+        let permission_workspace = tab
+            .workspace_id
+            .or(*lock(&app.state::<AppState>().active_workspace));
+        #[cfg(feature = "cef")]
+        let permission_container = container.id;
         let activity = app.state::<AppState>().activity.clone();
         let activity_nonce = activity.begin(tab_id);
         let blank = url::Url::parse(BLANK_URL).map_err(tauri::Error::InvalidUrl)?;
@@ -417,7 +423,12 @@ impl TabHost {
             let (console_ready, network_ready, interception_ready, fill_ready, loading_ready) =
                 if feeds {
                     let c = crate::console::attach(app.clone(), tab_id, session.clone());
-                    let n = crate::network::attach(app.clone(), tab_id, session.clone());
+                    let n = crate::network::attach(
+                        app.clone(),
+                        tab_id,
+                        session.clone(),
+                        view.label().to_owned(),
+                    );
                     crate::favicon::attach(app.clone(), tab_id, session.clone());
                     let loading = crate::loading::attach(app.clone(), tab_id, session.clone());
                     let f = crate::filltab::attach(app.clone(), tab_id, session.clone());
@@ -468,6 +479,9 @@ impl TabHost {
                     prefs_app.clone(),
                     tab_id,
                     session_for_prefs.clone(),
+                    nav.clone(),
+                    permission_workspace,
+                    permission_container,
                 )
                 .await;
                 tracing::debug!(%tab_id, "permission page setup complete before navigation");
@@ -689,7 +703,7 @@ impl TabHost {
             None
         };
         let chrome_popup_app = app.clone();
-        window.add_child(
+        let chrome_view = window.add_child(
             WebviewBuilder::new(
                 chrome.clone(),
                 WebviewUrl::App(format!("index.html?popout={id}").into()),
@@ -708,6 +722,8 @@ impl TabHost {
             LogicalPosition::new(0.0, 0.0),
             LogicalSize::new(width, height),
         )?;
+        #[cfg(feature = "cef")]
+        crate::permissions::attach_chrome(&chrome_view)?;
         reveal_soon(window.clone());
         crate::titlebar::keep_drags_in_chrome_soon(&window);
         if let Err(error) = view.reparent(&window) {
@@ -1178,7 +1194,7 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
         None
     };
     let chrome_popup_app = app.handle().clone();
-    let _chrome = window.add_child(
+    let chrome = window.add_child(
         WebviewBuilder::new(CHROME_LABEL, WebviewUrl::App("index.html".into()))
             .on_navigation(move |url| {
                 crate::ipc_security::allowed_chrome_navigation(url, chrome_dev_url.as_ref())
@@ -1189,6 +1205,8 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
         LogicalPosition::new(0.0, 0.0),
         LogicalSize::new(width, height),
     )?;
+    #[cfg(feature = "cef")]
+    crate::permissions::attach_chrome(&chrome)?;
     crate::titlebar::keep_drags_in_chrome_soon(&window);
 
     let state = app.state::<AppState>();

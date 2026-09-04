@@ -117,11 +117,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
+APP_ARGS=()
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    APP_ARGS=(-ApplePersistenceIgnoreState YES)
+fi
 step "starting ${BIN}"
 NO_COLOR=1 DIVE_USE_MOCK_KEYCHAIN=1 DIVE_DATA_DIR="${DATA_DIR}" DIVE_MCP_PORT="${PORT}" DIVE_OPEN_URL="${SITE}/a.html" \
 DIVE_MAX_IDLE_SECS=0 DIVE_SWEEP_SECS="${DIVE_SWEEP_SECS:-2}" DIVE_DISCARD_LOCAL_TABS=1 DIVE_CDP_BENCH=1 DIVE_MCP_ALLOW_EVAL=1 \
 DIVE_CHROMIUM_FLAGS="${DIVE_CHROMIUM_FLAGS:-} --disable-popup-blocking" RUST_LOG="${RUST_LOG:-info},dive_desktop_lib=info" \
-    "${BIN}" >"${LOG}" 2>&1 &
+    "${BIN}" "${APP_ARGS[@]}" >"${LOG}" 2>&1 &
 APP=$!
 
 for _ in $(seq 1 120); do

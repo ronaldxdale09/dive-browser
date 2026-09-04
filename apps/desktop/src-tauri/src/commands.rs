@@ -406,6 +406,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_set_tier,
             bookmark_remove,
             permission_set,
+            permission_reply,
             permissions_list,
             crate::extensions::extensions_list,
             crate::extensions::extension_pick,
@@ -516,6 +517,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::loading::TabLoad,
             crate::navigation::TabHistoryChanged,
             crate::permissions::PermissionAsked,
+            crate::permissions::PermissionDismissed,
             crate::privacy::PrivacyEvent,
             crate::subtitles::SubtitleModelProgress,
             crate::subtitles::SubtitleCue,
@@ -1617,46 +1619,49 @@ pub(crate) fn bookmark_remove(state: State<'_, AppState>, url: String) -> AppRes
     Ok(lock(&state.store).remove_bookmark(&url)?)
 }
 
-/// Remember or forget a site permission decision.
+/// Remember or forget a permission in the selected profile and real container.
 #[tauri::command]
 #[specta::specta]
-pub(crate) async fn permission_set(
-    state: State<'_, AppState>,
+pub(crate) fn permission_set(
+    app: AppHandle<Runtime>,
+    webview: tauri::Webview<Runtime>,
+    scope: crate::permissions::Scope,
     origin: String,
     kind: String,
     decision: crate::permissions::Decision,
 ) -> AppResult<()> {
-    crate::permissions::set(&state, &origin, &kind, decision)?;
-    let sessions = {
-        let host = lock(&state.host);
-        let store = lock(&state.store);
-        host.as_ref().map_or_else(Vec::new, |host| {
-            host.sessions()
-                .into_iter()
-                .filter_map(|(id, session)| {
-                    let matches = store
-                        .tab(id)
-                        .ok()
-                        .and_then(|tab| dive_core::origin_of(&tab.url))
-                        .is_some_and(|tab_origin| tab_origin == origin);
-                    matches.then_some(session)
-                })
-                .collect()
-        })
-    };
-    for session in sessions {
-        crate::permissions::apply_origin(&state, &session, &origin).await;
-    }
-    Ok(())
+    on_main(&app, move |_, app, state| {
+        crate::permissions::require_chrome(&webview)?;
+        crate::permissions::set(app, state, &scope, &origin, &kind, decision)
+    })
 }
-
-/// Every remembered site permission.
+/// Resolve the original native request; its opaque ID carries trusted provenance.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn permission_reply(
+    app: AppHandle<Runtime>,
+    webview: tauri::Webview<Runtime>,
+    tab_id: TabId,
+    request_id: String,
+    decision: crate::permissions::Decision,
+    duration: crate::permissions::Duration,
+) -> AppResult<()> {
+    on_main(&app, move |_, _, state| {
+        crate::permissions::require_chrome(&webview)?;
+        crate::permissions::reply(state, tab_id, &request_id, decision, duration)
+    })
+}
+/// Remembered permissions in the active profile and container.
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn permissions_list(
-    state: State<'_, AppState>,
-) -> AppResult<Vec<crate::permissions::SitePermission>> {
-    Ok(crate::permissions::all(&state)?)
+    app: AppHandle<Runtime>,
+    webview: tauri::Webview<Runtime>,
+) -> AppResult<crate::permissions::PermissionList> {
+    on_main(&app, move |_, _, state| {
+        crate::permissions::require_chrome(&webview)?;
+        Ok(crate::permissions::all(state)?)
+    })
 }
 
 /// The local subtitle models and whether each is downloaded.

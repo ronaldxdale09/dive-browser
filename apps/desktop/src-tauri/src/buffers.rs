@@ -13,6 +13,7 @@ use crate::network::NetworkEvent;
 
 const CONSOLE_CAP: usize = 500;
 const NETWORK_CAP: usize = 1000;
+const RESPONSE_BODY_BUDGET: usize = 2 * 1024 * 1024;
 const RECORDED_STEP_CAP: usize = 5_000;
 
 /// What a `ref` from `page_state` points at.
@@ -49,8 +50,10 @@ pub struct RequestSummary {
     pub headers: std::collections::BTreeMap<String, String>,
     /// Request body, when captured.
     pub post_data: Option<String>,
-    /// Response body for JSON responses, truncated; captured after the load finishes.
+    /// Complete JSON response body, captured only within the byte budget.
     pub response_body: Option<String>,
+    /// Why a response body is absent, when capture has completed or been omitted.
+    pub response_body_note: Option<String>,
     /// Response headers once they arrived.
     pub response_headers: std::collections::BTreeMap<String, String>,
     /// CDP monotonic seconds when the request was sent.
@@ -133,6 +136,7 @@ impl RequestSummary {
             headers: std::collections::BTreeMap::new(),
             post_data: None,
             response_body: None,
+            response_body_note: None,
             response_headers: std::collections::BTreeMap::new(),
             started_at,
             wall_time: 0.0,
@@ -347,10 +351,21 @@ impl Buffers {
 
     /// Newest `limit` requests as slim listings, oldest first.
     pub fn requests_listing(&self, tab: TabId, limit: usize) -> Vec<RequestListing> {
-        self.requests(tab, limit)
-            .iter()
-            .map(RequestListing::from)
-            .collect()
+        self.with(|m| {
+            let mut rows = m
+                .get(&tab)
+                .map(|b| {
+                    b.requests
+                        .iter()
+                        .rev()
+                        .take(limit)
+                        .map(RequestListing::from)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            rows.reverse();
+            rows
+        })
     }
 
     /// Frames of a socket or event stream, oldest first.
@@ -363,14 +378,67 @@ impl Buffers {
         })
     }
 
-    /// Attach a captured response body.
-    pub fn set_response_body(&self, tab: TabId, request_id: &str, body: String) {
+    /// Check capture eligibility without cloning request headers or bodies.
+    pub fn is_json_response(&self, tab: TabId, request_id: &str) -> bool {
         self.with(|m| {
-            if let Some(r) = m
+            m.get(&tab)
+                .and_then(|b| b.requests.iter().find(|r| r.id == request_id))
+                .is_some_and(|r| crate::network::is_json_mime(&r.mime_type))
+        })
+    }
+
+    /// Attach a complete response within a per-tab byte budget. Old bodies are
+    /// evicted first while their request metadata stays available.
+    pub fn set_response_body(&self, tab: TabId, request_id: &str, body: String) {
+        if body.len() > crate::network::MAX_BODY {
+            self.set_response_body_note(
+                tab,
+                request_id,
+                "Response exceeds the 64 KiB capture limit",
+            );
+            return;
+        }
+        self.with(|m| {
+            let Some(b) = m.get_mut(&tab) else {
+                return;
+            };
+            if !b.requests.iter().any(|r| r.id == request_id) {
+                return;
+            }
+            let mut retained = b
+                .requests
+                .iter()
+                .filter(|r| r.id != request_id)
+                .map(|r| r.response_body.as_ref().map_or(0, String::len))
+                .sum::<usize>();
+            for row in &mut b.requests {
+                if retained + body.len() <= RESPONSE_BODY_BUDGET {
+                    break;
+                }
+                if row.id != request_id
+                    && let Some(old) = row.response_body.take()
+                {
+                    retained -= old.len();
+                    row.response_body_note =
+                        Some("Body evicted: tab capture budget reached".into());
+                }
+            }
+            if let Some(row) = b.requests.iter_mut().find(|r| r.id == request_id) {
+                row.response_body = Some(body);
+                row.response_body_note = None;
+            }
+        });
+    }
+
+    /// Preserve the reason a body is unavailable instead of implying an empty body.
+    pub fn set_response_body_note(&self, tab: TabId, request_id: &str, note: &str) {
+        self.with(|m| {
+            if let Some(row) = m
                 .get_mut(&tab)
                 .and_then(|b| b.requests.iter_mut().find(|r| r.id == request_id))
             {
-                r.response_body = Some(body);
+                row.response_body = None;
+                row.response_body_note = Some(note.to_owned());
             }
         });
     }
@@ -587,6 +655,61 @@ mod tests {
             timestamp: 0.0,
             column: None,
         }
+    }
+
+    #[test]
+    fn response_body_budget_preserves_metadata_and_releases_replaced_bodies() {
+        let b = Buffers::default();
+        let tab = TabId::new();
+        let count = RESPONSE_BODY_BUDGET / crate::network::MAX_BODY;
+        for i in 0..=count {
+            b.with(|m| {
+                m.entry(tab).or_default().push_row(RequestSummary::new(
+                    &i.to_string(),
+                    "https://api.test",
+                    "GET",
+                    "Fetch",
+                    0.0,
+                ));
+            });
+            b.set_response_body(tab, &i.to_string(), "x".repeat(crate::network::MAX_BODY));
+        }
+        let rows = b.requests(tab, NETWORK_CAP);
+        assert_eq!(rows.len(), count + 1);
+        assert_eq!(
+            rows.iter()
+                .map(|r| r.response_body.as_ref().map_or(0, String::len))
+                .sum::<usize>(),
+            RESPONSE_BODY_BUDGET
+        );
+        assert!(rows[0].response_body.is_none());
+        assert_eq!(
+            rows[0].response_body_note.as_deref(),
+            Some("Body evicted: tab capture budget reached")
+        );
+        b.set_response_body(tab, "1", "{}".into());
+        b.set_response_body(tab, "0", "[]".into());
+        assert_eq!(
+            b.request(tab, "0").unwrap().response_body.as_deref(),
+            Some("[]")
+        );
+        assert!(b.request(tab, "0").unwrap().response_body_note.is_none());
+        assert!(
+            b.request(tab, "2").unwrap().response_body.is_some(),
+            "replacing releases old bytes without evicting other rows"
+        );
+        b.set_response_body(tab, "1", "é".repeat(crate::network::MAX_BODY));
+        assert!(
+            b.request(tab, "1").unwrap().response_body.is_none(),
+            "byte size is enforced even for direct callers"
+        );
+        b.drop_tab(tab);
+        b.set_response_body(tab, "0", "late".into());
+        b.set_response_body_note(tab, "0", "late");
+        assert!(
+            b.requests(tab, NETWORK_CAP).is_empty(),
+            "late capture cannot recreate a dropped tab"
+        );
     }
 
     #[test]

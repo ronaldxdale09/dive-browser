@@ -75,10 +75,12 @@ export const commands = {
 	tabSetTier: (id: TabId, tier: TabTier) => typedError<null, AppError>(__TAURI_INVOKE("tab_set_tier", { id, tier })),
 	/**  Forget a bookmark by URL. */
 	bookmarkRemove: (url: string) => typedError<boolean, AppError>(__TAURI_INVOKE("bookmark_remove", { url })),
-	/**  Remember or forget a site permission decision. */
-	permissionSet: (origin: string, kind: string, decision: Decision) => typedError<null, AppError>(__TAURI_INVOKE("permission_set", { origin, kind, decision })),
-	/**  Every remembered site permission. */
-	permissionsList: () => typedError<SitePermission[], AppError>(__TAURI_INVOKE("permissions_list")),
+	/**  Remember or forget a permission in the selected profile and real container. */
+	permissionSet: (scope: Scope, origin: string, kind: string, decision: Decision) => typedError<null, AppError>(__TAURI_INVOKE("permission_set", { scope, origin, kind, decision })),
+	/**  Resolve the original native request; its opaque ID carries trusted provenance. */
+	permissionReply: (tabId: TabId, requestId: string, decision: Decision, duration: Duration) => typedError<null, AppError>(__TAURI_INVOKE("permission_reply", { tabId, requestId, decision, duration })),
+	/**  Remembered permissions in the active profile and container. */
+	permissionsList: () => typedError<PermissionList, AppError>(__TAURI_INVOKE("permissions_list")),
 	/**  List installed extensions. */
 	extensionsList: () => typedError<ExtensionList, AppError>(__TAURI_INVOKE("extensions_list")),
 	/**  Ask the operating system for an unpacked extension directory. */
@@ -369,6 +371,7 @@ export const events = {
 	menuCommand: makeEvent<MenuCommand>("menu-command"),
 	networkEvent: makeEvent<NetworkEvent>("network-event"),
 	permissionAsked: makeEvent<PermissionAsked>("permission-asked"),
+	permissionDismissed: makeEvent<PermissionDismissed>("permission-dismissed"),
 	privacyEvent: makeEvent<PrivacyEvent>("privacy-event"),
 	recorderEvent: makeEvent<RecorderEvent>("recorder-event"),
 	recordingEvent: makeEvent<RecordingEvent>("recording-event"),
@@ -612,7 +615,7 @@ export type Decision =
 "allow" |
 /**  Refused. */
 "deny" |
-/**  Not decided; the engine refuses and the chrome asks. */
+/**  Not decided; the original native request waits for the chrome. */
 "ask";
 
 /**  Where Dive stands as the handler for web links. */
@@ -681,6 +684,8 @@ export type DownloadNotice = {
 	/**  `started` | `finished` | `failed`. */
 	status: string,
 };
+
+export type Duration = "page" | "remember";
 
 /**  Where and when the page thinks it is. */
 export type Environment = {
@@ -1070,12 +1075,27 @@ export type PaneBounds = {
 
 /**  A page asked for something no decision covers yet. */
 export type PermissionAsked = {
-	/**  The tab whose page asked. */
+	page_lifetime: boolean,
+	request_id: string,
 	tab_id: TabId,
-	/**  The page's origin. */
 	origin: string,
-	/**  What it asked for, as in [`SitePermission::kind`]. */
-	kind: string,
+	kinds: string[],
+	scope: Scope,
+};
+
+/**  A pending native request ended, including navigation, closure and timeout. */
+export type PermissionDismissed = {
+	request_id: string,
+	tab_id: TabId,
+};
+
+/**  Settings are scoped to the currently selected workspace's real CEF container. */
+export type PermissionList = {
+	scope: Scope,
+	profile_name: string,
+	container_name: string,
+	legacy_ignored: boolean,
+	permissions: SitePermission[],
 };
 
 /**  What the picker found. */
@@ -1508,6 +1528,11 @@ export type RuleAction =
 /**  Add or replace one request header. */
 { kind: "header"; name: string; value: string };
 
+export type Scope = {
+	profile_id: ProfileId,
+	container_id: ContainerId,
+};
+
 /**  Per-message switches from the chrome. */
 export type SendOptions = {
 	/**  Attach the current tab's title, URL, console, failed requests and text. */
@@ -1535,6 +1560,7 @@ export type SitePermission = {
 	kind: string,
 	/**  The decision. */
 	decision: Decision,
+	scope: Scope,
 };
 
 /**  Everything the chrome needs to render on boot. */

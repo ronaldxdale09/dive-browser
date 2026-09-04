@@ -20,7 +20,7 @@ mod drag;
 mod keyboard;
 mod life_span;
 mod load;
-mod permission;
+pub(crate) mod permission;
 mod process;
 
 use context_menu::TauriCefContextMenuHandler;
@@ -38,6 +38,7 @@ use permission::TauriCefPermissionHandler;
 pub(crate) use process::TauriCefBrowserProcessHandler;
 
 pub(crate) struct TauriCefBrowserClientHandlers<T: UserEvent> {
+  pub(crate) permissions: Arc<permission::PermissionBridge>,
   pub(crate) ipc_handler: Option<Arc<ipc::IpcHandler<T>>>,
   pub(crate) on_page_load_handler: Option<Arc<tauri_runtime::webview::OnPageLoadHandler>>,
   pub(crate) document_title_changed_handler:
@@ -53,6 +54,7 @@ pub(crate) struct TauriCefBrowserClientHandlers<T: UserEvent> {
 impl<T: UserEvent> Clone for TauriCefBrowserClientHandlers<T> {
   fn clone(&self) -> Self {
     Self {
+      permissions: self.permissions.clone(),
       ipc_handler: self.ipc_handler.clone(),
       on_page_load_handler: self.on_page_load_handler.clone(),
       document_title_changed_handler: self.document_title_changed_handler.clone(),
@@ -98,6 +100,7 @@ wrap_client! {
         self.drag_drop_handler_enabled,
         self.drag_drop_state.clone(),
         self.handlers.web_content_process_terminate_handler.clone(),
+        self.handlers.permissions.clone(),
       ))
     }
 
@@ -110,6 +113,7 @@ wrap_client! {
         self.context.clone(),
         self.handlers.new_window_handler.clone(),
         self.initial_url.clone(),
+        self.handlers.permissions.clone(),
       ))
     }
 
@@ -143,7 +147,7 @@ wrap_client! {
     }
 
     fn permission_handler(&self) -> Option<PermissionHandler> {
-      Some(TauriCefPermissionHandler::new())
+      Some(TauriCefPermissionHandler::new(self.handlers.permissions.clone()))
     }
 
     fn on_process_message_received(

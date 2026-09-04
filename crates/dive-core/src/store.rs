@@ -851,6 +851,16 @@ impl Store {
         Ok(())
     }
 
+    /// Write a related set of settings as one all-or-nothing decision.
+    pub fn set_settings_atomic(&self, entries: &[(String, String)]) -> Result<()> {
+        let transaction = self.conn.unchecked_transaction()?;
+        for (key, value) in entries {
+            transaction.execute("INSERT INTO settings (key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[key,value])?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// The most recently active, non-discarded tab of `workspace`, if any.
     pub fn last_active_tab(&self, workspace: WorkspaceId) -> Result<Option<Tab>> {
         let mut tab = self
@@ -1681,6 +1691,21 @@ mod tests {
         assert!(backup.is_file(), "no backup at {}", backup.display());
         assert_eq!(Store::file_version(&backup).unwrap(), 3);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn grouped_settings_roll_back_when_a_later_write_fails() {
+        let store = Store::in_memory().unwrap();
+        store.conn.execute_batch("CREATE TRIGGER reject_second BEFORE INSERT ON settings WHEN NEW.key = 'second' BEGIN SELECT RAISE(ABORT, 'test write failure'); END;").unwrap();
+        assert!(
+            store
+                .set_settings_atomic(&[
+                    ("first".into(), "allow".into()),
+                    ("second".into(), "allow".into())
+                ])
+                .is_err()
+        );
+        assert_eq!(store.setting("first").unwrap(), None);
     }
 
     #[test]

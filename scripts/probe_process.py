@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import time
 
 
@@ -25,7 +26,13 @@ def run_probe(binary: Path, environment: dict, log: Path, timeout: float, observ
     log.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     with log.open('wb') as output:
-        process = subprocess.Popen([str(binary)], env=environment, stdout=output,
+        arguments = [str(binary)]
+        # Per-launch NSArgumentDomain override, never a persistent defaults write.
+        # Disposable tests use DIVE's own profile/session restoration and must not
+        # inherit AppKit's crash-history dialog from another launch of this bundle.
+        if sys.platform == 'darwin' and environment.get('DIVE_DATA_DIR') and environment.get('DIVE_USE_MOCK_KEYCHAIN') == '1':
+            arguments += ['-ApplePersistenceIgnoreState', 'YES']
+        process = subprocess.Popen(arguments, env=environment, stdout=output,
                                    stderr=subprocess.STDOUT, start_new_session=True)
         try:
             deadline = started + timeout
