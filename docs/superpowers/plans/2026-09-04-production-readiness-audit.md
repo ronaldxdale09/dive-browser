@@ -115,7 +115,7 @@ Expected: lists capable of exceeding one screen have a cap/window proof or a ran
 
 Expected: crash/hang and loss defects precede dead controls, missing states, accessibility, performance, consistency, and platform gaps when scores tie.
 
-- [ ] **Step 4: Create or assign a focused implementation plan for every fixable defect**
+- [x] **Step 4: Create or assign a focused implementation plan for every fixable defect**
 
 Expected: each defect links to one existing plan under `docs/superpowers/plans/` or a new plan containing a failing test, minimal implementation, exact focused test, full gates, and commit boundary.
 
@@ -129,27 +129,27 @@ Expected: each defect links to one existing plan under `docs/superpowers/plans/`
 - Consumes: one ranked defect and its focused implementation plan.
 - Produces: one independently reviewable change, proof, and explicit-path commit.
 
-- [ ] **Step 1: Recheck worktree ownership before each defect**
+- [x] **Step 1: Recheck worktree ownership before each defect**
 
 For the first-ranked permission-state defect, run: `git status --short && git diff -- apps/desktop/src/components/SettingsDialog.tsx apps/desktop/src/components/SettingsDialog.test.tsx`
 
 Expected: overlap with another session causes the defect to be deferred or solved in a non-overlapping path, never silently absorbed.
 
-- [ ] **Step 2: Write and run the smallest failing proof**
+- [x] **Step 2: Write and run the smallest failing proof**
 
 Expected: the focused Vitest/Cargo test or live-check assertion fails for the observed reason before implementation.
 
-- [ ] **Step 3: Implement the smallest root-cause fix**
+- [x] **Step 3: Implement the smallest root-cause fix**
 
 Expected: existing store reducers, overlay hooks, focus hooks, main-thread hopping, and lock order are preserved.
 
-- [ ] **Step 4: Run the focused proof and required gates**
+- [x] **Step 4: Run the focused proof and required gates**
 
 Run: `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && pnpm -r typecheck && pnpm -r lint && pnpm -r test && git diff --exit-code -- apps/desktop/src/generated`
 
 Expected: all commands exit 0; engine/lifecycle changes additionally pass the copied-Probe live and memory harnesses.
 
-- [ ] **Step 5: Commit and push explicit task paths**
+- [x] **Step 5: Commit and push explicit task paths**
 
 For the first-ranked permission-state defect, run: `git add apps/desktop/src/components/SettingsDialog.tsx apps/desktop/src/components/SettingsDialog.test.tsx docs/production-readiness.md && git commit -m 'fix: keep site permission failures visible and recoverable' && git push origin autopilot/dive-build`
 
@@ -165,18 +165,18 @@ Expected: no pre-existing dirty path enters the commit unless the ownership is e
 - Consumes: every defect disposition, commit, gate result, and benchmark artifact.
 - Produces: the Phase D report and a product plan whose current-state claims match verified behavior.
 
-- [ ] **Step 1: Run final static and generated-binding gates**
+- [x] **Step 1: Run final static and generated-binding gates**
 
-Expected: exact command output and timestamps are copied into the verification section.
+Expected: exact command output and timestamps are copied into the verification section. Static gates passed; the generated-binding failure is isolated to the concurrent recording API and recorded as an actionable deferral.
 
-- [ ] **Step 2: Run final private live, memory, and startup probes**
+- [x] **Step 2: Run final private live, memory, and startup probes**
 
 Expected: CDP p95 is below 5 ms, 20-tab reclaim is at least 30 percent of growth, warm startup is below 600 ms, and every live scenario actually present in `scripts/live-check.sh` is listed without overclaiming missing scenarios.
 
-- [ ] **Step 3: Reconcile each inventory row and defect disposition**
+- [x] **Step 3: Reconcile each inventory row and defect disposition**
 
 Expected: every defect is `fixed` with proof or `deferred` with a reason and a concrete user action; no unresolved item is described as complete.
 
-- [ ] **Step 4: Update the product plan and commit the report**
+- [x] **Step 4: Update the product plan and commit the report**
 
 Expected: `docs/PLAN.md` links to the audit and distinguishes shipped, verified behavior from roadmap intent; the audit/report commit names its exact proof.

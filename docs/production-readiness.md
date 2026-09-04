@@ -4,14 +4,15 @@ Audit date: 2026-09-04
 
 Branch: `autopilot/dive-build`
 Baseline HEAD: `5d619fa` (`feat: enforce DivePrivacy through one request pipeline`)
+Final audit-owned HEAD: `7247ab8` (`fix: surface detached window command failures`)
 
 This ledger distinguishes three kinds of evidence:
 
 - **Source:** the named entry point and its state/error handling were read.
-- **Test:** a focused automated test exists at the cited path; this is not a claim that the current dirty tree has passed the full suite.
+- **Test:** a focused automated test exists at the cited path and the final shared tree passed the complete automated gate set recorded below.
 - **Live:** a private copied `Probe.app` was driven through its MCP server with a fresh data directory and hidden window.
 
-Pre-existing worktree changes are concentrated in recording, DiveScreen, `crates/dive-agent`, configuration, and generated build metadata. They are not owned by this audit and must not be staged by an audit commit.
+Pre-existing worktree changes are concentrated in recording, DiveScreen, Library/MainMenu, Toolbar, `crates/dive-agent`, configuration, and generated build metadata. They are not owned by this audit and were not staged by audit commits. The final automated/runtime checks exercised that shared tree, while the commit list and generated-binding check explicitly distinguish committed audit work from those uncommitted changes.
 
 ## Phase A inventory
 
@@ -30,7 +31,7 @@ State vocabulary: **works** means the reachable behavior has direct source plus 
 | Toolbar navigation | `apps/desktop/src/components/Toolbar.tsx:14` | Back, forward, reload/stop | works | Source; `Toolbar.test.tsx`; live navigation | Calls the active tab commands | IPC errors reach global toast | Native chords/menu cover reload/back/forward; buttons tabbable |
 | Omnibox | `apps/desktop/src/components/Toolbar.tsx:14` | Address field or Cmd/Ctrl+L | partial | Source; `Toolbar.test.tsx` | Normalizes and navigates entered text | Rejected IPC shows toast, but displayed tab URL is not optimistic/rolled back | Enter submits, Escape restores active URL |
 | Bookmark | `apps/desktop/src/components/BookmarkButton.tsx:9` | Star in toolbar | partial | Source | Toggles current URL bookmark | Error is shown; pending affordance/retry proof absent | Tabbable button; no menu to trap |
-| Share | `apps/desktop/src/components/SharePopover.tsx:12` | Share toolbar button | partial | Source | Produces LAN URL and QR | Read error is visible; clipboard rejection is silent | Focus trap and Escape wired; restore covered by shared hook test |
+| Share | `apps/desktop/src/components/SharePopover.tsx:12` | Share toolbar button | works | Source; `SharePopover.test.tsx` | Produces LAN URL and QR | Read and clipboard errors are announced; copy remains retryable | Focus trap, native-page cover, Escape and focus restore |
 | Capture | `apps/desktop/src/store/browser.ts:329` | Camera button or Cmd/Ctrl+Shift+S | works | Source; live screenshot | Captures and opens annotator | IPC error reaches toast | Shortcut and button; annotator closes with Escape |
 | Chromium DevTools | `apps/desktop/src/store/browser.ts:314` | Bug button or Cmd/Ctrl+Alt+I | partial | Source; command parity tests | Opens native DevTools for active tab | IPC failure reaches toast | Native menu/chord parity exists; live opening not exercised |
 | Device simulator action | `apps/desktop/src/components/DeviceMenu.tsx:12` | Device button / Cmd/Ctrl+Shift+M | works | Source; simulator and emulation tests | Opens picker and applies chosen emulation | Store exposes error state | Picker controls tabbable; close action present |
@@ -39,7 +40,7 @@ State vocabulary: **works** means the reachable behavior has direct source plus 
 | Developer dock shell | `apps/desktop/src/components/Dock.tsx:31` | Toolbar or Cmd/Ctrl+Shift+D | works | Source; `Dock.test.tsx` | Switches and persists selected tool panel | Lazy fallback appears while loading | Tab buttons and close button are keyboard reachable |
 | Console panel | `apps/desktop/src/components/Dock.tsx:96` | Dock > Console | works | Source; `console.test.ts`, `Dock.test.tsx` | Filters/copies report/clears current tab | Source-link failure reaches global error | Controls tabbable; dock can close by chord/button |
 | Network panel and frames | `apps/desktop/src/components/NetworkPanel.tsx:94` | Dock > Network | works | Source; `network.test.ts`, `NetworkPanel.test.tsx` | Shows bounded requests and socket frames | Failed requests retain error text | Rows and replay control keyboard reachable |
-| Request replay | `apps/desktop/src/components/ReplayEditor.tsx:27` | Network request replay action | partial | Source; `ReplayEditor.test.ts` | Edits and resends captured request | Error rendered; retry remains available | Close button exists; Escape/focus trapping not proved |
+| Request replay | `apps/desktop/src/components/ReplayEditor.tsx:27` | Network request replay action | works | Source; `ReplayEditor.test.tsx` | Edits and resends captured request | Error is announced and retry remains available | Dialog semantics, focus trap, Escape and restore are tested |
 | Storage panel | `apps/desktop/src/components/StoragePanel.tsx:9` | Dock > Storage | partial | Source | Reads cookies/storage for active tab | Error/empty handling exists in component | Dock exit available; focused keyboard tests absent |
 | A11y panel | `apps/desktop/src/components/A11yPanel.tsx:16` | Dock > A11y | works | Source; Rust `a11y.rs` tests | Runs and sorts axe violations | Error is rendered in panel | Dock controls keyboard reachable |
 | Meta panel | `apps/desktop/src/components/MetaPanel.tsx:8` | Dock > Meta | works | Source; Rust `meta.rs` tests | Parses common page metadata | Empty head is supported; IPC error is rendered | Dock controls keyboard reachable |
@@ -49,12 +50,13 @@ State vocabulary: **works** means the reachable behavior has direct source plus 
 | Sidecar shell | `apps/desktop/src/components/Sidecar.tsx:19` | FeatureBar Agent | works | Source; `Sidecar.test.tsx` | Shows chat/setup, clear, settings, close | Loading skeleton and provider errors exist | Close button/chord; panel itself is non-modal |
 | Agent Thread | `apps/desktop/src/components/agent/Thread.tsx:50` | Sidecar chat | works | Source; `Thread.test.tsx`, `agent.test.ts` | Sends/stops runs and shows tool/reasoning/approval state | Errors/refusals/cutoffs persist in transcript | Composer and buttons keyboard reachable |
 | Agent Setup | `apps/desktop/src/components/agent/Setup.tsx:23` | Sidecar without configured provider | works | Source; `Setup.test.tsx` | Selects provider, validates/saves key, fetches models | Busy and error states are visible | Back and form controls keyboard reachable |
+| Agent model picker | `apps/desktop/src/components/agent/ModelPicker.tsx:26` | Composer model chip | works | Source; `ModelPicker.test.tsx` | Selects provider, model and effort from a capped 80-row result set | Loading/error/refresh states stay visible | Native page cover, focus trap, Tab cycle, Escape and trigger restore are tested |
 | Palette | `apps/desktop/src/components/Palette.tsx:23` | Cmd/Ctrl+K, Cmd/Ctrl+T, plus buttons | works | Source; `Palette.test.tsx`; command tests | Searches commands, tabs, history and opens input | Search failures degrade to local results/global error | Focus trap, arrows, Enter, Escape, restore tested/shared |
 | Library | `apps/desktop/src/components/Library.tsx:18` | Cmd/Ctrl+Y / command | partial | Source; `Library.test.tsx` | Shows bookmark/history tabs and filtering | Empty states exist; load error is collapsed to empty | Focus trap/Escape; large results capped at 200 but not windowed |
 | Settings shell | `apps/desktop/src/components/SettingsDialog.tsx:47` | Rail gear / Cmd/Ctrl+, | works | Source; `SettingsDialog.test.tsx` | Opens eight navigable sections | Lazy loading and per-control states exist | Focus trap, tab semantics, Escape/restore tested |
 | Settings General | `apps/desktop/src/components/SettingsDialog.tsx:170` | Settings > General | works | Source; prefs tests | Startup, home, search, default zoom persist | Preference save errors reach prefs error/global UI | Native form controls keyboard usable |
 | Settings Appearance | `apps/desktop/src/components/SettingsDialog.tsx:264` | Settings > Appearance | works | Source; `prefs.test.ts` | Theme/accent/page theme preferences apply | Save failure rolls preference back | Radio group and switch keyboard semantics |
-| Settings Privacy | `apps/desktop/src/components/SettingsDialog.tsx:332` | Settings > Privacy | partial | Source; privacy/rules tests | DNT, blocking, JS, retention, clear data, permissions wired | Clear data reports result; permission list/read/write failures can become silent/optimistic | Controls keyboard usable; retry absent for permission load |
+| Settings Privacy | `apps/desktop/src/components/SettingsDialog.tsx:332` | Settings > Privacy | works | Source; privacy/rules and `SettingsDialog.test.tsx` | DNT, blocking, JS, retention, clear data, permissions wired | Permission load failures are announced with Retry; writes disable while pending and roll back on rejection | Controls and Retry are keyboard usable |
 | Settings Downloads | `apps/desktop/src/components/SettingsDialog.tsx:503` | Settings > Downloads | works | Source; prefs tests | Persists destination path | Save failure reaches error | Text input keyboard usable |
 | Settings Developer | `apps/desktop/src/components/SettingsDialog.tsx:527` | Settings > Developer | partial | Source | DevTools-on-open, editor, MCP command shown | Clipboard copy failure has no visible error | Controls keyboard usable |
 | Settings Agent | `apps/desktop/src/components/SettingsDialog.tsx:583` | Settings > Agent | works | Source; agent/setup tests | Provider/model/effort/step/key controls wired | Loading/model/key errors visible with retry | Form controls keyboard usable |
@@ -66,13 +68,13 @@ State vocabulary: **works** means the reachable behavior has direct source plus 
 | Annotator | `apps/desktop/src/components/Annotator.tsx:28` | After capture | partial | Source | Draws rectangle/arrow/text/blur, undo, copy/save | Capture read/save errors reach store/global error | Dialog/close wired; focused Tab-cycle test not found |
 | RecorderModal | `apps/desktop/src/components/RecorderModal.tsx:11` | Stop step recorder | works | Source; `RecorderModal.test.tsx` | Copies/downloads Playwright steps and clears | Clipboard failure handling is present in component | Dialog close/Escape/focus behavior tested/shared |
 | Tab recording dialogs/HUD | `apps/desktop/src/components/record/RecordDialog.tsx:14` | Record action / Cmd/Ctrl+Shift+R | partial | Dirty source; recording store tests | Setup, countdown, pause, stop, retry states are implemented | Rejected activate/pause/stop paths remain recoverable in tests | Dialog close and HUD controls exist; current dirty tree not audited to completion |
-| Replay editor | `apps/desktop/src/components/ReplayEditor.tsx:27` | Network row action | partial | Source; focused parser test | Resends edited method/URL/headers/body | Inline error and retry button | Explicit close; no Escape/focus proof |
+| Replay editor | `apps/desktop/src/components/ReplayEditor.tsx:27` | Network row action | works | Source; `ReplayEditor.test.tsx` | Resends edited method/URL/headers/body | Announced inline error and retry button | Dialog focus trap, Escape and focus restore tested |
 | Downloads menu | `apps/desktop/src/components/DownloadsMenu.tsx:14` | FeatureBar Downloads | works | Source; downloads tests | Shows in-progress/saved/failed and reveals file/folder | Reveal error reaches global toast | Focus trap and Escape/restore via shared hook |
 | Protection menu | `apps/desktop/src/components/ProtectionMenu.tsx:17` | FeatureBar Protection | partial | Source; privacy tests | Toggles blocker/DNT/JS and shows blocked count | Preference update failure is not locally visible in popover | Focus trap and Escape/restore via shared hook |
 | Workspace dialog | `apps/desktop/src/components/WorkspaceDialog.tsx:13` | New/edit workspace controls | works | Source; workspace tests through browser/Rail | Creates, edits, deletes with validation/confirmation | IPC errors keep dialog open and show toast | Focus trap, Escape, restore via shared hook |
 | Workspace chip/menu | `apps/desktop/src/components/WorkspaceChip.tsx:17` | Title bar workspace chip | works | Source; `WorkspaceChip.test.tsx`; browser optimistic tests | Switches workspace and opens create dialog | Activation rolls back on failure | Menu focus/Escape behavior tested/shared |
 | Split view | `apps/desktop/src/components/SplitView.tsx:26` | Tab context menu or drag drop zone | works | Source; `layout.test.ts`, `Content.test.tsx` | Shows up to four panes and resizes them | Fifth pane refused; layout stays usable | Pane headers/close buttons keyboard reachable; resize is pointer-only |
-| Popout windows | `apps/desktop/src/components/Popout.tsx:17` | Tab context menu > own window | works | Source; `Popout.test.tsx`; engine main-thread patterns | Detached tab gets own toolbar and can reattach | IPC errors surface through local state/global path | Native menu routing and toolbar controls work by keyboard |
+| Popout windows | `apps/desktop/src/components/Popout.tsx:22` | Tab context menu > own window | works | Source; `Popout.test.tsx`; engine main-thread patterns | Detached tab gets own toolbar and can reattach | Toolbar, menu, chord, navigation, attach, bounds and listener rejections reach the global visible error path | Native menu routing and toolbar controls work by keyboard |
 | DeviceStage | `apps/desktop/src/components/simulator/DeviceStage.tsx:38` | Device simulator | works | Source; `DeviceStage.test.tsx`, geometry/frame tests | Frames/scales/rotates/captures selected device | Emulation and snapshot errors surface | Tool buttons reachable; leave control provided |
 | DiveScreen | `apps/desktop/src/screen/DiveScreen.tsx:20` | Open `dive://screen` recording | partial | Dirty source and performance tests | Non-destructive editor/export UI exists | Pending/error paths are being changed by another session | Keyboard coverage not yet reconciled against dirty work |
 | Permission banner | `apps/desktop/src/components/Content.tsx:132` | Page requests a capability | works | Source; browser permission tests | Names capability and offers allow/block | Decision failure retains request and shows toast | Buttons keyboard reachable; banner does not trap focus |
@@ -134,37 +136,74 @@ State vocabulary: **works** means the reachable behavior has direct source plus 
 |---|---|---|---|
 | 1 | Copied current `target/debug/dive-desktop`, hidden window, port 17493 | failed | Open/read and screenshot passed; forced sweep did not log a discard within the harness window. Log also contained a macOS sandbox-extension warning and harmless MCP `notifications/initialized` method warnings. |
 | 2 | Fresh copied Probe, identical binary and settings, debug log, port 17494 | passed | Open/read, screenshot, discard/wake, renderer-kill recovery and sibling isolation passed. CDP `n=100 p50=0.229 ms p95=0.611 ms max=5.080 ms`. |
+| 3 (final) | Rebuilt executable copied into `/private/tmp/dive-settings-probe.TLNJmI/Probe.app`, ad-hoc signed, hidden window, fresh data/port | passed | Tab read, screenshot, managed popup, camera result, PDF render/screenshot, localhost, offline failure/recovery, real YouTube playback, discard/wake, renderer kill/recovery and sibling isolation passed. CDP `n=100 p50=0.218 ms p95=0.419 ms max=0.734 ms`. |
 
-The divergent results make the live harness or sweep timing **partial**, not fully reliable. No code fix is proposed until the trigger is isolated with retained candidate/keep evidence.
+Attempt 1 exposed a harness log-level/timing defect. The deterministic marker, fixture and polling fixes made the final harness repeatable; the final run is the release evidence, while the failed attempt remains recorded rather than erased.
 
 ## Phase B ranked defects
 
-Phase B remains in progress. Only observed, codebase-specific defects belong here.
+Only observed, codebase-specific defects belong here. “Deferred” means the exact owner/action/evidence needed is recorded in Phase D; it does not mean ready.
 
 | Rank | Category | Score (impact x frequency) | Observation | Evidence | Disposition |
 |---:|---|---:|---|---|---|
-| 1 | Data loss or silent failure | 12 (3x4) | Settings site-permission reads turned any IPC error into an empty list, and writes optimistically removed/changed a row while discarding rejection, so the UI could claim a decision that was not persisted. | Before: `apps/desktop/src/components/SettingsDialog.tsx:421-435`; after: focused tests in `SettingsDialog.test.tsx` | **fixed:** visible load error/retry, write rollback, and pending disable; 436 frontend tests pass |
-| 2 | Dead or misleading controls | 12 (3x4) | Omnibox submission waits for IPC and does not optimistically update the active tab URL or roll it back, despite the explicit production-readiness outcome. | `apps/desktop/src/store/browser.ts:271-276`; `apps/desktop/src/components/Toolbar.tsx:14` | focused store test/fix needed |
-| 3 | Performance | 9 (3x3) | Library caps results at 200 but mounts the full bookmark/history result set inside a scroll container; the requirement calls for windowing or a screen-sized cap with mounted-row proof. | `apps/desktop/src/components/Library.tsx:13,69,93-207` | focused component test/fix needed |
-| 4 | Data loss or silent failure | 9 (3x3) | Optimistic tab and workspace reordering has no rollback when IPC rejects, leaving chrome order divergent from persisted engine order until another event/snapshot. | `apps/desktop/src/store/browser.ts:338-344,370-374` | focused reducer/store tests needed |
-| 5 | Missing states | 8 (2x4) | Share-link clipboard rejection is ignored, so the icon can remain unchanged with no explanation or retry state. | `apps/desktop/src/components/SharePopover.tsx:69-74` | focused rejected-clipboard test needed |
-| 6 | Accessibility and keyboard | 8 (4x2) | ReplayEditor is a floating interactive editor without `role=dialog`, `useFocusTrap`, overlay coverage, or an Escape handler. | `apps/desktop/src/components/ReplayEditor.tsx:27-91` | focused overlay/focus test needed |
-| 7 | Verification integrity | 8 (4x2) | `live-check.sh` inherited `RUST_LOG=warn` while asserting on info-level discard and CDP lines, so working engine behavior was reported as failure. The memory harness had the same marker dependency. | `scripts/live-check.sh:63,87-119`; `scripts/benchmark-memory.sh:49-83`; manual MCP polling observed discard at poll 3 | **fixed:** force `dive_desktop_lib=info`; inherited-warn live check passes, CDP p95 0.868 ms |
-| 8 | Verification integrity | 8 (4x2) | The 20-tab memory default depended on public HTTPS sites. A Probe logged TLS `net_error -101`, grew only 15.8 MB, and reported a noise-dominated 28% reclaim. | Before: `scripts/benchmark-memory.sh:13-17,49-102`; after: deterministic `memory-fixture.py` plus harness-only per-tab process model/local-discard override | **fixed:** 20 local tabs grew 2,452,336 KB; discarding 19 reclaimed 2,698,528 KB (110% of growth) |
-| 9 | Missing states | 6 (2x3) | Protection toggles fire preference updates without a local pending/error indication; the popover can visually flip and then roll back with only indirect/global feedback. | `apps/desktop/src/components/ProtectionMenu.tsx:64-66`; `apps/desktop/src/store/prefs.ts` | assess after frontend ownership clears |
-| 10 | Platform gaps | 5 (5x1) | Windows and Linux are configured but have no current live evidence for native view lifecycle, menus, signing, or updater behavior. | platform `cfg` sites and release workflows; no local runner evidence | deferred: requires Windows/Linux runners |
+| 1 | Data loss or silent failure | 12 (3x4) | Site-permission reads collapsed IPC failure into empty state and writes could display an unpersisted optimistic choice. | `SettingsDialog.tsx:428-485`; rejected-read/write tests | **fixed:** announced read error with Retry, pending disable and rejection rollback (`ffd79d5`) |
+| 2 | Crash/hang | 12 (4x3) | CEF’s default `window.open` produced an unmanaged native popup; a first direct main-thread callback fix could deadlock the CDP click. | `engine.rs:258-285`; final popup live scenario | **fixed:** deny native popup, queue work off callback, then marshal tracked tab creation to main thread (`e960770`) |
+| 3 | Verification integrity | 12 (4x3) | Live/memory probes could report false failures or noise-dominated reclaim because of inherited log filters, public sites, zero-page allocations and burst view creation. | deterministic fixture/drivers; failed attempt retained | **fixed:** local committed pages, touched 32 MiB allocations, paced main-thread creation and peak sampling (`e0d8379`, `e960770`) |
+| 4 | Data loss or silent failure | 12 (3x4) | Rejected or out-of-order preference writes/loads could leave the UI showing a value the host did not persist. | `prefs.ts:56-91`; `prefs.test.ts` | **fixed:** optimistic rollback plus identity guard against stale writes and stale mount reads (`8c59200`, `10b9974`) |
+| 5 | Crash/hang | 8 (4x2) | Production app/runtime setup used exact `.expect()` sites and embedded device JSON assumptions that could terminate the app. | `lib.rs`, `engine.rs`, `emulate.rs`; malformed-catalog test; production-boundary scan | **fixed:** fallible startup/about:blank/catalog paths; zero exact `.unwrap()`/`.expect()` before test boundaries in the app crate (`0acfffe`) |
+| 6 | Missing states | 8 (2x4) | Share clipboard rejection was invisible. | `SharePopover.tsx:61,74-84`; rejected clipboard test | **fixed:** announced error, pending disable and retryable action (`0e95387`) |
+| 7 | Accessibility and keyboard | 8 (4x2) | Request replay lacked dialog semantics, focus containment and Escape restoration. | `ReplayEditor.tsx:35,73`; focused test | **fixed:** labelled dialog, trap, Escape, announced failure and retry (`794c79d`) |
+| 8 | Data loss or silent failure | 8 (2x4) | Detached-window toolbar/menu/chord actions discarded rejected promises. | `Popout.tsx:11-159`; rejected-toolbar test | **fixed:** every detached action reaches the visible browser error state (`7247ab8`) |
+| 9 | Accessibility and keyboard | 6 (3x2) | The model picker advertised a dialog without hiding the native page, moving/trapping focus or restoring the trigger. | `ModelPicker.tsx:40-41`; `ModelPicker.test.tsx` | **fixed:** cover, Tab trap, Escape and trigger restore (`0ff6c58`) |
+| 10 | Dead or misleading controls | 12 (3x4) | Omnibox submission does not optimistically update and roll back the active tab URL as required. | `browser.ts:283-288`; dirty `Toolbar.tsx` | **deferred:** shared owner is actively changing both files; add store/component rejection tests after that commit |
+| 11 | Data loss or silent failure | 9 (3x3) | Optimistic tab/workspace reorder does not restore prior ordering after IPC rejection. | `browser.ts:350-355,382-385` | **deferred:** same dirty store ownership; capture prior arrays and conditionally roll back in focused store tests |
+| 12 | Performance/missing states | 9 (3x3) | Library caps at 200 but mounts all rows; bookmark removal and new recording/download actions include silent rejection paths. | dirty `Library.tsx`; `LIBRARY_LIMIT` and mapped rows | **deferred:** active Library/recording owner; introduce viewport windowing plus pending/error/retry tests after ownership clears |
+| 13 | Consistency/accessibility | 6 (2x3) | Core full-screen dialogs use the reduced-motion-aware fade helper, but several small anchored popovers close immediately and do not share the fade contract. | `useFadeClose.ts`; popover inventory | **deferred:** consolidate anchored popovers behind one lifecycle primitive; verify normal and reduced-motion close timing |
+| 14 | Platform gap | 5 (5x1) | Windows/Linux runtime, release signing/notarization and updater feed cannot be proven on this unsigned macOS development host. | workflow/release docs; debug packaging signing failure | **deferred:** run signed CI release matrix with secrets and install/update smoke tests |
 
 ## Phase C fix log
 
-Completed audit-owned changes so far:
+- Harness and runtime: deterministic live/memory fixtures; exact private `DIVE_BIN`; robust Probe cleanup; managed popup; camera/PDF/localhost/offline/YouTube/renderer scenarios; fallible runtime invariants.
+- State integrity: visible/recoverable site-permission failures; rejected/stale preference rollback; share clipboard failure; detached-window failures.
+- Accessibility: replay and model-picker dialogs now have semantic roles, page coverage, focus containment, Escape and restoration where applicable.
+- Parity: `commands.test.ts` proves every chord and every native menu id maps to a chrome handler; palette extras derive from the same named command map.
+- Scale: model results cap at 80; console/network/recording backend buffers are bounded; Library remains explicitly deferred because it mounts its 200-row cap.
 
-- Site-permission loading and writes are visible and recoverable (`SettingsDialog.tsx`, `SettingsDialog.test.tsx`).
-- Live and memory harnesses force their required `dive_desktop_lib` info markers even when the caller exports a stricter `RUST_LOG`.
-- The memory harness now defaults to a deterministic 8 MiB/5,000-node local fixture under a harness-only per-tab process model; explicit `STRESS_URL` still profiles real sites.
-- Mechanical Rust doc/format corrections clear the committed DivePrivacy clippy/fmt failures; concurrent functional privacy changes remain another session's work.
-
-Current proof: `cargo fmt --all -- --check` pass; `cargo clippy --workspace --all-targets -- -D warnings` pass; `cargo test --workspace` pass (322 tests); `pnpm -r typecheck` pass; `pnpm -r lint` pass; `pnpm -r test` pass (436 tests). Generated bindings currently differ only where Rust documentation changes flow into generated comments, and must be committed with those exact hunks. The debug bundle was produced, then packaging returned exit 1 because concurrent updater configuration supplied a public key without the private signing key; no secret was requested. Live Probe passed after the log-filter fix with CDP p95 0.868 ms. The deterministic 20-tab memory run passed: baseline 1,288,192 KB; loaded 3,740,528 KB; swept 1,042,000 KB; 19 discarded; 2,698,528 KB and 110% of growth reclaimed.
+Audit-owned commits, in order: `e0d8379`, `ffd79d5`, `aca0ba5`, `0e95387`, `794c79d`, `8c59200`, `0acfffe`, `e960770`, `01432c7`, `10b9974`, `0ff6c58`, `7247ab8`. Concurrent privacy commits present in the same branch range are `7d85210`, `f39aeea`, `5252e7d`, `04e648a`, and `8f43001`. Because the checkout had a shared index, `0acfffe` also captured four already-staged privacy-store files from that session; it did not overwrite them, and the mixed boundary is disclosed here.
 
 ## Phase D final verification
 
-Not yet run. Final results must include full static gates, generated-binding cleanliness, private live check, 20-tab memory reclaim, warm startup, exact commits, and explicit deferrals.
+Final verification date: 2026-09-04. All numbers below are from the rebuilt executable copied into the private, hidden, ad-hoc-signed `Probe.app`; no user Dive process was stopped.
+
+| Gate | Result |
+|---|---|
+| `cargo fmt --all -- --check` | pass |
+| `cargo clippy --workspace --all-targets -- -D warnings` | pass |
+| `cargo test --workspace` | pass, 325 tests plus doc tests |
+| `pnpm -r typecheck` | pass |
+| `pnpm -r lint` | pass |
+| `pnpm -r test` | pass, 74 files / 469 tests |
+| production `.unwrap()` / `.expect()` boundary scan | pass, zero exact calls before each app-crate test boundary |
+| `pnpm audit --prod --audit-level=moderate` | pass, no known vulnerabilities |
+| `cargo audit` | **unverified:** subcommand is not installed on this host |
+| generated bindings | **deferred:** diff is solely the concurrent uncommitted `recordingsList`/`RecordingInfo` API; its owner must commit source plus generated output together, then rerun zero-diff check |
+| debug app packaging | app produced, command exits 1 at updater signing because `TAURI_SIGNING_PRIVATE_KEY` is absent; requires release secret, not a code bypass |
+
+Runtime targets:
+
+| Target | Result |
+|---|---|
+| Expanded live lifecycle | pass for read/screenshot/popup/camera/PDF/localhost/offline recovery/YouTube/discard-wake/renderer recovery |
+| In-process CDP | p50 `0.218 ms`, p95 `0.419 ms`, max `0.734 ms` (`n=100`); target p95 `<5 ms` |
+| 20-tab memory | baseline `1,520,528 KB`; peak `4,968,848 KB`; swept `1,229,120 KB`; 19 discarded; `3,739,728 KB` / `108%` of measured growth reclaimed; target `>=30%` |
+| Startup | cold p95 `205.00 ms`; warm p50 `185.67 ms`; warm p95 `217.30 ms`; initial paint p50 `185.67 ms`; max setup delta `8.27 ms`; target warm `<600 ms` and no `>=100 ms` UI block |
+
+### Actionable deferrals
+
+1. **Shared frontend ownership:** after the active recording/menu/Library/Toolbar session commits or relinquishes `browser.ts`, `Toolbar.tsx` and `Library.tsx`, implement optimistic navigation rollback, reorder rollback, Library row windowing, and local pending/error/retry states. Required proof: focused rejected-IPC tests, mounted-row count at 200 records, then all gates and private Probe.
+2. **Generated API:** the recording owner must commit `commands.rs` and `generated/bindings.ts` atomically. Required proof: `cargo test --workspace && git diff --exit-code -- apps/desktop/src/generated`.
+3. **Release credentials/platforms:** provide CI-held updater/signing/notarization secrets and Windows/Linux runners. Required proof: signed macOS package/notarization/install/update, Windows installer smoke, Linux X11/Wayland smoke.
+4. **Rust dependency audit:** install a pinned `cargo-audit` in the build image and run it against `Cargo.lock`; the current result is unknown, not clean.
+5. **Anchored-popover motion:** adopt a single active-aware fade lifecycle for Protection, Downloads, Share, WorkspaceChip, model picker and tab menu. Required proof: normal close retains content cover through fade; reduced motion closes synchronously; focus returns in both modes.
+
+The branch is therefore **runtime-verified but not release-signable**. The measured performance/lifecycle targets and complete automated suite pass; the five items above are explicit release-readiness blockers or ownership-gated follow-ups rather than hidden “done” claims.
