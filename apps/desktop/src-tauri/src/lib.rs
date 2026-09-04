@@ -460,24 +460,33 @@ fn stress_test(app: tauri::AppHandle<Runtime>) {
         tracing::info!(pid = std::process::id(), "stress: baseline");
         // Let the harness sample the baseline before the tabs start opening.
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let on_main = app.clone();
-        let _ = app.run_on_main_thread(move || {
-            let state = on_main.state::<state::AppState>();
-            let workspace = *state::lock(&state.active_workspace);
-            let mut opened = 0;
-            if let (Some(ws), Some(main)) = (workspace, engine::MainThread::here()) {
-                for i in 0..count {
-                    let url = &urls[i % urls.len()];
-                    match commands::open_tab(&main, &on_main, &state, ws, url) {
-                        Ok(_) => opened += 1,
-                        Err(e) => tracing::warn!("stress: open failed: {e}"),
+        let mut opened = 0;
+        for i in 0..count {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let on_main = app.clone();
+            let url = urls[i % urls.len()].clone();
+            if let Err(error) = app.run_on_main_thread(move || {
+                let state = on_main.state::<state::AppState>();
+                let workspace = *state::lock(&state.active_workspace);
+                let result = match (workspace, engine::MainThread::here()) {
+                    (Some(ws), Some(main)) => {
+                        commands::open_tab(&main, &on_main, &state, ws, &url).map(|_| ())
                     }
-                }
+                    _ => Err(AppError::new("stress: browser has no active workspace")),
+                };
+                let _ = tx.send(result);
+            }) {
+                tracing::warn!(%error, "stress: queuing tab open failed");
+                continue;
             }
-            let _ = tx.send(opened);
-        });
-        let opened = rx.await.unwrap_or(0);
+            match rx.await {
+                Ok(Ok(())) => opened += 1,
+                Ok(Err(error)) => tracing::warn!(%error, "stress: open failed"),
+                Err(error) => tracing::warn!(%error, "stress: tab result dropped"),
+            }
+            // Let the newly active fixture parse before the next view hides it.
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
         tokio::time::sleep(std::time::Duration::from_secs(settle)).await;
         tracing::info!(tabs = opened, "stress: loaded");
         let discarded = match housekeeping::sweep(&app).await {

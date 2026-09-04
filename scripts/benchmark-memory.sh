@@ -89,14 +89,19 @@ APP=$!
 sample_max() { local best=0 v; for _ in 1 2 3; do v=$(tree_rss "$1"); [[ ${v} -gt ${best} ]] && best=${v}; sleep 1; done; echo "${best}"; }
 sample_min() { local best="" v; for _ in 1 2 3 4; do v=$(tree_rss "$1"); [[ -z ${best} || ${v} -lt ${best} ]] && best=${v}; sleep 1; done; echo "${best}"; }
 
-baseline=""; loaded=""; swept=""; tabs=""; discarded=""
+baseline=""; peak=""; loaded=""; swept=""; tabs=""; discarded=""
 deadline=$(( $(date +%s) + SETTLE + 90 ))
 while kill -0 "${APP}" 2>/dev/null && [[ $(date +%s) -lt ${deadline} ]]; do
     if [[ -z "${baseline}" ]] && plain_log | grep -q "stress: baseline"; then
-        baseline=$(tree_rss "${APP}"); echo "   baseline  ${baseline} KB"
+        baseline=$(tree_rss "${APP}"); peak=${baseline}; echo "   baseline  ${baseline} KB"
+    fi
+    if [[ -n "${baseline}" && -z "${loaded}" ]]; then
+        current=$(tree_rss "${APP}")
+        [[ ${current} -gt ${peak} ]] && peak=${current}
     fi
     if [[ -z "${loaded}" ]] && plain_log | grep -q "stress: loaded"; then
-        loaded=$(sample_max "${APP}"); tabs=$(plain_log | sed -n 's/.*stress: loaded.*tabs=\([0-9]*\).*/\1/p' | tail -1)
+        loaded=$(sample_max "${APP}"); [[ ${peak} -gt ${loaded} ]] && loaded=${peak}
+        tabs=$(plain_log | sed -n 's/.*stress: loaded.*tabs=\([0-9]*\).*/\1/p' | tail -1)
         echo "   loaded    ${loaded} KB (${tabs} tabs)"
     fi
     if [[ -z "${swept}" ]] && plain_log | grep -q "stress: done"; then

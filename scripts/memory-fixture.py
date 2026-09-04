@@ -17,7 +17,10 @@ PAGE = b"""<!doctype html>
     fragment.appendChild(row);
   }
   root.appendChild(fragment);
-  window.__diveMemoryFixture = new Uint8Array(8 * 1024 * 1024);
+  window.__diveMemoryFixture = new Uint8Array(32 * 1024 * 1024);
+  for (let i = 0; i < window.__diveMemoryFixture.length; i += 4096) {
+    window.__diveMemoryFixture[i] = i & 255;
+  }
   document.title = 'Dive memory fixture ready';
 </script>
 """

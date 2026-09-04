@@ -255,6 +255,37 @@ impl TabHost {
                 });
             });
 
+        // CEF's default creates an unmanaged native popup that has no Dive tab,
+        // lifecycle, or MCP session. Cancel it and defer a normal tracked tab
+        // open to the event loop instead of re-entering CEF from its callback.
+        let popup_app = app.clone();
+        let popup_workspace = tab.workspace_id;
+        builder = builder.on_new_window(move |url, _features| {
+            let app = popup_app.clone();
+            tauri::async_runtime::spawn(async move {
+                let schedule = app.clone();
+                if let Err(error) = app.run_on_main_thread(move || {
+                    let Some(main) = MainThread::here() else {
+                        tracing::warn!(%url, "popup open reached the wrong thread");
+                        return;
+                    };
+                    let Some(workspace) = popup_workspace else {
+                        tracing::warn!(%url, "popup source has no workspace");
+                        return;
+                    };
+                    let state = schedule.state::<AppState>();
+                    if let Err(error) =
+                        crate::commands::open_tab(&main, &schedule, &state, workspace, url.as_str())
+                    {
+                        tracing::warn!(%url, %error, "opening popup as a tab failed");
+                    }
+                }) {
+                    tracing::warn!(%error, "queueing popup tab failed");
+                }
+            });
+            tauri::webview::NewWindowResponse::Deny
+        });
+
         let dl_app = app.clone();
         builder = builder.on_download(move |_, event| {
             match event {

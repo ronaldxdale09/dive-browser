@@ -2,10 +2,11 @@
 # live-check.sh — drive the real Dive app end to end through its MCP server.
 #
 # Starts a private instance against a local HTTP server, then checks: a tab
-# opens and its text reads back; a screenshot comes back; a background tab is
-# discarded by the sweep and wakes with its page on activation; killing the
-# renderer process recovers the tab in place without touching its sibling;
-# and the in-process CDP round trip stays inside its budget.
+# opens and its text reads back; popup, camera, PDF, localhost and offline
+# paths behave; a screenshot comes back; a background tab is discarded by the
+# sweep and wakes with its page on activation; killing the renderer process
+# recovers the tab in place without touching its sibling; and the in-process
+# CDP round trip stays inside its budget.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,6 +14,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MCP="${SCRIPT_DIR}/mcp-call.py"
 PORT="${LIVE_MCP_PORT:-7493}"
 CDP_P95_BUDGET_MS="${CDP_P95_BUDGET_MS:-5}"
+YOUTUBE_URL="${LIVE_YOUTUBE_URL:-https://www.youtube.com/watch?v=jNQXAC9IVRw}"
 DATA_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dive-live.XXXXXX")"
 SITE_DIR="${DATA_DIR}/site"
 LOG="${REPO_ROOT}/target/live-check.log"
@@ -39,8 +41,49 @@ cat >"${SITE_DIR}/a.html" <<'HTML'
 <!doctype html><title>Page A</title><body style="height:4000px"><h1>Page A</h1><p>alpha content</p></body>
 HTML
 cat >"${SITE_DIR}/b.html" <<'HTML'
-<!doctype html><title>Page B</title><body><h1>Page B</h1><p>bravo content</p></body>
+<!doctype html><title>Page B</title><body><h1>Page B</h1><p>bravo content</p>
+<a href="/popup.html" target="_blank">Open popup</a><button id="camera">Request camera</button><output id="result"></output>
+<script>
+document.getElementById('camera').onclick = async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    stream.getTracks().forEach(track => track.stop());
+    result.textContent = 'camera request handled: allowed';
+  } catch (error) {
+    result.textContent = `camera request handled: ${error.name}`;
+  }
+};
+</script></body>
 HTML
+cat >"${SITE_DIR}/popup.html" <<'HTML'
+<!doctype html><title>Popup</title><body><h1>Popup opened</h1></body>
+HTML
+cat >"${SITE_DIR}/offline.html" <<'HTML'
+<!doctype html><title>Offline target</title><body><h1>Offline recovery target</h1></body>
+HTML
+python3 - "${SITE_DIR}/sample.pdf" <<'PY'
+import pathlib, sys
+
+objects = [
+    b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n",
+    b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n",
+    b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 144]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n",
+    b"4 0 obj<</Length 48>>stream\nBT /F1 18 Tf 40 80 Td (Dive PDF fixture) Tj ET\nendstream endobj\n",
+    b"5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n",
+]
+pdf = bytearray(b"%PDF-1.4\n")
+offsets = []
+for obj in objects:
+    offsets.append(len(pdf))
+    pdf.extend(obj)
+xref = len(pdf)
+pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+pdf.extend(b"0000000000 65535 f \n")
+for offset in offsets:
+    pdf.extend(f"{offset:010d} 00000 n \n".encode())
+pdf.extend(f"trailer<</Size {len(objects) + 1}/Root 1 0 R>>\nstartxref\n{xref}\n%%EOF\n".encode())
+pathlib.Path(sys.argv[1]).write_bytes(pdf)
+PY
 python3 -u -m http.server --bind 127.0.0.1 0 --directory "${SITE_DIR}" >"${DATA_DIR}/http.log" 2>&1 &
 HTTP=$!
 for _ in $(seq 1 40); do
@@ -48,10 +91,17 @@ for _ in $(seq 1 40); do
     [[ -n "${SITE_PORT}" ]] && break; sleep 0.25
 done
 [[ -n "${SITE_PORT:-}" ]] || { kill "${HTTP}"; fail "local http server did not start"; }
-SITE="http://127.0.0.1:${SITE_PORT}"
+SITE="http://localhost:${SITE_PORT}"
 
 cleanup() {
-    kill "${APP:-}" 2>/dev/null || true
+    if [[ -n "${APP:-}" ]]; then
+        kill "${APP}" 2>/dev/null || true
+        for _ in $(seq 1 20); do
+            kill -0 "${APP}" 2>/dev/null || break
+            sleep 0.1
+        done
+        kill -9 "${APP}" 2>/dev/null || true
+    fi
     kill "${HTTP}" 2>/dev/null || true
     wait "${APP:-}" 2>/dev/null || true
     rm -rf "${DATA_DIR}"
@@ -60,7 +110,8 @@ trap cleanup EXIT
 
 step "starting ${BIN}"
 NO_COLOR=1 DIVE_DATA_DIR="${DATA_DIR}" DIVE_MCP_PORT="${PORT}" DIVE_OPEN_URL="${SITE}/a.html" \
-DIVE_MAX_IDLE_SECS=0 DIVE_SWEEP_SECS=2 DIVE_DISCARD_LOCAL_TABS=1 DIVE_CDP_BENCH=1 RUST_LOG="${RUST_LOG:-info},dive_desktop_lib=info" \
+DIVE_MAX_IDLE_SECS=0 DIVE_SWEEP_SECS=2 DIVE_DISCARD_LOCAL_TABS=1 DIVE_CDP_BENCH=1 DIVE_MCP_ALLOW_EVAL=1 \
+DIVE_CHROMIUM_FLAGS="${DIVE_CHROMIUM_FLAGS:-} --disable-popup-blocking" RUST_LOG="${RUST_LOG:-info},dive_desktop_lib=info" \
     "${BIN}" >"${LOG}" 2>&1 &
 APP=$!
 
@@ -81,8 +132,57 @@ mcp call page_wait_for "{\"tab_id\": \"${B_ID}\", \"text\": \"bravo content\", \
 mcp call page_text "{\"tab_id\": \"${B_ID}\"}" | grep -q "bravo content" || fail "page_text for B is wrong"
 
 step "screenshot comes back"
-SHOT=$(mcp call page_screenshot "{\"tab_id\": \"${B_ID}\"}")
+SHOT=$(mcp call page_screenshot "{\"tab_id\": \"${B_ID}\"}") || fail "page screenshot failed"
 python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("image_bytes",0) > 1000, d' <<<"${SHOT}" || fail "screenshot too small: ${SHOT}"
+
+step "page popup opens as a real tab"
+mcp call page_click "{\"tab_id\": \"${B_ID}\", \"locator\": \"role=link[name=\\\"Open popup\\\"]\"}" >/dev/null || fail "popup link could not be clicked"
+for _ in $(seq 1 40); do
+    TABS=$(mcp call tabs_list)
+    POPUP_ID=$(python3 -c 'import json,sys; t=[x for x in json.load(sys.stdin) if x["url"].endswith("popup.html")]; print(t[0]["id"] if t else "")' <<<"${TABS}")
+    [[ -n "${POPUP_ID}" ]] && break; sleep 0.25
+done
+[[ -n "${POPUP_ID:-}" ]] || fail "window.open did not create a popup tab: ${TABS}"
+mcp call tab_activate "{\"tab_id\": \"${POPUP_ID}\"}" >/dev/null || fail "popup tab could not be activated"
+mcp call page_wait_for "{\"tab_id\": \"${POPUP_ID}\", \"text\": \"Popup opened\", \"timeout_ms\": 15000}" >/dev/null || fail "popup tab did not render"
+mcp call tab_close "{\"tab_id\": \"${POPUP_ID}\"}" >/dev/null
+mcp call tab_activate "{\"tab_id\": \"${B_ID}\"}" >/dev/null
+
+step "camera request reaches a visible allowed or denied result"
+mcp call page_click "{\"tab_id\": \"${B_ID}\", \"locator\": \"role=button[name=\\\"Request camera\\\"]\"}" >/dev/null || fail "camera button could not be clicked"
+mcp call page_wait_for "{\"tab_id\": \"${B_ID}\", \"text\": \"camera request handled:\", \"timeout_ms\": 15000}" >/dev/null || fail "camera request never resolved"
+
+step "PDF renders in its own tab"
+PDF=$(mcp call tab_open "{\"url\": \"${SITE}/sample.pdf\"}")
+PDF_ID=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"${PDF}")
+mcp call page_wait_for "{\"tab_id\": \"${PDF_ID}\", \"url_includes\": \"sample.pdf\", \"load\": true, \"timeout_ms\": 20000}" >/dev/null || fail "PDF did not finish loading"
+PDF_SHOT=$(mcp call page_screenshot "{\"tab_id\": \"${PDF_ID}\"}")
+python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("image_bytes",0) > 1000, d' <<<"${PDF_SHOT}" || fail "PDF screenshot too small: ${PDF_SHOT}"
+mcp call tab_close "{\"tab_id\": \"${PDF_ID}\"}" >/dev/null
+mcp call tab_activate "{\"tab_id\": \"${B_ID}\"}" >/dev/null
+
+step "offline navigation fails without taking down the tab, then recovers"
+mcp call page_throttle "{\"tab_id\": \"${B_ID}\", \"profile\": \"offline\"}" >/dev/null
+mcp call tab_navigate "{\"tab_id\": \"${B_ID}\", \"url\": \"${SITE}/offline.html\"}" >/dev/null || true
+sleep 1
+kill -0 "${APP}" || fail "the app exited during offline navigation"
+mcp call page_throttle "{\"tab_id\": \"${B_ID}\", \"profile\": \"none\"}" >/dev/null
+mcp call tab_navigate "{\"tab_id\": \"${B_ID}\", \"url\": \"${SITE}/b.html\"}" >/dev/null || fail "navigation did not recover after clearing offline mode"
+mcp call page_wait_for "{\"tab_id\": \"${B_ID}\", \"text\": \"bravo content\", \"timeout_ms\": 15000}" >/dev/null || fail "tab did not recover after offline navigation"
+
+step "YouTube video reaches playback"
+# Let the startup CDP probe finish before loading a deliberately heavy external
+# page, so its latency number measures Dive rather than YouTube's renderer work.
+for _ in $(seq 1 40); do
+    plain_log | grep -q "cdp bench:" && break; sleep 0.25
+done
+YOUTUBE=$(mcp call tab_open "{\"url\": \"${YOUTUBE_URL}\"}") || fail "YouTube tab could not be opened"
+YOUTUBE_ID=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"${YOUTUBE}")
+mcp call page_wait_for "{\"tab_id\": \"${YOUTUBE_ID}\", \"locator\": \"video\", \"load\": true, \"timeout_ms\": 45000}" >/dev/null || fail "YouTube video element did not load"
+PLAYBACK=$(mcp call page_evaluate "{\"tab_id\": \"${YOUTUBE_ID}\", \"expression\": \"(async()=>{const v=document.querySelector('video');if(!v)throw new Error('video missing');const start=v.currentTime;v.muted=true;v.play().catch(()=>{});const end=performance.now()+10000;while(performance.now()<end){if(v.currentTime>start+0.2&&v.readyState>=2)return {advanced:true,currentTime:v.currentTime,readyState:v.readyState};await new Promise(r=>setTimeout(r,100))}return {advanced:false,currentTime:v.currentTime,readyState:v.readyState}})()\"}") || fail "YouTube playback evaluation failed"
+python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["advanced"] and v["readyState"] >= 2, v' <<<"${PLAYBACK}" || fail "YouTube did not advance playback: ${PLAYBACK}"
+mcp call tab_close "{\"tab_id\": \"${YOUTUBE_ID}\"}" >/dev/null
+mcp call tab_activate "{\"tab_id\": \"${B_ID}\"}" >/dev/null
 
 step "background tab is discarded, then wakes on activation"
 mcp call page_wait_for "{\"tab_id\": \"${A_ID}\", \"text\": \"alpha content\", \"timeout_ms\": 15000}" >/dev/null || fail "page A never loaded"
