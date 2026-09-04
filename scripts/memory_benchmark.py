@@ -91,7 +91,7 @@ def main():
             text = ANSI.sub('', log.read_text(errors='replace'))
             loaded_match = re.search(r'stress: loaded[^\n]*tabs=(\d+)', text)
             discarded_match = re.search(r'stress: swept[^\n]*discarded=(\d+)', text)
-            if not loaded_match or not discarded_match or 'stress: exiting' not in text or any(not v for v in samples.values()):
+            if not loaded_match or not discarded_match or 'stress: exiting' not in text or 'stress: lifecycle registry and wake verified' not in text or any(not v for v in samples.values()):
                 raise ValueError(f'missing markers or live process samples; log: {log}')
             actual_tabs, discarded = int(loaded_match[1]), int(discarded_match[1])
             if actual_tabs != tabs or discarded < tabs - 1:

@@ -128,6 +128,91 @@ async fn assert_renderer_alive(app: &tauri::AppHandle<Runtime>, id: TabId) -> Re
     Ok(())
 }
 
+/// After the memory sampling phase, prove discarded views left Tauri's
+/// registry and a discarded tab can reopen its persisted page exactly once.
+pub(crate) async fn verify_discarded_and_wake(
+    app: &tauri::AppHandle<Runtime>,
+) -> Result<(), AppError> {
+    let (tab, before) = on_main(app, |handle| {
+        let state = handle.state::<state::AppState>();
+        let workspace = (*state::lock(&state.active_workspace))
+            .ok_or_else(|| AppError::new("no active workspace"))?;
+        let views = handle.webviews();
+        let store = state::lock(&state.store);
+        let discarded: Vec<_> = store
+            .tabs_for_workspace(workspace)?
+            .into_iter()
+            .filter(|tab| tab.state == dive_core::TabState::Discarded)
+            .collect();
+        for tab in &discarded {
+            if views
+                .keys()
+                .any(|label| engine::tab_from_label(label) == Some(tab.id))
+            {
+                return Err(AppError::new(
+                    "discarded tab retained a Tauri webview registration",
+                ));
+            }
+        }
+        Ok((
+            discarded
+                .into_iter()
+                .next()
+                .ok_or_else(|| AppError::new("no discarded tab to verify wake"))?,
+            views.len(),
+        ))
+    })
+    .await?;
+    let id = tab.id;
+    on_main(app, move |handle| {
+        commands::tab_activate(handle.clone(), id)
+    })
+    .await?;
+    let session = state::lock(&app.state::<state::AppState>().host)
+        .as_ref()
+        .and_then(|host| host.cdp(id))
+        .ok_or_else(|| AppError::new("waking tab has no CDP session"))?;
+    let expression = format!(
+        "location.href === {} && document.readyState === 'complete'",
+        serde_json::to_string(&tab.url).map_err(AppError::new)?
+    );
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let reply = session
+                .call(
+                    "Runtime.evaluate",
+                    serde_json::json!({"expression": expression, "returnByValue": true}),
+                )
+                .await
+                .map_err(AppError::new)?;
+            if reply["result"]["value"] == true {
+                return Ok::<_, AppError>(());
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .map_err(AppError::new)??;
+    on_main(app, move |handle| {
+        let views = handle.webviews();
+        if views.len() != before + 1
+            || views
+                .keys()
+                .filter(|label| engine::tab_from_label(label) == Some(id))
+                .count()
+                != 1
+        {
+            return Err(AppError::new(
+                "wake did not create exactly one registered view",
+            ));
+        }
+        Ok(())
+    })
+    .await?;
+    println!("stress: lifecycle registry and wake verified");
+    Ok(())
+}
+
 pub(crate) fn start(app: tauri::AppHandle<Runtime>) {
     let Ok(mode) = std::env::var("DIVE_NATIVE_LIFECYCLE_PROBE") else {
         return;

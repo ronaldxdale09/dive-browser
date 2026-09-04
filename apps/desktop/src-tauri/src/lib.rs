@@ -562,6 +562,13 @@ fn stress_test(app: tauri::AppHandle<Runtime>) {
         // Give the harness time to sample memory before the process goes.
         tokio::time::sleep(std::time::Duration::from_secs(8)).await;
         tracing::info!("stress: exiting");
+        // Sampling has stopped; reopening a discarded tab must not contaminate
+        // the reclaim measurement, but still has to succeed before this passes.
+        if let Err(error) = lifecycle_probe::verify_discarded_and_wake(&app).await {
+            tracing::error!(%error, "stress: lifecycle registry or wake failed");
+            app.exit(1);
+            return;
+        }
         app.exit(if discarded + 1 >= opened { 0 } else { 2 });
     });
 }

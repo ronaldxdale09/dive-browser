@@ -26,7 +26,7 @@ import os,sys,time,mmap
 assert os.environ.get('DIVE_USE_MOCK_KEYCHAIN') == '1', 'test accessed system keychain'
 print('fixture output is retained',flush=True)
 if os.environ['FAKE_MODE']=='hang': time.sleep(60)
-if os.environ['FAKE_MODE'] in ('valid', 'late-crash'):
+if os.environ['FAKE_MODE'] in ('valid', 'late-crash', 'missing-wake'):
     print('stress: baseline',flush=True)
     time.sleep(0.4)
     allocation=mmap.mmap(-1,80*1024*1024)
@@ -38,12 +38,13 @@ if os.environ['FAKE_MODE'] in ('valid', 'late-crash'):
     print('stress: done',flush=True)
     time.sleep(0.4)
     print('stress: exiting',flush=True)
+    if os.environ['FAKE_MODE'] != 'missing-wake': print('stress: lifecycle registry and wake verified',flush=True)
 sys.exit(9 if os.environ['FAKE_MODE'] in ('crash', 'late-crash') else 0)
 ''')
             fake.chmod(0o755)
             environment = {**os.environ, 'DIVE_BIN': str(fake), 'FAKE_MODE': mode,
                            'STRESS_TABS': '2',
-                           'DIVE_PROBE_TIMEOUT_SECS': '2.5' if mode in ('valid', 'late-crash') else '0.5'}
+                           'DIVE_PROBE_TIMEOUT_SECS': '2.5' if mode in ('valid', 'late-crash', 'missing-wake') else '0.5'}
             process = subprocess.Popen(['bash', str(scripts / 'benchmark-memory.sh')],
                                        env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                        text=True, start_new_session=True)
@@ -65,7 +66,7 @@ sys.exit(9 if os.environ['FAKE_MODE'] in ('crash', 'late-crash') else 0)
         self.assertIsNone(summary)
 
     def test_crashes_and_missing_markers_are_rejected(self):
-        for mode in ('crash', 'late-crash', 'missing-markers'):
+        for mode in ('crash', 'late-crash', 'missing-markers', 'missing-wake'):
             with self.subTest(mode=mode):
                 timed_out, code, summary, output = self.run_probe(mode)
                 self.assertFalse(timed_out)
