@@ -62,6 +62,11 @@ export const commands = {
 	tabStop: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_stop", { id })),
 	/**  Open the system print dialog for the tab's page. */
 	tabPrint: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_print", { id })),
+	/**
+	 *  Fill the tab with the page's video, or leave that state. Returns what
+	 *  the page did: `filled`, `exited`, `no-video` or `unavailable`.
+	 */
+	tabFillVideo: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_fill_video", { id })),
 	/**  Move a tab between the Essential, Pinned and Today strips. */
 	tabSetTier: (id: TabId, tier: TabTier) => typedError<null, AppError>(__TAURI_INVOKE("tab_set_tier", { id, tier })),
 	/**  Forget a bookmark by URL. */
@@ -1162,6 +1167,11 @@ export type Prefs = {
 	motion?: string,
 	/**  Welcome screen backdrop: `orbs` | `plain` | `gradient`. */
 	welcome_background?: string,
+	/**
+	 *  Offer a hover control that fills the tab with a video, without
+	 *  leaving the window.
+	 */
+	video_fill_tab?: boolean,
 };
 
 /**  A named device, as the chrome's simulator and `page_resize` both see it. */

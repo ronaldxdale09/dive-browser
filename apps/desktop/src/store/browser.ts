@@ -55,6 +55,8 @@ interface BrowserState {
   stop: () => Promise<void>;
   /** Open the print dialog for the active tab. */
   print: () => Promise<void>;
+  /** Fill the tab with the page's video, or leave that state. */
+  fillVideo: () => Promise<void>;
   setTier: (id: string, tier: TabTier) => Promise<void>;
   /** Which settings panel opens next; `openSettings` sets it and the dialog reads it once. */
   settingsSection: SettingsSection;
@@ -330,8 +332,23 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   navigate: async (url) => {
     const id = get().activeTab;
     if (!id) return get().openTab(url);
-    set((s) => ({ navError: without(s.navError, id) }));
-    await run(set, () => ipc.tabNavigate(id, url));
+    const prevTab = get().tabs.find((candidate) => candidate.id === id);
+    const prevUrl = prevTab?.url;
+    // Optimistic: show the destination immediately in the active tab;
+    // if navigation rejects, roll back to the previous URL.
+    set((s) => ({
+      navError: without(s.navError, id),
+      tabs: s.tabs.map((t) => (t.id === id ? { ...t, url } : t)),
+    }));
+    try {
+      await ipc.tabNavigate(id, url);
+      set({ error: null });
+    } catch (e) {
+      set((s) => ({
+        tabs: s.tabs.map((t) => (t.id === id ? { ...t, url: prevUrl ?? t.url } : t)),
+        error: message(e),
+      }));
+    }
   },
   back: async () => {
     const id = get().activeTab;
@@ -348,6 +365,17 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   stop: async () => {
     const id = get().activeTab;
     if (id) await run(set, () => ipc.tabStop(id));
+  },
+  fillVideo: async () => {
+    const id = get().activeTab;
+    if (!id) return;
+    try {
+      const outcome = await ipc.tabFillVideo(id);
+      if (outcome === "no-video") set({ error: "No video on this page to fill the tab with." });
+      else if (outcome === "unavailable") set({ error: "Fill tab is off for this page. Turn it on in Settings › General." });
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+    }
   },
   print: async () => {
     const id = get().activeTab;
@@ -408,9 +436,15 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   reorderTabs: async (ordered) => {
     const ws = get().activeWorkspace;
     if (!ws) return;
+    const prevTabs = get().tabs;
     // Optimistic: renumber locally, the engine confirms with tab_upserted events.
     set((s) => ({ tabs: s.tabs.map((t) => (ordered.includes(t.id) ? { ...t, position: ordered.indexOf(t.id) } : t)) }));
-    await run(set, () => ipc.tabReorder(ws, ordered));
+    try {
+      await ipc.tabReorder(ws, ordered);
+      set({ error: null });
+    } catch (e) {
+      set({ tabs: prevTabs, error: message(e) });
+    }
   },
   setPinned: async (id, pinned) => run(set, () => ipc.tabSetPinned(id, pinned)),
   activateWorkspace: async (id) => {
@@ -438,9 +472,15 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     }
   },
   reorderWorkspaces: async (ordered) => {
+    const prevWorkspaces = get().workspaces;
     // Optimistic, like tab reordering: the engine confirms with upsert events.
     set((s) => ({ workspaces: ordered.map((id) => s.workspaces.find((w) => w.id === id)).filter((w) => w !== undefined) }));
-    await run(set, () => ipc.workspaceReorder(ordered));
+    try {
+      await ipc.workspaceReorder(ordered);
+      set({ error: null });
+    } catch (e) {
+      set({ workspaces: prevWorkspaces, error: message(e) });
+    }
   },
   createWorkspace: async (draft, separateContainer) => {
     await run(set, () => ipc.workspaceCreate(draft, separateContainer));

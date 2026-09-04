@@ -38,10 +38,25 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
   const [redo, setRedo] = useState<Operation[]>([]);
   const [draft, setDraft] = useState<Operation | null>(null);
   const [textAt, setTextAt] = useState<Point | null>(null);
-  const [zoom, setZoom] = useState(0.65);
+  // "fit" follows the width of the viewing area so the whole page is in
+  // view without hiding under the settings panel; a number is a zoom the
+  // person chose with the footer controls.
+  const [zoomMode, setZoomMode] = useState<number | "fit">("fit");
+  const [areaWidth, setAreaWidth] = useState(0);
+  const areaRef = useRef<HTMLElement>(null);
+  const zoom = image ? fitZoom(zoomMode, areaWidth, image.naturalWidth) : 1;
+  const setZoom = useCallback((update: (current: number) => number) => setZoomMode(Math.round(update(zoom) * 100) / 100), [zoom]);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [pdfSize, setPdfSize] = useState<"continuous" | "a4" | "letter">("continuous");
+
+  useEffect(() => {
+    const area = areaRef.current;
+    if (!area) return;
+    const observer = new ResizeObserver(([entry]) => entry && setAreaWidth(entry.contentRect.width));
+    observer.observe(area);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!src) return;
@@ -93,7 +108,7 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [redoOne, textAt, undoOne]);
+  }, [redoOne, setZoom, textAt, undoOne]);
 
   const point = (event: React.PointerEvent<HTMLCanvasElement>): Point => {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -161,13 +176,13 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
 
   return (
     <main aria-label="Capture editor" className="flex h-full min-h-0 flex-col bg-ground text-ink">
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-surface px-4">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line-2 bg-surface-2 px-4">
         <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-highlight-soft text-highlight"><Icon icon={ImageDown} size={16} /></span>
         <div className="mr-2 min-w-0 flex-1"><h1 className="truncate text-sm font-semibold">{title}</h1><p className="truncate text-[11px] text-ink-3">{sourceUrl || "Full-page capture"}</p></div>
         <Action label={copied ? "Copied" : "Copy"} icon={copied ? Check : Copy} disabled={!image || busy !== null} onClick={() => void copy()} />
         <Action label="Export PNG" short="PNG" icon={Download} disabled={!image || busy !== null} onClick={() => void exportAs("png")} />
         <Action label="Export JPEG" short="JPEG" icon={Download} disabled={!image || busy !== null} onClick={() => void exportAs("jpeg")} />
-        <select aria-label="PDF page size" value={pdfSize} onChange={(event) => setPdfSize(event.target.value as typeof pdfSize)} className="h-8 rounded-l-lg border border-line bg-surface-2 px-2 text-[11px] text-ink-2 outline-none"><option value="continuous">Continuous PDF</option><option value="a4">A4 pages</option><option value="letter">Letter pages</option></select>
+        <select aria-label="PDF page size" value={pdfSize} onChange={(event) => setPdfSize(event.target.value as typeof pdfSize)} className="h-8 rounded-l-lg border border-line-2 bg-surface-3 px-2 text-[11px] text-ink outline-none"><option value="continuous">Continuous PDF</option><option value="a4">A4 pages</option><option value="letter">Letter pages</option></select>
         <Action label="Export PDF" short="PDF" icon={Download} primary joined disabled={!image || busy !== null} onClick={() => void exportAs("pdf")} />
       </header>
       <div className="flex min-h-0 flex-1">
@@ -178,7 +193,7 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
           <ToolButton label="Redo" icon={Redo2} disabled={redo.length === 0} onClick={redoOne} />
           <ToolButton label="Reset edits" icon={RotateCcw} disabled={operations.length === 0} onClick={() => { setOperations([]); setRedo([]); }} />
         </aside>
-        <section className="relative min-w-0 flex-1 overflow-auto bg-[radial-gradient(circle_at_center,var(--color-surface-2),var(--color-ground)_70%)] p-8">
+        <section ref={areaRef} className="relative min-w-0 flex-1 overflow-auto bg-[radial-gradient(circle_at_center,var(--color-surface-2),var(--color-ground)_70%)] p-8">
           {loadError && <div role="alert" className="mx-auto mt-20 max-w-md rounded-xl border border-danger/30 bg-danger/10 p-5 text-sm text-danger">{loadError}</div>}
           {!image && !loadError && <div role="status" className="mx-auto mt-20 w-fit rounded-full border border-line bg-surface px-4 py-2 text-xs text-ink-3">Loading full-resolution capture…</div>}
           {image && <div className="relative mx-auto w-fit shadow-2xl" style={{ width: image.naturalWidth * zoom }}>
@@ -192,13 +207,23 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
           <div className="mt-auto space-y-2 border-t border-line pt-4 text-[11px] text-ink-3">{image && <p>{image.naturalWidth.toLocaleString()} × {image.naturalHeight.toLocaleString()} px</p>}{cropRegion && <p className="text-highlight">Crop: {Math.round(cropRegion.width)} × {Math.round(cropRegion.height)} px</p>}<button type="button" disabled={!src} onClick={() => src && void ipc.downloadsReveal(src)} className="flex items-center gap-1.5 text-ink-2 hover:text-ink disabled:opacity-40"><Icon icon={FolderOpen} size={13} /> Original in Finder</button></div>
         </aside>
       </div>
-      <footer className="flex h-10 shrink-0 items-center gap-2 border-t border-line bg-surface px-4 text-[11px] text-ink-3"><span>{operations.length} edit{operations.length === 1 ? "" : "s"}</span><span className="flex-1 text-center">Everything stays on this Mac</span><button type="button" aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(0.2, value - 0.1))} className="grid size-7 place-items-center rounded-full hover:bg-surface-2"><Icon icon={Minus} size={13} /></button><button type="button" onClick={() => setZoom(0.65)} className="w-12 rounded py-1 text-center hover:bg-surface-2">{Math.round(zoom * 100)}%</button><button type="button" aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(2, value + 0.1))} className="grid size-7 place-items-center rounded-full hover:bg-surface-2"><Icon icon={Plus} size={13} /></button></footer>
+      <footer className="flex h-10 shrink-0 items-center gap-2 border-t border-line bg-surface px-4 text-[11px] text-ink-3"><span>{operations.length} edit{operations.length === 1 ? "" : "s"}</span><span className="flex-1 text-center">Everything stays on this Mac</span><button type="button" aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(0.1, value - 0.1))} className="grid size-7 place-items-center rounded-full hover:bg-surface-2"><Icon icon={Minus} size={13} /></button><button type="button" aria-label={zoomMode === "fit" ? "Fitted to width; click for actual size" : "Fit to width"} aria-pressed={zoomMode === "fit"} onClick={() => setZoomMode(zoomMode === "fit" ? 1 : "fit")} className="min-w-12 rounded px-1.5 py-1 text-center hover:bg-surface-2 aria-pressed:text-ink">{zoomMode === "fit" ? `Fit · ${Math.round(zoom * 100)}%` : `${Math.round(zoom * 100)}%`}</button><button type="button" aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(2, value + 0.1))} className="grid size-7 place-items-center rounded-full hover:bg-surface-2"><Icon icon={Plus} size={13} /></button></footer>
     </main>
   );
 }
 
 function ToolButton({ label, icon, active = false, disabled = false, onClick }: { label: string; icon: typeof Crop; active?: boolean; disabled?: boolean; onClick: () => void }) { return <button type="button" aria-label={label} aria-pressed={active} disabled={disabled} onClick={onClick} className="grid size-10 place-items-center rounded-xl text-ink-3 hover:bg-surface-2 hover:text-ink disabled:opacity-30 aria-pressed:bg-highlight-soft aria-pressed:text-highlight"><Icon icon={icon} size={16} /></button>; }
-function Action({ label, short, icon, onClick, disabled, primary = false, joined = false }: { label: string; short?: string; icon: typeof Download; onClick: () => void; disabled: boolean; primary?: boolean; joined?: boolean }) { return <button type="button" aria-label={label} disabled={disabled} onClick={onClick} className={`flex h-8 items-center gap-1.5 px-3 text-xs font-medium disabled:opacity-40 ${joined ? "-ml-2 rounded-r-lg" : "rounded-lg"} ${primary ? "bg-accent text-accent-ink hover:brightness-105" : "bg-surface-2 text-ink-2 hover:bg-surface-3 hover:text-ink"}`}><Icon icon={icon} size={13} />{short ?? label}</button>; }
+function Action({ label, short, icon, onClick, disabled, primary = false, joined = false }: { label: string; short?: string; icon: typeof Download; onClick: () => void; disabled: boolean; primary?: boolean; joined?: boolean }) { return <button type="button" aria-label={label} disabled={disabled} onClick={onClick} className={`flex h-8 items-center gap-1.5 px-3 text-xs font-medium disabled:opacity-40 ${joined ? "-ml-2 rounded-r-lg" : "rounded-lg"} ${primary ? "bg-accent text-accent-ink hover:brightness-105" : "border border-line-2 bg-surface-3 text-ink hover:brightness-125"}`}><Icon icon={icon} size={13} />{short ?? label}</button>; }
+/** Padding the viewing area keeps around the page (Tailwind `p-8` on both sides). */
+const AREA_PADDING = 64;
+
+/** The zoom `mode` resolves to for a page `imageWidth` wide in an area `areaWidth` wide. Fit never enlarges past 100%. */
+export function fitZoom(mode: number | "fit", areaWidth: number, imageWidth: number): number {
+  if (mode !== "fit") return mode;
+  if (areaWidth <= 0 || imageWidth <= 0) return 1;
+  return Math.min(1, Math.max(0.05, (areaWidth - AREA_PADDING) / imageWidth));
+}
+
 function validRegion(region: Region): boolean { return Math.abs(region.x2 - region.x1) > 3 || Math.abs(region.y2 - region.y1) > 3; }
 function normalized(region: Region) { return { x: Math.min(region.x1, region.x2), y: Math.min(region.y1, region.y2), width: Math.abs(region.x2 - region.x1), height: Math.abs(region.y2 - region.y1) }; }
 function offsetMark(mark: Mark, x: number, y: number): Mark {

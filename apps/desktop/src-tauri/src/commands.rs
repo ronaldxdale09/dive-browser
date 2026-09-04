@@ -398,6 +398,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_zoom,
             tab_stop,
             tab_print,
+            tab_fill_video,
             tab_set_tier,
             bookmark_remove,
             permission_set,
@@ -1553,6 +1554,18 @@ pub(crate) async fn tab_stop(state: State<'_, AppState>, id: TabId) -> AppResult
         .await
         .map_err(|e| AppError::new(e.to_string()))?;
     Ok(())
+}
+
+/// Fill the tab with the page's video, or leave that state. Returns what
+/// the page did: `filled`, `exited`, `no-video` or `unavailable`.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_fill_video(state: State<'_, AppState>, id: TabId) -> AppResult<String> {
+    let session = lock(&state.host)
+        .as_ref()
+        .and_then(|h| h.cdp(id))
+        .ok_or_else(|| AppError::new("no devtools session"))?;
+    Ok(crate::filltab::toggle(&session).await)
 }
 
 /// Open the system print dialog for the tab's page.

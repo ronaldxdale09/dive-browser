@@ -1,5 +1,6 @@
 import { Clapperboard, Download, ExternalLink, FolderOpen, History, Search, Star, Trash2, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { ipc } from "../lib/ipc";
 import type { Bookmark, HistoryEntry, RecordingInfo } from "../lib/ipc";
 import { recordingBytes } from "../lib/recordingFormat";
@@ -100,8 +101,37 @@ function useOpenRow(onOpened: () => void) {
   };
 }
 
+function BookmarkRow({
+  item: b,
+  onOpen,
+  onRemove,
+}: {
+  item: Bookmark;
+  onOpen: (e: React.MouseEvent, url: string) => void;
+  onRemove: (url: string) => void;
+}) {
+  return (
+    <div className="group flex items-center gap-1">
+      <button type="button" onClick={(e) => onOpen(e, b.url)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
+        <Favicon src={b.favicon} size={14} fallback={Star} fallbackClassName="text-highlight" />
+        <span className="truncate text-ink">{b.title || b.url}</span>
+        <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(b.url)}</span>
+      </button>
+      <button
+        type="button"
+        aria-label={`Remove bookmark ${b.title || b.url}`}
+        onClick={() => onRemove(b.url)}
+        className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100"
+      >
+        <Icon icon={Trash2} size={13} />
+      </button>
+    </div>
+  );
+}
+
 function Bookmarks({ query, onOpened }: { query: string; onOpened: () => void }) {
   const [items, setItems] = useState<Bookmark[] | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let alive = true;
     ipc
@@ -113,33 +143,66 @@ function Bookmarks({ query, onOpened }: { query: string; onOpened: () => void })
     };
   }, []);
   const open = useOpenRow(onOpened);
-  const shown = (items ?? []).filter((b) => matches(query, b.title, b.url));
+  const shown = useMemo(() => (items ?? []).filter((b) => matches(query, b.title, b.url)), [items, query]);
   const remove = (url: string) => {
+    const prev = items;
     setItems((list) => (list ?? []).filter((b) => b.url !== url));
-    void ipc.bookmarkRemove(url).catch(() => undefined);
+    void ipc.bookmarkRemove(url).catch((err) => {
+      setItems(prev);
+      useBrowser.setState({ error: err instanceof Error ? err.message : String(err) });
+    });
   };
+
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer({
+    count: shown.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 36,
+    overscan: 10,
+    getItemKey: (i) => shown[i]?.url ?? i,
+  });
+
   if (items === null) return <p className="p-3 text-xs text-ink-3">Loading…</p>;
   if (shown.length === 0) return <Empty>{items.length === 0 ? "No bookmarks yet. Star a page from the address bar to keep it here." : "Nothing matches."}</Empty>;
+
+  const virtualItems = virtualizer.getVirtualItems();
+  const useVirtual = virtualItems.length > 0 && shown.length > 40;
+
+  if (!useVirtual) {
+    return (
+      <ul className="flex flex-col">
+        {shown.map((b) => (
+          <li key={b.url}>
+            <BookmarkRow item={b} onOpen={open} onRemove={remove} />
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
   return (
-    <ul className="flex flex-col">
-      {shown.map((b) => (
-        <li key={b.url} className="group flex items-center gap-1">
-          <button type="button" onClick={(e) => open(e, b.url)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
-            <Favicon src={b.favicon} size={14} fallback={Star} fallbackClassName="text-highlight" />
-            <span className="truncate text-ink">{b.title || b.url}</span>
-            <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(b.url)}</span>
-          </button>
-          <button
-            type="button"
-            aria-label={`Remove bookmark ${b.title || b.url}`}
-            onClick={() => remove(b.url)}
-            className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100"
-          >
-            <Icon icon={Trash2} size={13} />
-          </button>
-        </li>
-      ))}
-    </ul>
+    <div ref={scrollRef} className="h-full overflow-y-auto">
+      <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
+        {virtualItems.map((virtualRow) => {
+          const b = shown[virtualRow.index];
+          if (!b) return null;
+          return (
+            <div
+              key={b.url}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+            >
+              <BookmarkRow item={b} onOpen={open} onRemove={remove} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -234,16 +297,21 @@ function DownloadsList({ query }: { query: string }) {
   const items = useDownloads((s) => s.items);
   const shown = items.filter((d) => matches(query, d.name, d.url));
   if (shown.length === 0) return <Empty>{items.length === 0 ? "Nothing downloaded in this session yet." : "Nothing matches."}</Empty>;
+  const reveal = (path: string | null) => {
+    void ipc.downloadsReveal(path).catch((err) => {
+      useBrowser.setState({ error: err instanceof Error ? err.message : String(err) });
+    });
+  };
   return (
     <ul className="flex flex-col">
       {shown.map((d) => (
         <li key={`${d.url}-${d.at}`} className="group flex items-center gap-1">
-          <button type="button" onClick={() => void ipc.downloadsReveal(d.path).catch(() => undefined)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
+          <button type="button" onClick={() => reveal(d.path)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
             <Icon icon={Download} size={14} className="shrink-0 text-ink-3" />
             <span className="truncate text-ink">{d.name}</span>
             <span className="ml-auto shrink-0 pl-3 text-[11px] text-ink-3">{d.status}</span>
           </button>
-          <button type="button" aria-label={`Show ${d.name} in Finder`} onClick={() => void ipc.downloadsReveal(d.path).catch(() => undefined)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
+          <button type="button" aria-label={`Show ${d.name} in Finder`} onClick={() => reveal(d.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
             <Icon icon={FolderOpen} size={13} />
           </button>
         </li>
@@ -267,8 +335,22 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
     };
   }, []);
   const remove = (path: string) => {
+    const prev = items;
     setItems((list) => (list ?? []).filter((r) => r.path !== path));
-    void ipc.recordingDelete(path).catch(() => undefined);
+    void ipc.recordingDelete(path).catch((err) => {
+      setItems(prev);
+      useBrowser.setState({ error: err instanceof Error ? err.message : String(err) });
+    });
+  };
+  const reveal = (path: string) => {
+    void ipc.downloadsReveal(path).catch((err) => {
+      useBrowser.setState({ error: err instanceof Error ? err.message : String(err) });
+    });
+  };
+  const openRecording = (path: string) => {
+    void ipc.recordingOpen(path).catch((err) => {
+      useBrowser.setState({ error: err instanceof Error ? err.message : String(err) });
+    });
   };
   if (items === null) return <p className="p-3 text-xs text-ink-3">Loading…</p>;
   const shown = items.filter((r) => matches(query, r.name, r.format));
@@ -277,7 +359,7 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
     <ul className="flex flex-col">
       {shown.map((r) => (
         <li key={r.path} className="group flex items-center gap-1">
-          <button type="button" onClick={() => void ipc.recordingOpen(r.path).catch(() => undefined)} className="flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
+          <button type="button" onClick={() => openRecording(r.path)} className="flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
             <Icon icon={Clapperboard} size={14} className="shrink-0 text-ink-3" />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-ink">{r.name}</span>
@@ -301,7 +383,7 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
               <Icon icon={Wand2} size={13} />
             </button>
           )}
-          <button type="button" aria-label={`Show ${r.name} in Finder`} onClick={() => void ipc.downloadsReveal(r.path).catch(() => undefined)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
+          <button type="button" aria-label={`Show ${r.name} in Finder`} onClick={() => reveal(r.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
             <Icon icon={ExternalLink} size={13} />
           </button>
           <button type="button" aria-label={`Delete ${r.name}`} onClick={() => remove(r.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100">

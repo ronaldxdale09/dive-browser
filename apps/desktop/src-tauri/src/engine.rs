@@ -380,22 +380,24 @@ impl TabHost {
             // `DIVE_DISABLE_FEEDS=1` leaves the DevTools session idle, to
             // tell an engine fault apart from one our own traffic provokes.
             let feeds = std::env::var_os("DIVE_DISABLE_FEEDS").is_none();
-            let (console_ready, network_ready, interception_ready) = if feeds {
+            let (console_ready, network_ready, interception_ready, fill_ready) = if feeds {
                 let c = crate::console::attach(app.clone(), tab_id, session.clone());
                 let n = crate::network::attach(app.clone(), tab_id, session.clone());
                 crate::favicon::attach(app.clone(), tab_id, session.clone());
                 crate::loading::attach(app.clone(), tab_id, session.clone());
+                let f = crate::filltab::attach(app.clone(), tab_id, session.clone());
                 let r =
                     crate::rules::attach(app.clone(), tab_id, tab.workspace_id, session.clone());
                 crate::inspect::watch(app.clone(), tab_id, &session);
                 crate::crash::watch(app.clone(), tab_id, session.clone());
-                (c, n, r)
+                (c, n, r, f)
             } else {
                 let (ct, cr) = tokio::sync::oneshot::channel();
                 let (nt, nr) = tokio::sync::oneshot::channel();
                 let (rt, rr) = tokio::sync::oneshot::channel();
-                let _ = (ct.send(()), nt.send(()), rt.send(()));
-                (cr, nr, rr)
+                let (ft, fr) = tokio::sync::oneshot::channel();
+                let _ = (ct.send(()), nt.send(()), rt.send(()), ft.send(()));
+                (cr, nr, rr, fr)
             };
             let session_for_prefs = session.clone();
             self.cdp.insert(tab_id, session);
@@ -405,6 +407,7 @@ impl TabHost {
                 let _ = console_ready.await;
                 let _ = network_ready.await;
                 let _ = interception_ready.await;
+                let _ = fill_ready.await;
                 // Privacy preferences have to be in force before the document
                 // request goes out, or the first load escapes them.
                 let prefs = {
@@ -636,6 +639,7 @@ impl TabHost {
             LogicalPosition::new(0.0, 0.0),
             LogicalSize::new(width, height),
         )?;
+        crate::titlebar::keep_drags_in_chrome_soon(&window);
         if let Err(error) = view.reparent(&window) {
             let _ = window.destroy();
             return Err(error);
@@ -1046,6 +1050,7 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
         LogicalPosition::new(0.0, 0.0),
         LogicalSize::new(width, height),
     )?;
+    crate::titlebar::keep_drags_in_chrome_soon(&window);
 
     let state = app.state::<AppState>();
     *lock(&state.host) = Some(TabHost::new(window, crate::state::profiles_root()));

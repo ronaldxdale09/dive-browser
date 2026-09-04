@@ -52,6 +52,7 @@ export const DEFAULT_PREFS: Prefs = {
   tab_style: "pill",
   motion: "system",
   welcome_background: "orbs",
+  video_fill_tab: true,
 };
 
 /** The appearance fields at their defaults, for "Reset appearance". */

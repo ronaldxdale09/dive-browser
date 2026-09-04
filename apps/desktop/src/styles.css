@@ -95,6 +95,7 @@ button, input { font: inherit; color: inherit; }
 button {
   cursor: default;
   -webkit-tap-highlight-color: transparent;
+  transition: transform 90ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 button:not(:disabled):active,
 .pressable:not(:disabled):active {
@@ -307,6 +308,46 @@ button:not(:disabled):active,
   animation-duration: 120ms;
 }
 
+/* Anchored popover animations with matching leave transition */
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.popover-enter {
+  animation: popover-in var(--dialog-fade) cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: top right;
+  will-change: transform, opacity;
+}
+.popover-leave {
+  animation: popover-in var(--dialog-fade) ease-in reverse both;
+  transform-origin: top right;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+/* Progress indicator for omnibox loading */
+@keyframes loading-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(30%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+.animate-loading-bar {
+  animation: loading-progress 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: transform;
+}
+
 /* Tab dragging stays compositor-only: the lifted pill and split affordances
    animate with opacity/transform, never layout, filters or large repaints. */
 @keyframes tab-lift-in {
@@ -450,8 +491,11 @@ button:not(:disabled):active,
     .dialog-enter > *,
     .dialog-leave,
     .dialog-leave > *,
+    .popover-enter,
+    .popover-leave,
     .surface-enter,
     .skeleton-enter,
+    .animate-loading-bar,
     .tab-drag-ghost,
     .tab-drop-zone,
     .privacy-motion
@@ -489,8 +533,11 @@ button:not(:disabled):active,
   .dialog-enter > *,
   .dialog-leave,
   .dialog-leave > *,
+  .popover-enter,
+  .popover-leave,
   .surface-enter,
   .skeleton-enter,
+  .animate-loading-bar,
   .tab-drag-ghost,
   .tab-drop-zone,
   .privacy-motion

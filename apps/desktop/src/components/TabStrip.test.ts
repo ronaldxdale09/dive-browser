@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { essentialTabs, orderTabs, roveTab, TabStrip } from "./TabStrip";
+import { essentialTabs, orderTabs, roveTab, splitAction, TabStrip } from "./TabStrip";
 import type { Tab } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { ipc } from "../lib/ipc";
@@ -199,5 +199,43 @@ describe("TabStrip controls", () => {
     expect(roveTab("ArrowRight", list, button)).toBeNull();
     expect(roveTab("ArrowRight", list, tab)).toBe(tab);
     expect(roveTab("a", list, tab)).toBeNull();
+  });
+});
+
+describe("splitAction", () => {
+  const a = { ...t("a", "today", 0), title: "Alpha" };
+  const b = { ...t("b", "today", 1), title: "Beta" };
+  const c = { ...t("c", "today", 2), title: "A very long page title that keeps going" };
+  const tabs = [a, b, c];
+
+  it("splits an inactive tab with the active one, named after it", () => {
+    const action = splitAction(b, "a", undefined, tabs, []);
+    expect(action).toMatchObject({ kind: "with", anchor: "a", index: 1, label: "Split with “Alpha”" });
+    expect(action?.kind === "with" && action.partner.id).toBe("a");
+  });
+
+  it("splits the active tab with its neighbour, preferring the one after it", () => {
+    expect(splitAction(a, "a", undefined, tabs, [])).toMatchObject({ kind: "with", anchor: "a", label: "Split with “Beta”" });
+    expect(splitAction(c, "c", undefined, tabs, [])).toMatchObject({ kind: "with", label: "Split with “Beta”" });
+    expect(splitAction(a, "a", undefined, [a], [])).toBeNull();
+  });
+
+  it("shortens long partner names", () => {
+    expect(splitAction(a, "c", undefined, tabs, [])).toMatchObject({ label: "Split with “A very long page titl…”" });
+  });
+
+  it("lets a pane leave and another tab join an existing split", () => {
+    const split = { tabs: ["a", "b"], sizes: [0.5, 0.5] };
+    expect(splitAction(a, "a", split, tabs, [])).toEqual({ kind: "leave" });
+    expect(splitAction(c, "a", split, tabs, [])).toMatchObject({ kind: "with", index: 2, anchor: "a", label: "Add to split view" });
+  });
+
+  it("offers nothing for a tab in its own window, or when the split is full", () => {
+    expect(splitAction(b, "a", undefined, tabs, ["b"])).toBeNull();
+    expect(splitAction(b, "a", undefined, tabs, ["a"])).toBeNull();
+    const d = t("d", "today", 3);
+    const e = t("e", "today", 4);
+    const full = { tabs: ["a", "b", "c", "d"], sizes: [0.25, 0.25, 0.25, 0.25] };
+    expect(splitAction(e, "a", full, [...tabs, d, e], [])).toBeNull();
   });
 });

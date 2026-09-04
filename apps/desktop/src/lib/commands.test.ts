@@ -232,3 +232,11 @@ describe("command dispatch", () => {
     expect(activate).not.toHaveBeenCalled();
   });
 });
+
+describe("fill video", () => {
+  it("is bound to mod+shift+f and titled for the palette", async () => {
+    const { SHORTCUTS, COMMAND_TITLES } = await import("./commands");
+    expect(SHORTCUTS["mod+shift+f"]).toBe("tab.fillVideo");
+    expect(COMMAND_TITLES["tab.fillVideo"]).toBe("Fill tab with video");
+  });
+});

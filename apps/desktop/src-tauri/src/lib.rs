@@ -18,6 +18,7 @@ mod engine;
 mod error;
 mod extensions;
 mod favicon;
+mod filltab;
 mod find;
 mod har;
 mod housekeeping;
@@ -45,6 +46,7 @@ mod sourcemaps;
 pub mod startup;
 mod state;
 mod storage;
+mod titlebar;
 mod vitals;
 
 pub use error::AppError;

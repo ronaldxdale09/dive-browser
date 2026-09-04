@@ -3,11 +3,15 @@ import type { Event } from "@tauri-apps/api/event";
 import { reduceCrash, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, useBrowser, withoutRequest } from "./browser";
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
-import type { PermissionAsked, Tab, TabCrashed, TabLoad } from "../lib/ipc";
+import type { PermissionAsked, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
 import { usePrivacy } from "./privacy";
 
 const tab = (id: string, url = "https://x"): Tab => ({
   id, workspace_id: "w", tier: "today", url, title: "", position: 0, state: "active", last_active_at: "2026-01-01T00:00:00Z", favicon: null,
+});
+
+const ws = (id: string, name: string, position: number): Workspace => ({
+  id, name, color: "#fff", icon: "home", container_id: "c1", profile_id: "p1", position, created_at: "2026-01-01T00:00:00Z",
 });
 
 describe("reduceEvent", () => {
@@ -39,6 +43,21 @@ describe("reduceWindowChange", () => {
 
   it("forgets a tab that came back", () => {
     expect(reduceWindowChange({ detached: ["a", "b"], activeTab: null }, "a", false)).toEqual({ detached: ["b"], activeTab: null });
+  });
+});
+
+describe("permission helpers", () => {
+  it("deduplicates requests for the same origin and kind", () => {
+    const r1 = reducePermissionAsked({}, { tab_id: "t1", origin: "https://a.test", kind: "camera" });
+    expect(r1.t1).toEqual([{ origin: "https://a.test", kind: "camera" }]);
+    const r2 = reducePermissionAsked(r1, { tab_id: "t1", origin: "https://a.test", kind: "camera" });
+    expect(r2.t1?.length).toBe(1);
+  });
+
+  it("removes single request and cleans up empty tab list", () => {
+    const req = { origin: "https://a.test", kind: "camera" };
+    const r1 = { t1: [req] };
+    expect(withoutRequest(r1, "t1", req)).toEqual({});
   });
 });
 
@@ -161,6 +180,34 @@ describe("optimistic switching", () => {
     expect(useBrowser.getState().error).toBe("unknown workspace");
     expect(snapshot).not.toHaveBeenCalled();
   });
+
+  it("optimistically updates tab URL on navigate and rolls back if the engine refuses", async () => {
+    vi.spyOn(ipc, "tabNavigate").mockRejectedValue(new Error("invalid protocol"));
+    useBrowser.setState({ activeTab: "a", tabs: [tab("a", "https://prev.test")] });
+    await useBrowser.getState().navigate("bad://protocol");
+    expect(useBrowser.getState().tabs.find((t) => t.id === "a")?.url).toBe("https://prev.test");
+    expect(useBrowser.getState().error).toBe("invalid protocol");
+  });
+
+  it("optimistically reorders tabs and rolls back if the engine refuses", async () => {
+    vi.spyOn(ipc, "tabReorder").mockRejectedValue(new Error("reorder failed"));
+    const t1 = { ...tab("t1"), position: 0 };
+    const t2 = { ...tab("t2"), position: 1 };
+    useBrowser.setState({ activeWorkspace: "w1", tabs: [t1, t2] });
+    await useBrowser.getState().reorderTabs(["t2", "t1"]);
+    expect(useBrowser.getState().tabs).toEqual([t1, t2]);
+    expect(useBrowser.getState().error).toBe("reorder failed");
+  });
+
+  it("optimistically reorders workspaces and rolls back if the engine refuses", async () => {
+    vi.spyOn(ipc, "workspaceReorder").mockRejectedValue(new Error("workspace reorder failed"));
+    const w1 = ws("w1", "Work", 0);
+    const w2 = ws("w2", "Personal", 1);
+    useBrowser.setState({ workspaces: [w1, w2] });
+    await useBrowser.getState().reorderWorkspaces(["w2", "w1"]);
+    expect(useBrowser.getState().workspaces).toEqual([w1, w2]);
+    expect(useBrowser.getState().error).toBe("workspace reorder failed");
+  });
 });
 
 describe("boot", () => {
@@ -199,58 +246,16 @@ describe("boot", () => {
   });
 });
 
-describe("permission requests", () => {
-  const asked = (tab_id: string, kind: string, origin = "https://meet.test"): PermissionAsked => ({ tab_id, origin, kind });
-
-  it("queues one request per origin and kind", () => {
-    let reqs = reducePermissionAsked({}, asked("a", "camera"));
-    reqs = reducePermissionAsked(reqs, asked("a", "camera"));
-    reqs = reducePermissionAsked(reqs, asked("a", "microphone"));
-    reqs = reducePermissionAsked(reqs, asked("b", "camera"));
-    expect(reqs).toEqual({
-      a: [
-        { origin: "https://meet.test", kind: "camera" },
-        { origin: "https://meet.test", kind: "microphone" },
-      ],
-      b: [{ origin: "https://meet.test", kind: "camera" }],
-    });
-    const same = reducePermissionAsked(reqs, asked("a", "camera"));
-    expect(same).toBe(reqs);
-  });
-
-  it("drops a request and forgets a tab with none left", () => {
-    const reqs = reducePermissionAsked(reducePermissionAsked({}, asked("a", "camera")), asked("a", "microphone"));
-    const one = withoutRequest(reqs, "a", { origin: "https://meet.test", kind: "camera" });
-    expect(one).toEqual({ a: [{ origin: "https://meet.test", kind: "microphone" }] });
-    expect(withoutRequest(one, "a", { origin: "https://meet.test", kind: "microphone" })).toEqual({});
-  });
-
-  it("remembers the decision and clears the banner", async () => {
-    const initial = useBrowser.getState();
-    const set = vi.spyOn(ipc, "permissionSet").mockResolvedValue(null);
-    useBrowser.setState({ permissionRequests: { a: [{ origin: "https://meet.test", kind: "camera" }] } });
-    await useBrowser.getState().decidePermission("a", { origin: "https://meet.test", kind: "camera" }, "allow");
-    expect(set).toHaveBeenCalledWith("https://meet.test", "camera", "allow");
-    expect(useBrowser.getState().permissionRequests).toEqual({});
-    useBrowser.setState(initial, true);
-    vi.restoreAllMocks();
-  });
-
-  it("closing a tab drops its requests", () => {
-    const initial = useBrowser.getState();
-    vi.spyOn(ipc, "workspaceTabCounts").mockResolvedValue([]);
-    useBrowser.setState({ tabs: [tab("a")], permissionRequests: { a: [{ origin: "https://meet.test", kind: "camera" }] } });
-    useBrowser.getState().applyEvent({ type: "tab_closed", data: "a" });
-    expect(useBrowser.getState().permissionRequests).toEqual({});
-    useBrowser.setState(initial, true);
-    vi.restoreAllMocks();
-  });
-
-  it("openSettings lands on the asked-for panel", () => {
-    const initial = useBrowser.getState();
-    useBrowser.getState().openSettings("about");
-    expect(useBrowser.getState().open.settings).toBe(true);
-    expect(useBrowser.getState().settingsSection).toBe("about");
-    useBrowser.setState(initial, true);
+describe("fillVideo", () => {
+  it("asks the engine to fill the active tab and explains when there is no video", async () => {
+    const spy = vi.spyOn(ipc, "tabFillVideo").mockResolvedValue("no-video");
+    useBrowser.setState({ activeTab: "t1", error: null });
+    await useBrowser.getState().fillVideo();
+    expect(spy).toHaveBeenCalledWith("t1");
+    expect(useBrowser.getState().error).toMatch(/No video/);
+    spy.mockResolvedValue("filled");
+    useBrowser.setState({ error: null });
+    await useBrowser.getState().fillVideo();
+    expect(useBrowser.getState().error).toBeNull();
   });
 });

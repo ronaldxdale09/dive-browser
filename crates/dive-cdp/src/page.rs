@@ -189,7 +189,7 @@ pub async fn capture_full_page_instant(
             "full-page capture {width}x{height} exceeds the safe {MAX_FULL_PAGE_PIXELS:.0} pixel / {MAX_FULL_PAGE_DIMENSION:.0} px side limit"
         )));
     }
-    capture_screenshot(
+    capture_screenshot_retrying(
         session,
         ScreenshotOptions {
             format,
@@ -207,13 +207,47 @@ pub async fn capture_full_page_instant(
     .await
 }
 
+/// How many times a screenshot is attempted before its failure is reported.
+const SCREENSHOT_ATTEMPTS: u32 = 3;
+/// Pause between attempts, long enough for the compositor to produce a frame
+/// at the new surface size.
+const SCREENSHOT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Whether a protocol error is Chromium's transient "Unable to capture
+/// screenshot": raised when a capture beyond the viewport asks for a surface
+/// the compositor has not finished allocating, typically the first large
+/// capture after the document was traversed. The same request succeeds a
+/// moment later, so it is retried rather than surfaced.
+fn is_transient_capture_failure(error: &CdpError) -> bool {
+    matches!(error, CdpError::Protocol { message, .. } if message.contains("Unable to capture screenshot"))
+}
+
+/// [`capture_screenshot`], retried on the transient compositor failure.
+pub async fn capture_screenshot_retrying(
+    session: &CdpSession,
+    opts: ScreenshotOptions,
+) -> Result<Vec<u8>> {
+    let mut attempt = 1;
+    loop {
+        match capture_screenshot(session, opts).await {
+            Err(error) if attempt < SCREENSHOT_ATTEMPTS && is_transient_capture_failure(&error) => {
+                tracing::debug!(attempt, "screenshot not ready, retrying: {error}");
+                attempt += 1;
+                tokio::time::sleep(SCREENSHOT_RETRY_DELAY).await;
+            }
+            outcome => return outcome,
+        }
+    }
+}
+
 const FULL_PAGE_SCROLL_SCRIPT: &str = r"
 (() => new Promise((resolve) => {
   const root = document.scrollingElement;
   if (!root) { resolve(false); return; }
   const key = '__diveFullPageCapture';
   const body = document.body;
-  globalThis[key] = {
+  const saved = globalThis[key];
+  globalThis[key] = saved || {
     x: globalThis.scrollX,
     y: globalThis.scrollY,
     rootBehavior: root.style.getPropertyValue('scroll-behavior'),
@@ -223,27 +257,36 @@ const FULL_PAGE_SCROLL_SCRIPT: &str = r"
   };
   root.style.setProperty('scroll-behavior', 'auto', 'important');
   if (body) body.style.setProperty('scroll-behavior', 'auto', 'important');
-  globalThis.scrollTo(0, 0);
+  const bottomOf = () => Math.max(0, root.scrollHeight - globalThis.innerHeight);
+  const finish = (delay) => {
+    globalThis.scrollTo(0, bottomOf());
+    globalThis.setTimeout(() => resolve(true), delay);
+  };
+  // A hidden document gets its timers throttled to once a second or less,
+  // and nobody is watching: jump instead of animating. Same for reduced
+  // motion.
   const reduced = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  if (document.hidden || reduced) { finish(0); return; }
+  globalThis.scrollTo(0, 0);
+  const deadline = Date.now() + 8000;
   let steps = 0;
   let stalls = 0;
   let last = -1;
   const advance = () => {
-    const bottom = Math.max(0, root.scrollHeight - globalThis.innerHeight);
+    const bottom = bottomOf();
     const step = Math.max(360, globalThis.innerHeight * 0.78);
     const next = Math.min(bottom, globalThis.scrollY + step);
     globalThis.scrollTo(0, next);
     steps += 1;
     stalls = Math.abs(globalThis.scrollY - last) < 1 ? stalls + 1 : 0;
     last = globalThis.scrollY;
-    if (globalThis.scrollY >= bottom - 1 || stalls >= 3 || steps >= 240) {
-      globalThis.scrollTo(0, bottom);
-      globalThis.setTimeout(() => resolve(true), reduced ? 0 : 100);
+    if (globalThis.scrollY >= bottom - 1 || stalls >= 3 || steps >= 240 || Date.now() > deadline) {
+      finish(100);
       return;
     }
-    globalThis.setTimeout(advance, reduced ? 0 : 70);
+    globalThis.setTimeout(advance, 70);
   };
-  globalThis.setTimeout(advance, reduced ? 0 : 70);
+  globalThis.setTimeout(advance, 70);
 }))()
 ";
 
@@ -263,7 +306,9 @@ const FULL_PAGE_RESTORE_SCRIPT: &str = r"
   restore(body, state.bodyBehavior, state.bodyPriority);
   globalThis.scrollTo(state.x, state.y);
   delete globalThis[key];
-  globalThis.requestAnimationFrame(() => resolve(true));
+  // A timer, not an animation frame: a hidden or occluded document never paints,
+  // and the caller would wait on it until the protocol call timed out.
+  globalThis.setTimeout(() => resolve(true), 0);
 }))()
 ";
 
@@ -286,7 +331,12 @@ mod tests {
             self.sent.lock().unwrap().push(msg.clone());
             let reply = self.replies.lock().unwrap().remove(0);
             let session = self.session.lock().unwrap().clone().unwrap();
-            session.handle_incoming(&json!({"id": msg["id"], "result": reply}).to_string())
+            // A reply shaped `{"error": {...}}` is delivered as a protocol error.
+            let envelope = match reply.get("error") {
+                Some(error) => json!({"id": msg["id"], "error": error}),
+                None => json!({"id": msg["id"], "result": reply}),
+            };
+            session.handle_incoming(&envelope.to_string())
         }
     }
 
@@ -324,6 +374,67 @@ mod tests {
         assert_eq!(shot["params"]["clip"]["height"], 4000.0);
         assert_eq!(shot["params"]["captureBeyondViewport"], true);
         assert_eq!(sent[3]["method"], "Runtime.evaluate");
+    }
+
+    #[tokio::test]
+    async fn full_page_retries_the_transient_compositor_failure() {
+        let png = base64::engine::general_purpose::STANDARD.encode(b"PNGDATA");
+        let (session, sent) = scripted(vec![
+            json!({"cssContentSize": {"width": 1280, "height": 22000},
+                   "cssLayoutViewport": {"clientWidth": 1280, "clientHeight": 800}}),
+            json!({"error": {"code": -32000, "message": "Unable to capture screenshot"}}),
+            json!({"data": png}),
+        ]);
+        let bytes = capture_full_page_instant(&session, ImageFormat::Png)
+            .await
+            .unwrap();
+        assert_eq!(bytes, b"PNGDATA");
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 3);
+        assert_eq!(sent[1]["method"], "Page.captureScreenshot");
+        assert_eq!(sent[2]["method"], "Page.captureScreenshot");
+        assert_eq!(sent[1]["params"], sent[2]["params"], "retried unchanged");
+    }
+
+    #[tokio::test]
+    async fn full_page_gives_up_after_repeated_failures_and_reports_other_errors_at_once() {
+        let failure = json!({"error": {"code": -32000, "message": "Unable to capture screenshot"}});
+        let (session, sent) = scripted(vec![
+            json!({"cssContentSize": {"width": 1280, "height": 800},
+                   "cssLayoutViewport": {"clientWidth": 1280, "clientHeight": 800}}),
+            failure.clone(),
+            failure.clone(),
+            failure,
+        ]);
+        let error = capture_full_page_instant(&session, ImageFormat::Png)
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("Unable to capture screenshot"),
+            "{error}"
+        );
+        assert_eq!(sent.lock().unwrap().len(), 1 + SCREENSHOT_ATTEMPTS as usize);
+
+        let (session, sent) = scripted(vec![
+            json!({"cssContentSize": {"width": 1280, "height": 800},
+                   "cssLayoutViewport": {"clientWidth": 1280, "clientHeight": 800}}),
+            json!({"error": {"code": -32602, "message": "Invalid parameters"}}),
+        ]);
+        let error = capture_full_page_instant(&session, ImageFormat::Png)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("Invalid parameters"), "{error}");
+        assert_eq!(sent.lock().unwrap().len(), 2, "no retry for a real error");
+    }
+
+    #[test]
+    fn page_scripts_never_wait_on_an_animation_frame() {
+        // A hidden document never paints; a script that waits for a frame
+        // would hang the capture until the protocol call timed out.
+        assert!(!FULL_PAGE_SCROLL_SCRIPT.contains("requestAnimationFrame"));
+        assert!(!FULL_PAGE_RESTORE_SCRIPT.contains("requestAnimationFrame"));
+        assert!(FULL_PAGE_SCROLL_SCRIPT.contains("document.hidden"));
+        assert!(FULL_PAGE_SCROLL_SCRIPT.contains("deadline"));
     }
 
     #[tokio::test]

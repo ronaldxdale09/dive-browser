@@ -256,6 +256,11 @@ function General() {
             />
           }
         />
+        <Row
+          label="Fill tab with videos"
+          hint="Hover a video for a control that makes it fill the tab, without taking over the screen. ⌘⇧F toggles it; Escape leaves."
+          control={<Switch label="Fill tab with videos" checked={prefs.video_fill_tab} onChange={(video_fill_tab) => set({ video_fill_tab })} />}
+        />
       </Group>
     </>
   );

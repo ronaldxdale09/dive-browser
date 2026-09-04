@@ -4,8 +4,10 @@ import { useReducedMotion } from "./useReducedMotion";
 /** Length of a dialog's fade, in ms; matches `--dialog-fade` in styles.css. */
 export const DIALOG_FADE_MS = 120;
 
+export type FadeCloseVariant = "dialog" | "popover";
+
 /**
- * A dialog that fades out before it goes.
+ * A dialog or anchored popover that fades out before it goes.
  *
  * Dialogs over the page hide the native view for as long as they are mounted
  * (see lib/overlay.ts), so unmounting on close is what releases the page.
@@ -18,7 +20,7 @@ export const DIALOG_FADE_MS = 120;
  * `close` to call instead of `onClosed`; a second call while closing is a
  * no-op, so a double Escape does not close twice.
  */
-export function useFadeClose(onClosed: () => void) {
+export function useFadeClose(onClosed: () => void, variant: FadeCloseVariant = "dialog") {
   const reduced = useReducedMotion();
   const [closing, setClosing] = useState(false);
   const latest = useRef(onClosed);
@@ -40,5 +42,8 @@ export function useFadeClose(onClosed: () => void) {
     });
   }, [reduced]);
 
-  return { closing, close, className: closing ? "dialog-leave" : "dialog-enter" };
+  const enterClass = variant === "popover" ? "popover-enter" : "dialog-enter";
+  const leaveClass = variant === "popover" ? "popover-leave" : "dialog-leave";
+
+  return { closing, close, className: closing ? leaveClass : enterClass };
 }

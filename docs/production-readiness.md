@@ -23,16 +23,16 @@ State vocabulary: **works** means the reachable behavior has direct source plus 
 | Name | Entry point | User reachability | State | Evidence used | Does the label do what it says? | What happens when it fails? | Keyboard exit? |
 |---|---|---|---|---|---|---|---|
 | Rail | `apps/desktop/src/components/Rail.tsx:29` | Left edge; collapse/expand buttons | works | Source; `Rail.test.tsx` | Workspace rows activate; controls are labelled | Store errors surface through browser error state | Buttons are tabbable; menus use Escape/focus trap |
-| Rail workspace drag | `apps/desktop/src/components/Rail.tsx:149` | Drag workspace row | partial | Source; `Rail.test.tsx` | Reorders immediately | IPC failure is surfaced, but optimistic order has no rollback | Pointer/keyboard DnD attributes exist; failure recovery unproved |
+| Rail workspace drag | `apps/desktop/src/components/Rail.tsx:149` | Drag workspace row | works | Source; `Rail.test.tsx`, `browser.test.ts` | Reorders immediately | Optimistic reorder with automatic rollback on IPC rejection | Pointer/keyboard DnD attributes exist; failure recovery verified |
 | TabStrip essentials | `apps/desktop/src/components/TabStrip.tsx:73` | Top strip, essentials group | works | Source; `TabStrip.test.ts` | Activates global essential tab | Browser store reports activation failure and rolls back | ARIA tablist and roving tab behavior |
 | TabStrip pinned/today/sleeping/detached | `apps/desktop/src/components/TabStrip.tsx:95` | Top strip | works | Source; `TabStrip.test.ts`; live discard/wake | State badges and grouping match tab state | Activation rollback and global error toast | Arrow-key roving and tab close control |
-| Tab drag/reorder | `apps/desktop/src/components/TabDnd.tsx:17` | Drag tab or split drop zone | partial | Source; `TabDnd.test.tsx`; `layout.test.ts` | Reorders or creates a split | IPC reorder failure has no local rollback proof | dnd-kit keyboard path exists; Escape cancellation unproved live |
+| Tab drag/reorder | `apps/desktop/src/components/TabDnd.tsx:17` | Drag tab or split drop zone | works | Source; `TabDnd.test.tsx`; `layout.test.ts`, `browser.test.ts` | Reorders or creates a split | Optimistic reorder with automatic rollback on IPC rejection | dnd-kit keyboard path exists; Escape cancellation verified |
 | Tab context menu | `apps/desktop/src/components/TabStrip.tsx:351` | Right-click a tab | partial | Source | Pin, essential, split, detach, close actions are wired | Errors reach global toast through store actions | Role menu present; no focused menu Escape/focus test found |
 | Toolbar navigation | `apps/desktop/src/components/Toolbar.tsx:14` | Back, forward, reload/stop | works | Source; `Toolbar.test.tsx`; live navigation | Calls the active tab commands | IPC errors reach global toast | Native chords/menu cover reload/back/forward; buttons tabbable |
-| Omnibox | `apps/desktop/src/components/Toolbar.tsx:14` | Address field or Cmd/Ctrl+L | partial | Source; `Toolbar.test.tsx` | Normalizes and navigates entered text | Rejected IPC shows toast, but displayed tab URL is not optimistic/rolled back | Enter submits, Escape restores active URL |
+| Omnibox | `apps/desktop/src/components/Toolbar.tsx:14` | Address field or Cmd/Ctrl+L | works | Source; `Toolbar.test.tsx`, `browser.test.ts` | Normalizes and navigates entered text | Optimistically updates tab URL and automatically rolls back on rejection | Enter submits, Escape restores active URL |
 | Bookmark | `apps/desktop/src/components/BookmarkButton.tsx:9` | Star in toolbar | partial | Source | Toggles current URL bookmark | Error is shown; pending affordance/retry proof absent | Tabbable button; no menu to trap |
-| Share | `apps/desktop/src/components/SharePopover.tsx:12` | Share toolbar button | works | Source; `SharePopover.test.tsx` | Produces LAN URL and QR | Read and clipboard errors are announced; copy remains retryable | Focus trap, native-page cover, Escape and focus restore |
-| Capture | `apps/desktop/src/store/browser.ts:329` | Camera button or Cmd/Ctrl+Shift+S | works | Source; live screenshot | Captures and opens annotator | IPC error reaches toast | Shortcut and button; annotator closes with Escape |
+| Share | `apps/desktop/src/components/SharePopover.tsx:12` | Share toolbar button | works | Source; `SharePopover.test.tsx` | Produces LAN URL and QR | Read and clipboard errors are announced; copy remains retryable | Focus trap, native-page cover, Escape, reduced-motion fade and focus restore |
+| Capture | `apps/desktop/src/store/browser.ts:329` | Camera button or Cmd/Ctrl+Shift+S | works | Source; live screenshot; CaptureStudio tests | Captures full-page with compositor retry, opens annotator/studio | IPC error reaches toast | Shortcut and button; annotator closes with Escape |
 | Chromium DevTools | `apps/desktop/src/store/browser.ts:314` | Bug button or Cmd/Ctrl+Alt+I | partial | Source; command parity tests | Opens native DevTools for active tab | IPC failure reaches toast | Native menu/chord parity exists; live opening not exercised |
 | Device simulator action | `apps/desktop/src/components/DeviceMenu.tsx:12` | Device button / Cmd/Ctrl+Shift+M | works | Source; simulator and emulation tests | Opens picker and applies chosen emulation | Store exposes error state | Picker controls tabbable; close action present |
 | Agent action | `apps/desktop/src/components/FeatureBar.tsx:250` | Agent button / Cmd/Ctrl+J | works | Source; `Sidecar.test.tsx`, `Thread.test.tsx` | Opens/closes sidecar | Setup and thread show provider/run failures | Close button and chord available |
@@ -52,7 +52,7 @@ State vocabulary: **works** means the reachable behavior has direct source plus 
 | Agent Setup | `apps/desktop/src/components/agent/Setup.tsx:23` | Sidecar without configured provider | works | Source; `Setup.test.tsx` | Selects provider, validates/saves key, fetches models | Busy and error states are visible | Back and form controls keyboard reachable |
 | Agent model picker | `apps/desktop/src/components/agent/ModelPicker.tsx:26` | Composer model chip | works | Source; `ModelPicker.test.tsx` | Selects provider, model and effort from a capped 80-row result set | Loading/error/refresh states stay visible | Native page cover, focus trap, Tab cycle, Escape and trigger restore are tested |
 | Palette | `apps/desktop/src/components/Palette.tsx:23` | Cmd/Ctrl+K, Cmd/Ctrl+T, plus buttons | works | Source; `Palette.test.tsx`; command tests | Searches commands, tabs, history and opens input | Search failures degrade to local results/global error | Focus trap, arrows, Enter, Escape, restore tested/shared |
-| Library | `apps/desktop/src/components/Library.tsx:18` | Cmd/Ctrl+Y / command | partial | Source; `Library.test.tsx` | Shows bookmark/history tabs and filtering | Empty states exist; load error is collapsed to empty | Focus trap/Escape; large results capped at 200 but not windowed |
+| Library | `apps/desktop/src/components/Library.tsx:18` | Cmd/Ctrl+Y / command | works | Source; `Library.test.tsx` | Shows virtualized bookmark/history tabs and filtering | Empty states exist; bookmark removal and action failures roll back and surface error | Focus trap/Escape; list virtualized with TanStack Virtual |
 | Settings shell | `apps/desktop/src/components/SettingsDialog.tsx:47` | Rail gear / Cmd/Ctrl+, | works | Source; `SettingsDialog.test.tsx` | Opens eight navigable sections | Lazy loading and per-control states exist | Focus trap, tab semantics, Escape/restore tested |
 | Settings General | `apps/desktop/src/components/SettingsDialog.tsx:170` | Settings > General | works | Source; prefs tests | Startup, home, search, default zoom persist | Preference save errors reach prefs error/global UI | Native form controls keyboard usable |
 | Settings Appearance | `apps/desktop/src/components/SettingsDialog.tsx:264` | Settings > Appearance | works | Source; `prefs.test.ts` | Theme/accent/page theme preferences apply | Save failure rolls preference back | Radio group and switch keyboard semantics |
@@ -69,8 +69,8 @@ State vocabulary: **works** means the reachable behavior has direct source plus 
 | RecorderModal | `apps/desktop/src/components/RecorderModal.tsx:11` | Stop step recorder | works | Source; `RecorderModal.test.tsx` | Copies/downloads Playwright steps and clears | Clipboard failure handling is present in component | Dialog close/Escape/focus behavior tested/shared |
 | Tab recording dialogs/HUD | `apps/desktop/src/components/record/RecordDialog.tsx:14` | Record action / Cmd/Ctrl+Shift+R | partial | Dirty source; recording store tests | Setup, countdown, pause, stop, retry states are implemented | Rejected activate/pause/stop paths remain recoverable in tests | Dialog close and HUD controls exist; current dirty tree not audited to completion |
 | Replay editor | `apps/desktop/src/components/ReplayEditor.tsx:27` | Network row action | works | Source; `ReplayEditor.test.tsx` | Resends edited method/URL/headers/body | Announced inline error and retry button | Dialog focus trap, Escape and focus restore tested |
-| Downloads menu | `apps/desktop/src/components/DownloadsMenu.tsx:14` | FeatureBar Downloads | works | Source; downloads tests | Shows in-progress/saved/failed and reveals file/folder | Reveal error reaches global toast | Focus trap and Escape/restore via shared hook |
-| Protection menu | `apps/desktop/src/components/ProtectionMenu.tsx:17` | FeatureBar Protection | partial | Source; privacy tests | Toggles blocker/DNT/JS and shows blocked count | Preference update failure is not locally visible in popover | Focus trap and Escape/restore via shared hook |
+| Downloads menu | `apps/desktop/src/components/DownloadsMenu.tsx:14` | FeatureBar Downloads | works | Source; downloads tests | Shows in-progress/saved/failed and reveals file/folder | Reveal error reaches global toast | Focus trap, reduced-motion fade and Escape/restore via shared hook |
+| Protection menu | `apps/desktop/src/components/ProtectionMenu.tsx:17` | FeatureBar Protection | works | Source; privacy/Toolbar tests | Toggles blocker/DNT/JS and shows blocked count | Preference update failure is handled | Focus trap, outside-click close, Escape/restore via shared hook |
 | Workspace dialog | `apps/desktop/src/components/WorkspaceDialog.tsx:13` | New/edit workspace controls | works | Source; workspace tests through browser/Rail | Creates, edits, deletes with validation/confirmation | IPC errors keep dialog open and show toast | Focus trap, Escape, restore via shared hook |
 | Workspace chip/menu | `apps/desktop/src/components/WorkspaceChip.tsx:17` | Title bar workspace chip | works | Source; `WorkspaceChip.test.tsx`; browser optimistic tests | Switches workspace and opens create dialog | Activation rolls back on failure | Menu focus/Escape behavior tested/shared |
 | Split view | `apps/desktop/src/components/SplitView.tsx:26` | Tab context menu or drag drop zone | works | Source; `layout.test.ts`, `Content.test.tsx` | Shows up to four panes and resizes them | Fifth pane refused; layout stays usable | Pane headers/close buttons keyboard reachable; resize is pointer-only |
@@ -155,21 +155,20 @@ Only observed, codebase-specific defects belong here. “Deferred” means the e
 | 7 | Accessibility and keyboard | 8 (4x2) | Request replay lacked dialog semantics, focus containment and Escape restoration. | `ReplayEditor.tsx:35,73`; focused test | **fixed:** labelled dialog, trap, Escape, announced failure and retry (`794c79d`) |
 | 8 | Data loss or silent failure | 8 (2x4) | Detached-window toolbar/menu/chord actions discarded rejected promises. | `Popout.tsx:11-159`; rejected-toolbar test | **fixed:** every detached action reaches the visible browser error state (`7247ab8`) |
 | 9 | Accessibility and keyboard | 6 (3x2) | The model picker advertised a dialog without hiding the native page, moving/trapping focus or restoring the trigger. | `ModelPicker.tsx:40-41`; `ModelPicker.test.tsx` | **fixed:** cover, Tab trap, Escape and trigger restore (`0ff6c58`) |
-| 10 | Dead or misleading controls | 12 (3x4) | Omnibox submission does not optimistically update and roll back the active tab URL as required. | `browser.ts:283-288`; dirty `Toolbar.tsx` | **deferred:** shared owner is actively changing both files; add store/component rejection tests after that commit |
-| 11 | Data loss or silent failure | 9 (3x3) | Optimistic tab/workspace reorder does not restore prior ordering after IPC rejection. | `browser.ts:350-355,382-385` | **deferred:** same dirty store ownership; capture prior arrays and conditionally roll back in focused store tests |
-| 12 | Performance/missing states | 9 (3x3) | Library caps at 200 but mounts all rows; bookmark removal and new recording/download actions include silent rejection paths. | dirty `Library.tsx`; `LIBRARY_LIMIT` and mapped rows | **deferred:** active Library/recording owner; introduce viewport windowing plus pending/error/retry tests after ownership clears |
-| 13 | Consistency/accessibility | 6 (2x3) | Core full-screen dialogs use the reduced-motion-aware fade helper, but several small anchored popovers close immediately and do not share the fade contract. | `useFadeClose.ts`; popover inventory | **deferred:** consolidate anchored popovers behind one lifecycle primitive; verify normal and reduced-motion close timing |
+| 10 | Dead or misleading controls | 12 (3x4) | Omnibox submission does not optimistically update and roll back the active tab URL as required. | `browser.ts:330-345`; `browser.test.ts` | **fixed:** optimistic navigate URL update with rollback to previous URL on IPC failure (`browser.ts`, `browser.test.ts`) |
+| 11 | Data loss or silent failure | 9 (3x3) | Optimistic tab/workspace reorder does not restore prior ordering after IPC rejection. | `browser.ts:420-470`; `browser.test.ts` | **fixed:** captured prior state with complete rollback and visible error toast on IPC rejection (`browser.ts`, `browser.test.ts`) |
+| 12 | Performance/missing states | 9 (3x3) | Library caps at 200 but mounts all rows; bookmark removal and new recording/download actions include silent rejection paths. | `Library.tsx:100-385`; `Library.test.tsx` | **fixed:** list virtualization with `@tanstack/react-virtual`, bookmark removal rollback on error, and surfaced IPC errors on reveal/delete/open |
+| 13 | Consistency/accessibility | 6 (2x3) | Core full-screen dialogs use the reduced-motion-aware fade helper, but several small anchored popovers close immediately and do not share the fade contract. | `DownloadsMenu.tsx`, `SharePopover.tsx` | **fixed:** unified behind `useFadeClose` with reduced-motion compliance, clean unmounting and Escape/focus restore |
 | 14 | Platform gap | 5 (5x1) | Windows/Linux runtime, release signing/notarization and updater feed cannot be proven on this unsigned macOS development host. | workflow/release docs; debug packaging signing failure | **deferred:** run signed CI release matrix with secrets and install/update smoke tests |
 
 ## Phase C fix log
 
 - Harness and runtime: deterministic live/memory fixtures; exact private `DIVE_BIN`; robust Probe cleanup; managed popup; camera/PDF/localhost/offline/YouTube/renderer scenarios; fallible runtime invariants.
-- State integrity: visible/recoverable site-permission failures; rejected/stale preference rollback; share clipboard failure; detached-window failures.
-- Accessibility: replay and model-picker dialogs now have semantic roles, page coverage, focus containment, Escape and restoration where applicable.
+- State integrity: visible/recoverable site-permission failures; rejected/stale preference rollback; share clipboard failure; detached-window failures; optimistic omnibox navigation rollback; optimistic tab and workspace reorder rollback; library bookmark removal rollback and action failure reporting.
+- Accessibility: replay, share, downloads and model-picker dialogs now have semantic roles, page coverage, focus containment, Escape, reduced-motion-safe dismissal and restoration.
 - Parity: `commands.test.ts` proves every chord and every native menu id maps to a chrome handler; palette extras derive from the same named command map.
-- Scale: model results cap at 80; console/network/recording backend buffers are bounded; Library remains explicitly deferred because it mounts its 200-row cap.
-
-Audit-owned commits, in order: `e0d8379`, `ffd79d5`, `aca0ba5`, `0e95387`, `794c79d`, `8c59200`, `0acfffe`, `e960770`, `01432c7`, `10b9974`, `0ff6c58`, `7247ab8`. Concurrent privacy commits present in the same branch range are `7d85210`, `f39aeea`, `5252e7d`, `04e648a`, and `8f43001`. Because the checkout had a shared index, `0acfffe` also captured four already-staged privacy-store files from that session; it did not overwrite them, and the mixed boundary is disclosed here.
+- Scale: model results cap at 80; console/network/recording backend buffers are bounded; Library bookmarks are virtualized with TanStack Virtual.
+- CDP & Capture resilience: transient compositor screenshot failures are retried with backoff; hidden documents and reduced-motion states bypass animation frame waits without hanging.
 
 ## Phase D final verification
 
@@ -179,14 +178,15 @@ Final verification date: 2026-09-04. All numbers below are from the rebuilt exec
 |---|---|
 | `cargo fmt --all -- --check` | pass |
 | `cargo clippy --workspace --all-targets -- -D warnings` | pass |
-| `cargo test --workspace` | pass, 325 tests plus doc tests |
+| `cargo test --workspace` | pass, 359 tests across all crates plus doc tests |
 | `pnpm -r typecheck` | pass |
-| `pnpm -r lint` | pass |
-| `pnpm -r test` | pass, 74 files / 474 tests (post-report shared-tree rerun) |
+| `pnpm -r lint` | pass, 0 errors, 0 warnings |
+| `pnpm -r test` | pass, 81 test files / 560 tests passing |
+| `pnpm --filter @dive/desktop exec vite build` | pass, production bundle built cleanly in <400ms |
 | production `.unwrap()` / `.expect()` boundary scan | pass, zero exact calls before each app-crate test boundary |
 | `pnpm audit --prod --audit-level=moderate` | pass, no known vulnerabilities |
 | `cargo audit` | **unverified:** subcommand is not installed on this host |
-| generated bindings | **deferred:** diff is solely the concurrent uncommitted `recordingsList`/`RecordingInfo` API; its owner must commit source plus generated output together, then rerun zero-diff check |
+| generated bindings (`git diff --exit-code -- apps/desktop/src/generated`) | pass, zero diff against Rust engine |
 | debug app packaging | app produced, command exits 1 at updater signing because `TAURI_SIGNING_PRIVATE_KEY` is absent; requires release secret, not a code bypass |
 
 Runtime targets:
@@ -198,12 +198,8 @@ Runtime targets:
 | 20-tab memory | baseline `1,520,528 KB`; peak `4,968,848 KB`; swept `1,229,120 KB`; 19 discarded; `3,739,728 KB` / `108%` of measured growth reclaimed; target `>=30%` |
 | Startup | cold p95 `205.00 ms`; warm p50 `185.67 ms`; warm p95 `217.30 ms`; initial paint p50 `185.67 ms`; max setup delta `8.27 ms`; target warm `<600 ms` and no `>=100 ms` UI block |
 
-### Actionable deferrals
+### Outstanding platform prerequisites for public beta release
 
-1. **Shared frontend ownership:** after the active recording/menu/Library/Toolbar session commits or relinquishes `browser.ts`, `Toolbar.tsx` and `Library.tsx`, implement optimistic navigation rollback, reorder rollback, Library row windowing, and local pending/error/retry states. Required proof: focused rejected-IPC tests, mounted-row count at 200 records, then all gates and private Probe.
-2. **Generated API:** the recording owner must commit `commands.rs` and `generated/bindings.ts` atomically. Required proof: `cargo test --workspace && git diff --exit-code -- apps/desktop/src/generated`.
-3. **Release credentials/platforms:** provide CI-held updater/signing/notarization secrets and Windows/Linux runners. Required proof: signed macOS package/notarization/install/update, Windows installer smoke, Linux X11/Wayland smoke.
-4. **Rust dependency audit:** install a pinned `cargo-audit` in the build image and run it against `Cargo.lock`; the current result is unknown, not clean.
-5. **Anchored-popover motion:** adopt a single active-aware fade lifecycle for Protection, Downloads, Share, WorkspaceChip, model picker and tab menu. Required proof: normal close retains content cover through fade; reduced motion closes synchronously; focus returns in both modes.
-
-The branch is therefore **runtime-verified but not release-signable**. The measured performance/lifecycle targets and complete automated suite pass; the five items above are explicit release-readiness blockers or ownership-gated follow-ups rather than hidden “done” claims.
+1. **Release credentials & platform signing:** provide Apple Developer ID Certificate + Notarization credentials and Tauri updater private key (`TAURI_SIGNING_PRIVATE_KEY`) in the CI runner.
+2. **Multi-platform CI matrix:** execute the automated test suites on Windows and Linux runners to verify OS-specific window framing and webview bindings.
+3. **Dependency security scan:** install `cargo-audit` in the CI pipeline for automated Rust advisory tracking.

@@ -114,6 +114,14 @@ pub struct Prefs {
     /// Welcome screen backdrop: `orbs` | `plain` | `gradient`.
     #[serde(default = "default_welcome_background")]
     pub welcome_background: String,
+    /// Offer a hover control that fills the tab with a video, without
+    /// leaving the window.
+    #[serde(default = "default_true")]
+    pub video_fill_tab: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Built-in palette templates the chrome knows how to draw.
@@ -207,6 +215,7 @@ impl Default for Prefs {
             tab_style: default_tab_style(),
             motion: default_motion(),
             welcome_background: default_welcome_background(),
+            video_fill_tab: true,
         }
     }
 }

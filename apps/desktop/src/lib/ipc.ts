@@ -69,6 +69,7 @@ export const ipc = {
   tabReload: async (id: string) => unwrap(await commands.tabReload(id)),
   tabStop: async (id: string) => unwrap(await commands.tabStop(id)),
   tabPrint: async (id: string) => unwrap(await commands.tabPrint(id)),
+  tabFillVideo: async (id: string) => unwrap(await commands.tabFillVideo(id)),
   tabSetTier: async (id: string, tier: TabTier) => unwrap(await commands.tabSetTier(id, tier)),
   tabZoom: async (id: string, factor: number) => unwrap(await commands.tabZoom(id, factor)),
   tabDevtools: async (id: string) => unwrap(await commands.tabDevtools(id)),

@@ -3,7 +3,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { AppWindow, Columns2, Loader2, Moon, Pin, Plus, Star, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useBrowser } from "../store/browser";
-import { useLayout } from "../store/layout";
+import { MAX_PANES, useLayout, type Split } from "../store/layout";
 import type { Tab } from "../lib/ipc";
 import { Favicon } from "./Favicon";
 import { Icon, IconButton } from "./Icon";
@@ -35,6 +35,42 @@ export function essentialTabs(tabs: Tab[]): Tab[] {
   return tabs.filter((t) => t.tier === "essential").sort((a, b) => a.position - b.position);
 }
 
+/** What the tab menu offers for split view, if anything. */
+export type SplitAction =
+  /** The tab is already a pane: take it out. */
+  | { kind: "leave" }
+  /** Put `tab` beside `partner`: a new split with the two, or a pane added to the existing one. */
+  | { kind: "with"; partner: Tab; index: number; anchor: string; label: string };
+
+/**
+ * Split view from the menu: an inactive tab splits with the active one,
+ * the active tab splits with its neighbour, and a tab that is already a
+ * pane can leave. While a split is showing, another tab joins it at the
+ * end. Tabs in their own window cannot be panes.
+ */
+export function splitAction(tab: Tab, active: string | null, split: Split | undefined, ordered: Tab[], detached: string[]): SplitAction | null {
+  if (detached.includes(tab.id)) return null;
+  const live = (split?.tabs ?? []).filter((id) => ordered.some((t) => t.id === id) && !detached.includes(id));
+  if (live.includes(tab.id)) return { kind: "leave" };
+  const name = (t: Tab) => `Split with “${shorten(label(t))}”`;
+  if (live.length >= 2) {
+    if (live.length >= MAX_PANES) return null;
+    const partner = ordered.find((t) => t.id === live[live.length - 1]);
+    return partner ? { kind: "with", partner, index: live.length, anchor: live[0]!, label: "Add to split view" } : null;
+  }
+  const current = ordered.find((t) => t.id === active);
+  if (!current || detached.includes(current.id)) return null;
+  if (current.id !== tab.id) return { kind: "with", partner: current, index: 1, anchor: current.id, label: name(current) };
+  const usable = ordered.filter((t) => t.tier !== "pinned" && !detached.includes(t.id));
+  const at = usable.findIndex((t) => t.id === tab.id);
+  const partner = usable[at + 1] ?? usable[at - 1];
+  return partner ? { kind: "with", partner, index: 1, anchor: tab.id, label: name(partner) } : null;
+}
+
+function shorten(text: string, max = 22): string {
+  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
+}
+
 /**
  * Comet-style top strip: pill tabs, right-click to pin. Dragging is handled
  * by the `TabDnd` context around the whole chrome: within the strip a drag
@@ -53,8 +89,11 @@ export function TabStrip() {
   const detachTab = useBrowser((s) => s.detachTab);
   const attachTab = useBrowser((s) => s.attachTab);
   const insertPane = useLayout((s) => s.insert);
+  const removePane = useLayout((s) => s.remove);
+  const split = useLayout((s) => (workspace ? s.splits[workspace] : undefined));
   const loading = useBrowser((s) => s.loading);
   const tabs = orderTabs(all);
+  const paneIds = new Set((split?.tabs ?? []).filter((id) => !detached.includes(id)));
   const essentials = essentialTabs(all);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [tablistRef, narrow] = useNarrowTabs(tabs.length);
@@ -109,6 +148,7 @@ export function TabStrip() {
               active={t.id === active}
               loading={loading[t.id] === true}
               detached={detached.includes(t.id)}
+              inSplit={paneIds.has(t.id) && paneIds.size >= 2}
               narrow={narrow}
               inTabOrder={t.id === stop || (stop === null && t === tabs[0])}
               onFocus={() => setFocused(t.id)}
@@ -127,7 +167,7 @@ export function TabStrip() {
           y={menu.y}
           tier={all.find((t) => t.id === menu.id)?.tier ?? "today"}
           detached={detached.includes(menu.id)}
-          canSplit={!!active && active !== menu.id && !detached.includes(menu.id)}
+          split={(() => { const t = all.find((x) => x.id === menu.id); return t ? splitAction(t, active, split, tabs, detached) : null; })()}
           onPin={(v) => {
             void setPinned(menu.id, v);
             setMenu(null);
@@ -140,10 +180,16 @@ export function TabStrip() {
             void (out ? detachTab(menu.id, null) : attachTab(menu.id));
             setMenu(null);
           }}
-          onSplit={() => {
-            if (workspace && active) {
-              insertPane(workspace, menu.id, 1, active);
-              void activate(menu.id);
+          onSplit={(action) => {
+            if (workspace) {
+              if (action.kind === "leave") removePane(workspace, menu.id);
+              else {
+                // The menu's tab is one pane; the other is its partner. Whichever
+                // is not the anchor is the one inserted beside it.
+                const joining = action.anchor === menu.id ? action.partner.id : menu.id;
+                insertPane(workspace, joining, action.index, action.anchor);
+                void activate(menu.id);
+              }
             }
             setMenu(null);
           }}
@@ -205,7 +251,7 @@ function useNarrowTabs(count: number): [React.RefObject<HTMLDivElement | null>, 
 
 type Narrow = { close: boolean; title: boolean };
 
-function SortableTab({ tab: t, active, loading, detached, narrow, inTabOrder, onFocus, onActivate, onClose, onMenu }: { tab: Tab; active: boolean; loading: boolean; detached: boolean; narrow: Narrow; inTabOrder: boolean; onFocus: () => void; onActivate: () => void; onClose: () => void; onMenu: (x: number, y: number) => void }) {
+function SortableTab({ tab: t, active, loading, detached, inSplit, narrow, inTabOrder, onFocus, onActivate, onClose, onMenu }: { tab: Tab; active: boolean; loading: boolean; detached: boolean; inSplit: boolean; narrow: Narrow; inTabOrder: boolean; onFocus: () => void; onActivate: () => void; onClose: () => void; onMenu: (x: number, y: number) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id });
   // DragOverlay is the one tab that follows the pointer. The sortable item
   // becomes an invisible placeholder so the strip does not show a second,
@@ -293,6 +339,11 @@ function SortableTab({ tab: t, active, loading, detached, narrow, inTabOrder, on
             <Icon icon={AppWindow} size={11} />
           </span>
         )}
+        {inSplit && !detached && !pinned && !narrow.title && (
+          <span className="grid shrink-0 place-items-center text-highlight" aria-label="In split view">
+            <Icon icon={Columns2} size={11} />
+          </span>
+        )}
       </button>
       {!pinned && !narrow.title && (!narrow.close || active) && (
         <span
@@ -348,14 +399,15 @@ function EssentialTab({ tab: t, active, loading, onActivate, onMenu }: { tab: Ta
   );
 }
 
-function TabMenu({ x, y, tier, detached, canSplit, onPin, onEssential, onWindow, onSplit, onClose, onCloseOthers }: { x: number; y: number; tier: Tab["tier"]; detached: boolean; canSplit: boolean; onPin: (v: boolean) => void; onEssential: (v: boolean) => void; onWindow: (out: boolean) => void; onSplit: () => void; onClose: () => void; onCloseOthers: () => void }) {
+function TabMenu({ x, y, tier, detached, split, onPin, onEssential, onWindow, onSplit, onClose, onCloseOthers }: { x: number; y: number; tier: Tab["tier"]; detached: boolean; split: SplitAction | null; onPin: (v: boolean) => void; onEssential: (v: boolean) => void; onWindow: (out: boolean) => void; onSplit: (action: SplitAction) => void; onClose: () => void; onCloseOthers: () => void }) {
   useCoversContent(true);
   const pinned = tier === "pinned";
   const essential = tier === "essential";
   const item = "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink";
-  const position = clampFloatingPosition({ x, y, width: 192, height: canSplit ? 200 : 170, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
+  const rows = 4 + (essential ? 0 : 1) + (split ? 1 : 0);
+  const position = clampFloatingPosition({ x, y, width: 208, height: 12 + rows * 30 + 2 * 9, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
   return (
-    <div role="menu" style={{ left: position.x, top: position.y }} className="surface-enter fixed z-50 w-48 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+    <div role="menu" style={{ left: position.x, top: position.y }} className="surface-enter fixed z-50 w-52 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
       {!essential && (
         <button type="button" role="menuitem" className={item} onClick={() => onPin(!pinned)}>
           <Icon icon={Pin} size={13} /> {pinned ? "Unpin tab" : "Pin tab"}
@@ -364,14 +416,16 @@ function TabMenu({ x, y, tier, detached, canSplit, onPin, onEssential, onWindow,
       <button type="button" role="menuitem" className={item} onClick={() => onEssential(!essential)}>
         <Icon icon={Star} size={13} /> {essential ? "Remove from essentials" : "Make essential"}
       </button>
-      {canSplit && (
-        <button type="button" role="menuitem" className={item} onClick={onSplit}>
-          <Icon icon={Columns2} size={13} /> Split with current tab
+      <div className="my-1 h-px bg-line" role="separator" />
+      {split && (
+        <button type="button" role="menuitem" className={item} onClick={() => onSplit(split)}>
+          <Icon icon={Columns2} size={13} /> <span className="truncate">{split.kind === "leave" ? "Remove from split view" : split.label}</span>
         </button>
       )}
       <button type="button" role="menuitem" className={item} onClick={() => onWindow(!detached)}>
         <Icon icon={AppWindow} size={13} /> {detached ? "Move back to this window" : "Open in new window"}
       </button>
+      <div className="my-1 h-px bg-line" role="separator" />
       <button type="button" role="menuitem" className={item} onClick={onClose}>
         <Icon icon={X} size={13} /> Close tab
       </button>

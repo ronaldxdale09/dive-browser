@@ -94,6 +94,15 @@ describe("Library dialog", () => {
     expect(screen.queryByText("Example docs")).toBeNull();
   });
 
+  it("restores the bookmark and sets store error if removal rejects", async () => {
+    vi.spyOn(ipc, "bookmarkRemove").mockRejectedValue(new Error("disk locked"));
+    render(<Library />);
+    await waitFor(() => expect(screen.getByText("Example docs")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Remove bookmark Example docs" }));
+    await waitFor(() => expect(screen.getByText("Example docs")).toBeTruthy());
+    expect(useBrowser.getState().error).toBe("disk locked");
+  });
+
   it("shows history grouped by day and hands clearing over to Settings", async () => {
     render(<Library />);
     fireEvent.click(screen.getByRole("tab", { name: "History" }));
