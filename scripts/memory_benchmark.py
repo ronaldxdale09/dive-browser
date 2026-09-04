@@ -17,16 +17,31 @@ ROOT = Path(__file__).resolve().parent.parent
 ANSI = re.compile(r'\x1b\[[0-9;]*m')
 
 
-def tree_rss(pid):
-    output = subprocess.check_output(['ps', '-axo', 'pid=,ppid=,rss='], text=True, timeout=2)
-    rows = [tuple(map(int, line.split())) for line in output.splitlines() if line.strip()]
+def process_tree(pid, output):
+    rows = []
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        child, parent, rss, *command = line.split(maxsplit=3)
+        match = re.search(r'(?:^|\s)--type=([a-z-]+)(?:\s|$)', command[0] if command else '')
+        role = match[1] if match and match[1] in ('renderer', 'gpu-process', 'utility', 'broker') else 'helper'
+        rows.append({'pid': int(child), 'ppid': int(parent), 'rss_kb': int(rss), 'role': 'browser' if int(child) == pid else role})
+    if not any(row['pid'] == pid for row in rows):
+        return []
     wanted = {pid}
     while True:
-        descendants = {child for child, parent, _ in rows if parent in wanted}
+        descendants = {row['pid'] for row in rows if row['ppid'] in wanted}
         if descendants <= wanted:
             break
         wanted |= descendants
-    return sum(rss for child, _, rss in rows if child in wanted)
+    # Do not persist command arguments, paths, URLs or anything from another
+    # browser session. Only the test process tree's numeric samples and roles.
+    return sorted((row for row in rows if row['pid'] in wanted), key=lambda row: row['pid'])
+
+
+def sample_processes(pid):
+    output = subprocess.check_output(['ps', '-axo', 'pid=,ppid=,rss=,command='], text=True, timeout=2)
+    return process_tree(pid, output)
 
 
 def main():
@@ -71,20 +86,28 @@ def main():
                            'NO_COLOR': '1'}
             for key in ('DIVE_STARTUP_BENCHMARK', 'DIVE_SMOKE', 'DIVE_NATIVE_LIFECYCLE_PROBE'):
                 environment.pop(key, None)
+            # Failed measurements need the same reproducible identity as passes.
+            (evidence / 'run-metadata.json').write_text(json.dumps({
+                'binary': str(binary), 'binary_sha256': fingerprint, 'tabs': tabs,
+                'settle_seconds': settle, 'minimum_reclaim_pct': minimum,
+                'workload': 'explicit URLs' if os.environ.get('STRESS_URL') else 'local same-site fixture',
+                'process_overrides': {key: environment.get(key) for key in ('DIVE_CHROMIUM_FLAGS', 'DIVE_DEFAULT_PROCESS_MODEL', 'DIVE_RENDERER_PROCESS_LIMIT')},
+            }, indent=2) + '\n')
             samples = {'baseline': [], 'loaded': [], 'swept': []}
 
             def observe(pid):
                 text = ANSI.sub('', log.read_text(errors='replace'))
                 phase = 'swept' if 'stress: done' in text else 'loaded' if 'stress: loaded' in text else 'baseline' if 'stress: baseline' in text else None
                 if phase and 'stress: exiting' not in text:
-                    rss = tree_rss(pid)
+                    processes = sample_processes(pid)
+                    rss = sum(row['rss_kb'] for row in processes)
                     # Do not count memory freed by whole-application teardown
                     # as memory reclaimed by discarding background tabs.
                     after_sample = ANSI.sub('', log.read_text(errors='replace'))
                     if rss > 0 and 'stress: exiting' not in after_sample:
                         samples[phase].append(rss)
                         with (evidence / 'rss-samples.jsonl').open('a') as trace:
-                            trace.write(json.dumps({'monotonic_seconds': time.monotonic(), 'phase': phase, 'rss_kb': rss}) + '\n')
+                            trace.write(json.dumps({'monotonic_seconds': time.monotonic(), 'phase': phase, 'rss_kb': rss, 'processes': processes}) + '\n')
 
             print(f'Executable: {binary}\nProcess model: shipping defaults plus explicit environment overrides\nProbe evidence: {evidence}', flush=True)
             elapsed = run_probe(binary, environment, log, timeout, observe)
