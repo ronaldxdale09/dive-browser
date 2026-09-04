@@ -332,11 +332,16 @@ impl Registry {
 fn parse_stored(json: &str) -> serde_json::Result<Prefs> {
     let mut complete = serde_json::to_value(Prefs::default())?;
     let incoming: Value = serde_json::from_str(json)?;
-    let (Some(complete), Some(incoming)) = (complete.as_object_mut(), incoming.as_object()) else {
-        return serde_json::from_value(incoming);
+    let mut prefs: Prefs = if let (Some(complete), Some(incoming)) =
+        (complete.as_object_mut(), incoming.as_object())
+    {
+        complete.extend(incoming.clone());
+        serde_json::from_value(Value::Object(complete.clone()))?
+    } else {
+        serde_json::from_value(incoming)?
     };
-    complete.extend(incoming.clone());
-    serde_json::from_value(Value::Object(complete.clone()))
+    prefs.privacy_exceptions = normalize_privacy_exceptions(prefs.privacy_exceptions);
+    Ok(prefs)
 }
 
 /// The `DevTools` calls that put `prefs` into force on one tab.
@@ -497,6 +502,19 @@ mod tests {
         assert_eq!(prefs.blocked_patterns, vec!["ads.test"]);
         assert!(prefs.youtube_protection);
         assert!(prefs.privacy_exceptions.is_empty());
+    }
+
+    #[test]
+    fn stored_exceptions_are_normalized_without_clamping_legacy_preferences() {
+        let prefs = parse_stored(
+            r#"{"block_trackers":true,"blocked_patterns":["  ads.test ","   "],"privacy_exceptions":["com","Example.COM.","https://bad.test/path"]}"#,
+        )
+        .unwrap();
+        assert!(prefs.block_trackers);
+        assert_eq!(prefs.blocked_patterns, vec!["  ads.test ", "   "]);
+        assert_eq!(prefs.privacy_exceptions, vec!["example.com"]);
+        assert!(prefs.privacy_enabled_for("https://com/path"));
+        assert!(!prefs.privacy_enabled_for("https://example.com/path"));
     }
 
     #[test]
