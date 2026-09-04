@@ -142,8 +142,16 @@ mcp call page_wait_for "{\"tab_id\": \"${B_ID}\", \"text\": \"bravo content\", \
 mcp call page_text "{\"tab_id\": \"${B_ID}\"}" | grep -q "bravo content" || fail "page_text for B is wrong"
 
 step "screenshot comes back"
-SHOT=$(mcp call page_screenshot "{\"tab_id\": \"${B_ID}\"}") || fail "page screenshot failed"
-python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("image_bytes",0) > 1000, d' <<<"${SHOT}" || fail "screenshot too small: ${SHOT}"
+SHOT=""
+for _ in $(seq 1 20); do
+    SHOT=$(mcp call page_screenshot "{\"tab_id\": \"${B_ID}\"}") || fail "page screenshot failed"
+    if python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("image_bytes",0) > 1000, d' <<<"${SHOT}" 2>/dev/null; then
+        break
+    fi
+    # DOM readiness can precede CEF's first composited frame on a cold launch.
+    sleep 0.25
+done
+python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("image_bytes",0) > 1000, d' <<<"${SHOT}" || fail "screenshot too small after first-frame wait: ${SHOT}"
 
 step "page popup opens as a real tab"
 mcp call page_click "{\"tab_id\": \"${B_ID}\", \"locator\": \"role=link[name=\\\"Open popup\\\"]\"}" >/dev/null || fail "popup link could not be clicked"

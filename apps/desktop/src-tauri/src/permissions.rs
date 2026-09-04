@@ -260,7 +260,7 @@ pub async fn attach_page(app: tauri::AppHandle<Runtime>, tab_id: TabId, session:
         match session.call(method, params).await {
             Ok(_) => tracing::debug!(%tab_id, %method, "permission page setup step complete"),
             Err(error) => {
-                tracing::warn!(%tab_id, %method, %error, "permission page setup step failed")
+                tracing::warn!(%tab_id, %method, %error, "permission page setup step failed");
             }
         }
     }

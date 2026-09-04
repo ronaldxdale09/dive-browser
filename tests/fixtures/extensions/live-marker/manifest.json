@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Dive live extension marker",
+  "version": "1.0.0",
+  "content_scripts": [
+    {
+      "matches": ["http://localhost/*"],
+      "js": ["marker.js"],
+      "run_at": "document_end"
+    }
+  ]
+}
