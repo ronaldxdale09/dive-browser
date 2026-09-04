@@ -8,6 +8,11 @@ import { Icon, IconButton } from "./Icon";
 import { Favicon } from "./Favicon";
 import { tabLabel } from "./TabStrip";
 
+/** Keep commands in a detached window on the same visible error path as the main chrome. */
+function run(action: Promise<unknown>) {
+  void action.catch((error: unknown) => useBrowser.setState({ error: error instanceof Error ? error.message : String(error) }));
+}
+
 /**
  * A complete Dive window around one torn-off tab. The live native page is
  * reparented into this window, so navigation state, scroll and session data
@@ -35,7 +40,7 @@ export function Popout({ tabId }: { tabId: string }) {
     if (!el) return;
     const reporter = createBoundsReporter(
       () => elementBounds(el),
-      (bounds) => void ipc.popoutSetBounds(tabId, bounds).catch(() => undefined),
+      (bounds) => run(ipc.popoutSetBounds(tabId, bounds)),
     );
     reporter.schedule();
     const ro = new ResizeObserver(reporter.schedule);
@@ -57,19 +62,19 @@ export function Popout({ tabId }: { tabId: string }) {
       .listen((e) => {
         switch (e.payload) {
           case "tab.close":
-            void ipc.tabClose(tabId);
+            run(ipc.tabClose(tabId));
             break;
           case "tab.reload":
-            void ipc.tabReload(tabId);
+            run(ipc.tabReload(tabId));
             break;
           case "tab.back":
-            void ipc.tabBack(tabId);
+            run(ipc.tabBack(tabId));
             break;
           case "tab.forward":
-            void ipc.tabForward(tabId);
+            run(ipc.tabForward(tabId));
             break;
           case "tab.devtools":
-            void ipc.tabDevtools(tabId);
+            run(ipc.tabDevtools(tabId));
             break;
           case "address.focus":
             inputRef.current?.focus();
@@ -81,7 +86,8 @@ export function Popout({ tabId }: { tabId: string }) {
       .then((un) => {
         if (live) stop = un;
         else un();
-      });
+      })
+      .catch((error: unknown) => useBrowser.setState({ error: error instanceof Error ? error.message : String(error) }));
     return () => {
       live = false;
       stop?.();
@@ -92,9 +98,9 @@ export function Popout({ tabId }: { tabId: string }) {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
       const key = e.key.toLowerCase();
-      if (key === "w") void ipc.tabClose(tabId);
+      if (key === "w") run(ipc.tabClose(tabId));
       else if (key === "l") inputRef.current?.focus();
-      else if (key === "r") void ipc.tabReload(tabId);
+      else if (key === "r") run(ipc.tabReload(tabId));
       else return;
       e.preventDefault();
     };
@@ -127,7 +133,7 @@ export function Popout({ tabId }: { tabId: string }) {
               aria-label={`Close ${title}`}
               data-tauri-drag-region="false"
               onMouseDown={(e) => e.stopPropagation()}
-              onClick={() => void ipc.tabClose(tabId)}
+              onClick={() => run(ipc.tabClose(tabId))}
               className="mr-1 grid size-5 shrink-0 place-items-center rounded-full text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink"
             >
               <Icon icon={X} size={12} />
@@ -137,20 +143,20 @@ export function Popout({ tabId }: { tabId: string }) {
         <div className="min-w-8 flex-1 self-stretch" data-tauri-drag-region="true" />
       </header>
       <nav aria-label="Browser controls" className="flex min-w-0 items-center gap-1 border-b border-line px-2">
-        <IconButton icon={ArrowLeft} label="Back" onClick={() => void ipc.tabBack(tabId)} />
-        <IconButton icon={ArrowRight} label="Forward" onClick={() => void ipc.tabForward(tabId)} />
-        <IconButton icon={RotateCw} label="Reload" shortcut="⌘R" size={14} onClick={() => void ipc.tabReload(tabId)} />
+        <IconButton icon={ArrowLeft} label="Back" onClick={() => run(ipc.tabBack(tabId))} />
+        <IconButton icon={ArrowRight} label="Forward" onClick={() => run(ipc.tabForward(tabId))} />
+        <IconButton icon={RotateCw} label="Reload" shortcut="⌘R" size={14} onClick={() => run(ipc.tabReload(tabId))} />
         <form
           className="mx-1 flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2"
           onSubmit={(e) => {
             e.preventDefault();
-            void ipc.tabNavigate(tabId, draft.value);
+            run(ipc.tabNavigate(tabId, draft.value));
           }}
         >
           <Icon icon={secure ? Lock : Search} size={13} className="shrink-0 text-ink-3" />
           <input ref={inputRef} aria-label="Address" value={draft.value} onChange={(e) => setDraft({ url, value: e.target.value })} onFocus={(e) => e.target.select()} spellCheck={false} className="min-w-0 flex-1 bg-transparent text-xs text-ink outline-none placeholder:text-ink-3" placeholder="Search or enter address" />
         </form>
-        <IconButton icon={PanelsTopLeft} label="Move back to main window" tooltipAlign="end" onClick={() => void ipc.tabAttach(tabId)} />
+        <IconButton icon={PanelsTopLeft} label="Move back to main window" tooltipAlign="end" onClick={() => run(ipc.tabAttach(tabId))} />
       </nav>
       <div ref={body} className="min-h-0 flex-1 bg-surface" />
     </div>
