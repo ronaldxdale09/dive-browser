@@ -1032,9 +1032,9 @@ export type Prefs = {
 	block_trackers: boolean,
 	/**  Extra hosts or URL globs to block, one per entry. */
 	blocked_patterns: string[],
-	/**  Remove invasive YouTube components when DivePrivacy is active. */
+	/**  Remove invasive `YouTube` components when `DivePrivacy` is active. */
 	youtube_protection?: boolean,
-	/**  Exact document hosts where DivePrivacy is disabled. */
+	/**  Exact document hosts where `DivePrivacy` is disabled. */
 	privacy_exceptions?: string[],
 	/**  Run page scripts. Off makes every tab script-free. */
 	javascript: boolean,
@@ -1091,14 +1091,14 @@ export type PrivacyCategory =
 
 /**  A privacy action the chrome may summarize without exposing browsing URLs. */
 export type PrivacyEvent =
-/**  A network request was cancelled by DivePrivacy. */
+/**  A network request was cancelled by `DivePrivacy`. */
 { type: "blocked"; data: {
 	/**  Tab whose request was cancelled. */
 	tab_id: TabId,
 	/**  Which bundled matcher blocked it. */
 	category: PrivacyCategory,
 } } |
-/**  YouTube elements were removed from a document. */
+/**  `YouTube` elements were removed from a document. */
 { type: "youtube"; data: {
 	/**  Tab whose document was cleaned. */
 	tab_id: TabId,
@@ -1106,7 +1106,7 @@ export type PrivacyEvent =
 	count: number,
 } };
 
-/**  Public metadata about the bundled DivePrivacy assets. */
+/**  Public metadata about the bundled `DivePrivacy` assets. */
 export type PrivacyInfo = {
 	/**  Bundled ruleset version. */
 	version: string,

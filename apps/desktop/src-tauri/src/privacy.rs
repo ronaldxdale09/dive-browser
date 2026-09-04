@@ -35,14 +35,14 @@ pub enum PrivacyCategory {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Event)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum PrivacyEvent {
-    /// A network request was cancelled by DivePrivacy.
+    /// A network request was cancelled by `DivePrivacy`.
     Blocked {
         /// Tab whose request was cancelled.
         tab_id: TabId,
         /// Which bundled matcher blocked it.
         category: PrivacyCategory,
     },
-    /// YouTube elements were removed from a document.
+    /// `YouTube` elements were removed from a document.
     #[serde(rename = "youtube")]
     YouTube {
         /// Tab whose document was cleaned.
@@ -52,7 +52,7 @@ pub enum PrivacyEvent {
     },
 }
 
-/// Public metadata about the bundled DivePrivacy assets.
+/// Public metadata about the bundled `DivePrivacy` assets.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct PrivacyInfo {
     /// Bundled ruleset version.

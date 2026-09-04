@@ -48,10 +48,10 @@ pub struct Prefs {
     pub block_trackers: bool,
     /// Extra hosts or URL globs to block, one per entry.
     pub blocked_patterns: Vec<String>,
-    /// Remove invasive YouTube components when DivePrivacy is active.
+    /// Remove invasive `YouTube` components when `DivePrivacy` is active.
     #[serde(default = "default_youtube_protection")]
     pub youtube_protection: bool,
-    /// Exact document hosts where DivePrivacy is disabled.
+    /// Exact document hosts where `DivePrivacy` is disabled.
     #[serde(default)]
     pub privacy_exceptions: Vec<String>,
     /// Run page scripts. Off makes every tab script-free.
@@ -244,7 +244,7 @@ impl Prefs {
             .collect()
     }
 
-    /// Whether DivePrivacy applies to this document URL.
+    /// Whether `DivePrivacy` applies to this document URL.
     pub fn privacy_enabled_for(&self, document_url: &str) -> bool {
         let Some(host) = url::Url::parse(document_url).ok().and_then(|url| {
             url.host_str()
@@ -259,7 +259,7 @@ impl Prefs {
     }
 }
 
-/// Keep only exact, registrable hostnames suitable for disabling DivePrivacy.
+/// Keep only exact, registrable hostnames suitable for disabling `DivePrivacy`.
 pub fn normalize_privacy_exceptions(exceptions: Vec<String>) -> Vec<String> {
     let mut normalized = exceptions
         .into_iter()
@@ -546,7 +546,10 @@ mod tests {
         let normalized = normalize_privacy_exceptions(exceptions);
         assert_eq!(normalized.len(), 200);
         assert!(!normalized.iter().any(|host| {
-            matches!(host.as_str(), "com" | "co.uk" | "has whitespace.test" | "double..label.test")
+            matches!(
+                host.as_str(),
+                "com" | "co.uk" | "has whitespace.test" | "double..label.test"
+            )
         }));
     }
 

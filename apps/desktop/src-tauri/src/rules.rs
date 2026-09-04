@@ -228,7 +228,7 @@ pub fn interception_required(rules: &[Rule], prefs: &Prefs) -> bool {
     rules.iter().any(|rule| rule.enabled) || prefs.block_trackers
 }
 
-/// Choose one action, giving the first workspace rule priority over DivePrivacy.
+/// Choose one action, giving the first workspace rule priority over `DivePrivacy`.
 pub fn decide_paused_request(
     rules: &[Rule],
     privacy: &DivePrivacy,
@@ -267,7 +267,7 @@ pub fn decide_paused_request(
     }
 }
 
-/// Enable shared interception when workspace rules or DivePrivacy need it.
+/// Enable shared interception when workspace rules or `DivePrivacy` need it.
 pub async fn apply(session: &CdpSession, rules: &[Rule], prefs: &Prefs) -> AppResult<()> {
     let result = if interception_required(rules, prefs) {
         session
@@ -281,6 +281,7 @@ pub async fn apply(session: &CdpSession, rules: &[Rule], prefs: &Prefs) -> AppRe
 
 /// Answer `Fetch.requestPaused` events for `tab` according to the
 /// workspace's rules; also enables interception if rules already exist.
+#[allow(clippy::too_many_lines)] // one event loop owns the Fetch request lifecycle
 pub fn attach(
     app: AppHandle<Runtime>,
     tab_id: TabId,
