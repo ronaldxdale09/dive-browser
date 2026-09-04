@@ -47,18 +47,23 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 arboard = { version = "3", default-features = false, features = ["image-data"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 gif = "0.13"
-reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+whisper-rs = { version = "0.14", optional = true }
 adblock = { version = "0.13.3", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "1", features = ["keychain"] }
 core-foundation = "0.10"
+whisper-rs = { version = "0.14", optional = true, features = ["metal"] }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSView", "NSWindow"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray"] }
 
 [features]
-default = ["cef"]
+default = ["cef", "whisper"]
+# Local speech-to-text via whisper.cpp (builds with cmake). Turn off for a
+# quick UI-only build that skips the native transcription toolchain.
+whisper = ["dep:whisper-rs"]
 # Chromium engine (the product). Requires cmake + ninja and the CEF CLI.
 cef = ["tauri/cef"]
 # System webview fallback for UI-only development without CEF.

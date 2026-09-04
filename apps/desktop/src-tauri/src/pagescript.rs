@@ -24,6 +24,7 @@ const FRAGMENTS: &[(&str, &str)] = &[
     ("component.js", include_str!("inject/component.js")),
     ("media-guard.js", include_str!("inject/media-guard.js")),
     ("fill-tab.js", include_str!("inject/fill-tab.js")),
+    ("subtitles.js", include_str!("inject/subtitles.js")),
 ];
 
 /// Cap on include depth, so a cycle is a test failure rather than a hang.

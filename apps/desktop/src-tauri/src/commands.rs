@@ -413,6 +413,11 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             update_install,
             default_browser_status,
             default_browser_set,
+            subtitle_models,
+            subtitle_model_download,
+            subtitle_start,
+            subtitle_stop,
+            subtitle_running,
             tab_devtools,
             tab_screencast_start,
             tab_screencast_pause,
@@ -507,6 +512,9 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::loading::TabLoad,
             crate::permissions::PermissionAsked,
             crate::privacy::PrivacyEvent,
+            crate::subtitles::SubtitleModelProgress,
+            crate::subtitles::SubtitleCue,
+            crate::subtitles::SubtitleState,
         ])
 }
 
@@ -1643,6 +1651,59 @@ pub(crate) fn permissions_list(
     state: State<'_, AppState>,
 ) -> AppResult<Vec<crate::permissions::SitePermission>> {
     Ok(crate::permissions::all(&state)?)
+}
+
+/// The local subtitle models and whether each is downloaded.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn subtitle_models() -> Vec<crate::subtitles::SubtitleModel> {
+    crate::subtitles::models()
+}
+
+/// Download a subtitle model; progress arrives on `SubtitleModelProgress`.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn subtitle_model_download(app: AppHandle<Runtime>, id: String) -> AppResult<()> {
+    crate::subtitles::download_model(&app, &id)
+        .await
+        .map_err(AppError::new)
+}
+
+/// Start live subtitles on a tab. `language` is an ISO code or "auto";
+/// `translate` renders an English translation instead of the source text.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn subtitle_start(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: TabId,
+    model: String,
+    language: String,
+    translate: bool,
+) -> AppResult<()> {
+    let session = lock(&state.host)
+        .as_ref()
+        .and_then(|h| h.cdp(id))
+        .ok_or_else(|| AppError::new("no devtools session"))?;
+    crate::subtitles::start(app, id, session, model, language, translate)
+        .await
+        .map_err(AppError::new)
+}
+
+/// Stop live subtitles on a tab and clear the overlay.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn subtitle_stop(app: AppHandle<Runtime>, state: State<'_, AppState>, id: TabId) {
+    if let Some(session) = lock(&state.host).as_ref().and_then(|h| h.cdp(id)) {
+        crate::subtitles::stop(&app, id, &session);
+    }
+}
+
+/// Whether a tab is transcribing right now.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn subtitle_running(app: AppHandle<Runtime>, id: TabId) -> bool {
+    crate::subtitles::is_running(&app, id)
 }
 
 /// Whether Dive is the system's default browser.

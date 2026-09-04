@@ -46,6 +46,7 @@ mod sourcemaps;
 pub mod startup;
 mod state;
 mod storage;
+mod subtitles;
 mod titlebar;
 mod vitals;
 

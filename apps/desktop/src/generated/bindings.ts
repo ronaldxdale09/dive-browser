@@ -103,6 +103,19 @@ export const commands = {
 	defaultBrowserStatus: () => __TAURI_INVOKE<DefaultBrowserStatus>("default_browser_status"),
 	/**  Ask the system to make Dive the default browser. */
 	defaultBrowserSet: () => typedError<DefaultBrowserStatus, AppError>(__TAURI_INVOKE("default_browser_set")),
+	/**  The local subtitle models and whether each is downloaded. */
+	subtitleModels: () => __TAURI_INVOKE<SubtitleModel[]>("subtitle_models"),
+	/**  Download a subtitle model; progress arrives on `SubtitleModelProgress`. */
+	subtitleModelDownload: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("subtitle_model_download", { id })),
+	/**
+	 *  Start live subtitles on a tab. `language` is an ISO code or "auto";
+	 *  `translate` renders an English translation instead of the source text.
+	 */
+	subtitleStart: (id: TabId, model: string, language: string, translate: boolean) => typedError<null, AppError>(__TAURI_INVOKE("subtitle_start", { id, model, language, translate })),
+	/**  Stop live subtitles on a tab and clear the overlay. */
+	subtitleStop: (id: TabId) => __TAURI_INVOKE<void>("subtitle_stop", { id }),
+	/**  Whether a tab is transcribing right now. */
+	subtitleRunning: (id: TabId) => __TAURI_INVOKE<boolean>("subtitle_running", { id }),
 	/**  Open Chromium's `DevTools` window for a tab. */
 	tabDevtools: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_devtools", { id })),
 	/**  Start recording a tab with these options. */
@@ -356,6 +369,9 @@ export const events = {
 	recorderEvent: makeEvent<RecorderEvent>("recorder-event"),
 	recordingEvent: makeEvent<RecordingEvent>("recording-event"),
 	stateChanged: makeEvent<StateChanged>("state-changed"),
+	subtitleCue: makeEvent<SubtitleCue>("subtitle-cue"),
+	subtitleModelProgress: makeEvent<SubtitleModelProgress>("subtitle-model-progress"),
+	subtitleState: makeEvent<SubtitleState>("subtitle-state"),
 	tabCrashed: makeEvent<TabCrashed>("tab-crashed"),
 	tabLoad: makeEvent<TabLoad>("tab-load"),
 	tabWindowChanged: makeEvent<TabWindowChanged>("tab-window-changed"),
@@ -1588,6 +1604,56 @@ export type StyleChange_Serialize = {
 	locator: string | null,
 	/**  Component that rendered it, when known. */
 	component_name: string | null,
+};
+
+/**  A caption line for the overlay. */
+export type SubtitleCue = {
+	/**  Tab the caption belongs to. */
+	tab_id: TabId,
+	/**  The transcribed (or translated) text. */
+	text: string,
+	/**  Language the model detected or was told to use. */
+	language: string,
+	/**  True once the line is stable and will not be revised. */
+	is_final: boolean,
+};
+
+/**  A downloadable whisper model. */
+export type SubtitleModel = {
+	/**  Stable id used in commands and the file name. */
+	id: string,
+	/**  Human label for the picker. */
+	label: string,
+	/**  A one-line note on the speed/accuracy trade. */
+	detail: string,
+	/**  Approximate download size in megabytes. */
+	size_mb: number,
+	/**  Whether the file is already on disk. */
+	downloaded: boolean,
+};
+
+/**  Progress of a model download. */
+export type SubtitleModelProgress = {
+	/**  Model id. */
+	id: string,
+	/**  Bytes received so far. */
+	received: number | null,
+	/**  Total bytes, when the server reported a length. */
+	total: number | null,
+	/**  Set when the file is fully written and verified. */
+	done: boolean,
+	/**  A human message when the download failed. */
+	error: string | null,
+};
+
+/**  Whether subtitles are running on a tab, with any error. */
+export type SubtitleState = {
+	/**  The tab. */
+	tab_id: TabId,
+	/**  Running or stopped. */
+	active: boolean,
+	/**  A human message when it could not start or stay running. */
+	error: string | null,
 };
 
 /**  A browsing tab. */
