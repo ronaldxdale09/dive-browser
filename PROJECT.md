@@ -21,7 +21,7 @@ Dive browser is built on Tauri v2 (`tauri` git rev `dd2e5d91b60a6402ce270ceb03b0
 | 4 | Startup timeline instrumentation | Capture process start, SQLite init, window creation, setup complete | M1 | R1 Survey |
 | 5 | Initial window paint & chrome readiness | IPC hook reporting React boot and first paint | M1 | R1 Survey |
 | 6 | Startup benchmarking harness | Automated cold/warm startup benchmark script with p50/p95 reporting | M1 | R1 Survey |
-| 7 | 30-minute idle sweeping in `housekeeping.rs` | Reduce `MAX_IDLE` from 12h to 30m, sweep every 1-2m | M2 | R2 Survey |
+| 7 | One-hour idle sweeping in `housekeeping.rs` | Default one-hour idle window, sweep every minute | M2 | R2 Survey |
 | 8 | Multi-workspace native view sweep | Close native CEF webviews across all workspaces upon discard | M2 | R2 Survey |
 | 9 | Safe discard: pinned & essential tabs | Exclude pinned and essential tabs from idle discarding | M2 | R2 Survey |
 | 10 | Safe discard: audio-playing tabs | Detect and protect tabs playing audio from discard | M2 | R2 Survey |
@@ -50,7 +50,7 @@ Dive browser is built on Tauri v2 (`tauri` git rev `dd2e5d91b60a6402ce270ceb03b0
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
 | M1 | Engine Flags & Startup Performance | Chromium switches, startup timeline instrumentation, startup benchmark harness | none | IN_PROGRESS |
-| M2 | Tab Discarding & Memory Saver Architecture | 30m idle sweep, multi-workspace teardown, safe discard rules, scroll persistence, sleeping tab UI, 20-tab RSS harness | M1 | PLANNED |
+| M2 | Tab Discarding & Memory Saver Architecture | One-hour idle sweep, multi-workspace teardown, safe discard rules, scroll persistence, sleeping tab UI, 20-tab RSS harness | M1 | PLANNED |
 | M3 | Crash Isolation & Session Recovery Hardening | Native CEF termination hook, hard crash recreation, frontend crash notice, history preservation, crash stress test | M1 | PLANNED |
 | M4 | Core Developer Feature Reliability | In-process CDP latency benchmark (<5ms), Network/Console stress test, Playwright recorder verification, MCP concurrency test | M1 | PLANNED |
 | M5 | E2E Integration, 100% Pass & Adversarial Hardening | E2E test suite integration (Tiers 1-4), Tier 5 adversarial hardening, workspace cargo test/clippy/fmt compliance | M2, M3, M4 | PLANNED |
@@ -72,12 +72,14 @@ Dive browser is built on Tauri v2 (`tauri` git rev `dd2e5d91b60a6402ce270ceb03b0
   - Add `scroll_x INTEGER NOT NULL DEFAULT 0`
   - Add `scroll_y INTEGER NOT NULL DEFAULT 0`
 - `housekeeping::sweep`:
-  - Iterates over all tabs in `state.host.views` across workspaces
-  - Excludes active/showing tab, pinned tabs, essential tabs, tabs with `is_audible = true`, tabs with `is_local_bind(url) == true`
-  - Closes CEF native webview via `host.close(tab.id)`
-  - Sets `tab.state = TabState::Discarded`
+  - Considers only inactive Today tabs older than one hour (`DIVE_MAX_IDLE_SECS` and `DIVE_SWEEP_SECS` remain available for live tests).
+  - Protects every visible pane/popout, pinned/essential tabs, local development pages, screen/step recordings, agent runs, downloads, native DevTools, and in-page inspection.
+  - Document-start activity instrumentation covers media elements (including detached audio and accessible frames), WebAudio, WebRTC, capture requests/tracks, and unsaved forms/unload handlers. Unknown, inaccessible, uninstrumented or timed-out content stays active; cross-origin/OOPIF completeness is not assumed.
+  - Rechecks current activity/session and the conditional store snapshot under host-then-store locks on the main thread. Saves URL/scroll and requests CEF force-close without marking the row discarded.
+  - Waits at most five seconds for native invalidation, then unregisters the closed Tauri webview and conditionally marks discarded. Failure/timeout retains an active row. A fresh renderer invalidates the old finalization.
 - `commands::activate_tab`:
-  - If `!host.has(tab_id)`: creates webview, loads URL, injects script `window.scrollTo(scroll_x, scroll_y)`
+  - If `!host.has(tab_id)`, creates a webview with a fresh native label, loads the persisted URL and restores URL-matched scroll after load. This also handles activation while the previous renderer finishes closing.
+- Settings → General → Keep sites active: persisted HTTP(S)-origin exceptions, scoped to the current profile. Ports and schemes identify separate origins.
 - Frontend: `TabStrip.tsx` renders discarded tabs with sleeping indicator/opacity, allows click to activate.
 
 ### M3: Crash Recovery Contract

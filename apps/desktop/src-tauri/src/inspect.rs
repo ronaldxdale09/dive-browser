@@ -156,6 +156,14 @@ impl Registry {
         self.with(|m| m.get(&tab).map(|t| t.changes.clone()).unwrap_or_default())
     }
 
+    /// Picking or inspecting content and unsaved style edits protect the page.
+    pub fn active(&self, tab: TabId) -> bool {
+        self.with(|m| {
+            m.get(&tab)
+                .is_some_and(|t| t.nonce.is_some() || t.pick.is_some() || !t.changes.is_empty())
+        })
+    }
+
     /// Forget a closed tab.
     pub fn drop_tab(&self, tab: TabId) {
         self.with(|m| {
@@ -170,6 +178,7 @@ impl Registry {
 pub async fn start(app: &AppHandle<Runtime>, tab: TabId, session: &CdpSession) -> AppResult<()> {
     let nonce = dive_core::TabId::new().to_string().replace('-', "");
     let state = app.state::<AppState>();
+    let _pending = state.activity.pending(tab);
     session
         .call("Runtime.addBinding", serde_json::json!({"name": BINDING}))
         .await

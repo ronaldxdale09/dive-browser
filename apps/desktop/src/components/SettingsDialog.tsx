@@ -31,6 +31,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { AgentIcon } from "./agent/AgentIcon";
+import { KeepSitesActive } from "./settings/KeepSitesActive";
 import { Appearance } from "./settings/Appearance";
 import { SubtitlesControls } from "./settings/SubtitlesControls";
 
@@ -210,6 +211,8 @@ function General() {
           }
         />
       </Group>
+
+      <KeepSitesActive />
 
       <Group title="Search">
         <Row

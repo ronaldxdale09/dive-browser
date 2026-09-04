@@ -374,6 +374,8 @@ fn reveal(path: &std::path::Path) -> AppResult<()> {
 pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
     tauri_specta::Builder::<Runtime>::new()
         .commands(collect_commands![
+            crate::activity::keep_sites_list,
+            crate::activity::keep_site_set,
             snapshot,
             workspace_activate,
             profiles_list,
@@ -1372,6 +1374,7 @@ pub(crate) async fn tab_screencast_start(
     id: TabId,
     options: crate::screencast::RecordOptions,
 ) -> AppResult<()> {
+    let _pending = state.activity.pending(id);
     let session = cdp_for(&state, id)?;
     let window = window_rect(&app);
     state

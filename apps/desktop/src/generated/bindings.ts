@@ -7,6 +7,8 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 
 /** Commands */
 export const commands = {
+	keepSitesList: (profileId: ProfileId) => typedError<string[], AppError>(__TAURI_INVOKE("keep_sites_list", { profileId })),
+	keepSiteSet: (profileId: ProfileId, url: string, keep: boolean) => typedError<string[], AppError>(__TAURI_INVOKE("keep_site_set", { profileId, url, keep })),
 	snapshot: () => typedError<Snapshot, AppError>(__TAURI_INVOKE("snapshot")),
 	workspaceActivate: (id: WorkspaceId) => typedError<null, AppError>(__TAURI_INVOKE("workspace_activate", { id })),
 	/**  Every profile, in switcher order. */

@@ -57,6 +57,8 @@ pub struct AppState {
     pub inspector: crate::inspect::Registry,
     /// Renderer crash history, so recovery has a budget.
     pub crashes: crate::crash::Registry,
+    /// Native receipt generations and pending activity for safe discard.
+    pub activity: std::sync::Arc<crate::activity::Registry>,
     /// Live-subtitle transcription sessions per tab.
     pub subtitles: crate::subtitles::Registry,
 }
@@ -116,6 +118,7 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
         devservers: crate::devservers::Registry::default(),
         inspector: crate::inspect::Registry::default(),
         crashes: crate::crash::Registry::default(),
+        activity: std::sync::Arc::default(),
         subtitles: crate::subtitles::Registry::default(),
     };
     crate::commands::register_builtin(&state.commands);

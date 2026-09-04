@@ -45,6 +45,8 @@ export type GeolocationInput = { latitude: number; longitude: number; accuracy: 
 export type EnvironmentInput = { geolocation: GeolocationInput | null; timezone: string | null; locale: string | null };
 
 export const ipc = {
+  keepSitesList: async (profile: string) => unwrap(await commands.keepSitesList(profile)),
+  keepSiteSet: async (profile: string, url: string, keep: boolean) => unwrap(await commands.keepSiteSet(profile, url, keep)),
   snapshot: async () => unwrap(await commands.snapshot()),
   workspaceActivate: async (id: string) => unwrap(await commands.workspaceActivate(id)),
   profilesList: async () => unwrap(await commands.profilesList()),

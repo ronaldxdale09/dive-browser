@@ -2,6 +2,7 @@
 //! typed IPC surface used by the React chrome.
 
 mod a11y;
+mod activity;
 mod agent;
 mod agent_tools;
 mod automation;

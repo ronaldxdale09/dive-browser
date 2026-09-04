@@ -118,7 +118,14 @@ fn is_main_thread() -> bool {
 
 /// The tab a view label names, if it is one of ours.
 pub fn tab_from_label(label: &str) -> Option<TabId> {
-    label.strip_prefix("tab-")?.parse().ok()
+    let value = label.strip_prefix("tab-")?;
+    // Accept legacy labels as well as UUID + numeric renderer generation.
+    if let Ok(id) = value.parse() {
+        return Some(id);
+    }
+    let (id, generation) = value.rsplit_once('-')?;
+    generation.parse::<u64>().ok()?;
+    id.parse().ok()
 }
 
 pub struct TabHost {
@@ -233,8 +240,11 @@ impl TabHost {
             return Ok(());
         }
 
+        let activity = app.state::<AppState>().activity.clone();
+        let activity_nonce = activity.begin(tab_id);
         let blank = url::Url::parse(BLANK_URL).map_err(tauri::Error::InvalidUrl)?;
         let title_app = app.clone();
+        let title_nonce = activity_nonce.clone();
         #[allow(unused_mut)]
         let mut builder = WebviewBuilder::new(label_for(tab_id), WebviewUrl::External(blank))
             .data_directory(self.profiles_root.join(&container.cache_dir))
@@ -256,8 +266,9 @@ impl TabHost {
                 // Off the engine's stack: the store write and the event to
                 // the chrome must not re-enter CEF from inside its callback.
                 let app = title_app.clone();
+                let nonce = title_nonce.clone();
                 tauri::async_runtime::spawn(async move {
-                    update_tab(&app, tab_id, |t| t.title = title);
+                    update_session_tab(&app, tab_id, &nonce, |t| t.title = title);
                 });
             });
 
@@ -293,10 +304,14 @@ impl TabHost {
         });
 
         let dl_app = app.clone();
+        let dl_nonce = activity_nonce.clone();
         builder = builder.on_download(move |_, event| {
             match event {
                 DownloadEvent::Requested { url, destination } => {
                     let state = dl_app.state::<AppState>();
+                    state
+                        .activity
+                        .download(tab_id, &dl_nonce, url.as_str(), true);
                     let dir = state.prefs.get(&state).download_dir();
                     let _ = std::fs::create_dir_all(&dir);
                     let suggested = destination
@@ -321,6 +336,12 @@ impl TabHost {
                     .emit(&dl_app);
                 }
                 DownloadEvent::Finished { url, path, success } => {
+                    dl_app.state::<AppState>().activity.download(
+                        tab_id,
+                        &dl_nonce,
+                        url.as_str(),
+                        false,
+                    );
                     let _ = DownloadNotice {
                         url: url.to_string(),
                         path: path
@@ -342,7 +363,12 @@ impl TabHost {
         #[cfg(feature = "cef")]
         {
             let nav_app = app.clone();
+            let nav_nonce = activity_nonce.clone();
             builder = builder.on_address_change(move |_, url| {
+                nav_app
+                    .state::<AppState>()
+                    .activity
+                    .changed(tab_id, &nav_nonce);
                 // Views start on about:blank; that hop must not replace the
                 // tab's real URL or a restart would restore an empty tab.
                 if url.as_str() == BLANK_URL {
@@ -358,8 +384,9 @@ impl TabHost {
                     apply_site_zoom(&zoom_app, tab_id, &zoom_url);
                 });
                 let app = nav_app.clone();
+                let nonce = nav_nonce.clone();
                 tauri::async_runtime::spawn(async move {
-                    update_tab(&app, tab_id, |t| t.url = url);
+                    update_session_tab(&app, tab_id, &nonce, |t| t.url = url);
                 });
             });
         }
@@ -376,7 +403,8 @@ impl TabHost {
         // output are missed.
         #[cfg(feature = "cef")]
         {
-            let session = match attach_cdp(&view) {
+            let session = match attach_cdp(&view, activity.clone(), tab_id, activity_nonce.clone())
+            {
                 Ok(session) => session,
                 Err(error) => {
                     let _ = view.close();
@@ -386,25 +414,37 @@ impl TabHost {
             // `DIVE_DISABLE_FEEDS=1` leaves the DevTools session idle, to
             // tell an engine fault apart from one our own traffic provokes.
             let feeds = std::env::var_os("DIVE_DISABLE_FEEDS").is_none();
-            let (console_ready, network_ready, interception_ready, fill_ready) = if feeds {
-                let c = crate::console::attach(app.clone(), tab_id, session.clone());
-                let n = crate::network::attach(app.clone(), tab_id, session.clone());
-                crate::favicon::attach(app.clone(), tab_id, session.clone());
-                crate::loading::attach(app.clone(), tab_id, session.clone());
-                let f = crate::filltab::attach(app.clone(), tab_id, session.clone());
-                let r =
-                    crate::rules::attach(app.clone(), tab_id, tab.workspace_id, session.clone());
-                crate::inspect::watch(app.clone(), tab_id, &session);
-                crate::crash::watch(app.clone(), tab_id, session.clone());
-                (c, n, r, f)
-            } else {
-                let (ct, cr) = tokio::sync::oneshot::channel();
-                let (nt, nr) = tokio::sync::oneshot::channel();
-                let (rt, rr) = tokio::sync::oneshot::channel();
-                let (ft, fr) = tokio::sync::oneshot::channel();
-                let _ = (ct.send(()), nt.send(()), rt.send(()), ft.send(()));
-                (cr, nr, rr, fr)
-            };
+            let (console_ready, network_ready, interception_ready, fill_ready, loading_ready) =
+                if feeds {
+                    let c = crate::console::attach(app.clone(), tab_id, session.clone());
+                    let n = crate::network::attach(app.clone(), tab_id, session.clone());
+                    crate::favicon::attach(app.clone(), tab_id, session.clone());
+                    let loading = crate::loading::attach(app.clone(), tab_id, session.clone());
+                    let f = crate::filltab::attach(app.clone(), tab_id, session.clone());
+                    let r = crate::rules::attach(
+                        app.clone(),
+                        tab_id,
+                        tab.workspace_id,
+                        session.clone(),
+                    );
+                    crate::inspect::watch(app.clone(), tab_id, &session);
+                    crate::crash::watch(app.clone(), tab_id, session.clone());
+                    (c, n, r, f, loading)
+                } else {
+                    let (ct, cr) = tokio::sync::oneshot::channel();
+                    let (nt, nr) = tokio::sync::oneshot::channel();
+                    let (rt, rr) = tokio::sync::oneshot::channel();
+                    let (ft, fr) = tokio::sync::oneshot::channel();
+                    let (lt, lr) = tokio::sync::oneshot::channel();
+                    let _ = (
+                        ct.send(()),
+                        nt.send(()),
+                        rt.send(()),
+                        ft.send(()),
+                        lt.send(()),
+                    );
+                    (cr, nr, rr, fr, lr)
+                };
             let session_for_prefs = session.clone();
             self.cdp.insert(tab_id, session);
             let nav = view.clone();
@@ -414,6 +454,7 @@ impl TabHost {
                 let _ = network_ready.await;
                 let _ = interception_ready.await;
                 let _ = fill_ready.await;
+                let _ = loading_ready.await;
                 // Privacy preferences have to be in force before the document
                 // request goes out, or the first load escapes them.
                 let prefs = {
@@ -430,6 +471,8 @@ impl TabHost {
                 )
                 .await;
                 tracing::debug!(%tab_id, "permission page setup complete before navigation");
+                crate::activity::attach(&activity, tab_id, &activity_nonce, &session_for_prefs)
+                    .await;
                 crate::prefs::apply(&session_for_prefs, &prefs).await;
                 tracing::debug!(%tab_id, "browser preferences complete before navigation");
                 if let Err(e) = nav.navigate(url) {
@@ -807,12 +850,24 @@ impl TabHost {
 
     /// Destroy the view for `id`, if any.
     pub fn close(&mut self, id: TabId) -> tauri::Result<()> {
+        if let Some(view) = self.views.get(&id) {
+            view.close()?;
+        }
+        self.forget_closed(id);
+        self.window
+            .app_handle()
+            .state::<AppState>()
+            .activity
+            .drop_tab(id);
+        Ok(())
+    }
+
+    /// Forget a view after a successful native close transition.
+    pub fn forget_closed(&mut self, id: TabId) {
         if let Some(session) = self.cdp.remove(&id) {
             session.close();
         }
-        if let Some(view) = self.views.remove(&id) {
-            view.close()?;
-        }
+        self.views.remove(&id);
         if let Some(popout) = self.popouts.remove(&id) {
             let _ = popout.window.destroy();
         }
@@ -821,7 +876,6 @@ impl TabHost {
         if self.active == Some(id) {
             self.active = None;
         }
-        Ok(())
     }
 
     /// Navigate `id`'s view.
@@ -852,7 +906,12 @@ impl TabHost {
 
 /// Bridge a CEF webview's `DevTools` channel into a [`CdpSession`].
 #[cfg(feature = "cef")]
-fn attach_cdp(view: &Webview<Runtime>) -> tauri::Result<CdpSession> {
+fn attach_cdp(
+    view: &Webview<Runtime>,
+    activity: std::sync::Arc<crate::activity::Registry>,
+    tab: TabId,
+    nonce: String,
+) -> tauri::Result<CdpSession> {
     struct CefTransport(Webview<Runtime>);
     impl dive_cdp::Transport for CefTransport {
         fn send(&self, message: &str) -> Result<(), dive_cdp::CdpError> {
@@ -875,6 +934,7 @@ fn attach_cdp(view: &Webview<Runtime>) -> tauri::Result<CdpSession> {
                         head = &text[..text.len().min(160)],
                         "cdp <-"
                     );
+                    activity.ingest(tab, &nonce, text);
                     if let Err(e) = sink.handle_incoming(text) {
                         tracing::debug!("ignoring malformed cdp message: {e}");
                     }
@@ -902,7 +962,9 @@ const PLACEHOLDER_TITLE: &str = "Tauri CEF Initial Load";
 const BLANK_URL: &str = "about:blank";
 
 fn label_for(id: TabId) -> String {
-    format!("tab-{id}")
+    static NEXT_VIEW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let generation = NEXT_VIEW.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("tab-{id}-{generation}")
 }
 
 /// Label of the chrome webview inside the `seq`th popout window, for `id`.
@@ -937,6 +999,15 @@ fn apply_site_zoom(app: &AppHandle<Runtime>, tab_id: TabId, url: &str) {
         && let Err(e) = host.with_view(tab_id, |v| v.set_zoom(factor))
     {
         tracing::debug!(%tab_id, "site zoom not applied: {e}");
+    }
+}
+
+/// A late callback from a closing renderer must not overwrite its replacement.
+fn update_session_tab(app: &AppHandle<Runtime>, id: TabId, nonce: &str, f: impl FnOnce(&mut Tab)) {
+    let state = app.state::<AppState>();
+    let _host = lock(&state.host);
+    if state.activity.session_current(id, nonce) {
+        update_tab(app, id, f);
     }
 }
 
@@ -1128,6 +1199,22 @@ fn forward_events(app: AppHandle<Runtime>, mut rx: tokio::sync::broadcast::Recei
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reopening_while_native_close_is_pending_uses_a_new_label() {
+        let id = TabId::new();
+        let old = label_for(id);
+        let fresh = label_for(id);
+        assert_ne!(
+            old, fresh,
+            "runtime still owns old label until native close receipt"
+        );
+        assert_eq!(tab_from_label(&old), Some(id));
+        assert_eq!(tab_from_label(&fresh), Some(id));
+        assert_eq!(tab_from_label(&format!("tab-{id}")), Some(id));
+        assert_eq!(tab_from_label(&format!("tab-{id}-not-a-generation")), None);
+        assert_eq!(tab_from_label(&format!("chrome-pop-1-{id}")), None);
+    }
+
     #[test]
     fn window_bounds_round_trip_and_reject_tiny_frames() {
         let b = WindowBounds {
