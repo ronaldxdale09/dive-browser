@@ -15,6 +15,7 @@ export function SharePopover() {
   const [info, setInfo] = useState<ShareInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copying, setCopying] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   useCoversContent(open);
@@ -57,7 +58,7 @@ export function SharePopover() {
       {open && (
         <div ref={panel} role="dialog" aria-label="Share" className="absolute right-0 z-40 mt-1 w-64 rounded-xl border border-line-2 bg-surface p-3 text-xs shadow-2xl">
           <div className="mb-2 text-[10px] tracking-wider text-ink-3 uppercase">Open on your phone</div>
-          {error && <p className="text-danger">{error}</p>}
+          {error && <p role="alert" className="text-danger">{error}</p>}
           {info && (
             <>
               <div className="grid place-items-center rounded-lg bg-white p-2 [&_svg]:h-40 [&_svg]:w-40" dangerouslySetInnerHTML={{ __html: info.qr_svg }} />
@@ -66,13 +67,20 @@ export function SharePopover() {
                 <button
                   type="button"
                   aria-label="Copy link"
+                  disabled={copying}
                   onClick={() => {
-                    void navigator.clipboard.writeText(info.lan_url).then(() => {
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 1500);
-                    });
+                    setError(null);
+                    setCopying(true);
+                    void navigator.clipboard
+                      .writeText(info.lan_url)
+                      .then(() => {
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1500);
+                      })
+                      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+                      .finally(() => setCopying(false));
                   }}
-                  className="grid size-6 place-items-center rounded-full text-ink-2 hover:bg-surface-3 hover:text-ink"
+                  className="grid size-6 place-items-center rounded-full text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40"
                 >
                   <Icon icon={copied ? Check : Copy} size={12} />
                 </button>
