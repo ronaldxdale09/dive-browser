@@ -12,6 +12,22 @@ afterEach(() => {
 });
 
 describe("preference persistence", () => {
+  it("does not let an older load replace a newer stored update", async () => {
+    let finishLoad!: (prefs: typeof DEFAULT_PREFS) => void;
+    vi.spyOn(ipc, "prefsGet").mockImplementation(() => new Promise((resolve) => {
+      finishLoad = resolve;
+    }));
+    vi.spyOn(ipc, "prefsSet").mockImplementation((prefs) => Promise.resolve(prefs));
+    usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: false });
+
+    const loading = usePrefs.getState().load();
+    await usePrefs.getState().update({ block_trackers: true });
+    finishLoad(DEFAULT_PREFS);
+    await loading;
+
+    expect(usePrefs.getState().prefs.block_trackers).toBe(true);
+  });
+
   it("rolls an optimistic update back when the host rejects it", async () => {
     vi.spyOn(ipc, "prefsSet").mockRejectedValue(new Error("preferences unavailable"));
     usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });

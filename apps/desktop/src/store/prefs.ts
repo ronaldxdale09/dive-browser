@@ -54,10 +54,15 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   prefs: DEFAULT_PREFS,
   loaded: false,
   load: async () => {
+    const previous = get().prefs;
     try {
       const prefs = complete(await ipc.prefsGet());
-      set({ prefs, loaded: true });
-      applyAppearance(prefs);
+      if (get().prefs === previous) {
+        set({ prefs, loaded: true });
+        applyAppearance(prefs);
+      } else {
+        set({ loaded: true });
+      }
     } catch (e) {
       set({ loaded: true });
       report(e);
