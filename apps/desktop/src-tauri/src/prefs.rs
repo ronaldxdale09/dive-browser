@@ -48,7 +48,7 @@ pub struct Prefs {
     pub block_trackers: bool,
     /// Extra hosts or URL globs to block, one per entry.
     pub blocked_patterns: Vec<String>,
-    /// Remove invasive `YouTube` components when `DivePrivacy` is active.
+    /// Apply narrow `YouTube` privacy interventions when `DivePrivacy` is active.
     #[serde(default = "default_youtube_protection")]
     pub youtube_protection: bool,
     /// Exact document hosts where `DivePrivacy` is disabled.
@@ -444,9 +444,17 @@ fn is_hex_color(s: &str) -> bool {
 #[derive(Default)]
 pub struct Registry {
     cached: Mutex<Option<Prefs>>,
+    updates: tokio::sync::Mutex<()>,
 }
 
 impl Registry {
+    /// Enter one complete persist-and-apply preference transaction. Commands
+    /// keep this guard until every live tab has seen the stored snapshot, so
+    /// an older request can never apply after a newer request.
+    pub async fn begin_update(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.updates.lock().await
+    }
+
     /// Current preferences, reading the store the first time.
     pub fn get(&self, state: &AppState) -> Prefs {
         if let Some(prefs) = crate::state::lock(&self.cached).clone() {
@@ -1052,5 +1060,31 @@ mod tests {
         assert_eq!(fine.appearance_preset, "custom");
         assert_eq!(fine.custom_ground, "#0b0f14");
         assert!((fine.ui_scale - 1.13).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn preference_update_transactions_enter_in_request_order() {
+        let registry = std::sync::Arc::new(Registry::default());
+        let first = registry.begin_update().await;
+        let second_registry = std::sync::Arc::clone(&registry);
+        let (attempting_tx, attempting_rx) = tokio::sync::oneshot::channel();
+        let (entered_tx, mut entered_rx) = tokio::sync::oneshot::channel();
+        let second = tokio::spawn(async move {
+            let _ = attempting_tx.send(());
+            let _guard = second_registry.begin_update().await;
+            let _ = entered_tx.send(());
+        });
+
+        attempting_rx.await.expect("second transaction started");
+        assert!(
+            matches!(
+                entered_rx.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            ),
+            "the second persist-and-apply transaction entered before the first completed",
+        );
+        drop(first);
+        entered_rx.await.expect("second transaction entered");
+        second.await.expect("second transaction task");
     }
 }

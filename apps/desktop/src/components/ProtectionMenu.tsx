@@ -21,6 +21,8 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
   const openSettings = useBrowser((s) => s.openSettings);
   const counts = usePrivacy(selectPrivacyCounts(activeTab));
   const info = usePrivacy((s) => s.info);
+  const infoError = usePrivacy((s) => s.infoError);
+  const eventError = usePrivacy((s) => s.eventError);
   const loadInfo = usePrivacy((s) => s.loadInfo);
   const [open, setOpen] = useState(false);
   const [siteSaving, setSiteSaving] = useState(false);
@@ -40,7 +42,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
   const youtubeActive = siteOn && youtubeSite && prefs.youtube_protection;
   const total = counts.ads + counts.trackers + counts.youtube;
   const headline = !globalOn ? "DivePrivacy is off" : !host ? "Protection unavailable here" : paused ? "Protection paused here" : "Protected on this site";
-  const summary = total === 0 ? "Clean so far" : `${total} stopped so far`;
+  const summary = eventError ? "Activity unavailable" : total === 0 ? "Clean so far" : `${total} privacy actions so far`;
 
   useEffect(() => {
     if (open && !info) void loadInfo().catch(() => undefined);
@@ -167,7 +169,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
           </section>
 
           <footer className="flex items-center gap-2 border-t border-line bg-surface-2/45 px-3 py-2">
-            <span className="font-mono text-[9.5px] text-ink-3">Rules {info?.version ?? "bundled"}</span>
+            <span className="font-mono text-[9.5px] text-ink-3">{infoError ? "Rules unavailable" : `Rules ${info?.version ?? "bundled"}`}</span>
             <span className="min-w-0 flex-1 truncate text-[9.5px] text-ink-3">Across workspaces; site pauses stay host-specific.</span>
             <button
               type="button"

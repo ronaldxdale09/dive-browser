@@ -42,6 +42,8 @@ beforeEach(() => {
   usePrivacy.setState({
     byTab: {},
     info: { version: "2026.09.04", ad_rules: 63, tracker_rules: 62, cosmetic_hosts: 4 },
+    infoError: null,
+    eventError: null,
   });
   usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
   vi.spyOn(ipc, "downloadsReveal").mockResolvedValue(null);
@@ -196,11 +198,22 @@ describe("Toolbar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Protection" }));
 
     expect(screen.getByText("Protected on this site")).toBeTruthy();
-    expect(screen.getByText("4 stopped so far")).toBeTruthy();
+    expect(screen.getByText("4 privacy actions so far")).toBeTruthy();
     expect(screen.getByTestId("privacy-halo").className).toContain("privacy-halo");
     expect(screen.getByText("Ads blocked").nextSibling?.textContent).toBe("2");
     expect(screen.getByText("Trackers stopped").nextSibling?.textContent).toBe("1");
     expect(screen.getByLabelText("4 privacy actions on this page")).toBeTruthy();
+  });
+
+  it("does not present a working zero state when privacy events are unavailable", () => {
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, block_trackers: true }, loaded: true });
+    usePrivacy.setState({ eventError: "privacy events unavailable" });
+
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+
+    expect(screen.getByText("Activity unavailable")).toBeTruthy();
+    expect(screen.queryByText("Clean so far")).toBeNull();
   });
 
   it("persists an exact IP-host pause without duplicating the backend reload", async () => {

@@ -421,7 +421,6 @@ impl TabHost {
                 )
                 .await;
                 tracing::debug!(%tab_id, "permission page setup complete before navigation");
-                crate::privacy::apply_page(&session_for_prefs, &prefs, url.as_str()).await;
                 crate::prefs::apply(&session_for_prefs, &prefs).await;
                 tracing::debug!(%tab_id, "browser preferences complete before navigation");
                 if let Err(e) = nav.navigate(url) {
@@ -453,6 +452,21 @@ impl TabHost {
     /// Every live `DevTools` session, for changes that touch all open tabs.
     pub fn sessions(&self) -> Vec<(TabId, CdpSession)> {
         self.cdp.iter().map(|(id, s)| (*id, s.clone())).collect()
+    }
+
+    /// Forget sessions whose renderer has already closed. Their native view
+    /// lifecycle may finish independently, but future global preference and
+    /// rule updates must not keep addressing a dead CDP channel.
+    pub fn prune_closed_sessions(&mut self) -> Vec<TabId> {
+        let dead = self
+            .cdp
+            .iter()
+            .filter_map(|(id, session)| session.is_closed().then_some(*id))
+            .collect::<Vec<_>>();
+        for id in &dead {
+            self.cdp.remove(id);
+        }
+        dead
     }
 
     /// `DevTools` sessions whose views are about to be hidden by a chrome

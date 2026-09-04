@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+// @ts-expect-error Vitest runs in Node; the browser-only tsconfig intentionally omits Node types.
+import { readFileSync } from "node:fs";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "./browser";
 import { DEFAULT_APPEARANCE, DEFAULT_PREFS, accentInk, applyAppearance, isDefaultAppearance, resolveMotion, usePrefs, watchReducedMotion } from "./prefs";
+
+const styles = readFileSync("src/styles.css", "utf8");
 
 afterEach(() => {
   for (const name of ["data-theme", "data-density", "data-tab-style", "data-motion", "style"]) document.documentElement.removeAttribute(name);
@@ -11,6 +15,48 @@ afterEach(() => {
 });
 
 describe("preference persistence", () => {
+  it("serializes full snapshots so an older host apply finishes first", async () => {
+    let finishFirst!: (prefs: typeof DEFAULT_PREFS) => void;
+    let finishSecond!: (prefs: typeof DEFAULT_PREFS) => void;
+    let firstStarted!: () => void;
+    let secondStarted!: () => void;
+    const firstCall = new Promise<void>((resolve) => {
+      firstStarted = resolve;
+    });
+    const secondCall = new Promise<void>((resolve) => {
+      secondStarted = resolve;
+    });
+    const write = vi.spyOn(ipc, "prefsSet")
+      .mockImplementationOnce(() => {
+        firstStarted();
+        return new Promise((resolve) => {
+          finishFirst = resolve;
+        });
+      })
+      .mockImplementationOnce(() => {
+        secondStarted();
+        return new Promise((resolve) => {
+          finishSecond = resolve;
+        });
+      });
+    usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
+
+    const first = usePrefs.getState().update({ block_trackers: true });
+    await firstCall;
+    const second = usePrefs.getState().update({ do_not_track: true });
+    await Promise.resolve();
+    expect(write).toHaveBeenCalledTimes(1);
+
+    finishFirst({ ...DEFAULT_PREFS, block_trackers: true });
+    await first;
+    await secondCall;
+    finishSecond({ ...DEFAULT_PREFS, block_trackers: true, do_not_track: true });
+    await second;
+
+    expect(usePrefs.getState().prefs.block_trackers).toBe(true);
+    expect(usePrefs.getState().prefs.do_not_track).toBe(true);
+  });
+
   it("does not let an older load replace a newer stored update", async () => {
     let finishLoad!: (prefs: typeof DEFAULT_PREFS) => void;
     vi.spyOn(ipc, "prefsGet").mockImplementation(() => new Promise((resolve) => {
@@ -40,21 +86,37 @@ describe("preference persistence", () => {
   it("does not let a stale failed write undo a newer stored choice", async () => {
     let failFirst!: (error: Error) => void;
     let finishSecond!: (prefs: typeof DEFAULT_PREFS) => void;
+    let firstStarted!: () => void;
+    let secondStarted!: () => void;
+    const firstCall = new Promise<void>((resolve) => {
+      firstStarted = resolve;
+    });
+    const secondCall = new Promise<void>((resolve) => {
+      secondStarted = resolve;
+    });
     vi.spyOn(ipc, "prefsSet")
-      .mockImplementationOnce(() => new Promise((_, reject) => {
-        failFirst = reject;
-      }))
-      .mockImplementationOnce(() => new Promise((resolve) => {
-        finishSecond = resolve;
-      }));
+      .mockImplementationOnce(() => {
+        firstStarted();
+        return new Promise((_, reject) => {
+          failFirst = reject;
+        });
+      })
+      .mockImplementationOnce(() => {
+        secondStarted();
+        return new Promise((resolve) => {
+          finishSecond = resolve;
+        });
+      });
     usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
 
     const first = usePrefs.getState().update({ block_trackers: true });
+    await firstCall;
     const second = usePrefs.getState().update({ do_not_track: true });
-    finishSecond({ ...DEFAULT_PREFS, block_trackers: true, do_not_track: true });
-    await second;
     failFirst(new Error("stale failure"));
     await first;
+    await secondCall;
+    finishSecond({ ...DEFAULT_PREFS, block_trackers: true, do_not_track: true });
+    await second;
 
     expect(usePrefs.getState().prefs.block_trackers).toBe(true);
     expect(usePrefs.getState().prefs.do_not_track).toBe(true);
@@ -105,6 +167,12 @@ describe("applyAppearance", () => {
     vi.spyOn(window, "matchMedia").mockReturnValue(query);
     expect(resolveMotion({ ...DEFAULT_PREFS, motion: "system" })).toBe("reduce");
     expect(resolveMotion({ ...DEFAULT_PREFS, motion: "full" })).toBe("full");
+  });
+
+  it("unconditionally suppresses privacy motion when the OS requests reduced motion", () => {
+    expect(styles).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{\s*(?:\/\*[\s\S]*?\*\/\s*)?\.privacy-motion\s*\{[^}]*animation: none !important;[^}]*transition: none !important;/,
+    );
   });
 
   it("sets every theme variable for a non-default appearance and clears them at the defaults", () => {

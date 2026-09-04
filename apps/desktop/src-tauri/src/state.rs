@@ -49,6 +49,8 @@ pub struct AppState {
     pub prefs: crate::prefs::Registry,
     /// Immutable Dive-owned privacy matchers.
     pub privacy: crate::privacy::DivePrivacy,
+    /// Replaceable per-tab document-start privacy preference scripts.
+    pub privacy_pages: crate::privacy::PageRegistry,
     /// Dev servers discovered on this machine.
     pub devservers: crate::devservers::Registry,
     /// Element picks and style experiments from the in-page inspector.
@@ -108,6 +110,7 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
         rules: crate::rules::Registry::default(),
         prefs: crate::prefs::Registry::default(),
         privacy: crate::privacy::DivePrivacy::new(),
+        privacy_pages: crate::privacy::PageRegistry::default(),
         devservers: crate::devservers::Registry::default(),
         inspector: crate::inspect::Registry::default(),
         crashes: crate::crash::Registry::default(),

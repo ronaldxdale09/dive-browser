@@ -267,6 +267,7 @@ pub(crate) async fn prefs_set(
     state: State<'_, AppState>,
     prefs: crate::prefs::Prefs,
 ) -> AppResult<crate::prefs::Prefs> {
+    let _update = state.prefs.begin_update().await;
     let previous = state.prefs.get(&state);
     let stored = state.prefs.set(&state, prefs)?;
     let sessions = {
@@ -277,21 +278,21 @@ pub(crate) async fn prefs_set(
                 .into_iter()
                 .map(|(id, session)| {
                     let document_url = store.tab(id).map(|tab| tab.url).unwrap_or_default();
-                    (session, document_url)
+                    (id, session, document_url)
                 })
                 .collect()
         })
     };
-    for (session, document_url) in &sessions {
+    for (tab_id, session, document_url) in &sessions {
         crate::prefs::apply(session, &stored).await;
-        crate::privacy::apply_page(session, &stored, document_url).await;
+        crate::privacy::refresh_page_policy(&state, *tab_id, session, &stored).await;
         if privacy_site_state_changed(&previous, &stored, document_url)
             && let Err(error) = session.call0("Page.reload").await
         {
             tracing::debug!("DivePrivacy site pause reload failed open: {error}");
         }
     }
-    reapply_interception(&state, None).await?;
+    reapply_interception(&state, None).await;
     match crate::prefs::prune_history(&state) {
         Ok(0) => {}
         Ok(n) => tracing::info!(n, "pruned history past the retention window"),
@@ -305,7 +306,10 @@ fn privacy_site_state_changed(
     current: &crate::prefs::Prefs,
     document_url: &str,
 ) -> bool {
-    previous.privacy_enabled_for(document_url) != current.privacy_enabled_for(document_url)
+    let effective = |prefs: &crate::prefs::Prefs| {
+        prefs.block_trackers && prefs.privacy_enabled_for(document_url)
+    };
+    effective(previous) != effective(current)
 }
 
 /// Delete browsing data; returns a one-line summary of what went.
@@ -1884,16 +1888,37 @@ pub(crate) async fn rules_set(
     rules: Vec<crate::rules::Rule>,
 ) -> AppResult<()> {
     state.rules.set(&state, workspace, rules)?;
-    reapply_interception(&state, Some(workspace)).await
+    reapply_interception(&state, Some(workspace)).await;
+    Ok(())
+}
+
+#[derive(Default)]
+struct ReapplySummary {
+    dead: Vec<TabId>,
+    failed: Vec<(TabId, String)>,
+}
+
+async fn apply_interception_targets(
+    targets: Vec<(TabId, Vec<crate::rules::Rule>, dive_cdp::CdpSession)>,
+    prefs: &crate::prefs::Prefs,
+) -> ReapplySummary {
+    let mut summary = ReapplySummary::default();
+    for (tab_id, rules, session) in targets {
+        if session.is_closed() {
+            summary.dead.push(tab_id);
+            continue;
+        }
+        if let Err(error) = crate::rules::apply(&session, &rules, prefs).await {
+            summary.failed.push((tab_id, error.message));
+        }
+    }
+    summary
 }
 
 /// Reapply shared Fetch interception on all tabs, or those owned by one workspace.
-pub(crate) async fn reapply_interception(
-    state: &AppState,
-    workspace: Option<WorkspaceId>,
-) -> AppResult<()> {
+pub(crate) async fn reapply_interception(state: &AppState, workspace: Option<WorkspaceId>) {
     let prefs = state.prefs.get(state);
-    let sessions: Vec<(Option<WorkspaceId>, dive_cdp::CdpSession)> = {
+    let sessions: Vec<(TabId, Option<WorkspaceId>, dive_cdp::CdpSession)> = {
         let host = lock(&state.host);
         let store = lock(&state.store);
         host.as_ref().map_or_else(Vec::new, |host| {
@@ -1901,21 +1926,41 @@ pub(crate) async fn reapply_interception(
                 .into_iter()
                 .filter_map(|(id, session)| {
                     let owner = store.tab(id).ok()?.workspace_id;
-                    (workspace.is_none() || owner == workspace).then_some((owner, session))
+                    (workspace.is_none() || owner == workspace).then_some((id, owner, session))
                 })
                 .collect()
         })
     };
-    for (owner, session) in sessions {
-        let rules = owner.map_or_else(Vec::new, |id| state.rules.list(state, id));
-        crate::rules::apply(&session, &rules, &prefs).await?;
+    // Rule cache misses read the store, so resolve them only after releasing
+    // the host/store snapshot locks above.
+    let targets = sessions
+        .into_iter()
+        .map(|(id, owner, session)| {
+            let rules = owner.map_or_else(Vec::new, |id| state.rules.list(state, id));
+            (id, rules, session)
+        })
+        .collect();
+    let summary = apply_interception_targets(targets, &prefs).await;
+    for tab_id in &summary.dead {
+        tracing::debug!(%tab_id, "pruning closed interception session");
+        state.privacy_pages.drop_tab(*tab_id);
     }
-    Ok(())
+    for (tab_id, error) in &summary.failed {
+        tracing::warn!(%tab_id, %error, "could not reapply interception to tab");
+    }
+    let pruned = lock(&state.host)
+        .as_mut()
+        .map_or_else(Vec::new, crate::engine::TabHost::prune_closed_sessions);
+    for tab_id in pruned {
+        tracing::debug!(%tab_id, "pruned closed CDP session after interception reapply");
+        state.privacy_pages.drop_tab(tab_id);
+    }
 }
 
 /// Reapply interception after an existing workspace-rules integration writes rules.
 pub(crate) async fn reapply_rules(state: &AppState, workspace: WorkspaceId) -> AppResult<()> {
-    reapply_interception(state, Some(workspace)).await
+    reapply_interception(state, Some(workspace)).await;
+    Ok(())
 }
 
 /// Throttle a tab's network, or clear throttling with `None`.
@@ -2483,7 +2528,10 @@ mod tests {
 
     #[test]
     fn privacy_reload_is_reserved_for_site_pause_transitions() {
-        let previous = crate::prefs::Prefs::default();
+        let previous = crate::prefs::Prefs {
+            block_trackers: true,
+            ..crate::prefs::Prefs::default()
+        };
         let mut youtube_changed = previous.clone();
         youtube_changed.youtube_protection = false;
         assert!(!privacy_site_state_changed(
@@ -2504,6 +2552,85 @@ mod tests {
             &paused,
             "https://example.com/",
         ));
+
+        let globally_off = crate::prefs::Prefs::default();
+        let mut off_with_removed_exception = globally_off.clone();
+        off_with_removed_exception.privacy_exceptions = vec!["www.youtube.com".into()];
+        assert!(
+            !privacy_site_state_changed(
+                &off_with_removed_exception,
+                &globally_off,
+                "https://www.youtube.com/watch?v=abc",
+            ),
+            "changing an inert exception must not reload while global protection is off",
+        );
+    }
+
+    #[derive(Clone)]
+    struct AckTransport {
+        sent: std::sync::Arc<std::sync::Mutex<Vec<Value>>>,
+        session: std::sync::Arc<std::sync::Mutex<Option<dive_cdp::CdpSession>>>,
+    }
+
+    impl dive_cdp::Transport for AckTransport {
+        fn send(&self, message: &str) -> Result<(), dive_cdp::CdpError> {
+            let message: Value = serde_json::from_str(message).expect("outgoing CDP JSON");
+            let id = message["id"].as_u64().expect("CDP call id");
+            self.sent
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(message);
+            self.session
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .expect("session installed")
+                .handle_incoming(&serde_json::json!({"id": id, "result": {}}).to_string())?;
+            Ok(())
+        }
+    }
+
+    fn acknowledged_session() -> (
+        dive_cdp::CdpSession,
+        std::sync::Arc<std::sync::Mutex<Vec<Value>>>,
+    ) {
+        let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let holder = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let session = dive_cdp::CdpSession::new(AckTransport {
+            sent: std::sync::Arc::clone(&sent),
+            session: std::sync::Arc::clone(&holder),
+        });
+        *holder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(session.clone());
+        (session, sent)
+    }
+
+    #[tokio::test]
+    async fn interception_reapply_prunes_a_dead_first_session_and_updates_the_next() {
+        let dead_id = TabId::new();
+        let live_id = TabId::new();
+        let (dead, _) = acknowledged_session();
+        dead.close();
+        let (live, sent) = acknowledged_session();
+        let prefs = crate::prefs::Prefs {
+            block_trackers: true,
+            ..crate::prefs::Prefs::default()
+        };
+
+        let summary = apply_interception_targets(
+            vec![(dead_id, Vec::new(), dead), (live_id, Vec::new(), live)],
+            &prefs,
+        )
+        .await;
+
+        assert_eq!(summary.dead, vec![dead_id]);
+        assert!(summary.failed.is_empty());
+        let sent = sent
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0]["method"], "Fetch.enable");
     }
 
     #[test]

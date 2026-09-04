@@ -1110,7 +1110,7 @@ export type Prefs = {
 	block_trackers: boolean,
 	/**  Extra hosts or URL globs to block, one per entry. */
 	blocked_patterns: string[],
-	/**  Remove invasive `YouTube` components when `DivePrivacy` is active. */
+	/**  Apply narrow `YouTube` privacy interventions when `DivePrivacy` is active. */
 	youtube_protection?: boolean,
 	/**  Exact document hosts where `DivePrivacy` is disabled. */
 	privacy_exceptions?: string[],
@@ -1198,11 +1198,11 @@ export type PrivacyEvent =
 	/**  Which bundled matcher blocked it. */
 	category: PrivacyCategory,
 } } |
-/**  `YouTube` elements were removed from a document. */
+/**  A narrow `YouTube` privacy intervention was observed in a document. */
 { type: "youtube"; data: {
-	/**  Tab whose document was cleaned. */
+	/**  Tab whose document received the intervention. */
 	tab_id: TabId,
-	/**  Number of elements removed. */
+	/**  Number of reported interventions. */
 	count: number,
 } };
 

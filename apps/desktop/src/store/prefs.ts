@@ -67,6 +67,22 @@ interface PrefsState {
   update: (patch: Partial<Prefs>) => Promise<void>;
 }
 
+interface PendingWrite {
+  revision: number;
+  patch: Partial<Prefs>;
+}
+
+let confirmedPrefs = DEFAULT_PREFS;
+let pendingWrites: PendingWrite[] = [];
+let nextWriteRevision = 0;
+let writeTail: Promise<void> = Promise.resolve();
+
+function applyPending(base: Prefs, through = Number.MAX_SAFE_INTEGER): Prefs {
+  return pendingWrites
+    .filter((write) => write.revision <= through)
+    .reduce((prefs, write) => ({ ...prefs, ...write.patch }), base);
+}
+
 export const usePrefs = create<PrefsState>((set, get) => ({
   prefs: DEFAULT_PREFS,
   loaded: false,
@@ -75,6 +91,7 @@ export const usePrefs = create<PrefsState>((set, get) => ({
     try {
       const prefs = complete(await ipc.prefsGet());
       if (get().prefs === previous) {
+        confirmedPrefs = prefs;
         set({ prefs, loaded: true });
         applyAppearance(prefs);
       } else {
@@ -88,23 +105,32 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   update: async (patch) => {
     const previous = get().prefs;
     const next = { ...previous, ...patch };
+    if (pendingWrites.length === 0) confirmedPrefs = previous;
+    const write = { revision: ++nextWriteRevision, patch: { ...patch } };
+    pendingWrites.push(write);
     set({ prefs: next });
     applyAppearance(next);
-    try {
-      const stored = complete(await ipc.prefsSet(next));
-      // A slower earlier write must not replace a newer local choice.
-      if (get().prefs === next) {
-        set({ prefs: stored });
-        applyAppearance(stored);
+    const persisted = writeTail.then(async () => {
+      const snapshot = applyPending(confirmedPrefs, write.revision);
+      try {
+        const stored = complete(await ipc.prefsSet(snapshot));
+        confirmedPrefs = stored;
+        pendingWrites = pendingWrites.filter((pending) => pending.revision > write.revision);
+        const current = applyPending(confirmedPrefs);
+        set({ prefs: current });
+        applyAppearance(current);
+      } catch (e) {
+        const hasLaterWrite = pendingWrites.some((pending) => pending.revision > write.revision);
+        if (!hasLaterWrite) {
+          pendingWrites = pendingWrites.filter((pending) => pending.revision > write.revision);
+          set({ prefs: confirmedPrefs });
+          applyAppearance(confirmedPrefs);
+        }
+        report(e);
       }
-    } catch (e) {
-      // Roll back only while this is still the newest optimistic update.
-      if (get().prefs === next) {
-        set({ prefs: previous });
-        applyAppearance(previous);
-      }
-      report(e);
-    }
+    });
+    writeTail = persisted.catch(() => undefined);
+    await persisted;
   },
 }));
 

@@ -424,6 +424,13 @@ button:not(:disabled):active,
    preference opts out of the OS setting for the chrome alone. Both forms
    share one rule list via the `:root` prefix below. */
 @media (prefers-reduced-motion: reduce) {
+  /* OS accessibility always wins for DivePrivacy, including an explicit
+     chrome-level `data-motion="full"` preference. */
+  .privacy-motion {
+    animation: none !important;
+    transition: none !important;
+    will-change: auto;
+  }
   :root:not([data-motion="full"]) {
     --dialog-fade: 0ms;
   }

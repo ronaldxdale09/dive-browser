@@ -8,12 +8,9 @@
   if (window.__divePrivacy && window.__divePrivacy.version === 1) return;
 
   const bindingName = "__DIVE_PRIVACY_BINDING__";
-  const nativeFetch = typeof window.fetch === "function" ? window.fetch : null;
-  const xhrPrototype = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
-  const nativeOpen = xhrPrototype && xhrPrototype.open;
-  const nativeSend = xhrPrototype && xhrPrototype.send;
   const styleSelector = "style[data-dive-privacy]";
   const removedKeys = new Set(["adPlacements", "playerAds", "adSlots"]);
+  const youtubeHosts = new Set(["www.youtube.com", "m.youtube.com"]);
   const skipSelectors = [
     ".ytp-ad-skip-button-modern",
     ".ytp-ad-skip-button",
@@ -21,17 +18,22 @@
   ];
   const xhrTargets = new WeakSet();
   const xhrListeners = new Set();
+  const xhrPatches = new Map();
   const accelerated = new Map();
   const skippedPlayers = new Map();
   const state = {
     enabled: false,
-    installed: false,
+    hooksInstalled: false,
     cosmeticCss: "",
     observer: null,
   };
   let wrappedFetch = null;
   let wrappedOpen = null;
   let wrappedSend = null;
+  let previousFetch = null;
+  let previousOpen = null;
+  let previousSend = null;
+  let installedXhrPrototype = null;
 
   const report = () => {
     try {
@@ -63,6 +65,40 @@
   };
 
   const sanitize = (value) => sanitizeWithCount(value).value;
+
+  const recognizedInitialPlayerResponse = (value) => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+    try {
+      return (
+        (value.videoDetails !== null && typeof value.videoDetails === "object" && typeof value.videoDetails.videoId === "string") ||
+        (value.playabilityStatus !== null && typeof value.playabilityStatus === "object") ||
+        (value.streamingData !== null && typeof value.streamingData === "object")
+      );
+    } catch {
+      return false;
+    }
+  };
+
+  const sanitizeInitialPlayerData = () => {
+    if (!state.enabled) return;
+    try {
+      const property = "ytInitialPlayerResponse";
+      const current = window[property];
+      if (!recognizedInitialPlayerResponse(current)) return;
+      const clean = sanitizeWithCount(current);
+      if (clean.count === 0) return;
+      const descriptor = Object.getOwnPropertyDescriptor(window, property);
+      if (descriptor) {
+        if (!("value" in descriptor) || descriptor.writable !== true) return;
+        Object.defineProperty(window, property, { ...descriptor, value: clean.value });
+      } else {
+        window[property] = clean.value;
+      }
+      report();
+    } catch {
+      // Unknown accessors and frozen page globals remain untouched.
+    }
+  };
 
   const isPlayerUrl = (input) => {
     try {
@@ -110,25 +146,70 @@
 
   const patchXhrResponse = (xhr) => {
     try {
+      restoreXhrResponse(xhr);
       const responseType = xhr.responseType || "text";
       const raw = responseType === "json" ? xhr.response : xhr.responseText;
       const payload = responseType === "json" ? raw : JSON.parse(raw);
       const clean = sanitizeWithCount(payload);
       if (clean.count === 0) return;
       const text = JSON.stringify(clean.value);
+      const patch = {
+        response: Object.getOwnPropertyDescriptor(xhr, "response"),
+        responseText: Object.getOwnPropertyDescriptor(xhr, "responseText"),
+        responseGetter: null,
+        responseTextGetter: null,
+      };
+      patch.responseGetter = () => (responseType === "json" ? clean.value : text);
+      if (responseType === "" || responseType === "text") {
+        patch.responseTextGetter = () => text;
+      }
+      // Record ownership before the first mutation so a later define failure
+      // can roll back every descriptor already installed by this attempt.
+      xhrPatches.set(xhr, patch);
       Object.defineProperty(xhr, "response", {
         configurable: true,
-        get: () => (responseType === "json" ? clean.value : text),
+        enumerable: patch.response ? patch.response.enumerable : false,
+        get: patch.responseGetter,
       });
-      if (responseType === "" || responseType === "text") {
+      if (patch.responseTextGetter) {
         Object.defineProperty(xhr, "responseText", {
           configurable: true,
-          get: () => text,
+          enumerable: patch.responseText ? patch.responseText.enumerable : false,
+          get: patch.responseTextGetter,
         });
       }
       report();
     } catch {
       // A response we cannot parse or safely shadow remains untouched.
+      restoreXhrResponse(xhr);
+    }
+  };
+
+  function restoreXhrResponse(xhr) {
+    const patch = xhrPatches.get(xhr);
+    if (!patch) return;
+    for (const [property, original, getter] of [
+      ["response", patch.response, patch.responseGetter],
+      ["responseText", patch.responseText, patch.responseTextGetter],
+    ]) {
+      if (!getter) continue;
+      try {
+        const current = Object.getOwnPropertyDescriptor(xhr, property);
+        if (!current || current.get !== getter) continue;
+        if (original) Object.defineProperty(xhr, property, original);
+        else delete xhr[property];
+      } catch {
+        // A page-owned replacement descriptor wins over our cleanup.
+      }
+    }
+    xhrPatches.delete(xhr);
+  }
+
+  const removeXhrListeners = (xhr) => {
+    for (const entry of xhrListeners) {
+      if (entry.xhr !== xhr) continue;
+      entry.xhr.removeEventListener("readystatechange", entry.listener, true);
+      xhrListeners.delete(entry);
     }
   };
 
@@ -235,27 +316,38 @@
   const onNavigation = () => {
     skippedPlayers.clear();
     applyStyle();
+    sanitizeInitialPlayerData();
     inspectPlayers();
   };
 
   const install = () => {
-    if (state.installed) return;
-    state.installed = true;
+    if (state.hooksInstalled) return;
+    state.hooksInstalled = true;
 
-    if (nativeFetch) {
+    const delegateFetch = typeof window.fetch === "function" ? window.fetch : null;
+    if (delegateFetch) {
+      previousFetch = delegateFetch;
       wrappedFetch = async function (...args) {
-        const response = await Reflect.apply(nativeFetch, this, args);
+        const response = await Reflect.apply(delegateFetch, this, args);
         if (!state.enabled || !isPlayerUrl(args[0])) return response;
         return sanitizeResponse(response);
       };
       window.fetch = wrappedFetch;
     }
 
-    if (xhrPrototype && nativeOpen && nativeSend) {
+    const xhrPrototype = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
+    const delegateOpen = xhrPrototype && xhrPrototype.open;
+    const delegateSend = xhrPrototype && xhrPrototype.send;
+    if (xhrPrototype && delegateOpen && delegateSend) {
+      installedXhrPrototype = xhrPrototype;
+      previousOpen = delegateOpen;
+      previousSend = delegateSend;
       wrappedOpen = function (...args) {
+        removeXhrListeners(this);
+        restoreXhrResponse(this);
         if (isPlayerUrl(args[1])) xhrTargets.add(this);
         else xhrTargets.delete(this);
-        return Reflect.apply(nativeOpen, this, args);
+        return Reflect.apply(delegateOpen, this, args);
       };
       wrappedSend = function (...args) {
         if (state.enabled && xhrTargets.has(this)) {
@@ -270,7 +362,7 @@
           xhrListeners.add(entry);
           xhr.addEventListener("readystatechange", listener, true);
         }
-        return Reflect.apply(nativeSend, this, args);
+        return Reflect.apply(delegateSend, this, args);
       };
       xhrPrototype.open = wrappedOpen;
       xhrPrototype.send = wrappedSend;
@@ -285,55 +377,118 @@
         subtree: true,
       });
       document.addEventListener("yt-navigate-finish", onNavigation);
+      document.addEventListener("DOMContentLoaded", sanitizeInitialPlayerData);
+      window.addEventListener("load", sanitizeInitialPlayerData);
       window.addEventListener("popstate", onNavigation);
     } catch {
       if (state.observer) state.observer.disconnect();
       state.observer = null;
     }
     applyStyle();
+    sanitizeInitialPlayerData();
     inspectPlayers();
   };
 
-  const dispose = () => {
+  const uninstall = () => {
     if (state.observer) state.observer.disconnect();
     state.observer = null;
     document.removeEventListener("yt-navigate-finish", onNavigation);
+    document.removeEventListener("DOMContentLoaded", sanitizeInitialPlayerData);
+    window.removeEventListener("load", sanitizeInitialPlayerData);
     window.removeEventListener("popstate", onNavigation);
     for (const entry of xhrListeners) {
       entry.xhr.removeEventListener("readystatechange", entry.listener, true);
     }
     xhrListeners.clear();
+    for (const xhr of xhrPatches.keys()) restoreXhrResponse(xhr);
     skippedPlayers.clear();
     restoreInactiveMedia(new Set());
+    if (previousFetch && wrappedFetch && window.fetch === wrappedFetch) {
+      window.fetch = previousFetch;
+    }
+    if (
+      installedXhrPrototype &&
+      previousOpen &&
+      wrappedOpen &&
+      installedXhrPrototype.open === wrappedOpen
+    ) {
+      installedXhrPrototype.open = previousOpen;
+    }
+    if (
+      installedXhrPrototype &&
+      previousSend &&
+      wrappedSend &&
+      installedXhrPrototype.send === wrappedSend
+    ) {
+      installedXhrPrototype.send = previousSend;
+    }
+    wrappedFetch = null;
+    wrappedOpen = null;
+    wrappedSend = null;
+    previousFetch = null;
+    previousOpen = null;
+    previousSend = null;
+    installedXhrPrototype = null;
+    state.hooksInstalled = false;
+  };
+
+  const dispose = () => {
+    state.enabled = false;
+    uninstall();
     try {
       const style = document.querySelector(styleSelector);
       if (style) style.remove();
     } catch {
       // A page replacing document roots during disposal needs no further work.
     }
-    if (nativeFetch && wrappedFetch) window.fetch = nativeFetch;
-    if (xhrPrototype && nativeOpen && wrappedOpen) xhrPrototype.open = nativeOpen;
-    if (xhrPrototype && nativeSend && wrappedSend) xhrPrototype.send = nativeSend;
-    wrappedFetch = null;
-    wrappedOpen = null;
-    wrappedSend = null;
-    state.enabled = false;
     state.cosmeticCss = "";
-    state.installed = false;
   };
 
   const configure = (options) => {
     const next = options && typeof options === "object" ? options : {};
     state.enabled = next.enabled === true;
     state.cosmeticCss = typeof next.cosmeticCss === "string" ? next.cosmeticCss : "";
-    if (!state.enabled && !state.cosmeticCss) {
-      dispose();
-      return;
-    }
-    install();
+    if (state.enabled) install();
+    else uninstall();
     applyStyle();
-    inspectPlayers();
+    if (state.enabled) {
+      sanitizeInitialPlayerData();
+      inspectPlayers();
+    }
   };
 
-  window.__divePrivacy = { version: 1, install, configure, dispose, sanitize };
+  const configureForDocument = (policy) => {
+    try {
+      const next = policy && typeof policy === "object" ? policy : {};
+      const host = window.location.hostname.toLowerCase().replace(/\.$/, "");
+      const exceptions = Array.isArray(next.exceptions)
+        ? next.exceptions.filter((entry) => typeof entry === "string")
+        : [];
+      const siteEnabled = next.globalEnabled === true && !exceptions.includes(host);
+      const cssByHost = next.cosmeticCssByHost;
+      const cosmeticCss =
+        siteEnabled &&
+        (!youtubeHosts.has(host) || next.youtubeEnabled === true) &&
+        cssByHost &&
+        typeof cssByHost === "object" &&
+        typeof cssByHost[host] === "string"
+          ? cssByHost[host]
+          : "";
+      configure({
+        enabled: siteEnabled && next.youtubeEnabled === true && youtubeHosts.has(host),
+        cosmeticCss,
+      });
+    } catch {
+      configure({ enabled: false });
+    }
+  };
+
+  window.__divePrivacy = {
+    version: 1,
+    install,
+    configure,
+    configureForDocument,
+    dispose,
+    sanitize,
+  };
 })();

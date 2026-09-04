@@ -14,6 +14,8 @@ const MAX = Number.MAX_SAFE_INTEGER;
 interface PrivacyState {
   byTab: Record<string, PrivacyCounts>;
   info: PrivacyInfo | null;
+  infoError: string | null;
+  eventError: string | null;
   apply: (event: PrivacyEvent) => void;
   loadInfo: () => Promise<void>;
   clearPrivacy: (tabId: string) => void;
@@ -39,11 +41,25 @@ let infoLoading: Promise<void> | null = null;
 export const usePrivacy = create<PrivacyState>((set) => ({
   byTab: {},
   info: null,
+  infoError: null,
+  eventError: null,
   apply: (event) => set((s) => ({ byTab: { ...s.byTab, [event.data.tab_id]: foldPrivacy(s.byTab[event.data.tab_id], event) } })),
   loadInfo: () => {
-    infoLoading ??= ipc.privacyInfo().then((info) => {
-      usePrivacy.setState({ info });
-    });
+    if (usePrivacy.getState().info) return Promise.resolve();
+    if (infoLoading) return infoLoading;
+    const request = ipc
+      .privacyInfo()
+      .then((info) => {
+        usePrivacy.setState({ info, infoError: null });
+      })
+      .catch((error: unknown) => {
+        usePrivacy.setState({ info: null, infoError: errorMessage(error) });
+        throw error;
+      })
+      .finally(() => {
+        if (infoLoading === request) infoLoading = null;
+      });
+    infoLoading = request;
     return infoLoading;
   },
   clearPrivacy: (tabId) => set((s) => {
@@ -64,8 +80,24 @@ let listening: Promise<() => void> | null = null;
 
 /** Subscribe once to privacy actions emitted by the engine. */
 export function listenPrivacy() {
-  listening ??= events.privacyEvent.listen((e) => usePrivacy.getState().apply(e.payload));
+  if (listening) return listening;
+  const request = events.privacyEvent
+    .listen((e) => usePrivacy.getState().apply(e.payload))
+    .then((unlisten) => {
+      usePrivacy.setState({ eventError: null });
+      return unlisten;
+    })
+    .catch((error: unknown) => {
+      usePrivacy.setState({ eventError: errorMessage(error) });
+      if (listening === request) listening = null;
+      throw error;
+    });
+  listening = request;
   return listening;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** Clear this tab's summary when its document starts over. */

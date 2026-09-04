@@ -4,10 +4,13 @@ use dive_core::TabId;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use specta::Type;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
 
 use crate::Runtime;
+use crate::error::{AppError, AppResult};
 
 const ADS_RULES: &str = include_str!("../privacy/ads.txt");
 const TRACKER_RULES: &str = include_str!("../privacy/trackers.txt");
@@ -42,12 +45,12 @@ pub enum PrivacyEvent {
         /// Which bundled matcher blocked it.
         category: PrivacyCategory,
     },
-    /// `YouTube` elements were removed from a document.
+    /// A narrow `YouTube` privacy intervention was observed in a document.
     #[serde(rename = "youtube")]
     YouTube {
-        /// Tab whose document was cleaned.
+        /// Tab whose document received the intervention.
         tab_id: TabId,
-        /// Number of elements removed.
+        /// Number of reported interventions.
         count: u32,
     },
 }
@@ -88,6 +91,50 @@ struct PageConfiguration {
     cosmetic_css: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DocumentPolicy {
+    global_enabled: bool,
+    youtube_enabled: bool,
+    exceptions: Vec<String>,
+    cosmetic_css_by_host: BTreeMap<String, String>,
+}
+
+/// Per-tab identifiers for replaceable document-start policy scripts. The
+/// page API itself is stable; only this small preferences snapshot changes.
+#[derive(Default)]
+pub struct PageRegistry {
+    policies: Mutex<HashMap<TabId, Vec<String>>>,
+}
+
+impl PageRegistry {
+    fn policies(&self, tab_id: TabId) -> Vec<String> {
+        self.policies
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&tab_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn replace(&self, tab_id: TabId, identifiers: Vec<String>) {
+        let mut policies = self
+            .policies
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if identifiers.is_empty() {
+            policies.remove(&tab_id);
+        } else {
+            policies.insert(tab_id, identifiers);
+        }
+    }
+
+    /// Forget registration ids owned by a tab whose CDP session is gone.
+    pub fn drop_tab(&self, tab_id: TabId) {
+        self.replace(tab_id, Vec::new());
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PageEvent {
@@ -105,57 +152,171 @@ pub async fn attach_page(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSes
     let mut events = session.subscribe();
 
     for (method, params) in [
+        ("Runtime.enable", json!({})),
         ("Runtime.addBinding", json!({"name": binding})),
         ("Page.enable", json!({})),
         (
             "Page.addScriptToEvaluateOnNewDocument",
-            json!({"source": source}),
+            json!({"source": &source}),
         ),
-        ("Runtime.evaluate", json!({"expression": source})),
     ] {
         if let Err(error) = session.call(method, params).await {
             tracing::debug!(%tab_id, %method, "DivePrivacy page setup failed open: {error}");
         }
     }
+    // Join the same transaction boundary as `prefs_set`: otherwise a tab
+    // attaching with an older snapshot could register its policy after a
+    // newer persisted update had already finished applying.
+    {
+        let state = app.state::<crate::state::AppState>();
+        let _update = state.prefs.begin_update().await;
+        let prefs = state.prefs.get(&state);
+        match register_document_policy(&session, &prefs).await {
+            Ok(identifier) => state.privacy_pages.replace(tab_id, vec![identifier]),
+            Err(error) => {
+                tracing::debug!(%tab_id, "DivePrivacy document policy registration failed open: {error}");
+            }
+        }
+        if let Err(error) = session
+            .call("Runtime.evaluate", json!({"expression": &source}))
+            .await
+        {
+            tracing::debug!(%tab_id, "DivePrivacy current-page bootstrap failed open: {error}");
+        }
+        apply_page(&session, &prefs).await;
+    }
 
     tauri::async_runtime::spawn(async move {
+        let mut context = PageBindingContext::default();
         loop {
             match events.recv().await {
                 Ok(event) => {
+                    context.observe(&event);
                     if event.method == "Page.frameNavigated"
                         && event.params["frame"]["parentId"].is_null()
-                        && let Some(document_url) = event.params["frame"]["url"].as_str()
                     {
                         let state = app.state::<crate::state::AppState>();
+                        let _update = state.prefs.begin_update().await;
                         let prefs = state.prefs.get(&state);
-                        apply_page(&session, &prefs, document_url).await;
+                        apply_page(&session, &prefs).await;
                         continue;
                     }
-                    if let Some(event) = map_binding_event(&event, &binding, tab_id)
-                        && let Err(error) = event.emit(&app)
+                    if let Some(event) =
+                        map_binding_event(&event, &binding, tab_id, context.execution_context())
                     {
-                        tracing::warn!(%tab_id, "privacy event emit failed: {error}");
+                        let state = app.state::<crate::state::AppState>();
+                        let _update = state.prefs.begin_update().await;
+                        let prefs = state.prefs.get(&state);
+                        let tab_exists = crate::state::lock(&state.store).tab(tab_id).is_ok();
+                        let allowed = binding_event_allowed(
+                            session.is_closed(),
+                            tab_exists,
+                            &prefs,
+                            context.document_url(),
+                        );
+                        if allowed && let Err(error) = event.emit(&app) {
+                            tracing::warn!(%tab_id, "privacy event emit failed: {error}");
+                        }
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
                     tracing::warn!(%tab_id, count, "DivePrivacy missed CDP events");
+                    context.invalidate();
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    app.state::<crate::state::AppState>()
+                        .privacy_pages
+                        .drop_tab(tab_id);
+                    break;
+                }
             }
         }
     });
 }
 
-/// Apply current preferences and the exact document host's cosmetic rules.
-/// A malformed URL, rules asset, serialization error, or CDP failure is a
-/// fail-open no-op (the injected script removes any previously applied CSS).
-pub async fn apply_page(session: &CdpSession, prefs: &crate::prefs::Prefs, document_url: &str) {
-    let configuration = page_configuration(prefs, document_url);
-    let Ok(encoded) = serde_json::to_string(&configuration) else {
+fn document_policy(prefs: &crate::prefs::Prefs) -> DocumentPolicy {
+    DocumentPolicy {
+        global_enabled: prefs.block_trackers,
+        youtube_enabled: prefs.youtube_protection,
+        exceptions: prefs.privacy_exceptions.clone(),
+        cosmetic_css_by_host: cosmetic_policy(),
+    }
+}
+
+fn document_policy_expression(prefs: &crate::prefs::Prefs) -> AppResult<String> {
+    let encoded = serde_json::to_string(&document_policy(prefs)).map_err(AppError::new)?;
+    Ok(format!(
+        "window.__divePrivacy?.configureForDocument({encoded})"
+    ))
+}
+
+async fn register_document_policy(
+    session: &CdpSession,
+    prefs: &crate::prefs::Prefs,
+) -> AppResult<String> {
+    let source = document_policy_expression(prefs)?;
+    let result = session
+        .call(
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({"source": source}),
+        )
+        .await
+        .map_err(AppError::new)?;
+    result["identifier"]
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| AppError::new("document policy registration returned no identifier"))
+}
+
+/// Replace the future-document policy, then apply the same authoritative
+/// preferences to the live top document. Failed removals stay recorded so a
+/// later update can retry them; the newest script runs last at document start.
+pub async fn refresh_page_policy(
+    state: &crate::state::AppState,
+    tab_id: TabId,
+    session: &CdpSession,
+    prefs: &crate::prefs::Prefs,
+) {
+    replace_document_policy(&state.privacy_pages, tab_id, session, prefs).await;
+    apply_page(session, prefs).await;
+}
+
+async fn replace_document_policy(
+    registry: &PageRegistry,
+    tab_id: TabId,
+    session: &CdpSession,
+    prefs: &crate::prefs::Prefs,
+) {
+    let mut remaining = Vec::new();
+    for identifier in registry.policies(tab_id) {
+        if let Err(error) = session
+            .call(
+                "Page.removeScriptToEvaluateOnNewDocument",
+                json!({"identifier": &identifier}),
+            )
+            .await
+        {
+            tracing::debug!(%tab_id, %identifier, "could not replace old DivePrivacy policy: {error}");
+            remaining.push(identifier);
+        }
+    }
+    match register_document_policy(session, prefs).await {
+        Ok(identifier) => remaining.push(identifier),
+        Err(error) => {
+            tracing::debug!(%tab_id, "could not register current DivePrivacy policy: {error}");
+        }
+    }
+    registry.replace(tab_id, remaining);
+}
+
+/// Apply current preferences in the live document. Host selection happens in
+/// page world from `location.hostname`, avoiding the asynchronously persisted
+/// tab URL during navigation.
+pub async fn apply_page(session: &CdpSession, prefs: &crate::prefs::Prefs) {
+    let Ok(expression) = document_policy_expression(prefs) else {
         tracing::debug!("could not serialize DivePrivacy page configuration");
         return;
     };
-    let expression = format!("window.__divePrivacy?.configure({encoded})");
     if let Err(error) = session
         .call("Runtime.evaluate", json!({"expression": expression}))
         .await
@@ -166,8 +327,16 @@ pub async fn apply_page(session: &CdpSession, prefs: &crate::prefs::Prefs, docum
 
 /// Decode the single bounded page-side intervention message shape.
 #[must_use]
-pub fn map_binding_event(event: &CdpEvent, binding: &str, tab_id: TabId) -> Option<PrivacyEvent> {
+pub fn map_binding_event(
+    event: &CdpEvent,
+    binding: &str,
+    tab_id: TabId,
+    expected_context: Option<i64>,
+) -> Option<PrivacyEvent> {
     if event.method != "Runtime.bindingCalled" || event.params["name"].as_str()? != binding {
+        return None;
+    }
+    if Some(event.params["executionContextId"].as_i64()?) != expected_context {
         return None;
     }
     let encoded = event.params["payload"].as_str()?;
@@ -182,6 +351,107 @@ pub fn map_binding_event(event: &CdpEvent, binding: &str, tab_id: TabId) -> Opti
         tab_id,
         count: payload.count,
     })
+}
+
+#[derive(Default)]
+struct PageBindingContext {
+    frame_id: Option<String>,
+    document_url: String,
+    generation: u64,
+    execution_context: Option<(i64, u64)>,
+}
+
+impl PageBindingContext {
+    fn document_url(&self) -> &str {
+        &self.document_url
+    }
+
+    fn execution_context(&self) -> Option<i64> {
+        self.execution_context
+            .filter(|(_, generation)| *generation == self.generation)
+            .map(|(context, _)| context)
+    }
+
+    fn invalidate(&mut self) {
+        self.execution_context = None;
+    }
+
+    fn begin_document(&mut self, frame_id: &str, document_url: Option<&str>) {
+        let is_top = if let Some(top) = self.frame_id.as_deref() {
+            top == frame_id
+        } else {
+            self.frame_id = Some(frame_id.to_owned());
+            true
+        };
+        if is_top {
+            self.generation = self.generation.saturating_add(1);
+            self.execution_context = None;
+            document_url
+                .unwrap_or_default()
+                .clone_into(&mut self.document_url);
+        }
+    }
+
+    fn observe(&mut self, event: &CdpEvent) {
+        let params = &event.params;
+        match event.method.as_str() {
+            "Page.frameNavigated" => {
+                let frame = &params["frame"];
+                if frame["parentId"].as_str().is_none()
+                    && let Some(frame_id) = frame["id"].as_str()
+                {
+                    self.frame_id = Some(frame_id.to_owned());
+                    self.generation = self.generation.saturating_add(1);
+                    self.execution_context = None;
+                    frame["url"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .clone_into(&mut self.document_url);
+                }
+            }
+            "Page.frameStartedLoading" => {
+                if let Some(frame_id) = params["frameId"].as_str() {
+                    self.begin_document(frame_id, None);
+                }
+            }
+            "Network.requestWillBeSent" if params["type"].as_str() == Some("Document") => {
+                if let Some(frame_id) = params["frameId"].as_str() {
+                    self.begin_document(frame_id, params["request"]["url"].as_str());
+                }
+            }
+            "Fetch.requestPaused" if params["resourceType"].as_str() == Some("Document") => {
+                if let Some(frame_id) = params["frameId"].as_str() {
+                    self.begin_document(frame_id, params["request"]["url"].as_str());
+                }
+            }
+            "Runtime.executionContextsCleared" => self.execution_context = None,
+            "Runtime.executionContextDestroyed" => {
+                if params["executionContextId"].as_i64() == self.execution_context() {
+                    self.execution_context = None;
+                }
+            }
+            "Runtime.executionContextCreated" => {
+                let context = &params["context"];
+                let auxiliary = &context["auxData"];
+                if auxiliary["isDefault"].as_bool() == Some(true)
+                    && auxiliary["frameId"].as_str() == self.frame_id.as_deref()
+                    && let Some(context_id) = context["id"].as_i64()
+                {
+                    self.execution_context = Some((context_id, self.generation));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn binding_event_allowed(
+    session_closed: bool,
+    tab_exists: bool,
+    prefs: &crate::prefs::Prefs,
+    document_url: &str,
+) -> bool {
+    !session_closed && tab_exists && page_configuration(prefs, document_url).enabled
 }
 
 fn page_binding(tab_id: TabId) -> String {
@@ -200,9 +470,11 @@ fn page_configuration(prefs: &crate::prefs::Prefs, document_url: &str) -> PageCo
     };
     let site_enabled = prefs.privacy_enabled_for(document_url);
     let youtube_host = matches!(host.as_str(), "www.youtube.com" | "m.youtube.com");
+    let layers_enabled =
+        site_enabled && prefs.block_trackers && (!youtube_host || prefs.youtube_protection);
     PageConfiguration {
         enabled: prefs.block_trackers && site_enabled && youtube_host && prefs.youtube_protection,
-        cosmetic_css: if site_enabled && prefs.block_trackers {
+        cosmetic_css: if layers_enabled {
             cosmetic_css(&host)
         } else {
             String::new()
@@ -227,6 +499,23 @@ fn cosmetic_css(host: &str) -> String {
         return String::new();
     };
     format!("{} {{ display: none !important; }}", selectors.join(",\n"))
+}
+
+fn cosmetic_policy() -> BTreeMap<String, String> {
+    let Ok(rules) = serde_json::from_str::<BTreeMap<String, Vec<String>>>(COSMETIC_RULES) else {
+        return BTreeMap::new();
+    };
+    rules
+        .into_iter()
+        .filter_map(|(host, selectors)| {
+            (!selectors.is_empty()).then(|| {
+                (
+                    host,
+                    format!("{} {{ display: none !important; }}", selectors.join(",\n")),
+                )
+            })
+        })
+        .collect()
 }
 
 fn network_rule_count(rules: &str) -> u32 {
@@ -600,6 +889,20 @@ mod tests {
     }
 
     #[test]
+    fn page_configuration_disables_all_youtube_layers_when_youtube_is_off() {
+        let prefs = crate::prefs::Prefs {
+            block_trackers: true,
+            youtube_protection: false,
+            ..crate::prefs::Prefs::default()
+        };
+
+        let youtube = page_configuration(&prefs, "https://www.youtube.com/watch?v=abc");
+
+        assert!(!youtube.enabled);
+        assert!(youtube.cosmetic_css.is_empty());
+    }
+
+    #[test]
     fn binding_events_accept_only_the_bounded_youtube_shape() {
         let tab_id = dive_core::TabId::new();
         let binding = "__divePrivacy_test";
@@ -608,11 +911,18 @@ mod tests {
             params: serde_json::json!({
                 "name": binding,
                 "payload": r#"{"kind":"youtube","count":1}"#,
+                "executionContextId": 7,
             }),
         };
         assert_eq!(
-            map_binding_event(&event, binding, tab_id),
+            map_binding_event(&event, binding, tab_id, Some(7)),
             Some(PrivacyEvent::YouTube { tab_id, count: 1 })
+        );
+
+        assert_eq!(
+            map_binding_event(&event, binding, tab_id, Some(8)),
+            None,
+            "a stale or subframe execution context cannot report counts",
         );
 
         for payload in [
@@ -623,16 +933,206 @@ mod tests {
         ] {
             let malformed = dive_cdp::CdpEvent {
                 method: "Runtime.bindingCalled".into(),
-                params: serde_json::json!({"name": binding, "payload": payload}),
+                params: serde_json::json!({"name": binding, "payload": payload, "executionContextId": 7}),
             };
-            assert_eq!(map_binding_event(&malformed, binding, tab_id), None);
+            assert_eq!(
+                map_binding_event(&malformed, binding, tab_id, Some(7)),
+                None
+            );
         }
 
         let oversized = dive_cdp::CdpEvent {
             method: "Runtime.bindingCalled".into(),
-            params: serde_json::json!({"name": binding, "payload": "x".repeat(65)}),
+            params: serde_json::json!({"name": binding, "payload": "x".repeat(65), "executionContextId": 7}),
         };
-        assert_eq!(map_binding_event(&oversized, binding, tab_id), None);
+        assert_eq!(
+            map_binding_event(&oversized, binding, tab_id, Some(7)),
+            None
+        );
+    }
+
+    fn cdp_event(method: &str, params: serde_json::Value) -> CdpEvent {
+        CdpEvent {
+            method: method.into(),
+            params,
+        }
+    }
+
+    #[test]
+    fn binding_context_rejects_subframes_and_previous_document_generations() {
+        let mut context = PageBindingContext::default();
+        context.observe(&cdp_event(
+            "Page.frameNavigated",
+            json!({"frame": {"id": "main", "url": "https://www.youtube.com/watch?v=one"}}),
+        ));
+        context.observe(&cdp_event(
+            "Runtime.executionContextCreated",
+            json!({"context": {"id": 11, "auxData": {"frameId": "main", "isDefault": true}}}),
+        ));
+        assert_eq!(context.execution_context(), Some(11));
+        assert_eq!(
+            context.document_url(),
+            "https://www.youtube.com/watch?v=one"
+        );
+
+        context.observe(&cdp_event(
+            "Runtime.executionContextCreated",
+            json!({"context": {"id": 12, "auxData": {"frameId": "child", "isDefault": true}}}),
+        ));
+        assert_eq!(context.execution_context(), Some(11));
+
+        context.observe(&cdp_event(
+            "Network.requestWillBeSent",
+            json!({
+                "frameId": "main",
+                "type": "Document",
+                "request": {"url": "https://www.youtube.com/watch?v=two"}
+            }),
+        ));
+        assert_eq!(context.execution_context(), None);
+        assert_eq!(
+            context.document_url(),
+            "https://www.youtube.com/watch?v=two"
+        );
+        context.observe(&cdp_event(
+            "Runtime.executionContextCreated",
+            json!({"context": {"id": 13, "auxData": {"frameId": "main", "isDefault": true}}}),
+        ));
+        assert_eq!(context.execution_context(), Some(13));
+    }
+
+    #[test]
+    fn binding_counts_require_a_live_tab_and_effective_youtube_policy() {
+        let prefs = crate::prefs::Prefs {
+            block_trackers: true,
+            youtube_protection: true,
+            ..crate::prefs::Prefs::default()
+        };
+        assert!(binding_event_allowed(
+            false,
+            true,
+            &prefs,
+            "https://www.youtube.com/watch?v=abc",
+        ));
+        assert!(!binding_event_allowed(
+            true,
+            true,
+            &prefs,
+            "https://www.youtube.com/watch?v=abc",
+        ));
+        assert!(!binding_event_allowed(
+            false,
+            false,
+            &prefs,
+            "https://www.youtube.com/watch?v=abc",
+        ));
+        assert!(!binding_event_allowed(
+            false,
+            true,
+            &prefs,
+            "https://example.test/",
+        ));
+    }
+
+    #[derive(Clone)]
+    struct PolicyTransport {
+        sent: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+        session: std::sync::Arc<std::sync::Mutex<Option<CdpSession>>>,
+    }
+
+    impl dive_cdp::Transport for PolicyTransport {
+        fn send(&self, message: &str) -> Result<(), dive_cdp::CdpError> {
+            let message: serde_json::Value =
+                serde_json::from_str(message).expect("outgoing CDP JSON");
+            let id = message["id"].as_u64().expect("CDP call id");
+            self.sent
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(message);
+            self.session
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .expect("session installed")
+                .handle_incoming(
+                    &json!({"id": id, "result": {"identifier": "policy-1"}}).to_string(),
+                )?;
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn document_policy_is_registered_for_document_start() {
+        let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let holder = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let session = CdpSession::new(PolicyTransport {
+            sent: std::sync::Arc::clone(&sent),
+            session: std::sync::Arc::clone(&holder),
+        });
+        *holder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(session.clone());
+        let prefs = crate::prefs::Prefs {
+            block_trackers: true,
+            youtube_protection: true,
+            privacy_exceptions: vec!["m.youtube.com".into()],
+            ..crate::prefs::Prefs::default()
+        };
+
+        let identifier = register_document_policy(&session, &prefs)
+            .await
+            .expect("registered policy");
+
+        assert_eq!(identifier, "policy-1");
+        let sent = sent
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0]["method"], "Page.addScriptToEvaluateOnNewDocument");
+    }
+
+    #[tokio::test]
+    async fn preference_refresh_replaces_the_future_document_policy() {
+        let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let holder = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let session = CdpSession::new(PolicyTransport {
+            sent: std::sync::Arc::clone(&sent),
+            session: std::sync::Arc::clone(&holder),
+        });
+        *holder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(session.clone());
+        let registry = PageRegistry::default();
+        let tab_id = TabId::new();
+        registry.replace(tab_id, vec!["policy-old".into()]);
+        let prefs = crate::prefs::Prefs {
+            block_trackers: false,
+            youtube_protection: false,
+            privacy_exceptions: vec!["www.youtube.com".into()],
+            ..crate::prefs::Prefs::default()
+        };
+
+        replace_document_policy(&registry, tab_id, &session, &prefs).await;
+
+        let sent = sent
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(sent.len(), 2);
+        assert_eq!(
+            sent[0],
+            json!({
+                "id": sent[0]["id"],
+                "method": "Page.removeScriptToEvaluateOnNewDocument",
+                "params": {"identifier": "policy-old"}
+            })
+        );
+        assert_eq!(sent[1]["method"], "Page.addScriptToEvaluateOnNewDocument");
+        let source = sent[1]["params"]["source"]
+            .as_str()
+            .expect("serialized policy source");
+        assert!(source.contains(r#""globalEnabled":false"#));
+        assert!(source.contains(r#""youtubeEnabled":false"#));
+        assert_eq!(registry.policies(tab_id), vec!["policy-1"]);
     }
 
     #[test]

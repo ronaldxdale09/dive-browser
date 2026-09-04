@@ -1,9 +1,16 @@
+// @vitest-environment-options {"url":"https://www.youtube.com/watch?v=abc"}
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import privacySource from "../../src-tauri/src/inject/youtube_privacy.js?raw";
 
 interface DivePrivacy {
   install(): void;
   configure(options: { enabled: boolean; cosmeticCss?: string }): void;
+  configureForDocument(policy: {
+    globalEnabled: boolean;
+    youtubeEnabled: boolean;
+    exceptions: string[];
+    cosmeticCssByHost: Record<string, string>;
+  }): void;
   dispose(): void;
   sanitize(value: unknown): unknown;
 }
@@ -139,6 +146,76 @@ describe("YouTube privacy page script", () => {
     ]);
   });
 
+  it("activates before the first player fetch only when host and preferences allow it", async () => {
+    nativeFetch = vi.fn(async () => new Response(JSON.stringify({
+      adPlacements: [1],
+      videoDetails: { videoId: "first" },
+    }))) as typeof window.fetch;
+    window.fetch = nativeFetch;
+    const privacy = evaluate();
+
+    privacy.configureForDocument({
+      globalEnabled: true,
+      youtubeEnabled: true,
+      exceptions: [],
+      cosmeticCssByHost: {},
+    });
+    const response = await window.fetch("/youtubei/v1/player");
+
+    expect(await response.json()).toEqual({ videoDetails: { videoId: "first" } });
+    expect(window.fetch).not.toBe(nativeFetch);
+  });
+
+  it.each([
+    { name: "global protection off", globalEnabled: false, youtubeEnabled: true, exceptions: [] },
+    { name: "YouTube protection off", globalEnabled: true, youtubeEnabled: false, exceptions: [] },
+    { name: "site exception", globalEnabled: true, youtubeEnabled: true, exceptions: ["www.youtube.com"] },
+  ])("does not install request wrappers with $name", ({ globalEnabled, youtubeEnabled, exceptions }) => {
+    const privacy = evaluate();
+
+    privacy.configureForDocument({
+      globalEnabled,
+      youtubeEnabled,
+      exceptions,
+      cosmeticCssByHost: { "www.youtube.com": ".ytp-ad-overlay-container { display: none; }" },
+    });
+
+    expect(window.fetch).toBe(nativeFetch);
+    expect(XMLHttpRequest.prototype.open).toBe(nativeOpen);
+    expect(XMLHttpRequest.prototype.send).toBe(nativeSend);
+    expect(document.querySelector("style[data-dive-privacy]")).toBeNull();
+  });
+
+  it("sanitizes only recognized initial player data on load and SPA navigation", () => {
+    const page = window as unknown as Record<string, unknown>;
+    const privacy = evaluate();
+    page.ytInitialPlayerResponse = {
+      adPlacements: [1],
+      videoDetails: { videoId: "initial" },
+      keep: true,
+    };
+
+    privacy.configure({ enabled: true });
+    expect(page.ytInitialPlayerResponse).toEqual({
+      videoDetails: { videoId: "initial" },
+      keep: true,
+    });
+
+    const unknown = { adPlacements: [2], unrelated: true };
+    page.ytInitialPlayerResponse = unknown;
+    document.dispatchEvent(new Event("yt-navigate-finish"));
+    expect(page.ytInitialPlayerResponse).toBe(unknown);
+
+    page.ytInitialPlayerResponse = {
+      playerAds: [3],
+      playabilityStatus: { status: "OK" },
+    };
+    document.dispatchEvent(new Event("yt-navigate-finish"));
+    expect(page.ytInitialPlayerResponse).toEqual({
+      playabilityStatus: { status: "OK" },
+    });
+  });
+
   it("sanitizes a player XHR before page readystatechange listeners run", () => {
     const originalXhr = window.XMLHttpRequest;
     class FakeXhr extends EventTarget {
@@ -242,6 +319,181 @@ describe("YouTube privacy page script", () => {
         value: originalXhr,
       });
     }
+  });
+
+  it("removes Dive-owned XHR response getters before a reused request", () => {
+    const originalXhr = window.XMLHttpRequest;
+    class ReusedXhr extends EventTarget {
+      readyState = 0;
+      responseType: XMLHttpRequestResponseType = "";
+      responseText = "";
+      response: unknown = "";
+
+      open(_method: string, url: string): void {
+        this.readyState = 1;
+        this.responseText = url.includes("/youtubei/v1/player")
+          ? JSON.stringify({ adSlots: [1], videoDetails: { videoId: "abc" } })
+          : JSON.stringify({ adSlots: [9], ordinary: true });
+        this.response = this.responseText;
+      }
+
+      send(): void {
+        this.readyState = 4;
+        this.dispatchEvent(new Event("readystatechange"));
+      }
+    }
+    Object.defineProperty(window, "XMLHttpRequest", {
+      configurable: true,
+      writable: true,
+      value: ReusedXhr,
+    });
+
+    let privacy: DivePrivacy | undefined;
+    try {
+      privacy = evaluate();
+      privacy.configure({ enabled: true });
+      const xhr = new window.XMLHttpRequest();
+      xhr.open("POST", "/youtubei/v1/player");
+      xhr.send();
+      expect(JSON.parse(xhr.responseText)).toEqual({ videoDetails: { videoId: "abc" } });
+
+      xhr.open("GET", "/browse");
+      xhr.send();
+      expect(JSON.parse(xhr.responseText)).toEqual({ adSlots: [9], ordinary: true });
+      expect(Object.getOwnPropertyDescriptor(xhr, "responseText")?.get).toBeUndefined();
+    } finally {
+      privacy?.dispose();
+      delete window.__divePrivacy;
+      Object.defineProperty(window, "XMLHttpRequest", {
+        configurable: true,
+        writable: true,
+        value: originalXhr,
+      });
+    }
+  });
+
+  it("restores Dive-owned XHR response descriptors on cleanup", () => {
+    const originalXhr = window.XMLHttpRequest;
+    class CompletedXhr extends EventTarget {
+      readyState = 0;
+      responseType: XMLHttpRequestResponseType = "";
+      responseText = JSON.stringify({ adSlots: [1], videoDetails: { videoId: "abc" } });
+      response: unknown = this.responseText;
+      open(): void {}
+      send(): void {
+        this.readyState = 4;
+        this.dispatchEvent(new Event("readystatechange"));
+      }
+    }
+    Object.defineProperty(window, "XMLHttpRequest", {
+      configurable: true,
+      writable: true,
+      value: CompletedXhr,
+    });
+
+    let privacy: DivePrivacy | undefined;
+    try {
+      privacy = evaluate();
+      privacy.configure({ enabled: true });
+      const xhr = new window.XMLHttpRequest();
+      xhr.open("POST", "/youtubei/v1/player");
+      xhr.send();
+      expect(Object.getOwnPropertyDescriptor(xhr, "responseText")?.get).toBeTypeOf("function");
+
+      privacy.dispose();
+      expect(Object.getOwnPropertyDescriptor(xhr, "responseText")?.get).toBeUndefined();
+      expect(JSON.parse(xhr.responseText)).toEqual({
+        adSlots: [1],
+        videoDetails: { videoId: "abc" },
+      });
+    } finally {
+      privacy?.dispose();
+      delete window.__divePrivacy;
+      Object.defineProperty(window, "XMLHttpRequest", {
+        configurable: true,
+        writable: true,
+        value: originalXhr,
+      });
+    }
+  });
+
+  it("rolls back a partial XHR response patch when one descriptor cannot be shadowed", () => {
+    const originalXhr = window.XMLHttpRequest;
+    class GuardedXhr extends EventTarget {
+      readyState = 0;
+      responseType: XMLHttpRequestResponseType = "";
+      response: unknown = JSON.stringify({ adSlots: [1], videoDetails: { videoId: "abc" } });
+
+      constructor() {
+        super();
+        Object.defineProperty(this, "responseText", {
+          configurable: false,
+          enumerable: true,
+          writable: true,
+          value: this.response,
+        });
+      }
+
+      open(): void {}
+      send(): void {
+        this.readyState = 4;
+        this.dispatchEvent(new Event("readystatechange"));
+      }
+    }
+    Object.defineProperty(window, "XMLHttpRequest", {
+      configurable: true,
+      writable: true,
+      value: GuardedXhr,
+    });
+
+    let privacy: DivePrivacy | undefined;
+    try {
+      privacy = evaluate();
+      privacy.configure({ enabled: true });
+      const xhr = new window.XMLHttpRequest();
+      xhr.open("POST", "/youtubei/v1/player");
+      xhr.send();
+
+      expect(Object.getOwnPropertyDescriptor(xhr, "response")?.get).toBeUndefined();
+      expect(JSON.parse(xhr.responseText)).toEqual({
+        adSlots: [1],
+        videoDetails: { videoId: "abc" },
+      });
+    } finally {
+      privacy?.dispose();
+      delete window.__divePrivacy;
+      Object.defineProperty(window, "XMLHttpRequest", {
+        configurable: true,
+        writable: true,
+        value: originalXhr,
+      });
+    }
+  });
+
+  it("does not overwrite wrappers installed after DivePrivacy", () => {
+    const privacy = evaluate();
+    privacy.configure({ enabled: true });
+    const diveFetch = window.fetch;
+    const diveOpen = XMLHttpRequest.prototype.open;
+    const diveSend = XMLHttpRequest.prototype.send;
+    const pageFetch = vi.fn(function (this: unknown, ...args: Parameters<typeof window.fetch>) {
+      return Reflect.apply(diveFetch, this, args);
+    }) as typeof window.fetch;
+    const pageOpen = function (this: XMLHttpRequest, ...args: Parameters<XMLHttpRequest["open"]>) {
+      return Reflect.apply(diveOpen, this, args);
+    } as XMLHttpRequest["open"];
+    const pageSend = function (this: XMLHttpRequest, ...args: Parameters<XMLHttpRequest["send"]>) {
+      return Reflect.apply(diveSend, this, args);
+    } as XMLHttpRequest["send"];
+    window.fetch = pageFetch;
+    XMLHttpRequest.prototype.open = pageOpen;
+    XMLHttpRequest.prototype.send = pageSend;
+
+    privacy.dispose();
+
+    expect(window.fetch).toBe(pageFetch);
+    expect(XMLHttpRequest.prototype.open).toBe(pageOpen);
+    expect(XMLHttpRequest.prototype.send).toBe(pageSend);
   });
 
   it("clicks a visible skip control and preserves media state when the ad ends", async () => {

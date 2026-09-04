@@ -55,6 +55,90 @@ pub struct PausedRequest<'a> {
     pub method: &'a str,
 }
 
+/// The document URL that belongs to the current top frame, advanced from the
+/// same ordered CDP stream as paused requests. The database URL is only a
+/// seed: address-change persistence is deliberately asynchronous and can lag
+/// the first subresources of a navigation.
+struct TopFrameContext {
+    frame_id: Option<String>,
+    document_url: String,
+}
+
+impl TopFrameContext {
+    fn new(document_url: &str) -> Self {
+        Self {
+            frame_id: None,
+            document_url: document_url.to_owned(),
+        }
+    }
+
+    fn document_url(&self) -> &str {
+        &self.document_url
+    }
+
+    fn observe(&mut self, event: &dive_cdp::CdpEvent) {
+        let params = &event.params;
+        match event.method.as_str() {
+            "Page.frameNavigated" => {
+                let frame = &params["frame"];
+                if frame["parentId"].as_str().is_none()
+                    && let Some(frame_id) = frame["id"].as_str()
+                {
+                    self.frame_id = Some(frame_id.to_owned());
+                    frame["url"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .clone_into(&mut self.document_url);
+                }
+            }
+            "Page.frameStartedLoading" => {
+                if let Some(frame_id) = params["frameId"].as_str() {
+                    let is_top = if let Some(top) = self.frame_id.as_deref() {
+                        top == frame_id
+                    } else {
+                        self.frame_id = Some(frame_id.to_owned());
+                        true
+                    };
+                    // An unknown destination must fail open instead of using
+                    // the page the frame is leaving.
+                    if is_top {
+                        self.document_url.clear();
+                    }
+                }
+            }
+            "Network.requestWillBeSent" if params["type"].as_str() == Some("Document") => {
+                self.note_document_request(
+                    params["frameId"].as_str(),
+                    params["request"]["url"].as_str(),
+                );
+            }
+            "Fetch.requestPaused" if params["resourceType"].as_str() == Some("Document") => {
+                self.note_document_request(
+                    params["frameId"].as_str(),
+                    params["request"]["url"].as_str(),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    fn note_document_request(&mut self, frame_id: Option<&str>, url: Option<&str>) {
+        let Some(frame_id) = frame_id else {
+            self.document_url.clear();
+            return;
+        };
+        let is_top = if let Some(top) = self.frame_id.as_deref() {
+            top == frame_id
+        } else {
+            self.frame_id = Some(frame_id.to_owned());
+            true
+        };
+        if is_top {
+            url.unwrap_or_default().clone_into(&mut self.document_url);
+        }
+    }
+}
+
 /// The single terminal action chosen for one paused request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InterceptAction {
@@ -279,6 +363,103 @@ pub async fn apply(session: &CdpSession, rules: &[Rule], prefs: &Prefs) -> AppRe
     result.map(|_| ()).map_err(AppError::new)
 }
 
+/// Release every currently paused request and restore the one Fetch owner
+/// from authoritative rules. Each step is attempted once; recovery never
+/// recurses into itself.
+async fn reset_interception(session: &CdpSession, rules: &[Rule], prefs: &Prefs) {
+    if let Err(error) = session.call0("Fetch.disable").await {
+        tracing::debug!("Fetch.disable recovery failed: {error}");
+    }
+    if let Err(error) = apply(session, rules, prefs).await {
+        tracing::debug!("Fetch recovery re-enable failed: {error}");
+    }
+}
+
+async fn request_id_or_reset(
+    session: &CdpSession,
+    tab_id: TabId,
+    params: &Value,
+    rules: &[Rule],
+    prefs: &Prefs,
+) -> Option<String> {
+    if let Some(request_id) = params["requestId"].as_str() {
+        return Some(request_id.to_owned());
+    }
+    tracing::warn!(%tab_id, "paused request had no request id; resetting interception");
+    reset_interception(session, rules, prefs).await;
+    None
+}
+
+/// Execute the selected terminal action. Any action that modifies or refuses
+/// a request gets exactly one plain-continue fallback when Chromium rejects
+/// it. A failed plain continue is not retried, which keeps failure bounded.
+async fn execute_action(
+    session: &CdpSession,
+    request_id: &str,
+    request_headers: &Value,
+    action: &InterceptAction,
+) -> Option<PrivacyCategory> {
+    let privacy_category = match action {
+        InterceptAction::PrivacyBlock { category } => Some(*category),
+        _ => None,
+    };
+    let (method, params) = match action {
+        InterceptAction::Block | InterceptAction::PrivacyBlock { .. } => (
+            "Fetch.failRequest",
+            json!({"requestId": request_id, "errorReason": "BlockedByClient"}),
+        ),
+        InterceptAction::Mock {
+            status,
+            content_type,
+            body,
+        } => (
+            "Fetch.fulfillRequest",
+            json!({
+                "requestId": request_id,
+                "responseCode": status,
+                "responseHeaders": [
+                    {"name": "Content-Type", "value": content_type},
+                    {"name": "Access-Control-Allow-Origin", "value": "*"},
+                    {"name": "X-Dive-Mock", "value": "1"}
+                ],
+                "body": base64::engine::general_purpose::STANDARD.encode(body),
+            }),
+        ),
+        InterceptAction::Header { name, value } => {
+            let mut headers: Vec<Value> = request_headers
+                .as_object()
+                .map(|headers| {
+                    headers
+                        .iter()
+                        .filter(|(header, _)| !header.eq_ignore_ascii_case(name))
+                        .map(|(header, value)| json!({"name": header, "value": value}))
+                        .collect()
+                })
+                .unwrap_or_default();
+            headers.push(json!({"name": name, "value": value}));
+            (
+                "Fetch.continueRequest",
+                json!({"requestId": request_id, "headers": headers}),
+            )
+        }
+        InterceptAction::Continue => ("Fetch.continueRequest", json!({"requestId": request_id})),
+    };
+    match session.call(method, params).await {
+        Ok(_) => privacy_category,
+        Err(error) => {
+            tracing::debug!(%method, "intercept action failed: {error}");
+            if !matches!(action, InterceptAction::Continue)
+                && let Err(fallback) = session
+                    .call("Fetch.continueRequest", json!({"requestId": request_id}))
+                    .await
+            {
+                tracing::debug!("plain continue recovery failed: {fallback}");
+            }
+            None
+        }
+    }
+}
+
 /// Answer `Fetch.requestPaused` events for `tab` according to the
 /// workspace's rules; also enables interception if rules already exist.
 #[allow(clippy::too_many_lines)] // one event loop owns the Fetch request lifecycle
@@ -291,14 +472,20 @@ pub fn attach(
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
     tauri::async_runtime::spawn(async move {
         let mut events = session.subscribe();
-        {
+        let (initial_rules, initial_prefs, initial_document_url) = {
             let state = app.state::<AppState>();
             let rules = workspace.map_or_else(Vec::new, |id| state.rules.list(&state, id));
             let prefs = state.prefs.get(&state);
-            if let Err(e) = apply(&session, &rules, &prefs).await {
-                tracing::warn!(%tab_id, "fetch interception failed: {e}");
-            }
+            let document_url = crate::state::lock(&state.store)
+                .tab(tab_id)
+                .map(|tab| tab.url)
+                .unwrap_or_default();
+            (rules, prefs, document_url)
+        };
+        if let Err(e) = apply(&session, &initial_rules, &initial_prefs).await {
+            tracing::warn!(%tab_id, "fetch interception failed: {e}");
         }
+        let mut top_frame = TopFrameContext::new(&initial_document_url);
         let _ = ready_tx.send(());
         loop {
             let event = match events.recv().await {
@@ -308,7 +495,6 @@ pub fn attach(
                     // forever. Disabling Fetch releases them, then restores the
                     // current rules for subsequent requests.
                     tracing::warn!(%tab_id, n, "rule listener lagged; resetting interception");
-                    let _ = session.call0("Fetch.disable").await;
                     let (rules, prefs) = {
                         let state = app.state::<AppState>();
                         (
@@ -316,31 +502,28 @@ pub fn attach(
                             state.prefs.get(&state),
                         )
                     };
-                    let _ = apply(&session, &rules, &prefs).await;
+                    reset_interception(&session, &rules, &prefs).await;
                     continue;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             };
+            top_frame.observe(&event);
             if event.method != "Fetch.requestPaused" {
                 continue;
             }
             let p = &event.params;
-            let Some(request_id) = p["requestId"].as_str().map(str::to_owned) else {
-                tracing::warn!(%tab_id, "paused request had no request id; cannot fail open");
-                continue;
-            };
-            let url = p["request"]["url"].as_str().unwrap_or_default();
-            let (rules, prefs, document_url) = {
+            let (rules, prefs) = {
                 let state = app.state::<AppState>();
                 (
                     workspace.map_or_else(Vec::new, |id| state.rules.list(&state, id)),
                     state.prefs.get(&state),
-                    crate::state::lock(&state.store)
-                        .tab(tab_id)
-                        .map(|tab| tab.url)
-                        .unwrap_or_default(),
                 )
             };
+            let Some(request_id) = request_id_or_reset(&session, tab_id, p, &rules, &prefs).await
+            else {
+                continue;
+            };
+            let url = p["request"]["url"].as_str().unwrap_or_default();
             let action = {
                 let state = app.state::<AppState>();
                 decide_paused_request(
@@ -349,76 +532,17 @@ pub fn attach(
                     &prefs,
                     &PausedRequest {
                         url,
-                        document_url: &document_url,
+                        document_url: top_frame.document_url(),
                         resource_type: p["resourceType"].as_str().unwrap_or_default(),
                         method: p["request"]["method"].as_str().unwrap_or_default(),
                     },
                 )
             };
-            let privacy_category = match &action {
-                InterceptAction::PrivacyBlock { category } => Some(*category),
-                _ => None,
-            };
-            let (method, params) = match action {
-                InterceptAction::Block | InterceptAction::PrivacyBlock { .. } => (
-                    "Fetch.failRequest",
-                    json!({"requestId": &request_id, "errorReason": "BlockedByClient"}),
-                ),
-                InterceptAction::Mock {
-                    status,
-                    content_type,
-                    body,
-                } => (
-                    "Fetch.fulfillRequest",
-                    json!({
-                        "requestId": &request_id,
-                        "responseCode": status,
-                        "responseHeaders": [
-                            {"name": "Content-Type", "value": content_type},
-                            {"name": "Access-Control-Allow-Origin", "value": "*"},
-                            {"name": "X-Dive-Mock", "value": "1"}
-                        ],
-                        "body": base64::engine::general_purpose::STANDARD.encode(&body),
-                    }),
-                ),
-                InterceptAction::Header { name, value } => {
-                    let mut headers: Vec<Value> = p["request"]["headers"]
-                        .as_object()
-                        .map(|m| {
-                            m.iter()
-                                .filter(|(k, _)| !k.eq_ignore_ascii_case(&name))
-                                .map(|(k, v)| json!({"name": k, "value": v}))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    headers.push(json!({"name": name, "value": value}));
-                    (
-                        "Fetch.continueRequest",
-                        json!({"requestId": &request_id, "headers": headers}),
-                    )
-                }
-                InterceptAction::Continue => {
-                    ("Fetch.continueRequest", json!({"requestId": &request_id}))
-                }
-            };
-            match session.call(method, params).await {
-                Ok(_) => {
-                    if let Some(category) = privacy_category
-                        && let Err(e) = (PrivacyEvent::Blocked { tab_id, category }).emit(&app)
-                    {
-                        tracing::warn!(%tab_id, "privacy event emit failed: {e}");
-                    }
-                }
-                Err(e) => {
-                    tracing::debug!(%tab_id, "{method} failed: {e}");
-                    // A failed mock/block must degrade to a real request rather
-                    // than leaving the page permanently waiting on interception.
-                    if method != "Fetch.continueRequest" {
-                        let _ = session
-                            .call("Fetch.continueRequest", json!({"requestId": &request_id}))
-                            .await;
-                    }
-                }
+            if let Some(category) =
+                execute_action(&session, &request_id, &p["request"]["headers"], &action).await
+                && let Err(e) = (PrivacyEvent::Blocked { tab_id, category }).emit(&app)
+            {
+                tracing::warn!(%tab_id, "privacy event emit failed: {e}");
             }
         }
     });
@@ -430,6 +554,9 @@ mod tests {
     use super::*;
     use crate::prefs::Prefs;
     use crate::privacy::{DivePrivacy, PrivacyCategory};
+    use dive_cdp::{CdpError, Transport};
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex as StdMutex};
 
     fn rule(pattern: &str, action: RuleAction) -> Rule {
         Rule {
@@ -587,5 +714,225 @@ mod tests {
             ))
             .is_err()
         );
+    }
+
+    fn event(method: &str, params: Value) -> dive_cdp::CdpEvent {
+        dive_cdp::CdpEvent {
+            method: method.into(),
+            params,
+        }
+    }
+
+    #[test]
+    fn top_frame_navigation_context_changes_before_early_subresources() {
+        let mut context = TopFrameContext::new("https://news.test/old");
+        context.observe(&event(
+            "Page.frameNavigated",
+            json!({"frame": {"id": "main", "url": "https://news.test/old"}}),
+        ));
+        context.observe(&event(
+            "Network.requestWillBeSent",
+            json!({
+                "frameId": "main",
+                "type": "Document",
+                "request": {"url": "https://excepted.test/landing"}
+            }),
+        ));
+
+        let prefs = Prefs {
+            block_trackers: true,
+            privacy_exceptions: vec!["excepted.test".into()],
+            ..Prefs::default()
+        };
+        let early = PausedRequest {
+            url: "https://ads.doubleclick.net/early.js",
+            document_url: context.document_url(),
+            resource_type: "Script",
+            method: "GET",
+        };
+        assert_eq!(
+            decide_paused_request(&[], &privacy(), &prefs, &early),
+            InterceptAction::Continue,
+            "the destination exception must win before the stored tab URL catches up",
+        );
+
+        context.observe(&event(
+            "Network.requestWillBeSent",
+            json!({
+                "frameId": "main",
+                "type": "Document",
+                "request": {"url": "https://protected.test/redirected"},
+                "redirectResponse": {"status": 302}
+            }),
+        ));
+        let after_redirect = PausedRequest {
+            url: "https://ads.doubleclick.net/early.js",
+            document_url: context.document_url(),
+            resource_type: "Script",
+            method: "GET",
+        };
+        assert_eq!(
+            decide_paused_request(&[], &privacy(), &prefs, &after_redirect),
+            InterceptAction::PrivacyBlock {
+                category: PrivacyCategory::Ads,
+            },
+            "a cross-origin redirect must stop using the previous exception",
+        );
+    }
+
+    #[test]
+    fn top_frame_loading_clears_the_page_being_left_until_the_destination_is_known() {
+        let mut context = TopFrameContext::new("https://protected.test/old");
+        context.observe(&event(
+            "Page.frameNavigated",
+            json!({"frame": {"id": "main", "url": "https://protected.test/old"}}),
+        ));
+
+        context.observe(&event(
+            "Page.frameStartedLoading",
+            json!({"frameId": "main"}),
+        ));
+
+        assert_eq!(context.document_url(), "");
+    }
+
+    #[test]
+    fn subframe_documents_cannot_replace_the_top_frame_context() {
+        let mut context = TopFrameContext::new("https://protected.test/");
+        context.observe(&event(
+            "Page.frameNavigated",
+            json!({"frame": {"id": "main", "url": "https://protected.test/"}}),
+        ));
+        context.observe(&event(
+            "Fetch.requestPaused",
+            json!({
+                "requestId": "child-document",
+                "frameId": "child",
+                "resourceType": "Document",
+                "request": {"url": "https://excepted.test/frame"}
+            }),
+        ));
+        assert_eq!(context.document_url(), "https://protected.test/");
+
+        context.observe(&event(
+            "Fetch.requestPaused",
+            json!({
+                "requestId": "top-document",
+                "frameId": "main",
+                "resourceType": "Document",
+                "request": {"url": "https://excepted.test/top"}
+            }),
+        ));
+        assert_eq!(context.document_url(), "https://excepted.test/top");
+    }
+
+    #[derive(Clone, Copy)]
+    enum Reply {
+        Ok,
+        ProtocolError,
+    }
+
+    #[derive(Clone)]
+    struct ScriptedTransport {
+        sent: Arc<StdMutex<Vec<Value>>>,
+        replies: Arc<StdMutex<VecDeque<Reply>>>,
+        session: Arc<StdMutex<Option<CdpSession>>>,
+    }
+
+    impl Transport for ScriptedTransport {
+        fn send(&self, message: &str) -> Result<(), CdpError> {
+            let value: Value = serde_json::from_str(message).expect("outgoing CDP JSON");
+            let id = value["id"].as_u64().expect("CDP call id");
+            self.sent
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(value);
+            let reply = self
+                .replies
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .pop_front()
+                .unwrap_or(Reply::Ok);
+            let incoming = match reply {
+                Reply::Ok => json!({"id": id, "result": {}}),
+                Reply::ProtocolError => {
+                    json!({"id": id, "error": {"code": -32000, "message": "injected"}})
+                }
+            };
+            self.session
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .expect("session installed")
+                .handle_incoming(&incoming.to_string())?;
+            Ok(())
+        }
+    }
+
+    fn scripted_session(replies: Vec<Reply>) -> (CdpSession, Arc<StdMutex<Vec<Value>>>) {
+        let sent = Arc::new(StdMutex::new(Vec::new()));
+        let holder = Arc::new(StdMutex::new(None));
+        let session = CdpSession::new(ScriptedTransport {
+            sent: Arc::clone(&sent),
+            replies: Arc::new(StdMutex::new(replies.into())),
+            session: Arc::clone(&holder),
+        });
+        *holder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(session.clone());
+        (session, sent)
+    }
+
+    #[tokio::test]
+    async fn failed_header_rewrite_retries_one_plain_continue() {
+        let (session, sent) = scripted_session(vec![Reply::ProtocolError, Reply::Ok]);
+        let action = InterceptAction::Header {
+            name: "X-Test".into(),
+            value: "one".into(),
+        };
+
+        let reported = execute_action(
+            &session,
+            "request-1",
+            &json!({"Existing": "value"}),
+            &action,
+        )
+        .await;
+
+        assert_eq!(reported, None);
+        let sent = sent
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(sent.len(), 2, "recovery is bounded to one retry");
+        assert_eq!(sent[0]["method"], "Fetch.continueRequest");
+        assert!(sent[0]["params"].get("headers").is_some());
+        assert_eq!(
+            sent[1]["params"],
+            json!({"requestId": "request-1"}),
+            "the retry must drop the failed header override",
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_request_id_recovery_resets_fetch_once() {
+        let (session, sent) = scripted_session(vec![Reply::Ok, Reply::Ok]);
+
+        let request_id = request_id_or_reset(
+            &session,
+            TabId::new(),
+            &json!({"request": {"url": "https://example.test/"}}),
+            &[],
+            &enabled_prefs(),
+        )
+        .await;
+
+        assert_eq!(request_id, None);
+        let methods = sent
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .map(|message| message["method"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(methods, vec!["Fetch.disable", "Fetch.enable"]);
     }
 }
