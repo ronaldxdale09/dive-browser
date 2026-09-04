@@ -1,97 +1,225 @@
-import { Shield, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Megaphone, Play, Radar, Shield, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import type { LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
+import { ipc } from "../lib/ipc";
+import { useCoversContent } from "../lib/overlay";
+import { privacyGuardian } from "../lib/privacyAvatar";
+import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
-import { selectRequests, useNetwork } from "../store/network";
+import { selectPrivacyCounts, usePrivacy } from "../store/privacy";
 import { usePrefs } from "../store/prefs";
 import { FeatureButton } from "./FeatureBar";
 import { Icon } from "./Icon";
 import { Switch } from "./SettingsFields";
-import { useCoversContent } from "../lib/overlay";
-import { useFocusTrap } from "../lib/useFocusTrap";
 
-/**
- * Protection: the tracker blocker and its neighbours, one click from the
- * page they act on. The same preferences as Settings › Privacy; this is the
- * place to see them working — how many requests this tab lost to them.
- */
+/** DivePrivacy status and recovery controls for the active page. */
 export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) {
   const prefs = usePrefs((s) => s.prefs);
   const update = usePrefs((s) => s.update);
+  const tabs = useBrowser((s) => s.tabs);
   const activeTab = useBrowser((s) => s.activeTab);
-  const toggle = useBrowser((s) => s.toggle);
-  const blocked = useNetwork((s) => selectRequests(activeTab)(s).filter((r) => r.error?.includes("BLOCKED_BY_CLIENT")).length);
+  const openSettings = useBrowser((s) => s.openSettings);
+  const counts = usePrivacy(selectPrivacyCounts(activeTab));
+  const info = usePrivacy((s) => s.info);
+  const loadInfo = usePrivacy((s) => s.loadInfo);
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [siteSaving, setSiteSaving] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   useCoversContent(open);
-  useFocusTrap(panel, { active: open });
+  useFocusTrap(panel, { active: open, onEscape: () => setOpen(false) });
+
+  const tab = tabs.find((candidate) => candidate.id === activeTab);
+  const host = pageHost(tab?.url);
+  const globalOn = prefs.block_trackers;
+  const paused = host !== null && prefs.privacy_exceptions.includes(host);
+  const siteOn = globalOn && host !== null && !paused;
+  const youtubeSite = host === "www.youtube.com" || host === "m.youtube.com";
+  const youtubeActive = siteOn && youtubeSite && prefs.youtube_protection;
+  const total = counts.ads + counts.trackers + counts.youtube;
+  const headline = !globalOn ? "DivePrivacy is off" : paused ? "Protection paused here" : "Protected on this site";
+  const summary = total === 0 ? "Clean so far" : `${total} stopped so far`;
+
+  useEffect(() => {
+    if (open && !info) void loadInfo().catch(() => undefined);
+  }, [info, loadInfo, open]);
 
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    const closeOutside = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
+    window.addEventListener("mousedown", closeOutside);
+    return () => window.removeEventListener("mousedown", closeOutside);
   }, [open]);
 
-  const on = prefs.block_trackers;
+  const changeSite = async (enabled: boolean) => {
+    if (!activeTab || !host || !globalOn || siteSaving) return;
+    setSiteSaving(true);
+    const exceptions = enabled
+      ? prefs.privacy_exceptions.filter((exception) => exception !== host)
+      : [...prefs.privacy_exceptions.filter((exception) => exception !== host), host];
+    try {
+      await update({ privacy_exceptions: exceptions });
+      const stored = usePrefs.getState().prefs.privacy_exceptions;
+      const persisted = enabled ? !stored.includes(host) : stored.includes(host);
+      if (persisted) await ipc.tabReload(activeTab);
+    } catch (error) {
+      reportError(error);
+    } finally {
+      setSiteSaving(false);
+    }
+  };
+
   return (
-    <div ref={ref} className="relative">
-      <FeatureButton icon={on ? ShieldCheck : Shield} label="Protection" iconOnly={compact} tone={on ? "hi" : "quiet"} active={open} onClick={() => setOpen((o) => !o)} tooltipAlign="end">
-        {on && blocked > 0 && (
-          <span className="ml-0.5 rounded-full bg-highlight-soft px-1.5 py-px font-mono text-[10px] leading-4 text-highlight" aria-label={`${blocked} blocked on this page`}>
-            {blocked}
+    <div ref={root} className="relative">
+      <FeatureButton
+        icon={globalOn ? ShieldCheck : Shield}
+        label="Protection"
+        iconOnly={compact}
+        tone={siteOn ? "hi" : "quiet"}
+        active={open}
+        onClick={() => setOpen((value) => !value)}
+        tooltipAlign="end"
+      >
+        {globalOn && total > 0 && (
+          <span
+            key={total}
+            className="privacy-count privacy-motion ml-0.5 rounded-full bg-highlight-soft px-1.5 py-px font-mono text-[10px] leading-4 text-highlight"
+            aria-label={`${total} blocked on this page`}
+          >
+            {total}
           </span>
         )}
       </FeatureButton>
+
       {open && (
-        <div ref={panel} role="dialog" aria-label="Protection" className="absolute right-0 z-50 mt-1 w-80 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl">
-          <div className="flex items-center gap-2.5 rounded-lg bg-surface-2 px-3 py-2.5">
-            <span className={`grid size-8 shrink-0 place-items-center rounded-full ${on ? "bg-highlight-soft text-highlight" : "bg-surface-3 text-ink-3"}`}>
-              <Icon icon={on ? ShieldCheck : Shield} size={15} />
-            </span>
-            <span className="min-w-0">
-              <span className="block font-medium text-ink">{on ? `${blocked} ${blocked === 1 ? "request" : "requests"} blocked on this page` : "Tracker blocking is off"}</span>
-              <span className="block text-[10.5px] text-ink-3">{on ? "Analytics and ad hosts never leave the browser." : "Pages load exactly as they are served."}</span>
-            </span>
-          </div>
-          <Toggle label="Block trackers and ads" hint="A short list of analytics and ad hosts; blocked requests still show in the Network panel." checked={prefs.block_trackers} onChange={(v) => void update({ block_trackers: v })} />
-          <Toggle label="Send “Do Not Track”" hint="DNT: 1 and Sec-GPC: 1 on every request." checked={prefs.do_not_track} onChange={(v) => void update({ do_not_track: v })} />
-          <Toggle label="Run page JavaScript" hint="Off loads every page script-free." checked={prefs.javascript} onChange={(v) => void update({ javascript: v })} />
-          <div className="mt-1 flex items-center border-t border-line pt-1.5">
-            <span className="px-2 text-[10.5px] text-ink-3">Applies to every workspace.</span>
-            <span className="flex-1" />
+        <div
+          ref={panel}
+          role="dialog"
+          aria-label="DivePrivacy protection"
+          aria-modal="true"
+          className="privacy-card privacy-motion absolute right-0 z-50 mt-1 w-[360px] max-w-[calc(100vw-16px)] overflow-hidden rounded-2xl border border-line-2 bg-surface text-xs shadow-2xl"
+        >
+          <header className="flex items-center gap-3.5 bg-surface-2/70 px-4 py-4">
+            <div className="relative grid size-14 shrink-0 place-items-center">
+              <span
+                data-testid="privacy-halo"
+                aria-hidden="true"
+                className={`absolute inset-1 rounded-full border border-highlight/70 bg-highlight/20 ${siteOn ? "privacy-halo privacy-motion" : ""}`}
+              />
+              <img src={privacyGuardian()} alt="Dive Privacy guardian" className="relative size-12 rounded-full bg-surface-3" />
+              <span aria-hidden="true" className={`absolute right-0.5 bottom-0.5 size-3 rounded-full border-2 border-surface-2 ${siteOn ? "bg-highlight" : "bg-ink-3"}`} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-[14px] font-semibold tracking-[-0.01em] text-ink">{headline}</h3>
+              <p className={`privacy-count privacy-motion mt-0.5 text-[11px] ${total > 0 ? "text-highlight" : "text-ink-3"}`} aria-live="polite">
+                {summary}
+              </p>
+              {host && <p className="mt-1 truncate font-mono text-[10px] text-ink-3">{host}</p>}
+            </div>
+          </header>
+
+          <section aria-label="Protection layers" className="px-3 py-2">
+            <Layer icon={Megaphone} label="Ads blocked" value={String(counts.ads)} countKey={counts.ads} />
+            <Layer icon={Radar} label="Trackers stopped" value={String(counts.trackers)} countKey={counts.trackers} />
+            <Layer
+              icon={Play}
+              label="YouTube protection"
+              value={!youtubeSite ? "Unavailable here" : youtubeActive ? "Active" : "Inactive"}
+              control={
+                <Switch
+                  label="YouTube protection"
+                  checked={prefs.youtube_protection}
+                  disabled={!youtubeSite}
+                  onChange={(youtube_protection) => void update({ youtube_protection })}
+                />
+              }
+            />
+          </section>
+
+          <section className="border-t border-line px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-ink">Protection on this site</p>
+                <p className="mt-0.5 text-[10.5px] text-ink-3">
+                  {!host ? "Site controls unavailable" : paused ? `Resume on ${host}` : `Pause only on ${host}`}
+                </p>
+              </div>
+              <Switch label="Protection on this site" checked={siteOn} disabled={!globalOn || !host || siteSaving} onChange={(enabled) => void changeSite(enabled)} />
+            </div>
+
+            {!globalOn && (
+              <div className="privacy-layer privacy-motion mt-3 flex items-center gap-3 rounded-xl bg-surface-2 px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-ink">DivePrivacy protection</p>
+                  <p className="mt-0.5 text-[10.5px] text-ink-3">Enable curated protection across workspaces.</p>
+                </div>
+                <Switch label="DivePrivacy protection" checked={false} onChange={(block_trackers) => void update({ block_trackers })} />
+              </div>
+            )}
+          </section>
+
+          <footer className="flex items-center gap-2 border-t border-line bg-surface-2/45 px-3 py-2">
+            <span className="font-mono text-[9.5px] text-ink-3">Rules {info?.version ?? "bundled"}</span>
+            <span className="min-w-0 flex-1 truncate text-[9.5px] text-ink-3">Across workspaces; site pauses stay host-specific.</span>
             <button
               type="button"
               onClick={() => {
                 setOpen(false);
-                toggle("settings", true);
+                openSettings("privacy");
               }}
-              className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink"
+              className="privacy-motion flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[10.5px] text-ink-2 hover:bg-surface-3 hover:text-ink"
             >
               <Icon icon={SlidersHorizontal} size={12} /> All privacy settings
             </button>
-          </div>
+          </footer>
         </div>
       )}
     </div>
   );
 }
 
-function Toggle({ label, hint, checked, onChange }: { label: string; hint: string; checked: boolean; onChange: (v: boolean) => void }) {
+function Layer({
+  icon,
+  label,
+  value,
+  countKey,
+  control,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  countKey?: number;
+  control?: ReactNode;
+}) {
   return (
-    <div className="flex items-center gap-3 px-2 py-2">
-      <span className="min-w-0 flex-1">
-        <span className="block text-ink">{label}</span>
-        <span className="block text-[10.5px] leading-relaxed text-ink-3">{hint}</span>
+    <div className="privacy-layer privacy-motion flex min-h-10 items-center gap-2.5 rounded-xl px-2.5 py-2 hover:bg-surface-2">
+      <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-surface-2 text-ink-2">
+        <Icon icon={icon} size={13} />
       </span>
-      <Switch label={label} checked={checked} onChange={onChange} />
+      <span className="min-w-0 flex-1 text-ink-2">{label}</span>
+      <span key={countKey} className={`privacy-motion text-[11px] ${countKey === undefined ? "text-ink-3" : "privacy-count font-mono tabular-nums text-ink"}`}>
+        {value}
+      </span>
+      {control}
     </div>
   );
+}
+
+/** Only ordinary web pages have an exact host that the backend can except. */
+function pageHost(raw: string | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.hostname.toLowerCase().replace(/\.$/, "") || null;
+  } catch {
+    return null;
+  }
+}
+
+function reportError(error: unknown) {
+  useBrowser.setState({ error: error instanceof Error ? error.message : String(error) });
 }

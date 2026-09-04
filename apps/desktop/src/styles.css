@@ -285,6 +285,41 @@ button:not(:disabled):active,
   will-change: transform, opacity;
 }
 
+/* DivePrivacy's card moves once on entry. Counts and rows settle quickly;
+   the guardian halo is a single status acknowledgement, never a pulse loop. */
+@keyframes privacy-arrive {
+  from { opacity: 0; transform: translateY(-4px) scale(.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes privacy-halo {
+  0% { opacity: 0; transform: scale(.8); }
+  55% { opacity: .5; }
+  100% { opacity: 0; transform: scale(1.35); }
+}
+@keyframes privacy-count-in {
+  from { opacity: .35; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+.privacy-card {
+  animation: privacy-arrive 160ms cubic-bezier(.16, 1, .3, 1) both;
+  transform-origin: top right;
+}
+.privacy-halo {
+  animation: privacy-halo 180ms ease-out both;
+}
+.privacy-layer {
+  animation: privacy-arrive 140ms ease-out both;
+  transition: color 140ms ease, background-color 140ms ease, transform 140ms ease;
+}
+.privacy-layer:nth-child(2) { animation-delay: 15ms; }
+.privacy-layer:nth-child(3) { animation-delay: 30ms; }
+.privacy-count {
+  animation: privacy-count-in 140ms ease-out both;
+}
+.privacy-motion {
+  transition-duration: 150ms;
+}
+
 /* Reduced motion: nothing loops, nothing slides, and a state change is a
    cut. Spinners keep their glyph but stop turning; the pulsing dots that mark
    "recording" or "downloading" stay lit instead of blinking. */
@@ -307,8 +342,10 @@ button:not(:disabled):active,
   .surface-enter,
   .skeleton-enter,
   .tab-drag-ghost,
-  .tab-drop-zone {
+  .tab-drop-zone,
+  .privacy-motion {
     animation: none !important;
+    transition: none !important;
     will-change: auto;
   }
   .animate-ping {

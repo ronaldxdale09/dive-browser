@@ -6,6 +6,7 @@ import { useBrowser } from "../store/browser";
 import { useDownloads } from "../store/downloads";
 import { useEmulation } from "../store/emulation";
 import { useNetwork } from "../store/network";
+import { usePrivacy } from "../store/privacy";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { Toolbar } from "./Toolbar";
 
@@ -37,6 +38,10 @@ beforeEach(() => {
   useEmulation.setState({ byTab: {}, media: {}, throttle: {} });
   useDownloads.setState({ items: [] });
   useNetwork.setState({ byTab: {}, frames: {} });
+  usePrivacy.setState({
+    byTab: {},
+    info: { version: "2026.09.04", ad_rules: 63, tracker_rules: 62, cosmetic_hosts: 4 },
+  });
   usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
   vi.spyOn(ipc, "downloadsReveal").mockResolvedValue(null);
   vi.spyOn(ipc, "prefsSet").mockImplementation((p) => Promise.resolve(p));
@@ -135,22 +140,146 @@ describe("Toolbar", () => {
     expect(ipc.downloadsReveal).toHaveBeenCalledWith(null);
   });
 
-  it("turns tracker blocking on from the protection menu and counts what it blocked", async () => {
-    useNetwork.setState({
-      byTab: {
-        [tab.id]: [
-          { id: "1", url: "https://www.google-analytics.com/g.js", method: "GET", resourceType: "Script", status: null, mimeType: "", fromCache: false, size: null, error: "net::ERR_BLOCKED_BY_CLIENT", startedAt: 0, durationMs: 4 },
-          { id: "2", url: "https://example.com/app.js", method: "GET", resourceType: "Script", status: 200, mimeType: "text/javascript", fromCache: false, size: 10, error: null, startedAt: 0, durationMs: 40 },
-        ],
-      },
-      frames: {},
-    });
+  it("renders the local guardian and an honest clean, globally-off state", () => {
     render(<Toolbar />);
     fireEvent.click(screen.getByRole("button", { name: "Protection" }));
-    expect(screen.getByText("Tracker blocking is off")).toBeTruthy();
-    fireEvent.click(screen.getByRole("switch", { name: "Block trackers and ads" }));
+
+    const dialog = screen.getByRole("dialog", { name: "DivePrivacy protection" });
+    expect(dialog.className).toContain("w-[360px]");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(screen.getByText("DivePrivacy is off")).toBeTruthy();
+    expect(screen.getByText("Clean so far")).toBeTruthy();
+    expect(screen.getByAltText("Dive Privacy guardian").getAttribute("src")).toMatch(/^data:image\/svg\+xml/);
+    expect(screen.getByTestId("privacy-halo")).toBeTruthy();
+    expect(screen.getByText("Ads blocked").nextSibling?.textContent).toBe("0");
+    expect(screen.getByText("Trackers stopped").nextSibling?.textContent).toBe("0");
+    expect(screen.getByText("YouTube protection").nextSibling?.textContent).toBe("Unavailable here");
+    expect(screen.getByText("Rules 2026.09.04")).toBeTruthy();
+    expect((screen.getByRole("switch", { name: "Protection on this site" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("switch", { name: "DivePrivacy protection" }).getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("reports typed per-layer counts without treating generic network failures as privacy actions", () => {
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, block_trackers: true }, loaded: true });
+    usePrivacy.setState({ byTab: { [tab.id]: { ads: 2, trackers: 1, youtube: 0 } } });
+
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+
+    expect(screen.getByText("Protected on this site")).toBeTruthy();
+    expect(screen.getByText("3 stopped so far")).toBeTruthy();
+    expect(screen.getByTestId("privacy-halo").className).toContain("privacy-halo");
+    expect(screen.getByText("Ads blocked").nextSibling?.textContent).toBe("2");
+    expect(screen.getByText("Trackers stopped").nextSibling?.textContent).toBe("1");
+    expect(screen.getByLabelText("3 blocked on this page")).toBeTruthy();
+  });
+
+  it("persists an exact-host pause before reloading the active tab", async () => {
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, block_trackers: true }, loaded: true });
+    let finishWrite!: (prefs: typeof DEFAULT_PREFS) => void;
+    vi.mocked(ipc.prefsSet).mockReturnValueOnce(new Promise((resolve) => (finishWrite = resolve)));
+
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Protection on this site" }));
+
+    await waitFor(() => expect(ipc.prefsSet).toHaveBeenCalledWith({ ...DEFAULT_PREFS, block_trackers: true, privacy_exceptions: ["example.com"] }));
+    expect(ipc.tabReload).not.toHaveBeenCalled();
+
+    finishWrite({ ...DEFAULT_PREFS, block_trackers: true, privacy_exceptions: ["example.com"] });
+    await waitFor(() => expect(ipc.tabReload).toHaveBeenCalledWith(tab.id));
+    expect(screen.getByText("Protection paused here")).toBeTruthy();
+  });
+
+  it("removes only the active exact host when protection resumes", async () => {
+    usePrefs.setState({
+      prefs: { ...DEFAULT_PREFS, block_trackers: true, privacy_exceptions: ["other.example", "example.com"] },
+      loaded: true,
+    });
+
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+    const site = screen.getByRole("switch", { name: "Protection on this site" });
+    expect(site.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(site);
+
+    await waitFor(() => expect(ipc.prefsSet).toHaveBeenCalledWith({ ...DEFAULT_PREFS, block_trackers: true, privacy_exceptions: ["other.example"] }));
+    await waitFor(() => expect(ipc.tabReload).toHaveBeenCalledWith(tab.id));
+  });
+
+  it("offers global enablement when DivePrivacy is off", async () => {
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+    fireEvent.click(screen.getByRole("switch", { name: "DivePrivacy protection" }));
+
     await waitFor(() => expect(ipc.prefsSet).toHaveBeenCalledWith({ ...DEFAULT_PREFS, block_trackers: true }));
-    expect(screen.getByText("1 request blocked on this page")).toBeTruthy();
+    expect(screen.queryByRole("switch", { name: "DivePrivacy protection" })).toBeNull();
+    expect(screen.getByText("Protected on this site")).toBeTruthy();
+  });
+
+  it("shows and changes YouTube protection only on supported YouTube hosts", async () => {
+    useBrowser.setState({ tabs: [{ ...tab, url: "https://www.youtube.com/watch?v=abc" }] });
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, block_trackers: true }, loaded: true });
+    usePrivacy.setState({ byTab: { [tab.id]: { ads: 0, trackers: 0, youtube: 2 } } });
+
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+    expect(screen.getByText("YouTube protection").nextSibling?.textContent).toBe("Active");
+    const youtube = screen.getByRole("switch", { name: "YouTube protection" });
+    expect(youtube.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(youtube);
+
+    await waitFor(() => expect(ipc.prefsSet).toHaveBeenCalledWith({ ...DEFAULT_PREFS, block_trackers: true, youtube_protection: false }));
+    expect(screen.getByText("YouTube protection").nextSibling?.textContent).toBe("Inactive");
+  });
+
+  it.each(["dive://screen", "not a valid URL"])("disables host-specific controls for %s", (url) => {
+    useBrowser.setState({ tabs: [{ ...tab, url }] });
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, block_trackers: true }, loaded: true });
+
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+
+    expect((screen.getByRole("switch", { name: "Protection on this site" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Site controls unavailable")).toBeTruthy();
+  });
+
+  it("does not reload when preference persistence fails", async () => {
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, block_trackers: true }, loaded: true });
+    vi.mocked(ipc.prefsSet).mockRejectedValueOnce(new Error("disk full"));
+
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Protection on this site" }));
+
+    await waitFor(() => expect(useBrowser.getState().error).toBe("disk full"));
+    expect(usePrefs.getState().prefs.privacy_exceptions).toEqual([]);
+    expect(ipc.tabReload).not.toHaveBeenCalled();
+  });
+
+  it("closes on Escape and returns focus to the protection trigger", async () => {
+    render(<Toolbar />);
+    const trigger = screen.getByRole("button", { name: "Protection" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "DivePrivacy protection" });
+    expect(dialog.className).toContain("privacy-motion");
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    fireEvent.keyDown(document.activeElement ?? dialog, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "DivePrivacy protection" })).toBeNull());
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("opens all privacy settings from the card footer", () => {
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+    fireEvent.click(screen.getByRole("button", { name: "All privacy settings" }));
+
+    expect(useBrowser.getState().open.settings).toBe(true);
+    expect(useBrowser.getState().settingsSection).toBe("privacy");
+    expect(screen.queryByRole("dialog", { name: "DivePrivacy protection" })).toBeNull();
   });
 
   it("draws a progress line under the toolbar while the active tab loads", () => {
