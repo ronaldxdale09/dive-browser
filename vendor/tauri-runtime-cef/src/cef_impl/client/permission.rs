@@ -119,6 +119,16 @@ impl PermissionBridge {
     self.state.lock().unwrap().context = Some(context::ContextLease::acquire(context)?);
     Ok(())
   }
+  pub fn reconcile_permission_cache_for_diagnostics(&self) -> Result<(), String> {
+    self
+      .state
+      .lock()
+      .unwrap()
+      .context
+      .as_ref()
+      .ok_or_else(|| "Permission context unavailable".to_owned())?
+      .reconcile_for_diagnostics()
+  }
   pub fn reset_permission_cache(&self, origin: &str, kind: &str) -> Result<(), String> {
     self
       .state

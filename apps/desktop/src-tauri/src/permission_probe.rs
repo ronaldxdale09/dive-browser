@@ -3,8 +3,8 @@
 use std::{sync::Arc, time::Duration};
 
 use cef::{
-    CefString, ContentSettingTypes, ImplBrowser, ImplBrowserHost, ImplRequestContext,
-    JsonParserOptions, JsonWriterOptions, RequestContext,
+    CefString, ContentSettingTypes, ImplBrowser, ImplBrowserHost, ImplPreferenceManager,
+    ImplRequestContext, JsonParserOptions, JsonWriterOptions, RequestContext,
 };
 use dive_core::{Container, Profile, TabId, Workspace};
 use serde_json::{Value as Json, json};
@@ -101,6 +101,19 @@ fn expect(actual: &Json, expected: &Json, label: &str) -> Result<(), AppError> {
         )));
     }
     Ok(())
+}
+fn legacy_migration_readback(ar: &Json, storage: &Json, sensors: &Json) -> Result<(), AppError> {
+    expect(ar, &json!(3), "legacy AR permission reset")?;
+    expect(
+        storage,
+        &json!({}),
+        "legacy partitioned storage-access reset",
+    )?;
+    expect(
+        sensors,
+        &json!(3),
+        "legacy sensor default restricted to Ask",
+    )
 }
 fn navigation_ready(
     reply: Result<Json, dive_cdp::CdpError>,
@@ -204,6 +217,7 @@ pub(crate) async fn verify(app: &tauri::AppHandle<Runtime>) -> Result<(), AppErr
     // Keep the platform handle alive after close, reproducing the native timeout
     // task's ContextLease retention without invoking any permission API.
     let retained = native(app, first).await?;
+    verify_legacy_migration(app, retained.clone()).await?;
     seed_and_verify_geolocation(app, retained.clone()).await?;
     let second = open(app, first_scope.id).await?;
     let other = open(app, other_scope.id).await?;
@@ -289,6 +303,60 @@ async fn verify_isolation(
     .await
 }
 
+fn read_pref(context: &RequestContext, name: &str) -> Result<Json, AppError> {
+    let mut value = context
+        .preference(Some(&name.into()))
+        .ok_or_else(|| AppError::new(format!("native preference missing: {name}")))?;
+    serde_json::from_str(
+        &CefString::from(&cef::write_json(
+            Some(&mut value),
+            JsonWriterOptions::DEFAULT,
+        ))
+        .to_string(),
+    )
+    .map_err(AppError::new)
+}
+fn seed_pref(context: &RequestContext, name: &str, value: &Json) -> Result<(), AppError> {
+    let mut native = cef::parse_json(
+        Some(&value.to_string().as_str().into()),
+        JsonParserOptions::RFC,
+    )
+    .ok_or_else(|| AppError::new("native preference seed JSON failed"))?;
+    let mut error = CefString::from("");
+    if context.set_preference(Some(&name.into()), Some(&mut native), Some(&mut error)) == 0 {
+        return Err(AppError::new(format!(
+            "native preference seed failed: {name}: {error}"
+        )));
+    }
+    expect(
+        &read_pref(context, name)?,
+        value,
+        "legacy preference seed readback",
+    )
+}
+async fn verify_legacy_migration(
+    app: &tauri::AppHandle<Runtime>,
+    view: Native,
+) -> Result<(), AppError> {
+    on_main(app, move |_| {
+        const PARTITIONED: &str = "profile.content_settings.partitioned_exceptions.storage_access";
+        const SENSORS: &str = "profile.default_content_setting_values.sensors";
+        let context = context(&view)?;
+        seed(&context, ORIGIN, ContentSettingTypes::AR, &json!(1))?;
+        seed_pref(&context, PARTITIONED, &json!({"https://child.permission-probe.invalid,https://parent.permission-probe.invalid":{"setting":1}}))?;
+        seed_pref(&context, SENSORS, &json!(1))?;
+        expect(&read(&context, ORIGIN, ContentSettingTypes::SENSORS)?, &json!(1), "legacy effective sensor ALLOW seeded")?;
+        // This calls the exact production startup migration after verified native
+        // seeds. It cannot pass merely because fresh contexts already default Ask.
+        view.reconcile_permission_cache_for_diagnostics().map_err(AppError::new)?;
+        legacy_migration_readback(&read(&context, ORIGIN, ContentSettingTypes::AR)?,
+            &read_pref(&context, PARTITIONED)?, &read_pref(&context, SENSORS)?)?;
+        expect(&read(&context, ORIGIN, ContentSettingTypes::SENSORS)?, &json!(3), "legacy effective sensor ASK after migration")?;
+        println!("DIVE_PERMISSION_LEGACY_PROBE: seeded native AR, partitioned storage-access pair and sensor ALLOW reset/readback verified");
+        Ok(())
+    }).await
+}
+
 async fn seed_and_verify_geolocation(
     app: &tauri::AppHandle<Runtime>,
     seed_view: Native,
@@ -337,6 +405,22 @@ mod tests {
             code: -32000,
             message: "Inspected target navigated or closed".into(),
         }
+    }
+    #[test]
+    fn legacy_probe_rejects_each_stale_native_grant_or_default() {
+        let ask = json!(3);
+        let empty = json!({});
+        assert!(legacy_migration_readback(&ask, &empty, &ask).is_ok());
+        assert!(legacy_migration_readback(&json!(1), &empty, &ask).is_err());
+        assert!(
+            legacy_migration_readback(
+                &ask,
+                &json!({"https://child.test,https://parent.test":{"setting":1}}),
+                &ask
+            )
+            .is_err()
+        );
+        assert!(legacy_migration_readback(&ask, &empty, &json!(1)).is_err());
     }
     #[test]
     fn navigation_wait_retries_only_known_transition_on_open_original_session() {

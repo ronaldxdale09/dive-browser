@@ -1,14 +1,5 @@
-import { createAvatar } from "@dicebear/core";
-import { botttsNeutral } from "@dicebear/collection";
+// Fixed local artwork generated with DiceBear bottts-neutral 9.4.3, seed "Dive Privacy".
+// SVG metadata retains its attribution/license; no generator is needed at runtime.
+const guardian = "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20120%20120%22%20fill%3D%22none%22%20shape-rendering%3D%22auto%22%20width%3D%2296%22%20height%3D%2296%22%3E%3Cmetadata%20xmlns%3Ardf%3D%22http%3A%2F%2Fwww.w3.org%2F1999%2F02%2F22-rdf-syntax-ns%23%22%20xmlns%3Axsi%3D%22http%3A%2F%2Fwww.w3.org%2F2001%2FXMLSchema-instance%22%20xmlns%3Adc%3D%22http%3A%2F%2Fpurl.org%2Fdc%2Felements%2F1.1%2F%22%20xmlns%3Adcterms%3D%22http%3A%2F%2Fpurl.org%2Fdc%2Fterms%2F%22%3E%3Crdf%3ARDF%3E%3Crdf%3ADescription%3E%3Cdc%3Atitle%3EBottts%3C%2Fdc%3Atitle%3E%3Cdc%3Acreator%3EPablo%20Stanley%3C%2Fdc%3Acreator%3E%3Cdc%3Asource%20xsi%3Atype%3D%22dcterms%3AURI%22%3Ehttps%3A%2F%2Fbottts.com%2F%3C%2Fdc%3Asource%3E%3Cdcterms%3Alicense%20xsi%3Atype%3D%22dcterms%3AURI%22%3Ehttps%3A%2F%2Fbottts.com%2F%3C%2Fdcterms%3Alicense%3E%3Cdc%3Arights%3ERemix%20of%20%E2%80%9EBottts%E2%80%9D%20(https%3A%2F%2Fbottts.com%2F)%20by%20%E2%80%9EPablo%20Stanley%E2%80%9D%2C%20licensed%20under%20%E2%80%9EFree%20for%20personal%20and%20commercial%20use%E2%80%9D%20(https%3A%2F%2Fbottts.com%2F)%3C%2Fdc%3Arights%3E%3C%2Frdf%3ADescription%3E%3C%2Frdf%3ARDF%3E%3C%2Fmetadata%3E%3Cmask%20id%3D%22viewboxMask%22%3E%3Crect%20width%3D%22120%22%20height%3D%22120%22%20rx%3D%220%22%20ry%3D%220%22%20x%3D%220%22%20y%3D%220%22%20fill%3D%22%23fff%22%20%2F%3E%3C%2Fmask%3E%3Cg%20mask%3D%22url(%23viewboxMask)%22%3E%3Cg%20transform%3D%22translate(22%2068)%22%3E%3Crect%20x%3D%224%22%20y%3D%224%22%20width%3D%2268%22%20height%3D%2224%22%20rx%3D%225%22%20fill%3D%22%23000%22%20fill-opacity%3D%22.2%22%2F%3E%3Crect%20x%3D%228%22%20y%3D%228%22%20width%3D%2260%22%20height%3D%2216%22%20rx%3D%222%22%20fill%3D%22%23000%22%20fill-opacity%3D%22.8%22%2F%3E%3Cpath%20d%3D%22M9%2017h11l2-4%203%207%204-8%202%209%203-11%203%2010%203-3h15l3-4%202%207%203-3h4%22%20stroke%3D%22%234EFAC9%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(8%2020)%22%3E%3Cpath%20d%3D%22m18%2019%2012-2M20%2031c0-3.31%202.9-6%207-6%203.1%200%206%202.69%206%206M86%2020l-12-3M84%2031c0-3.31-2.9-6-6-6-4.1%200-7%202.69-7%206%22%20stroke%3D%22%23000%22%20stroke-width%3D%224%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
 
-let guardian: string | null = null;
-
-/** A deterministic, bundled privacy guardian avatar. */
-export function privacyGuardian(): string {
-  guardian ??= createAvatar(botttsNeutral, {
-    seed: "Dive Privacy",
-    size: 96,
-    backgroundColor: ["transparent"],
-  }).toDataUri();
-  return guardian;
-}
+export function privacyGuardian(): string { return guardian; }

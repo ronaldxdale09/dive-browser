@@ -94,7 +94,7 @@ def main():
             elapsed = run_probe(binary, env, log, 45)
             content = log.read_text(errors='replace')
             marker = 'DIVE_NETWORK_PROBE: compressed, cached, blob and service-worker capture verified'
-            if marker not in content or 'DIVE_PERMISSION_PROBE: native scalar/structured reset' not in content or 'event loop exited' not in content:
+            if marker not in content or 'DIVE_PERMISSION_PROBE: native scalar/structured reset' not in content or 'DIVE_PERMISSION_LEGACY_PROBE: seeded native AR, partitioned storage-access pair and sensor ALLOW reset/readback verified' not in content or 'event loop exited' not in content:
                 raise RuntimeError(f'native capture evidence incomplete: {log}')
             rows_line = next(line for line in content.splitlines() if line.startswith('DIVE_NETWORK_PROBE: ['))
             rows = json.loads(rows_line.removeprefix('DIVE_NETWORK_PROBE: '))

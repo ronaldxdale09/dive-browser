@@ -76,6 +76,75 @@ trait Cache {
   fn setting(&self, origin: &str, setting: Setting) -> Result<Json, String>;
   fn clear_setting(&self, origin: &str, setting: Setting) -> Result<(), String>;
 }
+// Startup-only cleanup for CEF 151 prompt types outside DIVE's supported UI.
+// Exact names/defaults: Chromium 151.0.7922.174 content_settings_registry.cc;
+// request mapping: permissions/request_type.cc and CEF permission_prompt.cc.
+// MultipleDownloads persists AUTOMATIC_DOWNLOADS in DownloadRequestLimiter.
+// Keep separate from SETTINGS: pair-scoped storage access must never inherit the
+// supported kinds' origin/origin reset API. No chooser/protocol store is scalar.
+const LEGACY_ASK_SETTINGS: &[&str] = &[
+  "ar",
+  "vr",
+  "hand_tracking",
+  "midi_sysex",
+  "camera_pan_tilt_zoom",
+  "captured_surface_control",
+  "idle_detection",
+  "local_fonts",
+  "keyboard_lock",
+  "pointer_lock",
+  "window_placement",
+  "local_network",
+  "loopback_network",
+  "web_app_installation",
+  "storage_access",
+  "top_level_storage_access",
+  "automatic_downloads",
+];
+fn reset_pref(cache: &impl Cache, name: &str, expected: &Json) -> Result<(), String> {
+  cache.clear_pref(name)?;
+  verify_pref(cache, name, expected)
+}
+fn verify_pref(cache: &impl Cache, name: &str, expected: &Json) -> Result<(), String> {
+  if cache.pref(name)? != *expected {
+    return Err(format!(
+      "Permission cache reset did not take effect: {name}"
+    ));
+  }
+  Ok(())
+}
+fn reset_legacy_scalar(
+  cache: &impl Cache,
+  name: &str,
+  restrictive_default: Option<i32>,
+) -> Result<(), String> {
+  for prefix in [
+    "profile.content_settings.exceptions",
+    "profile.content_settings.partitioned_exceptions",
+  ] {
+    reset_pref(cache, &format!("{prefix}.{name}"), &json!({}))?;
+  }
+  let name = format!("profile.default_content_setting_values.{name}");
+  if let Some(default) = restrictive_default {
+    // Sensors defaults to ALLOW; Windows protected media does not support ASK.
+    // Clearing these defaults alone would permit requests without our callback.
+    cache.write_pref(&name, &json!(default))?;
+    verify_pref(cache, &name, &json!(default))
+  } else {
+    reset_pref(cache, &name, &json!(3))
+  }
+}
+fn initialize_legacy(cache: &impl Cache) -> Result<(), String> {
+  for name in LEGACY_ASK_SETTINGS {
+    reset_legacy_scalar(cache, name, None)?;
+  }
+  reset_legacy_scalar(cache, "sensors", Some(3))?;
+  // Chromium does not register this preference on macOS/Linux. Missing expected
+  // preferences otherwise remain errors; do not use presence as a skip policy.
+  #[cfg(target_os = "windows")]
+  reset_legacy_scalar(cache, "protected_media_identifier", Some(2))?;
+  Ok(())
+}
 fn initialize(cache: &impl Cache) -> Result<(), String> {
   for setting in SETTINGS {
     for prefix in [
@@ -97,6 +166,7 @@ fn initialize(cache: &impl Cache) -> Result<(), String> {
       }
     }
   }
+  initialize_legacy(cache)?;
   let mut data = cache.pref(EMBARGO_PREF)?;
   if let Some(entries) = data.as_object_mut() {
     for entry in entries.values_mut() {
@@ -151,6 +221,15 @@ impl ContextLease {
     initialize(lease.as_ref())?;
     contexts.push(Arc::downgrade(&lease));
     Ok(lease)
+  }
+  pub(super) fn reconcile_for_diagnostics(&self) -> Result<(), String> {
+    if std::env::var("DIVE_PERMISSION_CACHE_PROBE").as_deref() != Ok("1") {
+      return Err("Permission cache diagnostics require explicit opt-in".into());
+    }
+    if cef::currently_on(ThreadId::UI) == 0 {
+      return Err("Permission context requires CEF UI".into());
+    }
+    initialize(self)
   }
   pub(super) fn reset(&self, origin: &str, kind: &str) -> Result<(), String> {
     if cef::currently_on(ThreadId::UI) == 0 {
@@ -248,6 +327,7 @@ mod tests {
     prefs: Mutex<HashMap<String, Json>>,
     settings: Mutex<HashMap<(String, String), Json>>,
     fail: bool,
+    ignored_reset: Option<&'static str>,
   }
   impl Cache for Fake {
     fn write_pref(&self, name: &str, value: &Json) -> Result<(), String> {
@@ -277,7 +357,9 @@ mod tests {
           .cloned()
           .unwrap_or_else(|| {
             if name.starts_with("profile.default_content") {
-              if name.ends_with("geolocation_with_options") {
+              if name.ends_with("sensors") || name.ends_with("protected_media_identifier") {
+                json!(1)
+              } else if name.ends_with("geolocation_with_options") {
                 json!({"approximate":3,"precise":3})
               } else {
                 json!(3)
@@ -292,7 +374,9 @@ mod tests {
       if self.fail {
         return Err("native reset failed".into());
       }
-      self.prefs.lock().unwrap().remove(name);
+      if self.ignored_reset != Some(name) {
+        self.prefs.lock().unwrap().remove(name);
+      }
       Ok(())
     }
     fn setting(&self, origin: &str, setting: Setting) -> Result<Json, String> {
@@ -350,6 +434,117 @@ mod tests {
       })
       .is_err()
     );
+  }
+  // Independent native preference fixtures: do not derive this from the migration
+  // table, or an omitted CEF request type would silently stop being tested.
+  const LEGACY_NAMES: &[&str] = &[
+    "ar",
+    "vr",
+    "hand_tracking",
+    "midi_sysex",
+    "camera_pan_tilt_zoom",
+    "captured_surface_control",
+    "idle_detection",
+    "local_fonts",
+    "keyboard_lock",
+    "pointer_lock",
+    "window_placement",
+    "local_network",
+    "loopback_network",
+    "web_app_installation",
+    "storage_access",
+    "top_level_storage_access",
+    "automatic_downloads",
+    "sensors",
+  ];
+  #[test]
+  fn startup_removes_legacy_prompt_grants_including_embedding_pairs() {
+    let cache = Fake::default();
+    for name in LEGACY_NAMES {
+      for prefix in [
+        "profile.content_settings.exceptions",
+        "profile.content_settings.partitioned_exceptions",
+      ] {
+        cache.prefs.lock().unwrap().insert(
+          format!("{prefix}.{name}"),
+          json!({"https://child.test,https://parent.test":{"setting":1},
+                 "https://other.test,*":{"setting":1}}),
+        );
+      }
+      cache.prefs.lock().unwrap().insert(
+        format!("profile.default_content_setting_values.{name}"),
+        json!(1),
+      );
+    }
+    let preserved = [
+      (
+        "profile.content_settings.exceptions.cookies",
+        json!({"https://a.test,*":{"setting":1}}),
+      ),
+      (
+        "profile.content_settings.exceptions.file_system_access_chooser_data",
+        json!({"https://a.test,*":{"setting":{"path":"/keep"}}}),
+      ),
+      (
+        "custom_handlers.registered_protocol_handlers",
+        json!([{"protocol":"web+keep"}]),
+      ),
+      (
+        "profile.content_settings.exceptions.fedcm_idp_registration",
+        json!({"https://id.test,*":{"setting":{"idp-registration":[]}}}),
+      ),
+    ];
+    for (name, value) in &preserved {
+      cache
+        .prefs
+        .lock()
+        .unwrap()
+        .insert((*name).into(), value.clone());
+    }
+    initialize(&cache).unwrap();
+    for name in LEGACY_NAMES {
+      for prefix in [
+        "profile.content_settings.exceptions",
+        "profile.content_settings.partitioned_exceptions",
+      ] {
+        assert_eq!(
+          cache.pref(&format!("{prefix}.{name}")).unwrap(),
+          json!({}),
+          "legacy {name}"
+        );
+      }
+      assert_eq!(
+        cache
+          .pref(&format!("profile.default_content_setting_values.{name}"))
+          .unwrap(),
+        json!(3),
+        "default {name}"
+      );
+    }
+    for (name, value) in preserved {
+      assert_eq!(cache.pref(name).unwrap(), value);
+    }
+  }
+  #[test]
+  fn startup_never_restores_permissive_sensor_default_and_rejects_ineffective_reset() {
+    let cache = Fake::default();
+    initialize(&cache).unwrap();
+    assert_eq!(
+      cache
+        .pref("profile.default_content_setting_values.sensors")
+        .unwrap(),
+      json!(3)
+    );
+    let name = "profile.content_settings.partitioned_exceptions.storage_access";
+    let cache = Fake {
+      ignored_reset: Some(name),
+      ..Fake::default()
+    };
+    cache.prefs.lock().unwrap().insert(
+      name.into(),
+      json!({"https://child.test,https://parent.test":{"setting":1}}),
+    );
+    assert!(initialize(&cache).unwrap_err().contains(name));
   }
   #[test]
   fn reset_clears_scalar_and_structured_origin_grants_without_changing_siblings() {

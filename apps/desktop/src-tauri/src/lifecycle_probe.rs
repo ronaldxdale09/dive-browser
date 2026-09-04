@@ -27,6 +27,10 @@ fn popout(app: &tauri::AppHandle<Runtime>, id: TabId) -> Option<tauri::Window<Ru
 }
 
 async fn run(app: &tauri::AppHandle<Runtime>, mode: &str) -> Result<(), AppError> {
+    #[cfg(feature = "cef")]
+    if let Ok(expected) = std::env::var("DIVE_AVATAR_PROBE") {
+        verify_avatars(app, &expected).await?;
+    }
     let ids = on_main(app, |handle| {
         let main = engine::MainThread::here().ok_or_else(|| AppError::new("not main thread"))?;
         let state = handle.state::<state::AppState>();
@@ -199,6 +203,48 @@ async fn wait_ipc_ready(session: &dive_cdp::CdpSession) -> Result<(), AppError> 
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }).await.map_err(AppError::new)?
+}
+
+#[cfg(feature = "cef")]
+async fn verify_avatars(app: &tauri::AppHandle<Runtime>, expected: &str) -> Result<(), AppError> {
+    let chrome = on_main(app, |handle| {
+        chrome_probe_session(
+            &handle
+                .get_webview(crate::CHROME_LABEL)
+                .ok_or_else(|| AppError::new("chrome missing"))?,
+        )
+    })
+    .await?;
+    let observed = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let value = read_probe_value(&chrome, "(() => { const images = [...document.querySelectorAll('img[data-avatar-state]')]; return { count: images.length, ready: images.length >= 2 && images.every(image => image.dataset.avatarState === 'ready' && image.complete && image.naturalWidth > 0), worker: performance.getEntriesByName('dive:avatar-worker-start').length, paint: performance.getEntriesByName('first-contentful-paint')[0]?.startTime, workerStart: performance.getEntriesByName('dive:avatar-worker-start')[0]?.startTime }; })()").await?;
+            if value["ready"] == true { return Ok::<_, AppError>(value); }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }).await.map_err(AppError::new)??;
+    chrome.close();
+    let expected_worker = match expected {
+        "cold" => 1,
+        "warm" => 0,
+        _ => return Err(AppError::new("avatar probe requires cold or warm")),
+    };
+    if observed["worker"] != expected_worker {
+        return Err(AppError::new(format!(
+            "avatar {expected} cache behavior mismatch: {observed}"
+        )));
+    }
+    if expected == "cold"
+        && !observed["paint"]
+            .as_f64()
+            .zip(observed["workerStart"].as_f64())
+            .is_some_and(|(paint, worker)| worker >= paint)
+    {
+        return Err(AppError::new(format!(
+            "avatar worker preceded first paint: {observed}"
+        )));
+    }
+    println!("DIVE_AVATAR_PROBE: {expected} artwork verified {observed}");
+    Ok(())
 }
 
 #[cfg(feature = "cef")]

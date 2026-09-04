@@ -44,6 +44,7 @@ if os.environ.get('DIVE_NATIVE_LIFECYCLE_PROBE'):
         print('DEBUG response body fetch dispatched tab_id=test-tab request_id=1')
         print('DEBUG response body fetch dispatched tab_id=test-tab request_id=2')
     print('DIVE_NETWORK_PROBE: compressed, cached, blob and service-worker capture verified')
+    print('DIVE_PERMISSION_LEGACY_PROBE: seeded native AR, partitioned storage-access pair and sensor ALLOW reset/readback verified')
     print('DIVE_PERMISSION_PROBE: native scalar/structured reset, shared-context reuse, container isolation and closed-context Ask/reopen verified')
     print('event loop exited')
 else:

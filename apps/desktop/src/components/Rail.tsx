@@ -1,3 +1,4 @@
+import { AvatarImage } from "./AvatarImage";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -8,7 +9,6 @@ import { useBrowser } from "../store/browser";
 import type { Workspace } from "../lib/ipc";
 import { usePrefs } from "../store/prefs";
 import { useDefaultBrowser } from "../store/defaultBrowser";
-import { workspaceAvatar } from "../lib/workspaceAvatar";
 import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
@@ -238,8 +238,7 @@ function WorkspaceRow({
       {/* A generated mark rather than a shared glyph: every workspace gets a
           shape of its own, on the color it was given, so the rail is scanned by
           appearance instead of by reading labels. Inactive ones sit back. */}
-      <img
-        src={workspaceAvatar(w.icon, w.color)}
+      <AvatarImage kind="workspace" seed={w.icon} color={w.color}
         alt=""
         width={28}
         height={28}
@@ -294,7 +293,7 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
         onKeyDown={(e) => e.key === "Escape" && onClose()}
       >
         <div className="flex items-center gap-2 px-2 pt-1 pb-2">
-          <img src={workspaceAvatar(workspace.icon, workspace.color)} alt="" width={20} height={20} className="size-5 rounded-md" />
+          <AvatarImage kind="workspace" seed={workspace.icon} color={workspace.color} alt="" width={20} height={20} className="size-5 rounded-md" />
           <span className="min-w-0 flex-1 truncate text-xs font-medium text-ink">{workspace.name}</span>
           <span className="font-mono text-[10px] text-ink-3">{count}</span>
         </div>

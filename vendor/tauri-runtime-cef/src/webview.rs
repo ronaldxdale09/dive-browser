@@ -67,6 +67,14 @@ impl Webview {
   pub fn permission_context(&self) -> Option<PermissionContext> {
     self.permissions.permission_context()
   }
+  /// Re-run production startup reconciliation for a seeded disposable context.
+  /// Requires CEF UI and DIVE_PERMISSION_CACHE_PROBE=1; never grants permission.
+  /// This diagnostic API is not exposed as a renderer IPC command.
+  pub fn reconcile_permission_cache_for_diagnostics(&self) -> std::result::Result<(), String> {
+    self
+      .permissions
+      .reconcile_permission_cache_for_diagnostics()
+  }
   /// Clear the native cached decision in this view's actual shared context.
   /// Must run on CEF UI; success includes read-back verification.
   pub fn reset_permission_cache(

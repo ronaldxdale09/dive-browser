@@ -1,8 +1,5 @@
-import { notionists } from "@dicebear/collection";
-import { createAvatar } from "@dicebear/core";
-
 /**
- * Profile faces: DiceBear "notionists" avatars generated in-process.
+ * Profile faces: DiceBear "notionists" avatars generated locally in a worker.
  *
  * A profile is a person, so it gets a face where a workspace gets a shape.
  * "notionists" over the cartoon styles because it stays legible at 20px in
@@ -16,24 +13,6 @@ import { createAvatar } from "@dicebear/core";
 
 /** Seeds offered in the picker, after the one derived from the name. */
 export const PROFILE_SEEDS = ["ada", "blake", "casey", "devon", "eden", "finley", "harper", "indigo", "jules", "kai", "lane", "morgan", "noor", "oakley", "parker", "quinn", "reese", "sage", "tatum", "vale"];
-
-const cache = new Map<string, string>();
-
-/** A `data:` URL for the face of `seed` on `color`. Memoized: the chip and the switcher redraw often. */
-export function profileAvatar(seed: string, color: string): string {
-  const key = `${seed}|${color}`;
-  const hit = cache.get(key);
-  if (hit) return hit;
-  const svg = createAvatar(notionists, {
-    seed,
-    backgroundColor: [color.replace("#", "")],
-    radius: 50,
-    scale: 96,
-  }).toString();
-  const url = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-  cache.set(key, url);
-  return url;
-}
 
 /** The seed a name suggests before anyone picks a face. */
 export function seedFromProfileName(name: string): string {
