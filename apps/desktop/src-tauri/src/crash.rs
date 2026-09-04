@@ -138,16 +138,7 @@ pub fn on_native_terminate(webview: &tauri::Webview<Runtime>) {
         return;
     };
     let app = webview.app_handle().clone();
-    tauri::async_runtime::spawn(async move {
-        let session = lock(&app.state::<AppState>().host)
-            .as_ref()
-            .and_then(|h| h.cdp(tab_id));
-        if let Some(session) = session {
-            recover(&app, tab_id, &session).await;
-        } else {
-            tracing::warn!(%tab_id, "web content process died with no session to reload");
-        }
-    });
+    schedule_recovery(&app, tab_id, None);
 }
 
 /// Watch a tab's session for renderer crashes and reload within budget.
@@ -161,14 +152,7 @@ pub fn watch(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
             match events.recv().await {
                 Ok(event) => {
                     if event.method == "Inspector.targetCrashed" {
-                        // Keep draining duplicate signals during backoff. If we
-                        // awaited recovery here, an old queued signal would be
-                        // read only after the reload opened a new crash episode.
-                        let app = app.clone();
-                        let session = session.clone();
-                        tauri::async_runtime::spawn(async move {
-                            recover(&app, tab_id, &session).await;
-                        });
+                        schedule_recovery(&app, tab_id, Some(session.clone()));
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -180,17 +164,61 @@ pub fn watch(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
     });
 }
 
-async fn recover(app: &AppHandle<Runtime>, tab_id: TabId, session: &CdpSession) {
+/// Admit the report now, before its returned worker can be delayed by scheduling.
+fn recovery_task<F, Fut>(
+    crashes: &Registry,
+    tab_id: TabId,
+    now: Instant,
+    run: F,
+) -> impl std::future::Future<Output = ()> + use<F, Fut>
+where
+    F: FnOnce(Option<Plan>) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let admitted = (!crashes.duplicate(tab_id, now)).then(|| crashes.on_crash(tab_id, now));
+    async move {
+        if let Some(planned) = admitted {
+            run(planned).await;
+        }
+    }
+}
+
+fn schedule_recovery(app: &AppHandle<Runtime>, tab_id: TabId, session: Option<CdpSession>) {
+    let worker_app = app.clone();
+    let task = recovery_task(
+        &app.state::<AppState>().crashes,
+        tab_id,
+        Instant::now(),
+        move |planned| async move {
+            // Native callbacks can be reentrant. Fetch their session in the
+            // worker, after admission, without locking the host in the callback.
+            let session = session.or_else(|| {
+                lock(&worker_app.state::<AppState>().host)
+                    .as_ref()
+                    .and_then(|host| host.cdp(tab_id))
+            });
+            if let Some(session) = session {
+                recover(&worker_app, tab_id, &session, planned).await;
+            } else {
+                tracing::warn!(%tab_id, "web content process died with no session to reload");
+            }
+        },
+    );
+    // The watcher remains free to drain reports while this attempt backs off.
+    tauri::async_runtime::spawn(task);
+}
+
+async fn recover(
+    app: &AppHandle<Runtime>,
+    tab_id: TabId,
+    session: &CdpSession,
+    planned: Option<Plan>,
+) {
     if session.is_closed() {
         return;
     }
-    let now = Instant::now();
-    let crashes = &app.state::<AppState>().crashes;
-    if crashes.duplicate(tab_id, now) {
-        tracing::debug!(%tab_id, "crash already being handled");
-        return;
-    }
-    let planned = crashes.on_crash(tab_id, now);
+    let state = app.state::<AppState>();
+    let crashes = &state.crashes;
     let Some(plan) = planned else {
         tracing::warn!(
             %tab_id,
@@ -262,6 +290,45 @@ mod tests {
                 .on_crash(tab, t0 + Duration::from_millis(500))
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn admission_happens_before_a_deferred_recovery_worker_runs() {
+        let registry = Registry::default();
+        let tab = TabId::new();
+        let now = Instant::now();
+        let handled = &Mutex::new(Vec::new());
+        recovery_task(&registry, tab, now, |plan| async move {
+            assert_eq!(plan.unwrap().attempt, 1);
+            handled.lock().unwrap().push("first");
+        })
+        .await;
+        // Both signal receipt and worker execution are controlled separately:
+        // this duplicate arrives before reload, but its worker is delayed.
+        let duplicate = recovery_task(
+            &registry,
+            tab,
+            now + Duration::from_millis(50),
+            |plan| async move {
+                if plan.is_some() {
+                    handled.lock().unwrap().push("duplicate");
+                }
+            },
+        );
+        registry.begin_reload(tab);
+        let new_crash = recovery_task(
+            &registry,
+            tab,
+            now + Duration::from_millis(300),
+            |plan| async move {
+                if plan.is_some() {
+                    handled.lock().unwrap().push("new");
+                }
+            },
+        );
+        duplicate.await;
+        new_crash.await;
+        assert_eq!(*handled.lock().unwrap(), vec!["first", "new"]);
     }
 
     use super::*;
