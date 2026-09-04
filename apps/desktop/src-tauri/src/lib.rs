@@ -68,10 +68,9 @@ pub const CHROME_LABEL: &str = "chrome";
 pub const MAIN_WINDOW: &str = "main";
 
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StartupMilestonePayload {
     milestone: String,
-    #[serde(alias = "elapsedMs")]
-    elapsed_ms: f64,
 }
 
 fn handle_startup_invoke(invoke: tauri::ipc::Invoke<Runtime>) -> bool {
@@ -88,8 +87,15 @@ fn handle_startup_invoke(invoke: tauri::ipc::Invoke<Runtime>) -> bool {
     };
     match payload {
         Ok(data) => {
-            startup::record_custom_milestone(&data.milestone, data.elapsed_ms);
-            resolver.resolve(());
+            let webview = message.webview();
+            match startup::observe_renderer_milestone(
+                webview.label(),
+                webview.window().label(),
+                &data.milestone,
+            ) {
+                Ok(()) => resolver.resolve(()),
+                Err(error) => resolver.reject(error),
+            }
         }
         Err(err) => {
             resolver.reject(err.to_string());
@@ -685,8 +691,19 @@ mod tests {
     }
 
     #[test]
+    fn startup_ipc_rejects_renderer_clock_payloads() {
+        assert!(
+            serde_json::from_value::<super::StartupMilestonePayload>(
+                serde_json::json!({"milestone":"chrome_first_paint", "elapsedMs": 1.0})
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     #[allow(clippy::float_cmp)]
     fn test_startup_timeline_instrumentation() {
+        let _serial = crate::startup::test_lock();
         crate::startup::reset_for_test(None);
         crate::startup::record_custom_milestone("state_init", 12.0);
         crate::startup::record_custom_milestone("window_created", 35.0);
