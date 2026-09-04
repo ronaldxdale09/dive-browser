@@ -8,7 +8,9 @@
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
-    "check": "cargo fmt --all -- --check && pnpm typecheck && pnpm lint && pnpm test && pnpm --filter @dive/desktop exec vite build && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace"
+    "check": "cargo fmt --all -- --check && pnpm typecheck && pnpm lint && pnpm test && pnpm --filter @dive/desktop exec vite build && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+    "release:check": "node scripts/release/latest-stable-release.mjs",
+    "release:bump": "node scripts/release/bump-version.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

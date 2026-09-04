@@ -12,6 +12,12 @@ use tauri::webview::{DownloadEvent, WebviewBuilder};
 use tauri::{App, AppHandle, LogicalPosition, LogicalSize, Manager, Webview, WebviewUrl, Window};
 use tauri_specta::Event;
 
+/// The chrome's ground colour (`--color-ground` in styles.css). Every window
+/// and chrome webview is painted with it before the page has drawn, so a
+/// window never shows through to what is behind it or flashes white while it
+/// is created, resized or moved.
+const GROUND: tauri::utils::config::Color = tauri::utils::config::Color(0x11, 0x11, 0x11, 0xFF);
+
 use crate::state::{AppState, lock};
 use crate::{CHROME_LABEL, MAIN_WINDOW, Runtime};
 
@@ -617,6 +623,10 @@ impl TabHost {
             .title(if title.is_empty() { "Dive" } else { title })
             .title_bar_style(tauri::TitleBarStyle::Overlay)
             .hidden_title(true)
+            .background_color(GROUND)
+            // Shown once its chrome has painted (below), so the window never
+            // appears as a bare band with the page hanging under it.
+            .visible(false)
             .inner_size(width, height)
             .min_inner_size(360.0, 240.0);
         if let Some((x, y)) = at {
@@ -635,10 +645,17 @@ impl TabHost {
                 chrome.clone(),
                 WebviewUrl::App(format!("index.html?popout={id}").into()),
             )
+            .background_color(GROUND)
+            .on_page_load(|webview, payload| {
+                if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                    reveal(&webview.window());
+                }
+            })
             .auto_resize(),
             LogicalPosition::new(0.0, 0.0),
             LogicalSize::new(width, height),
         )?;
+        reveal_soon(window.clone());
         crate::titlebar::keep_drags_in_chrome_soon(&window);
         if let Err(error) = view.reparent(&window) {
             let _ = window.destroy();
@@ -1008,6 +1025,29 @@ pub fn remember_window_bounds(window: &Window<Runtime>) {
 }
 
 /// Build the main window with the chrome webview filling it.
+/// Show a window built hidden, once (a second call is a no-op for a visible
+/// window). Focus follows so the torn-off tab keeps the keyboard.
+fn reveal(window: &Window<Runtime>) {
+    let _ = window.run_on_main_thread({
+        let window = window.clone();
+        move || {
+            if !window.is_visible().unwrap_or(true) {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }
+    });
+}
+
+/// Backstop for [`reveal`]: if the chrome never reports a finished load, the
+/// window still appears, a moment later.
+fn reveal_soon(window: Window<Runtime>) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        reveal(&window);
+    });
+}
+
 pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
     let remembered = {
         let state = app.state::<AppState>();
@@ -1027,6 +1067,7 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
         })
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true)
+        .background_color(GROUND)
         .inner_size(width, height)
         .min_inner_size(720.0, 480.0);
     if let Some(b) = remembered {
@@ -1046,7 +1087,9 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
     window.set_badge_label(Some("DEV".into()))?;
 
     let _chrome = window.add_child(
-        WebviewBuilder::new(CHROME_LABEL, WebviewUrl::App("index.html".into())).auto_resize(),
+        WebviewBuilder::new(CHROME_LABEL, WebviewUrl::App("index.html".into()))
+            .background_color(GROUND)
+            .auto_resize(),
         LogicalPosition::new(0.0, 0.0),
         LogicalSize::new(width, height),
     )?;

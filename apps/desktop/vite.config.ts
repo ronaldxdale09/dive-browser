@@ -15,5 +15,11 @@ export default defineConfig({
     // minified source is just under 600 kB and does not belong on startup.
     chunkSizeWarningLimit: 600,
   },
-  test: { environment: "jsdom", globals: false, maxWorkers: 4, setupFiles: ["src/test-setup.ts"] },
+  test: {
+    environment: "jsdom",
+    globals: false,
+    maxWorkers: 4,
+    setupFiles: ["src/test-setup.ts"],
+    include: ["src/**/*.{test,spec}.?(c|m)[jt]s?(x)", "../../scripts/**/*.{test,spec}.?(c|m)[jt]s?(x)"],
+  },
 });
