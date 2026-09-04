@@ -82,7 +82,11 @@ pub fn create_test_store() -> (Store, ContainerId, WorkspaceId) {
         .upsert_container(&container)
         .expect("failed to upsert test container");
 
-    let workspace = Workspace::new("Default Test Workspace", container_id, 0);
+    let profile = dive_core::Profile::new("Default Test Profile", container_id, 0);
+    store
+        .upsert_profile(&profile)
+        .expect("failed to upsert test profile");
+    let workspace = Workspace::new("Default Test Workspace", container_id, profile.id, 0);
     let workspace_id = workspace.id;
     store
         .upsert_workspace(&workspace)

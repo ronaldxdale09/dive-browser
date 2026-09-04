@@ -27,10 +27,11 @@ beforeEach(() => {
     tabs: [tab],
     activeTab: tab.id,
     activeWorkspace: tab.workspace_id,
-    open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false, menu: false },
+    open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false, menu: false, defaultBrowser: false, extensions: false },
     error: null,
     notice: null,
     annotating: null,
+    capturing: false,
     recordingTab: null,
     zoom: {},
     loading: {},
@@ -58,6 +59,7 @@ beforeEach(() => {
   vi.spyOn(ipc, "tabForward").mockResolvedValue(null);
   vi.spyOn(ipc, "tabReload").mockResolvedValue(null);
   vi.spyOn(ipc, "tabStop").mockResolvedValue(null);
+  vi.spyOn(ipc, "tabOpen").mockResolvedValue(tab);
   vi.spyOn(ipc, "tabCapture").mockResolvedValue("/tmp/capture.png");
   vi.spyOn(ipc, "tabScreencastStart").mockResolvedValue(null);
   vi.spyOn(ipc, "tabDevtools").mockResolvedValue(null);
@@ -82,6 +84,7 @@ describe("Toolbar", () => {
       "Open DevTools",
       "Developer dock",
       "Downloads",
+      "Extensions",
       "Protection",
     ];
 
@@ -92,6 +95,12 @@ describe("Toolbar", () => {
       expect(tooltip?.textContent).toContain(label);
       expect(button.getAttribute("title")).toBeNull();
     }
+  });
+
+  it("opens the extension manager from the page-action toolbar", () => {
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Extensions" }));
+    expect(useBrowser.getState().open.extensions).toBe(true);
   });
 
   it("routes clicks to navigation, bookmark, capture and DevTools actions", async () => {
@@ -111,8 +120,27 @@ describe("Toolbar", () => {
       expect(ipc.bookmarkToggle).toHaveBeenCalledWith(tab.id);
       expect(ipc.tabCapture).toHaveBeenCalledWith(tab.id, true);
       expect(ipc.tabDevtools).toHaveBeenCalledWith(tab.id);
-      expect(useBrowser.getState().annotating).toBe("/tmp/capture.png");
+      expect(ipc.tabOpen).toHaveBeenCalledWith(
+        tab.workspace_id,
+        "dive://capture?src=%2Ftmp%2Fcapture.png&url=https%3A%2F%2Fexample.com%2Fdocs&title=Example",
+      );
+      expect(useBrowser.getState().annotating).toBeNull();
     });
+  });
+
+  it("shows capture progress and ignores a second capture request", async () => {
+    let finish!: (path: string) => void;
+    vi.mocked(ipc.tabCapture).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    render(<Toolbar />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Capture full page" }));
+    const progress = await screen.findByRole("button", { name: "Capturing full page" });
+    expect((progress as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(progress);
+    expect(ipc.tabCapture).toHaveBeenCalledTimes(1);
+
+    await act(async () => finish("/tmp/capture.png"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Capture full page" })).toBeTruthy());
   });
 
   it("opens the share dialog and the developer dock", () => {

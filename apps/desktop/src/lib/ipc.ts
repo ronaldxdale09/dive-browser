@@ -4,6 +4,7 @@
  */
 import { Channel } from "@tauri-apps/api/core";
 import type { ChatDelta, SendOptions } from "../generated/bindings";
+import type { ExtensionInfo, ExtensionList } from "../generated/bindings";
 import { commands, events } from "../generated/bindings";
 import type { ClearRequest, Decision, ExportRequest, NetworkProfile, PaneBounds, Prefs, RecordOptions, Rule, TabTier } from "../generated/bindings";
 
@@ -11,7 +12,8 @@ import type { ClearRequest, Decision, ExportRequest, NetworkProfile, PaneBounds,
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 export { events };
-export type { Prefs, ClearRequest, Rule, RuleAction, PrivacyCategory, PrivacyEvent, PrivacyInfo, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, RecordOptions, RecordingResult, RecordingCapabilities, RecordingEvent, Microphone, MediaInfo, ExportRequest, KeptSegment, RecordingInfo, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions, SitePermission, Decision, UpdateInfo, PermissionAsked, TabTier } from "../generated/bindings";
+export type { ExtensionInfo, ExtensionList };
+export type { Prefs, ClearRequest, Rule, RuleAction, PrivacyCategory, PrivacyEvent, PrivacyInfo, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, RecordOptions, RecordingResult, RecordingCapabilities, RecordingEvent, Microphone, MediaInfo, ExportRequest, KeptSegment, RecordingInfo, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions, SitePermission, Decision, UpdateInfo, PermissionAsked, TabTier, DefaultBrowserStatus, Profile, ProfileId, ProfileDraft } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
 export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
@@ -20,6 +22,7 @@ export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
 }
 
 type WorkspaceDraftInput = { name: string; color: string; icon: string };
+export type ProfileDraftInput = { name: string; color: string; avatar: string; note: string };
 export type ReplayRequestInput = { method: string; url: string; headers: Record<string, string>; body: string | null; with_cookies: boolean; captured_host: string };
 type ChatTurnInput = { role: string; content: string };
 export type ChatDeltaOut = ChatDelta;
@@ -44,6 +47,11 @@ export type EnvironmentInput = { geolocation: GeolocationInput | null; timezone:
 export const ipc = {
   snapshot: async () => unwrap(await commands.snapshot()),
   workspaceActivate: async (id: string) => unwrap(await commands.workspaceActivate(id)),
+  profilesList: async () => unwrap(await commands.profilesList()),
+  profileCreate: async (draft: ProfileDraftInput) => unwrap(await commands.profileCreate(draft)),
+  profileUpdate: async (id: string, draft: ProfileDraftInput) => unwrap(await commands.profileUpdate(id, draft)),
+  profileActivate: async (id: string) => unwrap(await commands.profileActivate(id)),
+  profileDelete: async (id: string) => unwrap(await commands.profileDelete(id)),
   workspaceCreate: async (draft: WorkspaceDraftInput, separateContainer: boolean) =>
     unwrap(await commands.workspaceCreate(draft, separateContainer)),
   workspaceUpdate: async (id: string, draft: WorkspaceDraftInput) => unwrap(await commands.workspaceUpdate(id, draft)),
@@ -136,8 +144,16 @@ export const ipc = {
   bookmarksSearch: async (query: string, limit = 20) => unwrap(await commands.bookmarksSearch(query, limit)),
   permissionSet: async (origin: string, kind: string, decision: Decision) => unwrap(await commands.permissionSet(origin, kind, decision)),
   permissionsList: async () => unwrap(await commands.permissionsList()),
+  extensionsList: async () => unwrap(await commands.extensionsList()),
+  extensionPick: () => commands.extensionPick(),
+  extensionImport: async (path: string) => unwrap(await commands.extensionImport(path)),
+  extensionSetEnabled: async (id: string, enabled: boolean) => unwrap(await commands.extensionSetEnabled(id, enabled)),
+  extensionRemove: async (id: string) => unwrap(await commands.extensionRemove(id)),
+  appRestart: () => commands.appRestart(),
   /** The update the release channel offers, or null when current or when this build has no updater. */
   updateCheck: async () => unwrap(await commands.updateCheck()),
+  defaultBrowserStatus: () => commands.defaultBrowserStatus(),
+  defaultBrowserSet: async () => unwrap(await commands.defaultBrowserSet()),
   updateInstall: async () => unwrap(await commands.updateInstall()),
   historySearch: async (query: string, limit = 20) => unwrap(await commands.historySearch(query, limit)),
   shareUrl: async (url: string) => unwrap(await commands.shareUrl(url)),

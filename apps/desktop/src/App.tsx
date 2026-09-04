@@ -2,7 +2,8 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { Rail, RAIL_WIDTH } from "./components/Rail";
 import { TabStrip } from "./components/TabStrip";
 import { TabDnd } from "./components/TabDnd";
-import { WorkspaceChip } from "./components/WorkspaceChip";
+import { ProfileChip } from "./components/ProfileChip";
+import { ProfileDialog } from "./components/ProfileDialog";
 import { FeatureBar } from "./components/FeatureBar";
 import { Toolbar } from "./components/Toolbar";
 import { Content } from "./components/Content";
@@ -27,10 +28,12 @@ const Palette = lazy(() => import("./components/Palette").then(({ Palette }) => 
 const SettingsDialog = lazy(() => import("./components/SettingsDialog").then(({ SettingsDialog }) => ({ default: SettingsDialog })));
 const Annotator = lazy(() => import("./components/Annotator").then(({ Annotator }) => ({ default: Annotator })));
 const Library = lazy(() => import("./components/Library").then(({ Library }) => ({ default: Library })));
+const Extensions = lazy(() => import("./components/Extensions").then(({ Extensions }) => ({ default: Extensions })));
 const Shortcuts = lazy(() => import("./components/Shortcuts").then(({ Shortcuts }) => ({ default: Shortcuts })));
 const WorkspaceDialog = lazy(() => import("./components/WorkspaceDialog").then(({ WorkspaceDialog }) => ({ default: WorkspaceDialog })));
 const RecorderModal = lazy(() => import("./components/RecorderModal").then(({ RecorderModal }) => ({ default: RecorderModal })));
 const RecordDialog = lazy(() => import("./components/record/RecordDialog").then(({ RecordDialog }) => ({ default: RecordDialog })));
+const DefaultBrowserDialog = lazy(() => import("./components/DefaultBrowserDialog").then(({ DefaultBrowserDialog }) => ({ default: DefaultBrowserDialog })));
 const RecordingDoneDialog = lazy(() => import("./components/record/RecordingDoneDialog").then(({ RecordingDoneDialog }) => ({ default: RecordingDoneDialog })));
 
 export function App() {
@@ -92,7 +95,7 @@ export function App() {
       {/* Title-bar row: the workspace you are in, then its tabs, beside the
           traffic lights (overlay title bar). */}
       <header className="col-span-2 row-start-1 flex items-center gap-2 pl-[84px]">
-        <WorkspaceChip />
+        <ProfileChip />
         <div className="h-full min-w-0 flex-1">
           <TabStrip />
         </div>
@@ -154,16 +157,19 @@ export function App() {
         )}
         <Suspense fallback={showSidecar ? <PanelSkeleton label="agent" /> : null}>{showSidecar && <Sidecar />}</Suspense>
       </main>
-      <Suspense fallback={(open.palette || open.settings || open.library || open.shortcuts || annotating) ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
+      <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || annotating) ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
         {open.palette && <Palette />}
         {open.settings && <SettingsDialog />}
         {open.library && <Library />}
+        {open.extensions && <Extensions />}
         {open.shortcuts && <Shortcuts />}
+        {open.defaultBrowser && <DefaultBrowserDialog />}
         {annotating && <Annotator path={annotating} />}
       </Suspense>
       <Splash />
       <Suspense fallback={(editing || recorderOpen || recordingPhase === "setup" || recordingPhase === "done") ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
         {editing && <WorkspaceDialog key={editing.id ?? "new"} />}
+        <ProfileDialog />
         {recorderOpen && <RecorderModal />}
         {recordingPhase === "setup" && <RecordDialog />}
         {recordingPhase === "done" && <RecordingDoneDialog />}

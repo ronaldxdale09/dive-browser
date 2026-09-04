@@ -4,9 +4,9 @@ import { listenConsole, useConsole } from "./console";
 import { listenNetwork, useNetwork } from "./network";
 import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
 import { useDownloads } from "./downloads";
-import type { CoreEvent, Decision, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace } from "../lib/ipc";
+import type { CoreEvent, Decision, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
 
-export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "shortcuts" | "menu";
+export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser";
 /** The sections of the library dialog. */
 export type LibraryTab = "bookmarks" | "history" | "downloads" | "recordings";
 
@@ -20,13 +20,23 @@ interface BrowserState {
   ready: boolean;
   workspaces: Workspace[];
   activeWorkspace: string | null;
+  /** Every profile; the active one is the active workspace's. */
+  profiles: Profile[];
+  activeProfile: string | null;
+  /** The profile dialog: `{ id: null }` creates, `{ id }` edits, `null` is closed. */
+  editingProfile: { id: string | null } | null;
+  setEditingProfile: (v: { id: string | null } | null) => void;
+  createProfile: (draft: ProfileDraftInput) => Promise<void>;
+  updateProfile: (id: string, draft: ProfileDraftInput) => Promise<void>;
+  deleteProfile: (id: string) => Promise<void>;
+  activateProfile: (id: string) => Promise<void>;
   tabs: Tab[];
   activeTab: string | null;
   /** Tabs living in their own window rather than the main one. */
   detached: string[];
   detachTab: (id: string, at: { x: number; y: number } | null) => Promise<void>;
   attachTab: (id: string) => Promise<void>;
-  open: Record<UiPanel, boolean>;
+  open: Record<Exclude<UiPanel, "extensions">, boolean> & { extensions?: boolean };
   error: string | null;
   /** Tabs whose main frame is loading right now. */
   loading: Record<string, boolean>;
@@ -58,6 +68,8 @@ interface BrowserState {
   forward: () => Promise<void>;
   reload: () => Promise<void>;
   capture: (fullPage: boolean) => Promise<void>;
+  /** A user capture is traversing/encoding; blocks duplicate requests. */
+  capturing: boolean;
   /** Zoom factor per tab; absent means 1. */
   zoom: Record<string, number>;
   zoomStep: (direction: 1 | -1 | 0) => Promise<void>;
@@ -142,7 +154,7 @@ export function reduceCrash(state: Pick<LoadState, "crashedTabs" | "loading">, c
 }
 
 /** Reduce one core event into local state. Pure, so it is unit-testable. */
-type Reduced = Pick<BrowserState, "workspaces" | "tabs" | "activeTab" | "activeWorkspace" | "recordingTab" | "detached">;
+type Reduced = Pick<BrowserState, "workspaces" | "tabs" | "activeTab" | "activeWorkspace" | "recordingTab" | "detached" | "profiles" | "activeProfile">;
 
 export function reduceEvent(state: Reduced, event: CoreEvent): Partial<Reduced> {
   switch (event.type) {
@@ -152,8 +164,18 @@ export function reduceEvent(state: Reduced, event: CoreEvent): Partial<Reduced> 
     }
     case "workspace_removed":
       return { workspaces: state.workspaces.filter((w) => w.id !== event.data) };
-    case "workspace_activated":
-      return { activeWorkspace: event.data };
+    case "workspace_activated": {
+      const profile = state.workspaces.find((w) => w.id === event.data)?.profile_id ?? state.activeProfile;
+      return { activeWorkspace: event.data, activeProfile: profile };
+    }
+    case "profile_upserted": {
+      const others = state.profiles.filter((p) => p.id !== event.data.id);
+      return { profiles: [...others, event.data].sort((a, b) => a.position - b.position) };
+    }
+    case "profile_removed":
+      return { profiles: state.profiles.filter((p) => p.id !== event.data) };
+    case "profile_activated":
+      return { activeProfile: event.data };
     case "tab_upserted": {
       const idx = state.tabs.findIndex((t) => t.id === event.data.id);
       const tabs = idx === -1 ? [...state.tabs, event.data] : state.tabs.map((t, i) => (i === idx ? event.data : t));
@@ -176,7 +198,7 @@ export function reduceEvent(state: Reduced, event: CoreEvent): Partial<Reduced> 
 }
 
 function fromSnapshot(s: Snapshot) {
-  return { workspaces: s.workspaces, activeWorkspace: s.active_workspace, tabs: s.tabs, activeTab: s.active_tab, detached: s.detached };
+  return { workspaces: s.workspaces, activeWorkspace: s.active_workspace, tabs: s.tabs, activeTab: s.active_tab, detached: s.detached, profiles: s.profiles, activeProfile: s.active_profile };
 }
 
 /** A tab moved into its own window, or back. The main window's page goes
@@ -199,10 +221,34 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   ready: false,
   workspaces: [],
   activeWorkspace: null,
+  profiles: [],
+  activeProfile: null,
+  editingProfile: null,
+  setEditingProfile: (editingProfile) => set({ editingProfile }),
+  createProfile: async (draft) => {
+    await run(set, () => ipc.profileCreate(draft));
+    set({ ...fromSnapshot(await ipc.snapshot()), editingProfile: null });
+    void get().refreshCounts();
+  },
+  updateProfile: async (id, draft) => {
+    await run(set, () => ipc.profileUpdate(id, draft));
+    set({ editingProfile: null });
+  },
+  deleteProfile: async (id) => {
+    await run(set, () => ipc.profileDelete(id));
+    set({ ...fromSnapshot(await ipc.snapshot()), editingProfile: null });
+    void get().refreshCounts();
+  },
+  activateProfile: async (id) => {
+    if (get().activeProfile === id) return;
+    await run(set, () => ipc.profileActivate(id));
+    set(fromSnapshot(await ipc.snapshot()));
+    void get().refreshCounts();
+  },
   tabs: [],
   activeTab: null,
   detached: [],
-  open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false, menu: false },
+  open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false },
   libraryTab: "bookmarks",
   openLibrary: (libraryTab) => set((s) => ({ libraryTab, open: { ...s.open, library: true, menu: false } })),
   settingsSection: "general",
@@ -217,6 +263,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   error: null,
   notice: null,
   annotating: null,
+  capturing: false,
   zoom: {},
   loading: {},
   navError: {},
@@ -340,12 +387,23 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   },
   capture: async (fullPage) => {
     const id = get().activeTab;
-    if (!id) return;
-    await run(set, async () => {
+    if (!id || get().capturing) return;
+    const tab = get().tabs.find((candidate) => candidate.id === id);
+    const workspace = get().activeWorkspace;
+    set({ capturing: true, error: null });
+    try {
       const path = await ipc.tabCapture(id, fullPage);
-      set({ annotating: path, notice: `Copied to clipboard · saved ${path.split("/").pop() ?? path}` });
+      const params = new URLSearchParams({ src: path });
+      if (tab?.url) params.set("url", tab.url);
+      if (tab?.title) params.set("title", tab.title);
+      if (workspace) await ipc.tabOpen(workspace, `dive://capture?${params.toString()}`);
+      set({ annotating: null, notice: `Captured ${path.split("/").pop() ?? path}` });
       setTimeout(() => set({ notice: null }), 4000);
-    });
+    } catch (cause) {
+      set({ error: message(cause) });
+    } finally {
+      set({ capturing: false });
+    }
   },
   reorderTabs: async (ordered) => {
     const ws = get().activeWorkspace;

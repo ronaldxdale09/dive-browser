@@ -9,6 +9,7 @@ import type { Tab } from "../../lib/ipc";
  */
 
 const DiveScreen = lazy(() => import("../../screen/DiveScreen").then(({ DiveScreen }) => ({ default: DiveScreen })));
+const CaptureStudio = lazy(() => import("../capture/CaptureStudio").then(({ CaptureStudio }) => ({ default: CaptureStudio })));
 
 export function isInternalUrl(url: string): boolean {
   return url.startsWith("dive://");
@@ -34,7 +35,13 @@ export function InternalPage({ tab }: { tab: Tab }) {
   return (
     <div className="relative min-h-0 min-w-0 overflow-hidden bg-ground">
       <Suspense fallback={<p className="p-6 text-xs text-ink-3">Loading…</p>}>
-        {page === "screen" ? <DiveScreen src={params.get("src")} tabId={tab.id} /> : <Unknown page={page} />}
+        {page === "screen" ? (
+          <DiveScreen src={params.get("src")} tabId={tab.id} />
+        ) : page === "capture" ? (
+          <CaptureStudio src={params.get("src")} sourceUrl={params.get("url")} sourceTitle={params.get("title")} />
+        ) : (
+          <Unknown page={page} />
+        )}
       </Suspense>
     </div>
   );

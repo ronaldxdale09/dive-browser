@@ -12,7 +12,8 @@ pub use commands::{Command, CommandId, CommandRegistry, CommandScope};
 pub use error::CoreError;
 pub use events::{CoreEvent, EventBus};
 pub use model::{
-    Container, ContainerId, Tab, TabId, TabState, TabTier, Timestamp, Workspace, WorkspaceId,
+    Container, ContainerId, Profile, ProfileId, Tab, TabId, TabState, TabTier, Timestamp,
+    Workspace, WorkspaceId,
 };
 pub use store::{Bookmark, HistoryEntry, Store, origin_of};
 

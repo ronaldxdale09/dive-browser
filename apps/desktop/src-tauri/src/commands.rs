@@ -34,6 +34,10 @@ pub struct Snapshot {
     pub active_tab: Option<TabId>,
     /// Tabs shown in their own windows.
     pub detached: Vec<TabId>,
+    /// Every profile, in switcher order.
+    pub profiles: Vec<dive_core::Profile>,
+    /// The profile the active workspace belongs to.
+    pub active_profile: Option<dive_core::ProfileId>,
 }
 
 /// A tab moved into its own window, or back into the main one.
@@ -368,6 +372,11 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
         .commands(collect_commands![
             snapshot,
             workspace_activate,
+            profiles_list,
+            profile_create,
+            profile_update,
+            profile_activate,
+            profile_delete,
             workspace_create,
             workspace_update,
             workspace_delete,
@@ -389,8 +398,16 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             bookmark_remove,
             permission_set,
             permissions_list,
+            crate::extensions::extensions_list,
+            crate::extensions::extension_pick,
+            crate::extensions::extension_import,
+            crate::extensions::extension_set_enabled,
+            crate::extensions::extension_remove,
+            crate::extensions::app_restart,
             update_check,
             update_install,
+            default_browser_status,
+            default_browser_set,
             tab_devtools,
             tab_screencast_start,
             tab_screencast_pause,
@@ -581,12 +598,17 @@ pub(crate) fn snapshot(state: State<'_, AppState>) -> AppResult<Snapshot> {
     let (active_tab, detached) = lock(&state.host)
         .as_ref()
         .map_or((None, Vec::new()), |h| (h.active(), h.detached()));
+    let workspaces = store.workspaces()?;
+    let active_profile = active_workspace
+        .and_then(|id| workspaces.iter().find(|w| w.id == id).map(|w| w.profile_id));
     Ok(Snapshot {
-        workspaces: store.workspaces()?,
+        workspaces,
         active_workspace,
         tabs,
         active_tab,
         detached,
+        profiles: store.profiles()?,
+        active_profile,
     })
 }
 
@@ -599,8 +621,11 @@ pub(crate) fn workspace_activate(
 ) -> AppResult<()> {
     let last = {
         let store = lock(&state.store);
-        store.workspace(id)?;
+        let w = store.workspace(id)?;
         store.set_setting(crate::state::ACTIVE_WORKSPACE, &id.to_string())?;
+        // Remembered per profile, so switching back to a profile lands on
+        // the workspace it was last in.
+        store.set_setting(&profile_workspace_key(w.profile_id), &id.to_string())?;
         store.last_active_tab(id)?
     };
     *lock(&state.active_workspace) = Some(id);
@@ -698,20 +723,19 @@ pub(crate) fn workspace_create(
     let icon = clean_icon(&draft.icon)?;
     let workspace = {
         let store = lock(&state.store);
+        // A new workspace joins the profile you are in and browses in that
+        // profile's container, unless it asks for cookies of its own.
+        let profile = active_profile(&store, *lock(&state.active_workspace))?;
         let container = if separate_container {
             let c = dive_core::Container::new(&name);
             store.upsert_container(&c)?;
             c.id
         } else {
-            store
-                .containers()?
-                .into_iter()
-                .next()
-                .ok_or_else(|| AppError::new("no container"))?
-                .id
+            profile.container_id
         };
-        let position = i32::try_from(store.workspaces()?.len()).unwrap_or(i32::MAX);
-        let mut w = Workspace::new(name, container, position);
+        let position =
+            i32::try_from(store.workspaces_for_profile(profile.id)?.len()).unwrap_or(i32::MAX);
+        let mut w = Workspace::new(name, container, profile.id, position);
         w.color = color;
         w.icon = icon;
         store.upsert_workspace(&w)?;
@@ -757,9 +781,12 @@ pub(crate) fn workspace_delete(
 ) -> AppResult<()> {
     let (tab_ids, next) = {
         let store = lock(&state.store);
-        let all = store.workspaces()?;
+        let profile = store.workspace(id)?.profile_id;
+        let all = store.workspaces_for_profile(profile)?;
         if all.len() <= 1 {
-            return Err(AppError::new("cannot delete the last workspace"));
+            return Err(AppError::new(
+                "a profile keeps at least one workspace; delete the profile instead",
+            ));
         }
         let tabs = store.tabs_for_workspace(id)?;
         let next = all.iter().find(|w| w.id != id).map(|w| w.id);
@@ -784,6 +811,200 @@ pub(crate) fn workspace_delete(
     let was_active = *lock(&state.active_workspace) == Some(id);
     if was_active && let Some(next) = next {
         workspace_activate(app, state, next)?;
+    }
+    Ok(())
+}
+
+/// Setting key remembering the last workspace of a profile.
+fn profile_workspace_key(profile: dive_core::ProfileId) -> String {
+    format!("profile_workspace:{profile}")
+}
+
+/// The profile of the active workspace, else the first profile.
+fn active_profile(
+    store: &dive_core::Store,
+    active: Option<WorkspaceId>,
+) -> AppResult<dive_core::Profile> {
+    if let Some(id) = active
+        && let Ok(w) = store.workspace(id)
+    {
+        return Ok(store.profile(w.profile_id)?);
+    }
+    store
+        .profiles()?
+        .into_iter()
+        .next()
+        .ok_or_else(|| AppError::new("no profile"))
+}
+
+/// What a profile is made of, from the profile dialog.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ProfileDraft {
+    pub name: String,
+    pub color: String,
+    /// Avatar seed.
+    pub avatar: String,
+    pub note: String,
+}
+
+fn clean_profile(draft: &ProfileDraft) -> AppResult<(String, String, String, String)> {
+    let name = clean_name(&draft.name)?;
+    let color = clean_color(&draft.color)?;
+    let avatar = draft.avatar.trim();
+    if avatar.is_empty() || avatar.chars().count() > 64 {
+        return Err(AppError::new("pick an avatar"));
+    }
+    let note = draft.note.trim();
+    if note.chars().count() > 80 {
+        return Err(AppError::new("the note is too long"));
+    }
+    Ok((name, color, avatar.to_owned(), note.to_owned()))
+}
+
+/// Every profile, in switcher order.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn profiles_list(state: State<'_, AppState>) -> AppResult<Vec<dive_core::Profile>> {
+    Ok(lock(&state.store).profiles()?)
+}
+
+/// Create a profile with a container of its own and a first workspace, and
+/// switch to it.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn profile_create(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    draft: ProfileDraft,
+) -> AppResult<dive_core::Profile> {
+    let (name, color, avatar, note) = clean_profile(&draft)?;
+    let (profile, workspace) = {
+        let store = lock(&state.store);
+        let container = dive_core::Container::new(&name);
+        store.upsert_container(&container)?;
+        let position = i32::try_from(store.profiles()?.len()).unwrap_or(i32::MAX);
+        let mut p = dive_core::Profile::new(name, container.id, position);
+        p.color = color;
+        p.avatar = avatar;
+        p.note = note;
+        store.upsert_profile(&p)?;
+        let w = Workspace::new("Home", container.id, p.id, 0);
+        store.upsert_workspace(&w)?;
+        (p, w)
+    };
+    state
+        .bus
+        .publish(CoreEvent::ProfileUpserted(profile.clone()));
+    state
+        .bus
+        .publish(CoreEvent::WorkspaceUpserted(workspace.clone()));
+    workspace_activate(app, state, workspace.id)?;
+    Ok(profile)
+}
+
+/// Rename or restyle a profile.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn profile_update(
+    state: State<'_, AppState>,
+    id: dive_core::ProfileId,
+    draft: ProfileDraft,
+) -> AppResult<dive_core::Profile> {
+    let (name, color, avatar, note) = clean_profile(&draft)?;
+    let profile = {
+        let store = lock(&state.store);
+        let mut p = store.profile(id)?;
+        p.name = name;
+        p.color = color;
+        p.avatar = avatar;
+        p.note = note;
+        store.upsert_profile(&p)?;
+        p
+    };
+    state
+        .bus
+        .publish(CoreEvent::ProfileUpserted(profile.clone()));
+    Ok(profile)
+}
+
+/// Switch to a profile: its last workspace, or its first.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn profile_activate(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: dive_core::ProfileId,
+) -> AppResult<()> {
+    let target = {
+        let store = lock(&state.store);
+        store.profile(id)?;
+        let workspaces = store.workspaces_for_profile(id)?;
+        let remembered = store
+            .setting(&profile_workspace_key(id))?
+            .and_then(|s| s.parse::<WorkspaceId>().ok())
+            .filter(|w| workspaces.iter().any(|x| x.id == *w));
+        remembered
+            .or_else(|| workspaces.first().map(|w| w.id))
+            .ok_or_else(|| AppError::new("this profile has no workspace"))?
+    };
+    state.bus.publish(CoreEvent::ProfileActivated(id));
+    workspace_activate(app, state, target)
+}
+
+/// Delete a profile with all its workspaces and tabs. Refuses to delete
+/// the last profile; if the active one goes, another takes over.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn profile_delete(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: dive_core::ProfileId,
+) -> AppResult<()> {
+    let (workspaces, tab_ids, next) = {
+        let store = lock(&state.store);
+        let profiles = store.profiles()?;
+        if profiles.len() <= 1 {
+            return Err(AppError::new("cannot delete the last profile"));
+        }
+        let workspaces = store.workspaces_for_profile(id)?;
+        let mut tabs = Vec::new();
+        for w in &workspaces {
+            tabs.extend(
+                store
+                    .tabs_for_workspace(w.id)?
+                    .into_iter()
+                    .filter(|t| t.workspace_id == Some(w.id))
+                    .map(|t| t.id),
+            );
+        }
+        let next = profiles.iter().find(|p| p.id != id).map(|p| p.id);
+        (workspaces, tabs, next)
+    };
+    if let Some(host) = lock(&state.host).as_mut() {
+        for tab in &tab_ids {
+            host.close(*tab)?;
+        }
+    }
+    let was_active = {
+        let active = *lock(&state.active_workspace);
+        workspaces.iter().any(|w| Some(w.id) == active)
+    };
+    {
+        let store = lock(&state.store);
+        for w in &workspaces {
+            store.remove_workspace(w.id)?;
+        }
+        store.remove_profile(id)?;
+    }
+    for tab in tab_ids {
+        state.bus.publish(CoreEvent::TabClosed(tab));
+    }
+    for w in &workspaces {
+        state.bus.publish(CoreEvent::WorkspaceRemoved(w.id));
+    }
+    state.bus.publish(CoreEvent::ProfileRemoved(id));
+    if was_active && let Some(next) = next {
+        profile_activate(app, state, next)?;
     }
     Ok(())
 }
@@ -1037,6 +1258,7 @@ pub(crate) fn tab_navigate(state: State<'_, AppState>, id: TabId, url: String) -
 pub fn internal_title(url: &url::Url) -> String {
     match url.host_str() {
         Some("screen") => "DiveScreen".into(),
+        Some("capture") => "Dive Capture".into(),
         Some(other) => format!("Dive {other}"),
         None => "Dive".into(),
     }
@@ -1367,13 +1589,33 @@ pub(crate) fn bookmark_remove(state: State<'_, AppState>, url: String) -> AppRes
 /// Remember or forget a site permission decision.
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn permission_set(
+pub(crate) async fn permission_set(
     state: State<'_, AppState>,
     origin: String,
     kind: String,
     decision: crate::permissions::Decision,
 ) -> AppResult<()> {
     crate::permissions::set(&state, &origin, &kind, decision)?;
+    let sessions = {
+        let host = lock(&state.host);
+        let store = lock(&state.store);
+        host.as_ref().map_or_else(Vec::new, |host| {
+            host.sessions()
+                .into_iter()
+                .filter_map(|(id, session)| {
+                    let matches = store
+                        .tab(id)
+                        .ok()
+                        .and_then(|tab| dive_core::origin_of(&tab.url))
+                        .is_some_and(|tab_origin| tab_origin == origin);
+                    matches.then_some(session)
+                })
+                .collect()
+        })
+    };
+    for session in sessions {
+        crate::permissions::apply_origin(&state, &session, &origin).await;
+    }
     Ok(())
 }
 
@@ -1384,6 +1626,26 @@ pub(crate) fn permissions_list(
     state: State<'_, AppState>,
 ) -> AppResult<Vec<crate::permissions::SitePermission>> {
     Ok(crate::permissions::all(&state)?)
+}
+
+/// Whether Dive is the system's default browser.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn default_browser_status() -> crate::default_browser::DefaultBrowserStatus {
+    crate::default_browser::status()
+}
+
+/// Ask the system to make Dive the default browser.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn default_browser_set() -> AppResult<crate::default_browser::DefaultBrowserStatus>
+{
+    // Launch Services may block on the system's own confirmation sheet;
+    // keep that off the IPC and main threads.
+    tauri::async_runtime::spawn_blocking(crate::default_browser::make_default)
+        .await
+        .map_err(|e| AppError::new(e.to_string()))?
+        .map_err(AppError::new)
 }
 
 /// An update the release channel offers.

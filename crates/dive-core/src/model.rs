@@ -104,6 +104,50 @@ id_type!(
     /// Identifies a [`Tab`].
     TabId
 );
+id_type!(
+    /// Identifies a [`Profile`].
+    ProfileId
+);
+
+/// A person using the browser: a name and a face, a container of its own
+/// (cookies and logins), and the workspaces that belong to it. Switching
+/// profile switches which workspaces the rail shows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct Profile {
+    /// Stable id.
+    pub id: ProfileId,
+    /// Display name.
+    pub name: String,
+    /// Accent color as a CSS hex string.
+    pub color: String,
+    /// Avatar seed the chrome draws a face from.
+    pub avatar: String,
+    /// A line under the name: a role, an email, whatever tells it apart.
+    pub note: String,
+    /// Container this profile's workspaces browse in unless one asks for its own.
+    pub container_id: ContainerId,
+    /// Order in the switcher; lower first.
+    pub position: i32,
+    /// Creation timestamp.
+    pub created_at: Timestamp,
+}
+
+impl Profile {
+    /// Create a profile in `container` appended at `position`.
+    pub fn new(name: impl Into<String>, container: ContainerId, position: i32) -> Self {
+        let name = name.into();
+        Self {
+            id: ProfileId::new(),
+            avatar: name.to_lowercase(),
+            name,
+            color: "#7FD8C8".into(),
+            note: String::new(),
+            container_id: container,
+            position,
+            created_at: Timestamp::now(),
+        }
+    }
+}
 
 /// An isolated browsing profile: cookies, storage, cache and service workers.
 /// Maps 1:1 to a CEF request context with its own cache path.
@@ -145,6 +189,8 @@ pub struct Workspace {
     pub icon: String,
     /// Container whose profile this workspace browses in.
     pub container_id: ContainerId,
+    /// The profile this workspace belongs to.
+    pub profile_id: ProfileId,
     /// Order in the rail; lower first.
     pub position: i32,
     /// Creation timestamp.
@@ -157,14 +203,20 @@ impl Workspace {
         "layers"
     }
 
-    /// Create a workspace in `container` appended at `position`.
-    pub fn new(name: impl Into<String>, container: ContainerId, position: i32) -> Self {
+    /// Create a workspace of `profile` in `container` appended at `position`.
+    pub fn new(
+        name: impl Into<String>,
+        container: ContainerId,
+        profile: ProfileId,
+        position: i32,
+    ) -> Self {
         Self {
             id: WorkspaceId::new(),
             name: name.into(),
             color: "#0F6E75".into(),
             icon: Self::default_icon().into(),
             container_id: container,
+            profile_id: profile,
             position,
             created_at: Timestamp::now(),
         }

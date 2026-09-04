@@ -575,7 +575,7 @@ function ClearData() {
       .finally(() => setBusy(false));
   };
   return (
-    <Group title="Clear browsing data" description="Cookies, cache and site data are cleared through open tabs, so a workspace with nothing open keeps its data.">
+    <Group title="Clear browsing data" description="Open profiles clear immediately. Restart Dive after clearing cookies, cache, or site data to finish closed profiles and every stored origin.">
       <div className="flex flex-col gap-2 py-3">
         <Check label="Browsing history" checked={what.history} onChange={(history) => setWhat({ ...what, history })} />
         <Check label="Cookies and logins" checked={what.cookies} onChange={(cookies) => setWhat({ ...what, cookies })} />
@@ -586,9 +586,7 @@ function ClearData() {
             {busy ? "Clearing…" : "Clear now"}
           </Button>
           {result && (
-            <span role="status" className="text-[11px] text-ink-2">
-              {result}
-            </span>
+            <><span role="status" className="text-[11px] text-ink-2">{result}</span>{result.includes("restart Dive") && <Button onClick={() => ipc.appRestart()}>Restart now</Button>}</>
           )}
         </div>
       </div>

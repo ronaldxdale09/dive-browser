@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tokio::sync::broadcast;
 
-use crate::model::{Tab, TabId, Workspace, WorkspaceId};
+use crate::model::{Profile, ProfileId, Tab, TabId, Workspace, WorkspaceId};
 
 /// Something changed in the core state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -22,6 +22,12 @@ pub enum CoreEvent {
     TabClosed(TabId),
     /// The focused tab changed.
     TabActivated(TabId),
+    /// A profile was created or updated.
+    ProfileUpserted(Profile),
+    /// A profile was removed.
+    ProfileRemoved(ProfileId),
+    /// The active profile changed.
+    ProfileActivated(ProfileId),
 }
 
 /// Cheap-to-clone handle to the event bus.

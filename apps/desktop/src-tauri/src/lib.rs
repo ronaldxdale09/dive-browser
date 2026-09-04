@@ -11,10 +11,12 @@ mod cdp_feed;
 mod commands;
 mod console;
 mod crash;
+mod default_browser;
 mod devservers;
 mod emulate;
 mod engine;
 mod error;
+mod extensions;
 mod favicon;
 mod find;
 mod har;
@@ -102,6 +104,10 @@ pub fn run() {
     let _log_guard = init_logging();
     install_panic_hook();
 
+    if let Err(error) = prefs::finish_pending_clear() {
+        tracing::error!(%error, "deferred browser-data cleanup failed");
+    }
+
     engine::mark_main_thread();
     agent::init_keychain();
     let specta = commands::specta_builder();
@@ -112,12 +118,9 @@ pub fn run() {
     {
         builder = builder
             .root_cache_path(state::profiles_root())
-            // Leading dashes are load-bearing: tauri's CEF handler appends a
-            // valueless arg as a positional ARGUMENT unless it starts with "-",
-            // and Chromium ignores it. Without the switch every launch asks for
-            // the login keychain password to unlock "Chromium Safe Storage".
-            // Value form: the runtime turns a bare name into a positional argument and a
-            // dashed name into a doubled switch; `--use-mock-keychain=` is honored.
+            // Leading dashes are load-bearing for valueless switches in the
+            // CEF adapter. Normal launches use the operating system keychain;
+            // isolated automation may explicitly opt into its mock backend.
             .command_line_args(startup::build_chromium_args(None));
     }
 
@@ -203,13 +206,20 @@ pub fn run() {
             return;
         }
     };
-    app.run(|_, event| match event {
+    app.run(|app, event| match event {
         // Why the process is going away is the first question after an
         // unexpected exit; say so in the log.
         tauri::RunEvent::ExitRequested { code, .. } => {
             tracing::info!(?code, "exit requested");
         }
         tauri::RunEvent::Exit => tracing::info!("event loop exited"),
+        // Links the system hands us once Dive is the default browser (or a
+        // file dropped on the Dock icon).
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Opened { urls } => {
+            let urls: Vec<String> = urls.into_iter().map(|u| u.to_string()).collect();
+            open_handed_urls(app, urls);
+        }
         tauri::RunEvent::WindowEvent {
             label,
             event: tauri::WindowEvent::Destroyed,
@@ -341,6 +351,33 @@ fn install_panic_hook() {
         tracing::error!("{info}");
         previous(info);
     }));
+}
+
+/// Open URLs the OS handed to the app, each in its own tab of the active
+/// workspace, and bring the window forward.
+#[cfg(target_os = "macos")]
+fn open_handed_urls(app: &tauri::AppHandle<Runtime>, urls: Vec<String>) {
+    use tauri::Manager;
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let Some(main) = engine::MainThread::here() else {
+            return;
+        };
+        let state = handle.state::<state::AppState>();
+        let Some(workspace) = *state::lock(&state.active_workspace) else {
+            return;
+        };
+        for url in urls {
+            match commands::open_tab(&main, &handle, &state, workspace, &url) {
+                Ok(tab) => tracing::info!(%tab.id, url, "opened a link handed by the system"),
+                Err(e) => tracing::warn!(url, "could not open a handed link: {e}"),
+            }
+        }
+        if let Some(window) = handle.get_window(MAIN_WINDOW) {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    });
 }
 
 /// `DIVE_CDP_BENCH=1`: once the first tab is up, time a burst of trivial
@@ -631,13 +668,11 @@ mod tests {
     #[test]
     fn test_chromium_switches_configuration() {
         let args = crate::startup::build_chromium_args(None);
-        assert_eq!(args.len(), 5);
-        assert_eq!(args[0], ("use-mock-keychain", Some(String::new())));
-        assert_eq!(args[1], ("--disable-extensions", None));
-        assert_eq!(args[2], ("--process-per-site", None));
-        assert_eq!(args[3], ("renderer-process-limit", Some("6".to_string())));
+        assert_eq!(args.len(), 3);
+        assert_eq!(args[0], ("--process-per-site", None));
+        assert_eq!(args[1], ("renderer-process-limit", Some("6".to_string())));
         assert_eq!(
-            args[4],
+            args[2],
             (
                 "disable-features",
                 Some("ImmersiveReadAnything".to_string())

@@ -207,7 +207,8 @@ fn test_workspace_switching_during_recovery() {
     // Interaction: Switching active workspace while a background tab in another
     // workspace is recovering from a crash.
     let (store, container_id, ws_1) = create_test_store();
-    let ws_2 = dive_core::model::Workspace::new("Secondary Workspace", container_id, 1);
+    let profile_id = store.workspace(ws_1).unwrap().profile_id;
+    let ws_2 = dive_core::model::Workspace::new("Secondary Workspace", container_id, profile_id, 1);
     store.upsert_workspace(&ws_2).unwrap();
 
     let mut tab_ws1 = Tab::new(ws_1, "https://ws1.dev", 0);

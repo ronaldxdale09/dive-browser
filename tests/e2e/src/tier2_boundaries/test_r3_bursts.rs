@@ -75,7 +75,8 @@ fn test_crash_event_for_non_existent_tab() {
 #[test]
 fn test_simultaneous_crashes_multi_workspace() {
     let (store, container_id, ws_1) = create_test_store();
-    let ws_2 = dive_core::model::Workspace::new("WS 2", container_id, 1);
+    let profile_id = store.workspace(ws_1).unwrap().profile_id;
+    let ws_2 = dive_core::model::Workspace::new("WS 2", container_id, profile_id, 1);
     store.upsert_workspace(&ws_2).unwrap();
 
     let tab_1 = Tab::new(ws_1, "https://ws1.local", 0);

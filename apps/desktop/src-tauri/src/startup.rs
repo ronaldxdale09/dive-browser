@@ -330,23 +330,42 @@ pub fn report_startup_milestone(milestone: String, elapsed_ms: f64) -> Result<()
 /// - Valued switches have no leading `--` prefix so the runtime does not double-dash them.
 #[must_use]
 pub fn build_chromium_args(renderer_limit: Option<&str>) -> Vec<(&'static str, Option<String>)> {
+    let extension_paths = crate::extensions::startup_paths();
+    crate::extensions::mark_started(&extension_paths);
+    build_chromium_args_with(
+        renderer_limit,
+        &std::env::var("DIVE_CHROMIUM_FLAGS").unwrap_or_default(),
+        std::env::var_os("DIVE_USE_MOCK_KEYCHAIN").is_some(),
+        &extension_paths,
+    )
+}
+
+fn build_chromium_args_with(
+    renderer_limit: Option<&str>,
+    chromium_flags: &str,
+    use_mock_keychain: bool,
+    extension_paths: &[String],
+) -> Vec<(&'static str, Option<String>)> {
     let limit = renderer_limit
         .map(str::to_owned)
         .or_else(|| std::env::var("DIVE_RENDERER_PROCESS_LIMIT").ok())
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "6".to_string());
 
-    let mut args = vec![
-        ("use-mock-keychain", Some(String::new())),
-        ("--disable-extensions", None),
-    ];
+    let mut args = Vec::new();
+    if use_mock_keychain {
+        args.push(("use-mock-keychain", Some(String::new())));
+    }
+    if !extension_paths.is_empty() {
+        args.push(("load-extension", Some(extension_paths.join(","))));
+    }
     // `DIVE_DEFAULT_PROCESS_MODEL=1` leaves Chromium's own process model in
     // place, for telling a process-model fault apart from anything else.
     if std::env::var_os("DIVE_DEFAULT_PROCESS_MODEL").is_none() {
         args.push(("--process-per-site", None));
         args.push(("renderer-process-limit", Some(limit)));
     }
-    let mut extra = extra_chromium_args(&std::env::var("DIVE_CHROMIUM_FLAGS").unwrap_or_default());
+    let mut extra = extra_chromium_args(chromium_flags);
     // Chromium honours only the last `disable-features`, so ours and any
     // from the environment are folded into one switch.
     let mut disabled: Vec<String> = DISABLED_FEATURES.iter().map(|f| (*f).to_owned()).collect();
@@ -422,15 +441,21 @@ pub fn validate_switch_syntax(args: &[(&str, Option<String>)]) -> Result<(), Str
 /// Reset global benchmark state for isolated unit testing.
 pub fn reset_for_test(new_launch: Option<Instant>) {
     let instant = new_launch.unwrap_or_else(Instant::now);
-    let mut timeline_guard = TIMELINE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    *timeline_guard = Some(StartupTimeline::new(instant));
-
-    let mut milestones_guard = MILESTONES
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    *milestones_guard = Some(HashMap::new());
+    // Do not hold both locks at once. Production milestone recording takes
+    // MILESTONES before TIMELINE; taking them in the opposite order here can
+    // deadlock when startup tests run concurrently.
+    {
+        let mut milestones_guard = MILESTONES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *milestones_guard = Some(HashMap::new());
+    }
+    {
+        let mut timeline_guard = TIMELINE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *timeline_guard = Some(StartupTimeline::new(instant));
+    }
 
     CHROME_PAINT_RECEIVED.store(false, Ordering::SeqCst);
 }
@@ -482,15 +507,13 @@ mod tests {
 
     #[test]
     fn test_chromium_args_default_formatting() {
-        let args = build_chromium_args(None);
-        assert_eq!(args.len(), 5);
+        let args = build_chromium_args_with(None, "", false, &[]);
+        assert_eq!(args.len(), 3);
 
-        assert_eq!(args[0], ("use-mock-keychain", Some(String::new())));
-        assert_eq!(args[1], ("--disable-extensions", None));
-        assert_eq!(args[2], ("--process-per-site", None));
-        assert_eq!(args[3], ("renderer-process-limit", Some("6".to_string())));
+        assert_eq!(args[0], ("--process-per-site", None));
+        assert_eq!(args[1], ("renderer-process-limit", Some("6".to_string())));
         assert_eq!(
-            args[4],
+            args[2],
             (
                 "disable-features",
                 Some("ImmersiveReadAnything".to_string())
@@ -502,9 +525,24 @@ mod tests {
 
     #[test]
     fn test_chromium_args_custom_limit() {
-        let args = build_chromium_args(Some("12"));
-        assert_eq!(args[3], ("renderer-process-limit", Some("12".to_string())));
+        let args = build_chromium_args_with(Some("12"), "", false, &[]);
+        assert_eq!(args[1], ("renderer-process-limit", Some("12".to_string())));
         assert!(validate_switch_syntax(&args).is_ok());
+    }
+
+    #[test]
+    fn extensions_and_mock_keychain_are_explicit_startup_choices() {
+        let paths = vec!["/a/extension".to_owned(), "/z/extension".to_owned()];
+        let args = build_chromium_args_with(None, "", true, &paths);
+        assert_eq!(args[0], ("use-mock-keychain", Some(String::new())));
+        assert_eq!(
+            args[1],
+            (
+                "load-extension",
+                Some("/a/extension,/z/extension".to_owned())
+            )
+        );
+        assert!(!args.iter().any(|(name, _)| *name == "--disable-extensions"));
     }
 
     #[test]

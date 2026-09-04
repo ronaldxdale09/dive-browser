@@ -20,9 +20,9 @@ Make Dive's browser essentials trustworthy across persistent containers, then ad
 
 ### CEF Runtime Integration
 
-Vendor the small pinned `tauri-runtime-cef` crate while retaining the exact upstream Tauri revision for all other crates. The vendored runtime will forward CEF permission callbacks to Tauri's existing per-webview permission handler.
+Apply remembered decisions through Chromium's `Browser.setPermission` policy for every active page and install a document-start media guard that consults Dive's existing per-origin permission policy before calling the native media API. This works around the pinned CEF adapter's unconditional media acceptance without importing or forking framework internals.
 
-Media bitmasks will be evaluated per capability. CEF receives only the allowed camera/microphone bits; denied or undecided capabilities remain denied. Other CEF permission prompts will be mapped to Tauri permission kinds and accepted only when all requested capabilities are allowed. Unknown capabilities default to denial.
+Camera and microphone are evaluated independently. Allowed capabilities are applied to Chromium before the native request; denied or undecided capabilities reject before native capture begins. Unknown capabilities default to denial.
 
 This preserves the existing `PermissionAsked` event and remembered origin decisions rather than creating a second permission system.
 

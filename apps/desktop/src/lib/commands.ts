@@ -91,8 +91,8 @@ function message(error: unknown): string {
 
 /** Activate the workspace sitting at `index` in the rail, if there is one. */
 function jumpToWorkspace(index: number) {
-  const { workspaces, activeWorkspace, activateWorkspace } = useBrowser.getState();
-  const target = workspaces[index];
+  const { workspaces, activeWorkspace, activateWorkspace, activeProfile } = useBrowser.getState();
+  const target = workspaces.filter((w) => !activeProfile || w.profile_id === activeProfile)[index];
   return target && target.id !== activeWorkspace ? activateWorkspace(target.id) : undefined;
 }
 

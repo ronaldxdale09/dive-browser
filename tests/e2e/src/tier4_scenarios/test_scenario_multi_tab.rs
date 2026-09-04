@@ -22,7 +22,9 @@ use crate::tier1_feature_coverage::test_r2_discard::{SPEC_MAX_IDLE, should_disca
 #[test]
 fn test_scenario_20_tab_developer_workflow() {
     let (store, container_id, ws_frontend) = create_test_store();
-    let ws_backend = dive_core::model::Workspace::new("Backend Microservices", container_id, 1);
+    let profile_id = store.workspace(ws_frontend).unwrap().profile_id;
+    let ws_backend =
+        dive_core::model::Workspace::new("Backend Microservices", container_id, profile_id, 1);
     store.upsert_workspace(&ws_backend).unwrap();
 
     let now = Timestamp::now();

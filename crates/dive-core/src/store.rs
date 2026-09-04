@@ -8,7 +8,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::model::{
-    Container, ContainerId, Tab, TabId, TabState, TabTier, Timestamp, Workspace, WorkspaceId,
+    Container, ContainerId, Profile, ProfileId, Tab, TabId, TabState, TabTier, Timestamp,
+    Workspace, WorkspaceId,
 };
 use crate::{CoreError, Result};
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -74,6 +75,20 @@ const MIGRATIONS: &[&str] = &[
         x INTEGER NOT NULL DEFAULT 0,
         y INTEGER NOT NULL DEFAULT 0
     );",
+    // v8: profiles own workspaces. Existing rows get an empty profile id that
+    // `ensure_default_profile` fills in at startup, since a uuid v7 cannot
+    // be minted in SQL.
+    "CREATE TABLE profiles (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL,
+        avatar TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        container_id TEXT NOT NULL REFERENCES containers(id),
+        position INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    ALTER TABLE workspaces ADD COLUMN profile_id TEXT NOT NULL DEFAULT '';",
 ];
 
 /// Copy an existing database aside when this build is about to migrate it,
@@ -255,10 +270,11 @@ impl Store {
     /// Insert or replace a workspace.
     pub fn upsert_workspace(&self, w: &Workspace) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO workspaces (id, name, color, icon, container_id, position, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO workspaces (id, name, color, icon, container_id, position, created_at, profile_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, color = excluded.color,
-             icon = excluded.icon, container_id = excluded.container_id, position = excluded.position",
+             icon = excluded.icon, container_id = excluded.container_id, position = excluded.position,
+             profile_id = excluded.profile_id",
             params![
                 w.id.to_string(),
                 w.name,
@@ -266,7 +282,8 @@ impl Store {
                 w.icon,
                 w.container_id.to_string(),
                 w.position,
-                w.created_at.to_rfc3339()
+                w.created_at.to_rfc3339(),
+                w.profile_id.to_string()
             ],
         )?;
         Ok(())
@@ -295,6 +312,106 @@ impl Store {
         let rows = stmt.query_map([], workspace_from_row)?;
         rows.collect::<std::result::Result<_, _>>()
             .map_err(Into::into)
+    }
+
+    /// The workspaces of one profile, in rail order.
+    pub fn workspaces_for_profile(&self, profile: ProfileId) -> Result<Vec<Workspace>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "{WORKSPACE_SELECT} WHERE profile_id = ?1 ORDER BY position, created_at"
+        ))?;
+        let rows = stmt.query_map([profile.to_string()], workspace_from_row)?;
+        rows.collect::<std::result::Result<_, _>>()
+            .map_err(Into::into)
+    }
+
+    // ----- profiles -----
+
+    /// Insert or replace a profile.
+    pub fn upsert_profile(&self, p: &Profile) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO profiles (id, name, color, avatar, note, container_id, position, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET name = excluded.name, color = excluded.color,
+             avatar = excluded.avatar, note = excluded.note, container_id = excluded.container_id,
+             position = excluded.position",
+            params![
+                p.id.to_string(),
+                p.name,
+                p.color,
+                p.avatar,
+                p.note,
+                p.container_id.to_string(),
+                p.position,
+                p.created_at.to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Fetch one profile.
+    pub fn profile(&self, id: ProfileId) -> Result<Profile> {
+        self.conn
+            .query_row(
+                &format!("{PROFILE_SELECT} WHERE id = ?1"),
+                [id.to_string()],
+                profile_from_row,
+            )
+            .optional()?
+            .ok_or_else(|| CoreError::NotFound {
+                kind: "profile",
+                id: id.to_string(),
+            })
+    }
+
+    /// All profiles in switcher order.
+    pub fn profiles(&self) -> Result<Vec<Profile>> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!("{PROFILE_SELECT} ORDER BY position, created_at"))?;
+        let rows = stmt.query_map([], profile_from_row)?;
+        rows.collect::<std::result::Result<_, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Remove a profile. Its workspaces must have been removed first.
+    pub fn remove_profile(&self, id: ProfileId) -> Result<()> {
+        let n = self
+            .conn
+            .execute("DELETE FROM profiles WHERE id = ?1", [id.to_string()])?;
+        if n == 0 {
+            return Err(CoreError::NotFound {
+                kind: "profile",
+                id: id.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Make sure a profile exists and every workspace belongs to one: a
+    /// database from before profiles gets a "Personal" profile in the first
+    /// container that adopts all its workspaces. Returns the first profile.
+    pub fn ensure_default_profile(&self) -> Result<Profile> {
+        if let Some(first) = self.profiles()?.into_iter().next() {
+            self.conn.execute(
+                "UPDATE workspaces SET profile_id = ?1 WHERE profile_id = ''",
+                [first.id.to_string()],
+            )?;
+            return Ok(first);
+        }
+        let container = if let Some(c) = self.containers()?.into_iter().next() {
+            c
+        } else {
+            let c = Container::new("Personal");
+            self.upsert_container(&c)?;
+            c
+        };
+        let profile = Profile::new("Personal", container.id, 0);
+        self.upsert_profile(&profile)?;
+        self.conn.execute(
+            "UPDATE workspaces SET profile_id = ?1 WHERE profile_id = ''",
+            [profile.id.to_string()],
+        )?;
+        Ok(profile)
     }
 
     /// Remove a workspace and, by cascade, its tabs.
@@ -769,7 +886,9 @@ impl Store {
 
 const CONTAINER_SELECT: &str = "SELECT id, name, cache_dir, persist_cookies FROM containers";
 const WORKSPACE_SELECT: &str =
-    "SELECT id, name, color, icon, container_id, position, created_at FROM workspaces";
+    "SELECT id, name, color, icon, container_id, position, created_at, profile_id FROM workspaces";
+const PROFILE_SELECT: &str =
+    "SELECT id, name, color, avatar, note, container_id, position, created_at FROM profiles";
 const TAB_SELECT: &str =
     "SELECT id, workspace_id, tier, url, title, position, state, last_active_at, favicon FROM tabs";
 
@@ -815,6 +934,20 @@ fn workspace_from_row(r: &Row<'_>) -> rusqlite::Result<Workspace> {
         container_id: parse_id(&r.get::<_, String>(4)?)?,
         position: r.get(5)?,
         created_at: parse_time(&r.get::<_, String>(6)?)?,
+        profile_id: parse_id(&r.get::<_, String>(7)?)?,
+    })
+}
+
+fn profile_from_row(r: &Row<'_>) -> rusqlite::Result<Profile> {
+    Ok(Profile {
+        id: parse_id(&r.get::<_, String>(0)?)?,
+        name: r.get(1)?,
+        color: r.get(2)?,
+        avatar: r.get(3)?,
+        note: r.get(4)?,
+        container_id: parse_id(&r.get::<_, String>(5)?)?,
+        position: r.get(6)?,
+        created_at: parse_time(&r.get::<_, String>(7)?)?,
     })
 }
 
@@ -853,7 +986,8 @@ mod tests {
         let store = Store::in_memory().unwrap();
         let c = Container::new("Personal");
         store.upsert_container(&c).unwrap();
-        let w = Workspace::new("Work", c.id, 0);
+        let profile = store.ensure_default_profile().unwrap();
+        let w = Workspace::new("Work", c.id, profile.id, 0);
         store.upsert_workspace(&w).unwrap();
         (store, w)
     }
@@ -877,7 +1011,7 @@ mod tests {
     #[test]
     fn workspace_roundtrip_and_ordering() {
         let (store, w) = seeded();
-        let mut later = Workspace::new("Second", w.container_id, 1);
+        let mut later = Workspace::new("Second", w.container_id, w.profile_id, 1);
         later.color = "#ABCDEF".into();
         store.upsert_workspace(&later).unwrap();
         let all = store.workspaces().unwrap();
@@ -1202,7 +1336,7 @@ mod tests {
     #[test]
     fn discard_idle_spans_every_workspace() {
         let (store, w) = seeded();
-        let other = Workspace::new("Other", w.container_id, 1);
+        let other = Workspace::new("Other", w.container_id, w.profile_id, 1);
         store.upsert_workspace(&other).unwrap();
         let now = Timestamp::now();
         let mut a = Tab::new(w.id, "https://a", 0);
@@ -1279,6 +1413,7 @@ mod tests {
             0xff9d_3310_52cc_7359,
             0xa4b7_de1f_1a35_d3a6,
             0x1d6d_f725_f438_8a3c,
+            0x0b4e_ecbb_d242_ffaf,
         ];
         assert!(
             MIGRATIONS.len() >= SHIPPED.len(),

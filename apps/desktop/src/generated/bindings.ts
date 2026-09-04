@@ -9,6 +9,22 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 export const commands = {
 	snapshot: () => typedError<Snapshot, AppError>(__TAURI_INVOKE("snapshot")),
 	workspaceActivate: (id: WorkspaceId) => typedError<null, AppError>(__TAURI_INVOKE("workspace_activate", { id })),
+	/**  Every profile, in switcher order. */
+	profilesList: () => typedError<Profile[], AppError>(__TAURI_INVOKE("profiles_list")),
+	/**
+	 *  Create a profile with a container of its own and a first workspace, and
+	 *  switch to it.
+	 */
+	profileCreate: (draft: ProfileDraft) => typedError<Profile, AppError>(__TAURI_INVOKE("profile_create", { draft })),
+	/**  Rename or restyle a profile. */
+	profileUpdate: (id: ProfileId, draft: ProfileDraft) => typedError<Profile, AppError>(__TAURI_INVOKE("profile_update", { id, draft })),
+	/**  Switch to a profile: its last workspace, or its first. */
+	profileActivate: (id: ProfileId) => typedError<null, AppError>(__TAURI_INVOKE("profile_activate", { id })),
+	/**
+	 *  Delete a profile with all its workspaces and tabs. Refuses to delete
+	 *  the last profile; if the active one goes, another takes over.
+	 */
+	profileDelete: (id: ProfileId) => typedError<null, AppError>(__TAURI_INVOKE("profile_delete", { id })),
 	workspaceCreate: (draft: WorkspaceDraft, separateContainer: boolean) => typedError<Workspace, AppError>(__TAURI_INVOKE("workspace_create", { draft, separateContainer })),
 	workspaceUpdate: (id: WorkspaceId, draft: WorkspaceDraft) => typedError<Workspace, AppError>(__TAURI_INVOKE("workspace_update", { id, draft })),
 	/**
@@ -54,6 +70,18 @@ export const commands = {
 	permissionSet: (origin: string, kind: string, decision: Decision) => typedError<null, AppError>(__TAURI_INVOKE("permission_set", { origin, kind, decision })),
 	/**  Every remembered site permission. */
 	permissionsList: () => typedError<SitePermission[], AppError>(__TAURI_INVOKE("permissions_list")),
+	/**  List installed extensions. */
+	extensionsList: () => typedError<ExtensionList, AppError>(__TAURI_INVOKE("extensions_list")),
+	/**  Ask the operating system for an unpacked extension directory. */
+	extensionPick: () => __TAURI_INVOKE<string | null>("extension_pick"),
+	/**  Validate and register an unpacked extension directory. */
+	extensionImport: (path: string) => typedError<ExtensionList, AppError>(__TAURI_INVOKE("extension_import", { path })),
+	/**  Enable or disable an installed extension for the next launch. */
+	extensionSetEnabled: (id: string, enabled: boolean) => typedError<ExtensionList, AppError>(__TAURI_INVOKE("extension_set_enabled", { id, enabled })),
+	/**  Forget an extension without deleting its source directory. */
+	extensionRemove: (id: string) => typedError<ExtensionList, AppError>(__TAURI_INVOKE("extension_remove", { id })),
+	/**  Restart Dive so pending browser changes can take effect safely. */
+	appRestart: () => __TAURI_INVOKE<void>("app_restart"),
 	/**
 	 *  Ask the release channel for a newer build. `None` when this build has
 	 *  no updater (development) or is current.
@@ -66,6 +94,10 @@ export const commands = {
 } | null, AppError>(__TAURI_INVOKE("update_check")),
 	/**  Download and install the offered update; the app restarts when done. */
 	updateInstall: () => typedError<null, AppError>(__TAURI_INVOKE("update_install")),
+	/**  Whether Dive is the system's default browser. */
+	defaultBrowserStatus: () => __TAURI_INVOKE<DefaultBrowserStatus>("default_browser_status"),
+	/**  Ask the system to make Dive the default browser. */
+	defaultBrowserSet: () => typedError<DefaultBrowserStatus, AppError>(__TAURI_INVOKE("default_browser_set")),
 	/**  Open Chromium's `DevTools` window for a tab. */
 	tabDevtools: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_devtools", { id })),
 	/**  Start recording a tab with these options. */
@@ -540,7 +572,13 @@ export type CoreEvent =
 /**  A tab was closed. */
 { type: "tab_closed"; data: TabId } |
 /**  The focused tab changed. */
-{ type: "tab_activated"; data: TabId };
+{ type: "tab_activated"; data: TabId } |
+/**  A profile was created or updated. */
+{ type: "profile_upserted"; data: Profile } |
+/**  A profile was removed. */
+{ type: "profile_removed"; data: ProfileId } |
+/**  The active profile changed. */
+{ type: "profile_activated"; data: ProfileId };
 
 /**  What the person decided for one origin and kind. */
 export type Decision =
@@ -550,6 +588,16 @@ export type Decision =
 "deny" |
 /**  Not decided; the engine refuses and the chrome asks. */
 "ask";
+
+/**  Where Dive stands as the handler for web links. */
+export type DefaultBrowserStatus = {
+	/**  Whether this platform build can ask to become the default at all. */
+	supported: boolean,
+	/**  Whether Dive handles both `http` and `https` right now. */
+	is_default: boolean,
+	/**  Bundle id of whatever handles `https` today, when known. */
+	current: string | null,
+};
 
 /**  A server that answered. */
 export type DevServer = {
@@ -634,6 +682,34 @@ export type ExportRequest = {
 	segments: KeptSegment[],
 	/**  Take the source's sound along. */
 	with_audio: boolean,
+};
+
+/**  One locally installed unpacked extension. */
+export type ExtensionInfo = {
+	/**  Stable Dive identifier derived from the canonical source path. */
+	id: string,
+	/**  Display name declared by the manifest. */
+	name: string,
+	/**  Extension version declared by the manifest. */
+	version: string,
+	/**  Chromium manifest generation (2 or 3). */
+	manifest_version: number,
+	/**  Canonical local source directory. */
+	path: string,
+	/**  Whether Dive asks Chromium to load this extension at startup. */
+	enabled: boolean,
+	/**  Requested API and host permissions. */
+	permissions: string[],
+	/**  Compatibility or security facts the user should see. */
+	warnings: string[],
+};
+
+/**  Extension page data plus whether current settings need a restart. */
+export type ExtensionList = {
+	/**  Installed extensions. */
+	items: ExtensionInfo[],
+	/**  True when enabled paths differ from what this process started with. */
+	restart_required: boolean,
 };
 
 /**  Result of a find step. */
@@ -1120,6 +1196,42 @@ export type PrivacyInfo = {
 	cosmetic_hosts: number,
 };
 
+/**
+ *  A person using the browser: a name and a face, a container of its own
+ *  (cookies and logins), and the workspaces that belong to it. Switching
+ *  profile switches which workspaces the rail shows.
+ */
+export type Profile = {
+	/**  Stable id. */
+	id: ProfileId,
+	/**  Display name. */
+	name: string,
+	/**  Accent color as a CSS hex string. */
+	color: string,
+	/**  Avatar seed the chrome draws a face from. */
+	avatar: string,
+	/**  A line under the name: a role, an email, whatever tells it apart. */
+	note: string,
+	/**  Container this profile's workspaces browse in unless one asks for its own. */
+	container_id: ContainerId,
+	/**  Order in the switcher; lower first. */
+	position: number,
+	/**  Creation timestamp. */
+	created_at: string,
+};
+
+/**  What a profile is made of, from the profile dialog. */
+export type ProfileDraft = {
+	name: string,
+	color: string,
+	/**  Avatar seed. */
+	avatar: string,
+	note: string,
+};
+
+/**  Identifies a [`Profile`]. */
+export type ProfileId = string;
+
 /**  A provider in the catalog. */
 export type Provider =
 /**  Anthropic, first party. */
@@ -1372,6 +1484,10 @@ export type Snapshot = {
 	active_tab: TabId | null,
 	/**  Tabs shown in their own windows. */
 	detached: TabId[],
+	/**  Every profile, in switcher order. */
+	profiles: Profile[],
+	/**  The profile the active workspace belongs to. */
+	active_profile: ProfileId | null,
 };
 
 /**  One frame of a component's source location. */
@@ -1609,6 +1725,8 @@ export type Workspace = {
 	icon: string,
 	/**  Container whose profile this workspace browses in. */
 	container_id: ContainerId,
+	/**  The profile this workspace belongs to. */
+	profile_id: ProfileId,
 	/**  Order in the rail; lower first. */
 	position: number,
 	/**  Creation timestamp. */

@@ -134,8 +134,46 @@ pub async fn capture_screenshot(session: &CdpSession, opts: ScreenshotOptions) -
         .map_err(|e| CdpError::Transport(format!("bad base64 in screenshot: {e}")))
 }
 
-/// Capture the whole document, not just the viewport.
+/// Capture the whole document after visibly traversing it. The traversal lets
+/// lazy content render and gives a user-initiated capture honest progress.
 pub async fn capture_full_page(session: &CdpSession, format: ImageFormat) -> Result<Vec<u8>> {
+    session
+        .call(
+            "Runtime.evaluate",
+            json!({
+                "expression": FULL_PAGE_SCROLL_SCRIPT,
+                "awaitPromise": true,
+                "returnByValue": true,
+            }),
+        )
+        .await?;
+
+    let captured = capture_full_page_instant(session, format).await;
+    let restored = session
+        .call(
+            "Runtime.evaluate",
+            json!({
+                "expression": FULL_PAGE_RESTORE_SCRIPT,
+                "awaitPromise": true,
+                "returnByValue": true,
+            }),
+        )
+        .await;
+    match captured {
+        Ok(bytes) => {
+            restored?;
+            Ok(bytes)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Capture the full document without moving it. Automation uses this variant
+/// so an agent screenshot stays quick and does not animate in front of people.
+pub async fn capture_full_page_instant(
+    session: &CdpSession,
+    format: ImageFormat,
+) -> Result<Vec<u8>> {
     let metrics = layout_metrics(session).await?;
     let width = metrics.content_width;
     let height = metrics.content_height;
@@ -168,6 +206,66 @@ pub async fn capture_full_page(session: &CdpSession, format: ImageFormat) -> Res
     )
     .await
 }
+
+const FULL_PAGE_SCROLL_SCRIPT: &str = r"
+(() => new Promise((resolve) => {
+  const root = document.scrollingElement;
+  if (!root) { resolve(false); return; }
+  const key = '__diveFullPageCapture';
+  const body = document.body;
+  globalThis[key] = {
+    x: globalThis.scrollX,
+    y: globalThis.scrollY,
+    rootBehavior: root.style.getPropertyValue('scroll-behavior'),
+    rootPriority: root.style.getPropertyPriority('scroll-behavior'),
+    bodyBehavior: body ? body.style.getPropertyValue('scroll-behavior') : '',
+    bodyPriority: body ? body.style.getPropertyPriority('scroll-behavior') : ''
+  };
+  root.style.setProperty('scroll-behavior', 'auto', 'important');
+  if (body) body.style.setProperty('scroll-behavior', 'auto', 'important');
+  globalThis.scrollTo(0, 0);
+  const reduced = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  let steps = 0;
+  let stalls = 0;
+  let last = -1;
+  const advance = () => {
+    const bottom = Math.max(0, root.scrollHeight - globalThis.innerHeight);
+    const step = Math.max(360, globalThis.innerHeight * 0.78);
+    const next = Math.min(bottom, globalThis.scrollY + step);
+    globalThis.scrollTo(0, next);
+    steps += 1;
+    stalls = Math.abs(globalThis.scrollY - last) < 1 ? stalls + 1 : 0;
+    last = globalThis.scrollY;
+    if (globalThis.scrollY >= bottom - 1 || stalls >= 3 || steps >= 240) {
+      globalThis.scrollTo(0, bottom);
+      globalThis.setTimeout(() => resolve(true), reduced ? 0 : 100);
+      return;
+    }
+    globalThis.setTimeout(advance, reduced ? 0 : 70);
+  };
+  globalThis.setTimeout(advance, reduced ? 0 : 70);
+}))()
+";
+
+const FULL_PAGE_RESTORE_SCRIPT: &str = r"
+(() => new Promise((resolve) => {
+  const root = document.scrollingElement;
+  const body = document.body;
+  const key = '__diveFullPageCapture';
+  const state = globalThis[key];
+  if (!root || !state) { resolve(false); return; }
+  const restore = (element, value, priority) => {
+    if (!element) return;
+    if (value) element.style.setProperty('scroll-behavior', value, priority);
+    else element.style.removeProperty('scroll-behavior');
+  };
+  restore(root, state.rootBehavior, state.rootPriority);
+  restore(body, state.bodyBehavior, state.bodyPriority);
+  globalThis.scrollTo(state.x, state.y);
+  delete globalThis[key];
+  globalThis.requestAnimationFrame(() => resolve(true));
+}))()
+";
 
 #[cfg(test)]
 mod tests {
@@ -208,16 +306,24 @@ mod tests {
     async fn full_page_uses_content_size_as_clip() {
         let png = base64::engine::general_purpose::STANDARD.encode(b"PNGDATA");
         let (session, sent) = scripted(vec![
-            json!({"cssContentSize": {"width": 1280, "height": 4000},
+            json!({"result": {"value": true},
+                   "cssContentSize": {"width": 1280, "height": 4000},
                    "cssLayoutViewport": {"clientWidth": 1280, "clientHeight": 800}}),
-            json!({"data": png}),
+            json!({"data": png, "cssContentSize": {"width": 1280, "height": 4000},
+                   "cssLayoutViewport": {"clientWidth": 1280, "clientHeight": 800}}),
+            json!({"data": base64::engine::general_purpose::STANDARD.encode(b"PNGDATA")}),
+            json!({"result": {"value": true}}),
         ]);
         let bytes = capture_full_page(&session, ImageFormat::Png).await.unwrap();
         assert_eq!(bytes, b"PNGDATA");
-        let shot = &sent.lock().unwrap()[1];
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent[0]["method"], "Runtime.evaluate");
+        assert_eq!(sent[0]["params"]["awaitPromise"], true);
+        let shot = &sent[2];
         assert_eq!(shot["method"], "Page.captureScreenshot");
         assert_eq!(shot["params"]["clip"]["height"], 4000.0);
         assert_eq!(shot["params"]["captureBeyondViewport"], true);
+        assert_eq!(sent[3]["method"], "Runtime.evaluate");
     }
 
     #[tokio::test]
@@ -226,7 +332,7 @@ mod tests {
             "cssContentSize": {"width": 100_000, "height": 100_000},
             "cssLayoutViewport": {"clientWidth": 1280, "clientHeight": 800}
         })]);
-        let error = capture_full_page(&session, ImageFormat::Png)
+        let error = capture_full_page_instant(&session, ImageFormat::Png)
             .await
             .unwrap_err();
         assert!(error.to_string().contains("safe"), "{error}");
@@ -235,6 +341,26 @@ mod tests {
             1,
             "captureScreenshot must not be sent"
         );
+    }
+
+    #[tokio::test]
+    async fn animated_capture_restores_scroll_after_capture_failure() {
+        let (session, sent) = scripted(vec![
+            json!({"result": {"value": true}}),
+            json!({
+                "cssContentSize": {"width": 100_000, "height": 100_000},
+                "cssLayoutViewport": {"clientWidth": 1280, "clientHeight": 800}
+            }),
+            json!({"result": {"value": true}}),
+        ]);
+
+        let error = capture_full_page(&session, ImageFormat::Png)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("safe"), "{error}");
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 3);
+        assert_eq!(sent[2]["method"], "Runtime.evaluate");
     }
 
     #[tokio::test]

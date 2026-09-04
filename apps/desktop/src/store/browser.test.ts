@@ -12,20 +12,20 @@ const tab = (id: string, url = "https://x"): Tab => ({
 
 describe("reduceEvent", () => {
   it("upserts tabs in place", () => {
-    const base = { workspaces: [], tabs: [tab("a"), tab("b")], activeTab: "a", activeWorkspace: "w", recordingTab: null, detached: [] };
+    const base = { workspaces: [], tabs: [tab("a"), tab("b")], activeTab: "a", activeWorkspace: "w", recordingTab: null, detached: [], profiles: [], activeProfile: null };
     const out = reduceEvent(base, { type: "tab_upserted", data: tab("a", "https://y") });
     expect(out.tabs?.map((t) => t.url)).toEqual(["https://y", "https://x"]);
   });
 
   it("closing the active tab clears the selection until the engine activates a replacement", () => {
-    const base = { workspaces: [], tabs: [tab("a"), tab("b")], activeTab: "b", activeWorkspace: "w", recordingTab: null, detached: [] };
+    const base = { workspaces: [], tabs: [tab("a"), tab("b")], activeTab: "b", activeWorkspace: "w", recordingTab: null, detached: [], profiles: [], activeProfile: null };
     const out = reduceEvent(base, { type: "tab_closed", data: "b" });
     expect(out).toEqual({ tabs: [tab("a")], activeTab: null, recordingTab: null, detached: [] });
     expect(reduceEvent({ ...base, ...out }, { type: "tab_activated", data: "a" })).toEqual({ activeTab: "a" });
   });
 
   it("closing the tab being recorded drops the recording state", () => {
-    const base = { workspaces: [], tabs: [tab("a"), tab("b")], activeTab: "a", activeWorkspace: "w", recordingTab: "b", detached: [] };
+    const base = { workspaces: [], tabs: [tab("a"), tab("b")], activeTab: "a", activeWorkspace: "w", recordingTab: "b", detached: [], profiles: [], activeProfile: null };
     expect(reduceEvent(base, { type: "tab_closed", data: "b" }).recordingTab).toBeNull();
     expect(reduceEvent(base, { type: "tab_closed", data: "a" }).recordingTab).toBe("b");
   });
@@ -140,7 +140,7 @@ describe("optimistic switching", () => {
   it("moves the rail at once and fills the tabs in from the snapshot", async () => {
     let done!: () => void;
     vi.spyOn(ipc, "workspaceActivate").mockReturnValue(new Promise<null>((r) => (done = () => r(null))));
-    const snapshot = vi.spyOn(ipc, "snapshot").mockResolvedValue({ workspaces: [], active_workspace: "w2", tabs: [tab("z")], active_tab: "z", detached: [] });
+    const snapshot = vi.spyOn(ipc, "snapshot").mockResolvedValue({ workspaces: [], active_workspace: "w2", tabs: [tab("z")], active_tab: "z", detached: [], profiles: [], active_profile: null });
     vi.spyOn(ipc, "workspaceTabCounts").mockResolvedValue([]);
     useBrowser.setState({ activeWorkspace: "w1", tabs: [tab("a")], activeTab: "a" });
     const p = useBrowser.getState().activateWorkspace("w2");
@@ -177,7 +177,7 @@ describe("boot", () => {
     vi.spyOn(events.downloadNotice, "listen").mockResolvedValue(() => undefined);
     vi.spyOn(events.consoleEntry, "listen").mockResolvedValue(() => undefined);
     vi.spyOn(events.networkEvent, "listen").mockResolvedValue(() => undefined);
-    vi.spyOn(ipc, "snapshot").mockResolvedValue({ workspaces: [], active_workspace: null, tabs: [], active_tab: null, detached: [] });
+    vi.spyOn(ipc, "snapshot").mockResolvedValue({ workspaces: [], active_workspace: null, tabs: [], active_tab: null, detached: [], profiles: [], active_profile: null });
     vi.spyOn(ipc, "workspaceTabCounts").mockResolvedValue([]);
 
     await useBrowser.getState().boot();

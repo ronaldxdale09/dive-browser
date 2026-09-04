@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Bug, Camera, Lock, MoreHorizontal, PanelBottom, RotateCw, Search, X, Menu } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bug, Camera, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, X, Menu } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { FOCUS_ADDRESS } from "../lib/commands";
 import { useBrowser } from "../store/browser";
@@ -21,6 +21,7 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
   const reload = useBrowser((s) => s.reload);
   const stop = useBrowser((s) => s.stop);
   const capture = useBrowser((s) => s.capture);
+  const capturing = useBrowser((s) => s.capturing);
   const devtools = useBrowser((s) => s.devtools);
   const toggle = useBrowser((s) => s.toggle);
   const open = useBrowser((s) => s.open);
@@ -95,7 +96,8 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
           <ZoomBadge />
           <BookmarkButton />
           <SharePopover />
-          <IconButton icon={Camera} label="Capture full page" shortcut="⌘⇧S" disabled={!current} onClick={() => void capture(true)} />
+          <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />
+          <span className={capturing ? "animate-spin motion-reduce:animate-none" : undefined}><IconButton icon={capturing ? LoaderCircle : Camera} label={capturing ? "Capturing full page" : "Capture full page"} shortcut="⌘⇧S" disabled={!current || capturing} onClick={() => void capture(true)} /></span>
           <IconButton icon={Bug} label="Open DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
           <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={open.dock && !open.sidecar} onClick={toggleDock} />
           <DownloadsMenu compact />
@@ -106,7 +108,8 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
           <BookmarkButton />
           <SharePopover />
           <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />
-          <IconButton icon={Camera} label="Capture full page" shortcut="⌘⇧S" disabled={!current} onClick={() => void capture(true)} />
+          <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />
+          <span className={capturing ? "animate-spin motion-reduce:animate-none" : undefined}><IconButton icon={capturing ? LoaderCircle : Camera} label={capturing ? "Capturing full page" : "Capture full page"} shortcut="⌘⇧S" disabled={!current || capturing} onClick={() => void capture(true)} /></span>
           <IconButton icon={Bug} label="Open DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
           <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={open.dock} onClick={toggleDock} />
           <DownloadsMenu compact />

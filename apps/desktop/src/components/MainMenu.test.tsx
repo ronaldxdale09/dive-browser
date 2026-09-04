@@ -15,7 +15,7 @@ beforeEach(() => {
     activeTab: tab.id,
     activeWorkspace: "w",
     detached: [],
-    open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false, menu: true },
+    open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false, menu: true, defaultBrowser: false },
   });
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
   vi.spyOn(ipc, "recordingsList").mockResolvedValue([]);

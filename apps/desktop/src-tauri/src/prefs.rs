@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use specta::Type;
 
 use crate::error::{AppError, AppResult};
-use crate::state::AppState;
+use crate::state::{AppState, lock};
 
 /// Key holding the JSON blob in the settings table.
 const KEY: &str = "prefs";
@@ -418,11 +418,145 @@ pub struct ClearRequest {
     pub site_data: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PendingClear {
+    profiles: Vec<String>,
+    what: ClearRequest,
+}
+
+fn pending_clear_path() -> std::path::PathBuf {
+    crate::state::data_root().join("pending-browser-data-clear.json")
+}
+
+fn merge_clear(left: ClearRequest, right: ClearRequest) -> ClearRequest {
+    ClearRequest {
+        history: left.history || right.history,
+        cookies: left.cookies || right.cookies,
+        cache: left.cache || right.cache,
+        site_data: left.site_data || right.site_data,
+    }
+}
+
+fn safe_profile(root: &std::path::Path, name: &str) -> AppResult<std::path::PathBuf> {
+    let path = std::path::Path::new(name);
+    if path.components().count() != 1
+        || !matches!(
+            path.components().next(),
+            Some(std::path::Component::Normal(_))
+        )
+    {
+        return Err(AppError::new("invalid browser profile path"));
+    }
+    Ok(root.join(path))
+}
+
+fn component_targets(profile: &std::path::Path, what: ClearRequest) -> Vec<std::path::PathBuf> {
+    let mut targets = Vec::new();
+    if what.cookies {
+        for relative in [
+            "Cookies",
+            "Cookies-journal",
+            "Network/Cookies",
+            "Network/Cookies-journal",
+        ] {
+            targets.push(profile.join(relative));
+        }
+    }
+    if what.cache {
+        for relative in [
+            "Cache",
+            "Code Cache",
+            "GPUCache",
+            "Network Cache",
+            "Network/Cache",
+            "Shared Dictionary",
+            "Service Worker/CacheStorage",
+        ] {
+            targets.push(profile.join(relative));
+        }
+    }
+    if what.site_data {
+        for relative in [
+            "Local Storage",
+            "Session Storage",
+            "WebStorage",
+            "IndexedDB",
+            "CacheStorage",
+            "File System",
+            "blob_storage",
+            "databases",
+            "QuotaManager",
+            "QuotaManager-journal",
+            "Service Worker",
+        ] {
+            targets.push(profile.join(relative));
+        }
+    }
+    targets.sort();
+    targets.dedup();
+    targets
+}
+
+fn remove_target(path: &std::path::Path) -> AppResult<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    if path.is_dir() {
+        std::fs::remove_dir_all(path).map_err(AppError::new)
+    } else {
+        std::fs::remove_file(path).map_err(AppError::new)
+    }
+}
+
+/// Finish deferred profile cleanup before CEF opens or locks profile files.
+pub fn finish_pending_clear() -> AppResult<()> {
+    let pending_path = pending_clear_path();
+    if !pending_path.exists() {
+        return Ok(());
+    }
+    let pending: PendingClear = serde_json::from_slice(
+        &std::fs::read(&pending_path).map_err(AppError::new)?,
+    )
+    .map_err(|error| AppError::new(format!("invalid pending browser-data cleanup: {error}")))?;
+    let root = crate::state::profiles_root();
+    for name in &pending.profiles {
+        let profile = safe_profile(&root, name)?;
+        for target in component_targets(&profile, pending.what) {
+            remove_target(&target)?;
+        }
+    }
+    std::fs::remove_file(pending_path).map_err(AppError::new)
+}
+
+fn queue_profile_clear(profiles: &[String], what: ClearRequest) -> AppResult<()> {
+    let path = pending_clear_path();
+    let existing = if path.exists() {
+        serde_json::from_slice::<PendingClear>(&std::fs::read(&path).map_err(AppError::new)?).ok()
+    } else {
+        None
+    };
+    let mut profiles = existing.as_ref().map_or(profiles.to_owned(), |pending| {
+        let mut names = pending.profiles.clone();
+        names.extend_from_slice(profiles);
+        names
+    });
+    profiles.sort();
+    profiles.dedup();
+    let what = existing.map_or(what, |pending| merge_clear(pending.what, what));
+    let pending = PendingClear { profiles, what };
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(
+        &tmp,
+        serde_json::to_vec_pretty(&pending).map_err(AppError::new)?,
+    )
+    .map_err(AppError::new)?;
+    std::fs::rename(tmp, path).map_err(AppError::new)
+}
+
 /// Delete the requested browsing data and describe what went.
 ///
-/// Cookies, cache and site data are cleared through the open tabs' `DevTools`
-/// sessions, so a profile with no tab open keeps its data; the returned
-/// summary says so rather than pretending otherwise.
+/// Open profiles clear immediately through Chromium; a component cleanup is
+/// also queued for the next launch before CEF locks persistent profile files.
 pub async fn clear(state: &AppState, what: ClearRequest) -> AppResult<String> {
     let mut done: Vec<String> = Vec::new();
     if what.history {
@@ -433,36 +567,50 @@ pub async fn clear(state: &AppState, what: ClearRequest) -> AppResult<String> {
         let host = crate::state::lock(&state.host);
         let store = crate::state::lock(&state.store);
         host.as_ref().map_or_else(Vec::new, |host| {
-            host.sessions()
-                .into_iter()
-                .map(|(id, session)| {
-                    let url = store.tab(id).map(|t| t.url).unwrap_or_default();
-                    (url, session)
-                })
-                .collect()
+            let mut profiles = std::collections::HashMap::new();
+            for (id, session) in host.sessions() {
+                let Ok(tab) = store.tab(id) else { continue };
+                let Some(workspace) = tab
+                    .workspace_id
+                    .and_then(|workspace| store.workspace(workspace).ok())
+                else {
+                    continue;
+                };
+                profiles
+                    .entry(workspace.container_id)
+                    .or_insert((tab.url, session));
+            }
+            profiles.into_values().collect()
         })
     };
-    if sessions.is_empty() && (what.cookies || what.cache || what.site_data) {
-        done.push("nothing else (no tab open)".into());
-        return Ok(summary(&done));
-    }
+    let mut first_error = None;
     for (url, session) in &sessions {
-        if what.cookies {
-            let _ = session.call0("Network.clearBrowserCookies").await;
+        if what.cookies
+            && let Err(error) = session.call0("Network.clearBrowserCookies").await
+        {
+            first_error.get_or_insert(error);
         }
-        if what.cache {
-            let _ = session.call0("Network.clearBrowserCache").await;
+        if what.cache
+            && let Err(error) = session.call0("Network.clearBrowserCache").await
+        {
+            first_error.get_or_insert(error);
         }
         if what.site_data
             && let Some(origin) = origin_of(url)
-        {
-            let _ = session
+            && let Err(error) = session
                 .call(
                     "Storage.clearDataForOrigin",
                     json!({"origin": origin, "storageTypes": "all"}),
                 )
-                .await;
+                .await
+        {
+            first_error.get_or_insert(error);
         }
+    }
+    if let Some(error) = first_error {
+        return Err(AppError::new(format!(
+            "Chromium could not clear browser data: {error}"
+        )));
     }
     if what.cookies {
         done.push("cookies".into());
@@ -473,7 +621,20 @@ pub async fn clear(state: &AppState, what: ClearRequest) -> AppResult<String> {
     if what.site_data {
         done.push("site data".into());
     }
-    Ok(summary(&done))
+    if what.cookies || what.cache || what.site_data {
+        let profiles: Vec<String> = lock(&state.store)
+            .containers()?
+            .into_iter()
+            .map(|container| container.cache_dir)
+            .collect();
+        queue_profile_clear(&profiles, what)?;
+        Ok(format!(
+            "{}; restart Dive to finish every profile",
+            summary(&done)
+        ))
+    } else {
+        Ok(summary(&done))
+    }
 }
 
 fn origin_of(url: &str) -> Option<String> {
@@ -504,6 +665,53 @@ pub fn prune_history(state: &AppState) -> AppResult<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profile_cleanup_is_scoped_and_selection_specific() {
+        let root = std::path::Path::new("/profiles");
+        assert_eq!(
+            safe_profile(root, "container-good").unwrap(),
+            root.join("container-good")
+        );
+        assert!(safe_profile(root, "../outside").is_err());
+        assert!(safe_profile(root, "/absolute").is_err());
+        let targets = component_targets(
+            &root.join("container-good"),
+            ClearRequest {
+                history: false,
+                cookies: true,
+                cache: false,
+                site_data: false,
+            },
+        );
+        assert!(targets.iter().any(|path| path.ends_with("Network/Cookies")));
+        assert!(!targets.iter().any(|path| path.ends_with("IndexedDB")));
+    }
+
+    #[test]
+    fn pending_clear_selections_only_grow() {
+        let first = ClearRequest {
+            history: true,
+            cookies: false,
+            cache: true,
+            site_data: false,
+        };
+        let second = ClearRequest {
+            history: false,
+            cookies: true,
+            cache: false,
+            site_data: true,
+        };
+        assert_eq!(
+            merge_clear(first, second),
+            ClearRequest {
+                history: true,
+                cookies: true,
+                cache: true,
+                site_data: true
+            }
+        );
+    }
 
     #[test]
     fn defaults_survive_a_partial_blob() {

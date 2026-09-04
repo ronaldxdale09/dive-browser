@@ -11,6 +11,7 @@ const personal: Workspace = {
   color: "#7FD8C8",
   icon: "aurora",
   container_id: "container-1",
+  profile_id: "profile-1",
   position: 0,
   created_at: "2026-09-03T00:00:00Z",
 };

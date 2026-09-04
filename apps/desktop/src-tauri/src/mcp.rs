@@ -520,7 +520,8 @@ impl Browser for AppBrowser {
     async fn screenshot(&self, tab: TabId, full_page: bool) -> Result<Vec<u8>, BrowserError> {
         let session = self.session_for(tab).await?;
         let png = if full_page {
-            dive_cdp::page::capture_full_page(&session, dive_cdp::page::ImageFormat::Png).await
+            dive_cdp::page::capture_full_page_instant(&session, dive_cdp::page::ImageFormat::Png)
+                .await
         } else {
             dive_cdp::page::capture_screenshot(
                 &session,

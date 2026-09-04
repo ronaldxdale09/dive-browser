@@ -413,8 +413,17 @@ impl TabHost {
                 };
                 crate::privacy::attach_page(prefs_app.clone(), tab_id, session_for_prefs.clone())
                     .await;
+                tracing::debug!(%tab_id, "privacy page setup complete before navigation");
+                crate::permissions::attach_page(
+                    prefs_app.clone(),
+                    tab_id,
+                    session_for_prefs.clone(),
+                )
+                .await;
+                tracing::debug!(%tab_id, "permission page setup complete before navigation");
                 crate::privacy::apply_page(&session_for_prefs, &prefs, url.as_str()).await;
                 crate::prefs::apply(&session_for_prefs, &prefs).await;
+                tracing::debug!(%tab_id, "browser preferences complete before navigation");
                 if let Err(e) = nav.navigate(url) {
                     tracing::warn!(%tab_id, "initial navigation failed: {e}");
                 }

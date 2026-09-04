@@ -6,8 +6,10 @@
 //! answer is stored per origin and kind, and the page gets it on its next
 //! request (the prompt offers a reload).
 
+use dive_cdp::CdpSession;
 use dive_core::TabId;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use specta::Type;
 use tauri::Manager;
 use tauri::webview::{PermissionKind, PermissionResponse};
@@ -17,6 +19,15 @@ use crate::Runtime;
 use crate::state::{AppState, lock};
 
 const PREFIX: &str = "perm:";
+const BINDING: &str = "__divePermissionRequest";
+const KINDS: &[&str] = &[
+    "camera",
+    "microphone",
+    "geolocation",
+    "notifications",
+    "clipboard_read",
+    "display_capture",
+];
 
 /// What the person decided for one origin and kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -163,6 +174,142 @@ pub fn decide(webview: &tauri::Webview<Runtime>, kind: PermissionKind) -> Permis
     }
 }
 
+fn cdp_name(kind: &str) -> Option<&'static str> {
+    match kind {
+        "camera" => Some("camera"),
+        "microphone" => Some("microphone"),
+        "geolocation" => Some("geolocation"),
+        "notifications" => Some("notifications"),
+        "clipboard_read" => Some("clipboard-read"),
+        "display_capture" => Some("display-capture"),
+        _ => None,
+    }
+}
+
+fn cdp_setting(decision: Decision) -> &'static str {
+    match decision {
+        Decision::Allow => "granted",
+        Decision::Deny | Decision::Ask => "denied",
+    }
+}
+
+fn cdp_params(origin: &str, kind: &str, choice: Decision) -> Option<serde_json::Value> {
+    Some(json!({
+        "permission": {"name": cdp_name(kind)?},
+        "setting": cdp_setting(choice),
+        "origin": origin,
+    }))
+}
+
+/// Apply all remembered decisions for one origin through Chromium's native
+/// permission policy. Undecided capabilities fail closed until the user acts.
+pub async fn apply_origin(state: &AppState, session: &CdpSession, origin: &str) {
+    for kind in KINDS {
+        let Some(params) = cdp_params(origin, kind, decision(state, origin, kind)) else {
+            continue;
+        };
+        if let Err(error) = session.call("Browser.setPermission", params).await {
+            tracing::debug!(%origin, %kind, %error, "applying browser permission failed");
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct BindingRequest {
+    nonce: String,
+    id: u64,
+    kind: String,
+}
+
+fn binding_request(event: &dive_cdp::CdpEvent, nonce: &str) -> Option<(BindingRequest, i64)> {
+    if event.method != "Runtime.bindingCalled" || event.params["name"].as_str() != Some(BINDING) {
+        return None;
+    }
+    let request: BindingRequest = serde_json::from_str(event.params["payload"].as_str()?).ok()?;
+    if request.nonce != nonce || !KINDS.contains(&request.kind.as_str()) {
+        return None;
+    }
+    Some((request, event.params["executionContextId"].as_i64()?))
+}
+
+/// Install the media-attempt reporter and keep permission policy synchronized
+/// as the main frame moves between origins.
+pub async fn attach_page(app: tauri::AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
+    let mut events = session.subscribe();
+    let nonce = TabId::new().to_string().replace('-', "");
+    let script = crate::pagescript::build(
+        "media-guard.js",
+        &[
+            (
+                "__NONCE__",
+                serde_json::to_string(&nonce).unwrap_or_else(|_| "null".into()),
+            ),
+            ("__BINDING__", BINDING.to_owned()),
+        ],
+    );
+    for (method, params) in [
+        ("Runtime.enable", json!({})),
+        ("Page.enable", json!({})),
+        ("Runtime.addBinding", json!({"name": BINDING})),
+        (
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({"source": script}),
+        ),
+        ("Runtime.evaluate", json!({"expression": script})),
+    ] {
+        match session.call(method, params).await {
+            Ok(_) => tracing::debug!(%tab_id, %method, "permission page setup step complete"),
+            Err(error) => {
+                tracing::warn!(%tab_id, %method, %error, "permission page setup step failed")
+            }
+        }
+    }
+    tracing::debug!(%tab_id, "permission page setup complete");
+
+    tauri::async_runtime::spawn(async move {
+        while let Ok(event) = events.recv().await {
+            if let Some((request, context_id)) = binding_request(&event, &nonce) {
+                let origin = session.call("Runtime.evaluate", json!({"expression": "location.origin", "contextId": context_id, "returnByValue": true})).await
+                    .ok().and_then(|result| result["result"]["value"].as_str().map(str::to_owned));
+                let allowed = if let Some(origin) = origin {
+                    let state = app.state::<AppState>();
+                    let choice = decision(&state, &origin, &request.kind);
+                    if choice == Decision::Ask {
+                        let _ = PermissionAsked {
+                            tab_id,
+                            origin: origin.clone(),
+                            kind: request.kind.clone(),
+                        }
+                        .emit(&app);
+                    }
+                    apply_origin(&state, &session, &origin).await;
+                    choice == Decision::Allow
+                } else {
+                    false
+                };
+                let expression = format!(
+                    "window.__divePermissionResolve({}, {})",
+                    request.id,
+                    if allowed { "true" } else { "false" }
+                );
+                let _ = session
+                    .call(
+                        "Runtime.evaluate",
+                        json!({"expression": expression, "contextId": context_id}),
+                    )
+                    .await;
+            }
+            if event.method == "Page.frameNavigated"
+                && event.params["frame"]["parentId"].is_null()
+                && let Some(url) = event.params["frame"]["url"].as_str()
+                && let Some(origin) = dive_core::origin_of(url)
+            {
+                apply_origin(&app.state::<AppState>(), &session, &origin).await;
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,5 +335,38 @@ mod tests {
     fn every_kind_has_a_name() {
         assert_eq!(kind_name(PermissionKind::Camera), "camera");
         assert_eq!(kind_name(PermissionKind::DisplayCapture), "display_capture");
+    }
+
+    #[test]
+    fn undecided_permissions_fail_closed_in_chromium() {
+        assert_eq!(cdp_setting(Decision::Ask), "denied");
+        assert_eq!(cdp_setting(Decision::Deny), "denied");
+        assert_eq!(cdp_setting(Decision::Allow), "granted");
+        assert_eq!(cdp_name("camera"), Some("camera"));
+        assert_eq!(cdp_name("microphone"), Some("microphone"));
+        assert_eq!(cdp_name("unknown"), None);
+        assert_eq!(
+            cdp_params("https://example.com", "camera", Decision::Allow).unwrap(),
+            json!({"permission": {"name": "camera"}, "setting": "granted", "origin": "https://example.com"})
+        );
+    }
+
+    #[test]
+    fn recognizes_only_authenticated_media_binding_messages() {
+        let event = dive_cdp::CdpEvent {
+            method: "Runtime.bindingCalled".into(),
+            params: json!({"name": BINDING, "payload":"{\"nonce\":\"n\",\"id\":7,\"kind\":\"camera\"}", "executionContextId": 3}),
+        };
+        let (request, context) = binding_request(&event, "n").unwrap();
+        assert_eq!(
+            (request.id, request.kind.as_str(), context),
+            (7, "camera", 3)
+        );
+        assert!(binding_request(&event, "wrong").is_none());
+        let forged = dive_cdp::CdpEvent {
+            method: event.method.clone(),
+            params: json!({"name": BINDING, "payload":"{\"nonce\":\"n\",\"id\":7,\"kind\":\"filesystem\"}", "executionContextId": 3}),
+        };
+        assert!(binding_request(&forged, "n").is_none());
     }
 }

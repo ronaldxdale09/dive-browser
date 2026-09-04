@@ -125,6 +125,9 @@ pub const ACTIVE_TAB: &str = "active_tab";
 /// Ensure at least one container and workspace exist; return the workspace to
 /// show: the last active one if it still exists, else the first.
 fn seed_defaults(store: &Store) -> anyhow::Result<WorkspaceId> {
+    // Profiles came later than workspaces: an older database gets its
+    // "Personal" profile here, adopting every workspace it already had.
+    let profile = store.ensure_default_profile()?;
     let workspaces = store.workspaces()?;
     if !workspaces.is_empty() {
         let remembered = store
@@ -140,7 +143,7 @@ fn seed_defaults(store: &Store) -> anyhow::Result<WorkspaceId> {
         store.upsert_container(&c)?;
         c
     };
-    let workspace = Workspace::new("Home", container.id, 0);
+    let workspace = Workspace::new("Home", container.id, profile.id, 0);
     store.upsert_workspace(&workspace)?;
     tracing::info!(id = %workspace.id, "seeded default workspace");
     Ok(workspace.id)

@@ -197,7 +197,8 @@ fn test_safe_discard_audible_and_active_tabs() {
 #[test]
 fn test_multi_workspace_sweep_coverage() {
     let (store, container_id, ws_1) = create_test_store();
-    let ws_2 = dive_core::model::Workspace::new("Secondary Workspace", container_id, 1);
+    let profile_id = store.workspace(ws_1).unwrap().profile_id;
+    let ws_2 = dive_core::model::Workspace::new("Secondary Workspace", container_id, profile_id, 1);
     store.upsert_workspace(&ws_2).unwrap();
 
     let now = Timestamp::now();

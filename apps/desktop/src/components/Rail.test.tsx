@@ -4,6 +4,7 @@ import type { Workspace } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
+import { useDefaultBrowser } from "../store/defaultBrowser";
 import { Rail } from "./Rail";
 
 const personal: Workspace = {
@@ -12,6 +13,7 @@ const personal: Workspace = {
   color: "#7FD8C8",
   icon: "aurora",
   container_id: "container-1",
+  profile_id: "profile-1",
   position: 0,
   created_at: "2026-09-03T00:00:00Z",
 };
@@ -23,10 +25,12 @@ beforeEach(() => {
     activeWorkspace: personal.id,
     counts: { [personal.id]: 3, [client.id]: 1 },
     editing: null,
-    open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false, menu: false },
+    open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false, menu: false, defaultBrowser: false },
   });
   usePrefs.setState({ prefs: { ...DEFAULT_PREFS, rail_expanded: true }, loaded: true });
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
+  vi.spyOn(ipc, "defaultBrowserStatus").mockResolvedValue({ supported: true, is_default: false, current: "com.apple.Safari" });
+  useDefaultBrowser.setState({ status: null, phase: "idle", error: null });
 });
 
 afterEach(() => {
@@ -82,5 +86,40 @@ describe("Rail", () => {
     expect(useBrowser.getState().editing).toBeNull();
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit workspace…" }));
     expect(useBrowser.getState().editing).toEqual({ id: personal.id });
+  });
+
+  it("offers to make Dive the default browser, just above Settings", async () => {
+    render(<Rail />);
+    const offer = await screen.findByRole("button", { name: "Make Dive the default browser" });
+    expect(offer.textContent).toContain("Default browser");
+    const settings = screen.getByRole("button", { name: "Settings" });
+    expect(offer.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(offer.nextElementSibling).toBe(settings);
+    expect(screen.queryByTestId("default-browser-badge")).toBeNull();
+  });
+
+  it("hides the default-browser entry when the build cannot ask", async () => {
+    vi.mocked(ipc.defaultBrowserStatus).mockResolvedValue({ supported: false, is_default: false, current: null });
+    render(<Rail />);
+    await waitFor(() => expect(useDefaultBrowser.getState().status?.supported).toBe(false));
+    expect(screen.queryByRole("button", { name: /default browser/i })).toBeNull();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeTruthy();
+  });
+
+  it("wears a check once Dive is the default", async () => {
+    vi.mocked(ipc.defaultBrowserStatus).mockResolvedValue({ supported: true, is_default: true, current: "com.dive.browser" });
+    render(<Rail />);
+    const button = await screen.findByRole("button", { name: "Dive is your default browser" });
+    expect(button.textContent).toContain("Default browser");
+    expect(screen.getByTestId("default-browser-badge")).toBeTruthy();
+  });
+
+  it("opens the default-browser dialog on click, and re-reads the status on focus", async () => {
+    render(<Rail />);
+    fireEvent.click(await screen.findByRole("button", { name: "Make Dive the default browser" }));
+    expect(useBrowser.getState().open.defaultBrowser).toBe(true);
+    const before = vi.mocked(ipc.defaultBrowserStatus).mock.calls.length;
+    fireEvent(window, new Event("focus"));
+    expect(vi.mocked(ipc.defaultBrowserStatus).mock.calls.length).toBe(before + 1);
   });
 });

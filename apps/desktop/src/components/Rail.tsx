@@ -1,12 +1,13 @@
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { PanelLeftClose, PanelLeftOpen, Pencil, Plus, Settings2, Shield, SquarePlus, Trash2 } from "lucide-react";
-import { useRef, useState } from "react";
+import { Check, Globe, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Settings2, Shield, SquarePlus, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { useBrowser } from "../store/browser";
 import type { Workspace } from "../lib/ipc";
 import { usePrefs } from "../store/prefs";
+import { useDefaultBrowser } from "../store/defaultBrowser";
 import { workspaceAvatar } from "../lib/workspaceAvatar";
 import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
@@ -27,7 +28,11 @@ export const RAIL_WIDTH = { collapsed: 52, expanded: 208 };
  * that is guessable from a coloured circle.
  */
 export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
-  const workspaces = useBrowser((s) => s.workspaces);
+  const all = useBrowser((s) => s.workspaces);
+  const activeProfile = useBrowser((s) => s.activeProfile);
+  // The rail is the active profile's: other profiles' workspaces wait
+  // behind the profile switcher in the title bar.
+  const workspaces = all.filter((w) => !activeProfile || w.profile_id === activeProfile);
   const active = useBrowser((s) => s.activeWorkspace);
   const activate = useBrowser((s) => s.activateWorkspace);
   const reorder = useBrowser((s) => s.reorderWorkspaces);
@@ -93,6 +98,7 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
         </button>
       </div>
       {!expanded && !forceCollapsed && <RailButton icon={PanelLeftOpen} label="Expand workspaces" onClick={() => void update({ rail_expanded: true })} />}
+      <DefaultBrowserButton expanded={expanded} />
       <button
         type="button"
         aria-label="Settings"
@@ -111,6 +117,48 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
       </button>
       {menu && <WorkspaceMenu id={menu.id} x={menu.x} y={menu.y} onClose={() => setMenu(null)} />}
     </nav>
+  );
+}
+
+/**
+ * Offer to make Dive the default browser, or say that it already is. Hidden
+ * on builds that cannot ask. The status is read once and again whenever the
+ * window regains focus, so a change made in System Settings shows up.
+ */
+function DefaultBrowserButton({ expanded }: { expanded: boolean }) {
+  const status = useDefaultBrowser((s) => s.status);
+  const refresh = useDefaultBrowser((s) => s.refresh);
+  useEffect(() => {
+    void refresh();
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refresh]);
+  if (!status?.supported) return null;
+  const isDefault = status.is_default;
+  const title = isDefault ? "Dive is your default browser" : "Make Dive the default browser";
+  return (
+    <button
+      type="button"
+      aria-label={title}
+      title={title}
+      onClick={() => useBrowser.getState().toggle("defaultBrowser", true)}
+      className={
+        expanded
+          ? "flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-2 text-xs text-ink-3 hover:bg-surface-2 hover:text-ink"
+          : "grid size-9 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink"
+      }
+    >
+      <span className="relative grid size-7 shrink-0 place-items-center">
+        <Icon icon={Globe} />
+        {isDefault && (
+          <span data-testid="default-browser-badge" className="absolute right-0.5 bottom-0.5 grid size-3 place-items-center rounded-full bg-accent text-accent-ink" aria-hidden>
+            <Icon icon={Check} size={8} />
+          </span>
+        )}
+      </span>
+      {expanded && "Default browser"}
+    </button>
   );
 }
 
