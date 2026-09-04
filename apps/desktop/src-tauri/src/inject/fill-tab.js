@@ -7,6 +7,8 @@ if (window.__diveFillTab) return;
 
 const TARGET = "dive-fill-target";
 const CHAIN = "dive-fill-chain";
+const STAGE = "dive-fill-stage";
+const BACKDROP = "dive-fill-backdrop";
 const FILLING = "dive-filling";
 const Z = 2147483645;
 
@@ -14,13 +16,20 @@ const style = document.createElement("style");
 style.setAttribute("data-dive", "fill-tab");
 style.textContent = `
 html.${FILLING}, html.${FILLING} body { overflow: hidden !important; }
-.${TARGET} {
+.${STAGE}, .${BACKDROP} {
   position: fixed !important; inset: 0 !important;
   width: 100vw !important; height: 100vh !important;
+  margin: 0 !important; padding: 0 !important; border: 0 !important;
+  background: #000 !important;
+}
+.${BACKDROP} { z-index: ${Z} !important; }
+.${STAGE} { z-index: ${Z + 1} !important; }
+.${STAGE} > .${TARGET} {
+  position: absolute !important; inset: 0 !important;
+  width: 100% !important; height: 100% !important;
   max-width: none !important; max-height: none !important;
   margin: 0 !important; padding: 0 !important;
-  z-index: ${Z} !important; background: #000 !important;
-  transform: none !important; border-radius: 0 !important;
+  transform: none !important; border-radius: 0 !important; background: #000 !important;
 }
 .${TARGET} .${CHAIN} {
   position: absolute !important; inset: 0 !important;
@@ -32,13 +41,13 @@ html.${FILLING}, html.${FILLING} body { overflow: hidden !important; }
   position: absolute !important; left: 0 !important; top: 0 !important;
   width: 100% !important; height: 100% !important;
   max-width: none !important; max-height: none !important;
-  object-fit: contain !important;
+  object-fit: contain !important; z-index: 1 !important;
 }`;
 
 // The control lives in a shadow root so page CSS cannot restyle it.
 const host = document.createElement("div");
 host.setAttribute("data-dive", "fill-tab-control");
-host.style.cssText = `position:fixed;left:0;top:0;z-index:${Z + 2};pointer-events:none;`;
+host.style.cssText = `position:fixed;left:0;top:0;z-index:${Z + 3};pointer-events:none;`;
 const shadow = host.attachShadow({ mode: "closed" });
 // Built with DOM calls, never HTML strings: sites that enforce Trusted
 // Types (YouTube among them) reject innerHTML from any script.
@@ -85,6 +94,9 @@ let hovered = null;
 let target = null;
 let filledVideo = null;
 let chain = [];
+let stage = null;
+let backdrop = null;
+let placeholder = null;
 let hideTimer = 0;
 let mounted = false;
 
@@ -97,6 +109,13 @@ function mount() {
   (document.head || root).appendChild(style);
   root.appendChild(host);
   mounted = true;
+}
+
+// The control must sit above the stage, which is appended after it; moving
+// the host to the end of <body> whenever it shows keeps it on top.
+function raise() {
+  const root = document.body || document.documentElement;
+  if (root && host.parentNode === root) root.appendChild(host);
 }
 
 function playerFor(video) {
@@ -143,6 +162,7 @@ function show(video) {
   } else if (!place(video)) {
     return;
   }
+  raise();
   button.classList.add("show");
   clearTimeout(hideTimer);
   hideTimer = setTimeout(hide, filling ? 2200 : 1600);
@@ -155,8 +175,27 @@ function hide() {
 
 function enter(video) {
   const node = playerFor(video);
+  if (!node.parentNode || node === document.body || node === document.documentElement) return;
   target = node;
   filledVideo = video;
+  // Reparent the player to a top-level stage. Fixed positioning and a high
+  // z-index are not enough on their own: a site whose player sits inside an
+  // ancestor with its own transform or z-index (YouTube does) traps the
+  // player below its header and sidebar. Lifting the node out to <body>
+  // escapes every such stacking context. A comment marks the exact spot so
+  // exit puts it back where it was.
+  placeholder = document.createComment("dive-fill");
+  node.parentNode.insertBefore(placeholder, node);
+  backdrop = document.createElement("div");
+  backdrop.className = BACKDROP;
+  backdrop.setAttribute("data-dive", "fill");
+  stage = document.createElement("div");
+  stage.className = STAGE;
+  stage.setAttribute("data-dive", "fill");
+  const root = document.body || document.documentElement;
+  root.appendChild(backdrop);
+  root.appendChild(stage);
+  stage.appendChild(node);
   node.classList.add(TARGET);
   // Every wrapper between the player and the video is stretched too, or a
   // zero-height container (YouTube's video container) hides the picture.
@@ -176,6 +215,16 @@ function exit() {
   target.classList.remove(TARGET);
   for (const el of chain) el.classList.remove(CHAIN);
   chain = [];
+  // Put the player back exactly where it was, then drop the stage.
+  if (placeholder && placeholder.parentNode) {
+    placeholder.parentNode.insertBefore(target, placeholder);
+    placeholder.remove();
+  }
+  placeholder = null;
+  if (stage) stage.remove();
+  if (backdrop) backdrop.remove();
+  stage = null;
+  backdrop = null;
   document.documentElement.classList.remove(FILLING);
   target = null;
   filledVideo = null;
