@@ -157,7 +157,7 @@ describe("SettingsDialog", () => {
   });
 
   it("closes on Escape", async () => {
-    useBrowser.setState({ open: { sidecar: false, dock: false, palette: false, find: false, settings: true, library: false, shortcuts: false, menu: false, defaultBrowser: false } });
+    useBrowser.setState({ open: { sidecar: false, dock: false, palette: false, find: false, settings: true, library: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false } });
     render(<SettingsDialog />);
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     await waitFor(() => expect(useBrowser.getState().open.settings).toBe(false));

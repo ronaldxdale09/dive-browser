@@ -13,7 +13,7 @@ type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 export { events };
 export type { ExtensionInfo, ExtensionList };
-export type { Prefs, ClearRequest, Rule, RuleAction, PrivacyCategory, PrivacyEvent, PrivacyInfo, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, RecordOptions, RecordingResult, RecordingCapabilities, RecordingEvent, Microphone, MediaInfo, ExportRequest, KeptSegment, RecordingInfo, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions, SitePermission, Decision, UpdateInfo, PermissionAsked, TabTier, DefaultBrowserStatus, Profile, ProfileId, ProfileDraft } from "../generated/bindings";
+export type { Prefs, ClearRequest, Rule, RuleAction, PrivacyCategory, PrivacyEvent, PrivacyInfo, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, RecordOptions, RecordingResult, RecordingCapabilities, RecordingEvent, Microphone, MediaInfo, ExportRequest, KeptSegment, RecordingInfo, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions, SitePermission, Decision, UpdateInfo, PermissionAsked, TabTier, DefaultBrowserStatus, Profile, ProfileId, ProfileDraft, SubtitleModel, SubtitleModelProgress, SubtitleCue, SubtitleState } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
 export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
@@ -172,6 +172,15 @@ export const ipc = {
     channel.onmessage = onDelta;
     unwrap(await commands.agentSend(runId, turns, tabId, options, channel));
   },
+  /** The local subtitle models and whether each is downloaded. */
+  subtitleModels: () => commands.subtitleModels(),
+  /** Start downloading a model; progress arrives on `events.subtitleModelProgress`. */
+  subtitleModelDownload: async (id: string) => unwrap(await commands.subtitleModelDownload(id)),
+  /** Start live subtitles on a tab. `language` is an ISO code or "auto"; `translate` renders English. */
+  subtitleStart: async (id: string, model: string, language: string, translate: boolean) =>
+    unwrap(await commands.subtitleStart(id, model, language, translate)),
+  subtitleStop: (id: string) => commands.subtitleStop(id),
+  subtitleRunning: (id: string) => commands.subtitleRunning(id),
   commandRun: async (id: string, args: unknown = null): Promise<unknown> =>
     JSON.parse(unwrap(await commands.commandRun(id, args === null ? null : JSON.stringify(args)))),
 };

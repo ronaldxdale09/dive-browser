@@ -15,7 +15,7 @@ beforeEach(() => {
     activeTab: tab.id,
     activeWorkspace: "w",
     detached: [],
-    open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false, menu: true, defaultBrowser: false },
+    open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false, menu: true, defaultBrowser: false, subtitles: false },
   });
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
   vi.spyOn(ipc, "recordingsList").mockResolvedValue([]);
@@ -29,7 +29,7 @@ afterEach(() => {
 describe("MainMenu", () => {
   it("lists the browser's pages and features with their shortcuts", () => {
     render(<MainMenu />);
-    for (const name of ["New Tab", "Bookmarks", "History", "Downloads", "Recordings", "Settings", "Device Simulator", "Record a Video", "Print…"]) {
+    for (const name of ["New Tab", "Bookmarks", "History", "Downloads", "Recordings", "Settings", "Device Simulator", "Record a Video", "Live subtitles", "Print…"]) {
       expect(screen.getByRole("menuitem", { name: new RegExp(name.replace("…", "")) })).toBeTruthy();
     }
     expect(screen.getByText("⌘T")).toBeTruthy();

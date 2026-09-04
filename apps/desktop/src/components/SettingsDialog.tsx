@@ -1,4 +1,5 @@
 import {
+  Captions,
   Check as CheckIcon,
   Copy,
   Download,
@@ -31,6 +32,7 @@ import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { AgentIcon } from "./agent/AgentIcon";
 import { Appearance } from "./settings/Appearance";
+import { SubtitlesControls } from "./settings/SubtitlesControls";
 
 type SectionId = SettingsSection;
 
@@ -41,6 +43,7 @@ const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
   { id: "downloads", label: "Downloads", icon: Download },
   { id: "developer", label: "Developer", icon: Plug },
   { id: "agent", label: "Agent", icon: AgentIcon as LucideIcon },
+  { id: "subtitles", label: "Live subtitles", icon: Captions },
   { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
   { id: "about", label: "About", icon: Info },
 ];
@@ -143,6 +146,8 @@ function Panel({ section, info }: { section: SectionId; info: AppInfo | null }) 
       return <Developer info={info} />;
     case "agent":
       return <Agent />;
+    case "subtitles":
+      return <SubtitlesControls />;
     case "shortcuts":
       return <Shortcuts />;
     case "about":

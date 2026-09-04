@@ -26,7 +26,7 @@ beforeEach(() => {
     tabs: [tab],
     activeTab: tab.id,
     activeWorkspace: tab.workspace_id,
-    open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false, menu: false, defaultBrowser: false },
+    open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false },
     error: null,
     notice: null,
     annotating: null,

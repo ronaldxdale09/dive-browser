@@ -6,12 +6,12 @@ import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
 import { useDownloads } from "./downloads";
 import type { CoreEvent, Decision, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
 
-export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser";
+export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser" | "subtitles";
 /** The sections of the library dialog. */
 export type LibraryTab = "bookmarks" | "history" | "downloads" | "recordings";
 
 /** The panels of the settings dialog; `openSettings` can land on any of them. */
-export type SettingsSection = "general" | "appearance" | "privacy" | "downloads" | "developer" | "agent" | "shortcuts" | "about";
+export type SettingsSection = "general" | "appearance" | "privacy" | "downloads" | "developer" | "agent" | "subtitles" | "shortcuts" | "about";
 
 /** A page's outstanding request for a capability, awaiting the person's answer. */
 export type PermissionRequest = { origin: string; kind: string };
@@ -250,7 +250,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   tabs: [],
   activeTab: null,
   detached: [],
-  open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false },
+  open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false },
   libraryTab: "bookmarks",
   openLibrary: (libraryTab) => set((s) => ({ libraryTab, open: { ...s.open, library: true, menu: false } })),
   settingsSection: "general",

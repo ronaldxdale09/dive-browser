@@ -20,6 +20,7 @@ import { useChromeLayout } from "./lib/adaptiveLayout";
 import { PanelSkeleton, ToastViewport } from "./components/ChromeFeedback";
 import { usePicker } from "./store/simulator";
 import { scheduleBootCheck } from "./store/updates";
+import { bootSubtitles } from "./store/subtitles";
 import { useRecording } from "./store/recording";
 import { useRecorder } from "./store/recorder";
 
@@ -35,6 +36,7 @@ const WorkspaceDialog = lazy(() => import("./components/WorkspaceDialog").then((
 const RecorderModal = lazy(() => import("./components/RecorderModal").then(({ RecorderModal }) => ({ default: RecorderModal })));
 const RecordDialog = lazy(() => import("./components/record/RecordDialog").then(({ RecordDialog }) => ({ default: RecordDialog })));
 const DefaultBrowserDialog = lazy(() => import("./components/DefaultBrowserDialog").then(({ DefaultBrowserDialog }) => ({ default: DefaultBrowserDialog })));
+const Subtitles = lazy(() => import("./components/Subtitles").then(({ Subtitles }) => ({ default: Subtitles })));
 const RecordingDoneDialog = lazy(() => import("./components/record/RecordingDoneDialog").then(({ RecordingDoneDialog }) => ({ default: RecordingDoneDialog })));
 
 export function App() {
@@ -60,6 +62,8 @@ export function App() {
   useEffect(() => void boot(), [boot]);
   // One look at the release channel, well after startup has settled.
   useEffect(() => scheduleBootCheck(), []);
+  // Subscribe once to the live-subtitles events.
+  useEffect(() => void bootSubtitles(), []);
   // Which panels were open last time is remembered here rather than in the
   // browser store, whose `open` map is per-window state. Applied once at
   // boot, then followed.
@@ -163,8 +167,8 @@ export function App() {
         )}
         <Suspense fallback={showSidecar ? <PanelSkeleton label="agent" /> : null}>{showSidecar && <Sidecar />}</Suspense>
       </main>
-      <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || annotating) ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
-        {open.palette && <Palette />}\n        {open.settings && <SettingsDialog />}\n        {open.library && <Library />}\n        {open.extensions && <Extensions />}\n        {open.shortcuts && <Shortcuts />}\n        {open.defaultBrowser && <DefaultBrowserDialog />}\n        {annotating && <Annotator path={annotating} />}\n      </Suspense>
+      <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || open.subtitles || annotating) ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
+        {open.palette && <Palette />}\n        {open.settings && <SettingsDialog />}\n        {open.library && <Library />}\n        {open.extensions && <Extensions />}\n        {open.shortcuts && <Shortcuts />}\n        {open.defaultBrowser && <DefaultBrowserDialog />}\n        {open.subtitles && <Subtitles />}\n        {annotating && <Annotator path={annotating} />}\n      </Suspense>
       <Splash />
       <Suspense fallback={(editing || recorderOpen || recordingPhase === "setup" || recordingPhase === "done") ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
         {editing && <WorkspaceDialog key={editing.id ?? "new"} />}\n        <ProfileDialog />
