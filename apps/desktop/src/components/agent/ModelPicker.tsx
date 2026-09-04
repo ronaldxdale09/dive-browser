@@ -2,6 +2,8 @@ import { Check, ChevronDown, Loader2, Plus, RefreshCw, Search } from "lucide-rea
 import { useEffect, useMemo, useRef, useState } from "react";
 import { compactNumber, shortModel } from "../../lib/agentSteps";
 import type { ModelInfo, Provider } from "../../lib/ipc";
+import { useCoversContent } from "../../lib/overlay";
+import { useFocusTrap } from "../../lib/useFocusTrap";
 import { isReady, useAgent } from "../../store/agent";
 import { usePrefs } from "../../store/prefs";
 import { Icon } from "../Icon";
@@ -33,6 +35,10 @@ export function ModelPicker({ onAddProvider }: { onAddProvider: () => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
+
+  useCoversContent(open);
+  useFocusTrap(dialog, { active: open, onEscape: () => setOpen(false) });
 
   const provider = providers.find((p) => p.id === prefs.agent_provider);
   const listed = models[prefs.agent_provider];
@@ -48,13 +54,8 @@ export function ModelPicker({ onAddProvider }: { onAddProvider: () => void }) {
     const onDown = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
+    return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
   const filtered = useMemo(() => {
@@ -87,7 +88,7 @@ export function ModelPicker({ onAddProvider }: { onAddProvider: () => void }) {
         <Icon icon={ChevronDown} size={11} className="shrink-0 text-ink-3" />
       </button>
       {open && (
-        <div role="dialog" aria-label="Model and provider" className="absolute bottom-full left-0 z-20 mb-2 w-[min(320px,calc(100vw-24px))] rounded-xl border border-line-2 bg-surface p-2 shadow-2xl">
+        <div ref={dialog} role="dialog" aria-label="Model and provider" className="absolute bottom-full left-0 z-20 mb-2 w-[min(320px,calc(100vw-24px))] rounded-xl border border-line-2 bg-surface p-2 shadow-2xl">
           <div className="mb-2 flex items-center gap-1 overflow-x-auto scroll-hidden">
             {usable.map((p) => (
               <button
@@ -173,4 +174,3 @@ function ModelRow({ model, selected, onPick }: { model: ModelInfo; selected: boo
 function trim(n: number): string {
   return n >= 10 ? n.toFixed(0) : n >= 1 ? n.toFixed(1) : n.toFixed(2).replace(/\.?0+$/, "");
 }
-
