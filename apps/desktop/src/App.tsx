@@ -10,6 +10,7 @@ import { Content } from "./components/Content";
 import { FindBar } from "./components/FindBar";
 import { Splash } from "./components/Splash";
 import { ResizeHandle } from "./components/ResizeHandle";
+import { UpdateDialog } from "./components/UpdateDialog";
 import { DOCK_LIMITS, SIDECAR_LIMITS } from "./lib/resize";
 import { useBrowser } from "./store/browser";
 import { useLayout } from "./store/layout";
@@ -163,28 +164,18 @@ export function App() {
         <Suspense fallback={showSidecar ? <PanelSkeleton label="agent" /> : null}>{showSidecar && <Sidecar />}</Suspense>
       </main>
       <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || annotating) ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
-        {open.palette && <Palette />}
-        {open.settings && <SettingsDialog />}
-        {open.library && <Library />}
-        {open.extensions && <Extensions />}
-        {open.shortcuts && <Shortcuts />}
-        {open.defaultBrowser && <DefaultBrowserDialog />}
-        {annotating && <Annotator path={annotating} />}
-      </Suspense>
+        {open.palette && <Palette />}\n        {open.settings && <SettingsDialog />}\n        {open.library && <Library />}\n        {open.extensions && <Extensions />}\n        {open.shortcuts && <Shortcuts />}\n        {open.defaultBrowser && <DefaultBrowserDialog />}\n        {annotating && <Annotator path={annotating} />}\n      </Suspense>
       <Splash />
       <Suspense fallback={(editing || recorderOpen || recordingPhase === "setup" || recordingPhase === "done") ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
-        {editing && <WorkspaceDialog key={editing.id ?? "new"} />}
-        <ProfileDialog />
-        {recorderOpen && <RecorderModal />}
-        {recordingPhase === "setup" && <RecordDialog />}
-        {recordingPhase === "done" && <RecordingDoneDialog />}
-      </Suspense>
+        {editing && <WorkspaceDialog key={editing.id ?? "new"} />}\n        <ProfileDialog />
+        {recorderOpen && <RecorderModal />}\n        {recordingPhase === "setup" && <RecordDialog />}\n        {recordingPhase === "done" && <RecordingDoneDialog />}\n      </Suspense>
       <ToastViewport
         notice={notice}
         error={error}
         onDismissNotice={() => useBrowser.setState({ notice: null })}
         onDismissError={() => useBrowser.setState({ error: null })}
       />
+      <UpdateDialog />
     </div>
     </TabDnd>
   );

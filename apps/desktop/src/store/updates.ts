@@ -14,8 +14,11 @@ interface UpdatesState {
   update: UpdateInfo | null;
   error: string | null;
   installing: boolean;
+  dismissed: boolean;
   check: () => Promise<void>;
   install: () => Promise<void>;
+  dismiss: () => void;
+  reopen: () => void;
 }
 
 export const useUpdates = create<UpdatesState>((set, get) => ({
@@ -23,12 +26,13 @@ export const useUpdates = create<UpdatesState>((set, get) => ({
   update: null,
   error: null,
   installing: false,
+  dismissed: false,
   check: async () => {
     if (get().status === "checking") return;
     set({ status: "checking", error: null });
     try {
       const update = await ipc.updateCheck();
-      set(update ? { status: "available", update } : { status: "none", update: null });
+      set(update ? { status: "available", update, dismissed: false } : { status: "none", update: null, dismissed: false });
     } catch (e) {
       set({ status: "error", error: e instanceof Error ? e.message : String(e) });
     }
@@ -42,6 +46,8 @@ export const useUpdates = create<UpdatesState>((set, get) => ({
       set({ installing: false, error: e instanceof Error ? e.message : String(e) });
     }
   },
+  dismiss: () => set({ dismissed: true }),
+  reopen: () => set({ dismissed: false }),
 }));
 
 /** Delay before the one automatic check after launch, so it never competes with startup. */
