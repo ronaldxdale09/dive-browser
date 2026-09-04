@@ -1028,14 +1028,19 @@ pub fn remember_window_bounds(window: &Window<Runtime>) {
 /// Show a window built hidden, once (a second call is a no-op for a visible
 /// window). Focus follows so the torn-off tab keeps the keyboard.
 fn reveal(window: &Window<Runtime>) {
-    let _ = window.run_on_main_thread({
-        let window = window.clone();
-        move || {
-            if !window.is_visible().unwrap_or(true) {
-                let _ = window.show();
-                let _ = window.set_focus();
+    // CEF load callbacks can run on the native message pump outside Winit's
+    // dispatch guard. run_on_main_thread executes inline on that thread, so a
+    // synchronous is_visible getter there would queue its reply and deadlock.
+    // Leave the CEF callback first, then enter through a queued Winit task.
+    let window = window.clone();
+    tauri::async_runtime::spawn(async move {
+        let reveal = window.clone();
+        let _ = window.run_on_main_thread(move || {
+            if !reveal.is_visible().unwrap_or(true) {
+                let _ = reveal.show();
+                let _ = reveal.set_focus();
             }
-        }
+        });
     });
 }
 

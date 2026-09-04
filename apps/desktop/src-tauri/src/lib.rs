@@ -23,6 +23,7 @@ mod find;
 mod har;
 mod housekeeping;
 mod inspect;
+mod lifecycle_probe;
 mod loading;
 mod locator;
 mod mcp;
@@ -110,7 +111,7 @@ fn handle_startup_invoke(invoke: tauri::ipc::Invoke<Runtime>) -> bool {
 pub fn run() {
     startup::record_launch();
 
-    let _log_guard = init_logging();
+    let log_guard = init_logging();
     install_panic_hook();
 
     if let Err(error) = prefs::finish_pending_clear() {
@@ -205,6 +206,7 @@ pub fn run() {
             cdp_bench(app.handle().clone());
             startup::record_milestone("setup_complete");
             startup::on_setup_completed(app.handle().clone());
+            lifecycle_probe::start(app.handle().clone());
             Ok(())
         })
         .build(tauri::generate_context!());
@@ -212,10 +214,11 @@ pub fn run() {
         Ok(app) => app,
         Err(error) => {
             tracing::error!(%error, "failed to build Dive");
-            return;
+            drop(log_guard);
+            std::process::exit(1);
         }
     };
-    app.run(|app, event| match event {
+    let exit_code = app.run_return(|app, event| match event {
         // Why the process is going away is the first question after an
         // unexpected exit; say so in the log.
         tauri::RunEvent::ExitRequested { code, .. } => {
@@ -241,6 +244,12 @@ pub fn run() {
         } => tracing::info!(%label, "window close requested"),
         _ => {}
     });
+    // Flush the asynchronous file logger after CEF and the app have drained,
+    // then preserve the exit status for launchers and runtime probes.
+    drop(log_guard);
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
 }
 
 /// Open tabs for URLs given on the command line or in `DIVE_OPEN_URL`
@@ -535,6 +544,9 @@ fn stress_test(app: tauri::AppHandle<Runtime>) {
         }
         tokio::time::sleep(std::time::Duration::from_secs(settle)).await;
         tracing::info!(tabs = opened, "stress: loaded");
+        // Keep the loaded phase alive long enough for the external harness to
+        // sample it before discard begins reclaiming renderer memory.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         let discarded = match housekeeping::sweep(&app).await {
             Ok(n) => n,
             Err(e) => {
@@ -548,6 +560,7 @@ fn stress_test(app: tauri::AppHandle<Runtime>) {
         tracing::info!("stress: done");
         // Give the harness time to sample memory before the process goes.
         tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+        tracing::info!("stress: exiting");
         app.exit(if discarded + 1 >= opened { 0 } else { 2 });
     });
 }
