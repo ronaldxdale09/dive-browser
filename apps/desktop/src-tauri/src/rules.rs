@@ -351,11 +351,56 @@ pub fn decide_paused_request(
     }
 }
 
+/// Every CDP resource type except `Media`. Streaming video and audio fire a
+/// rapid series of byte-range requests; pausing each one for the CDP
+/// round-trip adds latency that makes the player abort segments and stall
+/// (YouTube in particular). `DivePrivacy` never blocks media, so when only
+/// it needs interception those requests are left off the pause pipeline.
+const NON_MEDIA_RESOURCE_TYPES: &[&str] = &[
+    "Document",
+    "Stylesheet",
+    "Image",
+    "Font",
+    "Script",
+    "TextTrack",
+    "XHR",
+    "Fetch",
+    "Prefetch",
+    "EventSource",
+    "WebSocket",
+    "Manifest",
+    "SignedExchange",
+    "Ping",
+    "CSPViolationReport",
+    "Preflight",
+    "Other",
+];
+
+/// The `Fetch.enable` patterns for the current rules and prefs. A workspace
+/// mock/rewrite/block rule may target any URL, media included, so an enabled
+/// rule intercepts everything; privacy alone excludes media so video plays
+/// without per-segment interception latency.
+fn interception_patterns(rules: &[Rule]) -> serde_json::Value {
+    if rules.iter().any(|rule| rule.enabled) {
+        json!([{"urlPattern": "*"}])
+    } else {
+        json!(
+            NON_MEDIA_RESOURCE_TYPES
+                .iter()
+                .map(|t| json!({"urlPattern": "*", "resourceType": t}))
+                .collect::<Vec<_>>()
+        )
+    }
+}
+
 /// Enable shared interception when workspace rules or `DivePrivacy` need it.
 pub async fn apply(session: &CdpSession, rules: &[Rule], prefs: &Prefs) -> AppResult<()> {
     let result = if interception_required(rules, prefs) {
         session
-            .call("Fetch.enable", json!({"patterns": [{"urlPattern": "*"}]}))
+            .call(
+                "Fetch.enable",
+                json!({"patterns": interception_patterns(rules)}),
+            )
             .await
     } else {
         session.call0("Fetch.disable").await
@@ -936,6 +981,34 @@ mod tests {
             .map(|message| message["method"].as_str().unwrap().to_owned())
             .collect::<Vec<_>>();
         assert_eq!(methods, vec!["Fetch.disable", "Fetch.enable"]);
+    }
+
+    #[test]
+    fn privacy_only_interception_leaves_media_alone() {
+        let patterns = interception_patterns(&[]);
+        let arr = patterns.as_array().unwrap();
+        let types: Vec<&str> = arr
+            .iter()
+            .map(|p| p["resourceType"].as_str().unwrap())
+            .collect();
+        assert!(
+            !types.contains(&"Media"),
+            "media must not be intercepted for privacy"
+        );
+        assert!(types.contains(&"Document") && types.contains(&"Script"));
+        assert!(arr.iter().all(|p| p["urlPattern"] == "*"));
+    }
+
+    #[test]
+    fn a_workspace_rule_intercepts_everything_including_media() {
+        let rule = Rule {
+            id: "r".into(),
+            pattern: "*://media.example/*".into(),
+            enabled: true,
+            action: RuleAction::Block,
+        };
+        let patterns = interception_patterns(&[rule]);
+        assert_eq!(patterns, json!([{"urlPattern": "*"}]));
     }
 
     #[tokio::test]
