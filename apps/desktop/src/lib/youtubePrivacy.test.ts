@@ -184,6 +184,66 @@ describe("YouTube privacy page script", () => {
     }
   });
 
+  it("leaves an in-flight player XHR untouched when YouTube protection is disabled", () => {
+    const originalXhr = window.XMLHttpRequest;
+    class PendingXhr extends EventTarget {
+      readyState = 0;
+      responseType: XMLHttpRequestResponseType = "";
+      responseText = JSON.stringify({ adSlots: [1], videoDetails: { videoId: "abc" } });
+      response: unknown = this.responseText;
+
+      open(): void {}
+      send(): void {}
+
+      complete(): void {
+        this.readyState = 4;
+        this.dispatchEvent(new Event("readystatechange"));
+      }
+    }
+    Object.defineProperty(window, "XMLHttpRequest", {
+      configurable: true,
+      writable: true,
+      value: PendingXhr,
+    });
+    const reported = vi.fn();
+    Object.defineProperty(window, "__DIVE_PRIVACY_BINDING__", {
+      configurable: true,
+      writable: true,
+      value: reported,
+    });
+
+    let privacy: DivePrivacy | undefined;
+    try {
+      privacy = evaluate();
+      privacy.configure({ enabled: true });
+      const xhr = new window.XMLHttpRequest();
+      let observed = "";
+      xhr.addEventListener("readystatechange", () => {
+        if (xhr.readyState === 4) observed = xhr.responseText;
+      });
+      xhr.open("POST", "/youtubei/v1/player");
+      xhr.send("{}");
+
+      privacy.configure({ enabled: false, cosmeticCss: "#tads { display: none !important; }" });
+      (xhr as unknown as PendingXhr).complete();
+
+      expect(JSON.parse(observed)).toEqual({
+        adSlots: [1],
+        videoDetails: { videoId: "abc" },
+      });
+      expect(reported).not.toHaveBeenCalled();
+    } finally {
+      privacy?.dispose();
+      delete window.__divePrivacy;
+      delete (window as unknown as Record<string, unknown>).__DIVE_PRIVACY_BINDING__;
+      Object.defineProperty(window, "XMLHttpRequest", {
+        configurable: true,
+        writable: true,
+        value: originalXhr,
+      });
+    }
+  });
+
   it("clicks a visible skip control and preserves media state when the ad ends", async () => {
     document.body.innerHTML = `
       <div class="html5-video-player ad-showing">
@@ -209,6 +269,29 @@ describe("YouTube privacy page script", () => {
     expect(video.volume).toBe(0.4);
     expect(video.muted).toBe(false);
     expect(video.playbackRate).toBe(1.25);
+  });
+
+  it("clicks a reused skip control once in each distinct ad cycle", async () => {
+    document.body.innerHTML = `
+      <div class="html5-video-player ad-showing">
+        <video></video>
+        <button class="ytp-ad-skip-button-modern">Skip</button>
+      </div>
+    `;
+    const player = document.querySelector(".html5-video-player")!;
+    const skip = document.querySelector("button")!;
+    const clicked = vi.fn();
+    skip.addEventListener("click", clicked);
+
+    const privacy = evaluate();
+    privacy.configure({ enabled: true });
+    await turn();
+    player.classList.remove("ad-showing");
+    await turn();
+    player.classList.add("ad-showing");
+    await turn();
+
+    expect(clicked).toHaveBeenCalledTimes(2);
   });
 
   it("accelerates only an unskippable ad and restores its media state", async () => {

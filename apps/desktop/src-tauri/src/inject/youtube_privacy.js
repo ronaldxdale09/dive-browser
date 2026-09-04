@@ -22,7 +22,7 @@
   const xhrTargets = new WeakSet();
   const xhrListeners = new Set();
   const accelerated = new Map();
-  const clicked = new WeakSet();
+  const skippedPlayers = new Map();
   const state = {
     enabled: false,
     installed: false,
@@ -164,18 +164,21 @@
 
   const inspectPlayers = () => {
     const active = new Set();
+    const activePlayers = new Set();
     if (!state.enabled) {
       restoreInactiveMedia(active);
+      skippedPlayers.clear();
       return;
     }
     try {
       for (const player of document.querySelectorAll(".html5-video-player.ad-showing")) {
+        activePlayers.add(player);
         const skip = skipSelectors
           .map((selector) => player.querySelector(selector))
           .find((element) => visible(element));
         if (skip) {
-          if (!clicked.has(skip)) {
-            clicked.add(skip);
+          if (skippedPlayers.get(player) !== skip) {
+            skippedPlayers.set(player, skip);
             skip.click();
             report();
           }
@@ -205,6 +208,9 @@
     } catch {
       // A transient DOM state or hostile accessor disables only this pass.
     }
+    for (const player of skippedPlayers.keys()) {
+      if (!activePlayers.has(player)) skippedPlayers.delete(player);
+    }
     restoreInactiveMedia(active);
   };
 
@@ -227,6 +233,7 @@
   };
 
   const onNavigation = () => {
+    skippedPlayers.clear();
     applyStyle();
     inspectPlayers();
   };
@@ -257,7 +264,7 @@
             if (xhr.readyState !== 4) return;
             xhr.removeEventListener("readystatechange", listener, true);
             xhrListeners.delete(entry);
-            patchXhrResponse(xhr);
+            if (state.enabled) patchXhrResponse(xhr);
           };
           const entry = { xhr, listener };
           xhrListeners.add(entry);
@@ -296,6 +303,7 @@
       entry.xhr.removeEventListener("readystatechange", entry.listener, true);
     }
     xhrListeners.clear();
+    skippedPlayers.clear();
     restoreInactiveMedia(new Set());
     try {
       const style = document.querySelector(styleSelector);
