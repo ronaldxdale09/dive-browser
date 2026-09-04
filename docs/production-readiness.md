@@ -182,7 +182,7 @@ Final verification date: 2026-09-04. All numbers below are from the rebuilt exec
 | `cargo test --workspace` | pass, 325 tests plus doc tests |
 | `pnpm -r typecheck` | pass |
 | `pnpm -r lint` | pass |
-| `pnpm -r test` | pass, 74 files / 469 tests |
+| `pnpm -r test` | pass, 74 files / 474 tests (post-report shared-tree rerun) |
 | production `.unwrap()` / `.expect()` boundary scan | pass, zero exact calls before each app-crate test boundary |
 | `pnpm audit --prod --audit-level=moderate` | pass, no known vulnerabilities |
 | `cargo audit` | **unverified:** subcommand is not installed on this host |
