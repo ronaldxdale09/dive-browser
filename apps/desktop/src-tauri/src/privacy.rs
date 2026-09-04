@@ -552,7 +552,7 @@ mod tests {
             privacy_info(),
             PrivacyInfo {
                 version: "2026.09.04.2".into(),
-                ad_rules: 63,
+                ad_rules: 62,
                 tracker_rules: 60,
                 cosmetic_hosts: 3,
             }
@@ -659,6 +659,25 @@ mod tests {
         assert_eq!(value["data"]["count"], 3);
     }
 
+    #[test]
+    fn hostname_anchor_subsumption_respects_subdomain_boundaries_and_options() {
+        let parent = OwnedNetworkRule::parse("||openx.net/w/1.0/$third-party");
+
+        assert!(parent.subsumes(&OwnedNetworkRule::parse("||u.openx.net/w/1.0/$third-party",)));
+        assert!(parent.subsumes(&OwnedNetworkRule::parse(
+            "||u.openx.net/w/1.0/sync$third-party,script",
+        )));
+        assert!(!parent.subsumes(&OwnedNetworkRule::parse(
+            "||notopenx.net/w/1.0/$third-party",
+        )));
+        assert!(!parent.subsumes(&OwnedNetworkRule::parse("||u.openx.net/v/1.0/$third-party",)));
+        assert!(!parent.subsumes(&OwnedNetworkRule::parse("||u.openx.net/w/1.0/",)));
+        assert!(
+            !OwnedNetworkRule::parse("||openx.net/w/1.0/$third-party,script")
+                .subsumes(&OwnedNetworkRule::parse("||u.openx.net/w/1.0/$third-party",))
+        );
+    }
+
     #[derive(Debug)]
     struct OwnedNetworkRule<'a> {
         raw: &'a str,
@@ -684,7 +703,12 @@ mod tests {
         }
 
         fn subsumes(&self, other: &Self) -> bool {
-            self.host == other.host
+            let host_matches = self.host == other.host
+                || other
+                    .host
+                    .strip_suffix(self.host)
+                    .is_some_and(|prefix| prefix.ends_with('.'));
+            host_matches
                 && other.path.starts_with(self.path)
                 && (!self.third_party || other.third_party)
                 && (self.resource_type.is_none() || self.resource_type == other.resource_type)

@@ -74,8 +74,6 @@
 ||rtb.openx.net/$third-party
 ! OpenX ad server endpoint.
 ||openx.net/w/1.0/$third-party
-! OpenX user sync endpoint.
-||u.openx.net/w/1.0/$third-party
 ! Magnite advertising endpoint.
 ! Provenance: Magnite/Rubicon documentation and reproduced third-party browser traffic (2026-09).
 ||prebid-server.rubiconproject.com/$third-party
