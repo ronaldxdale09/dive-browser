@@ -19,7 +19,7 @@ const PAGE_BINDING_PREFIX: &str = "__divePrivacy_";
 const MAX_PAGE_EVENT: usize = 64;
 
 /// Version of the rule assets bundled with this application.
-pub const DIVE_PRIVACY_VERSION: &str = "2026.09.04.2";
+pub const DIVE_PRIVACY_VERSION: &str = "2026.09.04.3";
 
 /// Categories reported for network requests blocked by `DivePrivacy`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Type)]
@@ -551,7 +551,7 @@ mod tests {
         assert_eq!(
             privacy_info(),
             PrivacyInfo {
-                version: "2026.09.04.2".into(),
+                version: "2026.09.04.3".into(),
                 ad_rules: 62,
                 tracker_rules: 60,
                 cosmetic_hosts: 3,
