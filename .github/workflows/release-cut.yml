@@ -224,7 +224,7 @@ jobs:
           key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
 
       - name: Import Apple signing certificate
-        if: env.APPLE_CERTIFICATE != ''
+        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -250,8 +250,12 @@ jobs:
           DIVE_UPDATER_PUBKEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
         run: |
           set -euo pipefail
-          pnpm --filter @dive/desktop exec tauri build \
-            --config "{\"plugins\":{\"updater\":{\"pubkey\":\"$DIVE_UPDATER_PUBKEY\"}}}"
+          if [ -n "${DIVE_UPDATER_PUBKEY:-}" ]; then
+            pnpm --filter @dive/desktop exec tauri build \
+              --config "{\"plugins\":{\"updater\":{\"pubkey\":\"$DIVE_UPDATER_PUBKEY\"}}}"
+          else
+            pnpm --filter @dive/desktop exec tauri build
+          fi
           scripts/release/prepare-bundle.sh target/release/bundle/macos/Dive.app
 
       - name: Prepare updater manifest and package artifacts
@@ -259,12 +263,19 @@ jobs:
           set -euo pipefail
           mkdir -p out
           cp target/release/bundle/dmg/*.dmg out/ 2>/dev/null || true
-          cp target/release/bundle/macos/*.tar.gz out/
-          cp target/release/bundle/macos/*.tar.gz.sig out/
+          cp target/release/bundle/macos/*.tar.gz out/ 2>/dev/null || true
+          cp target/release/bundle/macos/*.tar.gz.sig out/ 2>/dev/null || true
 
           VERSION="${{ needs.cut.outputs.version }}"
-          SIG=$(cat out/*.tar.gz.sig)
-          ARCHIVE=$(basename out/*.tar.gz)
+          SIG=""
+          if compgen -G "out/*.tar.gz.sig" > /dev/null; then
+            SIG=$(cat out/*.tar.gz.sig | head -n 1)
+          fi
+
+          ARCHIVE=""
+          if compgen -G "out/*.tar.gz" > /dev/null; then
+            ARCHIVE=$(basename $(ls out/*.tar.gz | head -n 1))
+          fi
 
           cat > out/latest.json <<JSON
           {
@@ -318,4 +329,3 @@ jobs:
           echo "## Release Successfully Published 🎉" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Tag:** \`${{ needs.cut.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Release:** https://github.com/${{ github.repository }}/releases/tag/${{ needs.cut.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Update Manifest:** https://github.com/${{ github.repository }}/releases/download/${{ needs.cut.outputs.tag }}/latest.json" >> "$GITHUB_STEP_SUMMARY"
