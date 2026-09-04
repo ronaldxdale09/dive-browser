@@ -168,11 +168,23 @@ export function App() {
         <Suspense fallback={showSidecar ? <PanelSkeleton label="agent" /> : null}>{showSidecar && <Sidecar />}</Suspense>
       </main>
       <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || open.subtitles || annotating) ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
-        {open.palette && <Palette />}\n        {open.settings && <SettingsDialog />}\n        {open.library && <Library />}\n        {open.extensions && <Extensions />}\n        {open.shortcuts && <Shortcuts />}\n        {open.defaultBrowser && <DefaultBrowserDialog />}\n        {open.subtitles && <Subtitles />}\n        {annotating && <Annotator path={annotating} />}\n      </Suspense>
+        {open.palette && <Palette />}
+        {open.settings && <SettingsDialog />}
+        {open.library && <Library />}
+        {open.extensions && <Extensions />}
+        {open.shortcuts && <Shortcuts />}
+        {open.defaultBrowser && <DefaultBrowserDialog />}
+        {open.subtitles && <Subtitles />}
+        {annotating && <Annotator path={annotating} />}
+      </Suspense>
       <Splash />
       <Suspense fallback={(editing || recorderOpen || recordingPhase === "setup" || recordingPhase === "done") ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
-        {editing && <WorkspaceDialog key={editing.id ?? "new"} />}\n        <ProfileDialog />
-        {recorderOpen && <RecorderModal />}\n        {recordingPhase === "setup" && <RecordDialog />}\n        {recordingPhase === "done" && <RecordingDoneDialog />}\n      </Suspense>
+        {editing && <WorkspaceDialog key={editing.id ?? "new"} />}
+        <ProfileDialog />
+        {recorderOpen && <RecorderModal />}
+        {recordingPhase === "setup" && <RecordDialog />}
+        {recordingPhase === "done" && <RecordingDoneDialog />}
+      </Suspense>
       <ToastViewport
         notice={notice}
         error={error}
