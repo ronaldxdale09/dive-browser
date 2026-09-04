@@ -106,13 +106,17 @@ jobs:
 
       # 4. Optional Apple Developer ID Certificate Import (if configured)
       - name: Import Apple signing certificate
-        if: steps.meta.outputs.skip != 'true' && secrets.APPLE_CERTIFICATE != ''
+        if: steps.meta.outputs.skip != 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD || 'ephemeral-keychain' }}
         run: |
           set -euo pipefail
+          if [ -z "${APPLE_CERTIFICATE:-}" ]; then
+            echo "No Apple signing certificate configured; skipping keychain import."
+            exit 0
+          fi
           echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security default-keychain -s build.keychain
