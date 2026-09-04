@@ -58,7 +58,7 @@ describe("Shortcuts dialog", () => {
     expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeTruthy();
     expect(contentCoverDepth()).toBe(1);
     expect(screen.getByRole("region", { name: "Tabs" })).toBeTruthy();
-    expect(screen.getByText("Library: bookmarks and history")).toBeTruthy();
+    expect(screen.getByText("History")).toBeTruthy();
     expect(screen.getByText("⌘Y")).toBeTruthy();
     expect(screen.getByText("⌘/")).toBeTruthy();
     expect(screen.getByText("⌘⇧S")).toBeTruthy();

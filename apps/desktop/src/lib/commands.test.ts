@@ -50,12 +50,60 @@ describe("command dispatch", () => {
   });
 
   it("binds the library, cheatsheet, settings and print", () => {
-    expect(SHORTCUTS["mod+y"]).toBe("library.open");
+    expect(SHORTCUTS["mod+y"]).toBe("history.open");
     expect(SHORTCUTS["mod+/"]).toBe("shortcuts.open");
     expect(SHORTCUTS["mod+,"]).toBe("settings.open");
     expect(SHORTCUTS["mod+p"]).toBe("tab.print");
     expect(chordOf(key({ key: "/", metaKey: true }))).toBe("mod+/");
-    expect(shortcutFor(key({ key: "y", metaKey: true, target: document.createElement("div") }))).toBe("library.open");
+    expect(shortcutFor(key({ key: "y", metaKey: true, target: document.createElement("div") }))).toBe("history.open");
+  });
+
+  it("provides the useful non-conflicting Chrome and Brave shortcuts", () => {
+    expect(SHORTCUTS["mod+n"]).toBe("window.new");
+    expect(SHORTCUTS["mod+t"]).toBe("tab.new");
+    expect(SHORTCUTS["mod+d"]).toBe("bookmark.toggle");
+    expect(SHORTCUTS["mod+shift+a"]).toBe("tabs.search");
+    expect(SHORTCUTS["mod+y"]).toBe("history.open");
+    expect(SHORTCUTS["mod+alt+b"]).toBe("bookmarks.open");
+    expect(SHORTCUTS["mod+shift+j"]).toBe("downloads.open");
+    expect(SHORTCUTS["mod+shift+delete"]).toBe("browsing-data.open");
+  });
+
+  it("opens a fresh window in the current workspace", async () => {
+    const opened = tab("new");
+    const open = vi.spyOn(ipc, "tabOpen").mockResolvedValue(opened);
+    const detach = vi.spyOn(ipc, "tabDetach").mockResolvedValue(null);
+    useBrowser.setState({ activeWorkspace: "w" });
+
+    await UI_COMMANDS["window.new"]!();
+
+    expect(open).toHaveBeenCalledWith("w", "about:blank");
+    expect(detach).toHaveBeenCalledWith("new", null);
+  });
+
+  it("routes browser library and tab-search commands to their exact surfaces", async () => {
+    await UI_COMMANDS["tabs.search"]!();
+    expect(useBrowser.getState().open.palette).toBe(true);
+
+    await UI_COMMANDS["history.open"]!();
+    expect(useBrowser.getState().libraryTab).toBe("history");
+    await UI_COMMANDS["bookmarks.open"]!();
+    expect(useBrowser.getState().libraryTab).toBe("bookmarks");
+    await UI_COMMANDS["downloads.open"]!();
+    expect(useBrowser.getState().libraryTab).toBe("downloads");
+
+    await UI_COMMANDS["browsing-data.open"]!();
+    expect(useBrowser.getState().settingsSection).toBe("privacy");
+    expect(useBrowser.getState().open.settings).toBe(true);
+  });
+
+  it("toggles a bookmark and gives visible confirmation", async () => {
+    vi.spyOn(ipc, "bookmarkToggle").mockResolvedValue(true);
+    useBrowser.setState({ tabs: [tab("a")], activeTab: "a" });
+
+    await UI_COMMANDS["bookmark.toggle"]!();
+
+    expect(useBrowser.getState().notice).toBe("Bookmark saved");
   });
 
   it("routes the new commands to the store", async () => {
@@ -153,6 +201,10 @@ describe("command dispatch", () => {
     expect(shortcutFor(key({ key: "t", metaKey: true, target: input }))).toBe("tab.new");
     expect(shortcutFor(key({ key: "w", metaKey: true, target: input }))).toBe("tab.close");
     expect(shortcutFor(key({ key: "r", metaKey: true, target: input }))).toBe("tab.reload");
+    expect(shortcutFor(key({ key: "n", metaKey: true, target: input }))).toBe("window.new");
+    expect(shortcutFor(key({ key: "d", metaKey: true, target: input }))).toBe("bookmark.toggle");
+    expect(shortcutFor(key({ key: "A", metaKey: true, shiftKey: true, target: input }))).toBe("tabs.search");
+    expect(shortcutFor(key({ key: "Delete", metaKey: true, shiftKey: true, target: input }))).toBe("browsing-data.open");
     expect(shortcutFor(key({ key: "Tab", ctrlKey: true, target: input }))).toBe("tab.next");
     // Outside a field everything applies.
     expect(shortcutFor(key({ key: "f", metaKey: true, target: document.createElement("div") }))).toBe("find.open");

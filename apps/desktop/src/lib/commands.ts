@@ -15,7 +15,9 @@ const WORKSPACE_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
  */
 export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "palette.open": () => useBrowser.getState().toggle("palette", true),
+  "tabs.search": () => useBrowser.getState().toggle("palette", true),
   "tab.new": () => useBrowser.getState().toggle("palette", true),
+  "window.new": () => openWindow(),
   "tab.close": () => {
     const { activeTab, closeTab } = useBrowser.getState();
     return activeTab ? closeTab(activeTab) : undefined;
@@ -33,6 +35,11 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "capture.fullpage": () => useBrowser.getState().capture(true),
   "find.open": () => useBrowser.getState().toggle("find", true),
   "library.open": () => useBrowser.getState().toggle("library", true),
+  "bookmarks.open": () => useBrowser.getState().openLibrary("bookmarks"),
+  "history.open": () => useBrowser.getState().openLibrary("history"),
+  "downloads.open": () => useBrowser.getState().openLibrary("downloads"),
+  "browsing-data.open": () => useBrowser.getState().openSettings("privacy"),
+  "bookmark.toggle": () => toggleBookmark(),
   "shortcuts.open": () => useBrowser.getState().toggle("shortcuts", true),
   "settings.open": () => useBrowser.getState().openSettings(),
   "tab.print": () => useBrowser.getState().print(),
@@ -51,6 +58,36 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   // browser's ⌘1…⌘9 lands on a tab.
   ...Object.fromEntries(WORKSPACE_SLOTS.map((n) => [`workspace.jump.${n}`, () => jumpToWorkspace(n - 1)])),
 };
+
+/** Create a blank tab and move it into its own browser window. */
+async function openWindow() {
+  const workspace = useBrowser.getState().activeWorkspace;
+  if (!workspace) return;
+  try {
+    const tab = await ipc.tabOpen(workspace, "about:blank");
+    await ipc.tabDetach(tab.id, null);
+    useBrowser.setState({ error: null });
+  } catch (error) {
+    useBrowser.setState({ error: message(error) });
+  }
+}
+
+/** Toggle the active page's bookmark and confirm the result visibly. */
+async function toggleBookmark() {
+  const tab = useBrowser.getState().activeTab;
+  if (!tab) return;
+  try {
+    const saved = await ipc.bookmarkToggle(tab);
+    useBrowser.setState({ error: null, notice: saved ? "Bookmark saved" : "Bookmark removed" });
+    setTimeout(() => useBrowser.setState({ notice: null }), 3000);
+  } catch (error) {
+    useBrowser.setState({ error: message(error) });
+  }
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 /** Activate the workspace sitting at `index` in the rail, if there is one. */
 function jumpToWorkspace(index: number) {
@@ -85,6 +122,8 @@ export function runCommand(id: string): void {
 /** Default chords, parsed from the same notation Rust reports ("mod+shift+s"). */
 export const SHORTCUTS: Record<string, string> = {
   "mod+k": "palette.open",
+  "mod+shift+a": "tabs.search",
+  "mod+n": "window.new",
   "mod+t": "tab.new",
   "mod+w": "tab.close",
   "mod+r": "tab.reload",
@@ -99,7 +138,12 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+shift+m": "simulator.toggle",
   "mod+shift+s": "capture.fullpage",
   "mod+f": "find.open",
-  "mod+y": "library.open",
+  "mod+d": "bookmark.toggle",
+  "mod+y": "history.open",
+  "mod+alt+b": "bookmarks.open",
+  "mod+shift+j": "downloads.open",
+  "mod+shift+backspace": "browsing-data.open",
+  "mod+shift+delete": "browsing-data.open",
   "mod+/": "shortcuts.open",
   "mod+,": "settings.open",
   "mod+p": "tab.print",
@@ -122,6 +166,8 @@ export const SHORTCUTS: Record<string, string> = {
  */
 export const COMMAND_TITLES: Record<string, string> = {
   "palette.open": "Command palette",
+  "tabs.search": "Search tabs",
+  "window.new": "New window",
   "tab.new": "New tab",
   "tab.close": "Close tab",
   "tab.reload": "Reload",
@@ -140,6 +186,11 @@ export const COMMAND_TITLES: Record<string, string> = {
   "find.open": "Find in page",
   "address.focus": "Focus the address bar",
   "library.open": "Library: bookmarks and history",
+  "bookmarks.open": "Bookmarks",
+  "history.open": "History",
+  "downloads.open": "Downloads",
+  "browsing-data.open": "Delete browsing data…",
+  "bookmark.toggle": "Bookmark this page",
   "shortcuts.open": "Keyboard shortcuts",
   "settings.open": "Settings",
   "tab.back": "Back",
@@ -191,11 +242,30 @@ export function formatChord(chord: string, mac: boolean = isMac()): string {
 }
 
 /**
- * Chords that keep working while the omnibox or any other field has focus.
- * Everything else is the field's own business there: ⌘A selects its text,
- * Enter submits it, and a bare letter is typing.
+ * Browser-global chords that keep working while the omnibox or another field
+ * has focus. Everything else is the field's own business there: ⌘A selects
+ * its text, Enter submits it, and a bare letter is typing.
  */
-const CHORDS_IN_FIELDS = new Set(["mod+l", "mod+k", "mod+t", "mod+w", "mod+r", "mod+shift+t", "mod+shift+[", "mod+shift+]", "ctrl+tab", "ctrl+shift+tab"]);
+const CHORDS_IN_FIELDS = new Set([
+  "mod+l",
+  "mod+k",
+  "mod+n",
+  "mod+t",
+  "mod+w",
+  "mod+r",
+  "mod+d",
+  "mod+y",
+  "mod+alt+b",
+  "mod+shift+a",
+  "mod+shift+j",
+  "mod+shift+t",
+  "mod+shift+backspace",
+  "mod+shift+delete",
+  "mod+shift+[",
+  "mod+shift+]",
+  "ctrl+tab",
+  "ctrl+shift+tab",
+]);
 
 /** Keys that are not characters but still make sense in a chord. */
 const NAMED_KEYS = new Set(["escape", "enter", "tab", "backspace", "delete", "home", "end", "pageup", "pagedown", "arrowleft", "arrowright", "arrowup", "arrowdown", "space"]);
@@ -254,7 +324,7 @@ function keyOf(e: KeyboardEvent): string | null {
 
 /**
  * The command a key event should run, or null. Inside a field only the
- * navigation chords apply, and only with the platform modifier held.
+ * explicitly global browser chords apply.
  */
 export function shortcutFor(e: KeyboardEvent, shortcuts: Record<string, string> = SHORTCUTS): string | null {
   const chord = chordOf(e);

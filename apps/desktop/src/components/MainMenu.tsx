@@ -234,6 +234,7 @@ function useMenu(close: () => void): Group[] {
     {
       id: "new",
       items: [
+        { id: "window.new", label: "New Window", icon: AppWindow, shortcut: "⌘N", run: done(() => runCommand("window.new")) },
         { id: "tab.new", label: "New Tab", icon: SquarePlus, shortcut: "⌘T", run: done(() => runCommand("tab.new")) },
         { id: "workspace.new", label: "New Workspace", icon: LayoutGrid, keywords: "container profile", run: done(() => runCommand("workspace.new")) },
         {
@@ -262,9 +263,9 @@ function useMenu(close: () => void): Group[] {
     {
       id: "library",
       items: [
-        { id: "bookmarks", label: "Bookmarks", icon: Star, shortcut: "⌘Y", more: true, keywords: "favorites saved", run: () => b().openLibrary("bookmarks") },
-        { id: "history", label: "History", icon: History, more: true, keywords: "visited recent", run: () => b().openLibrary("history") },
-        { id: "downloads", label: "Downloads", icon: Download, more: true, keywords: "files saved", run: () => b().openLibrary("downloads") },
+        { id: "bookmarks", label: "Bookmarks", icon: Star, shortcut: "⌘⌥B", more: true, keywords: "favorites saved", run: () => b().openLibrary("bookmarks") },
+        { id: "history", label: "History", icon: History, shortcut: "⌘Y", more: true, keywords: "visited recent", run: () => b().openLibrary("history") },
+        { id: "downloads", label: "Downloads", icon: Download, shortcut: "⌘⇧J", more: true, keywords: "files saved", run: () => b().openLibrary("downloads") },
         { id: "recordings", label: "Recordings", icon: Clapperboard, more: true, keywords: "videos gifs captures", run: () => b().openLibrary("recordings") },
         { id: "clear", label: "Delete Browsing Data…", icon: Trash2, keywords: "cookies cache privacy clear", run: done(() => b().openSettings("privacy")) },
       ],

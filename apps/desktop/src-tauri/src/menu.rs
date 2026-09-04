@@ -23,13 +23,19 @@ pub struct MenuCommand(pub String);
 /// Commands whose point is to type into the chrome. The page keeps keyboard
 /// focus while it is visible, so focus has to move before the command lands or
 /// the first keystrokes would go to the page.
-const FOCUS_CHROME: [&str; 6] = [
+const FOCUS_CHROME: [&str; 12] = [
     "palette.open",
+    "tabs.search",
     "tab.new",
     "find.open",
     "address.focus",
+    "bookmarks.open",
+    "history.open",
+    "downloads.open",
+    "browsing-data.open",
     "workspace.new",
     "workspace.edit",
+    "shortcuts.open",
 ];
 
 /// One chrome-owned menu item with its accelerator.
@@ -42,6 +48,7 @@ fn item(app: &App<Runtime>, id: &str, text: &str, accel: &str) -> tauri::Result<
 /// The File menu: the tab and chrome commands people reach for first.
 fn file_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
     SubmenuBuilder::new(app, "File")
+        .item(&item(app, "window.new", "New Window", "CmdOrCtrl+N")?)
         .item(&item(app, "tab.new", "New Tab", "CmdOrCtrl+T")?)
         .item(&item(app, "tab.close", "Close Tab", "CmdOrCtrl+W")?)
         .separator()
@@ -58,6 +65,12 @@ fn file_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
             "CmdOrCtrl+K",
         )?)
         .item(&item(app, "find.open", "Find in Page…", "CmdOrCtrl+F")?)
+        .item(&item(
+            app,
+            "bookmark.toggle",
+            "Bookmark This Page",
+            "CmdOrCtrl+D",
+        )?)
         .separator()
         .item(&item(
             app,
@@ -109,6 +122,58 @@ fn workspaces_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
     menu.build()
 }
 
+/// Page history, tab traversal and the Chrome-compatible library shortcuts.
+fn history_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
+    SubmenuBuilder::new(app, "History")
+        .item(&item(app, "tab.back", "Back", "CmdOrCtrl+BracketLeft")?)
+        .item(&item(
+            app,
+            "tab.forward",
+            "Forward",
+            "CmdOrCtrl+BracketRight",
+        )?)
+        .separator()
+        .item(&item(
+            app,
+            "tab.prev",
+            "Previous Tab",
+            "CmdOrCtrl+Shift+BracketLeft",
+        )?)
+        .item(&item(
+            app,
+            "tab.next",
+            "Next Tab",
+            "CmdOrCtrl+Shift+BracketRight",
+        )?)
+        .separator()
+        .item(&item(
+            app,
+            "tabs.search",
+            "Search Tabs…",
+            "CmdOrCtrl+Shift+A",
+        )?)
+        .item(&item(app, "history.open", "Show History", "CmdOrCtrl+Y")?)
+        .item(&item(
+            app,
+            "bookmarks.open",
+            "Show Bookmarks",
+            "CmdOrCtrl+Alt+B",
+        )?)
+        .item(&item(
+            app,
+            "downloads.open",
+            "Show Downloads",
+            "CmdOrCtrl+Shift+J",
+        )?)
+        .item(&item(
+            app,
+            "browsing-data.open",
+            "Delete Browsing Data…",
+            "CmdOrCtrl+Shift+Backspace",
+        )?)
+        .build()
+}
+
 /// Build the menu and route its events to the chrome.
 pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
     let app_menu = SubmenuBuilder::new(app, "Dive")
@@ -154,28 +219,7 @@ pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
         .item(&item(app, "tab.devtools", "DevTools", "CmdOrCtrl+Alt+I")?)
         .build()?;
 
-    let history = SubmenuBuilder::new(app, "History")
-        .item(&item(app, "tab.back", "Back", "CmdOrCtrl+BracketLeft")?)
-        .item(&item(
-            app,
-            "tab.forward",
-            "Forward",
-            "CmdOrCtrl+BracketRight",
-        )?)
-        .separator()
-        .item(&item(
-            app,
-            "tab.prev",
-            "Previous Tab",
-            "CmdOrCtrl+Shift+BracketLeft",
-        )?)
-        .item(&item(
-            app,
-            "tab.next",
-            "Next Tab",
-            "CmdOrCtrl+Shift+BracketRight",
-        )?)
-        .build()?;
+    let history = history_menu(app)?;
 
     let workspaces = workspaces_menu(app)?;
 
