@@ -7,7 +7,7 @@ if (window.__diveSubtitles) {
 } else {
   const BINDING = window.__AUDIO_BINDING__ || "__diveSubtitleAudio";
   const TARGET_RATE = 16000;
-  const FRAME_MS = 250;
+  const FRAME_MS = 100;
 
   let ctx = null;
   let source = null;
@@ -124,21 +124,27 @@ if (window.__diveSubtitles) {
       };
       source.connect(node);
       node.connect(ctx.destination);
-      if (ctx.state === "suspended") {
-        // Started from the chrome menu, so there is no page gesture yet;
-        // Chrome keeps the context suspended. Resume on the next interaction
-        // and nudge the viewer meanwhile.
-        ctx.resume().catch(() => {});
-        if (ctx.state === "suspended") {
-          if (tappedElement) show("Captions on \u2014 click the video to start");
-          const resume = () => {
-            ctx.resume().catch(() => {});
-            document.removeEventListener("pointerdown", resume, true);
-            document.removeEventListener("keydown", resume, true);
-          };
-          document.addEventListener("pointerdown", resume, true);
-          document.addEventListener("keydown", resume, true);
-        }
+      // Capturing needs the context RUNNING to deliver samples, and a context
+      // created from the chrome menu has no page gesture, so Chrome starts it
+      // suspended. Try to resume; if it stays suspended, prompt for one click
+      // and resume on it. (Audio itself keeps playing regardless on the
+      // captureStream path.)
+      const onRunning = () => status("Listening\u2026");
+      const armResume = () => {
+        status("Click the video to start captions");
+        const resume = () => {
+          document.removeEventListener("pointerdown", resume, true);
+          document.removeEventListener("keydown", resume, true);
+          ctx.resume().then(onRunning).catch(() => {});
+        };
+        document.addEventListener("pointerdown", resume, true);
+        document.addEventListener("keydown", resume, true);
+      };
+      if (ctx.state === "running") {
+        onRunning();
+      } else {
+        armResume();
+        ctx.resume().then(() => { if (ctx.state === "running") onRunning(); }).catch(() => {});
       }
       return true;
     } catch (e) {
@@ -157,13 +163,22 @@ if (window.__diveSubtitles) {
     clearTimeout(hideTimer);
   }
 
+  // A sticky line (status/hint) that stays until replaced.
+  function status(text) {
+    const o = ensureOverlay();
+    o.__line.textContent = text;
+    o.style.display = "";
+    clearTimeout(hideTimer);
+  }
+
+  // A transcribed caption: shown, then faded only after a long quiet gap so
+  // it does not vanish between passes.
   function show(text) {
     const o = ensureOverlay();
     o.__line.textContent = text;
     o.style.display = "";
     clearTimeout(hideTimer);
-    // Fade the line out if transcription goes quiet.
-    hideTimer = setTimeout(() => { if (overlay) overlay.style.display = "none"; }, 6000);
+    hideTimer = setTimeout(() => { if (overlay) overlay.style.display = "none"; }, 10000);
   }
 
   // Follow the video into and out of fullscreen so the caption stays on top.
@@ -172,9 +187,7 @@ if (window.__diveSubtitles) {
   }
 
   const ok = start();
-  // Show immediately so the viewer sees subtitles are on, before the first
-  // line is transcribed. push()/show() replace this with real captions.
-  if (ok) show("Listening\u2026");
+  if (!ok) window.__diveSubtitleError = window.__diveSubtitleError || "no-video";
 
   window.__diveSubtitles = Object.freeze({
     hasVideo: () => Boolean(video),
@@ -182,6 +195,4 @@ if (window.__diveSubtitles) {
     stop,
     running: () => Boolean(ctx),
   });
-
-  if (!ok) window.__diveSubtitleError = window.__diveSubtitleError || "no-video";
 }

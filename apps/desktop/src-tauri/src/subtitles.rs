@@ -35,12 +35,24 @@ use crate::state::AppState;
 const AUDIO_BINDING: &str = "__diveSubtitleAudio";
 /// Sample rate whisper expects; the page downsamples to this.
 const SAMPLE_RATE: usize = 16_000;
-/// Seconds of audio each transcription pass looks at.
-const WINDOW_SECS: usize = 8;
-/// How often a pass runs.
-const STEP_SECS: f64 = 2.0;
+/// Seconds of audio each transcription pass looks at. Smaller means the
+/// newest words appear sooner and each pass is cheaper; too small loses the
+/// context whisper needs for accuracy. `DIVE_SUBTITLE_WINDOW_SECS` overrides.
+const WINDOW_SECS: usize = 5;
+/// How often a pass runs; the dominant source of caption latency after
+/// inference time. `DIVE_SUBTITLE_STEP_SECS` overrides.
+const STEP_SECS: f64 = 0.8;
 /// Longest audio kept in the ring, so a tab left running does not grow forever.
-const MAX_BUFFER_SECS: usize = 12;
+const MAX_BUFFER_SECS: usize = 8;
+
+/// Read a positive number from `key`, or use `default`.
+fn env_num<T: std::str::FromStr + PartialOrd + Copy>(key: &str, default: T, min: T) -> T {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.trim().parse::<T>().ok())
+        .filter(|v| *v >= min)
+        .unwrap_or(default)
+}
 
 /// A downloadable whisper model.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -61,6 +73,13 @@ pub struct SubtitleModel {
 /// (~99 languages including English, Japanese and Tagalog); the English-only
 /// variants are deliberately omitted so language choice always works.
 const MODELS: &[(&str, &str, &str, u32, &str)] = &[
+    (
+        "tiny",
+        "Tiny",
+        "Fastest and lowest latency. Good for clear English; less accurate.",
+        78,
+        "ggml-tiny.bin",
+    ),
     (
         "base",
         "Base",
@@ -313,7 +332,9 @@ pub async fn start(
         .emit(&worker_app);
 
         let mut ring: Vec<f32> = Vec::with_capacity(SAMPLE_RATE * MAX_BUFFER_SECS);
-        let pass_every = std::time::Duration::from_secs_f64(STEP_SECS);
+        let window_secs = env_num("DIVE_SUBTITLE_WINDOW_SECS", WINDOW_SECS, 2);
+        let step_secs = env_num("DIVE_SUBTITLE_STEP_SECS", STEP_SECS, 0.2);
+        let pass_every = std::time::Duration::from_secs_f64(step_secs);
         let mut next = std::time::Instant::now() + pass_every;
         let mut last_text = String::new();
         while !stop.load(std::sync::atomic::Ordering::SeqCst) {
@@ -326,11 +347,11 @@ pub async fn start(
                 ring.drain(0..ring.len() - max);
             }
             if std::time::Instant::now() < next || ring.len() < SAMPLE_RATE {
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                std::thread::sleep(std::time::Duration::from_millis(20));
                 continue;
             }
             next = std::time::Instant::now() + pass_every;
-            let window_len = (SAMPLE_RATE * WINDOW_SECS).min(ring.len());
+            let window_len = (SAMPLE_RATE * window_secs).min(ring.len());
             let window = ring[ring.len() - window_len..].to_vec();
             match transcribe(&ctx, &window, &lang, translate) {
                 Ok((text, detected)) if !text.trim().is_empty() && text != last_text => {
@@ -396,6 +417,13 @@ fn transcribe(
     use whisper_rs::{FullParams, SamplingStrategy};
     let mut state = ctx.create_state().map_err(|e| e.to_string())?;
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    // Use most of the machine's cores and treat the short window as one
+    // segment: both cut the per-pass decode time that gates how live the
+    // captions feel.
+    let threads =
+        std::thread::available_parallelism().map_or(4, |n| (n.get().saturating_sub(2)).clamp(2, 8));
+    params.set_n_threads(i32::try_from(threads).unwrap_or(4));
+    params.set_single_segment(true);
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_special(false);
