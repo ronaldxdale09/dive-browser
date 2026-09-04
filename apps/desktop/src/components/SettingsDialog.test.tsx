@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { useBrowser } from "../store/browser";
+import { usePrivacy } from "../store/privacy";
 import { SettingsDialog, groupPermissions } from "./SettingsDialog";
 import { useUpdates } from "../store/updates";
 
@@ -30,6 +31,7 @@ beforeEach(() => {
   vi.spyOn(ipc, "updateCheck").mockResolvedValue(null);
   vi.spyOn(ipc, "updateInstall").mockResolvedValue(null);
   useBrowser.setState({ settingsSection: "general" });
+  usePrivacy.setState({ info: null });
   useUpdates.setState({ status: "idle", update: null, error: null, installing: false });
 });
 
@@ -60,10 +62,91 @@ describe("SettingsDialog", () => {
   it("persists a toggled preference", async () => {
     render(<SettingsDialog />);
     fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
-    fireEvent.click(screen.getByRole("switch", { name: "Block trackers" }));
+    fireEvent.click(screen.getByRole("switch", { name: "DivePrivacy protection" }));
 
     await waitFor(() => expect(ipc.prefsSet).toHaveBeenCalledWith({ ...DEFAULT_PREFS, block_trackers: true }));
     expect(usePrefs.getState().prefs.block_trackers).toBe(true);
+  });
+
+  it("separates bundled DivePrivacy controls from advanced custom URL rules", () => {
+    const prefs = {
+      ...DEFAULT_PREFS,
+      block_trackers: true,
+      blocked_patterns: ["ads.example.test"],
+      privacy_exceptions: ["example.com"],
+    };
+    usePrefs.setState({ prefs, loaded: true });
+    vi.mocked(ipc.prefsGet).mockResolvedValue(prefs);
+    usePrivacy.setState({ info: { version: "2026.09.04.1", ad_rules: 63, tracker_rules: 62, cosmetic_hosts: 4 } });
+
+    render(<SettingsDialog />);
+    fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
+
+    expect(screen.getByRole("switch", { name: "DivePrivacy protection" })).toBeTruthy();
+    const youtube = screen.getByRole("switch", { name: "YouTube protection" }) as HTMLButtonElement;
+    expect(youtube.disabled).toBe(false);
+    expect(youtube.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText(/Rules ship inside the signed app and work offline/)).toBeTruthy();
+    expect(screen.getByText("2026.09.04.1")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Advanced" })).toBeTruthy();
+    expect((screen.getByLabelText("Custom URL rules") as HTMLTextAreaElement).value).toBe("ads.example.test");
+    expect(screen.getByText("example.com")).toBeTruthy();
+    expect(screen.queryByText("Block trackers")).toBeNull();
+    expect(screen.queryByLabelText("Blocked hosts")).toBeNull();
+  });
+
+  it("disables YouTube protection while DivePrivacy is off", () => {
+    render(<SettingsDialog />);
+    fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
+
+    expect((screen.getByRole("switch", { name: "YouTube protection" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("removes an exact-host exception", async () => {
+    const prefs = { ...DEFAULT_PREFS, block_trackers: true, privacy_exceptions: ["other.test", "example.com"] };
+    usePrefs.setState({ prefs, loaded: true });
+    vi.mocked(ipc.prefsGet).mockResolvedValue(prefs);
+    render(<SettingsDialog />);
+    fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume protection on example.com" }));
+
+    expect(screen.queryByText("example.com")).toBeNull();
+    await waitFor(() =>
+      expect(ipc.prefsSet).toHaveBeenCalledWith({ ...prefs, privacy_exceptions: ["other.test"] }),
+    );
+  });
+
+  it("restores an exception when removing it fails to persist", async () => {
+    const prefs = { ...DEFAULT_PREFS, block_trackers: true, privacy_exceptions: ["example.com"] };
+    usePrefs.setState({ prefs, loaded: true });
+    vi.mocked(ipc.prefsGet).mockResolvedValue(prefs);
+    vi.mocked(ipc.prefsSet).mockRejectedValue(new Error("preferences unavailable"));
+    render(<SettingsDialog />);
+    fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume protection on example.com" }));
+
+    await waitFor(() => expect(screen.getByText("example.com")).toBeTruthy());
+    expect(useBrowser.getState().error).toBe("preferences unavailable");
+  });
+
+  it("does not let its initial preferences load restore a removed exception", async () => {
+    const prefs = { ...DEFAULT_PREFS, block_trackers: true, privacy_exceptions: ["example.com"] };
+    let finishLoad!: (value: typeof prefs) => void;
+    usePrefs.setState({ prefs, loaded: false });
+    vi.mocked(ipc.prefsGet).mockImplementation(() => new Promise((resolve) => {
+      finishLoad = resolve;
+    }));
+    render(<SettingsDialog />);
+    fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume protection on example.com" }));
+    await waitFor(() => expect(ipc.prefsSet).toHaveBeenCalledWith({ ...prefs, privacy_exceptions: [] }));
+    finishLoad(prefs);
+
+    await waitFor(() => expect(usePrefs.getState().loaded).toBe(true));
+    expect(usePrefs.getState().prefs.privacy_exceptions).toEqual([]);
   });
 
   it("only offers a search URL for a custom engine", () => {

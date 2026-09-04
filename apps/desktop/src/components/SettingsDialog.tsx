@@ -23,6 +23,7 @@ import { useUpdates } from "../store/updates";
 import { formatChord } from "../lib/commands";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import type { Prefs } from "../store/prefs";
+import { usePrivacy } from "../store/privacy";
 import { Icon, IconButton } from "./Icon";
 import { Button, Check, Group, Row, Segmented, Select, Switch, TextArea, TextInput } from "./SettingsFields";
 import { useCoversContent } from "../lib/overlay";
@@ -331,8 +332,73 @@ const RETENTION = [
 
 function Privacy() {
   const [prefs, set] = usePref();
+  const privacyInfo = usePrivacy((s) => s.info);
   return (
     <>
+      <Group
+        title="DivePrivacy"
+        description="Dive's curated ad, tracker, cosmetic, and YouTube protections. Rules ship inside the signed app and work offline."
+      >
+        <Row
+          label="DivePrivacy protection"
+          hint="Blocks common advertising, analytics, fingerprinting, telemetry, cryptomining, and popup infrastructure with bundled rules."
+          control={
+            <Switch
+              label="DivePrivacy protection"
+              checked={prefs.block_trackers}
+              onChange={(block_trackers) => set({ block_trackers })}
+            />
+          }
+        />
+        <Row
+          label="YouTube protection"
+          hint="Applies narrow, fail-open protections on supported YouTube pages. Turning this off does not weaken general tracker protection."
+          control={
+            <Switch
+              label="YouTube protection"
+              checked={prefs.youtube_protection}
+              disabled={!prefs.block_trackers}
+              onChange={(youtube_protection) => set({ youtube_protection })}
+            />
+          }
+        />
+        <Row
+          stacked
+          label="Site exceptions"
+          hint="Protection is paused only for these exact hosts. Developer request rules still apply."
+          control={
+            prefs.privacy_exceptions.length === 0 ? (
+              <p className="text-[11px] text-ink-3">No site exceptions.</p>
+            ) : (
+              <div role="list" aria-label="Sites with paused DivePrivacy protection" className="flex flex-wrap gap-2">
+                {prefs.privacy_exceptions.map((host) => (
+                  <span
+                    key={host}
+                    role="listitem"
+                    className="inline-flex h-7 items-center gap-1.5 rounded-full border border-line bg-surface-2 pl-2.5 pr-1 font-mono text-[10.5px] text-ink-2"
+                  >
+                    {host}
+                    <button
+                      type="button"
+                      aria-label={`Resume protection on ${host}`}
+                      onClick={() => set({ privacy_exceptions: prefs.privacy_exceptions.filter((exception) => exception !== host) })}
+                      className="grid size-5 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-ink"
+                    >
+                      <Icon icon={X} size={11} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )
+          }
+        />
+        <Row
+          label="Bundled ruleset"
+          hint="This version is packaged with Dive and changes only when the app is updated."
+          control={<span className="font-mono text-[11px] text-ink-2">{privacyInfo?.version ?? "…"}</span>}
+        />
+      </Group>
+
       <Group title="Requests">
         <Row
           label="Send “Do Not Track”"
@@ -340,17 +406,20 @@ function Privacy() {
           control={<Switch label="Send Do Not Track" checked={prefs.do_not_track} onChange={(do_not_track) => set({ do_not_track })} />}
         />
         <Row
-          label="Block trackers"
-          hint="Refuses requests to a short list of analytics and ad hosts. Blocked requests still appear in the Network panel."
-          control={<Switch label="Block trackers" checked={prefs.block_trackers} onChange={(block_trackers) => set({ block_trackers })} />}
+          label="Run page JavaScript"
+          hint="Off loads every page with scripting disabled — useful for checking what a page does without it."
+          control={<Switch label="Run page JavaScript" checked={prefs.javascript} onChange={(javascript) => set({ javascript })} />}
         />
+      </Group>
+
+      <Group title="Advanced" description="Your custom URL globs are separate from DivePrivacy's curated rules.">
         <Row
           stacked
-          label="Blocked hosts"
+          label="Custom URL rules"
           hint="One host or URL pattern per line. A bare host matches anywhere in the URL; * is a wildcard."
           control={
             <TextArea
-              label="Blocked hosts"
+              label="Custom URL rules"
               value={prefs.blocked_patterns.join("\n")}
               placeholder={"ads.example.com\n*://*.tracker.dev/*"}
               onCommit={(text) =>
@@ -363,11 +432,6 @@ function Privacy() {
               }
             />
           }
-        />
-        <Row
-          label="Run page JavaScript"
-          hint="Off loads every page with scripting disabled — useful for checking what a page does without it."
-          control={<Switch label="Run page JavaScript" checked={prefs.javascript} onChange={(javascript) => set({ javascript })} />}
         />
       </Group>
 
