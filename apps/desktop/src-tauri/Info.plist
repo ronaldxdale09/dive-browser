@@ -33,11 +33,27 @@
       </array>
     </dict>
   </array>
+  <!-- Usage descriptions for every macOS TCC-protected resource a web page can
+       reach through Chromium. macOS hard-kills the process (SIGABRT via TCC)
+       the instant it touches one of these without a declared string, so every
+       capability a browser exposes must be listed here even though the prompt,
+       not the string, is what actually gates access. Bluetooth in particular
+       is reached by passkeys and security keys during Google/WebAuthn sign-in. -->
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>Sites you visit may use Bluetooth for passkeys, security keys, or Web Bluetooth devices.</string>
+  <key>NSBluetoothPeripheralUsageDescription</key>
+  <string>Sites you visit may use Bluetooth for passkeys, security keys, or Web Bluetooth devices.</string>
   <key>NSCameraUsageDescription</key>
   <string>Pages you visit may ask to use the camera.</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>Pages you visit may ask to use the microphone.</string>
   <key>NSLocationUsageDescription</key>
   <string>Pages you visit may ask for your location.</string>
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>Pages you visit may ask for your location.</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Sites and devices you cast to may need to find each other on your local network.</string>
+  <key>NSMotionUsageDescription</key>
+  <string>Pages you visit may ask to use motion and orientation sensors.</string>
 </dict>
 </plist>
