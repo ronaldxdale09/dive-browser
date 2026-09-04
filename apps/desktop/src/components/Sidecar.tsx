@@ -1,5 +1,5 @@
 import { Plus, Settings2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isReady, useAgent } from "../store/agent";
 import { useBrowser } from "../store/browser";
 import { usePrefs } from "../store/prefs";
@@ -20,6 +20,7 @@ export function Sidecar() {
   const init = useAgent((s) => s.init);
   const refreshKeys = useAgent((s) => s.refreshKeys);
   const loaded = useAgent((s) => s.loaded);
+  const initError = useAgent((s) => s.initError);
   const providers = useAgent((s) => s.providers);
   const keyed = useAgent((s) => s.keyed);
   const messages = useAgent((s) => s.messages);
@@ -30,10 +31,12 @@ export function Sidecar() {
   const toggle = useBrowser((s) => s.toggle);
   // The user may want to change or configure a provider even while ready
   const [wantsSetup, setWantsSetup] = useState(false);
+  const previousSettings = useRef(settingsOpen);
 
   useEffect(() => void init(), [init]);
   useEffect(() => {
-    if (!settingsOpen) void refreshKeys();
+    if (previousSettings.current && !settingsOpen) void refreshKeys();
+    previousSettings.current = settingsOpen;
   }, [settingsOpen, refreshKeys]);
 
   const provider = providers.find((p) => p.id === providerId);
@@ -83,8 +86,9 @@ export function Sidecar() {
           <div className="mt-auto h-20 rounded-xl border border-line bg-surface-2/50" />
         </div>
       )}
-      {loaded && showSetup && <Setup canGoBack={ready} onDone={() => setWantsSetup(false)} />}
-      {loaded && !showSetup && <Thread onAddProvider={() => setWantsSetup(true)} />}
+      {loaded && initError && <div className="p-4 text-sm text-ink-2"><p role="alert">{initError}</p><button type="button" onClick={() => void init()} className="mt-3 min-h-9 rounded-lg border border-line-2 px-3 text-ink hover:bg-surface-3">Retry loading agent</button></div>}
+      {loaded && !initError && showSetup && <Setup canGoBack={ready} onDone={() => setWantsSetup(false)} />}
+      {loaded && !initError && !showSetup && <Thread onAddProvider={() => setWantsSetup(true)} />}
     </aside>
   );
 }

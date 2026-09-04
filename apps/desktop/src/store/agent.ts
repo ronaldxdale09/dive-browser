@@ -37,6 +37,7 @@ interface AgentState {
   keyed: Provider[];
   /** `null` until the first `init` has answered. */
   loaded: boolean;
+  initError: string | null;
   /** Model listings by provider id. */
   models: Record<string, ModelInfo[]>;
   modelsLoading: string | null;
@@ -63,6 +64,17 @@ interface AgentState {
 let seq = 0;
 const nextId = () => `m${++seq}`;
 const newRunId = () => `run-${Date.now().toString(36)}-${(++seq).toString(36)}`;
+let initializing: Promise<void> | null = null;
+let keyGeneration = 0;
+
+/** A stalled host credential request must not keep the panel loading forever. */
+function initializationDeadline<T>(request: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("Agent initialization timed out. Try again.")), 10_000);
+  });
+  return Promise.race([request, timeout]).finally(() => clearTimeout(timer));
+}
 
 /** The message's steps with no approval left pending, or nothing to patch. */
 function settle(m: Message): Partial<Message> {
@@ -130,6 +142,7 @@ export const useAgent = create<AgentState>((set, get) => ({
   providers: [],
   keyed: [],
   loaded: false,
+  initError: null,
   models: {},
   modelsLoading: null,
   modelsError: null,
@@ -138,17 +151,21 @@ export const useAgent = create<AgentState>((set, get) => ({
   runId: null,
   sessionAutoApprove: false,
 
-  init: async () => {
-    try {
-      const [providers, keyed] = await Promise.all([ipc.agentProviders(), ipc.agentKeys()]);
-      set({ providers, keyed, loaded: true });
-    } catch {
-      set({ loaded: true });
-    }
+  init: () => {
+    if (initializing) return initializing;
+    const generation = ++keyGeneration;
+    set({ loaded: false, initError: null });
+    initializing = initializationDeadline(Promise.all([ipc.agentProviders(), ipc.agentKeys()]))
+      .then(([providers, keyed]) => set({ providers, ...(generation === keyGeneration ? { keyed } : {}), loaded: true }))
+      .catch((error: unknown) => set({ loaded: true, initError: error instanceof Error ? error.message : String(error) }))
+      .finally(() => { initializing = null; });
+    return initializing;
   },
   refreshKeys: async () => {
+    const generation = ++keyGeneration;
     try {
-      set({ keyed: await ipc.agentKeys() });
+      const keyed = await initializationDeadline(ipc.agentKeys());
+      if (generation === keyGeneration) set({ keyed });
     } catch {
       // keychain unavailable; keep what we had
     }
