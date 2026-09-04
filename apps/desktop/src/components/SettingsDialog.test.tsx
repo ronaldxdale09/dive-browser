@@ -114,6 +114,46 @@ describe("Site permissions", () => {
     expect(screen.queryByText("https://maps.test")).toBeNull();
     expect(screen.getByText("https://meet.test")).toBeTruthy();
   });
+
+  it("shows a failed permission read instead of claiming the list is empty", async () => {
+    vi.mocked(ipc.permissionsList).mockRejectedValue(new Error("permission store unavailable"));
+    render(<SettingsDialog />);
+    fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("permission store unavailable"));
+    expect(screen.queryByText("No site has asked for anything yet.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Retry site permissions" })).toBeTruthy();
+  });
+
+  it("rolls a permission decision back when persistence fails", async () => {
+    vi.mocked(ipc.permissionSet).mockRejectedValue(new Error("permission write failed"));
+    render(<SettingsDialog />);
+    fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
+    await waitFor(() => expect(screen.getByText("https://maps.test")).toBeTruthy());
+
+    const select = screen.getByLabelText("https://maps.test Location") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "allow" } });
+
+    await waitFor(() => expect(select.value).toBe("deny"));
+    expect(screen.getByRole("alert").textContent).toContain("permission write failed");
+  });
+
+  it("disables a permission decision while its write is pending", async () => {
+    let finish!: () => void;
+    vi.mocked(ipc.permissionSet).mockImplementation(() => new Promise<null>((resolve) => {
+      finish = () => resolve(null);
+    }));
+    render(<SettingsDialog />);
+    fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
+    await waitFor(() => expect(screen.getByText("https://maps.test")).toBeTruthy());
+
+    const select = screen.getByLabelText("https://maps.test Location") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "allow" } });
+    expect(select.disabled).toBe(true);
+
+    finish();
+    await waitFor(() => expect(select.disabled).toBe(false));
+  });
 });
 
 describe("About and updates", () => {

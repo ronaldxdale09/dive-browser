@@ -420,25 +420,56 @@ export function groupPermissions(list: SitePermission[]): { origin: string; kind
 
 function SitePermissions() {
   const [list, setList] = useState<SitePermission[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+  const [saving, setSaving] = useState<Record<string, true>>({});
   useEffect(() => {
     let alive = true;
     ipc
       .permissionsList()
       .then((l) => alive && setList(l))
-      .catch(() => alive && setList([]));
+      .catch((e: unknown) => alive && setError(e instanceof Error ? e.message : String(e)));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [reload]);
   const decide = (p: SitePermission, decision: Decision) => {
+    const key = `${p.origin}\n${p.kind}`;
     setList((l) => (l ?? []).flatMap((x) => (x.origin === p.origin && x.kind === p.kind ? (decision === "ask" ? [] : [{ ...x, decision }]) : [x])));
-    void ipc.permissionSet(p.origin, p.kind, decision).catch(() => undefined);
+    setError(null);
+    setSaving((s) => ({ ...s, [key]: true }));
+    void ipc
+      .permissionSet(p.origin, p.kind, decision)
+      .catch((e: unknown) => {
+        setList((l) => {
+          const current = l ?? [];
+          const without = current.filter((x) => !(x.origin === p.origin && x.kind === p.kind));
+          return [...without, p];
+        });
+        setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => setSaving((s) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== key))));
   };
   const groups = groupPermissions(list ?? []);
   return (
     <Group title="Site permissions" description="What you have allowed or blocked, by site. A page asks again for anything set back to Ask.">
-      {list === null && <p className="py-3 text-xs text-ink-3">Loading…</p>}
-      {list !== null && groups.length === 0 && <p className="py-3 text-xs text-ink-3">No site has asked for anything yet.</p>}
+      {list === null && !error && <p className="py-3 text-xs text-ink-3">Loading…</p>}
+      {error && (
+        <div role="alert" className="flex items-center gap-3 py-3 text-xs text-danger">
+          <span className="min-w-0 flex-1">{error}</span>
+          <Button
+            variant="quiet"
+            onClick={() => {
+              setList(null);
+              setError(null);
+              setReload((n) => n + 1);
+            }}
+          >
+            Retry site permissions
+          </Button>
+        </div>
+      )}
+      {list !== null && !error && groups.length === 0 && <p className="py-3 text-xs text-ink-3">No site has asked for anything yet.</p>}
       {groups.map((g) => (
         <div key={g.origin} className="border-b border-line py-3 last:border-b-0">
           <p className="mb-1.5 truncate font-mono text-xs text-ink">{g.origin}</p>
@@ -446,9 +477,10 @@ function SitePermissions() {
             {g.kinds.map((p) => (
               <div key={p.kind} className="flex items-center gap-3">
                 <span className="min-w-0 flex-1 text-[11px] text-ink-2">{PERMISSION_KINDS[p.kind] ?? p.kind}</span>
-                <Select label={`${g.origin} ${PERMISSION_KINDS[p.kind] ?? p.kind}`} value={p.decision} onChange={(d) => decide(p, d)} options={DECISIONS} />
+                <Select disabled={Boolean(saving[`${p.origin}\n${p.kind}`])} label={`${g.origin} ${PERMISSION_KINDS[p.kind] ?? p.kind}`} value={p.decision} onChange={(d) => decide(p, d)} options={DECISIONS} />
                 <button
                   type="button"
+                  disabled={Boolean(saving[`${p.origin}\n${p.kind}`])}
                   aria-label={`Forget ${g.origin} ${PERMISSION_KINDS[p.kind] ?? p.kind}`}
                   onClick={() => decide(p, "ask")}
                   className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-ink"
