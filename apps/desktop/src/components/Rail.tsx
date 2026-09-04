@@ -1,7 +1,7 @@
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Check, Globe, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Settings2, Shield, SquarePlus, Trash2 } from "lucide-react";
+import { ArrowRight, Check, Globe, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Settings2, Shield, SquarePlus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { useBrowser } from "../store/browser";
@@ -137,17 +137,19 @@ function DefaultBrowserButton({ expanded }: { expanded: boolean }) {
   if (!status?.supported) return null;
   const isDefault = status.is_default;
   const title = isDefault ? "Dive is your default browser" : "Make Dive the default browser";
+  // Until Dive is the default this is the one invitation on the rail: a
+  // hairline pill with a slow light sweep. Once it is, the sweep goes and
+  // the row settles into the same quiet weight as Settings below it.
+  const shape = expanded ? "flex h-9 items-center gap-2.5 rounded-lg px-2" : "grid size-9 place-items-center rounded-full";
+  const tone = isDefault ? "rail-cta is-default text-ink-3 hover:bg-surface-2 hover:text-ink" : "rail-cta text-ink-2 hover:text-ink";
   return (
     <button
       type="button"
       aria-label={title}
       title={title}
+      data-default={isDefault || undefined}
       onClick={() => useBrowser.getState().toggle("defaultBrowser", true)}
-      className={
-        expanded
-          ? "flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-2 text-xs text-ink-3 hover:bg-surface-2 hover:text-ink"
-          : "grid size-9 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink"
-      }
+      className={`${shape} ${tone} relative shrink-0 overflow-hidden text-xs transition-colors`}
     >
       <span className="relative grid size-7 shrink-0 place-items-center">
         <Icon icon={Globe} />
@@ -157,7 +159,17 @@ function DefaultBrowserButton({ expanded }: { expanded: boolean }) {
           </span>
         )}
       </span>
-      {expanded && "Default browser"}
+      {expanded && (
+        <span className="relative flex min-w-0 flex-1 flex-col leading-tight">
+          <span className={isDefault ? "truncate" : "truncate font-medium text-ink"}>{isDefault ? "Default browser" : "Set as default browser"}</span>
+          {!isDefault && <span className="truncate text-[10px] text-ink-3">Links from other apps</span>}
+        </span>
+      )}
+      {expanded && !isDefault && (
+        <span className="grid size-5 shrink-0 place-items-center rounded-full bg-accent text-accent-ink" aria-hidden>
+          <Icon icon={ArrowRight} size={11} />
+        </span>
+      )}
     </button>
   );
 }

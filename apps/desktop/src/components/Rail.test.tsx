@@ -91,7 +91,9 @@ describe("Rail", () => {
   it("offers to make Dive the default browser, just above Settings", async () => {
     render(<Rail />);
     const offer = await screen.findByRole("button", { name: "Make Dive the default browser" });
-    expect(offer.textContent).toContain("Default browser");
+    expect(offer.textContent).toContain("Set as default browser");
+    expect(offer.className).toContain("rail-cta");
+    expect(offer.className).not.toContain("is-default");
     const settings = screen.getByRole("button", { name: "Settings" });
     expect(offer.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(offer.nextElementSibling).toBe(settings);
@@ -111,6 +113,7 @@ describe("Rail", () => {
     render(<Rail />);
     const button = await screen.findByRole("button", { name: "Dive is your default browser" });
     expect(button.textContent).toContain("Default browser");
+    expect(button.className).toContain("is-default");
     expect(screen.getByTestId("default-browser-badge")).toBeTruthy();
   });
 
