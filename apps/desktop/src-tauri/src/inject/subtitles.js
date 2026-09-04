@@ -45,10 +45,19 @@ if (window.__diveSubtitles) {
       "color:#fff;font:600 22px/1.35 -apple-system,'Segoe UI',system-ui,sans-serif;" +
       "text-shadow:0 1px 2px rgba(0,0,0,0.6);white-space:pre-wrap;";
     host.appendChild(line);
-    (document.body || document.documentElement).appendChild(host);
     overlay = host;
     overlay.__line = line;
+    reparentOverlay();
     return overlay;
+  }
+
+  // A fullscreened/theater player is promoted to the browser's top layer,
+  // which paints above any normal fixed element regardless of z-index, so the
+  // caption must live inside that element to sit in front of the video.
+  function reparentOverlay() {
+    if (!overlay) return;
+    const host = document.fullscreenElement || document.webkitFullscreenElement || document.body || document.documentElement;
+    if (host && overlay.parentNode !== host) host.appendChild(overlay);
   }
 
   // Downsample a Float32 buffer at inputRate to 16 kHz and append Int16 LE.
@@ -157,7 +166,15 @@ if (window.__diveSubtitles) {
     hideTimer = setTimeout(() => { if (overlay) overlay.style.display = "none"; }, 6000);
   }
 
+  // Follow the video into and out of fullscreen so the caption stays on top.
+  for (const ev of ["fullscreenchange", "webkitfullscreenchange"]) {
+    document.addEventListener(ev, () => setTimeout(reparentOverlay, 0), true);
+  }
+
   const ok = start();
+  // Show immediately so the viewer sees subtitles are on, before the first
+  // line is transcribed. push()/show() replace this with real captions.
+  if (ok) show("Listening\u2026");
 
   window.__diveSubtitles = Object.freeze({
     hasVideo: () => Boolean(video),
