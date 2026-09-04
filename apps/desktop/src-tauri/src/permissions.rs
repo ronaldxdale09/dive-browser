@@ -232,6 +232,22 @@ fn binding_request(event: &dive_cdp::CdpEvent, nonce: &str) -> Option<(BindingRe
     Some((request, event.params["executionContextId"].as_i64()?))
 }
 
+/// Keep the permission service alive until the session itself ends.
+async fn next_permission_event(
+    events: &mut dive_cdp::CdpEventReceiver,
+    tab_id: TabId,
+) -> Option<dive_cdp::CdpEvent> {
+    loop {
+        match events.recv().await {
+            Ok(event) => return Some(event),
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                tracing::warn!(%tab_id, n, "permission monitor missed CDP events");
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+        }
+    }
+}
+
 /// Install the media-attempt reporter and keep permission policy synchronized
 /// as the main frame moves between origins.
 pub async fn attach_page(app: tauri::AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
@@ -267,7 +283,7 @@ pub async fn attach_page(app: tauri::AppHandle<Runtime>, tab_id: TabId, session:
     tracing::debug!(%tab_id, "permission page setup complete");
 
     tauri::async_runtime::spawn(async move {
-        while let Ok(event) = events.recv().await {
+        while let Some(event) = next_permission_event(&mut events, tab_id).await {
             if let Some((request, context_id)) = binding_request(&event, &nonce) {
                 let origin = session.call("Runtime.evaluate", json!({"expression": "location.origin", "contextId": context_id, "returnByValue": true})).await
                     .ok().and_then(|result| result["result"]["value"].as_str().map(str::to_owned));
@@ -313,6 +329,40 @@ pub async fn attach_page(app: tauri::AppHandle<Runtime>, tab_id: TabId, session:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct NoopTransport;
+    impl dive_cdp::Transport for NoopTransport {
+        fn send(&self, _message: &str) -> Result<(), dive_cdp::CdpError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn permission_consumer_survives_event_overload() {
+        let session = CdpSession::new(NoopTransport);
+        let mut events = session.subscribe();
+        for _ in 0..2048 {
+            session
+                .handle_incoming(r#"{"method":"Runtime.bindingCalled"}"#)
+                .unwrap();
+        }
+        let event = next_permission_event(&mut events, TabId::new())
+            .await
+            .expect("permission handling must continue after a full CDP buffer");
+        assert_eq!(event.method, "Runtime.bindingCalled");
+    }
+
+    #[tokio::test]
+    async fn permission_consumer_exits_on_session_closure() {
+        let session = CdpSession::new(NoopTransport);
+        let mut events = session.subscribe();
+        session.close();
+        assert!(
+            next_permission_event(&mut events, TabId::new())
+                .await
+                .is_none()
+        );
+    }
 
     #[test]
     fn decisions_round_trip_through_their_text_form() {

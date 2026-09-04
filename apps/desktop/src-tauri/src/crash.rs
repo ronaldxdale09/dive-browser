@@ -108,6 +108,13 @@ impl Registry {
         matches!(seen.insert(tab, now), Some(prev) if now.duration_since(prev) < SAME_EVENT)
     }
 
+    /// Mark the boundary between this crash and a possible crash-on-reload.
+    pub fn begin_reload(&self, tab: TabId) {
+        // Once reload starts the renderer can crash again immediately. Time
+        // alone cannot distinguish that new crash from the previous signals.
+        lock(&self.seen).remove(&tab);
+    }
+
     /// Record a crash and say what to do about it.
     pub fn on_crash(&self, tab: TabId, now: Instant) -> Option<Plan> {
         let mut history = lock(&self.inner);
@@ -154,7 +161,14 @@ pub fn watch(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
             match events.recv().await {
                 Ok(event) => {
                     if event.method == "Inspector.targetCrashed" {
-                        recover(&app, tab_id, &session).await;
+                        // Keep draining duplicate signals during backoff. If we
+                        // awaited recovery here, an old queued signal would be
+                        // read only after the reload opened a new crash episode.
+                        let app = app.clone();
+                        let session = session.clone();
+                        tauri::async_runtime::spawn(async move {
+                            recover(&app, tab_id, &session).await;
+                        });
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -167,6 +181,9 @@ pub fn watch(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
 }
 
 async fn recover(app: &AppHandle<Runtime>, tab_id: TabId, session: &CdpSession) {
+    if session.is_closed() {
+        return;
+    }
     let now = Instant::now();
     let crashes = &app.state::<AppState>().crashes;
     if crashes.duplicate(tab_id, now) {
@@ -201,6 +218,10 @@ async fn recover(app: &AppHandle<Runtime>, tab_id: TabId, session: &CdpSession) 
     }
     .emit(app);
     tokio::time::sleep(plan.delay).await;
+    if session.is_closed() {
+        return;
+    }
+    crashes.begin_reload(tab_id);
     if let Err(e) = session.call0("Page.reload").await {
         tracing::warn!(%tab_id, "reload after a crash failed: {e}");
     }
@@ -218,6 +239,29 @@ mod tests {
         assert!(!registry.duplicate(tab, t0 + SAME_EVENT + Duration::from_secs(1)));
         registry.drop_tab(tab);
         assert!(!registry.duplicate(tab, t0 + SAME_EVENT + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn a_new_crash_after_reload_gets_its_own_bounded_attempt() {
+        let registry = Registry::default();
+        let tab = TabId::new();
+        let t0 = Instant::now();
+        for attempt in 1..=MAX_ATTEMPTS {
+            let now = t0 + Duration::from_millis(u64::from(attempt) * 100);
+            assert!(
+                !registry.duplicate(tab, now),
+                "a reload can crash inside the dedup window"
+            );
+            assert_eq!(registry.on_crash(tab, now).unwrap().attempt, attempt);
+            assert!(registry.duplicate(tab, now + Duration::from_millis(1)));
+            registry.begin_reload(tab);
+        }
+        assert!(!registry.duplicate(tab, t0 + Duration::from_millis(500)));
+        assert!(
+            registry
+                .on_crash(tab, t0 + Duration::from_millis(500))
+                .is_none()
+        );
     }
 
     use super::*;

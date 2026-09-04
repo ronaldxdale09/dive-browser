@@ -9,6 +9,9 @@
   const originalUserMedia = typeof media.getUserMedia === "function" ? media.getUserMedia.bind(media) : null;
   const originalDisplayMedia = typeof media.getDisplayMedia === "function" ? media.getDisplayMedia.bind(media) : null;
   const pending = new Map();
+  // A lost CDP event or disappearing backend must never strand a page's
+  // media promise (or retain its resolver) for the lifetime of the document.
+  const requestTimeout = 30_000;
   let nextId = 1;
   Object.defineProperty(media, "__diveGuarded", { value: true });
   Object.defineProperty(window, "__divePermissionResolve", {
@@ -22,8 +25,18 @@
   });
   const ask = (kind) => new Promise((resolve) => {
     const id = nextId++;
-    pending.set(id, resolve);
-    window.__BINDING__(JSON.stringify({ nonce, id, kind }));
+    const settle = (allowed) => {
+      pending.delete(id);
+      clearTimeout(timer);
+      resolve(allowed);
+    };
+    const timer = setTimeout(() => settle(false), requestTimeout);
+    pending.set(id, settle);
+    try {
+      window.__BINDING__(JSON.stringify({ nonce, id, kind }));
+    } catch {
+      settle(false);
+    }
   });
   if (originalUserMedia) {
     media.getUserMedia = async function (constraints) {
