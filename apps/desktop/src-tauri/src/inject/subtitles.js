@@ -89,9 +89,22 @@ if (window.__diveSubtitles) {
       };
       source.connect(node);
       node.connect(ctx.destination);
-      // Keep the video audible: route the source to the speakers too.
-      source.connect(ctx.destination);
-      if (ctx.state === "suspended") ctx.resume();
+      if (ctx.state === "suspended") {
+        // Started from the chrome menu, so there is no page gesture yet;
+        // Chrome keeps the context suspended. Resume on the next interaction
+        // and nudge the viewer meanwhile.
+        ctx.resume().catch(() => {});
+        if (ctx.state === "suspended") {
+          show("Captions on \u2014 click the video to start");
+          const resume = () => {
+            ctx.resume().catch(() => {});
+            document.removeEventListener("pointerdown", resume, true);
+            document.removeEventListener("keydown", resume, true);
+          };
+          document.addEventListener("pointerdown", resume, true);
+          document.addEventListener("keydown", resume, true);
+        }
+      }
       return true;
     } catch (e) {
       window.__diveSubtitleError = String(e && e.name || e);
