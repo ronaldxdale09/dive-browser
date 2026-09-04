@@ -348,20 +348,22 @@ impl TabHost {
             // `DIVE_DISABLE_FEEDS=1` leaves the DevTools session idle, to
             // tell an engine fault apart from one our own traffic provokes.
             let feeds = std::env::var_os("DIVE_DISABLE_FEEDS").is_none();
-            let (console_ready, network_ready) = if feeds {
+            let (console_ready, network_ready, interception_ready) = if feeds {
                 let c = crate::console::attach(app.clone(), tab_id, session.clone());
                 let n = crate::network::attach(app.clone(), tab_id, session.clone());
                 crate::favicon::attach(app.clone(), tab_id, session.clone());
                 crate::loading::attach(app.clone(), tab_id, session.clone());
-                crate::rules::attach(app.clone(), tab_id, tab.workspace_id, session.clone());
+                let r =
+                    crate::rules::attach(app.clone(), tab_id, tab.workspace_id, session.clone());
                 crate::inspect::watch(app.clone(), tab_id, &session);
                 crate::crash::watch(app.clone(), tab_id, session.clone());
-                (c, n)
+                (c, n, r)
             } else {
                 let (ct, cr) = tokio::sync::oneshot::channel();
                 let (nt, nr) = tokio::sync::oneshot::channel();
-                let _ = (ct.send(()), nt.send(()));
-                (cr, nr)
+                let (rt, rr) = tokio::sync::oneshot::channel();
+                let _ = (ct.send(()), nt.send(()), rt.send(()));
+                (cr, nr, rr)
             };
             let session_for_prefs = session.clone();
             self.cdp.insert(tab_id, session);
@@ -370,6 +372,7 @@ impl TabHost {
             tauri::async_runtime::spawn(async move {
                 let _ = console_ready.await;
                 let _ = network_ready.await;
+                let _ = interception_ready.await;
                 // Privacy preferences have to be in force before the document
                 // request goes out, or the first load escapes them.
                 let prefs = {

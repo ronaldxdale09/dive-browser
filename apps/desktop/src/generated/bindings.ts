@@ -246,6 +246,8 @@ export const commands = {
 	 */
 	commandRun: (id: string, argsJson: string | null) => typedError<string, AppError>(__TAURI_INVOKE("command_run", { id, argsJson })),
 	appInfo: () => __TAURI_INVOKE<AppInfo>("app_info"),
+	/**  Return bundled ruleset metadata without reading browsing state. */
+	privacyInfo: () => __TAURI_INVOKE<PrivacyInfo>("privacy_info"),
 	/**  Current user preferences. */
 	prefsGet: () => __TAURI_INVOKE<Prefs>("prefs_get"),
 	/**
@@ -311,6 +313,7 @@ export const events = {
 	menuCommand: makeEvent<MenuCommand>("menu-command"),
 	networkEvent: makeEvent<NetworkEvent>("network-event"),
 	permissionAsked: makeEvent<PermissionAsked>("permission-asked"),
+	privacyEvent: makeEvent<PrivacyEvent>("privacy-event"),
 	recorderEvent: makeEvent<RecorderEvent>("recorder-event"),
 	recordingEvent: makeEvent<RecordingEvent>("recording-event"),
 	stateChanged: makeEvent<StateChanged>("state-changed"),
@@ -1077,6 +1080,42 @@ export type Preset = {
 	safe_area: Insets,
 	/**  The device itself. */
 	device: Device,
+};
+
+/**  Categories reported for network requests blocked by `DivePrivacy`. */
+export type PrivacyCategory =
+/**  Advertising delivery and auction infrastructure. */
+"ads" |
+/**  Analytics, telemetry, fingerprinting, and cryptomining infrastructure. */
+"tracker";
+
+/**  A privacy action the chrome may summarize without exposing browsing URLs. */
+export type PrivacyEvent =
+/**  A network request was cancelled by DivePrivacy. */
+{ type: "blocked"; data: {
+	/**  Tab whose request was cancelled. */
+	tab_id: TabId,
+	/**  Which bundled matcher blocked it. */
+	category: PrivacyCategory,
+} } |
+/**  YouTube elements were removed from a document. */
+{ type: "youtube"; data: {
+	/**  Tab whose document was cleaned. */
+	tab_id: TabId,
+	/**  Number of elements removed. */
+	count: number,
+} };
+
+/**  Public metadata about the bundled DivePrivacy assets. */
+export type PrivacyInfo = {
+	/**  Bundled ruleset version. */
+	version: string,
+	/**  Number of advertising network rules. */
+	ad_rules: number,
+	/**  Number of tracking network rules. */
+	tracker_rules: number,
+	/**  Number of hosts with cosmetic rules. */
+	cosmetic_hosts: number,
 };
 
 /**  A provider in the catalog. */

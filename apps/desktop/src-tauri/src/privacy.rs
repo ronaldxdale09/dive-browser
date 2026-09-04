@@ -1,21 +1,87 @@
 use adblock::{Engine, FilterSet, lists::ParseOptions, request::Request};
+use dive_core::TabId;
+use serde::{Deserialize, Serialize};
+use specta::Type;
+use tauri_specta::Event;
 
 const ADS_RULES: &str = include_str!("../privacy/ads.txt");
 const TRACKER_RULES: &str = include_str!("../privacy/trackers.txt");
 const EXCEPTION_RULES: &str = include_str!("../privacy/exceptions.txt");
-const _: &str = include_str!("../privacy/cosmetic.json");
+const COSMETIC_RULES: &str = include_str!("../privacy/cosmetic.json");
 const _: &str = include_str!("../privacy/VERSION");
 
 /// Version of the rule assets bundled with this application.
 pub const DIVE_PRIVACY_VERSION: &str = "2026.09.04.1";
 
 /// Categories reported for network requests blocked by `DivePrivacy`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
 pub enum PrivacyCategory {
     /// Advertising delivery and auction infrastructure.
     Ads,
     /// Analytics, telemetry, fingerprinting, and cryptomining infrastructure.
     Tracker,
+}
+
+/// A privacy action the chrome may summarize without exposing browsing URLs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Event)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum PrivacyEvent {
+    /// A network request was cancelled by DivePrivacy.
+    Blocked {
+        /// Tab whose request was cancelled.
+        tab_id: TabId,
+        /// Which bundled matcher blocked it.
+        category: PrivacyCategory,
+    },
+    /// YouTube elements were removed from a document.
+    #[serde(rename = "youtube")]
+    YouTube {
+        /// Tab whose document was cleaned.
+        tab_id: TabId,
+        /// Number of elements removed.
+        count: u32,
+    },
+}
+
+/// Public metadata about the bundled DivePrivacy assets.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct PrivacyInfo {
+    /// Bundled ruleset version.
+    pub version: String,
+    /// Number of advertising network rules.
+    pub ad_rules: u32,
+    /// Number of tracking network rules.
+    pub tracker_rules: u32,
+    /// Number of hosts with cosmetic rules.
+    pub cosmetic_hosts: u32,
+}
+
+/// Return bundled ruleset metadata without reading browsing state.
+#[tauri::command]
+#[specta::specta]
+pub fn privacy_info() -> PrivacyInfo {
+    PrivacyInfo {
+        version: DIVE_PRIVACY_VERSION.to_owned(),
+        ad_rules: network_rule_count(ADS_RULES),
+        tracker_rules: network_rule_count(TRACKER_RULES),
+        cosmetic_hosts: serde_json::from_str::<serde_json::Value>(COSMETIC_RULES)
+            .ok()
+            .and_then(|value| value.as_object().map(serde_json::Map::len))
+            .and_then(|count| u32::try_from(count).ok())
+            .unwrap_or_default(),
+    }
+}
+
+fn network_rule_count(rules: &str) -> u32 {
+    u32::try_from(
+        rules
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('!'))
+            .count(),
+    )
+    .unwrap_or(u32::MAX)
 }
 
 /// The result of applying `DivePrivacy` to one request.
@@ -278,6 +344,43 @@ mod tests {
             include_str!("../privacy/VERSION").trim(),
             DIVE_PRIVACY_VERSION
         );
+    }
+
+    #[test]
+    fn privacy_info_reports_only_bundled_asset_metadata() {
+        assert_eq!(
+            privacy_info(),
+            PrivacyInfo {
+                version: "2026.09.04.1".into(),
+                ad_rules: 63,
+                tracker_rules: 62,
+                cosmetic_hosts: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn blocked_event_contains_no_browsing_url() {
+        let event = PrivacyEvent::Blocked {
+            tab_id: dive_core::TabId::new(),
+            category: PrivacyCategory::Tracker,
+        };
+        let value = serde_json::to_value(event).expect("serialize privacy event");
+        assert_eq!(value["type"], "blocked");
+        assert!(value["data"].get("tab_id").is_some());
+        assert_eq!(value["data"]["category"], "tracker");
+        assert!(value["data"].get("url").is_none());
+    }
+
+    #[test]
+    fn youtube_event_uses_the_product_name_on_the_wire() {
+        let event = PrivacyEvent::YouTube {
+            tab_id: dive_core::TabId::new(),
+            count: 3,
+        };
+        let value = serde_json::to_value(event).expect("serialize privacy event");
+        assert_eq!(value["type"], "youtube");
+        assert_eq!(value["data"]["count"], 3);
     }
 
     #[derive(Debug)]

@@ -270,6 +270,7 @@ pub(crate) async fn prefs_set(
     for (_, session) in &sessions {
         crate::prefs::apply(session, &stored).await;
     }
+    reapply_interception(&state, None).await?;
     match crate::prefs::prune_history(&state) {
         Ok(0) => {}
         Ok(n) => tracing::info!(n, "pruned history past the retention window"),
@@ -420,6 +421,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             commands_list,
             command_run,
             app_info,
+            crate::privacy::privacy_info,
             prefs_get,
             prefs_set,
             browsing_data_clear,
@@ -456,6 +458,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::engine::DownloadNotice,
             crate::loading::TabLoad,
             crate::permissions::PermissionAsked,
+            crate::privacy::PrivacyEvent,
         ])
 }
 
@@ -1593,23 +1596,38 @@ pub(crate) async fn rules_set(
     rules: Vec<crate::rules::Rule>,
 ) -> AppResult<()> {
     state.rules.set(&state, workspace, rules)?;
-    reapply_rules(&state, workspace).await
+    reapply_interception(&state, Some(workspace)).await
 }
 
-/// Enable or disable interception on every open tab of `workspace`.
-pub(crate) async fn reapply_rules(state: &AppState, workspace: WorkspaceId) -> AppResult<()> {
-    let rules = state.rules.list(state, workspace);
-    let sessions: Vec<dive_cdp::CdpSession> = {
+/// Reapply shared Fetch interception on all tabs, or those owned by one workspace.
+pub(crate) async fn reapply_interception(
+    state: &AppState,
+    workspace: Option<WorkspaceId>,
+) -> AppResult<()> {
+    let prefs = state.prefs.get(state);
+    let sessions: Vec<(Option<WorkspaceId>, dive_cdp::CdpSession)> = {
         let host = lock(&state.host);
-        let tabs = lock(&state.store).tabs_for_workspace(workspace)?;
-        tabs.iter()
-            .filter_map(|t| host.as_ref().and_then(|h| h.cdp(t.id)))
-            .collect()
+        let store = lock(&state.store);
+        host.as_ref().map_or_else(Vec::new, |host| {
+            host.sessions()
+                .into_iter()
+                .filter_map(|(id, session)| {
+                    let owner = store.tab(id).ok()?.workspace_id;
+                    (workspace.is_none() || owner == workspace).then_some((owner, session))
+                })
+                .collect()
+        })
     };
-    for session in sessions {
-        crate::rules::apply(&session, &rules).await?;
+    for (owner, session) in sessions {
+        let rules = owner.map_or_else(Vec::new, |id| state.rules.list(state, id));
+        crate::rules::apply(&session, &rules, &prefs).await?;
     }
     Ok(())
+}
+
+/// Reapply interception after an existing workspace-rules integration writes rules.
+pub(crate) async fn reapply_rules(state: &AppState, workspace: WorkspaceId) -> AppResult<()> {
+    reapply_interception(state, Some(workspace)).await
 }
 
 /// Throttle a tab's network, or clear throttling with `None`.

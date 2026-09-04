@@ -12,9 +12,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use specta::Type;
 use tauri::{AppHandle, Manager};
+use tauri_specta::Event;
 
 use crate::Runtime;
 use crate::error::{AppError, AppResult};
+use crate::prefs::Prefs;
+use crate::privacy::{DivePrivacy, PrivacyCategory, PrivacyDecision, PrivacyEvent, RequestContext};
 use crate::state::AppState;
 
 /// One rule; the first enabled match wins.
@@ -41,6 +44,34 @@ pub enum RuleAction {
     },
     /// Add or replace one request header.
     Header { name: String, value: String },
+}
+
+/// Request fields used by the pure interception planner.
+#[derive(Debug, Clone, Copy)]
+pub struct PausedRequest<'a> {
+    pub url: &'a str,
+    pub document_url: &'a str,
+    pub resource_type: &'a str,
+    pub method: &'a str,
+}
+
+/// The single terminal action chosen for one paused request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InterceptAction {
+    Continue,
+    Block,
+    Mock {
+        status: u16,
+        content_type: String,
+        body: String,
+    },
+    Header {
+        name: String,
+        value: String,
+    },
+    PrivacyBlock {
+        category: PrivacyCategory,
+    },
 }
 
 /// Largest mock body kept, in characters.
@@ -192,10 +223,53 @@ pub fn decide<'a>(rules: &'a [Rule], url: &str) -> Option<&'a Rule> {
     rules.iter().find(|r| r.enabled && matches(&r.pattern, url))
 }
 
-/// Enable interception on `session` when the workspace has enabled rules,
-/// disable it otherwise.
-pub async fn apply(session: &CdpSession, rules: &[Rule]) -> AppResult<()> {
-    let result = if rules.iter().any(|r| r.enabled) {
+/// Whether this tab needs the shared `Fetch.requestPaused` pipeline.
+pub fn interception_required(rules: &[Rule], prefs: &Prefs) -> bool {
+    rules.iter().any(|rule| rule.enabled) || prefs.block_trackers
+}
+
+/// Choose one action, giving the first workspace rule priority over DivePrivacy.
+pub fn decide_paused_request(
+    rules: &[Rule],
+    privacy: &DivePrivacy,
+    prefs: &Prefs,
+    request: &PausedRequest<'_>,
+) -> InterceptAction {
+    if let Some(rule) = decide(rules, request.url) {
+        return match &rule.action {
+            RuleAction::Block => InterceptAction::Block,
+            RuleAction::Mock {
+                status,
+                content_type,
+                body,
+            } => InterceptAction::Mock {
+                status: *status,
+                content_type: content_type.clone(),
+                body: body.clone(),
+            },
+            RuleAction::Header { name, value } => InterceptAction::Header {
+                name: name.clone(),
+                value: value.clone(),
+            },
+        };
+    }
+    if !prefs.block_trackers || !prefs.privacy_enabled_for(request.document_url) {
+        return InterceptAction::Continue;
+    }
+    match privacy.decide(&RequestContext {
+        url: request.url,
+        document_url: request.document_url,
+        resource_type: request.resource_type,
+        method: request.method,
+    }) {
+        PrivacyDecision::Allow => InterceptAction::Continue,
+        PrivacyDecision::Block(category) => InterceptAction::PrivacyBlock { category },
+    }
+}
+
+/// Enable shared interception when workspace rules or DivePrivacy need it.
+pub async fn apply(session: &CdpSession, rules: &[Rule], prefs: &Prefs) -> AppResult<()> {
+    let result = if interception_required(rules, prefs) {
         session
             .call("Fetch.enable", json!({"patterns": [{"urlPattern": "*"}]}))
             .await
@@ -212,19 +286,19 @@ pub fn attach(
     tab_id: TabId,
     workspace: Option<WorkspaceId>,
     session: CdpSession,
-) {
-    let Some(workspace) = workspace else {
-        return;
-    };
+) -> crate::cdp_feed::Ready {
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
     tauri::async_runtime::spawn(async move {
         let mut events = session.subscribe();
         {
             let state = app.state::<AppState>();
-            let rules = state.rules.list(&state, workspace);
-            if let Err(e) = apply(&session, &rules).await {
+            let rules = workspace.map_or_else(Vec::new, |id| state.rules.list(&state, id));
+            let prefs = state.prefs.get(&state);
+            if let Err(e) = apply(&session, &rules, &prefs).await {
                 tracing::warn!(%tab_id, "fetch interception failed: {e}");
             }
         }
+        let _ = ready_tx.send(());
         loop {
             let event = match events.recv().await {
                 Ok(event) => event,
@@ -234,11 +308,14 @@ pub fn attach(
                     // current rules for subsequent requests.
                     tracing::warn!(%tab_id, n, "rule listener lagged; resetting interception");
                     let _ = session.call0("Fetch.disable").await;
-                    let rules = {
+                    let (rules, prefs) = {
                         let state = app.state::<AppState>();
-                        state.rules.list(&state, workspace)
+                        (
+                            workspace.map_or_else(Vec::new, |id| state.rules.list(&state, id)),
+                            state.prefs.get(&state),
+                        )
                     };
-                    let _ = apply(&session, &rules).await;
+                    let _ = apply(&session, &rules, &prefs).await;
                     continue;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -247,42 +324,68 @@ pub fn attach(
                 continue;
             }
             let p = &event.params;
-            let Some(request_id) = p["requestId"].as_str() else {
+            let Some(request_id) = p["requestId"].as_str().map(str::to_owned) else {
+                tracing::warn!(%tab_id, "paused request had no request id; cannot fail open");
                 continue;
             };
             let url = p["request"]["url"].as_str().unwrap_or_default();
-            let rules = {
+            let (rules, prefs, document_url) = {
                 let state = app.state::<AppState>();
-                state.rules.list(&state, workspace)
+                (
+                    workspace.map_or_else(Vec::new, |id| state.rules.list(&state, id)),
+                    state.prefs.get(&state),
+                    crate::state::lock(&state.store)
+                        .tab(tab_id)
+                        .map(|tab| tab.url)
+                        .unwrap_or_default(),
+                )
             };
-            let (method, params) = match decide(&rules, url).map(|r| &r.action) {
-                Some(RuleAction::Block) => (
+            let action = {
+                let state = app.state::<AppState>();
+                decide_paused_request(
+                    &rules,
+                    &state.privacy,
+                    &prefs,
+                    &PausedRequest {
+                        url,
+                        document_url: &document_url,
+                        resource_type: p["resourceType"].as_str().unwrap_or_default(),
+                        method: p["request"]["method"].as_str().unwrap_or_default(),
+                    },
+                )
+            };
+            let privacy_category = match &action {
+                InterceptAction::PrivacyBlock { category } => Some(*category),
+                _ => None,
+            };
+            let (method, params) = match action {
+                InterceptAction::Block | InterceptAction::PrivacyBlock { .. } => (
                     "Fetch.failRequest",
-                    json!({"requestId": request_id, "errorReason": "BlockedByClient"}),
+                    json!({"requestId": &request_id, "errorReason": "BlockedByClient"}),
                 ),
-                Some(RuleAction::Mock {
+                InterceptAction::Mock {
                     status,
                     content_type,
                     body,
-                }) => (
+                } => (
                     "Fetch.fulfillRequest",
                     json!({
-                        "requestId": request_id,
+                        "requestId": &request_id,
                         "responseCode": status,
                         "responseHeaders": [
                             {"name": "Content-Type", "value": content_type},
                             {"name": "Access-Control-Allow-Origin", "value": "*"},
                             {"name": "X-Dive-Mock", "value": "1"}
                         ],
-                        "body": base64::engine::general_purpose::STANDARD.encode(body),
+                        "body": base64::engine::general_purpose::STANDARD.encode(&body),
                     }),
                 ),
-                Some(RuleAction::Header { name, value }) => {
+                InterceptAction::Header { name, value } => {
                     let mut headers: Vec<Value> = p["request"]["headers"]
                         .as_object()
                         .map(|m| {
                             m.iter()
-                                .filter(|(k, _)| !k.eq_ignore_ascii_case(name))
+                                .filter(|(k, _)| !k.eq_ignore_ascii_case(&name))
                                 .map(|(k, v)| json!({"name": k, "value": v}))
                                 .collect()
                         })
@@ -290,28 +393,42 @@ pub fn attach(
                     headers.push(json!({"name": name, "value": value}));
                     (
                         "Fetch.continueRequest",
-                        json!({"requestId": request_id, "headers": headers}),
+                        json!({"requestId": &request_id, "headers": headers}),
                     )
                 }
-                None => ("Fetch.continueRequest", json!({"requestId": request_id})),
+                InterceptAction::Continue => {
+                    ("Fetch.continueRequest", json!({"requestId": &request_id}))
+                }
             };
-            if let Err(e) = session.call(method, params).await {
-                tracing::debug!(%tab_id, "{method} failed: {e}");
-                // A failed mock/block must degrade to a real request rather
-                // than leaving the page permanently waiting on interception.
-                if method != "Fetch.continueRequest" {
-                    let _ = session
-                        .call("Fetch.continueRequest", json!({"requestId": request_id}))
-                        .await;
+            match session.call(method, params).await {
+                Ok(_) => {
+                    if let Some(category) = privacy_category
+                        && let Err(e) = (PrivacyEvent::Blocked { tab_id, category }).emit(&app)
+                    {
+                        tracing::warn!(%tab_id, "privacy event emit failed: {e}");
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!(%tab_id, "{method} failed: {e}");
+                    // A failed mock/block must degrade to a real request rather
+                    // than leaving the page permanently waiting on interception.
+                    if method != "Fetch.continueRequest" {
+                        let _ = session
+                            .call("Fetch.continueRequest", json!({"requestId": &request_id}))
+                            .await;
+                    }
                 }
             }
         }
     });
+    ready_rx
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::prefs::Prefs;
+    use crate::privacy::{DivePrivacy, PrivacyCategory};
 
     fn rule(pattern: &str, action: RuleAction) -> Rule {
         Rule {
@@ -320,6 +437,75 @@ mod tests {
             enabled: true,
             action,
         }
+    }
+
+    fn privacy() -> DivePrivacy {
+        DivePrivacy::from_text("||ads.doubleclick.net^", "||metrics.test^", "")
+    }
+
+    fn enabled_prefs() -> Prefs {
+        Prefs {
+            block_trackers: true,
+            ..Prefs::default()
+        }
+    }
+
+    fn paused_ad<'a>() -> PausedRequest<'a> {
+        PausedRequest {
+            url: "https://ads.doubleclick.net/pagead/id",
+            document_url: "https://news.test/",
+            resource_type: "Script",
+            method: "GET",
+        }
+    }
+
+    #[test]
+    fn fetch_is_enabled_for_rules_or_diveprivacy() {
+        assert!(!interception_required(&[], &Prefs::default()));
+        assert!(!interception_required(
+            &[],
+            &Prefs {
+                blocked_patterns: vec!["example.test".into()],
+                ..Prefs::default()
+            }
+        ));
+        assert!(interception_required(
+            &[rule("*", RuleAction::Block)],
+            &Prefs::default()
+        ));
+        assert!(interception_required(&[], &enabled_prefs()));
+    }
+
+    #[test]
+    fn workspace_rule_precedes_privacy() {
+        let rules = vec![rule(
+            "*://ads.doubleclick.net/*",
+            RuleAction::Mock {
+                status: 204,
+                content_type: "text/plain".into(),
+                body: String::new(),
+            },
+        )];
+        assert!(matches!(
+            decide_paused_request(&rules, &privacy(), &enabled_prefs(), &paused_ad()),
+            InterceptAction::Mock { .. }
+        ));
+    }
+
+    #[test]
+    fn diveprivacy_runs_only_without_a_workspace_match() {
+        assert_eq!(
+            decide_paused_request(&[], &privacy(), &enabled_prefs(), &paused_ad()),
+            InterceptAction::PrivacyBlock {
+                category: PrivacyCategory::Ads
+            }
+        );
+        let mut prefs = enabled_prefs();
+        prefs.privacy_exceptions = vec!["news.test".into()];
+        assert_eq!(
+            decide_paused_request(&[], &privacy(), &prefs, &paused_ad()),
+            InterceptAction::Continue
+        );
     }
 
     #[test]
