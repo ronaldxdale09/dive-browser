@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 interface StartupObservation {
-  controlsReady(): void;
+  observeControls(): { rendered(): void; cancel(): void };
   dispose(): void;
 }
 let active: StartupObservation | undefined;
@@ -19,6 +19,7 @@ export function startStartupTelemetry(): () => void {
   let paintAcknowledged = false;
   let controlsRendered = false;
   let controlsSent = false;
+  let controlsGeneration = 0;
   let observer: PerformanceObserver | undefined;
 
   const flushControls = () => {
@@ -29,10 +30,23 @@ export function startStartupTelemetry(): () => void {
     });
   };
   const observation: StartupObservation = {
-    controlsReady() {
-      if (disposed) return;
-      controlsRendered = true;
-      flushControls();
+    observeControls() {
+      const generation = ++controlsGeneration;
+      controlsRendered = false;
+      return {
+        rendered() {
+          if (disposed || generation !== controlsGeneration) return;
+          controlsRendered = true;
+          flushControls();
+        },
+        cancel() {
+          // Readiness can still be waiting for paint acknowledgement after
+          // both frames ran. Old StrictMode cleanup must not revoke a remount.
+          if (generation !== controlsGeneration) return;
+          controlsGeneration++;
+          controlsRendered = false;
+        },
+      };
     },
     dispose() {
       disposed = true;
@@ -64,11 +78,13 @@ export function startStartupTelemetry(): () => void {
 export function scheduleControlsReady(): () => void {
   const observation = active;
   if (!observation) return () => {};
+  const controls = observation.observeControls();
   let secondFrame: number | undefined;
   const firstFrame = requestAnimationFrame(() => {
-    secondFrame = requestAnimationFrame(() => observation.controlsReady());
+    secondFrame = requestAnimationFrame(() => controls.rendered());
   });
   return () => {
+    controls.cancel();
     cancelAnimationFrame(firstFrame);
     if (secondFrame !== undefined) cancelAnimationFrame(secondFrame);
   };

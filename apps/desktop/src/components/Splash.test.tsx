@@ -101,4 +101,17 @@ describe("Splash", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
+  it("revokes rendered controls on unmount before a delayed paint acknowledgement", async () => {
+    let acknowledge = () => {};
+    vi.mocked(invoke).mockImplementationOnce(() => new Promise<void>((resolve) => { acknowledge = resolve; }));
+    observePaint();
+    useBrowser.setState({ ready: true });
+    const view = render(<Splash />);
+    await act(() => vi.advanceTimersByTimeAsync(40));
+    view.unmount();
+    acknowledge();
+    await act(() => vi.runAllTimersAsync());
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
 });

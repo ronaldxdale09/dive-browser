@@ -79,6 +79,33 @@ describe("startup observations", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
+  it("revokes rendered controls while paint acknowledgement is still pending", async () => {
+    let acknowledge = () => {};
+    vi.mocked(invoke).mockImplementationOnce(() => new Promise<void>((resolve) => { acknowledge = resolve; }));
+    paint(["first-contentful-paint"]);
+    const cancel = scheduleControlsReady();
+    await vi.advanceTimersByTimeAsync(40);
+    cancel();
+    acknowledge();
+    await vi.runAllTimersAsync();
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let an older cleanup revoke a newer controls observation", async () => {
+    let acknowledge = () => {};
+    vi.mocked(invoke).mockImplementationOnce(() => new Promise<void>((resolve) => { acknowledge = resolve; }));
+    paint(["first-contentful-paint"]);
+    const cancelOld = scheduleControlsReady();
+    await vi.advanceTimersByTimeAsync(40);
+    const cancelNew = scheduleControlsReady();
+    await vi.advanceTimersByTimeAsync(40);
+    cancelOld();
+    acknowledge();
+    await vi.runAllTimersAsync();
+    expect(invoke).toHaveBeenLastCalledWith("report_startup_milestone", { milestone: "controls_ready" });
+    cancelNew();
+  });
+
   it("never observes or reports a popout document", async () => {
     stop();
     observed = undefined;
