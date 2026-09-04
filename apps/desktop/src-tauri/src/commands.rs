@@ -263,12 +263,29 @@ pub(crate) async fn prefs_set(
     state: State<'_, AppState>,
     prefs: crate::prefs::Prefs,
 ) -> AppResult<crate::prefs::Prefs> {
+    let previous = state.prefs.get(&state);
     let stored = state.prefs.set(&state, prefs)?;
-    let sessions = lock(&state.host)
-        .as_ref()
-        .map_or_else(Vec::new, crate::engine::TabHost::sessions);
-    for (_, session) in &sessions {
+    let sessions = {
+        let host = lock(&state.host);
+        let store = lock(&state.store);
+        host.as_ref().map_or_else(Vec::new, |host| {
+            host.sessions()
+                .into_iter()
+                .map(|(id, session)| {
+                    let document_url = store.tab(id).map(|tab| tab.url).unwrap_or_default();
+                    (session, document_url)
+                })
+                .collect()
+        })
+    };
+    for (session, document_url) in &sessions {
         crate::prefs::apply(session, &stored).await;
+        crate::privacy::apply_page(session, &stored, document_url).await;
+        if privacy_site_state_changed(&previous, &stored, document_url)
+            && let Err(error) = session.call0("Page.reload").await
+        {
+            tracing::debug!("DivePrivacy site pause reload failed open: {error}");
+        }
     }
     reapply_interception(&state, None).await?;
     match crate::prefs::prune_history(&state) {
@@ -277,6 +294,14 @@ pub(crate) async fn prefs_set(
         Err(e) => tracing::warn!("history prune failed: {e}"),
     }
     Ok(stored)
+}
+
+fn privacy_site_state_changed(
+    previous: &crate::prefs::Prefs,
+    current: &crate::prefs::Prefs,
+    document_url: &str,
+) -> bool {
+    previous.privacy_enabled_for(document_url) != current.privacy_enabled_for(document_url)
 }
 
 /// Delete browsing data; returns a one-line summary of what went.
@@ -2191,6 +2216,31 @@ mod tests {
         assert_eq!(clean_icon("  ").unwrap(), Workspace::default_icon());
         assert!(clean_icon("<img onerror=x>").is_err());
         assert!(clean_icon(&"a".repeat(33)).is_err());
+    }
+
+    #[test]
+    fn privacy_reload_is_reserved_for_site_pause_transitions() {
+        let previous = crate::prefs::Prefs::default();
+        let mut youtube_changed = previous.clone();
+        youtube_changed.youtube_protection = false;
+        assert!(!privacy_site_state_changed(
+            &previous,
+            &youtube_changed,
+            "https://www.youtube.com/watch?v=abc",
+        ));
+
+        let mut paused = previous.clone();
+        paused.privacy_exceptions = vec!["www.youtube.com".into()];
+        assert!(privacy_site_state_changed(
+            &previous,
+            &paused,
+            "https://www.youtube.com/watch?v=abc",
+        ));
+        assert!(!privacy_site_state_changed(
+            &previous,
+            &paused,
+            "https://example.com/",
+        ));
     }
 
     #[test]

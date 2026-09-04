@@ -1,14 +1,22 @@
 use adblock::{Engine, FilterSet, lists::ParseOptions, request::Request};
+use dive_cdp::{CdpEvent, CdpSession};
 use dive_core::TabId;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use specta::Type;
+use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
+
+use crate::Runtime;
 
 const ADS_RULES: &str = include_str!("../privacy/ads.txt");
 const TRACKER_RULES: &str = include_str!("../privacy/trackers.txt");
 const EXCEPTION_RULES: &str = include_str!("../privacy/exceptions.txt");
 const COSMETIC_RULES: &str = include_str!("../privacy/cosmetic.json");
+const YOUTUBE_SCRIPT: &str = include_str!("inject/youtube_privacy.js");
 const _: &str = include_str!("../privacy/VERSION");
+const PAGE_BINDING_PREFIX: &str = "__divePrivacy_";
+const MAX_PAGE_EVENT: usize = 64;
 
 /// Version of the rule assets bundled with this application.
 pub const DIVE_PRIVACY_VERSION: &str = "2026.09.04.1";
@@ -71,6 +79,154 @@ pub fn privacy_info() -> PrivacyInfo {
             .and_then(|count| u32::try_from(count).ok())
             .unwrap_or_default(),
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PageConfiguration {
+    enabled: bool,
+    cosmetic_css: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PageEvent {
+    kind: String,
+    count: u32,
+}
+
+/// Install `DivePrivacy`'s page binding and bootstrap script for one CEF tab.
+///
+/// Every call is best effort: a missing CDP capability leaves the document
+/// untouched rather than preventing its navigation.
+pub async fn attach_page(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
+    let binding = page_binding(tab_id);
+    let source = YOUTUBE_SCRIPT.replace("__DIVE_PRIVACY_BINDING__", &binding);
+    let mut events = session.subscribe();
+
+    for (method, params) in [
+        ("Runtime.addBinding", json!({"name": binding})),
+        ("Page.enable", json!({})),
+        (
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({"source": source}),
+        ),
+        ("Runtime.evaluate", json!({"expression": source})),
+    ] {
+        if let Err(error) = session.call(method, params).await {
+            tracing::debug!(%tab_id, %method, "DivePrivacy page setup failed open: {error}");
+        }
+    }
+
+    tauri::async_runtime::spawn(async move {
+        loop {
+            match events.recv().await {
+                Ok(event) => {
+                    if event.method == "Page.frameNavigated"
+                        && event.params["frame"]["parentId"].is_null()
+                        && let Some(document_url) = event.params["frame"]["url"].as_str()
+                    {
+                        let state = app.state::<crate::state::AppState>();
+                        let prefs = state.prefs.get(&state);
+                        apply_page(&session, &prefs, document_url).await;
+                        continue;
+                    }
+                    if let Some(event) = map_binding_event(&event, &binding, tab_id)
+                        && let Err(error) = event.emit(&app)
+                    {
+                        tracing::warn!(%tab_id, "privacy event emit failed: {error}");
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                    tracing::warn!(%tab_id, count, "DivePrivacy missed CDP events");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
+/// Apply current preferences and the exact document host's cosmetic rules.
+/// A malformed URL, rules asset, serialization error, or CDP failure is a
+/// fail-open no-op (the injected script removes any previously applied CSS).
+pub async fn apply_page(session: &CdpSession, prefs: &crate::prefs::Prefs, document_url: &str) {
+    let configuration = page_configuration(prefs, document_url);
+    let Ok(encoded) = serde_json::to_string(&configuration) else {
+        tracing::debug!("could not serialize DivePrivacy page configuration");
+        return;
+    };
+    let expression = format!("window.__divePrivacy?.configure({encoded})");
+    if let Err(error) = session
+        .call("Runtime.evaluate", json!({"expression": expression}))
+        .await
+    {
+        tracing::debug!("DivePrivacy page configuration failed open: {error}");
+    }
+}
+
+/// Decode the single bounded page-side intervention message shape.
+#[must_use]
+pub fn map_binding_event(event: &CdpEvent, binding: &str, tab_id: TabId) -> Option<PrivacyEvent> {
+    if event.method != "Runtime.bindingCalled" || event.params["name"].as_str()? != binding {
+        return None;
+    }
+    let encoded = event.params["payload"].as_str()?;
+    if encoded.len() > MAX_PAGE_EVENT {
+        return None;
+    }
+    let payload: PageEvent = serde_json::from_str(encoded).ok()?;
+    if payload.kind != "youtube" || payload.count != 1 {
+        return None;
+    }
+    Some(PrivacyEvent::YouTube {
+        tab_id,
+        count: payload.count,
+    })
+}
+
+fn page_binding(tab_id: TabId) -> String {
+    format!(
+        "{PAGE_BINDING_PREFIX}{}",
+        tab_id.to_string().replace('-', "")
+    )
+}
+
+fn page_configuration(prefs: &crate::prefs::Prefs, document_url: &str) -> PageConfiguration {
+    let Some(host) = exact_host(document_url) else {
+        return PageConfiguration {
+            enabled: false,
+            cosmetic_css: String::new(),
+        };
+    };
+    let site_enabled = prefs.privacy_enabled_for(document_url);
+    let youtube_host = matches!(host.as_str(), "www.youtube.com" | "m.youtube.com");
+    PageConfiguration {
+        enabled: site_enabled && youtube_host && prefs.youtube_protection,
+        cosmetic_css: if site_enabled && prefs.block_trackers {
+            cosmetic_css(&host)
+        } else {
+            String::new()
+        },
+    }
+}
+
+fn exact_host(document_url: &str) -> Option<String> {
+    url::Url::parse(document_url)
+        .ok()?
+        .host_str()
+        .map(|host| host.trim_end_matches('.').to_ascii_lowercase())
+}
+
+fn cosmetic_css(host: &str) -> String {
+    let Ok(rules) =
+        serde_json::from_str::<std::collections::BTreeMap<String, Vec<String>>>(COSMETIC_RULES)
+    else {
+        return String::new();
+    };
+    let Some(selectors) = rules.get(host).filter(|selectors| !selectors.is_empty()) else {
+        return String::new();
+    };
+    format!("{} {{ display: none !important; }}", selectors.join(",\n"))
 }
 
 fn network_rule_count(rules: &str) -> u32 {
@@ -354,9 +510,71 @@ mod tests {
                 version: "2026.09.04.1".into(),
                 ad_rules: 63,
                 tracker_rules: 62,
-                cosmetic_hosts: 0,
+                cosmetic_hosts: 3,
             }
         );
+    }
+
+    #[test]
+    fn page_configuration_uses_exact_hosts_and_honours_site_exceptions() {
+        let mut prefs = crate::prefs::Prefs {
+            block_trackers: true,
+            ..crate::prefs::Prefs::default()
+        };
+        let youtube = page_configuration(&prefs, "https://www.youtube.com/watch?v=abc");
+        assert!(youtube.enabled);
+        assert!(youtube.cosmetic_css.contains(".ytp-ad-overlay-container"));
+        assert!(!youtube.cosmetic_css.contains("*="));
+
+        let google = page_configuration(&prefs, "https://www.google.com/search?q=dive");
+        assert!(!google.enabled);
+        assert!(google.cosmetic_css.contains("#tads"));
+        assert!(google.cosmetic_css.contains("#bottomads"));
+
+        let unsupported = page_configuration(&prefs, "https://video.youtube.com/watch?v=abc");
+        assert!(!unsupported.enabled);
+        assert!(unsupported.cosmetic_css.is_empty());
+
+        prefs.privacy_exceptions = vec!["www.youtube.com".into()];
+        let paused = page_configuration(&prefs, "https://www.youtube.com/watch?v=abc");
+        assert!(!paused.enabled);
+        assert!(paused.cosmetic_css.is_empty());
+    }
+
+    #[test]
+    fn binding_events_accept_only_the_bounded_youtube_shape() {
+        let tab_id = dive_core::TabId::new();
+        let binding = "__divePrivacy_test";
+        let event = dive_cdp::CdpEvent {
+            method: "Runtime.bindingCalled".into(),
+            params: serde_json::json!({
+                "name": binding,
+                "payload": r#"{"kind":"youtube","count":1}"#,
+            }),
+        };
+        assert_eq!(
+            map_binding_event(&event, binding, tab_id),
+            Some(PrivacyEvent::YouTube { tab_id, count: 1 })
+        );
+
+        for payload in [
+            r#"{"kind":"youtube","count":2}"#,
+            r#"{"kind":"youtube","count":1,"url":"https://example.test"}"#,
+            r#"{"kind":"other","count":1}"#,
+            "not json",
+        ] {
+            let malformed = dive_cdp::CdpEvent {
+                method: "Runtime.bindingCalled".into(),
+                params: serde_json::json!({"name": binding, "payload": payload}),
+            };
+            assert_eq!(map_binding_event(&malformed, binding, tab_id), None);
+        }
+
+        let oversized = dive_cdp::CdpEvent {
+            method: "Runtime.bindingCalled".into(),
+            params: serde_json::json!({"name": binding, "payload": "x".repeat(65)}),
+        };
+        assert_eq!(map_binding_event(&oversized, binding, tab_id), None);
     }
 
     #[test]

@@ -379,6 +379,9 @@ impl TabHost {
                     let state = prefs_app.state::<AppState>();
                     state.prefs.get(&state)
                 };
+                crate::privacy::attach_page(prefs_app.clone(), tab_id, session_for_prefs.clone())
+                    .await;
+                crate::privacy::apply_page(&session_for_prefs, &prefs, url.as_str()).await;
                 crate::prefs::apply(&session_for_prefs, &prefs).await;
                 if let Err(e) = nav.navigate(url) {
                     tracing::warn!(%tab_id, "initial navigation failed: {e}");

@@ -1,1 +1,19 @@
-{}
+{
+  "m.youtube.com": [
+    ".ytp-ad-overlay-container",
+    "ytm-ad-slot-renderer",
+    "ytm-promoted-sparkles-web-renderer"
+  ],
+  "www.google.com": [
+    "#tads",
+    "#bottomads"
+  ],
+  "www.youtube.com": [
+    ".ytp-ad-overlay-container",
+    "ytd-ad-slot-renderer",
+    "ytd-in-feed-ad-layout-renderer",
+    "ytd-promoted-sparkles-web-renderer",
+    "ytd-rich-item-renderer:has(> #content > ytd-ad-slot-renderer)",
+    "ytd-rich-section-renderer:has(> #content > ytd-ad-slot-renderer)"
+  ]
+}
