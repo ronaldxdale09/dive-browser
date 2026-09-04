@@ -60,7 +60,12 @@ Dive browser is built on Tauri v2 (`tauri` git rev `dd2e5d91b60a6402ce270ceb03b0
 ### M1: Startup Instrumentation Contract
 - Rust module: `apps/desktop/src-tauri/src/startup.rs`
 - Data struct: `StartupTimeline { process_start: Instant, state_init_ms: f64, window_created_ms: f64, setup_complete_ms: f64, chrome_paint_ms: Option<f64> }`
-- IPC Command: `report_startup_milestone(milestone: String, elapsed_ms: f64)`
+- IPC payload: `report_startup_milestone({ milestone: "chrome_first_paint" | "controls_ready" })`. Only the `chrome` webview in the `main` window may send it. Unknown milestones, extra fields (including renderer timestamps), and controls before paint are rejected. Duplicate milestones preserve the first observation.
+- The frontend observes actual first contentful paint with a buffered `PerformanceObserver`. Controls readiness requires successful initial snapshot loading, full splash removal, and a subsequently rendered frame. Initialization failure and missing paint never synthesize success.
+- Rust timestamps IPC receipt relative to `record_launch()`. Report `timing_basis` is `host_observed_since_record_launch`: these values include renderer scheduling and IPC latency and do not mix `performance.now()` with the host clock.
+- `StartupBenchmarkReport.total_startup_ms` is the observed controls-readiness timestamp only when native initialization milestones, paint, and controls are present and correctly ordered. It is `null` while incomplete. Required order: state initialization ≤ window creation ≤ setup completion; window creation ≤ paint ≤ controls; setup completion ≤ controls.
+- With `DIVE_STARTUP_BENCHMARK=1`, the app waits up to `DIVE_BENCHMARK_TIMEOUT_MS` (default 10,000 ms), writes the report, and exits with code 0 for complete observations, 1 for incomplete observations, or 2 for output-write failure. The external harness must also observe a graceful process exit; watchdog termination is failure.
+- Validation: production Rust startup/IPC tests and frontend startup/Splash tests exercise these behaviors. Startup percentile and native lifecycle claims require the process harness; fabricated JSON in a model test is not runtime evidence.
 
 ### M2: Tab Discarding & Memory Saver Contract
 - Store Schema Migration v7:
