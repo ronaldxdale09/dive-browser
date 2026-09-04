@@ -683,11 +683,21 @@ impl TabHost {
             );
         }
         let window = builder.build()?;
+        let chrome_dev_url = if cfg!(debug_assertions) {
+            app.config().build.dev_url.clone()
+        } else {
+            None
+        };
+        let chrome_popup_app = app.clone();
         window.add_child(
             WebviewBuilder::new(
                 chrome.clone(),
                 WebviewUrl::App(format!("index.html?popout={id}").into()),
             )
+            .on_navigation(move |url| {
+                crate::ipc_security::allowed_chrome_navigation(url, chrome_dev_url.as_ref())
+            })
+            .on_new_window(move |url, _| open_chrome_link(&chrome_popup_app, Some(id), url))
             .background_color(GROUND)
             .on_page_load(|webview, payload| {
                 if payload.event() == tauri::webview::PageLoadEvent::Finished {
@@ -1162,8 +1172,18 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
     #[cfg(all(debug_assertions, target_os = "macos"))]
     window.set_badge_label(Some("DEV".into()))?;
 
+    let chrome_dev_url = if cfg!(debug_assertions) {
+        app.config().build.dev_url.clone()
+    } else {
+        None
+    };
+    let chrome_popup_app = app.handle().clone();
     let _chrome = window.add_child(
         WebviewBuilder::new(CHROME_LABEL, WebviewUrl::App("index.html".into()))
+            .on_navigation(move |url| {
+                crate::ipc_security::allowed_chrome_navigation(url, chrome_dev_url.as_ref())
+            })
+            .on_new_window(move |url, _| open_chrome_link(&chrome_popup_app, None, url))
             .background_color(GROUND)
             .auto_resize(),
         LogicalPosition::new(0.0, 0.0),
@@ -1176,6 +1196,44 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
 
     forward_events(app.handle().clone(), state.bus.subscribe());
     Ok(())
+}
+
+/// Chrome links open tracked page tabs, never unmanaged popups inheriting
+/// the chrome's native client, labels, and application capabilities.
+fn open_chrome_link(
+    app: &AppHandle<Runtime>,
+    source: Option<TabId>,
+    url: url::Url,
+) -> tauri::webview::NewWindowResponse<Runtime> {
+    if matches!(url.scheme(), "http" | "https") {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let handle = app.clone();
+            if let Err(error) = app.run_on_main_thread(move || {
+                let Some(main) = MainThread::here() else {
+                    return;
+                };
+                let state = handle.state::<AppState>();
+                let workspace = if let Some(tab) = source {
+                    let Ok(tab) = lock(&state.store).tab(tab) else {
+                        return;
+                    };
+                    tab.workspace_id.or(*lock(&state.active_workspace))
+                } else {
+                    *lock(&state.active_workspace)
+                };
+                if let Some(workspace) = workspace
+                    && let Err(error) =
+                        crate::commands::open_tab(&main, &handle, &state, workspace, url.as_str())
+                {
+                    tracing::warn!(%error, "opening chrome link as a tab failed");
+                }
+            }) {
+                tracing::warn!(%error, "queueing chrome link failed");
+            }
+        });
+    }
+    tauri::webview::NewWindowResponse::Deny
 }
 
 /// Relay core events to the chrome webview.

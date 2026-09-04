@@ -14,3 +14,7 @@ Remove this override only after the upstream replacement passes normal multi-pro
 Native follow-up found that removing the native-id mapping swallowed Winit's later `Destroyed` event. Final window teardown now emits that event once to Tauri, releasing its window/webview registries. The runtime also retains an accepted exit code through the event loop and CEF shutdown instead of always returning zero from `run_return`.
 
 DIVE separately defers its popout `reveal` work off CEF's load callback before scheduling Winit work. This avoids synchronous visibility getters while the external CEF message pump owns the main thread. The runtime's general `run_on_main_thread` inline semantics remain upstream-compatible because Tauri's synchronous wrappers depend on them.
+
+## IPC caller provenance
+
+`src/cef_impl/ipc.rs` ignores the URL in renderer process-message arguments and derives it from the valid native main frame. Subframes and invalid/missing native frames cannot inherit their containing webview's IPC identity. DIVE additionally restricts application commands and plugin capabilities to its actual chrome webviews and prevents those views from navigating to web content. Chrome popup links are routed into normal managed page tabs. This preserves the pinned Tauri remote-origin ACL check instead of treating renderer-provided URI metadata as native authority.

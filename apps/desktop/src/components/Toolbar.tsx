@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Bug, Camera, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, X, Menu } from "lucide-react";
+import { Bug, Camera, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, X, Menu } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { FOCUS_ADDRESS } from "../lib/commands";
 import { useBrowser } from "../store/browser";
@@ -12,14 +12,13 @@ import { Tooltip } from "./Tooltip";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { usePicker } from "../store/simulator";
+import { NavigationButtons } from "./NavigationButtons";
 
 /** Navigation row: nav icons, the omnibox pill and, as glyphs, the actions that act on the page. */
 export function Toolbar({ compact = false }: { compact?: boolean }) {
   const tabs = useBrowser((s) => s.tabs);
   const activeTab = useBrowser((s) => s.activeTab);
   const navigate = useBrowser((s) => s.navigate);
-  const back = useBrowser((s) => s.back);
-  const forward = useBrowser((s) => s.forward);
   const reload = useBrowser((s) => s.reload);
   const stop = useBrowser((s) => s.stop);
   const capture = useBrowser((s) => s.capture);
@@ -67,8 +66,7 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
 
   return (
     <div className="relative flex h-full items-center gap-1 px-2">
-      <IconButton icon={ArrowLeft} label="Back" disabled={!current} onClick={() => void back()} />
-      <IconButton icon={ArrowRight} label="Forward" disabled={!current} onClick={() => void forward()} />
+      <NavigationButtons tabId={current?.id ?? null} url={url} loading={loading} />
       {/* While the page loads the same slot stops it, as in every browser. */}
       {loading ? (
         <IconButton icon={X} label="Stop loading" shortcut="Esc" disabled={!current} onClick={() => void stop()} size={14} />

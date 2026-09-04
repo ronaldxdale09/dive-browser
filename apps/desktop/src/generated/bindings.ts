@@ -57,6 +57,8 @@ export const commands = {
 	tabSetPinned: (id: TabId, pinned: boolean) => typedError<null, AppError>(__TAURI_INVOKE("tab_set_pinned", { id, pinned })),
 	tabBack: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_back", { id })),
 	tabForward: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_forward", { id })),
+	tabHistory: (id: TabId) => typedError<NavigationHistory, AppError>(__TAURI_INVOKE("tab_history", { id })),
+	tabHistoryNavigate: (id: TabId, generation: string, entryId: number) => typedError<null, AppError>(__TAURI_INVOKE("tab_history_navigate", { id, generation, entryId })),
 	tabReload: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_reload", { id })),
 	/**  Set a tab's zoom factor (clamped to the step range). */
 	tabZoom: (id: TabId, factor: number | null) => typedError<null, AppError>(__TAURI_INVOKE("tab_zoom", { id, factor })),
@@ -375,6 +377,7 @@ export const events = {
 	subtitleModelProgress: makeEvent<SubtitleModelProgress>("subtitle-model-progress"),
 	subtitleState: makeEvent<SubtitleState>("subtitle-state"),
 	tabCrashed: makeEvent<TabCrashed>("tab-crashed"),
+	tabHistoryChanged: makeEvent<TabHistoryChanged>("tab-history-changed"),
 	tabLoad: makeEvent<TabLoad>("tab-load"),
 	tabWindowChanged: makeEvent<TabWindowChanged>("tab-window-changed"),
 };
@@ -943,6 +946,18 @@ export type ModelInfo = {
 	input_per_mtok: number | null,
 	/**  USD per million output tokens. */
 	output_per_mtok: number | null,
+};
+
+export type NavigationEntry = {
+	id: number,
+	url: string,
+	title: string,
+};
+
+export type NavigationHistory = {
+	generation: string,
+	current_index: number,
+	entries: NavigationEntry[],
 };
 
 /**  One step in a request's life. The chrome merges these by `request_id`. */
@@ -1691,6 +1706,10 @@ export type TabCrashed = {
 	attempt: number,
 	/**  Whether Dive is reloading it. */
 	recovering: boolean,
+};
+
+export type TabHistoryChanged = {
+	tab_id: TabId,
 };
 
 /**  Identifies a [`Tab`]. */

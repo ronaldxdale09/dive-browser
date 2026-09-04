@@ -12,6 +12,7 @@ import type { ClearRequest, Decision, ExportRequest, NetworkProfile, PaneBounds,
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 export { events };
+export type { NavigationEntry, NavigationHistory } from "../generated/bindings";
 export type { ExtensionInfo, ExtensionList };
 export type { Prefs, ClearRequest, Rule, RuleAction, PrivacyCategory, PrivacyEvent, PrivacyInfo, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, RecordOptions, RecordingResult, RecordingCapabilities, RecordingEvent, Microphone, MediaInfo, ExportRequest, KeptSegment, RecordingInfo, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions, SitePermission, Decision, UpdateInfo, PermissionAsked, TabTier, DefaultBrowserStatus, Profile, ProfileId, ProfileDraft, SubtitleModel, SubtitleModelProgress, SubtitleCue, SubtitleState } from "../generated/bindings";
 
@@ -68,6 +69,8 @@ export const ipc = {
   tabSetPinned: async (id: string, pinned: boolean) => unwrap(await commands.tabSetPinned(id, pinned)),
   tabBack: async (id: string) => unwrap(await commands.tabBack(id)),
   tabForward: async (id: string) => unwrap(await commands.tabForward(id)),
+  tabHistory: async (id: string) => unwrap(await commands.tabHistory(id)),
+  tabHistoryNavigate: async (id: string, generation: string, entryId: number) => unwrap(await commands.tabHistoryNavigate(id, generation, entryId)),
   tabReload: async (id: string) => unwrap(await commands.tabReload(id)),
   tabStop: async (id: string) => unwrap(await commands.tabStop(id)),
   tabPrint: async (id: string) => unwrap(await commands.tabPrint(id)),

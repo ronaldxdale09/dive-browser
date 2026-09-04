@@ -75,6 +75,28 @@ impl Navigation {
 }
 
 impl MainFrame {
+    fn history_changed(&self, event: &CdpEvent) -> bool {
+        let navigation = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match event.method.as_str() {
+            "Page.frameNavigated" => event.params.get("frame").is_some_and(|frame| {
+                frame.get("parentId").is_none()
+                    && frame
+                        .get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|id| navigation.is_main(id))
+            }),
+            "Page.navigatedWithinDocument" | "Page.frameStoppedLoading" => event
+                .params
+                .get("frameId")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|id| navigation.is_main(id)),
+            _ => false,
+        }
+    }
+
     fn note(&self, id: &str, url: Option<&str>) {
         self.state
             .lock()
@@ -231,11 +253,15 @@ pub fn attach(
                     {
                         tracing::warn!(%tab_id, %error, "loading event emit failed");
                     }
+                    if main.history_changed(&event) {
+                        let _ = crate::navigation::TabHistoryChanged { tab_id }.emit(&app);
+                    }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
                     tracing::warn!(%tab_id, missed, "loading feed lagged; resetting request correlation");
                     main.forget_request();
                     refresh_main(&session, &main).await;
+                    let _ = crate::navigation::TabHistoryChanged { tab_id }.emit(&app);
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
@@ -248,6 +274,25 @@ pub fn attach(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn history_refreshes_include_same_url_push_state_but_not_subframes() {
+        let main = MainFrame::default();
+        main.note("root", Some("https://example.com"));
+        assert!(main.history_changed(&ev(
+            "Page.navigatedWithinDocument",
+            json!({"frameId":"root", "url":"https://example.com"})
+        )));
+        assert!(!main.history_changed(&ev(
+            "Page.navigatedWithinDocument",
+            json!({"frameId":"child", "url":"https://example.com"})
+        )));
+        assert!(!main.history_changed(&ev(
+            "Page.frameNavigated",
+            json!({"frame":{"id":"child","parentId":"root"}})
+        )));
+        assert!(main.history_changed(&ev("Page.frameStoppedLoading", json!({"frameId":"root"}))));
+    }
 
     fn ev(method: &str, params: serde_json::Value) -> CdpEvent {
         CdpEvent {

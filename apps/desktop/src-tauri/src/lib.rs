@@ -24,12 +24,14 @@ mod find;
 mod har;
 mod housekeeping;
 mod inspect;
+mod ipc_security;
 mod lifecycle_probe;
 mod loading;
 mod locator;
 mod mcp;
 mod menu;
 mod meta;
+mod navigation;
 mod network;
 mod openapi;
 mod pagescript;
@@ -152,6 +154,13 @@ pub fn run() {
 
     let app = builder
         .invoke_handler(move |invoke: tauri::ipc::Invoke<Runtime>| {
+            let caller = invoke.message.webview_ref();
+            if !ipc_security::trusted_chrome_label(caller.label(), caller.window_ref().label()) {
+                invoke
+                    .resolver
+                    .reject("application commands are only available to Dive chrome");
+                return true;
+            }
             if invoke.message.command() == "report_startup_milestone" {
                 handle_startup_invoke(invoke)
             } else {

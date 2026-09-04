@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
-import { ipc } from "../lib/ipc";
+import { events, ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { useDownloads } from "../store/downloads";
 import { useEmulation } from "../store/emulation";
@@ -59,6 +59,15 @@ beforeEach(() => {
   });
   vi.spyOn(ipc, "tabBack").mockResolvedValue(null);
   vi.spyOn(ipc, "tabForward").mockResolvedValue(null);
+  vi.spyOn(events.tabHistoryChanged, "listen").mockResolvedValue(() => {});
+  vi.spyOn(ipc, "tabHistory").mockResolvedValue({
+    generation: "view-1", current_index: 1, entries: [
+      { id: 10, title: "Previous page", url: "https://example.com/previous" },
+      { id: 20, title: "Current page", url: tab.url },
+      { id: 30, title: "Next page", url: "https://example.com/next" },
+    ],
+  });
+  vi.spyOn(ipc, "tabHistoryNavigate").mockResolvedValue(null);
   vi.spyOn(ipc, "tabReload").mockResolvedValue(null);
   vi.spyOn(ipc, "tabStop").mockResolvedValue(null);
   vi.spyOn(ipc, "tabOpen").mockResolvedValue(tab);
@@ -73,6 +82,40 @@ afterEach(() => {
 });
 
 describe("Toolbar", () => {
+  it("disables Back and Forward when the native history has a single entry", async () => {
+    vi.mocked(ipc.tabHistory).mockResolvedValue({ generation: "view-1", current_index: 0, entries: [{ id: 1, title: "Only page", url: tab.url }] });
+    render(<Toolbar />);
+    await waitFor(() => expect(ipc.tabHistory).toHaveBeenCalled());
+    expect((screen.getByRole("button", { name: "Back" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Forward" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("opens actual history with the keyboard and navigates using its generation and entry ID", async () => {
+    render(<Toolbar />);
+    const back = screen.getByRole("button", { name: "Back" }) as HTMLButtonElement;
+    await waitFor(() => expect(back.disabled).toBe(false));
+    act(() => back.focus());
+    fireEvent.keyDown(back, { key: "ArrowDown" });
+    const menu = screen.getByRole("menu", { name: "Back history" });
+    expect(menu.contains(document.activeElement)).toBe(true);
+    await waitFor(() => expect(ipc.setContentCovered).toHaveBeenCalledWith(true));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Previous page/ }));
+    await waitFor(() => expect(ipc.tabHistoryNavigate).toHaveBeenCalledWith(tab.id, "view-1", 10));
+    expect(screen.queryByRole("menu", { name: "Back history" })).toBeNull();
+    expect(document.activeElement).toBe(back);
+  });
+
+  it("opens forward history on right-click and closes it with Escape", async () => {
+    render(<Toolbar />);
+    const forward = screen.getByRole("button", { name: "Forward" }) as HTMLButtonElement;
+    await waitFor(() => expect(forward.disabled).toBe(false));
+    fireEvent.contextMenu(forward);
+    expect(screen.getByRole("menuitem", { name: /Next page/ })).toBeTruthy();
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(forward);
+  });
+
   it("shows and selects the complete URL when editing, including scheme and fragment", async () => {
     const url = "https://example.com/docs?q=hello#details";
     useBrowser.setState({ tabs: [{ ...tab, url }] });
@@ -179,6 +222,7 @@ describe("Toolbar", () => {
 
   it("routes clicks to navigation, bookmark, capture and DevTools actions", async () => {
     render(<Toolbar />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Back" }) as HTMLButtonElement).disabled).toBe(false));
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.click(screen.getByRole("button", { name: "Forward" }));

@@ -30,6 +30,8 @@ if os.environ.get('DIVE_STARTUP_BENCHMARK'):
     sys.exit(1)
 if os.environ.get('DIVE_NATIVE_LIFECYCLE_PROBE'):
     print('DIVE_LIFECYCLE_PROBE: popout close and reattach verified')
+    print('DIVE_LIFECYCLE_PROBE: native navigation history verified')
+    print('DIVE_LIFECYCLE_PROBE: chrome IPC boundary verified')
     print('DIVE_LIFECYCLE_PROBE: quit requested with detached window' if os.environ['DIVE_NATIVE_LIFECYCLE_PROBE']=='quit' else 'DIVE_LIFECYCLE_PROBE: main window close requested')
     print('event loop exited')
 else:

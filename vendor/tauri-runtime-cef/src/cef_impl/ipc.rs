@@ -143,12 +143,12 @@ pub(crate) fn on_process_message_received<T: UserEvent>(
     return 1;
   };
 
-  let mut url = CefString::from(&args.string(0)).to_string();
-  if url.is_empty()
-    && let Some(frame) = frame
-  {
-    url = CefString::from(&frame.url()).to_string();
-  }
+  // Renderer message arguments are not an authority for origin. Only the
+  // valid native main frame may invoke IPC; subframes must not inherit their
+  // containing webview's application capabilities.
+  let Some(frame) = frame else { return 1; };
+  let native_url = CefString::from(&frame.url()).to_string();
+  let Some(url) = native_ipc_url(frame.is_valid() != 0, frame.is_main() != 0, &native_url) else { return 1; };
   let body = CefString::from(&args.string(1)).to_string();
 
   if let Ok(request) = http::Request::builder().uri(url).body(body) {
@@ -165,4 +165,23 @@ pub(crate) fn on_process_message_received<T: UserEvent>(
     );
   }
   1
+}
+
+fn native_ipc_url(valid: bool, main: bool, native_url: &str) -> Option<String> {
+  if !valid || !main { return None; }
+  url::Url::parse(native_url).ok().map(|url| url.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::native_ipc_url;
+
+  #[test]
+  fn ipc_origin_comes_from_the_live_native_main_frame() {
+    assert_eq!(native_ipc_url(true, true, "https://page.test/"), Some("https://page.test/".into()));
+    assert_eq!(native_ipc_url(true, false, "http://tauri.localhost/"), None);
+    assert_eq!(native_ipc_url(false, true, "http://tauri.localhost/"), None);
+    assert_eq!(native_ipc_url(true, true, ""), None);
+    assert_eq!(native_ipc_url(true, true, "not a URL"), None);
+  }
 }

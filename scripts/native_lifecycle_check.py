@@ -39,6 +39,8 @@ def main():
             elapsed = run_probe(binary, env, log, 30, inspect_hang)
             content = log.read_text(errors='replace')
             if ('DIVE_LIFECYCLE_PROBE: popout close and reattach verified' not in content
+                    or 'DIVE_LIFECYCLE_PROBE: native navigation history verified' not in content
+                    or 'DIVE_LIFECYCLE_PROBE: chrome IPC boundary verified' not in content
                     or 'DIVE_LIFECYCLE_PROBE: ' + ('quit requested with detached window' if mode == 'quit' else 'main window close requested') not in content
                     or 'event loop exited' not in content):
                 raise RuntimeError(f'lifecycle evidence incomplete: {log}')
