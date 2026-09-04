@@ -64,14 +64,23 @@ export const usePrefs = create<PrefsState>((set, get) => ({
     }
   },
   update: async (patch) => {
-    const next = { ...get().prefs, ...patch };
+    const previous = get().prefs;
+    const next = { ...previous, ...patch };
     set({ prefs: next });
     applyAppearance(next);
     try {
       const stored = complete(await ipc.prefsSet(next));
-      set({ prefs: stored });
-      applyAppearance(stored);
+      // A slower earlier write must not replace a newer local choice.
+      if (get().prefs === next) {
+        set({ prefs: stored });
+        applyAppearance(stored);
+      }
     } catch (e) {
+      // Roll back only while this is still the newest optimistic update.
+      if (get().prefs === next) {
+        set({ prefs: previous });
+        applyAppearance(previous);
+      }
       report(e);
     }
   },
