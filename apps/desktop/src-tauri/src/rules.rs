@@ -354,7 +354,7 @@ pub fn decide_paused_request(
 /// Every CDP resource type except `Media`. Streaming video and audio fire a
 /// rapid series of byte-range requests; pausing each one for the CDP
 /// round-trip adds latency that makes the player abort segments and stall
-/// (YouTube in particular). `DivePrivacy` never blocks media, so when only
+/// (`YouTube` in particular). `DivePrivacy` never blocks media, so when only
 /// it needs interception those requests are left off the pause pipeline.
 const NON_MEDIA_RESOURCE_TYPES: &[&str] = &[
     "Document",
