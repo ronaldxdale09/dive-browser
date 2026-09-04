@@ -70,7 +70,9 @@ impl DivePrivacy {
     /// Returns the category to block, or allows a request when it is malformed or unmatched.
     #[must_use]
     pub fn decide(&self, context: &RequestContext<'_>) -> PrivacyDecision {
-        if context.resource_type.eq_ignore_ascii_case("document") {
+        if context.resource_type.eq_ignore_ascii_case("document")
+            || context.resource_type.eq_ignore_ascii_case("media")
+        {
             return PrivacyDecision::Allow;
         }
 
@@ -206,6 +208,19 @@ mod tests {
     }
 
     #[test]
+    fn media_requests_fail_open() {
+        let privacy = DivePrivacy::from_text("||ads.test^", "", "");
+        assert_eq!(
+            privacy.decide(&ctx(
+                "https://ads.test/video.mp4",
+                "https://news.test/",
+                "media",
+            )),
+            PrivacyDecision::Allow
+        );
+    }
+
+    #[test]
     fn bundled_network_rules_are_unique() {
         for (name, text) in [("ads", ADS_RULES), ("trackers", TRACKER_RULES)] {
             let mut rules = HashSet::new();
@@ -215,6 +230,28 @@ mod tests {
                 .filter(|line| !line.is_empty() && !line.starts_with('!'))
             {
                 assert!(rules.insert(rule), "duplicate {name} rule: {rule}");
+            }
+        }
+    }
+
+    #[test]
+    fn bundled_network_rules_do_not_include_subsumed_rules() {
+        for (name, text) in [("ads", ADS_RULES), ("trackers", TRACKER_RULES)] {
+            let rules = text
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with('!'))
+                .map(OwnedNetworkRule::parse)
+                .collect::<Vec<_>>();
+            for (index, rule) in rules.iter().enumerate() {
+                for other in rules.iter().skip(index + 1) {
+                    assert!(
+                        !rule.subsumes(other) && !other.subsumes(rule),
+                        "subsumed {name} rule: {} and {}",
+                        rule.raw,
+                        other.raw
+                    );
+                }
             }
         }
     }
@@ -232,6 +269,46 @@ mod tests {
                     "invalid {name} rule: {rule}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn bundled_version_matches_public_version() {
+        assert_eq!(
+            include_str!("../privacy/VERSION").trim(),
+            DIVE_PRIVACY_VERSION
+        );
+    }
+
+    #[derive(Debug)]
+    struct OwnedNetworkRule<'a> {
+        raw: &'a str,
+        host: &'a str,
+        path: &'a str,
+        third_party: bool,
+        resource_type: Option<&'a str>,
+    }
+
+    impl<'a> OwnedNetworkRule<'a> {
+        fn parse(raw: &'a str) -> Self {
+            let (pattern, options) = raw.split_once('$').unwrap_or((raw, ""));
+            let pattern = pattern.strip_prefix("||").expect("hostname anchor");
+            let (host, path) = pattern.split_once('/').unwrap_or((pattern, ""));
+            let options = options.split(',').collect::<Vec<_>>();
+            Self {
+                raw,
+                host,
+                path,
+                third_party: options.contains(&"third-party"),
+                resource_type: options.iter().copied().find(|option| *option == "script"),
+            }
+        }
+
+        fn subsumes(&self, other: &Self) -> bool {
+            self.host == other.host
+                && other.path.starts_with(self.path)
+                && (!self.third_party || other.third_party)
+                && (self.resource_type.is_none() || self.resource_type == other.resource_type)
         }
     }
 }

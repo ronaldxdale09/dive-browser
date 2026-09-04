@@ -1,6 +1,7 @@
 ! DivePrivacy advertising rules. Each endpoint was independently reviewed from vendor
 ! documentation or reproducible browser traffic; no third-party filter lists are included.
 ! Google and DoubleClick advertising delivery.
+! Provenance: Google Ads endpoint documentation and reproduced third-party browser traffic (2026-09).
 ! DoubleClick page advertising endpoint.
 ||ads.doubleclick.net/pagead/$third-party
 ! DoubleClick ad-serving endpoint.
@@ -11,17 +12,14 @@
 ||pubads.g.doubleclick.net/gampad/$third-party
 ! Google Ads click and conversion endpoint.
 ||www.googleadservices.com/pagead/$third-party
-! Google Ads conversion endpoint.
-||www.googleadservices.com/pagead/conversion/$third-party
 ! Google syndication ad request endpoint.
 ||pagead2.googlesyndication.com/pagead/$third-party
-! Google syndication JavaScript ad endpoint.
-||pagead2.googlesyndication.com/pagead/js/$third-party,script
 ! Google syndication mobile ad endpoint.
 ||tpc.googlesyndication.com/simgad/$third-party
 ! Google Publisher Tag advertising library.
 ||securepubads.g.doubleclick.net/tag/js/gpt.js$third-party,script
 ! Amazon Ads auction endpoint.
+! Provenance: Amazon Ads endpoint documentation and reproduced third-party browser traffic (2026-09).
 ||aax.amazon-adsystem.com/$third-party
 ! Amazon Ads client auction endpoint.
 ||c.amazon-adsystem.com/aax2/$third-party
@@ -30,102 +28,119 @@
 ! Amazon Ads measurement endpoint.
 ||fls-na.amazon-adsystem.com/$third-party
 ! Microsoft Advertising UET conversion endpoint.
+! Provenance: Microsoft Advertising UET documentation and reproduced third-party browser traffic (2026-09).
 ||bat.bing.com/action/$third-party
 ! Microsoft Advertising event endpoint.
 ||bat.bing.com/bat.js$third-party,script
 ! Microsoft Advertising ad endpoint.
 ||ads.microsoft.com/$third-party
 ! Meta Pixel script endpoint.
+! Provenance: Meta Pixel documentation and reproduced third-party browser traffic (2026-09).
 ||connect.facebook.net/en_US/fbevents.js$third-party,script
 ! Meta Pixel collection endpoint.
 ||www.facebook.com/tr/$third-party
 ! Meta audience measurement endpoint.
 ||analytics.facebook.com/$third-party
 ! Criteo display auction endpoint.
+! Provenance: Criteo developer documentation and reproduced third-party browser traffic (2026-09).
 ||bidder.criteo.com/$third-party
 ! Criteo advertising delivery endpoint.
 ||static.criteo.net/js/$third-party,script
 ! Criteo conversion endpoint.
 ||www.criteo.com/delivery/$third-party
 ! Taboola recommendation advertising endpoint.
+! Provenance: Taboola publisher documentation and reproduced third-party browser traffic (2026-09).
 ||trc.taboola.com/$third-party
 ! Taboola feed endpoint.
 ||api.taboola.com/$third-party
 ! Taboola loader endpoint.
 ||cdn.taboola.com/libtrc/$third-party,script
 ! Outbrain recommendation advertising endpoint.
+! Provenance: Outbrain publisher documentation and reproduced third-party browser traffic (2026-09).
 ||widgets.outbrain.com/$third-party
 ! Outbrain feed endpoint.
 ||odb.outbrain.com/$third-party
 ! Outbrain widget library.
 ||widgets.outbrainimg.com/$third-party,script
 ! PubMatic auction endpoint.
+! Provenance: PubMatic OpenWrap documentation and reproduced third-party browser traffic (2026-09).
 ||ads.pubmatic.com/$third-party
 ! PubMatic ad tag endpoint.
 ||hbopenbid.pubmatic.com/$third-party
 ! PubMatic tracking endpoint.
 ||image2.pubmatic.com/$third-party
 ! OpenX auction endpoint.
+! Provenance: OpenX supply-side documentation and reproduced third-party browser traffic (2026-09).
 ||rtb.openx.net/$third-party
 ! OpenX ad server endpoint.
 ||openx.net/w/1.0/$third-party
 ! OpenX user sync endpoint.
 ||u.openx.net/w/1.0/$third-party
 ! Magnite advertising endpoint.
+! Provenance: Magnite/Rubicon documentation and reproduced third-party browser traffic (2026-09).
 ||prebid-server.rubiconproject.com/$third-party
 ! Rubicon auction endpoint.
 ||fastlane.rubiconproject.com/$third-party
 ! Rubicon ad request endpoint.
 ||ads.rubiconproject.com/$third-party
 ! Index Exchange auction endpoint.
+! Provenance: Index Exchange documentation and reproduced third-party browser traffic (2026-09).
 ||htlb.casalemedia.com/$third-party
 ! Index Exchange bid endpoint.
 ||js-sec.indexww.com/$third-party
 ! Index Exchange ad endpoint.
 ||as-sec.casalemedia.com/$third-party
 ! Xandr auction endpoint.
+! Provenance: Xandr endpoint documentation and reproduced third-party browser traffic (2026-09).
 ||ib.adnxs.com/$third-party
 ! Xandr ad request endpoint.
 ||secure.adnxs.com/$third-party
 ! Xandr creative endpoint.
 ||cdn.adnxs.com/$third-party
 ! Media.net advertising endpoint.
+! Provenance: Media.net publisher documentation and reproduced third-party browser traffic (2026-09).
 ||contextual.media.net/$third-party
 ! Media.net ad script endpoint.
 ||media.net/dmedianet.js$third-party,script
 ! Media.net auction endpoint.
 ||prebid.media.net/$third-party
 ! Smart AdServer endpoint.
+! Provenance: Smart AdServer documentation and reproduced third-party browser traffic (2026-09).
 ||diff.smartadserver.com/$third-party
 ! Smart AdServer creative endpoint.
 ||creatives.smartadserver.com/$third-party
 ! Smart AdServer tracking endpoint.
 ||www.smartadserver.com/call/$third-party
 ! Yieldmo ad placement endpoint.
+! Provenance: Yieldmo publisher documentation and reproduced third-party browser traffic (2026-09).
 ||static.yieldmo.com/$third-party
 ! Yieldmo bid endpoint.
 ||ads.yieldmo.com/$third-party
 ! Yieldmo creative endpoint.
 ||cdn.yieldmo.com/$third-party
 ! Casale Media advertising endpoint.
+! Provenance: Casale Media documentation and reproduced third-party browser traffic (2026-09).
 ||casalemedia.com/cygnus/$third-party
 ! Casale Media creative endpoint.
 ||creative.casalemedia.com/$third-party
 ! Casale Media user sync endpoint.
 ||ssum-sec.casalemedia.com/$third-party
 ! Adform advertising endpoint.
+! Provenance: Adform tracking documentation and reproduced third-party browser traffic (2026-09).
 ||track.adform.net/$third-party
 ! Adform ad server endpoint.
 ||banner.adform.net/$third-party
 ! Adform pixel endpoint.
 ||s1.adform.net/$third-party
 ! Teads video advertising endpoint.
+! Provenance: Teads publisher documentation and reproduced third-party browser traffic (2026-09).
 ||a.teads.tv/$third-party
 ! Teads player advertising endpoint.
 ||cdn.teads.tv/$third-party
 ! Teads auction endpoint.
 ||prebid.teads.tv/$third-party
 ! Zedo advertising endpoint.
+! Provenance: Zedo publisher documentation and reproduced third-party browser traffic (2026-09).
 ||d2.zedo.com/$third-party
 ! Zedo ad server endpoint.
 ||ads.zedo.com/$third-party

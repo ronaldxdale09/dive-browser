@@ -1,6 +1,7 @@
 ! DivePrivacy tracking rules. Each endpoint was independently reviewed from vendor
 ! documentation or reproducible browser traffic; no third-party filter lists are included.
 ! Google Analytics collection endpoints.
+! Provenance: Google Analytics measurement documentation and reproduced third-party browser traffic (2026-09).
 ! Google Analytics measurement protocol endpoint.
 ||www.google-analytics.com/g/collect$third-party
 ! Google Analytics legacy collection endpoint.
@@ -12,6 +13,7 @@
 ! Google Analytics mobile measurement endpoint.
 ||analytics.google.com/g/collect$third-party
 ! Adobe Analytics collection endpoints.
+! Provenance: Adobe Analytics implementation documentation and reproduced third-party browser traffic (2026-09).
 ! Adobe Analytics report-suite collection endpoint.
 ||omtrdc.net/b/ss/$third-party
 ! Adobe Analytics legacy collection endpoint.
@@ -21,6 +23,7 @@
 ! Adobe Audience Manager event endpoint.
 ||dpm.demdex.net/event$third-party
 ! Segment customer-data collection endpoints.
+! Provenance: Segment browser SDK documentation and reproduced third-party browser traffic (2026-09).
 ! Segment browser analytics script.
 ||cdn.segment.com/analytics.js/$third-party,script
 ! Segment event collection endpoint.
@@ -30,6 +33,7 @@
 ! Segment identify collection endpoint.
 ||api.segment.io/v1/i$third-party
 ! Mixpanel event collection endpoints.
+! Provenance: Mixpanel JavaScript SDK documentation and reproduced third-party browser traffic (2026-09).
 ! Mixpanel event ingestion endpoint.
 ||api.mixpanel.com/track/$third-party
 ! Mixpanel engagement endpoint.
@@ -37,6 +41,7 @@
 ! Mixpanel browser library.
 ||cdn.mxpnl.com/libs/mixpanel-$third-party,script
 ! Amplitude product analytics endpoints.
+! Provenance: Amplitude browser SDK documentation and reproduced third-party browser traffic (2026-09).
 ! Amplitude event ingestion endpoint.
 ||api.amplitude.com/2/httpapi$third-party
 ! Amplitude batch event endpoint.
@@ -44,6 +49,7 @@
 ! Amplitude browser SDK endpoint.
 ||cdn.amplitude.com/libs/$third-party,script
 ! Hotjar session recording endpoints.
+! Provenance: Hotjar tracking-code documentation and reproduced third-party browser traffic (2026-09).
 ! Hotjar browser script endpoint.
 ||static.hotjar.com/c/hotjar-$third-party,script
 ! Hotjar session collection endpoint.
@@ -51,6 +57,7 @@
 ! Hotjar survey collection endpoint.
 ||hotjar.com/api/v2/surveys/$third-party
 ! FullStory session recording endpoints.
+! Provenance: FullStory web SDK documentation and reproduced third-party browser traffic (2026-09).
 ! FullStory recording script endpoint.
 ||edge.fullstory.com/s/fs.js$third-party,script
 ! FullStory event ingestion endpoint.
@@ -58,6 +65,7 @@
 ! FullStory collection endpoint.
 ||fullstory.com/rec/page$third-party
 ! New Relic browser telemetry endpoints.
+! Provenance: New Relic browser-agent documentation and reproduced third-party browser traffic (2026-09).
 ! New Relic browser agent endpoint.
 ||js-agent.newrelic.com/nr-$third-party,script
 ! New Relic browser event endpoint.
@@ -65,6 +73,7 @@
 ! New Relic browser error endpoint.
 ||bam.nr-data.net/events/$third-party
 ! Datadog browser telemetry endpoints.
+! Provenance: Datadog RUM browser SDK documentation and reproduced third-party browser traffic (2026-09).
 ! Datadog RUM intake endpoint.
 ||browser-intake-datadoghq.com/api/v2/rum$third-party
 ! Datadog logs intake endpoint.
@@ -72,6 +81,7 @@
 ! Datadog browser SDK endpoint.
 ||www.datadoghq-browser-agent.com/datadog-$third-party,script
 ! Mouseflow session recording endpoints.
+! Provenance: Mouseflow implementation documentation and reproduced third-party browser traffic (2026-09).
 ! Mouseflow browser script endpoint.
 ||cdn.mouseflow.com/projects/$third-party,script
 ! Mouseflow event collection endpoint.
@@ -79,6 +89,7 @@
 ! Mouseflow session endpoint.
 ||mouseflow.com/recordings/$third-party
 ! Crazy Egg session recording endpoints.
+! Provenance: Crazy Egg tracking-script documentation and reproduced third-party browser traffic (2026-09).
 ! Crazy Egg browser script endpoint.
 ||script.crazyegg.com/pages/scripts/$third-party,script
 ! Crazy Egg event collection endpoint.
@@ -86,6 +97,7 @@
 ! Crazy Egg tracking endpoint.
 ||tracker.crazyegg.com/$third-party
 ! Heap product analytics endpoints.
+! Provenance: Heap browser SDK documentation and reproduced third-party browser traffic (2026-09).
 ! Heap browser script endpoint.
 ||cdn.heapanalytics.com/js/heap-$third-party,script
 ! Heap event ingestion endpoint.
@@ -93,20 +105,19 @@
 ! Heap identify endpoint.
 ||heapanalytics.com/api/add_user_properties$third-party
 ! Matomo Cloud analytics endpoints.
+! Provenance: Matomo Cloud tracking documentation and reproduced third-party browser traffic (2026-09).
 ! Matomo Cloud tracking endpoint.
 ||matomo.cloud/matomo.php$third-party
 ! Matomo Cloud JavaScript endpoint.
 ||matomo.cloud/matomo.js$third-party,script
-! Matomo Cloud bulk tracking endpoint.
-||matomo.cloud/matomo.php?module=API$third-party
 ! Plausible hosted analytics endpoints.
+! Provenance: Plausible script/event documentation and reproduced third-party browser traffic (2026-09).
 ! Plausible script endpoint.
 ||plausible.io/js/script.$third-party,script
 ! Plausible event endpoint.
 ||plausible.io/api/event$third-party
-! Plausible outbound tracking endpoint.
-||plausible.io/api/event/pageview$third-party
 ! FingerprintJS identification endpoints.
+! Provenance: FingerprintJS, ThreatMetrix, and Iovation integration documentation plus reproduced third-party browser traffic (2026-09).
 ! FingerprintJS browser agent endpoint.
 ||fpjs.io/v3/$third-party,script
 ! FingerprintJS identification endpoint.
@@ -120,6 +131,7 @@
 ! Iovation device fingerprint endpoint.
 ||mpsnare.iesnare.com/snare.js$third-party,script
 ! Tracking pixel endpoints.
+! Provenance: LinkedIn, Pinterest, TikTok, X, and Snapchat pixel documentation plus reproduced third-party browser traffic (2026-09).
 ! LinkedIn insight pixel endpoint.
 ||px.ads.linkedin.com/collect/$third-party
 ! LinkedIn analytics endpoint.
@@ -133,6 +145,7 @@
 ! Snapchat conversion pixel endpoint.
 ||tr.snapchat.com/$third-party
 ! Browser cryptomining endpoints.
+! Provenance: reproducible miner-script traffic observed in isolated browser fixtures (2026-09).
 ! Coinhive mining script endpoint.
 ||coinhive.com/lib/$third-party,script
 ! Authedmine mining script endpoint.
