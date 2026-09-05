@@ -4,6 +4,7 @@ import { Icon } from "../components/Icon";
 import { recordingClock } from "../lib/recordingFormat";
 import { RATIO_VALUE, contentBox, outputTime, sourceTime } from "./math";
 import { previewNeedsFrame } from "./previewLoop";
+import { leasePreviewMedia } from "./previewMedia";
 import { Renderer } from "./render";
 import { useEditor } from "./store";
 import type { Project } from "./model";
@@ -144,23 +145,35 @@ export function Stage() {
     };
   }, [project, segments, duration, cursorRaw, cursorSmooth, size, setPlaying]);
 
-  // Lend the element to the exporter for as long as the stage is up.
+  // The stage owns one media resource and lends only that live element to
+  // export. Cleanup must not clear a replacement stage's borrowed pointer.
   const setVideoEl = useEditor((s) => s.setVideoEl);
-  useEffect(() => {
-    setVideoEl(video.current);
-    return () => setVideoEl(null);
-  }, [setVideoEl, playable]);
-
-  // The hidden video needs a nudge to fetch its metadata under CEF.
   useEffect(() => {
     const v = video.current;
     if (!v || !playable) return;
-    v.load();
-    const id = window.setTimeout(() => {
-      if (v.readyState < 1) void v.play().then(() => v.pause()).catch(() => undefined);
-    }, 400);
-    return () => window.clearTimeout(id);
-  }, [playable]);
+    const generation = useEditor.getState().generation;
+    const isCurrent = () => {
+      const state = useEditor.getState();
+      return state.generation === generation && state.videoEl === v;
+    };
+    setVideoEl(v);
+    const release = leasePreviewMedia(v, playable, {
+      isCurrent,
+      generation,
+      onError: () => {
+        console.error("[divescreen] preview media failed", {
+          code: v.error?.code ?? null,
+          readyState: v.readyState,
+          networkState: v.networkState,
+        });
+        useEditor.setState({ playing: false, error: "Dive could not decode this recording preview. The original file is still safe." });
+      },
+    });
+    return () => {
+      release();
+      if (isCurrent()) setVideoEl(null);
+    };
+  }, [playable, setVideoEl]);
 
   if (!project) return null;
 
@@ -202,11 +215,9 @@ export function Stage() {
           )}
           <video
             ref={video}
-            src={playable ?? undefined}
             muted
             playsInline
             preload="auto"
-            onError={() => useEditor.setState({ playing: false, error: "Dive could not decode this recording preview. The original file is still safe." })}
             className="pointer-events-none absolute -left-[9999px] size-px opacity-0"
           />
         </div>

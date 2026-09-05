@@ -1,6 +1,11 @@
 //! Opt-in diagnostics for a disposable, interactive native UI run.
 //! No keyboard contents, form values, page URLs, or snapshot data are recorded.
 
+#[path = "ui_media_probe.rs"]
+mod media_probe;
+#[path = "ui_network_probe.rs"]
+mod network_probe;
+
 use std::{
     path::PathBuf,
     sync::{
@@ -33,6 +38,15 @@ const DOCUMENT: &str = r#"(() => {
   const rect = root?.getBoundingClientRect();
   const box = element => { const r = element?.getBoundingClientRect(); return r && {x:r.x,y:r.y,width:r.width,height:r.height}; };
   const tablist = document.querySelector('[role="tablist"][aria-label="Tabs"]');
+  const mediaEvents = ['lease_setup','lease_release','media_error','export_begin','export_seek_failed','export_seek_timeout','export_seek_cancelled','export_end'];
+  const mediaPhases = ['idle','preparing','seeking','rendering','draining','flushing','uploading','finishing','done'];
+  const mediaFields = ['atMs','generation','exporting','frame','targetMs','code','currentTime','seeking','paused','readyState','networkState'];
+  const screenMedia = Array.isArray(window.__diveScreenMediaProbe) ? window.__diveScreenMediaProbe.slice(-64).flatMap(row => {
+    if (!row || !mediaEvents.includes(row.event) || !mediaPhases.includes(row.phase)) return [];
+    const safe = {event:row.event,phase:row.phase};
+    for (const key of mediaFields) safe[key] = typeof row[key] === 'number' && Number.isFinite(row[key]) ? row[key] : null;
+    return [safe];
+  }) : null;
   return {ready:document.readyState, visibility:document.visibilityState, focused:document.hasFocus(),
     now:performance.now(), timeOrigin:performance.timeOrigin, children:root?.childElementCount,
     rect:rect && {x:rect.x,y:rect.y,width:rect.width,height:rect.height},
@@ -44,7 +58,7 @@ const DOCUMENT: &str = r#"(() => {
     dialogs:document.querySelectorAll('[role="dialog"]').length,
     newTab:!!document.querySelector('[role="dialog"][aria-label="New tab"]'),
     loading:!!document.querySelector('[aria-label="Loading dialog"]'), input:window.__diveUiProbe,
-    inputTiming:window.__diveInputTimingProbe?.snapshot()};
+    inputTiming:window.__diveInputTimingProbe?.snapshot(), screenMedia};
 })()"#;
 
 fn enabled(flag: &str, mock: &str, profile: bool, competing_probe: bool) -> bool {
@@ -144,6 +158,95 @@ async fn wait_for_request(
     }
 }
 
+async fn enable_media_and_network(
+    session: &dive_cdp::CdpSession,
+    stop: Arc<AtomicBool>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    // Subscribe before enable: Chromium may replay errors during its reply.
+    // Reuse this session's existing native observer, never install another.
+    let mut events = session.subscribe();
+    let worker_stop = stop.clone();
+    let task = tokio::spawn(async move {
+        let mut capture = media_probe::MediaErrors::new(true);
+        let mut sequence = 0;
+        let mut network = network_probe::NetworkFacts::new(true);
+        let mut network_sequence = 0;
+        let mut lag_reported = false;
+        while !(worker_stop.load(Ordering::Acquire) || capture.full() && network.full()) {
+            match events.recv().await {
+                Ok(event) => {
+                    if let Some(mut fact) = network.collect(&event.method, &event.params) {
+                        network_sequence += 1;
+                        let unix_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0.0, |time| time.as_secs_f64() * 1000.0);
+                        fact["sequence"] = json!(network_sequence);
+                        fact["unix_ms"] = json!(unix_ms);
+                        println!("DIVE_UI_PROBE_NETWORK: {fact}");
+                    }
+                    for error in capture.collect(&event.method, &event.params) {
+                        sequence += 1;
+                        let unix_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0.0, |time| time.as_secs_f64() * 1000.0);
+                        println!(
+                            "DIVE_UI_PROBE_MEDIA_ERROR: {}",
+                            json!({
+                                "sequence":sequence,"unix_ms":unix_ms,
+                                "errorType":error.error_type,"code":error.code
+                            })
+                        );
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    if !lag_reported {
+                        println!("DIVE_UI_PROBE_MEDIA_LAG: {skipped}");
+                        println!("DIVE_UI_PROBE_NETWORK_LAG: {skipped}");
+                        lag_reported = true;
+                    }
+                }
+            }
+        }
+    });
+    // Both enables share one bounded interval and the existing observer. An
+    // unsupported domain is diagnostic status, not a failed basic UI sample.
+    let enable = |method| {
+        let stop = &stop;
+        async move {
+            !stop.load(Ordering::Acquire)
+                && matches!(
+                    tokio::time::timeout(Duration::from_secs(10), session.call0(method)).await,
+                    Ok(Ok(_))
+                )
+        }
+    };
+    let (media_enabled, network_enabled) =
+        tokio::join!(enable("Media.enable"), enable("Network.enable"));
+    println!(
+        "DIVE_UI_PROBE_MEDIA_STATUS: {}",
+        if media_enabled {
+            "enabled"
+        } else {
+            "unavailable"
+        }
+    );
+    println!(
+        "DIVE_UI_PROBE_NETWORK_STATUS: {}",
+        if network_enabled {
+            "enabled"
+        } else {
+            "unavailable"
+        }
+    );
+    if media_enabled || network_enabled {
+        Some(task)
+    } else {
+        task.abort();
+        None
+    }
+}
+
 async fn run(
     app: tauri::AppHandle<Runtime>,
     directory: PathBuf,
@@ -161,8 +264,10 @@ async fn run(
         .ok_or_else(|| AppError::new("chrome missing"))?;
     check_running(&stop)?;
     let session = chrome_probe_session(&chrome)?;
+    let mut media_task = None;
     let result = async {
         let mut sequence = 0;
+        let mut media_attempted = false;
         while !stop.load(Ordering::Acquire) {
             if manual && sequence > 0 {
                 wait_for_request(&directory, &stop, &progress).await?;
@@ -201,9 +306,18 @@ async fn run(
                 println!("DIVE_UI_PROBE_BEGIN: {sequence} input-timing-enable");
                 let started = checked(&stop, || evaluate(&session, "(() => { window.__diveUiInputTimingEnabled = true; return window.__diveInputTimingProbe?.start() === true; })()")).await?;
                 if started != json!(true) { return Err(AppError::new("input timing diagnostic is unavailable")); }
+                if !media_attempted {
+                    check_running(&stop)?;
+                    media_attempted = true;
+                    media_task = enable_media_and_network(&session, stop.clone()).await;
+                }
             }
             println!("DIVE_UI_PROBE_BEGIN: {sequence} document");
-            let document = checked(&stop, || evaluate(&session, DOCUMENT)).await?;
+            let mut document = checked(&stop, || evaluate(&session, DOCUMENT)).await?;
+            if let Some(document) = document.as_object_mut() {
+                let safe = media_probe::screen_media(document.get("screenMedia").unwrap_or(&Value::Null));
+                document.insert("screenMedia".into(), safe);
+            }
             println!("DIVE_UI_PROBE_DOCUMENT: {}",json!({"sequence":sequence,"document":document}));
             if stop.load(Ordering::Acquire) { break; }
             println!("DIVE_UI_PROBE_BEGIN: {sequence} ipc");
@@ -227,6 +341,9 @@ async fn run(
         Ok(())
     }.await;
     session.close();
+    if let Some(task) = media_task {
+        task.abort();
+    }
     result
 }
 

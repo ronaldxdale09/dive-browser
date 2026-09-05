@@ -10,6 +10,11 @@ import type { ExportProgress } from "./export";
 import { outputSize } from "./math";
 import { useEditor } from "./store";
 
+// Object identity is the run token; a new editor generation can replace an
+// old native finish, but only the matching run may release global ownership.
+interface ExportOwner { generation: number }
+let exportOwner: ExportOwner | null = null;
+
 /**
  * Export: choose the file, watch it render, then open it or find it. The
  * render runs in the chrome and never blocks the editor's own state.
@@ -26,7 +31,12 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [result, setResult] = useState<RecordingResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
-  useEffect(() => () => abort.current?.abort(), []);
+  const runOwner = useRef<ExportOwner | null>(null);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; abort.current?.abort(); };
+  }, []);
   const dialog = useRef<HTMLDivElement>(null);
   const cancelButton = useRef<HTMLButtonElement>(null);
   const doneButton = useRef<HTMLButtonElement>(null);
@@ -44,22 +54,37 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const set = (p: Partial<typeof ex>) => update((e) => ({ ...e, export: { ...e.export, ...p } }));
 
   const run = async () => {
-    if (!playable) return;
+    const store = useEditor.getState();
+    if (!playable || store.project !== project || store.playable !== playable) return;
+    if (runOwner.current) return;
+    if (exportOwner?.generation === store.generation) {
+      setError("Another export for this recording is still finishing. Try again when it completes.");
+      return;
+    }
+    const owner: ExportOwner = { generation: store.generation };
+    exportOwner = owner;
+    runOwner.current = owner;
+    const current = () => mounted.current && runOwner.current === owner && exportOwner === owner && useEditor.getState().generation === owner.generation;
     setError(null);
     setResult(null);
     abort.current = new AbortController();
-    const store = useEditor.getState();
     store.setPlaying(false);
     store.setExporting(true);
     try {
-      const r = await exportProject({ project, playable, segments, cursorRaw, cursorSmooth, onProgress: setProgress, signal: abort.current.signal, video: store.videoEl });
-      setResult(r);
+      const r = await exportProject({ project, playable, segments, cursorRaw, cursorSmooth, onProgress: (value) => { if (current()) setProgress(value); }, signal: abort.current.signal, video: store.videoEl });
+      if (current()) setResult(r);
     } catch (e) {
-      console.error("[divescreen] export failed", e);
-      setProgress(null);
-      setError(e instanceof Error ? e.message : String(e));
+      if (current()) {
+        console.error("[divescreen] export failed", e);
+        setProgress(null);
+        setError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
-      useEditor.getState().setExporting(false);
+      if (exportOwner === owner) {
+        exportOwner = null;
+        if (useEditor.getState().generation === owner.generation) useEditor.getState().setExporting(false);
+      }
+      if (runOwner.current === owner) runOwner.current = null;
     }
   };
 

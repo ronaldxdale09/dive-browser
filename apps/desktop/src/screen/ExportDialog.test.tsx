@@ -9,7 +9,7 @@ vi.mock("./export", () => ({ exportProject: vi.fn() }));
 const media = { source: "/tmp/audio.mp4", playable: "/tmp/audio.webm", events: null, durationMs: 3000, width: 640, height: 360 };
 
 beforeEach(() => {
-  useEditor.setState({ project: newProject(media), playable: "asset://test", duration: 3000, playing: false });
+  useEditor.setState({ generation: useEditor.getState().generation + 1, exporting: false, project: newProject(media), playable: "asset://test", duration: 3000, playing: false });
 });
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 

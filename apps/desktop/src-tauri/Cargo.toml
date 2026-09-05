@@ -38,6 +38,7 @@ tauri-plugin-updater = "2"
 rfd = "0.16"
 anyhow = { workspace = true }
 thiserror = { workspace = true }
+tempfile = "3"
 url = { workspace = true }
 psl = "2"
 time = { workspace = true }

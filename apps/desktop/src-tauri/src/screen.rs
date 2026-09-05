@@ -2,6 +2,9 @@
 //! the recording into the chrome in pieces, and turning the editor's
 //! rendered `WebM` into the finished MP4 or GIF with the source's sound.
 
+#[path = "screen_project_file.rs"]
+mod project_file;
+
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -231,7 +234,7 @@ pub(crate) fn screen_project_read(source: String) -> AppResult<Option<String>> {
 #[allow(clippy::needless_pass_by_value)] // Tauri commands deserialize owned strings.
 pub(crate) fn screen_project_write(source: String, json: String) -> AppResult<()> {
     let path = project_path(&captured(&source)?)?;
-    std::fs::write(path, json)?;
+    project_file::write_project(&path, json.as_bytes())?;
     Ok(())
 }
 

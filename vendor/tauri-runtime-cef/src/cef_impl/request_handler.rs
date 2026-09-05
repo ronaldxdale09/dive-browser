@@ -33,6 +33,9 @@ use crate::{
   webview::{CefInitScript, INITIAL_LOAD_URL},
 };
 
+#[path = "partial_response.rs"]
+mod partial_response;
+
 type HttpResponse = Arc<RefCell<Option<http::Response<Cursor<Vec<u8>>>>>>;
 pub(crate) type SchemeRegistry = Arc<
   Mutex<
@@ -305,6 +308,35 @@ wrap_resource_handler! {
           // handler is Arc<Box<UriSchemeProtocol>>, so we need to dereference to call it
           (**handler)(&label, http_request, responder);
         });
+        1
+      } else {
+        0
+      }
+    }
+
+    fn skip(
+      &self,
+      bytes_to_skip: i64,
+      bytes_skipped: Option<&mut i64>,
+      _callback: Option<&mut ResourceSkipCallback>,
+    ) -> ::std::os::raw::c_int {
+      let Some(bytes_skipped) = bytes_skipped else { return 0 };
+      *bytes_skipped = -2; // ERR_FAILED, with no asynchronous callback pending.
+      let response = self.response.borrow();
+      let Some(response) = response.as_ref() else { return 0 };
+      // Pinned CEF calls Skip(range_start) before response_headers. The protocol
+      // handler has already selected the 206 body, so seeking its cursor here
+      // would discard the requested bytes a second time. Acknowledge only an
+      // exact, complete partial response; retain failure for all other cases.
+      let skipped = partial_response::acknowledge_skip(
+        response.status().as_u16(),
+        response.headers().get(http::header::CONTENT_RANGE).and_then(|v| v.to_str().ok()),
+        response.body().get_ref().len(),
+        response.body().position(),
+        bytes_to_skip,
+      );
+      if let Some(skipped) = skipped {
+        *bytes_skipped = skipped;
         1
       } else {
         0
