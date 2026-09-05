@@ -87,7 +87,7 @@ interface BrowserState {
   reorderTabs: (ordered: string[]) => Promise<void>;
   setPinned: (id: string, pinned: boolean) => Promise<void>;
   activateWorkspace: (id: string) => Promise<void>;
-  /** Live tab count per workspace id; the snapshot only carries the active one's tabs. */
+  /** Open tab count including discarded tabs per workspace id; the snapshot only carries the active one's tabs. */
   counts: Record<string, number>;
   refreshCounts: () => Promise<void>;
   reorderWorkspaces: (ordered: string[]) => Promise<void>;

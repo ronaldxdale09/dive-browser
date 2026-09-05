@@ -40,7 +40,7 @@ export const commands = {
 	 */
 	workspaceReorder: (ordered: WorkspaceId[]) => typedError<null, AppError>(__TAURI_INVOKE("workspace_reorder", { ordered })),
 	/**
-	 *  Live tab count of every workspace. The snapshot only carries the active
+	 *  Open tab count of every workspace, including discarded tabs. The snapshot carries the active
 	 *  workspace's tabs, so the rail asks for the rest separately.
 	 */
 	workspaceTabCounts: () => typedError<WorkspaceTabs[], AppError>(__TAURI_INVOKE("workspace_tab_counts")),
@@ -1895,7 +1895,7 @@ export type WorkspaceId = string;
 export type WorkspaceTabs = {
 	/**  The workspace. */
 	workspace_id: WorkspaceId,
-	/**  Live tabs in it. */
+	/**  Open tabs in it, including discarded tabs. */
 	tabs: number,
 };
 

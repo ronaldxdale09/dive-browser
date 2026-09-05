@@ -667,11 +667,11 @@ pub(crate) fn workspace_activate(
 pub struct WorkspaceTabs {
     /// The workspace.
     pub workspace_id: WorkspaceId,
-    /// Live tabs in it.
+    /// Open tabs in it, including discarded tabs.
     pub tabs: u32,
 }
 
-/// Live tab count of every workspace. The snapshot only carries the active
+/// Open tab count of every workspace, including discarded tabs. The snapshot carries the active
 /// workspace's tabs, so the rail asks for the rest separately.
 #[tauri::command]
 #[specta::specta]

@@ -668,12 +668,12 @@ impl Store {
         Ok(())
     }
 
-    /// Live tab count per workspace, for the rail's badges. Discarded tabs are
-    /// left out: they are metadata for a tab that is no longer really open.
+    /// Open tab count per workspace, including tabs whose renderer was discarded.
+    /// Global essential tabs have no workspace and are counted separately.
     pub fn tab_counts(&self) -> Result<Vec<(WorkspaceId, u32)>> {
         let mut stmt = self.conn.prepare(
             "SELECT workspace_id, COUNT(*) FROM tabs
-             WHERE workspace_id IS NOT NULL AND state != 'discarded'
+             WHERE workspace_id IS NOT NULL
              GROUP BY workspace_id",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -1439,15 +1439,40 @@ mod tests {
     }
 
     #[test]
-    fn tab_counts_skip_discarded_tabs() {
+    fn workspace_counts_include_open_tabs_in_every_renderer_state() {
         let (store, w) = seeded();
-        store
-            .upsert_tab(&Tab::new(w.id, "https://a.dev", 0))
-            .unwrap();
-        let mut gone = Tab::new(w.id, "https://b.dev", 1);
-        gone.state = TabState::Discarded;
-        store.upsert_tab(&gone).unwrap();
-        assert_eq!(store.tab_counts().unwrap(), vec![(w.id, 1)]);
+        let other = Workspace::new("Other", w.container_id, w.profile_id, 1);
+        store.upsert_workspace(&other).unwrap();
+        let mut tabs = Vec::new();
+        for state in [TabState::Active, TabState::Sleeping, TabState::Discarded] {
+            let mut tab = Tab::new(w.id, "https://fixture.test", 0);
+            tab.state = state;
+            store.upsert_tab(&tab).unwrap();
+            tabs.push(tab);
+        }
+        let mut sleeping_only = Tab::new(other.id, "https://other.test", 0);
+        sleeping_only.state = TabState::Discarded;
+        store.upsert_tab(&sleeping_only).unwrap();
+        let mut essential = Tab::new(w.id, "https://essential.test", 0);
+        essential.workspace_id = None;
+        essential.tier = TabTier::Essential;
+        store.upsert_tab(&essential).unwrap();
+        let counts = || {
+            store
+                .tab_counts()
+                .unwrap()
+                .into_iter()
+                .collect::<std::collections::HashMap<_, _>>()
+        };
+        assert_eq!(counts().get(&w.id), Some(&3));
+        assert_eq!(counts().get(&other.id), Some(&1));
+        store.remove_tab(tabs[2].id).unwrap();
+        assert_eq!(counts().get(&w.id), Some(&2));
+        for tab in &tabs[..2] {
+            store.remove_tab(tab.id).unwrap();
+        }
+        assert!(!counts().contains_key(&w.id));
+        assert_eq!(counts().get(&other.id), Some(&1));
     }
 
     #[test]
