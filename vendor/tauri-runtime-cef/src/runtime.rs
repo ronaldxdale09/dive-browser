@@ -541,6 +541,7 @@ impl<T: UserEvent> WinitCefApp<T> {
         }
 
         self.state.live_browsers = self.state.live_browsers.saturating_sub(1);
+        log::debug!(target: "dive_native_close", "stage=retired webview={} live_browsers={} native_children={}", webview_id, self.state.live_browsers, self.state.windows.values().map(|window| window.children.len()).sum::<usize>());
 
         // A window that just lost its last webview has nothing left to show, so
         // it follows the webview out through the regular close path — listeners
@@ -573,6 +574,7 @@ impl<T: UserEvent> WinitCefApp<T> {
           .find(|child| child.webview_id == webview_id)
         {
           child.destroy_host_window();
+          log::debug!(target: "dive_native_close", "stage=host_removed webview={}", webview_id);
         }
       }
       Message::CreateWindow {

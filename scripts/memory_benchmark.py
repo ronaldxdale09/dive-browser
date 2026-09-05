@@ -44,6 +44,34 @@ def sample_processes(pid):
     return process_tree(pid, output)
 
 
+def validate_native_closure(text, discarded):
+    """Corroborate heap samples with completed CEF closes, before swept sampling."""
+    phases = []
+    before_close = set()
+    retired = set()
+    for line in text.splitlines():
+        if line.startswith('DIVE_MEMORY_HEAP: '):
+            phases.append(json.loads(line.split('DIVE_MEMORY_HEAP: ', 1)[1]))
+        elif len(phases) == 1:
+            match = re.search(r'dive_native_close: stage=(before_close|retired) webview=(\d+)(?: |$)', line)
+            if match:
+                stage, identity = match.groups()
+                if stage == 'before_close':
+                    before_close.add(identity)
+                elif identity in before_close:
+                    retired.add(identity)
+    if [sample.get('phase') for sample in phases] != ['loaded', 'swept', 'settled'] or any(not sample.get('isolates') for sample in phases):
+        raise ValueError('missing complete heap diagnostic evidence')
+    pages = []
+    for sample in phases:
+        targets = sample.get('targets')
+        if not isinstance(targets, list) or not targets or any(not isinstance(target, dict) or not isinstance(target.get('targetId'), str) or not target['targetId'] or not isinstance(target.get('type'), str) for target in targets):
+            raise ValueError('missing complete native target evidence')
+        pages.append({target['targetId'] for target in targets if target['type'] == 'page'})
+    if len(retired) < discarded or len(pages[0] - pages[1]) < discarded or not pages[1] or pages[1] != pages[2]:
+        raise ValueError('discarded browsers not confirmed retired before swept sampling')
+
+
 def main():
     target = ROOT / 'target'
     target.mkdir(exist_ok=True)
@@ -86,6 +114,8 @@ def main():
                            'NO_COLOR': '1'}
             for key in ('DIVE_STARTUP_BENCHMARK', 'DIVE_SMOKE', 'DIVE_NATIVE_LIFECYCLE_PROBE'):
                 environment.pop(key, None)
+            if 'DIVE_STRESS_HEAP_METRICS' in environment:
+                environment['RUST_LOG'] += ',dive_native_close=debug'
             # Failed measurements need the same reproducible identity as passes.
             (evidence / 'run-metadata.json').write_text(json.dumps({
                 'binary': str(binary), 'binary_sha256': fingerprint, 'tabs': tabs,
@@ -118,9 +148,7 @@ def main():
             if not loaded_match or not discarded_match or 'stress: exiting' not in text or 'stress: lifecycle registry and wake verified' not in text or any(not v for v in samples.values()):
                 raise ValueError(f'missing markers or live process samples; log: {log}')
             if 'DIVE_STRESS_HEAP_METRICS' in environment:
-                heap_samples = [json.loads(line.split('DIVE_MEMORY_HEAP: ', 1)[1]) for line in text.splitlines() if line.startswith('DIVE_MEMORY_HEAP: ')]
-                if [sample.get('phase') for sample in heap_samples] != ['loaded', 'swept', 'settled'] or any(not sample.get('isolates') for sample in heap_samples):
-                    raise ValueError(f'missing complete heap diagnostic evidence; log: {log}')
+                validate_native_closure(text, int(discarded_match[1]))
             actual_tabs, discarded = int(loaded_match[1]), int(discarded_match[1])
             if actual_tabs != tabs or discarded < tabs - 1:
                 raise ValueError(f'incomplete workload: {actual_tabs}/{tabs} tabs, {discarded} discarded')

@@ -50,6 +50,28 @@ async fn collect(sessions: Vec<CdpSession>) -> Result<BTreeMap<String, Value>, A
     Ok(samples)
 }
 
+fn target_identities(response: &Value) -> Result<Vec<Value>, AppError> {
+    let targets = response["targetInfos"]
+        .as_array()
+        .filter(|targets| !targets.is_empty() && targets.len() <= 4096)
+        .ok_or_else(|| AppError::new("memory probe missing or excessive target list"))?;
+    targets
+        .iter()
+        .map(|target| {
+            let mut identity = serde_json::Map::new();
+            for field in ["targetId", "type"] {
+                let value = target[field]
+                    .as_str()
+                    .filter(|value| !value.is_empty() && value.len() <= 128)
+                    .ok_or_else(|| AppError::new("memory probe invalid target identity"))?;
+                identity.insert(field.into(), json!(value));
+            }
+            // URLs, titles and other document data are not needed to count live targets.
+            Ok(Value::Object(identity))
+        })
+        .collect()
+}
+
 pub(crate) async fn record(
     app: &tauri::AppHandle<crate::Runtime>,
     phase: &str,
@@ -65,19 +87,30 @@ pub(crate) async fn record(
         ));
     }
     let state = app.state::<crate::state::AppState>();
-    let sessions = crate::state::lock(&state.host)
+    let sessions: Vec<_> = crate::state::lock(&state.host)
         .as_ref()
         .map(crate::engine::TabHost::sessions)
         .unwrap_or_default()
         .into_iter()
         .map(|(_, session)| session)
         .collect();
-    let samples = tokio::time::timeout(std::time::Duration::from_secs(10), collect(sessions))
-        .await
-        .map_err(AppError::new)??;
+    let (samples, targets) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let session = sessions
+            .first()
+            .ok_or_else(|| AppError::new("memory probe has no live session"))?;
+        let reply = session
+            .call("Target.getTargets", json!({}))
+            .await
+            .map_err(AppError::new)?;
+        let targets = target_identities(&reply)?;
+        let samples = collect(sessions).await?;
+        Ok::<_, AppError>((samples, targets))
+    })
+    .await
+    .map_err(AppError::new)??;
     println!(
         "DIVE_MEMORY_HEAP: {}",
-        json!({"phase":phase,"isolates":samples})
+        json!({"phase":phase,"isolates":samples,"targets":targets})
     );
     Ok(())
 }
@@ -85,6 +118,24 @@ pub(crate) async fn record(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn target_diagnostics_require_identity_and_omit_document_data() {
+        assert_eq!(
+            target_identities(&json!({"targetInfos":[{
+                "targetId":"one", "type":"page", "url":"private", "title":"private"
+            }]}))
+            .unwrap(),
+            vec![json!({"targetId":"one","type":"page"})]
+        );
+        for reply in [
+            json!({}),
+            json!({"targetInfos":[]}),
+            json!({"targetInfos":[{"type":"page"}]}),
+            json!({"targetInfos":[{"targetId":"one","type":null}]}),
+        ] {
+            assert!(target_identities(&reply).is_err());
+        }
+    }
     #[test]
     fn missing_invalid_or_unrelated_fields_are_not_reported_as_zero() {
         assert!(fields(&json!({"usedSize": -1}), &["usedSize"]).is_err());

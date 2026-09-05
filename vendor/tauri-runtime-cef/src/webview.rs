@@ -658,7 +658,10 @@ impl<T: UserEvent> WinitCefApp<T> {
       WebviewMessage::CanGoBack(tx) => _ = tx.send(Ok(child.browser.can_go_back() == 1)),
       WebviewMessage::GoForward => child.browser.go_forward(),
       WebviewMessage::CanGoForward(tx) => _ = tx.send(Ok(child.browser.can_go_forward() == 1)),
-      WebviewMessage::Close => child.host.close_browser(0),
+      WebviewMessage::Close => {
+        log::debug!(target: "dive_native_close", "stage=request webview={} browser={}", child.webview_id, child.browser_id);
+        child.host.close_browser(0);
+      }
       WebviewMessage::SetBounds(bounds) => {
         let parent_size = appwindow.window.surface_size();
         let scale = appwindow.window.scale_factor();

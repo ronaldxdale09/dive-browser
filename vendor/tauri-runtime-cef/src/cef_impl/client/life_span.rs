@@ -146,6 +146,7 @@ wrap_life_span_handler! {
       if browser.is_none() {
         return 0;
       }
+      log::debug!(target: "dive_native_close", "stage=do_close webview={}", self.webview_id);
 
       #[cfg(any(target_os = "macos", windows))]
       {
@@ -165,6 +166,7 @@ wrap_life_span_handler! {
       if browser.is_none() {
         return;
       }
+      log::debug!(target: "dive_native_close", "stage=before_close webview={}", self.webview_id);
       let _ = self
         .sender
         .send(Message::BrowserClosed(self.window_id, self.webview_id));
