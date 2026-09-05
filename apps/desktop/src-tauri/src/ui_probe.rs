@@ -51,6 +51,47 @@ fn enabled(flag: &str, mock: &str, profile: bool, competing_probe: bool) -> bool
     flag == "1" && mock == "1" && profile && !competing_probe
 }
 
+/// Fixed launcher receipts only; never log arbitrary native menu IDs.
+pub(crate) fn native_input_receipt(stage: &'static str, command: &str) {
+    use std::io::Write as _;
+    use std::sync::{OnceLock, atomic::AtomicUsize};
+    static ADMITTED: OnceLock<bool> = OnceLock::new();
+    static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
+    if !matches!(command, "tab.new" | "palette.open" | "tabs.search") {
+        return;
+    }
+    if !ADMITTED.get_or_init(|| {
+        std::env::var("DIVE_UI_INPUT_NATIVE_TRACE").as_deref() == Ok("1")
+            && enabled(
+                &std::env::var("DIVE_UI_PROBE").unwrap_or_default(),
+                &std::env::var("DIVE_USE_MOCK_KEYCHAIN").unwrap_or_default(),
+                std::env::var_os("DIVE_DATA_DIR").is_some_and(|value| !value.is_empty()),
+                [
+                    "DIVE_NATIVE_LIFECYCLE_PROBE",
+                    "DIVE_STRESS_TABS",
+                    "DIVE_SMOKE",
+                    "DIVE_CDP_BENCH",
+                ]
+                .iter()
+                .any(|key| std::env::var_os(key).is_some()),
+            )
+    }) {
+        return;
+    }
+    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    if sequence >= 256 {
+        return;
+    }
+    let unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |time| time.as_secs_f64() * 1000.0);
+    let _ = writeln!(
+        std::io::stdout().lock(),
+        "DIVE_INPUT_NATIVE_APP: {}",
+        json!({"sequence":sequence,"unix_ms":unix_ms,"stage":stage,"command":command})
+    );
+}
+
 fn check_running(stop: &AtomicBool) -> Result<(), AppError> {
     if stop.load(Ordering::Acquire) {
         Err(AppError::new("UI diagnostic canceled by watchdog"))

@@ -134,6 +134,7 @@ pub struct EventProxy<T: UserEvent> {
 
 impl<T: UserEvent> EventLoopProxy<T> for EventProxy<T> {
   fn send_event(&self, event: T) -> Result<()> {
+    crate::native_input_trace::record(crate::native_input_trace::Stage::ProxySend, None, None);
     self.context.send_message(Message::UserEvent(event))
   }
 }
@@ -238,6 +239,13 @@ fn handle_main_thread_message<T: UserEvent>(
   let app = unsafe { &mut *dispatch.app };
   let event_loop = unsafe { &*dispatch.event_loop };
 
+  if matches!(&message, Message::UserEvent(_)) {
+    crate::native_input_trace::record(
+      crate::native_input_trace::Stage::UserEventImmediate,
+      None,
+      None,
+    );
+  }
   app.handle_message(event_loop, message);
 
   Ok(())
@@ -260,10 +268,18 @@ impl<T: UserEvent> RuntimeContext<T> {
       message
     };
 
+    let user_event = matches!(&message, Message::UserEvent(_));
     self
       .sender
       .send(message)
       .map_err(|_| Error::FailedToSendMessage)?;
+    if user_event {
+      crate::native_input_trace::record(
+        crate::native_input_trace::Stage::UserEventEnqueued,
+        None,
+        None,
+      );
+    }
     self.proxy.wake_up();
     Ok(())
   }
@@ -659,7 +675,14 @@ impl<T: UserEvent> WinitCefApp<T> {
       }),
       #[cfg(target_os = "macos")]
       Message::AccessibilityChanged { enabled } => self.set_browsers_accessibility_state(enabled),
-      Message::UserEvent(event) => self.run_callback(RunEvent::UserEvent(event)),
+      Message::UserEvent(event) => {
+        crate::native_input_trace::record(
+          crate::native_input_trace::Stage::UserEventDispatch,
+          None,
+          None,
+        );
+        self.run_callback(RunEvent::UserEvent(event));
+      }
     }
   }
 

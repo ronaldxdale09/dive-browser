@@ -687,7 +687,20 @@ impl<T: UserEvent> WinitCefApp<T> {
         };
         child.set_bounds(parent_size, scale, new_bounds);
       }
-      WebviewMessage::SetFocus => child.host.set_focus(1),
+      WebviewMessage::SetFocus => {
+        let browser_id = crate::native_input_trace::enabled().then(|| child.browser.identifier());
+        crate::native_input_trace::record(
+          crate::native_input_trace::Stage::SetFocusBegin,
+          browser_id,
+          Some(webview_id),
+        );
+        child.host.set_focus(1);
+        crate::native_input_trace::record(
+          crate::native_input_trace::Stage::SetFocusEnd,
+          browser_id,
+          Some(webview_id),
+        );
+      }
       WebviewMessage::Url(tx) => {
         let url = child.url().unwrap_or_default();
         let _ = tx.send(Ok(url));

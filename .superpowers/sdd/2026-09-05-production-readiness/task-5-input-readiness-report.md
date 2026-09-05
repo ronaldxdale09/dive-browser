@@ -35,3 +35,21 @@ Idle before/after startup comparison used3 fresh-profile launches and5 same-prof
 Native run9 final6bad21ac rendered Alpha before diagnostics. The first Palette opening from a focused Settings field mounted3.7ms after command receipt and focused5.0ms after receipt; all18 immediately typed characters were visible and traced. The original cold native-menu sample mounted306.2ms after command receipt, but used a different command-entry route, so this is a local cold-readiness comparison rather than a controlled cross-route percentile benchmark.
 
 The separate native focus bug remained: later page-focused Cmd+T sent four leading characters into the page input and16 into Palette. The latter mounted1.3ms and focused2ms after the native-menu command reached JavaScript. No native focus fix is claimed. All renderer/IPC samples answered; no blank window reproduced. Normal Quit/helper drain passed after186.80seconds (session duration). Evidence target/ui-input-9/native.log and CUA screenshots. Canonical pnpm check passed:703 frontend tests with one opt-in benchmark skipped,448 Rust tests,19 Python harness tests, formatting, TypeScript, ESLint, Vite build and strict Clippy (/tmp/dive-palette-eager-final-check.log).
+
+
+## Native route qualification (run10)
+
+Exact binary `3d473847043b90343143557e6f16e67c99f52b5ed8b44d1d9b9d2e0b61130994` launched with an isolated mock-keychain profile, manual chrome sampling and separately gated native input receipts. Native pixels showed the complete Alpha page and browser controls before any diagnostic sample. All sampled document/IPC requests answered. Normal native Quit and helper drain completed after227.01seconds (session duration). Evidence: `target/ui-native-route-10/native.log` and computer-use screenshots in the conversation.
+
+The native receipt module is inert by default, requires explicit diagnostic/mock/profile gates, retains no typed text and emits at most256 fixed-metadata receipts per process. A Cmd+T raw keydown arms only a500ms window. Six tests passed standalone and module-wrapped; the child-test filter asserts a real test ran in both harnesses. Three app diagnostic tests, strict workspace Clippy and the exact release build passed. Independent review closed both the non-CEF cfg and module-qualified test-filter findings. Synchronous diagnostic output can alter timing; these samples are causal event-order evidence, not uninstrumented performance measurements. Generic runtime events have no message identity, so their proximity alone does not prove command causality.
+
+Two settled page-to-Palette attempts retained complete18/20-character input. The next settled page attempt reproduced the loss: computer use typed19characters, Palette displayed17, and Escape revealed the missing two characters in the previously empty page input. Native receipts establish the boundary:
+
+- Sequence136: Cmd+T entered page browser2 pre-key at1788602587031.242ms Unix.
+- Sequences137–138: two following keydowns entered the same page at7031.571/7031.792ms, before Cmd+T post-key at7031.966ms.
+- App menu receipt was7036.027ms; chrome browser1 native focus returned7036.156ms.
+- Chrome sample5 mounted Palette1.4ms and focused its combobox2ms after JavaScript command receipt; all17 later input events reached it.
+
+This confirms input can already be routed to the old page while the browser-owned New Tab command is waiting for renderer fallback. It does not support adding a later focus hop. A narrow reserved-shortcut path needs to act before renderer delivery and preserve correct window targeting and single dispatch.
+
+A separate rapid Escape→page click→Cmd+T sequence stayed routed to chrome browser1 during closing, toggled the launcher and accepted no input; sample3 records this interrupted transition. It is not counted as a settled page handoff result and remains an additional transition-race acceptance case.

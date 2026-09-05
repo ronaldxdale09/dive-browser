@@ -15,6 +15,11 @@ use tauri_specta::Event;
 
 use crate::Runtime;
 use crate::state::{AppState, lock};
+#[cfg(feature = "cef")]
+use crate::ui_probe::native_input_receipt;
+
+#[cfg(not(feature = "cef"))]
+fn native_input_receipt(_stage: &'static str, _command: &str) {}
 
 /// A menu item the chrome owns; the payload is a command id from `UI_COMMANDS`.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
@@ -245,6 +250,7 @@ pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
 
     app.on_menu_event(|app, event| {
         let id = event.id().0.clone();
+        native_input_receipt("menu-received", &id);
         // A tab in its own window has its own chrome; while that window is
         // focused the shortcut is about it, not the main window's page.
         let target = {
@@ -260,7 +266,11 @@ pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
                 None => crate::CHROME_LABEL.to_owned(),
             }
         };
-        let _ = MenuCommand(id).emit_to(app, target.as_str());
+        native_input_receipt("menu-focus-returned", &id);
+        native_input_receipt("menu-emit-begin", &id);
+        let command = MenuCommand(id);
+        let _ = command.emit_to(app, target.as_str());
+        native_input_receipt("menu-emit-returned", &command.0);
     });
     Ok(())
 }

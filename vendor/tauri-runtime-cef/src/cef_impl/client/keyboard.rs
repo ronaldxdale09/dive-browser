@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
+use crate::native_input_trace::{self, Stage};
 use cef::*;
 
 #[cfg(target_os = "linux")]
@@ -10,6 +11,33 @@ type CefOsEvent<'a> = Option<&'a mut cef::sys::XEvent>;
 type CefOsEvent<'a> = *mut u8;
 #[cfg(windows)]
 type CefOsEvent<'a> = Option<&'a mut cef::sys::MSG>;
+
+fn trace_key(stage: Stage, browser: Option<&Browser>, event: Option<&KeyEvent>) {
+  if !native_input_trace::enabled() {
+    return;
+  }
+  let Some(event) = event else { return };
+  use cef::sys::{cef_event_flags_t as Flags, cef_key_event_type_t};
+  let raw_key_down = event.type_ == cef_key_event_type_t::KEYEVENT_RAWKEYDOWN.into();
+  let key_down = raw_key_down || event.type_ == cef_key_event_type_t::KEYEVENT_KEYDOWN.into();
+  if !key_down {
+    return;
+  }
+  #[cfg(windows)]
+  let modifiers = event.modifiers as i32;
+  #[cfg(not(windows))]
+  let modifiers = event.modifiers;
+  let launcher = native_input_trace::is_launcher(
+    cfg!(target_os = "macos"),
+    raw_key_down,
+    event.windows_key_code,
+    modifiers & Flags::EVENTFLAG_COMMAND_DOWN.0 != 0,
+    modifiers & Flags::EVENTFLAG_CONTROL_DOWN.0 != 0,
+    modifiers & Flags::EVENTFLAG_ALT_DOWN.0 != 0,
+    modifiers & Flags::EVENTFLAG_SHIFT_DOWN.0 != 0,
+  );
+  native_input_trace::key_event(stage, key_down, launcher, browser.map(|b| b.identifier()));
+}
 
 wrap_keyboard_handler! {
   pub struct TauriCefKeyboardHandler {
@@ -24,6 +52,7 @@ wrap_keyboard_handler! {
       _os_event: CefOsEvent<'_>,
       _is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>,
     ) -> ::std::os::raw::c_int {
+      trace_key(Stage::PreKey, _browser.as_deref(), event);
       // If devtools is disabled, block devtools keyboard shortcuts.
       if !self.devtools_enabled {
         let Some(event) = event else {
@@ -82,6 +111,17 @@ wrap_keyboard_handler! {
         }
       }
 
+      0
+    }
+
+    fn on_key_event(
+      &self,
+      browser: Option<&mut Browser>,
+      event: Option<&KeyEvent>,
+      _os_event: CefOsEvent<'_>,
+    ) -> ::std::os::raw::c_int {
+      trace_key(Stage::PostKey, browser.as_deref(), event);
+      // Preserve the generated handler's default: let CEF continue its fallback.
       0
     }
   }

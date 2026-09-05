@@ -7,6 +7,7 @@
 
 mod cef_impl;
 mod external_message_pump;
+mod native_input_trace;
 mod platform;
 mod runtime;
 mod webview;
