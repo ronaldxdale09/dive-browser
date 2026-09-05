@@ -59,6 +59,10 @@ pub(crate) enum Stage {
   UserEventDispatch,
   SetFocusBegin,
   SetFocusEnd,
+  #[cfg(target_os = "macos")]
+  DirectSubmit,
+  #[cfg(target_os = "macos")]
+  DirectFocus,
 }
 
 impl Stage {
@@ -72,6 +76,10 @@ impl Stage {
       Self::UserEventDispatch => "user_event_dispatch",
       Self::SetFocusBegin => "set_focus_begin",
       Self::SetFocusEnd => "set_focus_end",
+      #[cfg(target_os = "macos")]
+      Self::DirectSubmit => "direct_submit",
+      #[cfg(target_os = "macos")]
+      Self::DirectFocus => "direct_focus",
     }
   }
 }
@@ -216,6 +224,10 @@ mod tests {
       Stage::UserEventDispatch,
       Stage::SetFocusBegin,
       Stage::SetFocusEnd,
+      #[cfg(target_os = "macos")]
+      Stage::DirectSubmit,
+      #[cfg(target_os = "macos")]
+      Stage::DirectFocus,
     ] {
       record(stage, Some(22), Some(33));
     }

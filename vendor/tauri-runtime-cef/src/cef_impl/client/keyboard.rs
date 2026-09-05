@@ -39,9 +39,51 @@ fn trace_key(stage: Stage, browser: Option<&Browser>, event: Option<&KeyEvent>) 
   native_input_trace::key_event(stage, key_down, launcher, browser.map(|b| b.identifier()));
 }
 
+#[cfg(target_os = "macos")]
+fn dispatch_reserved_new_tab(
+  binding: &crate::reserved_shortcut_native::NativeShortcutBinding,
+  browser: Option<&Browser>,
+  event: Option<&KeyEvent>,
+  os_event: CefOsEvent<'_>,
+) -> bool {
+  use crate::reserved_shortcut::{ShortcutKey, dispatch_new_tab};
+  use cef::sys::{cef_event_flags_t as Flags, cef_key_event_type_t};
+  use objc2::MainThreadMarker;
+  use objc2_app_kit::{NSEvent, NSEventType};
+
+  let Some(event) = event else { return false };
+  let Some(browser) = browser else { return false };
+  let modifiers = event.modifiers;
+  dispatch_new_tab(
+    true,
+    ShortcutKey {
+      raw_key_down: event.type_ == cef_key_event_type_t::KEYEVENT_RAWKEYDOWN.into(),
+      key_code: event.windows_key_code,
+      command: modifiers & Flags::EVENTFLAG_COMMAND_DOWN.0 != 0,
+      control: modifiers & Flags::EVENTFLAG_CONTROL_DOWN.0 != 0,
+      alt: modifiers & Flags::EVENTFLAG_ALT_DOWN.0 != 0,
+      shift: modifiers & Flags::EVENTFLAG_SHIFT_DOWN.0 != 0,
+    },
+    !os_event.is_null(),
+    || {
+      let Some(_mtm) = MainThreadMarker::new() else {
+        return false;
+      };
+      // SAFETY: CEF supplies the native NSEvent for this UI-thread callback;
+      // the event is borrowed here, never retained or stored.
+      let Some(event) = (unsafe { os_event.cast::<NSEvent>().as_ref() }) else {
+        return false;
+      };
+      event.r#type() == NSEventType::KeyDown
+        && crate::reserved_shortcut_native::dispatch(binding, browser)
+    },
+  )
+}
+
 wrap_keyboard_handler! {
   pub struct TauriCefKeyboardHandler {
     devtools_enabled: bool,
+    shortcut_binding: std::sync::Arc<crate::reserved_shortcut_native::NativeShortcutBinding>,
   }
 
   impl KeyboardHandler {
@@ -53,6 +95,12 @@ wrap_keyboard_handler! {
       _is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>,
     ) -> ::std::os::raw::c_int {
       trace_key(Stage::PreKey, _browser.as_deref(), event);
+      // Bound main-window pages submit directly to chrome. Chrome itself and
+      // unbound/detached pages retain their existing DOM/native-menu route.
+      #[cfg(target_os = "macos")]
+      if dispatch_reserved_new_tab(&self.shortcut_binding, _browser.as_deref(), event, _os_event) {
+        return 1;
+      }
       // If devtools is disabled, block devtools keyboard shortcuts.
       if !self.devtools_enabled {
         let Some(event) = event else {

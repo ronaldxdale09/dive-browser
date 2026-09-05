@@ -39,6 +39,7 @@ pub(crate) use process::TauriCefBrowserProcessHandler;
 
 pub(crate) struct TauriCefBrowserClientHandlers<T: UserEvent> {
   pub(crate) permissions: Arc<permission::PermissionBridge>,
+  pub(crate) shortcut_binding: Arc<crate::reserved_shortcut_native::NativeShortcutBinding>,
   pub(crate) ipc_handler: Option<Arc<ipc::IpcHandler<T>>>,
   pub(crate) on_page_load_handler: Option<Arc<tauri_runtime::webview::OnPageLoadHandler>>,
   pub(crate) document_title_changed_handler:
@@ -55,6 +56,7 @@ impl<T: UserEvent> Clone for TauriCefBrowserClientHandlers<T> {
   fn clone(&self) -> Self {
     Self {
       permissions: self.permissions.clone(),
+      shortcut_binding: self.shortcut_binding.clone(),
       ipc_handler: self.ipc_handler.clone(),
       on_page_load_handler: self.on_page_load_handler.clone(),
       document_title_changed_handler: self.document_title_changed_handler.clone(),
@@ -143,7 +145,7 @@ wrap_client! {
     }
 
     fn keyboard_handler(&self) -> Option<KeyboardHandler> {
-      Some(TauriCefKeyboardHandler::new(self.devtools_enabled))
+      Some(TauriCefKeyboardHandler::new(self.devtools_enabled, self.handlers.shortcut_binding.clone()))
     }
 
     fn permission_handler(&self) -> Option<PermissionHandler> {

@@ -28,6 +28,7 @@ use crate::cef_impl::{client as browser_client, cookie, request_context, request
 use crate::runtime::{CefRuntime, Message, RuntimeContext, WinitCefApp};
 use crate::window::AppWindow;
 
+pub use crate::reserved_shortcut_native::NativeNewTabTarget;
 pub use browser_client::permission::{NativePermissionRequest, PermissionContext};
 
 /// A handle to the native CEF browser backing a Tauri webview.
@@ -38,17 +39,35 @@ pub use browser_client::permission::{NativePermissionRequest, PermissionContext}
 pub struct Webview {
   browser: cef::Browser,
   permissions: Arc<browser_client::permission::PermissionBridge>,
+  shortcut_target: std::sync::Weak<crate::reserved_shortcut_native::NewTabTarget>,
+  shortcut_binding: Arc<crate::reserved_shortcut_native::NativeShortcutBinding>,
 }
 
 impl Webview {
   pub(crate) fn new(
     browser: cef::Browser,
     permissions: Arc<browser_client::permission::PermissionBridge>,
+    shortcut_target: std::sync::Weak<crate::reserved_shortcut_native::NewTabTarget>,
+    shortcut_binding: Arc<crate::reserved_shortcut_native::NativeShortcutBinding>,
   ) -> Self {
     Self {
       browser,
       permissions,
+      shortcut_target,
+      shortcut_binding,
     }
+  }
+
+  /// A weak target handle: valid only while this exact native view remains alive.
+  /// The embedding app must select its trusted chrome, not a page document.
+  pub fn new_tab_shortcut_target(&self) -> NativeNewTabTarget {
+    NativeNewTabTarget(self.shortcut_target.clone())
+  }
+
+  /// Configure the macOS reserved Cmd+T target on the native UI thread.
+  /// Pass None for chrome controls or detached pages that use existing routing.
+  pub fn set_new_tab_shortcut_target(&self, target: Option<NativeNewTabTarget>) {
+    self.shortcut_binding.bind(target.map(|target| target.0));
   }
 
   /// Install policy on this native view. Requests default to denial before installation.
@@ -232,6 +251,8 @@ impl Default for BoundsRate {
 }
 
 pub(crate) struct AppWebview {
+  pub(crate) shortcut_target: Arc<crate::reserved_shortcut_native::NewTabTarget>,
+  pub(crate) shortcut_binding: Arc<crate::reserved_shortcut_native::NativeShortcutBinding>,
   pub(crate) permissions: Arc<browser_client::permission::PermissionBridge>,
   pub(crate) webview_id: u32,
   pub(crate) label: String,
@@ -403,8 +424,11 @@ impl<T: UserEvent> WinitCefApp<T> {
     #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     let web_content_process_terminate_handler: Option<Arc<dyn Fn() + Send>> = None;
     let permissions = Arc::new(browser_client::permission::PermissionBridge::default());
+    let shortcut_binding =
+      Arc::new(crate::reserved_shortcut_native::NativeShortcutBinding::default());
     let handlers = browser_client::TauriCefBrowserClientHandlers {
       permissions: permissions.clone(),
+      shortcut_binding: shortcut_binding.clone(),
       ipc_handler: pending.ipc_handler.map(Arc::from),
       on_page_load_handler,
       document_title_changed_handler,
@@ -547,6 +571,11 @@ impl<T: UserEvent> WinitCefApp<T> {
 
         browser_tx
           .send(AppWebview {
+            shortcut_target: Arc::new(crate::reserved_shortcut_native::NewTabTarget::new(
+              browser.clone(),
+              webview_id,
+            )),
+            shortcut_binding,
             permissions,
             webview_id,
             label,
@@ -723,6 +752,8 @@ impl<T: UserEvent> WinitCefApp<T> {
       WebviewMessage::WithWebview(f) => f(Webview::new(
         child.browser.clone(),
         child.permissions.clone(),
+        Arc::downgrade(&child.shortcut_target),
+        child.shortcut_binding.clone(),
       )),
       WebviewMessage::Print => child.host.print(),
       WebviewMessage::AddEventListener(event_id, handler) => {

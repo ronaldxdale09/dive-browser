@@ -21,6 +21,44 @@ const GROUND: tauri::utils::config::Color = tauri::utils::config::Color(0x11, 0x
 use crate::state::{AppState, lock};
 use crate::{CHROME_LABEL, MAIN_WINDOW, Runtime};
 
+/// Popout chrome has no New Tab launcher; retain its existing menu behavior.
+#[cfg(any(all(feature = "cef", target_os = "macos"), test))]
+fn new_tab_chrome_label(window: &str) -> Option<&'static str> {
+    (window == MAIN_WINDOW).then_some(CHROME_LABEL)
+}
+
+/// Configure native routing outside keyboard callbacks. Only weak native
+/// handles cross these callbacks; key delivery never locks `AppState` or scans
+/// the app's webview registry.
+#[cfg(all(feature = "cef", target_os = "macos"))]
+fn refresh_new_tab_shortcut(view: &Webview<Runtime>, window: &Window<Runtime>) {
+    let Some(chrome_label) = new_tab_chrome_label(window.label()) else {
+        if let Err(error) = view.with_webview(|native| native.set_new_tab_shortcut_target(None)) {
+            tracing::warn!(%error, "clearing native New Tab target failed");
+        }
+        return;
+    };
+    let Some(chrome) = window
+        .webviews()
+        .into_iter()
+        .find(|view| view.label() == chrome_label)
+    else {
+        tracing::warn!("main chrome unavailable for native New Tab target");
+        return;
+    };
+    let page = view.clone();
+    if let Err(error) = chrome.with_webview(move |native_chrome| {
+        let target = native_chrome.new_tab_shortcut_target();
+        if let Err(error) = page.with_webview(move |native_page| {
+            native_page.set_new_tab_shortcut_target(Some(target));
+        }) {
+            tracing::warn!(%error, "binding native New Tab target failed");
+        }
+    }) {
+        tracing::warn!(%error, "reading native New Tab target failed");
+    }
+}
+
 /// A download started or finished; shown as a toast.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct DownloadNotice {
@@ -424,6 +462,8 @@ impl TabHost {
             let _ = view.close();
             return Err(error);
         }
+        #[cfg(all(feature = "cef", target_os = "macos"))]
+        refresh_new_tab_shortcut(&view, &self.window);
         // The view starts blank so the DevTools feeds are listening before the
         // first navigation; otherwise the document request and early console
         // output are missed.
@@ -760,6 +800,8 @@ impl TabHost {
             let _ = window.destroy();
             return Err(error);
         }
+        #[cfg(all(feature = "cef", target_os = "macos"))]
+        refresh_new_tab_shortcut(&view, &window);
         let bounds = popout_content_bounds(width, height);
         self.popouts.insert(
             id,
@@ -790,6 +832,8 @@ impl TabHost {
         };
         if let Some(view) = self.views.get(&id) {
             view.reparent(&self.window)?;
+            #[cfg(all(feature = "cef", target_os = "macos"))]
+            refresh_new_tab_shortcut(view, &self.window);
             view.hide()?;
         }
         let _ = popout.window.destroy();
@@ -1307,6 +1351,20 @@ fn forward_events(app: AppHandle<Runtime>, mut rx: tokio::sync::broadcast::Recei
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_new_tab_target_is_main_only_across_detach_and_reattach() {
+        assert_eq!(
+            super::new_tab_chrome_label(crate::MAIN_WINDOW),
+            Some(crate::CHROME_LABEL)
+        );
+        assert_eq!(super::new_tab_chrome_label("popout-1-example"), None);
+        assert_eq!(super::new_tab_chrome_label(""), None);
+        assert_eq!(
+            super::new_tab_chrome_label(crate::MAIN_WINDOW),
+            Some(crate::CHROME_LABEL)
+        );
+    }
+
     #[test]
     fn reopening_while_native_close_is_pending_uses_a_new_label() {
         let id = TabId::new();

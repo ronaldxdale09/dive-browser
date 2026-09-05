@@ -9,6 +9,8 @@ mod cef_impl;
 mod external_message_pump;
 mod native_input_trace;
 mod platform;
+mod reserved_shortcut;
+mod reserved_shortcut_native;
 mod runtime;
 mod webview;
 mod window;

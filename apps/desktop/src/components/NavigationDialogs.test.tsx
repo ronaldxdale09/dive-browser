@@ -93,6 +93,29 @@ describe("foreground navigation dialogs", () => {
     await waitFor(() => expect(vi.mocked(ipc.setContentCovered).mock.calls).toEqual([[true], [false]]));
   });
 
+  it("mounts and focuses New tab before the direct native event returns", () => {
+    useBrowser.getState().openSettings();
+    render(<NavigationDialogs />);
+    screen.getByRole("textbox", { name: "Home page" }).focus();
+    act(() => {
+      window.dispatchEvent(new Event("dive-native-new-tab"));
+      // Assert inside the event turn: an eventual React commit is too late
+      // when the following native key event is already queued for chrome.
+      const input = screen.getByRole("combobox");
+      expect(document.activeElement).toBe(input);
+      expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+      fireEvent.change(input, { target: { value: "immediate native input" } });
+      expect((input as HTMLInputElement).value).toBe("immediate native input");
+    });
+  });
+
+  it("removes the direct native listener when chrome unmounts", () => {
+    const { unmount } = render(<NavigationDialogs />);
+    unmount();
+    act(() => window.dispatchEvent(new Event("dive-native-new-tab")));
+    expect(useBrowser.getState().open.palette).toBe(false);
+  });
+
   it("keeps native content covered while the replacement dialog's lazy chunk loads", async () => {
     let loadPalette!: (value: { default: typeof Palette }) => void;
     const paletteModule = new Promise<{ default: typeof Palette }>((resolve) => { loadPalette = resolve; });
