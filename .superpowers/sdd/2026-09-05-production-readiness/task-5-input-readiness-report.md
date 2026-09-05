@@ -53,3 +53,8 @@ Two settled page-to-Palette attempts retained complete18/20-character input. The
 This confirms input can already be routed to the old page while the browser-owned New Tab command is waiting for renderer fallback. It does not support adding a later focus hop. A narrow reserved-shortcut path needs to act before renderer delivery and preserve correct window targeting and single dispatch.
 
 A separate rapid Escape→page click→Cmd+T sequence stayed routed to chrome browser1 during closing, toggled the launcher and accepted no input; sample3 records this interrupted transition. It is not counted as a settled page handoff result and remains an additional transition-race acceptance case.
+
+
+## Early menu candidate: native queue race remains
+
+The macOS-only candidate called the native main menu for exact Cmd+T in pre-key and consumed the event only when accepted. Four policy regressions and source review passed, and the final combined build compiled it. Native run13 exactfdf8a77c confirmed no Cmd+T post-key fallback, but failed immediate typing:15leading characters appeared in the page input and only5in Palette. Receipts show pre-key1788604409760.936ms, proxy9767.647ms,15later page keydowns while queued, app menu9787.709ms and chrome focus9787.887ms. Thus removing renderer fallback alone does not fix the application-queue interval. No fix claim is made; this candidate will be replaced by a per-page direct trusted-chrome handoff with weak ownership and native-window checks. Normal Quit/helper drain passed147.21seconds. Evidence target/ui-native-route-13/native.log and CUA screenshots.
