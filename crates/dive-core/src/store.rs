@@ -861,13 +861,14 @@ impl Store {
         Ok(())
     }
 
-    /// The most recently active, non-discarded tab of `workspace`, if any.
+    /// The most recently active open tab of `workspace`, if any.
+    /// Discarded tabs remain open and recreate their renderer when activated.
     pub fn last_active_tab(&self, workspace: WorkspaceId) -> Result<Option<Tab>> {
         let mut tab = self
             .conn
             .query_row(
                 &format!(
-                    "{TAB_SELECT} WHERE workspace_id = ?1 AND state != 'discarded'
+                    "{TAB_SELECT} WHERE workspace_id = ?1
                      ORDER BY last_active_at DESC LIMIT 1"
                 ),
                 [workspace.to_string()],
@@ -1288,28 +1289,61 @@ mod tests {
     }
 
     #[test]
-    fn settings_roundtrip_and_last_active_tab() {
-        let (store, w) = seeded();
+    fn settings_roundtrip() {
+        let (store, _) = seeded();
         assert_eq!(store.setting("active_tab").unwrap(), None);
         store.set_setting("active_tab", "x").unwrap();
         store.set_setting("active_tab", "y").unwrap();
         assert_eq!(store.setting("active_tab").unwrap().as_deref(), Some("y"));
+    }
 
+    #[test]
+    fn last_active_tab_uses_recency_across_renderer_states_within_workspace() {
+        let (store, w) = seeded();
         assert!(store.last_active_tab(w.id).unwrap().is_none());
-        let now = Timestamp::now();
+        let now = Timestamp::parse("2026-09-05T12:00:00Z").unwrap();
         let mut older = Tab::new(w.id, "https://older", 0);
         older.last_active_at = now - time::Duration::hours(2);
-        let mut newest_but_discarded = Tab::new(w.id, "https://gone", 1);
-        newest_but_discarded.state = TabState::Discarded;
+        let mut discarded = Tab::new(w.id, "https://discarded", 1);
+        discarded.state = TabState::Discarded;
+        discarded.last_active_at = now - time::Duration::minutes(1);
         let mut newer = Tab::new(w.id, "https://newer", 2);
+        newer.state = TabState::Sleeping;
         newer.last_active_at = now - time::Duration::hours(1);
-        for t in [&older, &newest_but_discarded, &newer] {
+        let other = Workspace::new("Other", w.container_id, w.profile_id, 1);
+        store.upsert_workspace(&other).unwrap();
+        let mut foreign = Tab::new(other.id, "https://foreign", 0);
+        foreign.last_active_at = now;
+        for t in [&older, &discarded, &newer, &foreign] {
             store.upsert_tab(t).unwrap();
         }
+        assert_eq!(store.last_active_tab(w.id).unwrap().unwrap(), discarded);
         assert_eq!(
-            store.last_active_tab(w.id).unwrap().unwrap().url,
-            "https://newer"
+            store.last_active_tab(other.id).unwrap().unwrap().id,
+            foreign.id
         );
+    }
+
+    #[test]
+    fn last_active_tab_after_close_can_restore_discarded_remaining_tab() {
+        let (store, w) = seeded();
+        let now = Timestamp::parse("2026-09-05T12:00:00Z").unwrap();
+        let mut alpha = Tab::new(w.id, "https://fixture.test/alpha", 0);
+        alpha.last_active_at = now;
+        let mut beta = Tab::new(w.id, "https://fixture.test/beta?saved=1#section", 1);
+        beta.last_active_at = now - time::Duration::hours(2);
+        beta.state = TabState::Discarded;
+        store.upsert_tab(&alpha).unwrap();
+        store.upsert_tab(&beta).unwrap();
+        assert_eq!(store.last_active_tab(w.id).unwrap().unwrap().id, alpha.id);
+
+        store.remove_tab(alpha.id).unwrap();
+        // Closing a tab removes its row; discarding only releases its renderer.
+        // Replacement selection must retain the identity and persisted URL to wake.
+        assert_eq!(store.last_active_tab(w.id).unwrap().unwrap(), beta);
+
+        store.remove_tab(beta.id).unwrap();
+        assert!(store.last_active_tab(w.id).unwrap().is_none());
     }
 
     #[test]

@@ -126,7 +126,7 @@ export function TabStrip() {
       )}
       <SortableContext items={tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
         {/* Tabs share the row the way Chrome's do: each starts at a
-            comfortable width and they shrink together as more open, down to
+            comfortable intrinsic width and they shrink together as more open, down to
             a favicon alone. The list itself shrinks with them, so whatever
             they leave is the window's drag area. */}
         <div
@@ -271,7 +271,7 @@ function SortableTab({ tab: t, active, loading, detached, inSplit, narrow, inTab
         e.preventDefault();
         onMenu(e.clientX, e.clientY);
       }}
-      className={`tab-item group flex h-[calc(var(--row-h)-4px)] cursor-pointer items-center text-xs transition-colors ${pinned ? "w-9 shrink-0 justify-center" : `min-w-9 basis-56 max-w-56 shrink ${narrow.title ? "justify-center" : ""}`} ${sleeping || detached ? "opacity-55 hover:opacity-100" : ""}`}
+      className={`tab-item group flex h-[calc(var(--row-h)-4px)] cursor-pointer items-center text-xs transition-colors ${pinned ? "w-9 shrink-0 justify-center" : `min-w-9 w-56 max-w-56 shrink ${narrow.title ? "justify-center" : ""}`} ${sleeping || detached ? "opacity-55 hover:opacity-100" : ""}`}
       data-active={active || undefined}
       title={detached ? `${label(t)} (in its own window)` : sleeping ? `${label(t)} (sleeping, click to wake)` : pinned ? label(t) : undefined}
       data-sleeping={sleeping || undefined}
