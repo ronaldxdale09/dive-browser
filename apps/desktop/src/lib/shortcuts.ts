@@ -16,7 +16,7 @@ export function useShortcuts() {
       const id = shortcutFor(e);
       if (!id) return;
       e.preventDefault();
-      runCommand(id);
+      runCommand(id, "keyboard");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -25,7 +25,7 @@ export function useShortcuts() {
   useEffect(() => {
     let stop: (() => void) | undefined;
     let live = true;
-    void events.menuCommand.listen((e) => runCommand(e.payload)).then((un) => {
+    void events.menuCommand.listen((e) => runCommand(e.payload, "native-menu")).then((un) => {
       if (live) stop = un;
       else un();
     });

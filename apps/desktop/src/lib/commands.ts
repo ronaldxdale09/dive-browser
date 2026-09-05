@@ -3,6 +3,7 @@ import { useBrowser } from "../store/browser";
 import { useRecording } from "../store/recording";
 import { usePicker } from "../store/simulator";
 import type { Command } from "./ipc";
+import { traceInputCommand } from "./inputTimingProbe";
 
 /** Rail positions a workspace chord can reach. */
 const WORKSPACE_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
@@ -110,7 +111,8 @@ function stepTab(delta: number) {
   return next ? activateTab(next.id) : undefined;
 }
 
-export function runCommand(id: string): void {
+export function runCommand(id: string, source: "keyboard" | "native-menu" | "command" = "command"): void {
+  traceInputCommand(id, source);
   const handler = UI_COMMANDS[id];
   if (handler) {
     void handler();

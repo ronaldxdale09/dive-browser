@@ -40,9 +40,11 @@ const DOCUMENT: &str = r#"(() => {
     activeTag:document.activeElement?.tagName, centerTag:document.elementFromPoint(innerWidth/2,innerHeight/2)?.tagName,
     tablist:box(tablist), tabs:Array.from(tablist?.querySelectorAll('.tab-item') || []).slice(0,100).map(element => ({...box(element),pinned:element.hasAttribute('data-pinned'),sleeping:element.hasAttribute('data-sleeping')})),
     newTabButton:box(document.querySelector('button[aria-label="New tab"]')),
+    alerts:document.querySelectorAll('[role="alert"]').length,
     dialogs:document.querySelectorAll('[role="dialog"]').length,
     newTab:!!document.querySelector('[role="dialog"][aria-label="New tab"]'),
-    loading:!!document.querySelector('[aria-label="Loading dialog"]'), input:window.__diveUiProbe};
+    loading:!!document.querySelector('[aria-label="Loading dialog"]'), input:window.__diveUiProbe,
+    inputTiming:window.__diveInputTimingProbe?.snapshot()};
 })()"#;
 
 fn enabled(flag: &str, mock: &str, profile: bool, competing_probe: bool) -> bool {
@@ -81,20 +83,49 @@ async fn evaluate(session: &dive_cdp::CdpSession, expression: &str) -> Result<Va
     Ok(reply["result"]["value"].clone())
 }
 
+async fn wait_for_request(
+    directory: &std::path::Path,
+    stop: &AtomicBool,
+    progress: &mpsc::Sender<()>,
+) -> Result<(), AppError> {
+    // Only local file I/O and this worker's timer run while waiting. In
+    // particular, do not attach CDP or enqueue a native callback before the
+    // operator has observed the uninstrumented window and requests a sample.
+    loop {
+        check_running(stop)?;
+        let request = directory.join("sample.request");
+        if request.is_file() {
+            std::fs::remove_file(request).map_err(AppError::new)?;
+            return Ok(());
+        }
+        let _ = progress.send(());
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
 async fn run(
     app: tauri::AppHandle<Runtime>,
     directory: PathBuf,
     stop: Arc<AtomicBool>,
     progress: mpsc::Sender<()>,
+    manual: bool,
 ) -> Result<(), AppError> {
+    if manual {
+        println!("DIVE_UI_PROBE: waiting for sample.request without native or CDP polling");
+        wait_for_request(&directory, &stop, &progress).await?;
+    }
     println!("DIVE_UI_PROBE: attaching");
     let chrome = app
         .get_webview(crate::CHROME_LABEL)
         .ok_or_else(|| AppError::new("chrome missing"))?;
+    check_running(&stop)?;
     let session = chrome_probe_session(&chrome)?;
     let result = async {
         let mut sequence = 0;
         while !stop.load(Ordering::Acquire) {
+            if manual && sequence > 0 {
+                wait_for_request(&directory, &stop, &progress).await?;
+            }
             sequence += 1;
             println!("DIVE_UI_PROBE_BEGIN: {sequence} native");
             let native_stop = stop.clone();
@@ -103,8 +134,12 @@ async fn run(
                 let window = handle.get_window(crate::MAIN_WINDOW).ok_or_else(|| AppError::new("window missing"))?;
                 let chrome = handle.get_webview(crate::CHROME_LABEL).ok_or_else(|| AppError::new("chrome missing"))?;
                 let bounds = chrome.bounds()?;
+                let monitor = window.current_monitor()?.map(|monitor| json!({
+                    "position":monitor.position(), "size":monitor.size(), "scale":monitor.scale_factor()
+                }));
                 Ok(json!({"visible":window.is_visible()?, "minimized":window.is_minimized()?,
                     "focused":window.is_focused()?, "size":window.inner_size()?,
+                    "position":window.outer_position()?, "scale":window.scale_factor()?, "monitor":monitor,
                     "chromeBounds":{"position":bounds.position,"size":bounds.size}}))
             }).await?;
             check_running(&stop)?;
@@ -117,6 +152,15 @@ async fn run(
             })?;
             println!("DIVE_UI_PROBE_NATIVE: {}", json!({"sequence":sequence,"window":native,"browser":rx.await.map_err(AppError::new)?}));
             if stop.load(Ordering::Acquire) { break; }
+            println!("DIVE_UI_PROBE_BEGIN: {sequence} identity");
+            let frame = checked(&stop, || async { session.call0("Page.getFrameTree").await.map_err(AppError::new) }).await?;
+            println!("DIVE_UI_PROBE_IDENTITY: {}",json!({"sequence":sequence,"frame":frame["frameTree"]["frame"]["id"],"loader":frame["frameTree"]["frame"]["loaderId"]}));
+            if directory.join("input-timing.request").is_file() {
+                std::fs::remove_file(directory.join("input-timing.request")).map_err(AppError::new)?;
+                println!("DIVE_UI_PROBE_BEGIN: {sequence} input-timing-enable");
+                let started = checked(&stop, || evaluate(&session, "(() => { window.__diveUiInputTimingEnabled = true; return window.__diveInputTimingProbe?.start() === true; })()")).await?;
+                if started != json!(true) { return Err(AppError::new("input timing diagnostic is unavailable")); }
+            }
             println!("DIVE_UI_PROBE_BEGIN: {sequence} document");
             let document = checked(&stop, || evaluate(&session, DOCUMENT)).await?;
             println!("DIVE_UI_PROBE_DOCUMENT: {}",json!({"sequence":sequence,"document":document}));
@@ -172,6 +216,7 @@ pub(crate) fn start(app: tauri::AppHandle<Runtime>) {
         return;
     }
     println!("DIVE_UI_PROBE_DIRECTORY: {}", directory.display());
+    let manual = std::env::var("DIVE_UI_PROBE_ON_DEMAND").as_deref() == Ok("1");
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = stop.clone();
     let (tx, rx) = mpsc::channel();
@@ -182,7 +227,7 @@ pub(crate) fn start(app: tauri::AppHandle<Runtime>) {
             .enable_all()
             .build()
             .map_err(AppError::new)
-            .and_then(|runtime| runtime.block_on(run(app, directory, worker_stop, tx)));
+            .and_then(|runtime| runtime.block_on(run(app, directory, worker_stop, tx, manual)));
         if let Err(error) = result {
             tracing::error!(%error,"UI diagnostic stopped");
         }
@@ -207,6 +252,55 @@ pub(crate) fn start(app: tauri::AppHandle<Runtime>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn manual_sample_requires_its_marker_and_honors_cancellation() {
+        let directory = std::env::temp_dir().join(format!(
+            "dive-ui-marker-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).expect("fixture directory");
+        let stop = AtomicBool::new(false);
+        let (tx, rx) = mpsc::channel();
+        let waiting = wait_for_request(&directory, &stop, &tx);
+        tokio::pin!(waiting);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut waiting)
+                .await
+                .is_err()
+        );
+        assert!(rx.try_recv().is_ok(), "idle worker sends a heartbeat");
+        let capture = directory.join("capture.request");
+        std::fs::write(&capture, []).expect("capture marker");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut waiting)
+                .await
+                .is_err()
+        );
+        let sample = directory.join("sample.request");
+        std::fs::write(&sample, []).expect("sample marker");
+        tokio::time::timeout(Duration::from_secs(2), &mut waiting)
+            .await
+            .expect("marker noticed")
+            .expect("sample admitted");
+        assert!(!sample.exists(), "sample marker is consumed");
+        assert!(
+            capture.exists(),
+            "capture marker does not trigger or get consumed by sample admission"
+        );
+        std::fs::write(&sample, []).expect("next sample marker");
+        stop.store(true, Ordering::Release);
+        assert!(wait_for_request(&directory, &stop, &tx).await.is_err());
+        assert!(
+            sample.exists(),
+            "canceled worker does not consume a later request"
+        );
+        std::fs::remove_dir_all(&directory).expect("fixture cleanup");
+    }
 
     #[tokio::test]
     async fn canceled_blocked_step_does_not_dispatch_followup() {

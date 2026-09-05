@@ -45,6 +45,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  window.__diveInputTimingProbe?.stop();
+  delete window.__diveUiInputTimingEnabled;
   resetContentCover();
   useBrowser.setState(useBrowser.getInitialState());
   vi.restoreAllMocks();
@@ -54,6 +56,9 @@ afterEach(() => {
 
 describe("foreground navigation dialogs", () => {
   it.each(["keyboard", "native menu"])("replaces Settings with a focused New tab dialog via %s", async (source) => {
+    window.__diveUiInputTimingEnabled = true;
+    const timing = window.__diveInputTimingProbe!;
+    timing.start();
     useBrowser.getState().openSettings();
     render(<NavigationDialogs />);
     const settingsField = screen.getByRole("textbox", { name: "Home page" });
@@ -71,6 +76,12 @@ describe("foreground navigation dialogs", () => {
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     const input = screen.getByRole("combobox") as HTMLInputElement;
     expect(document.activeElement).toBe(input);
+    const trace = timing.snapshot().events;
+    expect(trace.find((event) => event.kind === "command")).toMatchObject({ command: "tab.new", source: source === "keyboard" ? "keyboard" : "native-menu" });
+    const mounted = trace.findIndex((event) => event.kind === "palette-mounted");
+    const focused = trace.findIndex((event) => event.kind === "focusin" && event.target?.role === "combobox");
+    expect(mounted).toBeGreaterThan(-1);
+    expect(focused).toBeGreaterThan(mounted);
     expect(vi.mocked(ipc.setContentCovered).mock.calls).toEqual([[true]]);
     fireEvent.change(input, { target: { value: "https://fixture.test/new" } });
     expect(input.value).toBe("https://fixture.test/new");
