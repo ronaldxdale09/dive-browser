@@ -18,6 +18,7 @@ import { useLayout } from "./store/layout";
 import { usePrefs, watchReducedMotion, watchSystemTheme } from "./store/prefs";
 import { useShortcuts } from "./lib/shortcuts";
 import { useCoversContent } from "./lib/overlay";
+import { Palette } from "./components/Palette";
 import { useChromeLayout } from "./lib/adaptiveLayout";
 import { PanelSkeleton, ToastViewport } from "./components/ChromeFeedback";
 import { usePicker } from "./store/simulator";
@@ -28,7 +29,6 @@ import { useRecorder } from "./store/recorder";
 
 const Sidecar = lazy(() => import("./components/Sidecar").then(({ Sidecar }) => ({ default: Sidecar })));
 const Dock = lazy(() => import("./components/Dock").then(({ Dock }) => ({ default: Dock })));
-const Palette = lazy(() => import("./components/Palette").then(({ Palette }) => ({ default: Palette })));
 const SettingsDialog = lazy(() => import("./components/SettingsDialog").then(({ SettingsDialog }) => ({ default: SettingsDialog })));
 const Annotator = lazy(() => import("./components/Annotator").then(({ Annotator }) => ({ default: Annotator })));
 const Library = lazy(() => import("./components/Library").then(({ Library }) => ({ default: Library })));
