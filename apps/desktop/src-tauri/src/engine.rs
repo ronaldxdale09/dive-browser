@@ -437,6 +437,9 @@ impl TabHost {
                     return Err(error);
                 }
             };
+            app.state::<AppState>()
+                .crashes
+                .bind_view(tab_id, view.label());
             // `DIVE_DISABLE_FEEDS=1` leaves the DevTools session idle, to
             // tell an engine fault apart from one our own traffic provokes.
             let feeds = std::env::var_os("DIVE_DISABLE_FEEDS").is_none();
@@ -459,7 +462,12 @@ impl TabHost {
                         session.clone(),
                     );
                     crate::inspect::watch(app.clone(), tab_id, &session);
-                    crate::crash::watch(app.clone(), tab_id, session.clone());
+                    crate::crash::watch(
+                        app.clone(),
+                        tab_id,
+                        view.label().to_owned(),
+                        session.clone(),
+                    );
                     (c, n, r, f, loading)
                 } else {
                     let (ct, cr) = tokio::sync::oneshot::channel();

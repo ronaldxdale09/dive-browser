@@ -12,6 +12,8 @@ mod cdp_feed;
 mod commands;
 mod console;
 mod crash;
+#[cfg(feature = "cef")]
+mod crash_probe;
 mod default_browser;
 mod devservers;
 mod emulate;

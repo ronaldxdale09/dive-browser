@@ -8,7 +8,7 @@ use tauri::Manager;
 
 use crate::{AppError, Runtime, commands, engine, state};
 
-async fn on_main<T: Send + 'static>(
+pub(crate) async fn on_main<T: Send + 'static>(
     app: &tauri::AppHandle<Runtime>,
     run: impl FnOnce(&tauri::AppHandle<Runtime>) -> Result<T, AppError> + Send + 'static,
 ) -> Result<T, AppError> {
@@ -60,6 +60,10 @@ async fn run(app: &tauri::AppHandle<Runtime>, mode: &str) -> Result<(), AppError
     #[cfg(feature = "cef")]
     if let Ok(url) = std::env::var("DIVE_NETWORK_CAPTURE_PROBE_URL") {
         crate::network_probe::verify(app, ids[1], &url).await?;
+    }
+    #[cfg(feature = "cef")]
+    if std::env::var_os("DIVE_CRASH_PROBE").is_some() {
+        crate::crash_probe::verify(app).await?;
     }
     on_main(app, move |handle| {
         commands::tab_detach(handle.clone(), ids[0], None)?;
@@ -126,7 +130,9 @@ async fn run(app: &tauri::AppHandle<Runtime>, mode: &str) -> Result<(), AppError
 }
 
 #[cfg(feature = "cef")]
-fn chrome_probe_session(view: &tauri::Webview<Runtime>) -> Result<dive_cdp::CdpSession, AppError> {
+pub(crate) fn chrome_probe_session(
+    view: &tauri::Webview<Runtime>,
+) -> Result<dive_cdp::CdpSession, AppError> {
     struct Transport(tauri::Webview<Runtime>);
     impl dive_cdp::Transport for Transport {
         fn send(&self, message: &str) -> Result<(), dive_cdp::CdpError> {
@@ -161,7 +167,7 @@ async fn probe_evaluate(
 
 /// Only side-effect-free readiness expressions use this retry path. Commands
 /// and history mutations are issued once, outside these bounded polls.
-async fn read_probe_value(
+pub(crate) async fn read_probe_value(
     session: &dive_cdp::CdpSession,
     expression: &str,
 ) -> Result<serde_json::Value, AppError> {
@@ -560,6 +566,10 @@ pub(crate) async fn verify_discarded_and_wake(
 
 pub(crate) fn start(app: tauri::AppHandle<Runtime>) {
     let Ok(mode) = std::env::var("DIVE_NATIVE_LIFECYCLE_PROBE") else {
+        if std::env::var_os("DIVE_CRASH_PROBE").is_some() {
+            tracing::error!("crash probe requires the disposable native lifecycle harness");
+            app.exit(2);
+        }
         return;
     };
     if !matches!(mode.as_str(), "quit" | "window-close")

@@ -40,7 +40,7 @@ def main():
                     sampled = True
                     subprocess.run(['sample', str(pid), '1', '1', '-file', str(log.with_suffix('.sample.txt'))], capture_output=True, timeout=5)
 
-            elapsed = run_probe(binary, env, log, 30, inspect_hang)
+            elapsed = run_probe(binary, env, log, 60 if 'DIVE_CRASH_PROBE' in env else 30, inspect_hang)
             content = log.read_text(errors='replace')
             if ('DIVE_LIFECYCLE_PROBE: popout close and reattach verified' not in content
                     or 'DIVE_LIFECYCLE_PROBE: native navigation history verified' not in content
@@ -58,7 +58,9 @@ def main():
                 raise RuntimeError(f'permission WebUI evidence incomplete: {log}')
             if 'DIVE_AVATAR_PROBE' in env and f"DIVE_AVATAR_PROBE: {env['DIVE_AVATAR_PROBE']} artwork verified" not in content:
                 raise RuntimeError(f'avatar evidence incomplete: {log}')
-            records.append({'avatar_cache': env.get('DIVE_AVATAR_PROBE'), 'mode': mode, 'elapsed_seconds': round(elapsed, 2), 'permission_cache_checked': 'DIVE_PERMISSION_CACHE_PROBE' in env, 'log': str(log)})
+            if 'DIVE_CRASH_PROBE' in env and 'DIVE_CRASH_PROBE: Page.crash once, isolated context, in-place recovery and unchanged sibling/chrome documents verified' not in content:
+                raise RuntimeError(f'isolated crash evidence incomplete: {log}')
+            records.append({'avatar_cache': env.get('DIVE_AVATAR_PROBE'), 'mode': mode, 'elapsed_seconds': round(elapsed, 2), 'permission_cache_checked': 'DIVE_PERMISSION_CACHE_PROBE' in env, 'crash_checked': 'DIVE_CRASH_PROBE' in env, 'log': str(log)})
             print(f'{index}: {mode}, tab/window checks passed, exited normally in {elapsed:.2f}s', flush=True)
     # The native runtime must preserve failure status after asynchronous CEF
     # shutdown, not merely log app.exit(1) and return success to its launcher.
@@ -67,7 +69,7 @@ def main():
         env = {**os.environ, 'DIVE_DATA_DIR': profile, 'DIVE_MCP_PORT': '0', 'DIVE_USE_MOCK_KEYCHAIN': '1',
                'DIVE_STARTUP_BENCHMARK': '1', 'DIVE_BENCHMARK_TIMEOUT_MS': '0',
                'DIVE_BENCHMARK_OUTPUT': str(report)}
-        for key in ('DIVE_NATIVE_LIFECYCLE_PROBE', 'DIVE_STRESS_TABS', 'DIVE_SMOKE'):
+        for key in ('DIVE_NATIVE_LIFECYCLE_PROBE', 'DIVE_CRASH_PROBE', 'DIVE_STRESS_TABS', 'DIVE_SMOKE'):
             env.pop(key, None)
         run_probe(binary, env, evidence / 'incomplete-startup.log', 20, expected_exit_code=1)
         if json.loads(report.read_text())['total_startup_ms'] is not None:

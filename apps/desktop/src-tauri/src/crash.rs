@@ -93,15 +93,57 @@ pub fn plan(state: Attempts, now: Instant) -> Option<Plan> {
     })
 }
 
+struct Admitted {
+    planned: Option<Plan>,
+}
+
 /// Crash history per tab.
 #[derive(Default)]
 pub struct Registry {
+    /// Serializes view replacement with admission, without taking the tab host
+    /// lock from a reentrant native callback. Always lock this before history.
+    views: Mutex<HashMap<TabId, String>>,
     inner: Mutex<HashMap<TabId, Attempts>>,
     /// When each tab's crash was last reported, to fold duplicate signals.
     seen: Mutex<HashMap<TabId, Instant>>,
 }
 
 impl Registry {
+    pub fn bind_view(&self, tab: TabId, label: &str) {
+        let mut views = lock(&self.views);
+        if views.get(&tab).is_some_and(|current| current == label) {
+            return;
+        }
+        views.insert(tab, label.to_owned());
+        lock(&self.inner).remove(&tab);
+        lock(&self.seen).remove(&tab);
+    }
+
+    fn current_view(&self, tab: TabId, label: &str) -> bool {
+        lock(&self.views)
+            .get(&tab)
+            .is_some_and(|current| current == label)
+    }
+
+    fn admit(&self, tab: TabId, label: &str, now: Instant) -> Option<Admitted> {
+        let views = lock(&self.views);
+        if views.get(&tab).is_none_or(|current| current != label) {
+            return None;
+        }
+        (!self.duplicate(tab, now)).then(|| Admitted {
+            planned: self.on_crash(tab, now),
+        })
+    }
+
+    fn begin_current_reload(&self, tab: TabId, label: &str) -> bool {
+        let views = lock(&self.views);
+        if views.get(&tab).is_none_or(|current| current != label) {
+            return false;
+        }
+        self.begin_reload(tab);
+        true
+    }
+
     /// Note a report and say whether it repeats one just handled.
     pub fn duplicate(&self, tab: TabId, now: Instant) -> bool {
         let mut seen = lock(&self.seen);
@@ -126,6 +168,8 @@ impl Registry {
 
     /// Forget a closed tab's history.
     pub fn drop_tab(&self, tab: TabId) {
+        let mut views = lock(&self.views);
+        views.remove(&tab);
         lock(&self.inner).remove(&tab);
         lock(&self.seen).remove(&tab);
     }
@@ -138,11 +182,11 @@ pub fn on_native_terminate(webview: &tauri::Webview<Runtime>) {
         return;
     };
     let app = webview.app_handle().clone();
-    schedule_recovery(&app, tab_id, None);
+    schedule_recovery(&app, tab_id, webview.label().to_owned(), None);
 }
 
 /// Watch a tab's session for renderer crashes and reload within budget.
-pub fn watch(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
+pub fn watch(app: AppHandle<Runtime>, tab_id: TabId, view_label: String, session: CdpSession) {
     let mut events = session.subscribe();
     tauri::async_runtime::spawn(async move {
         if let Err(error) = session.call0("Inspector.enable").await {
@@ -152,7 +196,7 @@ pub fn watch(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
             match events.recv().await {
                 Ok(event) => {
                     if event.method == "Inspector.targetCrashed" {
-                        schedule_recovery(&app, tab_id, Some(session.clone()));
+                        schedule_recovery(&app, tab_id, view_label.clone(), Some(session.clone()));
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -168,6 +212,7 @@ pub fn watch(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
 fn recovery_task<F, Fut>(
     crashes: &Registry,
     tab_id: TabId,
+    view_label: &str,
     now: Instant,
     run: F,
 ) -> impl std::future::Future<Output = ()> + use<F, Fut>
@@ -175,19 +220,26 @@ where
     F: FnOnce(Option<Plan>) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    let admitted = (!crashes.duplicate(tab_id, now)).then(|| crashes.on_crash(tab_id, now));
+    let admitted = crashes.admit(tab_id, view_label, now);
     async move {
         if let Some(planned) = admitted {
-            run(planned).await;
+            run(planned.planned).await;
         }
     }
 }
 
-fn schedule_recovery(app: &AppHandle<Runtime>, tab_id: TabId, session: Option<CdpSession>) {
+fn schedule_recovery(
+    app: &AppHandle<Runtime>,
+    tab_id: TabId,
+    view_label: String,
+    session: Option<CdpSession>,
+) {
     let worker_app = app.clone();
+    let source_label = view_label.clone();
     let task = recovery_task(
         &app.state::<AppState>().crashes,
         tab_id,
+        &source_label,
         Instant::now(),
         move |planned| async move {
             // Native callbacks can be reentrant. Fetch their session in the
@@ -195,12 +247,15 @@ fn schedule_recovery(app: &AppHandle<Runtime>, tab_id: TabId, session: Option<Cd
             let session = session.or_else(|| {
                 lock(&worker_app.state::<AppState>().host)
                     .as_ref()
-                    .and_then(|host| host.cdp(tab_id))
+                    .and_then(|host| {
+                        let matches = host
+                            .with_view(tab_id, |view| Ok(view.label() == view_label))
+                            .ok()?;
+                        matches.then(|| host.cdp(tab_id)).flatten()
+                    })
             });
             if let Some(session) = session {
-                recover(&worker_app, tab_id, &session, planned).await;
-            } else {
-                tracing::warn!(%tab_id, "web content process died with no session to reload");
+                recover(&worker_app, tab_id, &view_label, &session, planned).await;
             }
         },
     );
@@ -208,13 +263,50 @@ fn schedule_recovery(app: &AppHandle<Runtime>, tab_id: TabId, session: Option<Cd
     tauri::async_runtime::spawn(task);
 }
 
+/// Called within one main-thread dispatch, where native view replacement cannot
+/// interleave. Do not hold the registry lock across event/CEF publication.
+fn publish_current<T>(
+    crashes: &Registry,
+    tab: TabId,
+    label: &str,
+    emit: impl FnOnce() -> T,
+) -> Option<T> {
+    crashes.current_view(tab, label).then(emit)
+}
+
+async fn emit_current(app: &AppHandle<Runtime>, label: &str, notice: TabCrashed) -> bool {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let publish_app = app.clone();
+    let label = label.to_owned();
+    if app
+        .run_on_main_thread(move || {
+            let state = publish_app.state::<AppState>();
+            let published = publish_current(&state.crashes, notice.tab_id, &label, || {
+                notice.emit(&publish_app).is_ok()
+            })
+            .unwrap_or(false);
+            let _ = tx.send(published);
+        })
+        .is_err()
+    {
+        return false;
+    }
+    rx.await.unwrap_or(false)
+}
+
 async fn recover(
     app: &AppHandle<Runtime>,
     tab_id: TabId,
+    view_label: &str,
     session: &CdpSession,
     planned: Option<Plan>,
 ) {
-    if session.is_closed() {
+    if session.is_closed()
+        || !app
+            .state::<AppState>()
+            .crashes
+            .current_view(tab_id, view_label)
+    {
         return;
     }
     let state = app.state::<AppState>();
@@ -225,12 +317,16 @@ async fn recover(
             "renderer crashed {MAX_ATTEMPTS} times in {}s; leaving the tab as it is",
             WINDOW.as_secs()
         );
-        let _ = TabCrashed {
-            tab_id,
-            attempt: MAX_ATTEMPTS,
-            recovering: false,
-        }
-        .emit(app);
+        emit_current(
+            app,
+            view_label,
+            TabCrashed {
+                tab_id,
+                attempt: MAX_ATTEMPTS,
+                recovering: false,
+            },
+        )
+        .await;
         return;
     };
     tracing::warn!(
@@ -239,17 +335,26 @@ async fn recover(
         "renderer crashed; reloading in {}ms",
         plan.delay.as_millis()
     );
-    let _ = TabCrashed {
-        tab_id,
-        attempt: plan.attempt,
-        recovering: true,
+    if !emit_current(
+        app,
+        view_label,
+        TabCrashed {
+            tab_id,
+            attempt: plan.attempt,
+            recovering: true,
+        },
+    )
+    .await
+    {
+        return;
     }
-    .emit(app);
     tokio::time::sleep(plan.delay).await;
     if session.is_closed() {
         return;
     }
-    crashes.begin_reload(tab_id);
+    if !crashes.begin_current_reload(tab_id, view_label) {
+        return;
+    }
     if let Err(e) = session.call0("Page.reload").await {
         tracing::warn!(%tab_id, "reload after a crash failed: {e}");
     }
@@ -298,7 +403,8 @@ mod tests {
         let tab = TabId::new();
         let now = Instant::now();
         let handled = &Mutex::new(Vec::new());
-        recovery_task(&registry, tab, now, |plan| async move {
+        registry.bind_view(tab, "view-1");
+        recovery_task(&registry, tab, "view-1", now, |plan| async move {
             assert_eq!(plan.unwrap().attempt, 1);
             handled.lock().unwrap().push("first");
         })
@@ -308,6 +414,7 @@ mod tests {
         let duplicate = recovery_task(
             &registry,
             tab,
+            "view-1",
             now + Duration::from_millis(50),
             |plan| async move {
                 if plan.is_some() {
@@ -319,6 +426,7 @@ mod tests {
         let new_crash = recovery_task(
             &registry,
             tab,
+            "view-1",
             now + Duration::from_millis(300),
             |plan| async move {
                 if plan.is_some() {
@@ -329,6 +437,81 @@ mod tests {
         duplicate.await;
         new_crash.await;
         assert_eq!(*handled.lock().unwrap(), vec!["first", "new"]);
+    }
+
+    #[tokio::test]
+    async fn a_delayed_old_view_report_never_runs_or_spends_the_replacements_budget() {
+        let registry = Registry::default();
+        let tab = TabId::new();
+        let now = Instant::now();
+        registry.bind_view(tab, "old");
+        assert_eq!(
+            registry
+                .admit(tab, "old", now)
+                .unwrap()
+                .planned
+                .unwrap()
+                .attempt,
+            1
+        );
+        registry.bind_view(tab, "replacement");
+        for _ in 0..10 {
+            recovery_task(&registry, tab, "old", now, |_| async {
+                panic!("old native or CDP report reached a recovery worker");
+            })
+            .await;
+        }
+        assert_eq!(
+            registry
+                .admit(tab, "replacement", now)
+                .unwrap()
+                .planned
+                .unwrap()
+                .attempt,
+            1
+        );
+        // A pending old worker cannot clear the new view's deduplication state.
+        assert!(!registry.begin_current_reload(tab, "old"));
+        assert!(registry.admit(tab, "replacement", now).is_none());
+        registry.bind_view(tab, "replacement");
+        assert!(registry.begin_current_reload(tab, "replacement"));
+        assert_eq!(
+            registry
+                .admit(tab, "replacement", now)
+                .unwrap()
+                .planned
+                .unwrap()
+                .attempt,
+            2
+        );
+    }
+
+    #[test]
+    fn a_closed_views_report_does_not_recreate_retired_history() {
+        let registry = Registry::default();
+        let tab = TabId::new();
+        registry.bind_view(tab, "closed");
+        registry.drop_tab(tab);
+        assert!(registry.admit(tab, "closed", Instant::now()).is_none());
+        assert!(!registry.current_view(tab, "closed"));
+        assert!(!registry.begin_current_reload(tab, "closed"));
+        assert!(lock(&registry.inner).is_empty());
+        assert!(lock(&registry.seen).is_empty());
+    }
+
+    #[test]
+    fn queued_crash_publication_checks_the_view_when_main_thread_executes_it() {
+        let registry = Registry::default();
+        let tab = TabId::new();
+        registry.bind_view(tab, "old");
+        let notices = std::cell::RefCell::new(Vec::new());
+        let queued = || publish_current(&registry, tab, "old", || notices.borrow_mut().push("old"));
+        registry.bind_view(tab, "replacement");
+        assert!(queued().is_none());
+        publish_current(&registry, tab, "replacement", || {
+            notices.borrow_mut().push("new");
+        });
+        assert_eq!(*notices.borrow(), vec!["new"]);
     }
 
     use super::*;
