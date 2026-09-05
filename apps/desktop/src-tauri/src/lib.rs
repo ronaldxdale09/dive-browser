@@ -8,6 +8,7 @@ mod agent_tools;
 mod automation;
 mod ax;
 mod buffers;
+mod capture_scope;
 mod cdp_feed;
 mod commands;
 mod console;
@@ -210,6 +211,7 @@ pub fn run() {
         .setup(move |app| {
             specta.mount_events(app);
             state::init(app)?;
+            capture_scope::install(app)?;
             startup::record_milestone("state_init");
             engine::create_main_window(app)?;
             startup::record_milestone("window_created");

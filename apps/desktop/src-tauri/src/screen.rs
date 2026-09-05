@@ -166,6 +166,12 @@ fn probe(path: &Path) -> AppResult<(f64, u32, u32, bool)> {
         .arg(path)
         .output()
         .map_err(AppError::new)?;
+    if !out.status.success() {
+        return Err(AppError::new(format!(
+            "ffprobe could not read the recording: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(AppError::new)?;
     let duration = v["format"]["duration"]
         .as_str()
@@ -325,13 +331,14 @@ pub(crate) async fn screen_export_finish(
 
 /// The ffmpeg filter that cuts and speeds the source's sound to match
 /// the kept segments: one `atrim`+`atempo` chain per segment, concatenated.
+/// Input 0 is the editor's video-only render; input 1 is the source recording.
 pub fn audio_filter(segments: &[KeptSegment]) -> String {
     let mut f = String::new();
     let mut labels = String::new();
     for (i, s) in segments.iter().enumerate() {
         let _ = write!(
             f,
-            "[0:a]atrim=start={:.3}:end={:.3},asetpts=PTS-STARTPTS{}[a{i}];",
+            "[1:a]atrim=start={:.3}:end={:.3},asetpts=PTS-STARTPTS{}[a{i}];",
             s.src_start_ms / 1000.0,
             s.src_end_ms / 1000.0,
             tempo_chain(s.speed)
@@ -363,8 +370,16 @@ fn tempo_chain(speed: f64) -> String {
 
 #[allow(clippy::too_many_lines)] // The export command is intentionally one linear ffmpeg recipe.
 fn finish(staged: &Path, source: &Path, req: &ExportRequest) -> AppResult<RecordingResult> {
+    finish_in(&crate::commands::captures_dir()?, staged, source, req)
+}
+
+fn finish_in(
+    dir: &Path,
+    staged: &Path,
+    source: &Path,
+    req: &ExportRequest,
+) -> AppResult<RecordingResult> {
     let ffmpeg = ffmpeg_path().ok_or_else(|| AppError::new("ffmpeg not found"))?;
-    let dir = crate::commands::captures_dir()?;
     let stem = format!(
         "{}-edited-{}",
         source
@@ -375,7 +390,9 @@ fn finish(staged: &Path, source: &Path, req: &ExportRequest) -> AppResult<Record
             .replace([':', '.'], "-")
     );
     let gif = req.format.eq_ignore_ascii_case("gif");
-    let with_audio = req.with_audio && !gif && !req.segments.is_empty();
+    // The editor requests audio preservation for MP4 even when the recording
+    // was made with its microphone off. Only map a stream that actually exists.
+    let with_audio = req.with_audio && !gif && !req.segments.is_empty() && probe(source)?.3;
     let path = dir.join(format!("{stem}.{}", if gif { "gif" } else { "mp4" }));
     let mut cmd = Command::new(&ffmpeg);
     cmd.args(["-hide_banner", "-loglevel", "error", "-y"]);
@@ -445,6 +462,225 @@ fn finish(staged: &Path, source: &Path, req: &ExportRequest) -> AppResult<Record
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct MediaFixture {
+        dir: PathBuf,
+        ffmpeg: PathBuf,
+    }
+
+    impl MediaFixture {
+        fn new(audio: bool) -> Self {
+            let ffmpeg = ffmpeg_path().expect("this ignored test requires ffmpeg");
+            assert!(
+                ffmpeg.with_file_name("ffprobe").is_file(),
+                "this ignored test requires ffprobe beside ffmpeg"
+            );
+            let dir =
+                std::env::temp_dir().join(format!("dive-screen-audio-{}", dive_core::TabId::new()));
+            std::fs::create_dir(&dir).expect("create isolated media fixture");
+            let fixture = Self { dir, ffmpeg };
+            let mut staged = Command::new(&fixture.ffmpeg);
+            staged.args([
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=blue:s=64x64:r=10:d=2",
+                "-an",
+                "-c:v",
+                "libvpx-vp9",
+            ]);
+            fixture.generate(staged, "staged.webm");
+            let mut source = Command::new(&fixture.ffmpeg);
+            source.args(["-f", "lavfi", "-i", "color=c=blue:s=64x64:r=10:d=4"]);
+            if audio {
+                source.args([
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    r"aevalsrc=sin(2*PI*if(lt(t\,1)\,440\,if(lt(t\,2)\,880\,1760))*t):s=48000:d=4",
+                    "-c:a",
+                    "aac",
+                ]);
+            } else {
+                source.arg("-an");
+            }
+            source.args(["-c:v", "libx264", "-shortest"]);
+            fixture.generate(source, "source.mp4");
+            fixture
+        }
+
+        fn generate(&self, mut command: Command, name: &str) {
+            let output = command
+                .args(["-hide_banner", "-loglevel", "error", "-y"])
+                .arg(self.dir.join(name))
+                .stdin(Stdio::null())
+                .output()
+                .expect("run fixture ffmpeg");
+            assert!(
+                output.status.success(),
+                "fixture ffmpeg: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        fn export(&self, format: &str) -> RecordingResult {
+            let staged = self.dir.join("staged.webm");
+            let source = self.dir.join("source.mp4");
+            let request = ExportRequest {
+                staged: staged.to_string_lossy().into_owned(),
+                source: source.to_string_lossy().into_owned(),
+                format: format.into(),
+                fps: 10,
+                gif_fps: 10,
+                segments: vec![
+                    KeptSegment {
+                        src_start_ms: 1000.0,
+                        src_end_ms: 2000.0,
+                        speed: 1.0,
+                    },
+                    KeptSegment {
+                        src_start_ms: 2000.0,
+                        src_end_ms: 4000.0,
+                        speed: 2.0,
+                    },
+                ],
+                // The UI asks to preserve audio for MP4, including silent sources.
+                with_audio: true,
+            };
+            finish_in(&self.dir, &staged, &source, &request).expect("export real staged media")
+        }
+    }
+
+    impl Drop for MediaFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn assert_export_media(result: &RecordingResult, audio: bool) {
+        let (duration, width, height, has_audio) =
+            probe(Path::new(&result.path)).expect("probe exported file");
+        assert!(
+            (duration - 2000.0).abs() < 200.0,
+            "output duration: {duration}"
+        );
+        assert_eq!((width, height, has_audio), (64, 64, audio));
+        assert_eq!(result.has_audio, audio);
+        assert!(result.bytes > 0.0);
+    }
+
+    #[test]
+    #[ignore = "requires ffmpeg and ffprobe; run explicitly with --ignored"]
+    fn export_audio_preserves_source_cuts_and_speed() {
+        let fixture = MediaFixture::new(true);
+        let result = fixture.export("mp4");
+        assert_export_media(&result, true);
+        let decoded = Command::new(&fixture.ffmpeg)
+            .args([
+                "-v",
+                "error",
+                "-i",
+                &result.path,
+                "-map",
+                "0:a:0",
+                "-ac",
+                "1",
+                "-ar",
+                "48000",
+                "-f",
+                "f32le",
+                "-",
+            ])
+            .stdin(Stdio::null())
+            .output()
+            .expect("decode exported audio");
+        assert!(
+            decoded.status.success(),
+            "decode: {}",
+            String::from_utf8_lossy(&decoded.stderr)
+        );
+        let samples: Vec<f32> = decoded
+            .stdout
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|bytes| f32::from_le_bytes(*bytes))
+            .collect();
+        // The discarded first second is 440Hz. Retained source 1–2s is 880Hz;
+        // source 2–4s is 1760Hz and must occupy only one output second at 2×.
+        for (start, end, expected) in [(9600, 38400, 880.0), (57600, 86400, 1760.0)] {
+            let section = samples
+                .get(start..end)
+                .expect("two seconds of decoded audio");
+            let crossings = u32::try_from(
+                section
+                    .windows(2)
+                    .filter(|pair| pair[0] <= 0.0 && pair[1] > 0.0)
+                    .count(),
+            )
+            .expect("bounded crossings");
+            let frequency = f64::from(crossings) / 0.6;
+            assert!(
+                (frequency - expected).abs() < 12.0,
+                "expected {expected}Hz, got {frequency}Hz"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "requires ffmpeg and ffprobe; run explicitly with --ignored"]
+    fn export_audio_accepts_silent_source_without_phantom_track() {
+        let fixture = MediaFixture::new(false);
+        assert_export_media(&fixture.export("mp4"), false);
+    }
+
+    #[test]
+    #[ignore = "requires ffmpeg and ffprobe; run explicitly with --ignored"]
+    fn export_audio_rejects_unreadable_source_instead_of_treating_it_as_silent() {
+        let fixture = MediaFixture::new(false);
+        let source = fixture.dir.join("source.mp4");
+        std::fs::write(&source, b"not a media container").expect("corrupt isolated source fixture");
+        let staged = fixture.dir.join("staged.webm");
+        let request = ExportRequest {
+            source: source.to_string_lossy().into_owned(),
+            staged: staged.to_string_lossy().into_owned(),
+            format: "mp4".into(),
+            fps: 10,
+            gif_fps: 10,
+            segments: vec![KeptSegment {
+                src_start_ms: 0.0,
+                src_end_ms: 2000.0,
+                speed: 1.0,
+            }],
+            with_audio: true,
+        };
+        let error = finish_in(&fixture.dir, &staged, &source, &request)
+            .expect_err("invalid source cannot be classified as silent");
+        assert!(
+            error
+                .to_string()
+                .contains("ffprobe could not read the recording"),
+            "{error}"
+        );
+        assert!(
+            std::fs::read_dir(&fixture.dir)
+                .expect("list fixture files")
+                .all(|entry| !entry
+                    .expect("fixture entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .contains("-edited-"))
+        );
+    }
+
+    #[test]
+    #[ignore = "requires ffmpeg and ffprobe; run explicitly with --ignored"]
+    fn export_audio_keeps_gif_silent() {
+        let fixture = MediaFixture::new(true);
+        let result = fixture.export("gif");
+        assert_export_media(&result, false);
+        assert_eq!(result.format, "gif");
+    }
 
     #[test]
     fn audio_follows_cuts_and_speed() {

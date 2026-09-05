@@ -2,6 +2,7 @@ import { Check, Download, ExternalLink, FolderOpen, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { ipc } from "../lib/ipc";
+import { useFocusTrap } from "../lib/useFocusTrap";
 import type { RecordingResult } from "../lib/ipc";
 import { recordingBytes, recordingClock } from "../lib/recordingFormat";
 import { exportProject } from "./export";
@@ -26,6 +27,16 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
+  const dialog = useRef<HTMLDivElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  const doneButton = useRef<HTMLButtonElement>(null);
+  const busy = progress !== null && progress.phase !== "done";
+  useFocusTrap(dialog, { active: Boolean(project), onEscape: () => { if (!busy) onClose(); } });
+  useEffect(() => {
+    if (busy) cancelButton.current?.focus({ preventScroll: true });
+    else if (result) doneButton.current?.focus({ preventScroll: true });
+    else if (dialog.current && !dialog.current.contains(document.activeElement)) dialog.current.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
+  }, [busy, result]);
   if (!project) return null;
   const ex = project.editor.export;
   const gif = ex.format === "gif";
@@ -52,12 +63,11 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const busy = progress !== null && progress.phase !== "done";
   const label = progress?.phase === "rendering" ? `Rendering frame ${progress.frame} of ${progress.frames}` : progress?.phase === "uploading" ? "Handing the frames to the engine" : progress?.phase === "finishing" ? "Encoding with the sound" : "Preparing";
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50" onMouseDown={() => !busy && onClose()}>
-      <div role="dialog" aria-modal="true" aria-label="Export" onMouseDown={(e) => e.stopPropagation()} className="w-[520px] max-w-[calc(100vw-32px)] rounded-2xl border border-line-2 bg-surface p-5 shadow-2xl">
+      <div ref={dialog} role="dialog" aria-modal="true" aria-label="Export" onMouseDown={(e) => e.stopPropagation()} className="w-[520px] max-w-[calc(100vw-32px)] rounded-2xl border border-line-2 bg-surface p-5 shadow-2xl">
         <header className="mb-4 flex items-center gap-3">
           <span className="grid size-9 place-items-center rounded-xl bg-highlight-soft text-highlight">
             <Icon icon={Download} size={17} />
@@ -107,7 +117,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
             <div className="h-2 overflow-hidden rounded-full bg-surface-2">
               <div className="h-full bg-highlight transition-[width]" style={{ width: `${Math.round(progress.progress * 100)}%` }} />
             </div>
-            <button type="button" onClick={() => abort.current?.abort()} className="h-8 self-end rounded-lg px-3 text-ink-2 hover:bg-surface-2 hover:text-ink">
+            <button ref={cancelButton} type="button" onClick={() => abort.current?.abort()} className="h-8 self-end rounded-lg px-3 text-ink-2 hover:bg-surface-2 hover:text-ink">
               Cancel
             </button>
           </div>
@@ -127,7 +137,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 <Icon icon={FolderOpen} size={13} /> Show in Finder
               </button>
               <span className="flex-1" />
-              <button type="button" onClick={onClose} className="h-8 rounded-lg bg-accent px-4 font-medium text-accent-ink">
+              <button ref={doneButton} type="button" onClick={onClose} className="h-8 rounded-lg bg-accent px-4 font-medium text-accent-ink">
                 Done
               </button>
             </div>
