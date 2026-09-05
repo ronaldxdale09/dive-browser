@@ -59,6 +59,77 @@ pub fn unique_path(dir: &std::path::Path, suggested: &str) -> PathBuf {
     candidate
 }
 
+/// Shared by page views and chrome-owned editors. Blob exports from capture,
+/// recording and developer tools need the same destination and notices as pages.
+fn handle_download(
+    app: &AppHandle<Runtime>,
+    event: DownloadEvent<'_>,
+    source: Option<(TabId, &str)>,
+) -> bool {
+    let notice = match event {
+        DownloadEvent::Requested { url, destination } => {
+            let state = app.state::<AppState>();
+            let dir = state.prefs.get(&state).download_dir();
+            match download_destination(&dir, destination, &url) {
+                Ok(path) => *destination = path,
+                Err(error) => {
+                    tracing::warn!(%error, "preparing download destination failed");
+                    let _ = DownloadNotice {
+                        url: url.to_string(),
+                        path: String::new(),
+                        status: "failed".into(),
+                    }
+                    .emit(app);
+                    return false;
+                }
+            }
+            if let Some((tab, nonce)) = source {
+                state.activity.download(tab, nonce, url.as_str(), true);
+            }
+            DownloadNotice {
+                url: url.to_string(),
+                path: destination.to_string_lossy().into_owned(),
+                status: "started".into(),
+            }
+        }
+        DownloadEvent::Finished { url, path, success } => {
+            if let Some((tab, nonce)) = source {
+                app.state::<AppState>()
+                    .activity
+                    .download(tab, nonce, url.as_str(), false);
+            }
+            DownloadNotice {
+                url: url.to_string(),
+                path: path
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                status: if success { "finished" } else { "failed" }.into(),
+            }
+        }
+        _ => return true,
+    };
+    let _ = notice.emit(app);
+    true
+}
+
+fn download_destination(
+    dir: &std::path::Path,
+    suggested: &std::path::Path,
+    url: &url::Url,
+) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let name = suggested
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_else(|| {
+            url.path_segments()
+                .and_then(|mut parts| parts.next_back())
+                .filter(|name| !name.is_empty())
+                .unwrap_or("download")
+        });
+    Ok(unique_path(dir, name))
+}
+
 /// Rectangle of the content area in logical pixels, relative to the window.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
 pub struct Bounds {
@@ -312,58 +383,7 @@ impl TabHost {
         let dl_app = app.clone();
         let dl_nonce = activity_nonce.clone();
         builder = builder.on_download(move |_, event| {
-            match event {
-                DownloadEvent::Requested { url, destination } => {
-                    let state = dl_app.state::<AppState>();
-                    state
-                        .activity
-                        .download(tab_id, &dl_nonce, url.as_str(), true);
-                    let dir = state.prefs.get(&state).download_dir();
-                    let _ = std::fs::create_dir_all(&dir);
-                    let suggested = destination
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .map_or_else(
-                            || {
-                                url.path_segments()
-                                    .and_then(|mut s| s.next_back())
-                                    .filter(|s| !s.is_empty())
-                                    .unwrap_or("download")
-                                    .to_owned()
-                            },
-                            str::to_owned,
-                        );
-                    *destination = unique_path(&dir, &suggested);
-                    let _ = DownloadNotice {
-                        url: url.to_string(),
-                        path: destination.to_string_lossy().into_owned(),
-                        status: "started".into(),
-                    }
-                    .emit(&dl_app);
-                }
-                DownloadEvent::Finished { url, path, success } => {
-                    dl_app.state::<AppState>().activity.download(
-                        tab_id,
-                        &dl_nonce,
-                        url.as_str(),
-                        false,
-                    );
-                    let _ = DownloadNotice {
-                        url: url.to_string(),
-                        path: path
-                            .map(|p| p.to_string_lossy().into_owned())
-                            .unwrap_or_default(),
-                        status: if success {
-                            "finished".into()
-                        } else {
-                            "failed".into()
-                        },
-                    }
-                    .emit(&dl_app);
-                }
-                _ => {}
-            }
-            true
+            handle_download(&dl_app, event, Some((tab_id, &dl_nonce)))
         });
 
         #[cfg(feature = "cef")]
@@ -703,6 +723,7 @@ impl TabHost {
             None
         };
         let chrome_popup_app = app.clone();
+        let chrome_download_app = app.clone();
         let chrome_view = window.add_child(
             WebviewBuilder::new(
                 chrome.clone(),
@@ -712,6 +733,7 @@ impl TabHost {
                 crate::ipc_security::allowed_chrome_navigation(url, chrome_dev_url.as_ref())
             })
             .on_new_window(move |url, _| open_chrome_link(&chrome_popup_app, Some(id), url))
+            .on_download(move |_, event| handle_download(&chrome_download_app, event, None))
             .background_color(GROUND)
             .on_page_load(|webview, payload| {
                 if payload.event() == tauri::webview::PageLoadEvent::Finished {
@@ -1194,12 +1216,14 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
         None
     };
     let chrome_popup_app = app.handle().clone();
+    let chrome_download_app = app.handle().clone();
     let chrome = window.add_child(
         WebviewBuilder::new(CHROME_LABEL, WebviewUrl::App("index.html".into()))
             .on_navigation(move |url| {
                 crate::ipc_security::allowed_chrome_navigation(url, chrome_dev_url.as_ref())
             })
             .on_new_window(move |url, _| open_chrome_link(&chrome_popup_app, None, url))
+            .on_download(move |_, event| handle_download(&chrome_download_app, event, None))
             .background_color(GROUND)
             .auto_resize(),
         LogicalPosition::new(0.0, 0.0),
@@ -1336,6 +1360,25 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn editor_downloads_use_configured_directory_and_preserve_existing_files() {
+        let root = std::env::temp_dir().join(format!("dive-export-{}", TabId::new()));
+        let dir = root.join("custom-downloads");
+        let url = url::Url::parse("blob:https://tauri.localhost/test-export").unwrap();
+        let suggestion = std::path::Path::new("/ignored/example.png");
+        let first = download_destination(&dir, suggestion, &url).unwrap();
+        assert_eq!(first, dir.join("example.png"));
+        std::fs::write(&first, b"existing capture").unwrap();
+        assert_eq!(
+            download_destination(&dir, suggestion, &url).unwrap(),
+            dir.join("example (1).png")
+        );
+        assert_eq!(std::fs::read(&first).unwrap(), b"existing capture");
+        // A failed configured destination must not silently fall back elsewhere.
+        assert!(download_destination(&first.join("child"), suggestion, &url).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn unique_path_appends_counter() {
