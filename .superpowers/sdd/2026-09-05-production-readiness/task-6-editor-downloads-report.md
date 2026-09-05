@@ -20,3 +20,7 @@ The before session successfully navigated example.com; Find reported 1/2 and Ret
 ## Open limits
 
 Drag and text placement on the capture canvas did not register via CUA while accessible toolbar buttons did. No native pointer-event diagnosis yet; do not claim annotation qualification or infer a confirmed product cause. Popout export uses the same handler but was not exercised through a separate popout UI. Download cancellation, interrupted/restarted persistence, large-page capture, compact layout, every developer/media/agent feature and signed release qualification remain open. Native permission WebUI diagnostic still has a separate opt-in crash. This does not close the full production-readiness goal.
+
+## Additional native feature pass
+
+The same7d78efac binary, target/features-ui-native.log, passed bookmark creation and library listing, iPhone14Pro portrait/landscape rendering and exit back to ordinary viewport, two-tab search/selection, creation of a separate-cookie workspace and Cmd+1 restoration of the prior workspace/tabs. Pointer clicking the page's Learn more link navigated to the IANA page and rendered it. Capturing that longer page produced a2114x1770 preview. Canvas text placement still did not register, even after both native page tabs were closed; this rules out those hidden sibling views as the immediate explanation in this test. No annotation fix or pass is claimed. Normal Quit/helper drain passed. The shared Downloads fix has native export evidence, while these broader feature checks remain representative rather than exhaustive.
