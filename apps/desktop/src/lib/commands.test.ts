@@ -115,11 +115,13 @@ describe("command dispatch", () => {
     expect(print).toHaveBeenCalledWith("a");
     expect(stop).toHaveBeenCalledWith("a");
     await UI_COMMANDS["library.open"]!();
+    expect(useBrowser.getState().open).toMatchObject({ library: true, shortcuts: false, settings: false });
     await UI_COMMANDS["shortcuts.open"]!();
+    expect(useBrowser.getState().open).toMatchObject({ library: false, shortcuts: true, settings: false });
     await UI_COMMANDS["settings.open"]!();
     const { open } = useBrowser.getState();
-    expect(open.library).toBe(true);
-    expect(open.shortcuts).toBe(true);
+    expect(open.library).toBe(false);
+    expect(open.shortcuts).toBe(false);
     expect(open.settings).toBe(true);
     useBrowser.setState({ open: { ...open, library: false, shortcuts: false, settings: false } });
   });

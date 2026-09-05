@@ -1,11 +1,16 @@
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "./ipc";
-import { resetContentCover, useCoversContent } from "./overlay";
+import { contentCoverDepth, resetContentCover, useContentPreview, useCoversContent } from "./overlay";
 
 function Overlay({ active = true }: { active?: boolean }) {
   useCoversContent(active);
   return null;
+}
+
+function Preview() {
+  const preview = useContentPreview("tab");
+  return <output data-testid="preview">{preview ?? "none"}</output>;
 }
 
 afterEach(() => {
@@ -15,6 +20,45 @@ afterEach(() => {
 });
 
 describe("useCoversContent", () => {
+  it.each(["resolve", "reject"])("preserves the current preview when a previous uncover settles by %s", async (outcome) => {
+    const uncovers: { resolve: (value: null) => void; reject: (error: Error) => void }[] = [];
+    const covered = vi.spyOn(ipc, "setContentCovered").mockImplementation((value) => {
+      if (value) return Promise.resolve(null);
+      return new Promise<null>((resolve, reject) => uncovers.push({ resolve, reject }));
+    });
+    vi.spyOn(ipc, "prepareContentCover")
+      .mockResolvedValueOnce([{ tab_id: "tab", data_url: "preview-a" }])
+      .mockResolvedValueOnce([{ tab_id: "tab", data_url: "preview-b" }]);
+    render(<Preview />);
+    const first = render(<Overlay />);
+    await waitFor(() => expect(covered.mock.calls).toEqual([[true]]));
+    expect(screen.getByTestId("preview").textContent).toBe("preview-a");
+
+    first.unmount();
+    expect(uncovers).toHaveLength(1);
+    const second = render(<Overlay />);
+    await waitFor(() => expect(covered.mock.calls).toEqual([[true], [false], [true]]));
+    expect(contentCoverDepth()).toBe(1);
+    expect(screen.getByTestId("preview").textContent).toBe("preview-b");
+
+    await act(async () => {
+      if (outcome === "resolve") uncovers[0]!.resolve(null);
+      else uncovers[0]!.reject(new Error("previous uncover failed"));
+    });
+    expect.soft(screen.getByTestId("preview").textContent).toBe("preview-b");
+
+    // The current generation's final release still clears its preview even
+    // when the engine rejects the uncover request.
+    second.unmount();
+    expect(contentCoverDepth()).toBe(0);
+    expect(covered.mock.calls).toEqual([[true], [false], [true], [false]]);
+    await act(async () => {
+      if (outcome === "resolve") uncovers[1]!.resolve(null);
+      else uncovers[1]!.reject(new Error("final uncover failed"));
+    });
+    expect(screen.getByTestId("preview").textContent).toBe("none");
+  });
+
   it("captures the visible page before hiding the native view", async () => {
     let finishCapture!: (value: { tab_id: string; data_url: string }[]) => void;
     const capture = vi.fn(

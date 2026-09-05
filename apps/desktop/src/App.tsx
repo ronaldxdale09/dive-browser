@@ -17,6 +17,7 @@ import { useBrowser } from "./store/browser";
 import { useLayout } from "./store/layout";
 import { usePrefs, watchReducedMotion, watchSystemTheme } from "./store/prefs";
 import { useShortcuts } from "./lib/shortcuts";
+import { useCoversContent } from "./lib/overlay";
 import { useChromeLayout } from "./lib/adaptiveLayout";
 import { PanelSkeleton, ToastViewport } from "./components/ChromeFeedback";
 import { usePicker } from "./store/simulator";
@@ -47,6 +48,9 @@ export function App() {
   const annotating = useBrowser((s) => s.annotating);
   const editing = useBrowser((s) => s.editing);
   const open = useBrowser((s) => s.open);
+  // Keep the native page covered between navigation dialogs, including while
+  // a replacement's lazy chunk is loading inside Suspense.
+  useCoversContent(open.palette || open.settings || open.library || open.shortcuts);
   const loadPrefs = usePrefs((s) => s.load);
   const railExpanded = usePrefs((s) => s.prefs.rail_expanded);
   const responsive = useChromeLayout();

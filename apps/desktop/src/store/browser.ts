@@ -106,6 +106,17 @@ interface BrowserState {
 export type NavError = { url: string; error: string };
 export type CrashState = { attempt: number; recovering: boolean };
 
+const NAVIGATION_DIALOGS = new Set<UiPanel>(["palette", "settings", "library", "shortcuts"]);
+
+/** Navigation dialogs replace each other; panels and editing workflows keep their state. */
+function togglePanel(open: BrowserState["open"], panel: UiPanel, value?: boolean): BrowserState["open"] {
+  const shown = value ?? !open[panel];
+  if (shown && NAVIGATION_DIALOGS.has(panel)) {
+    return { ...open, palette: false, settings: false, library: false, shortcuts: false, menu: false, [panel]: true };
+  }
+  return { ...open, [panel]: shown };
+}
+
 type LoadState = Pick<BrowserState, "loading" | "navError" | "crashedTabs">;
 
 /** Drop `key` from a record without mutating it; the same object when absent. */
@@ -253,9 +264,9 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   detached: [],
   open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false },
   libraryTab: "bookmarks",
-  openLibrary: (libraryTab) => set((s) => ({ libraryTab, open: { ...s.open, library: true, menu: false } })),
+  openLibrary: (libraryTab) => set((s) => ({ libraryTab, open: togglePanel(s.open, "library", true) })),
   settingsSection: "general",
-  openSettings: (section = "general") => set((s) => ({ settingsSection: section, open: { ...s.open, settings: true } })),
+  openSettings: (section = "general") => set((s) => ({ settingsSection: section, open: togglePanel(s.open, "settings", true) })),
   permissionRequests: {},
   applyPermissionAsked: (asked) => set((s) => ({ permissionRequests: reducePermissionAsked(s.permissionRequests, asked) })),
   decidePermission: async (tabId, request, decision, duration) => {
@@ -499,7 +510,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     void get().refreshCounts();
   },
 
-  toggle: (panel, value) => set((s) => ({ open: { ...s.open, [panel]: value ?? !s.open[panel] } })),
+  toggle: (panel, value) => set((s) => ({ open: togglePanel(s.open, panel, value) })),
   applyEvent: (event) => {
     set((s) => reduceEvent(s, event));
     if (event.type === "tab_closed") {

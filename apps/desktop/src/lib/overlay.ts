@@ -64,12 +64,16 @@ function release() {
   depth = Math.max(0, depth - 1);
   if (depth !== 0) return;
   generation += 1;
+  const token = generation;
   if (covered) {
     covered = false;
     void ipc
       .setContentCovered(false)
       .catch(() => undefined)
-      .finally(() => publish({}));
+      .finally(() => {
+        // A later overlay may already have captured and covered the page.
+        if (depth === 0 && token === generation) publish({});
+      });
   } else {
     publish({});
   }
