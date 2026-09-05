@@ -59,6 +59,8 @@ mod state;
 mod storage;
 mod subtitles;
 mod titlebar;
+#[cfg(feature = "cef")]
+mod ui_probe;
 mod vitals;
 
 pub use error::AppError;
@@ -224,6 +226,8 @@ pub fn run() {
             startup::record_milestone("setup_complete");
             startup::on_setup_completed(app.handle().clone());
             lifecycle_probe::start(app.handle().clone());
+            #[cfg(feature = "cef")]
+            ui_probe::start(app.handle().clone());
             Ok(())
         })
         .build(tauri::generate_context!());
