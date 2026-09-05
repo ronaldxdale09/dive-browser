@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Opt-in, bounded timing receipts. Never serialize an event, key or page data.
+//! `post_key` marks renderer fallback, not execution of a native menu action.
 
 use std::{
   io::Write,
@@ -37,7 +38,24 @@ pub(crate) fn enabled() -> bool {
   })
 }
 
-pub(crate) fn is_launcher(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum KeyClass {
+  Launcher,
+  SelectAll,
+  Other,
+}
+
+impl KeyClass {
+  fn name(self) -> &'static str {
+    match self {
+      Self::Launcher => "launcher",
+      Self::SelectAll => "select_all",
+      Self::Other => "other",
+    }
+  }
+}
+
+pub(crate) fn classify_key(
   macos: bool,
   raw_key_down: bool,
   key_code: i32,
@@ -45,8 +63,16 @@ pub(crate) fn is_launcher(
   control: bool,
   alt: bool,
   shift: bool,
-) -> bool {
-  macos && raw_key_down && key_code == 84 && command && !control && !alt && !shift
+) -> KeyClass {
+  if macos && raw_key_down && command && !control && !alt && !shift {
+    match key_code {
+      84 => KeyClass::Launcher,
+      65 => KeyClass::SelectAll,
+      _ => KeyClass::Other,
+    }
+  } else {
+    KeyClass::Other
+  }
 }
 
 #[derive(Clone, Copy)]
@@ -87,18 +113,18 @@ impl Stage {
 #[derive(Default)]
 struct TraceState {
   sequence: u64,
-  launcher_ms: Option<u64>,
+  armed_ms: Option<u64>,
 }
 
 impl TraceState {
-  fn next(&mut self, now_ms: u64, launcher: bool) -> Option<u64> {
+  fn next(&mut self, now_ms: u64, arm: bool) -> Option<u64> {
     if self.sequence >= LIMIT {
       return None;
     }
-    if launcher {
-      self.launcher_ms = Some(now_ms);
+    if arm {
+      self.armed_ms = Some(now_ms);
     }
-    if now_ms.checked_sub(self.launcher_ms?)? > WINDOW_MS {
+    if now_ms.checked_sub(self.armed_ms?)? > WINDOW_MS {
       return None;
     }
     self.sequence += 1;
@@ -106,14 +132,20 @@ impl TraceState {
   }
 }
 
-pub(crate) fn key_event(stage: Stage, key_down: bool, launcher: bool, browser_id: Option<i32>) {
+pub(crate) fn key_event(
+  stage: Stage,
+  key_down: bool,
+  classification: KeyClass,
+  browser_id: Option<i32>,
+) {
   if key_down {
     emit(
       stage,
       browser_id,
       None,
-      Some(if launcher { "launcher" } else { "other" }),
-      launcher && matches!(stage, Stage::PreKey),
+      Some(classification.name()),
+      matches!(classification, KeyClass::Launcher | KeyClass::SelectAll)
+        && matches!(stage, Stage::PreKey),
     );
   }
 }
@@ -127,7 +159,7 @@ fn emit(
   browser_id: Option<i32>,
   webview_id: Option<u32>,
   classification: Option<&'static str>,
-  launcher: bool,
+  arm: bool,
 ) {
   if !enabled() {
     return;
@@ -136,7 +168,7 @@ fn emit(
   let (origin, state) = STATE.get_or_init(|| (Instant::now(), Mutex::new(TraceState::default())));
   let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
   let monotonic_ms = origin.elapsed().as_millis() as u64;
-  let Some(sequence) = state.next(monotonic_ms, launcher) else {
+  let Some(sequence) = state.next(monotonic_ms, arm) else {
     return;
   };
   let unix_ms = SystemTime::now()
@@ -172,19 +204,31 @@ mod tests {
   }
 
   #[test]
-  fn launcher_is_only_macos_raw_command_t_without_extra_shortcut_modifiers() {
-    assert!(is_launcher(true, true, 84, true, false, false, false));
-    assert!(!is_launcher(false, true, 84, true, false, false, false));
-    assert!(!is_launcher(true, false, 84, true, false, false, false));
-    assert!(!is_launcher(true, true, 85, true, false, false, false));
-    assert!(!is_launcher(true, true, 84, false, false, false, false));
-    assert!(!is_launcher(true, true, 84, true, true, false, false));
-    assert!(!is_launcher(true, true, 84, true, false, true, false));
-    assert!(!is_launcher(true, true, 84, true, false, false, true));
+  fn reserved_classification_requires_exact_macos_raw_command_without_extra_modifiers() {
+    for (code, expected) in [(84, KeyClass::Launcher), (65, KeyClass::SelectAll)] {
+      assert_eq!(
+        classify_key(true, true, code, true, false, false, false),
+        expected
+      );
+      for actual in [
+        classify_key(false, true, code, true, false, false, false),
+        classify_key(true, false, code, true, false, false, false),
+        classify_key(true, true, code, false, false, false, false),
+        classify_key(true, true, code, true, true, false, false),
+        classify_key(true, true, code, true, false, true, false),
+        classify_key(true, true, code, true, false, false, true),
+      ] {
+        assert_eq!(actual, KeyClass::Other);
+      }
+    }
+    assert_eq!(
+      classify_key(true, true, 85, true, false, false, false),
+      KeyClass::Other
+    );
   }
 
   #[test]
-  fn only_launcher_pre_event_arms_a_non_sliding_half_second_window() {
+  fn armed_window_is_non_sliding_and_rearms_after_expiry() {
     let mut state = TraceState::default();
     assert_eq!(state.next(0, false), None);
     assert_eq!(state.next(10, true), Some(1));
@@ -210,12 +254,21 @@ mod tests {
     if std::env::var_os("DIVE_TRACE_TEST_CHILD").is_none() {
       return;
     }
-    // Neither post-key, a non-keydown launcher, nor unrelated activity arms it.
-    key_event(Stage::PostKey, true, true, Some(11));
-    key_event(Stage::PreKey, false, true, Some(11));
+    let select_all = std::env::var_os("DIVE_TRACE_TEST_SELECT_ALL").is_some();
+    let chord = if select_all {
+      KeyClass::SelectAll
+    } else {
+      KeyClass::Launcher
+    };
+    // Neither post-key, a non-keydown chord, nor unrelated activity arms it.
+    key_event(Stage::PostKey, true, chord, Some(11));
+    key_event(Stage::PreKey, false, chord, Some(11));
     record(Stage::ProxySend, None, None);
-    key_event(Stage::PreKey, true, true, Some(11));
-    key_event(Stage::PreKey, true, false, Some(11));
+    key_event(Stage::PreKey, true, chord, Some(11));
+    key_event(Stage::PreKey, true, KeyClass::Other, Some(11));
+    if select_all {
+      key_event(Stage::PostKey, true, chord, Some(11));
+    }
     for stage in [
       Stage::PostKey,
       Stage::ProxySend,
@@ -232,11 +285,11 @@ mod tests {
       record(stage, Some(22), Some(33));
     }
     for _ in 0..300 {
-      key_event(Stage::PreKey, true, true, Some(11));
+      key_event(Stage::PreKey, true, chord, Some(11));
     }
   }
 
-  fn child_receipts(trace: &str, competing: bool) -> Vec<String> {
+  fn child_receipts(trace: &str, competing: bool, select_all: bool) -> Vec<String> {
     let mut child = std::process::Command::new(std::env::current_exe().unwrap());
     child
       // A suffix matches both standalone and library-qualified module paths.
@@ -246,6 +299,10 @@ mod tests {
       .env("DIVE_UI_PROBE", "1")
       .env("DIVE_USE_MOCK_KEYCHAIN", "1")
       .env("DIVE_DATA_DIR", "/unused-disposable-test-profile");
+    child.env_remove("DIVE_TRACE_TEST_SELECT_ALL");
+    if select_all {
+      child.env("DIVE_TRACE_TEST_SELECT_ALL", "1");
+    }
     for key in [
       "DIVE_NATIVE_LIFECYCLE_PROBE",
       "DIVE_STRESS_TABS",
@@ -270,9 +327,9 @@ mod tests {
 
   #[test]
   fn actual_output_is_gated_armed_by_pre_key_only_and_process_bounded() {
-    assert!(child_receipts("", false).is_empty());
-    assert!(child_receipts("1", true).is_empty());
-    let lines = child_receipts("1", false);
+    assert!(child_receipts("", false, false).is_empty());
+    assert!(child_receipts("1", true, false).is_empty());
+    let lines = child_receipts("1", false, false);
     assert_eq!(lines.len(), 256);
     assert!(lines[0].contains("\"sequence\":1,"));
     assert!(lines[0].contains("\"stage\":\"pre_key\""));
@@ -287,5 +344,26 @@ mod tests {
         assert!(!line.contains(forbidden));
       }
     }
+  }
+
+  #[test]
+  fn select_all_receipts_preserve_pre_other_post_order_and_share_gate_and_cap() {
+    assert!(child_receipts("", false, true).is_empty());
+    assert!(child_receipts("1", true, true).is_empty());
+    let lines = child_receipts("1", false, true);
+    assert_eq!(lines.len(), 256);
+    for (line, (stage, class)) in lines.iter().zip([
+      ("pre_key", "select_all"),
+      ("pre_key", "other"),
+      ("post_key", "select_all"),
+    ]) {
+      assert!(line.contains(&format!("\"stage\":\"{stage}\"")), "{line}");
+      assert!(
+        line.contains(&format!("\"classification\":\"{class}\"")),
+        "{line}"
+      );
+    }
+    assert!(lines[0].contains("\"sequence\":1,"));
+    assert!(lines[255].contains("\"sequence\":256,"));
   }
 }

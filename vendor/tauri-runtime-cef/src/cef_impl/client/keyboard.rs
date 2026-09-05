@@ -27,7 +27,7 @@ fn trace_key(stage: Stage, browser: Option<&Browser>, event: Option<&KeyEvent>) 
   let modifiers = event.modifiers as i32;
   #[cfg(not(windows))]
   let modifiers = event.modifiers;
-  let launcher = native_input_trace::is_launcher(
+  let classification = native_input_trace::classify_key(
     cfg!(target_os = "macos"),
     raw_key_down,
     event.windows_key_code,
@@ -36,7 +36,12 @@ fn trace_key(stage: Stage, browser: Option<&Browser>, event: Option<&KeyEvent>) 
     modifiers & Flags::EVENTFLAG_ALT_DOWN.0 != 0,
     modifiers & Flags::EVENTFLAG_SHIFT_DOWN.0 != 0,
   );
-  native_input_trace::key_event(stage, key_down, launcher, browser.map(|b| b.identifier()));
+  native_input_trace::key_event(
+    stage,
+    key_down,
+    classification,
+    browser.map(|b| b.identifier()),
+  );
 }
 
 #[cfg(target_os = "macos")]

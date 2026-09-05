@@ -8,6 +8,7 @@ beforeEach(() => {
   delete window.__diveUiInputTimingEnabled;
 });
 afterEach(() => {
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   probe().stop();
   delete window.__diveUiInputTimingEnabled;
   document.body.replaceChildren();
@@ -15,6 +16,42 @@ afterEach(() => {
 });
 
 describe("input timing probe", () => {
+  it("captures selection replacement order using numeric metadata without text", () => {
+    window.__diveUiInputTimingEnabled = true;
+    probe().start();
+    const input = document.createElement("input");
+    input.value = "private";
+    document.body.appendChild(input);
+    input.focus();
+    input.setSelectionRange(0, 7);
+    document.dispatchEvent(new Event("selectionchange"));
+    input.dispatchEvent(new InputEvent("beforeinput", { inputType: "insertText", data: "sensitive", bubbles: true }));
+    input.value = "x";
+    input.setSelectionRange(1, 1);
+    input.dispatchEvent(new InputEvent("input", { inputType: "insertText", data: "sensitive", bubbles: true }));
+    const snapshot = probe().snapshot();
+    expect(snapshot.events.slice(-3)).toMatchObject([
+      { kind: "selectionchange", selection: { length: 7, start: 0, end: 7 } },
+      { kind: "beforeinput", selection: { length: 7, start: 0, end: 7 }, inputType: "insertText" },
+      { kind: "input", selection: { length: 1, start: 1, end: 1 }, inputType: "insertText" },
+    ]);
+    expect(JSON.stringify(snapshot)).not.toMatch(/private|sensitive/);
+    snapshot.events.at(-1)!.selection!.length = 99;
+    expect(probe().snapshot().events.at(-1)!.selection!.length).toBe(1);
+  });
+
+  it("omits password metadata and rejects arbitrary input types", () => {
+    window.__diveUiInputTimingEnabled = true;
+    probe().start();
+    const input = document.createElement("input");
+    input.type = "password";
+    Object.defineProperty(input, "value", { get: () => { throw new Error("must not read passwords"); } });
+    document.body.appendChild(input);
+    input.dispatchEvent(new InputEvent("input", { inputType: "secret-type", data: "secret-data", bubbles: true }));
+    expect(probe().snapshot().events.at(-1)).toMatchObject({ selection: null, inputType: "other" });
+    expect(JSON.stringify(probe().snapshot())).not.toContain("secret");
+  });
+
   it("does not install listeners or collect events without explicit admission", () => {
     const listen = vi.spyOn(window, "addEventListener");
     expect(probe().start()).toBe(false);

@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { flushSync } from "react-dom";
 import { events } from "./ipc";
-import { runCommand, shortcutFor } from "./commands";
+import { selectAllInChromeField } from "./chromeEditing";
+import { isMac, runCommand, shortcutFor } from "./commands";
 
 /**
  * Global key chords, routed through the shared command dispatcher.
@@ -13,7 +14,7 @@ import { runCommand, shortcutFor } from "./commands";
 export function useShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
+      if (e.defaultPrevented || selectAllInChromeField(e, isMac())) return;
       const id = shortcutFor(e);
       if (!id) return;
       e.preventDefault();

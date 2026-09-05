@@ -55,6 +55,22 @@ afterEach(() => {
 });
 
 describe("foreground navigation dialogs", () => {
+  it("selects the entire focused Palette query synchronously before replacement typing", () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    useBrowser.getState().toggle("palette", true);
+    render(<NavigationDialogs />);
+    const input = screen.getByRole("combobox") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "previous query" } });
+    input.setSelectionRange(input.value.length, input.value.length);
+    const event = new KeyboardEvent("keydown", { key: "a", metaKey: true, bubbles: true, cancelable: true });
+    input.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, 14]);
+    input.setRangeText("h", input.selectionStart!, input.selectionEnd!, "end");
+    fireEvent.input(input);
+    expect(input.value).toBe("h");
+  });
+
   it.each(["keyboard", "native menu"])("replaces Settings with a focused New tab dialog via %s", async (source) => {
     window.__diveUiInputTimingEnabled = true;
     const timing = window.__diveInputTimingProbe!;
