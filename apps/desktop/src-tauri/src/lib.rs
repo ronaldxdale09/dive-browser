@@ -29,6 +29,7 @@ mod lifecycle_probe;
 mod loading;
 mod locator;
 mod mcp;
+mod memory_probe;
 mod menu;
 mod meta;
 mod navigation;
@@ -567,6 +568,11 @@ fn stress_test(app: tauri::AppHandle<Runtime>) {
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         }
         tokio::time::sleep(std::time::Duration::from_secs(settle)).await;
+        if let Err(error) = memory_probe::record(&app, "loaded").await {
+            tracing::error!(%error, "stress: heap diagnostics failed");
+            app.exit(1);
+            return;
+        }
         tracing::info!(tabs = opened, "stress: loaded");
         // Keep the loaded phase alive long enough for the external harness to
         // sample it before discard begins reclaiming renderer memory.
@@ -580,11 +586,21 @@ fn stress_test(app: tauri::AppHandle<Runtime>) {
             }
         };
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        if let Err(error) = memory_probe::record(&app, "swept").await {
+            tracing::error!(%error, "stress: heap diagnostics failed");
+            app.exit(1);
+            return;
+        }
         tracing::info!(discarded, "stress: swept");
         tracing::info!("stress: done");
         // Give the harness time to sample memory before the process goes.
         tokio::time::sleep(std::time::Duration::from_secs(8)).await;
         tracing::info!("stress: exiting");
+        if let Err(error) = memory_probe::record(&app, "settled").await {
+            tracing::error!(%error, "stress: heap diagnostics failed");
+            app.exit(1);
+            return;
+        }
         // Sampling has stopped; reopening a discarded tab must not contaminate
         // the reclaim measurement, but still has to succeed before this passes.
         if let Err(error) = lifecycle_probe::verify_discarded_and_wake(&app).await {

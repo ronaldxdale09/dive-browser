@@ -90,6 +90,7 @@ def main():
             (evidence / 'run-metadata.json').write_text(json.dumps({
                 'binary': str(binary), 'binary_sha256': fingerprint, 'tabs': tabs,
                 'settle_seconds': settle, 'minimum_reclaim_pct': minimum,
+                'heap_metrics': 'DIVE_STRESS_HEAP_METRICS' in environment,
                 'workload': 'explicit URLs' if os.environ.get('STRESS_URL') else 'local same-site fixture',
                 'process_overrides': {key: environment.get(key) for key in ('DIVE_CHROMIUM_FLAGS', 'DIVE_DEFAULT_PROCESS_MODEL', 'DIVE_RENDERER_PROCESS_LIMIT')},
             }, indent=2) + '\n')
@@ -116,6 +117,10 @@ def main():
             discarded_match = re.search(r'stress: swept[^\n]*discarded=(\d+)', text)
             if not loaded_match or not discarded_match or 'stress: exiting' not in text or 'stress: lifecycle registry and wake verified' not in text or any(not v for v in samples.values()):
                 raise ValueError(f'missing markers or live process samples; log: {log}')
+            if 'DIVE_STRESS_HEAP_METRICS' in environment:
+                heap_samples = [json.loads(line.split('DIVE_MEMORY_HEAP: ', 1)[1]) for line in text.splitlines() if line.startswith('DIVE_MEMORY_HEAP: ')]
+                if [sample.get('phase') for sample in heap_samples] != ['loaded', 'swept', 'settled'] or any(not sample.get('isolates') for sample in heap_samples):
+                    raise ValueError(f'missing complete heap diagnostic evidence; log: {log}')
             actual_tabs, discarded = int(loaded_match[1]), int(discarded_match[1])
             if actual_tabs != tabs or discarded < tabs - 1:
                 raise ValueError(f'incomplete workload: {actual_tabs}/{tabs} tabs, {discarded} discarded')
@@ -135,6 +140,7 @@ def main():
                        'sample_counts': {key: len(value) for key, value in samples.items()},
                        'binary': str(binary), 'binary_sha256': fingerprint, 'evidence': str(evidence),
                        'elapsed_seconds': round(elapsed, 2),
+                       'heap_metrics': 'DIVE_STRESS_HEAP_METRICS' in environment,
                        'process_overrides': {key: environment.get(key) for key in ('DIVE_CHROMIUM_FLAGS', 'DIVE_DEFAULT_PROCESS_MODEL', 'DIVE_RENDERER_PROCESS_LIMIT')},
                        'workload': 'explicit URLs' if os.environ.get('STRESS_URL') else 'local same-site fixture'}
             temporary = summary_path.with_suffix('.json.tmp')

@@ -12,7 +12,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 
 
 class MemoryBenchmarkTests(unittest.TestCase):
-    def run_probe(self, mode):
+    def run_probe(self, mode, heap=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             scripts = root / 'scripts'
@@ -45,6 +45,10 @@ sys.exit(9 if os.environ['FAKE_MODE'] in ('crash', 'late-crash') else 0)
             environment = {**os.environ, 'DIVE_BIN': str(fake), 'FAKE_MODE': mode,
                            'STRESS_TABS': '2',
                            'DIVE_PROBE_TIMEOUT_SECS': '2.5' if mode in ('valid', 'late-crash', 'missing-wake') else '0.5'}
+            if heap:
+                environment['DIVE_STRESS_HEAP_METRICS'] = '1'
+            else:
+                environment.pop('DIVE_STRESS_HEAP_METRICS', None)
             process = subprocess.Popen(['bash', str(scripts / 'benchmark-memory.sh')],
                                        env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                        text=True, start_new_session=True)
@@ -64,6 +68,13 @@ sys.exit(9 if os.environ['FAKE_MODE'] in ('crash', 'late-crash') else 0)
         self.assertFalse(timed_out, 'memory harness ignored external deadline')
         self.assertNotEqual(code, 0, output)
         self.assertIsNone(summary)
+
+    def test_requested_heap_diagnostics_cannot_pass_without_native_samples(self):
+        timed_out, code, summary, output = self.run_probe('valid', heap=True)
+        self.assertFalse(timed_out)
+        self.assertNotEqual(code, 0)
+        self.assertIsNone(summary)
+        self.assertIn('missing complete heap diagnostic evidence', output)
 
     def test_crashes_and_missing_markers_are_rejected(self):
         for mode in ('crash', 'late-crash', 'missing-markers', 'missing-wake'):
