@@ -150,11 +150,17 @@ function PermissionBanner({ tabId, request }: { tabId: string; request: Permissi
         <span className="font-medium text-ink">{request.origin}</span> wants to {request.kinds.map(describePermission).join(" and ")}
         <span className="ml-2 text-ink-3">{profile} · this container</span>
       </span>
-      <select aria-label="Permission duration" disabled={busy} value={duration} onChange={(e) => setDuration(e.target.value as "remember" | "page")} className="rounded-md border border-line-2 bg-surface-2 px-2 py-1 text-ink">
+      <select
+        aria-label="Permission duration"
+        title={request.page_lifetime ? undefined : "This permission is remembered; page-only access is unavailable."}
+        disabled={busy}
+        value={duration}
+        onChange={(e) => setDuration(e.target.value as "remember" | "page")}
+        className="rounded-md border border-line-2 bg-surface-2 px-2 py-1 text-ink"
+      >
         <option value="remember">Remember in this profile and container</option>
         {request.page_lifetime && <option value="page">Until this page navigates or closes</option>}
       </select>
-      {!request.page_lifetime && <span className="text-ink-3">This permission is remembered; page-only access is unavailable.</span>}
       <button type="button" disabled={busy} onClick={() => void answer("deny")} className="flex h-6 items-center gap-1 rounded-md border border-line-2 px-2 text-ink hover:bg-surface-3 disabled:opacity-50">
         <Icon icon={X} size={11} /> Block
       </button>

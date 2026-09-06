@@ -127,7 +127,7 @@ export function RecordingDoneDialog() {
                     dismiss();
                     void useBrowser.getState().openTab(screenUrl(result.path));
                   }}
-                  className="flex h-8 items-center gap-1.5 rounded-lg bg-highlight-soft px-3 text-xs font-medium text-highlight hover:brightness-110"
+                  className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-highlight-soft px-3 text-xs font-medium whitespace-nowrap text-highlight hover:brightness-110"
                 >
                   <Icon icon={Wand2} size={13} />
                   Edit in DiveScreen
@@ -139,11 +139,11 @@ export function RecordingDoneDialog() {
                   dismiss();
                   openSetup();
                 }}
-                className="h-8 rounded-lg px-3 text-xs text-ink-2 hover:bg-surface-2 hover:text-ink"
+                className="h-8 shrink-0 rounded-lg px-3 text-xs whitespace-nowrap text-ink-2 hover:bg-surface-2 hover:text-ink"
               >
                 Record another
               </button>
-              <button ref={primary} type="button" onClick={close} className="h-8 rounded-lg bg-accent px-4 text-xs font-medium text-accent-ink hover:brightness-110">
+              <button ref={primary} type="button" onClick={close} className="h-8 shrink-0 rounded-lg bg-accent px-4 text-xs font-medium text-accent-ink hover:brightness-110">
                 Done
               </button>
             </>
@@ -177,7 +177,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function Action({ icon, label, onClick, tone = "quiet" }: { icon: typeof Copy; label: string; onClick: () => void; tone?: "quiet" | "danger" }) {
   return (
-    <button type="button" onClick={onClick} className={`flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs transition-colors hover:bg-surface-2 ${tone === "danger" ? "text-ink-3 hover:text-danger" : "text-ink-2 hover:text-ink"}`}>
+    <button type="button" onClick={onClick} className={`flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs whitespace-nowrap transition-colors hover:bg-surface-2 ${tone === "danger" ? "text-ink-3 hover:text-danger" : "text-ink-2 hover:text-ink"}`}>
       <Icon icon={icon} size={13} />
       {label}
     </button>

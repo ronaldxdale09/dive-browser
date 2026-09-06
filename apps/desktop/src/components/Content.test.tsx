@@ -189,7 +189,7 @@ describe("Content permission banner", () => {
     useBrowser.setState({permissionRequests:{t1:[{...camera,page_lifetime:false,kinds:["notifications"]}]}});
     render(<Content />);
     expect(screen.queryByRole("option",{name:"Until this page navigates or closes"})).toBeNull();
-    expect(screen.getByText(/This permission is remembered/)).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Permission duration" }).getAttribute("title")).toMatch(/This permission is remembered/);
   });
 
   it("queues a second request behind the first and only speaks for the active tab", async () => {
