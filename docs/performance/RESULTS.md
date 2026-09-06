@@ -52,7 +52,7 @@ After the user made the Mac available, all twelve launches completed: three fres
 
 CEF151 uses 31.8% less ten-tab memory than Brave and 37.0% less than Chrome in this specific workload. CEF152 remains experimental and is excluded from the merge/release source. No overall performance win is established. Raw results, ranges and receipts: `target/performance-goal/quiet-runtime-matrix/` and `quiet-runtime-summary.json`. The source startup-subscription change was made after these exact binaries were built; this table does not measure that additional change.
 
-The final source also starts independent startup subscriptions concurrently, waits for the entire batch before snapshot/retry, and permits failed console/network subscriptions to retry. Regression tests first reproduced serial startup and sticky failed subscriptions; all 50 targeted tests and the full repository gate subsequently passed. No measured speedup is claimed for this final change yet.
+The final startup-subscription experiment passed unit and repository gates but a fresh custom-avatar lifecycle check observed worker startup 0.4 ms before first contentful paint. With further optimization stopped by the user, that experiment and its console/network retry changes were reverted. The merged application source retains the previously qualified implementation; no speedup is claimed for the rejected startup experiment.
 
 ## Implemented changes
 

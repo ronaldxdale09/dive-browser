@@ -181,12 +181,7 @@ let listening: Promise<() => void> | null = null;
 
 /** Subscribe once to network events from the engine. */
 export function listenNetwork() {
-  if (listening) return listening;
-  const request = events.networkEvent.listen((e) => useNetwork.getState().enqueue(e.payload)).catch((error: unknown) => {
-    if (listening === request) listening = null;
-    throw error;
-  });
-  listening = request;
+  listening ??= events.networkEvent.listen((e) => useNetwork.getState().enqueue(e.payload));
   return listening;
 }
 

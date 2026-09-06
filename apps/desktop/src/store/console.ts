@@ -74,12 +74,7 @@ let listening: Promise<() => void> | null = null;
 
 /** Subscribe once to console events from the engine. */
 export function listenConsole() {
-  if (listening) return listening;
-  const request = events.consoleEntry.listen((e) => useConsole.getState().enqueue(e.payload)).catch((error: unknown) => {
-    if (listening === request) listening = null;
-    throw error;
-  });
-  listening = request;
+  listening ??= events.consoleEntry.listen((e) => useConsole.getState().enqueue(e.payload));
   return listening;
 }
 
