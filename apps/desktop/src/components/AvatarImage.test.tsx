@@ -27,7 +27,7 @@ it("keeps dimensions while loading and cannot show a previous profile after a la
   const image = view.container.querySelector("img")!;
   expect(image.getAttribute("data-avatar-state")).toBe("pending");
   expect(image.width).toBe(20);
-  await act(() => vi.advanceTimersByTimeAsync(2));
+  await act(() => vi.advanceTimersByTimeAsync(3));
   view.rerender(<AvatarImage kind="profile" seed="second-person" color="#F0B35E" width={20} height={20} alt="" />);
   const worker = WorkerStub.latest;
   const old = "data:image/svg+xml;utf8,%3Csvg%2F%3E#first";
@@ -41,4 +41,30 @@ it("keeps dimensions while loading and cannot show a previous profile after a la
   const warm = render(<AvatarImage kind="profile" seed="second-person" color="#F0B35E" alt="" />);
   expect(warm.container.querySelector("img")!.getAttribute("src")).toBe(current);
   await act(() => vi.advanceTimersByTimeAsync(5000));
+});
+
+it("waits for observed contentful paint before starting a cold avatar worker", async () => {
+  vi.resetModules();
+  vi.useFakeTimers();
+  const worker = vi.fn(function () { return new WorkerStub(); });
+  let painted!: () => void;
+  const disconnect = vi.fn();
+  vi.stubGlobal("Worker", worker);
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => setTimeout(callback, 1));
+  vi.stubGlobal("requestIdleCallback", (callback: () => void) => setTimeout(callback, 1));
+  vi.stubGlobal("PerformanceObserver", class {
+    static supportedEntryTypes = ["paint"];
+    constructor(callback: (list: {getEntries(): {name: string}[]}) => void) {
+      painted = () => callback({getEntries: () => [{name: "first-contentful-paint"}]});
+    }
+    observe() {}
+    disconnect = disconnect;
+  });
+  const {AvatarImage: ColdAvatar} = await import("./AvatarImage");
+  render(<ColdAvatar kind="profile" seed="paint-gated-person" color="#123456" alt="" />);
+  await act(() => vi.advanceTimersByTimeAsync(10));
+  expect(worker).not.toHaveBeenCalled();
+  await act(async () => { painted(); await vi.advanceTimersByTimeAsync(10); });
+  expect(worker).toHaveBeenCalledTimes(1);
+  expect(disconnect).toHaveBeenCalledTimes(1);
 });

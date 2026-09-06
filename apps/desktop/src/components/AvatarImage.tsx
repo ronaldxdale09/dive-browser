@@ -13,11 +13,25 @@ const cache = new AvatarCache(
   },
   () => window.localStorage,
   (run) => {
-    // First draw the controls. Cold artwork then loads during an idle period.
-    requestAnimationFrame(() => {
+    const idle = () => {
       if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 1500 });
       else setTimeout(run, 0);
-    });
+    };
+    // A frame callback precedes paint, and font readiness can delay FCP further.
+    // Observe the actual paint before spending work on uncached artwork.
+    if (performance.getEntriesByName("first-contentful-paint").length) {
+      idle();
+    } else if (typeof PerformanceObserver !== "undefined" && PerformanceObserver.supportedEntryTypes.includes("paint")) {
+      const observer = new PerformanceObserver((entries) => {
+        if (entries.getEntries().some((entry) => entry.name === "first-contentful-paint")) {
+          observer.disconnect();
+          idle();
+        }
+      });
+      observer.observe({ type: "paint", buffered: true });
+    } else {
+      requestAnimationFrame(() => requestAnimationFrame(idle));
+    }
   },
 );
 
