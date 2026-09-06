@@ -207,6 +207,7 @@ function NavErrorPanel({ url, error }: { url: string; error: string }) {
 function FullPage() {
   const ref = useRef<HTMLDivElement>(null);
   const activeTab = useBrowser((s) => s.activeTab);
+  const ready = useBrowser((s) => s.ready);
   const preview = useContentPreview(activeTab);
 
   useEffect(() => {
@@ -229,7 +230,9 @@ function FullPage() {
 
   return (
     <div ref={ref} className="relative min-h-0 bg-surface">
-      {!activeTab && (
+      {/* Before the session snapshot arrives, null means unknown. Mounting
+          the artwork then wastes a canvas and its startup work on restored tabs. */}
+      {ready && !activeTab && (
         <Suspense fallback={<div className="absolute inset-0 bg-ground" aria-label="Loading start page" />}>
           <Welcome />
         </Suspense>

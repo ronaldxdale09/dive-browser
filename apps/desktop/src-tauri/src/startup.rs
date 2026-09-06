@@ -420,11 +420,21 @@ fn build_chromium_args_with(
         }
     });
     args.push(("disable-features", Some(disabled.join(","))));
+    // Reclaim temporary startup/document allocations while V8 considers the
+    // renderer idle, instead of retaining them for its 30-second initial delay.
+    // V8 still owns the low-allocation check and incremental collection. An
+    // explicit js-flags override remains authoritative for diagnostics.
+    if !extra.iter().any(|(name, _)| *name == "js-flags") {
+        args.push(("js-flags", Some(IDLE_RECLAIM_FLAGS.to_owned())));
+    }
     args.extend(extra);
     args
 }
 
-/// Chromium features that must stay off in an embedded engine.
+const IDLE_RECLAIM_FLAGS: &str =
+    "--gc-memory-reducer-start-delay-ms=1000 --memory-reducer-delay-ms=1000";
+
+/// Chromium features disabled by the embedded browser's default policy.
 ///
 /// `ImmersiveReadAnything` (reading mode) installs a soft-navigation observer
 /// that asks `tabs::TabInterface::GetFromContents` for the Chrome tab behind
@@ -432,12 +442,24 @@ fn build_chromium_args_with(
 /// null it gets back, taking the whole browser process down the first time
 /// a page navigates within itself. `YouTube` does that as soon as a video
 /// starts. Symbolised from the crash on CEF 151.3.12; Chromium 151.
-pub const DISABLED_FEATURES: &[&str] = &["ImmersiveReadAnything"];
+///
+/// `SpareRendererForSitePerProcess` keeps an unused renderer warm. Create that
+/// renderer when needed instead; this does not change site isolation or the
+/// process assignment of any open page.
+pub const DISABLED_FEATURES: &[&str] = &["ImmersiveReadAnything", "SpareRendererForSitePerProcess"];
 
-/// Parse `DIVE_CHROMIUM_FLAGS`: whitespace-separated switches, either
-/// `--name` (valueless) or `name=value`, for experiments without a rebuild.
+/// Parse `DIVE_CHROMIUM_FLAGS`: shell-quoted switches, either `--name`
+/// (valueless) or `name=value`. Quoting keeps multi-option V8 values intact.
+/// No shell is executed and no variable or command substitution is performed.
 pub fn extra_chromium_args(spec: &str) -> Vec<(&'static str, Option<String>)> {
-    spec.split_whitespace()
+    let Some(items) = shlex::split(spec) else {
+        tracing::warn!(
+            "ignoring malformed DIVE_CHROMIUM_FLAGS: unmatched quoting or invalid escape"
+        );
+        return Vec::new();
+    };
+    items
+        .into_iter()
         .filter_map(|item| {
             if let Some((name, value)) = item.split_once('=') {
                 let name = name.trim_start_matches('-');
@@ -537,8 +559,32 @@ mod tests {
                 true
             }
         });
-        assert_eq!(folded, ["ImmersiveReadAnything", "A", "B"]);
+        assert_eq!(
+            folded,
+            [
+                "ImmersiveReadAnything",
+                "SpareRendererForSitePerProcess",
+                "A",
+                "B"
+            ]
+        );
         assert_eq!(merged, [("--x", None)]);
+    }
+
+    #[test]
+    fn quoted_engine_values_stay_one_argument() {
+        let args = extra_chromium_args(
+            r#"--js-flags="--trace-gc --gc-memory-reducer-start-delay-ms=1000 --memory-reducer-delay-ms=1000" --x"#,
+        );
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0], ("js-flags", Some("--trace-gc --gc-memory-reducer-start-delay-ms=1000 --memory-reducer-delay-ms=1000".to_owned())));
+        assert_eq!(args[1], ("--x", None));
+        assert!(validate_switch_syntax(&args).is_ok());
+    }
+
+    #[test]
+    fn invalid_quoting_never_applies_a_partial_diagnostic_policy() {
+        assert!(extra_chromium_args("--disable-gpu --js-flags=\"unterminated").is_empty());
     }
 
     #[test]
@@ -556,7 +602,7 @@ mod tests {
     #[test]
     fn test_chromium_args_default_formatting() {
         let args = build_chromium_args_with(None, "", false, &[]);
-        assert_eq!(args.len(), 3);
+        assert_eq!(args.len(), 4);
 
         assert_eq!(args[0], ("--process-per-site", None));
         assert_eq!(args[1], ("renderer-process-limit", Some("6".to_string())));
@@ -564,10 +610,33 @@ mod tests {
             args[2],
             (
                 "disable-features",
-                Some("ImmersiveReadAnything".to_string())
+                Some("ImmersiveReadAnything,SpareRendererForSitePerProcess".to_string())
             )
         );
+        assert_eq!(args[3], ("js-flags", Some(IDLE_RECLAIM_FLAGS.to_owned())));
 
+        assert!(validate_switch_syntax(&args).is_ok());
+    }
+
+    #[test]
+    fn explicit_v8_flags_override_idle_reclamation_without_duplicate_switches() {
+        let args = build_chromium_args_with(
+            None,
+            "--js-flags=--memory-reducer-delay-ms=8000",
+            false,
+            &[],
+        );
+        let flags: Vec<_> = args
+            .iter()
+            .filter(|(name, _)| *name == "js-flags")
+            .collect();
+        assert_eq!(
+            flags,
+            [&(
+                "js-flags",
+                Some("--memory-reducer-delay-ms=8000".to_owned())
+            )]
+        );
         assert!(validate_switch_syntax(&args).is_ok());
     }
 

@@ -98,6 +98,7 @@ let stage = null;
 let backdrop = null;
 let placeholder = null;
 let hideTimer = 0;
+let playerCheckTimer = 0;
 let mounted = false;
 
 // Registered for new documents, this runs before the DOM exists, so nothing
@@ -178,6 +179,11 @@ function enter(video) {
   if (!node.parentNode || node === document.body || node === document.documentElement) return;
   target = node;
   filledVideo = video;
+  // SPA navigation can detach the filled player. Check only while filling;
+  // ordinary pages and inactive video controls need no recurring wakeup.
+  playerCheckTimer = setInterval(() => {
+    if (target && !target.isConnected) exit();
+  }, 1000);
   // Reparent the player to a top-level stage. Fixed positioning and a high
   // z-index are not enough on their own: a site whose player sits inside an
   // ancestor with its own transform or z-index (YouTube does) traps the
@@ -212,6 +218,8 @@ function enter(video) {
 
 function exit() {
   if (!target) return;
+  clearInterval(playerCheckTimer);
+  playerCheckTimer = 0;
   target.classList.remove(TARGET);
   for (const el of chain) el.classList.remove(CHAIN);
   chain = [];
@@ -297,10 +305,6 @@ document.addEventListener("keydown", (e) => {
 
 // The page's own fullscreen wins; ours gets out of its way.
 document.addEventListener("fullscreenchange", () => { if (document.fullscreenElement && target) exit(); });
-
-// If the filled player leaves the document (navigation within a single-page
-// app), fall back to normal layout rather than leaving the body locked.
-setInterval(() => { if (target && !target.isConnected) exit(); }, 1000);
 
 window.__diveFillTab = Object.freeze({
   toggle: () => toggle(null),

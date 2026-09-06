@@ -124,3 +124,21 @@ describe("avatar cache", () => {
     expect(setup().cache.get({ ...input, seed: "19" })).toBe(largeSvg);
   });
 });
+
+
+it("draws the standard defaults without starting a generator or scheduling work", async () => {
+  const createWorker = vi.fn();
+  const defer = vi.fn();
+  const cache = new AvatarCache(createWorker, () => null, defer);
+  for (const input of [
+    { kind: "profile", seed: "personal", color: "#7FD8C8" },
+    { kind: "workspace", seed: "layers", color: "#0F6E75" },
+  ] as const) {
+    expect(cache.get(input)).toMatch(/^data:image\/svg\+xml;/);
+    expect(await cache.load(input)).toBe(cache.get(input));
+  }
+  expect(cache.get({ kind: "profile", seed: "personal", color: "#F0B35E" })).toBeUndefined();
+  expect(cache.get({ kind: "profile", seed: "custom", color: "#7FD8C8" })).toBeUndefined();
+  expect(createWorker).not.toHaveBeenCalled();
+  expect(defer).not.toHaveBeenCalled();
+});

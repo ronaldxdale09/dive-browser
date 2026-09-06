@@ -22,6 +22,9 @@ keyring-core = "1"
 futures-util = "0.3"
 # Direct access to the same pinned native CEF types for safe discard.
 cef = { version = "=151.8.1", optional = true }
+# The pinned Tauri workspace disables runtime default features. Explicitly
+# enable CEF's process sandbox; the packaged helper initializes it before CEF.
+tauri-runtime-cef = { git = "https://github.com/tauri-apps/tauri", rev = "713203057982a38d810f64fe0930c9f7670b3a0d", default-features = false, features = ["sandbox"], optional = true }
 async-trait = "0.1"
 tauri = { workspace = true, features = ["unstable", "devtools", "specta", "protocol-asset"] }
 tauri-specta = { workspace = true }
@@ -30,6 +33,7 @@ specta-typescript = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.10"
+shlex = "2.0.1"
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -67,7 +71,7 @@ default = ["cef", "whisper"]
 # quick UI-only build that skips the native transcription toolchain.
 whisper = ["dep:whisper-rs"]
 # Chromium engine (the product). Requires cmake + ninja and the CEF CLI.
-cef = ["tauri/cef", "dep:cef"]
+cef = ["tauri/cef", "dep:cef", "dep:tauri-runtime-cef"]
 # System webview fallback for UI-only development without CEF.
 wry = ["tauri/wry"]
 

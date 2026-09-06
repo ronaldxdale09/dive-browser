@@ -12,14 +12,26 @@
   const installed = [];
   const peers = new Set();
   const tracks = new Set();
+  const remembered = new WeakMap();
+  let notified = false;
   const signal = () => {
-    try { window.__diveActivityChanged(JSON.stringify({ nonce })); }
+    // One receipt invalidates the host's previous evidence. Further changes
+    // need no IPC until a new snapshot arms another discard decision.
+    if (notified) return;
+    try { window.__diveActivityChanged(JSON.stringify({ nonce })); notified = true; }
     catch (_) { known = false; }
   };
   const remember = (set, value, events) => {
     // Weak references prevent the guard from extending a media object's life.
-    set.add(new WeakRef(value));
-    for (const event of events) value.addEventListener(event, signal);
+    // Repeated play/capture calls must not accumulate references to the same
+    // long-lived player or track. The membership index is also weak.
+    let seen = remembered.get(set);
+    if (!seen) { seen = new WeakSet(); remembered.set(set, seen); }
+    if (!seen.has(value)) {
+      seen.add(value);
+      set.add(new WeakRef(value));
+      for (const event of events) value.addEventListener(event, signal);
+    }
     signal();
     return value;
   };
@@ -123,6 +135,10 @@
   }
   observe(document);
   function snapshot() {
+    // Snapshot inspection is synchronous. Re-arm before reading activity so
+    // any subsequent event invalidates this evidence immediately, with no
+    // debounce window in which the host could discard a newly active page.
+    notified = false;
     const reasons = new Set();
     let covered = known && installed.every(([object, name, value]) => object[name] === value);
     if (active(media, (value) => !value.paused && !value.ended)) reasons.add("media");

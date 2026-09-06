@@ -232,8 +232,8 @@ impl Facts {
 
     fn validate(&self, phase: &str, document: &Value) -> Result<(), AppError> {
         for (index, case) in self.cases.iter().enumerate() {
-            let blocked = (index == 1 && phase != "off") || (index == 2 && phase == "workspace");
-            let paused = phase != "off" && (index != 2 || phase == "workspace");
+            let blocked = (index == 1 && phase != "off") || (index == 0 && phase == "workspace");
+            let paused = phase != "off" && index != 2;
             let loaded = document[["control", "tracker", "media"][index]].as_bool();
             if case.requested == 0
                 || case.wrong_type
@@ -302,11 +302,8 @@ async fn verify_phases(
         phase_prefs.block_trackers = phase != "off";
         let phase_rules = if phase == "workspace" {
             vec![rules::Rule {
-                id: "fetch-probe-media".into(),
-                pattern: format!(
-                    "http://{TRACKER}:{}/fixture.wav*",
-                    config.fixture.port().unwrap()
-                ),
+                id: "fetch-probe-script".into(),
+                pattern: format!("{}control.js*", config.fixture),
                 enabled: true,
                 action: rules::RuleAction::Block,
             }]
@@ -351,6 +348,81 @@ async fn verify_phases(
     Ok::<_, AppError>(())
 }
 
+/// Exercise the document path through the production Fetch owner, including
+/// changing a live rule back to privacy-only filtering.
+async fn verify_documents(
+    app: &tauri::AppHandle<Runtime>,
+    workspace: WorkspaceId,
+    session: &CdpSession,
+    prefs: &Prefs,
+    config: &Config,
+) -> Result<(), AppError> {
+    let mut prefs = prefs.clone();
+    prefs.block_trackers = true;
+    prefs.privacy_exceptions.clear();
+    for phase in ["privacy", "mock", "disabled"] {
+        let mut events = session.subscribe();
+        let rules = if phase == "privacy" {
+            vec![]
+        } else {
+            vec![rules::Rule {
+                id: "fetch-document-probe".into(),
+                pattern: format!("{}?document=*", config.fixture),
+                enabled: phase == "mock",
+                action: rules::RuleAction::Mock {
+                    status: 200,
+                    content_type: "text/html".into(),
+                    body: "<!doctype html><title>Document mock verified</title>".into(),
+                },
+            }]
+        };
+        set_policy(app, workspace, session, prefs.clone(), rules).await?;
+        let url = format!("{}?document={phase}", config.fixture);
+        session
+            .call("Page.navigate", json!({"url":url}))
+            .await
+            .map_err(AppError::new)?;
+        let expected = if phase == "mock" {
+            "Document mock verified"
+        } else {
+            "Fetch filter fixture"
+        };
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let expression = format!("location.href === {} && document.readyState === 'complete' && document.title === {}", json!(url), json!(expected));
+                if super::read_probe_value(session, &expression).await? == true {
+                    return Ok::<_, AppError>(());
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        }).await.map_err(AppError::new)??;
+        let mut requested = 0;
+        let mut paused = 0;
+        loop {
+            match events.try_recv() {
+                Ok(event) if event.params["request"]["url"] == url => match event.method.as_str() {
+                    "Network.requestWillBeSent" => requested += 1,
+                    "Fetch.requestPaused" => paused += 1,
+                    _ => {}
+                },
+                Ok(_) => {}
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
+                Err(error) => return Err(AppError::new(error)),
+            }
+        }
+        if requested == 0 || paused != u32::from(phase == "mock") {
+            return Err(AppError::new(format!(
+                "document filtering failed: {phase}, requested={requested}, paused={paused}"
+            )));
+        }
+        println!(
+            "DIVE_FETCH_DOCUMENT: {}",
+            json!({"phase":phase,"requested":requested,"paused":paused})
+        );
+    }
+    Ok(())
+}
+
 pub(crate) async fn verify(app: &tauri::AppHandle<Runtime>, tab: TabId) -> Result<(), AppError> {
     let Some(config) = config()? else {
         return Ok(());
@@ -369,7 +441,10 @@ pub(crate) async fn verify(app: &tauri::AppHandle<Runtime>, tab: TabId) -> Resul
             .ok_or_else(|| AppError::new("probe session missing"))?;
         (workspace, prefs, rules, session)
     };
-    let run = verify_phases(app, workspace, &session, &prefs, &config);
+    let run = async {
+        verify_phases(app, workspace, &session, &prefs, &config).await?;
+        verify_documents(app, workspace, &session, &prefs, &config).await
+    };
     let result = tokio::time::timeout(Duration::from_secs(35), run)
         .await
         .map_err(AppError::new)
@@ -462,7 +537,7 @@ mod tests {
                     34567,
                 )
                 .unwrap();
-            if phase != "off" && (index != 2 || phase == "workspace") {
+            if phase != "off" && index != 2 {
                 facts
                     .observe(
                         &event(
@@ -474,7 +549,7 @@ mod tests {
                     )
                     .unwrap();
             }
-            let blocked = (index == 1 && phase != "off") || (index == 2 && phase == "workspace");
+            let blocked = (index == 1 && phase != "off") || (index == 0 && phase == "workspace");
             document[["control", "tracker", "media"][index]] = json!(!blocked);
             facts
                 .observe(

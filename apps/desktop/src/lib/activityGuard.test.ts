@@ -118,6 +118,55 @@ describe("discard activity guard", () => {
     expect(snapshot().known).toBe(false);
   });
 
+  it("tracks a repeatedly played media object once without losing activity signals", () => {
+    const frame = document.createElement("iframe");
+    document.body.append(frame);
+    const page = frame.contentWindow as Page;
+    const mediaPrototype = (page as unknown as { HTMLMediaElement: typeof HTMLMediaElement }).HTMLMediaElement.prototype;
+    mediaPrototype.play = () => Promise.resolve();
+    const { snapshot, signals } = install(page);
+    const video = page.document.createElement("video");
+    let paused = false;
+    Object.defineProperties(video, { paused: { get: () => paused }, ended: { value: false } });
+    // Each reference registration attaches one listener for each media event.
+    // Counting registrations catches growth even while the player stays alive.
+    const nativeAdd = video.addEventListener;
+    let registrations = 0;
+    video.addEventListener = function (...args: Parameters<typeof nativeAdd>) {
+      registrations += 1;
+      return nativeAdd.apply(this, args);
+    };
+    for (let i = 0; i < 100; i++) void video.play();
+    expect(registrations).toBe(3);
+    expect(snapshot().reasons).toContain("media");
+    const before = signals.length;
+    paused = true;
+    video.dispatchEvent(new Event("pause"));
+    expect(signals.length).toBeGreaterThan(before);
+    expect(snapshot().reasons).not.toContain("media");
+  });
+
+  it("coalesces activity receipts until a fresh snapshot, then invalidates the next decision immediately", async () => {
+    const { page, snapshot, signals } = install();
+    // Initial installation already tells the host that evidence changed.
+    const initial = signals.length;
+    for (let i = 0; i < 50; i++) {
+      page.document.body.setAttribute("data-tick", String(i));
+      await Promise.resolve();
+    }
+    expect(signals).toHaveLength(initial);
+    expect(snapshot()).toMatchObject({ known: true, reasons: [] });
+    page.document.body.setAttribute("data-tick", "after-probe");
+    await Promise.resolve();
+    expect(signals).toHaveLength(initial + 1);
+    // A further probe arms a new decision. Input signals synchronously,
+    // without waiting for a timer or MutationObserver delivery.
+    snapshot();
+    page.document.body.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(signals).toHaveLength(initial + 2);
+    expect(snapshot().reasons).toContain("unsaved_form");
+  });
+
   it("protects unload handlers and closed shadow content", () => {
     const { page, snapshot } = install();
     page.onbeforeunload = () => "unsaved";

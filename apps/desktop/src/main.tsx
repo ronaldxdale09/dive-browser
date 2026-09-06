@@ -1,11 +1,9 @@
-import { lazy, StrictMode, Suspense } from "react";
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { ChromeRoot } from "./components/ChromeRoot";
 import { ChromeErrorBoundary } from "./components/ChromeErrorBoundary";
 import { startStartupTelemetry } from "./lib/startup";
 import "./styles.css";
-
-const App = lazy(() => import("./App").then(({ App }) => ({ default: App })));
-const Popout = lazy(() => import("./components/Popout").then(({ Popout }) => ({ default: Popout })));
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");
@@ -20,9 +18,7 @@ if (!popout) {
 createRoot(root).render(
   <StrictMode>
     <ChromeErrorBoundary>
-      <Suspense fallback={<div className="h-full bg-ground" aria-label="Loading Dive" />}>
-        {popout ? <Popout tabId={popout} /> : <App />}
-      </Suspense>
+      <ChromeRoot tabId={popout} />
     </ChromeErrorBoundary>
   </StrictMode>,
 );

@@ -318,19 +318,29 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     // error-boundary retry) would race past the `??=` guards below; share it.
     booting ??= (async () => {
       try {
-        unlisten ??= await events.stateChanged.listen((e) => get().applyEvent(e.payload));
-        unlistenLoad ??= await events.tabLoad.listen((e) => get().applyLoad(e.payload));
-        unlistenCrash ??= await events.tabCrashed.listen((e) => get().applyCrash(e.payload));
-        unlistenPermission ??= await events.permissionAsked.listen((e) => get().applyPermissionAsked(e.payload));
-        unlistenPermissionDismissed ??= await events.permissionDismissed.listen((e) => set((s) => ({permissionRequests: withoutRequest(s.permissionRequests,e.payload.tab_id,e.payload)})));
-        unlistenWindowChanged ??= await events.tabWindowChanged.listen((e) => set(reduceWindowChange(get(), e.payload.tab, e.payload.detached)));
-        unlistenDownload ??= await events.downloadNotice.listen((e) => {
-          const d = e.payload;
-          useDownloads.getState().apply(d);
-          const name = d.path.split("/").pop() ?? d.url;
-          get().notify(d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : `Download failed: ${name}`, 5000);
-        });
-        await Promise.all([listenConsole(), listenNetwork(), listenPrivacy(), usePrivacy.getState().loadInfo()]);
+        // Register independent feeds together, then wait for the entire batch.
+        // An early rejection must not release booting while other listeners are
+        // still pending, or a retry could subscribe to those feeds twice.
+        const subscriptions = await Promise.allSettled([
+          (async () => { unlisten ??= await events.stateChanged.listen((e) => get().applyEvent(e.payload)); })(),
+          (async () => { unlistenLoad ??= await events.tabLoad.listen((e) => get().applyLoad(e.payload)); })(),
+          (async () => { unlistenCrash ??= await events.tabCrashed.listen((e) => get().applyCrash(e.payload)); })(),
+          (async () => { unlistenPermission ??= await events.permissionAsked.listen((e) => get().applyPermissionAsked(e.payload)); })(),
+          (async () => { unlistenPermissionDismissed ??= await events.permissionDismissed.listen((e) => set((s) => ({permissionRequests: withoutRequest(s.permissionRequests,e.payload.tab_id,e.payload)}))); })(),
+          (async () => { unlistenWindowChanged ??= await events.tabWindowChanged.listen((e) => set(reduceWindowChange(get(), e.payload.tab, e.payload.detached))); })(),
+          (async () => {
+            unlistenDownload ??= await events.downloadNotice.listen((e) => {
+              const d = e.payload;
+              useDownloads.getState().apply(d);
+              const name = d.path.split("/").pop() ?? d.url;
+              get().notify(d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : `Download failed: ${name}`, 5000);
+            });
+          })(),
+          listenConsole(), listenNetwork(), listenPrivacy(), usePrivacy.getState().loadInfo(),
+        ]);
+        for (const result of subscriptions) {
+          if (result.status === "rejected") throw result.reason;
+        }
         set({ ...fromSnapshot(await ipc.snapshot()), ready: true, error: null });
         void get().refreshCounts();
       } catch (e) {

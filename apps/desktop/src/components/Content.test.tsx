@@ -8,7 +8,7 @@ import { Content, describePermission } from "./Content";
 
 // The welcome screen, the device simulator and its picker have tests of
 // their own and lean on browser APIs jsdom lacks.
-vi.mock("./Welcome", () => ({ Welcome: () => null }));
+vi.mock("./Welcome", () => ({ Welcome: () => <div>Welcome fixture</div> }));
 vi.mock("./simulator/DeviceStage", () => ({ DeviceStage: () => null }));
 vi.mock("./simulator/DevicePicker", () => ({ DevicePicker: () => null }));
 
@@ -40,6 +40,24 @@ afterEach(() => {
   resetContentCover();
   useBrowser.setState(initial, true);
   vi.restoreAllMocks();
+});
+
+describe("Content startup", () => {
+  it("does not mount the welcome artwork while the session snapshot is pending", async () => {
+    useBrowser.setState({ ready: false, tabs: [], activeTab: null });
+    render(<Content />);
+    await act(async () => { await vi.dynamicImportSettled(); });
+    expect(screen.queryByText("Welcome fixture")).toBeNull();
+    act(() => useBrowser.setState({ ready: true, tabs: [tab], activeTab: tab.id }));
+    expect(screen.queryByText("Welcome fixture")).toBeNull();
+  });
+
+  it("shows the start page when a loaded session has no active tab", async () => {
+    useBrowser.setState({ ready: false, tabs: [], activeTab: null });
+    render(<Content />);
+    act(() => useBrowser.setState({ ready: true }));
+    expect(await screen.findByText("Welcome fixture")).toBeTruthy();
+  });
 });
 
 describe("Content error panel", () => {

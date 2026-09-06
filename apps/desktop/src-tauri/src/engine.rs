@@ -371,6 +371,24 @@ fn popout_content_bounds(width: f64, height: f64) -> Bounds {
     }
 }
 
+/// Give restored pages a usable viewport before React reports exact layout.
+/// The chrome later owns panel/split geometry; starting at 1x1 makes sites
+/// initialize against a tiny viewport and immediately repeat responsive layout.
+fn main_content_bounds(width: f64, height: f64, expanded_rail: bool) -> Bounds {
+    // Match App's 40px title row, 44px toolbar, and Rail's responsive policy.
+    let rail = if expanded_rail && width >= 960.0 {
+        208.0
+    } else {
+        52.0
+    };
+    Bounds {
+        x: rail,
+        y: 84.0,
+        width: (width - rail).max(1.0),
+        height: (height - 84.0).max(1.0),
+    }
+}
+
 /// Destroys a window on drop unless disarmed: the popout builder's rollback.
 struct DestroyOnDrop(Option<Window<Runtime>>);
 
@@ -404,17 +422,12 @@ pub fn popout_tab(label: &str) -> Option<TabId> {
 }
 
 impl TabHost {
-    fn new(window: Window<Runtime>, profiles_root: PathBuf) -> Self {
+    fn new(window: Window<Runtime>, profiles_root: PathBuf, bounds: Bounds) -> Self {
         Self {
             window,
             views: HashMap::new(),
             cdp: HashMap::new(),
-            bounds: Bounds {
-                x: 0.0,
-                y: 0.0,
-                width: 1.0,
-                height: 1.0,
-            },
+            bounds,
             active: None,
             profiles_root,
             covered: false,
@@ -1468,7 +1481,15 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
     crate::titlebar::keep_drags_in_chrome_soon(&window);
 
     let state = app.state::<AppState>();
-    *lock(&state.host) = Some(TabHost::new(window, crate::state::profiles_root()));
+    let size = window
+        .inner_size()?
+        .to_logical::<f64>(window.scale_factor()?);
+    let bounds = main_content_bounds(
+        size.width,
+        size.height,
+        state.prefs.get(&state).rail_expanded,
+    );
+    *lock(&state.host) = Some(TabHost::new(window, crate::state::profiles_root(), bounds));
 
     forward_events(app.handle().clone(), state.bus.subscribe());
     Ok(())
@@ -1623,6 +1644,22 @@ mod tests {
                 height: 616.0,
             }
         );
+    }
+
+    #[test]
+    fn main_page_has_a_usable_initial_viewport_inside_the_chrome() {
+        for (width, height, expanded, rail) in [
+            (1280.0, 820.0, true, 208.0),
+            (1280.0, 820.0, false, 52.0),
+            (720.0, 480.0, true, 52.0),
+        ] {
+            let bounds = super::main_content_bounds(width, height, expanded);
+            assert!((bounds.x - rail).abs() < f64::EPSILON);
+            assert!((bounds.y - 84.0).abs() < f64::EPSILON);
+            assert!((bounds.x + bounds.width - width).abs() < f64::EPSILON);
+            assert!((bounds.y + bounds.height - height).abs() < f64::EPSILON);
+            assert!(bounds.width >= 668.0 && bounds.height >= 396.0);
+        }
     }
 
     #[test]

@@ -55,6 +55,30 @@ pub struct AppBrowser {
     app: AppHandle<Runtime>,
 }
 
+/// Keep a renderer admitted for the entire tool operation, including gaps
+/// between polling calls. Dropping/cancelling the operation releases it.
+struct ToolSession {
+    session: CdpSession,
+    _pending: crate::activity::Pending,
+}
+
+impl ToolSession {
+    fn new(session: CdpSession, activity: &Arc<crate::activity::Registry>, tab: TabId) -> Self {
+        Self {
+            session,
+            _pending: activity.pending(tab),
+        }
+    }
+}
+
+impl std::ops::Deref for ToolSession {
+    type Target = CdpSession;
+
+    fn deref(&self) -> &Self::Target {
+        &self.session
+    }
+}
+
 impl AppBrowser {
     /// Wrap the app handle.
     pub fn new(app: AppHandle<Runtime>) -> Self {
@@ -65,14 +89,18 @@ impl AppBrowser {
         self.app.state::<AppState>()
     }
 
-    fn session(&self, tab: TabId) -> Result<dive_cdp::CdpSession, BrowserError> {
+    fn session(&self, tab: TabId) -> Result<ToolSession, BrowserError> {
         let state = self.state();
         let host = lock(&state.host);
         let host = host
             .as_ref()
             .ok_or_else(|| BrowserError::Other("engine not ready".into()))?;
-        host.cdp(tab)
-            .ok_or_else(|| BrowserError::TabNotFound(tab.to_string()))
+        let session = host
+            .cdp(tab)
+            .ok_or_else(|| BrowserError::TabNotFound(tab.to_string()))?;
+        // The host lock is also held by request_discard. Admit the operation
+        // before releasing it, so eviction cannot race session acquisition.
+        Ok(ToolSession::new(session, &state.activity, tab))
     }
 
     /// Run `f` on the main thread and wait for its answer.
@@ -217,10 +245,20 @@ impl From<locator::Failure> for BrowserError {
     }
 }
 
+/// A wait may cross a document replacement; retry only known transient CDP
+/// readiness failures, and never retry a confirmed closed session.
+fn retry_wait_during_navigation(error: &locator::Failure, closed: bool) -> bool {
+    !closed
+        && matches!(error, locator::Failure::Engine(message) if matches!(message.as_str(),
+        "cdp error -32000: Inspected target navigated or closed"
+        | "cdp error -32000: Not attached to an active page"
+        | "cdp error -32000: Execution context was destroyed."))
+}
+
 impl AppBrowser {
     /// A live CDP session for `tab`, creating the view if it has been
     /// discarded.
-    async fn session_for(&self, tab: TabId) -> Result<CdpSession, BrowserError> {
+    async fn session_for(&self, tab: TabId) -> Result<ToolSession, BrowserError> {
         self.ensure_view(tab).await?;
         self.session(tab)
     }
@@ -228,7 +266,7 @@ impl AppBrowser {
     /// A session that can accept real input. CEF stops acknowledging `Input`
     /// events while a native child view is hidden, so a user-like action must
     /// bring its target tab forward first.
-    async fn action_session_for(&self, tab: TabId) -> Result<CdpSession, BrowserError> {
+    async fn action_session_for(&self, tab: TabId) -> Result<ToolSession, BrowserError> {
         self.ensure_view(tab).await?;
         if !self.on_screen(tab) {
             self.activate(tab).await?;
@@ -843,31 +881,42 @@ impl Browser for AppBrowser {
             .or_else(|| params.url_includes.clone());
         self.tracked(tab, "page_wait_for", described, async {
             let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
-            let mut unmet = Vec::new();
             loop {
-                unmet.clear();
-                let page = locator::page(&session, 0).await?;
-                if params.load && page["loading"] == Value::Bool(true) {
-                    unmet.push("still loading".to_owned());
-                }
-                if let Some(text) = &params.text
-                    && !locator::contains_text(&session, text).await?
-                {
-                    unmet.push(format!("text {text:?} not on the page"));
-                }
-                if let Some(fragment) = &params.url_includes
-                    && !page["url"].as_str().unwrap_or_default().contains(fragment)
-                {
-                    unmet.push(format!("url does not contain {fragment:?}"));
-                }
-                if let Some(selector) = &params.locator {
-                    // An unparseable locator can never match, so fail now
-                    // rather than after the whole timeout.
-                    let count = locator::count(&session, selector).await?;
-                    if count == 0 {
-                        unmet.push(format!("nothing matches {selector:?}"));
+                let probe = async {
+                    let mut unmet = Vec::new();
+                    let page = locator::page(&session, 0).await?;
+                    if params.load && page["loading"] == Value::Bool(true) {
+                        unmet.push("still loading".to_owned());
                     }
+                    if let Some(text) = &params.text
+                        && !locator::contains_text(&session, text).await?
+                    {
+                        unmet.push(format!("text {text:?} not on the page"));
+                    }
+                    if let Some(fragment) = &params.url_includes
+                        && !page["url"].as_str().unwrap_or_default().contains(fragment)
+                    {
+                        unmet.push(format!("url does not contain {fragment:?}"));
+                    }
+                    if let Some(selector) = &params.locator {
+                        // An unparseable locator can never match, so fail now
+                        // rather than after the whole timeout.
+                        let count = locator::count(&session, selector).await?;
+                        if count == 0 {
+                            unmet.push(format!("nothing matches {selector:?}"));
+                        }
+                    }
+                    Ok::<_, locator::Failure>((page, unmet))
                 }
+                .await;
+                let (page, unmet) = match probe {
+                    Ok(status) => status,
+                    Err(error) if retry_wait_during_navigation(&error, session.is_closed()) => (
+                        Value::Null,
+                        vec!["navigation changed the document during the wait".into()],
+                    ),
+                    Err(error) => return Err(error.into()),
+                };
                 if unmet.is_empty() {
                     return Ok(json!({
                         "matched": true,
@@ -1345,4 +1394,83 @@ fn load_or_create_token() -> std::io::Result<String> {
     #[cfg(not(unix))]
     std::fs::write(&path, &token)?;
     Ok(token)
+}
+
+#[cfg(test)]
+mod tool_session_tests {
+    use super::*;
+
+    #[test]
+    fn waits_retry_only_known_navigation_errors_on_live_sessions() {
+        for message in [
+            "cdp error -32000: Inspected target navigated or closed",
+            "cdp error -32000: Not attached to an active page",
+            "cdp error -32000: Execution context was destroyed.",
+        ] {
+            let error = locator::Failure::Engine(message.into());
+            assert!(retry_wait_during_navigation(&error, false));
+            assert!(!retry_wait_during_navigation(&error, true));
+        }
+        for message in [
+            "session closed",
+            "transport failure: disconnected",
+            "script exception",
+            "cdp call timed out: Runtime.evaluate",
+        ] {
+            assert!(!retry_wait_during_navigation(
+                &locator::Failure::Engine(message.into()),
+                false
+            ));
+        }
+        assert!(!retry_wait_during_navigation(
+            &locator::Failure::Invalid {
+                locator: "[".into(),
+                reason: "invalid selector".into(),
+            },
+            false
+        ));
+    }
+
+    struct IdleTransport;
+    impl dive_cdp::Transport for IdleTransport {
+        fn send(&self, _: &str) -> Result<(), dive_cdp::CdpError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn concurrent_tools_protect_the_renderer_until_the_last_operation_ends() {
+        let activity = Arc::new(crate::activity::Registry::default());
+        let tab = TabId::new();
+        let nonce = activity.begin(tab);
+        activity.ready(tab, &nonce);
+        let prior = activity.ticket(tab).unwrap();
+        let one = ToolSession::new(CdpSession::new(IdleTransport), &activity, tab);
+        let two = ToolSession::new(CdpSession::new(IdleTransport), &activity, tab);
+        assert!(activity.ticket(tab).is_none());
+        assert!(!activity.begin_close(tab, &prior));
+        drop(one);
+        assert!(activity.ticket(tab).is_none());
+        drop(two);
+        let current = activity.ticket(tab).unwrap();
+        assert_ne!(current, prior);
+        assert!(activity.begin_close(tab, &current));
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_wait_releases_its_renderer_protection() {
+        let activity = Arc::new(crate::activity::Registry::default());
+        let tab = TabId::new();
+        let nonce = activity.begin(tab);
+        activity.ready(tab, &nonce);
+        let session = ToolSession::new(CdpSession::new(IdleTransport), &activity, tab);
+        let wait = tokio::spawn(async move {
+            let _session = session;
+            std::future::pending::<()>().await;
+        });
+        assert!(activity.ticket(tab).is_none());
+        wait.abort();
+        assert!(wait.await.unwrap_err().is_cancelled());
+        assert!(activity.ticket(tab).is_some());
+    }
 }

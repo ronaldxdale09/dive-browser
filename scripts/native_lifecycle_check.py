@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -29,7 +30,18 @@ def main():
             if index != 1:
                 env.pop('DIVE_WELCOME_PROBE', None)
             if 'DIVE_AVATAR_PROBE' in env:
-                env['DIVE_AVATAR_PROBE'] = 'cold' if index == 1 else 'warm'
+                # Standard defaults paint without a worker, even in a fresh
+                # profile. Then exercise actual cold custom generation and
+                # its persisted warm reuse in the same disposable profile.
+                env['DIVE_AVATAR_PROBE'] = ('bundled', 'warm', 'cold', 'warm')[index - 1]
+                if index == 3:
+                    with sqlite3.connect(Path(profile) / 'dive.db') as db:
+                        changed = db.execute("UPDATE profiles SET avatar = ? WHERE avatar = ?",
+                                             ('native-avatar-cold', 'personal')).rowcount
+                        db.execute("UPDATE workspaces SET icon = ? WHERE icon = ?",
+                                   ('native-workspace-cold', 'layers'))
+                        if changed < 1:
+                            raise RuntimeError('disposable profile has no default avatar to customize')
             log = evidence / f'{index}-{mode}.log'
             started = time.monotonic()
             sampled = False
