@@ -586,25 +586,20 @@ fn finish_in(
 
 fn finish_job(job: &jobs::Job, source: &Path, req: &ExportRequest) -> AppResult<RecordingResult> {
     let ffmpeg = ffmpeg_path().ok_or_else(|| AppError::new("ffmpeg not found"))?;
+    // "clip (edited).mp4", then "clip (edited) (2).mp4": a name a person can
+    // read in Finder, rather than a timestamp and a job id.
     let stem = format!(
-        "{}-edited-{}",
+        "{} (edited)",
         source
             .file_stem()
-            .map_or_else(|| "dive".into(), |s| s.to_string_lossy().into_owned(),),
-        dive_core::Timestamp::now()
-            .to_rfc3339()
-            .replace([':', '.'], "-")
+            .map_or_else(|| "dive".into(), |s| s.to_string_lossy().into_owned(),)
     );
     let gif = req.format.eq_ignore_ascii_case("gif");
     // The editor requests audio preservation for MP4 even when the recording
     // was made with its microphone off. Only map a stream that actually exists.
     let with_audio =
         req.with_audio && !gif && !req.segments.is_empty() && probe_job(job, source)?.3;
-    let name = format!(
-        "{stem}-{}.{}",
-        dive_core::TabId::new(),
-        if gif { "gif" } else { "mp4" }
-    );
+    let name = job.free_name(&stem, if gif { "gif" } else { "mp4" });
     let path = job.output(if gif { "finished.gif" } else { "finished.mp4" });
     let mut cmd = Command::new(&ffmpeg);
     cmd.args(["-hide_banner", "-loglevel", "error", "-y"]);
@@ -946,7 +941,7 @@ mod tests {
                     .expect("fixture entry")
                     .file_name()
                     .to_string_lossy()
-                    .contains("-edited-"))
+                    .contains(" (edited)"))
         );
     }
 

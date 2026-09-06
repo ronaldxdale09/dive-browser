@@ -26,6 +26,13 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- DiveScreen exports are named "clip (edited).mp4", counting up on a clash,
+  instead of carrying a timestamp and a job id.
+- MCP and agent page input fail at once with a reason while a dialog covers
+  the page, instead of timing out; local providers (Ollama, LM Studio) select
+  an installed model when the configured default is missing.
+- The permission bar keeps its explanation in a tooltip; the saved-recording
+  footer stays on one line.
 - The tab context menu closes on Escape and on a press elsewhere.
 - The palette no longer lists open pages under History as well as Tabs.
 - "About Dive" opens Settings → About instead of the stock macOS panel.

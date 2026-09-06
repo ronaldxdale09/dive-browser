@@ -387,6 +387,27 @@ impl Job {
         result
     }
     /// Publish the final media last, so Library never observes an unfinished file.
+    /// A file name under the captures root that neither the video nor its
+    /// preview companion occupies yet: `stem.ext`, then `stem (2).ext`, and
+    /// so on. Publishing still refuses to overwrite, so a race loses cleanly.
+    pub fn free_name(&self, stem: &str, ext: &str) -> String {
+        let previews = self.root.join(crate::screencast::PREVIEW_DIR);
+        let taken = |name: &str| {
+            self.root.join(name).exists()
+                || previews
+                    .join(Path::new(name).with_extension("webm"))
+                    .exists()
+        };
+        let first = format!("{stem}.{ext}");
+        if !taken(&first) {
+            return first;
+        }
+        (2..10_000)
+            .map(|n| format!("{stem} ({n}).{ext}"))
+            .find(|name| !taken(name))
+            .unwrap_or(first)
+    }
+
     pub fn publish(
         &self,
         output: &Path,
@@ -566,6 +587,29 @@ mod tests {
             events: None,
             preview: None,
         }
+    }
+
+    #[test]
+    fn free_names_count_past_the_video_and_its_companion() {
+        let root = tempfile::tempdir().unwrap();
+        let jobs = Registry::default();
+        let id = jobs.begin(root.path(), "chrome").unwrap();
+        jobs.append("chrome", &id, 0, b"frames").unwrap();
+        let job = jobs.claim("chrome", &id).unwrap();
+        assert_eq!(job.free_name("clip (edited)", "mp4"), "clip (edited).mp4");
+        std::fs::write(root.path().join("clip (edited).mp4"), b"v").unwrap();
+        assert_eq!(
+            job.free_name("clip (edited)", "mp4"),
+            "clip (edited) (2).mp4"
+        );
+        let previews = root.path().join(crate::screencast::PREVIEW_DIR);
+        std::fs::create_dir_all(&previews).unwrap();
+        std::fs::write(previews.join("clip (edited) (2).webm"), b"p").unwrap();
+        assert_eq!(
+            job.free_name("clip (edited)", "mp4"),
+            "clip (edited) (3).mp4"
+        );
+        job.settle(Err(AppError::new("done"))).ok();
     }
 
     #[test]
