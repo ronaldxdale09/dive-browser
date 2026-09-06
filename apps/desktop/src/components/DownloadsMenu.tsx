@@ -9,6 +9,7 @@ import { FeatureButton } from "./FeatureBar";
 import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
+import { errorMessage } from "../lib/errors";
 
 /** Downloads: what this session saved, where it went, and a way to the file. */
 export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
@@ -37,7 +38,7 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
   }, [open]);
 
   const reveal = (path: string | null) => {
-    void ipc.downloadsReveal(path).catch((e: unknown) => useBrowser.setState({ error: e instanceof Error ? e.message : String(e) }));
+    void ipc.downloadsReveal(path).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
   };
 
   return (

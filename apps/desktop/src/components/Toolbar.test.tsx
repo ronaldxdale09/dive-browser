@@ -31,7 +31,6 @@ beforeEach(() => {
     open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false, menu: false, defaultBrowser: false, extensions: false, subtitles: false },
     error: null,
     notice: null,
-    annotating: null,
     capturing: false,
     recordingTab: null,
     zoom: {},
@@ -257,7 +256,6 @@ describe("Toolbar", () => {
         tab.workspace_id,
         "dive://capture?src=%2Ftmp%2Fcapture.png&url=https%3A%2F%2Fexample.com%2Fdocs&title=Example",
       );
-      expect(useBrowser.getState().annotating).toBeNull();
     });
   });
 

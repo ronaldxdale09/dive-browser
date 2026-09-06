@@ -35,6 +35,7 @@ export class Renderer {
   draw(ctx: CanvasRenderingContext2D, project: Project, video: VideoSource | null, tMs: number, smoothed: CursorSample[], raw: CursorSample[], opts: { width: number; height: number; playing: boolean }) {
     const { width: W, height: H } = opts;
     const e = project.editor;
+    this.pruneImages(e.annotations);
     ctx.save();
     ctx.clearRect(0, 0, W, H);
     this.drawBackground(ctx, e.wallpaper, W, H, e.blurBackground);
@@ -104,6 +105,14 @@ export class Renderer {
       this.drawAnnotation(ctx, a, tMs, W, H);
     }
     ctx.restore();
+  }
+
+  /** Drop decoded images no annotation refers to any more. */
+  private pruneImages(annotations: AnnotationRegion[]) {
+    if (this.images.size === 0) return;
+    const used = new Set<string>();
+    for (const a of annotations) if (a.image) used.add(a.image);
+    for (const key of this.images.keys()) if (!used.has(key)) this.images.delete(key);
   }
 
   private focusOf(z: ZoomRegion, tMs: number, project: Project, smoothed: CursorSample[]): { cx: number; cy: number } {

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ipc } from "../../lib/ipc";
 import { useBrowser } from "../../store/browser";
 import { Group } from "../SettingsFields";
+import { errorMessage } from "../../lib/errors";
 
 /** Keyed by profile so late loads and writes cannot leak into another profile. */
 export function KeepSitesActive() {
@@ -25,7 +26,7 @@ function Sites({ profile }: { profile: string }) {
     try {
       setSites(await ipc.keepSiteSet(profile, site, keep));
       if (keep) setUrl("");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    } catch (cause) { setError(errorMessage(cause)); }
     finally { setBusy(false); }
   }
   return <Group title="Keep sites active" description="Inactive Today tabs may unload after one hour and restore when opened. Pinned tabs and pages with ongoing activity stay active. These site exceptions apply to this profile, including every page at the same address and port.">

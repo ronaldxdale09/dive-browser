@@ -5,6 +5,7 @@ import { listenNetwork, useNetwork } from "./network";
 import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
 import { useDownloads } from "./downloads";
 import type { CoreEvent, Decision, Duration, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
+import { errorMessage } from "../lib/errors";
 
 export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser" | "subtitles";
 /** The sections of the library dialog. */
@@ -81,9 +82,8 @@ interface BrowserState {
   recordingTab: string | null;
   screencastToggle: () => Promise<void>;
   notice: string | null;
-  /** Path of the capture currently open in the annotator. */
-  annotating: string | null;
-  setAnnotating: (path: string | null) => void;
+  /** Show a transient toast; a newer notice replaces the old one and its timer. */
+  notify: (text: string, ms?: number) => void;
   reorderTabs: (ordered: string[]) => Promise<void>;
   setPinned: (id: string, pinned: boolean) => Promise<void>;
   activateWorkspace: (id: string) => Promise<void>;
@@ -239,6 +239,12 @@ let unlistenLoad: (() => void) | null = null;
 let unlistenCrash: (() => void) | null = null;
 let unlistenPermission: (() => void) | null = null;
 let unlistenPermissionDismissed: (() => void) | null = null;
+let unlistenWindowChanged: (() => void) | null = null;
+let unlistenDownload: (() => void) | null = null;
+/** The boot in flight, so a remount that boots again waits for it instead of subscribing twice. */
+let booting: Promise<void> | null = null;
+/** The one toast timer: a newer notice cancels the older one's clearing. */
+let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useBrowser = create<BrowserState>((set, get) => ({
   ready: false,
@@ -285,7 +291,14 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   counts: {},
   error: null,
   notice: null,
-  annotating: null,
+  notify: (text, ms = 3000) => {
+    if (noticeTimer) clearTimeout(noticeTimer);
+    set({ notice: text });
+    noticeTimer = setTimeout(() => {
+      noticeTimer = null;
+      set({ notice: null });
+    }, ms);
+  },
   capturing: false,
   zoom: {},
   loading: {},
@@ -297,31 +310,36 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     set((s) => reduceLoad(s, load));
   },
   applyCrash: (crash) => set((s) => reduceCrash(s, crash)),
-  setAnnotating: (path) => set({ annotating: path }),
   editing: null,
   setEditing: (editing) => set({ editing }),
 
-  boot: async () => {
-    try {
-      unlisten ??= await events.stateChanged.listen((e) => get().applyEvent(e.payload));
-      unlistenLoad ??= await events.tabLoad.listen((e) => get().applyLoad(e.payload));
-      unlistenCrash ??= await events.tabCrashed.listen((e) => get().applyCrash(e.payload));
-      unlistenPermission ??= await events.permissionAsked.listen((e) => get().applyPermissionAsked(e.payload));
-      unlistenPermissionDismissed ??= await events.permissionDismissed.listen((e) => set((s) => ({permissionRequests: withoutRequest(s.permissionRequests,e.payload.tab_id,e.payload)})));
-      await events.tabWindowChanged.listen((e) => set(reduceWindowChange(get(), e.payload.tab, e.payload.detached)));
-      await events.downloadNotice.listen((e) => {
-        const d = e.payload;
-        useDownloads.getState().apply(d);
-        const name = d.path.split("/").pop() ?? d.url;
-        set({ notice: d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : `Download failed: ${name}` });
-        setTimeout(() => set({ notice: null }), 5000);
-      });
-      await Promise.all([listenConsole(), listenNetwork(), listenPrivacy(), usePrivacy.getState().loadInfo()]);
-      set({ ...fromSnapshot(await ipc.snapshot()), ready: true, error: null });
-      void get().refreshCounts();
-    } catch (e) {
-      set({ error: String(e), ready: true });
-    }
+  boot: () => {
+    // A second boot while the first is still subscribing (StrictMode, an
+    // error-boundary retry) would race past the `??=` guards below; share it.
+    booting ??= (async () => {
+      try {
+        unlisten ??= await events.stateChanged.listen((e) => get().applyEvent(e.payload));
+        unlistenLoad ??= await events.tabLoad.listen((e) => get().applyLoad(e.payload));
+        unlistenCrash ??= await events.tabCrashed.listen((e) => get().applyCrash(e.payload));
+        unlistenPermission ??= await events.permissionAsked.listen((e) => get().applyPermissionAsked(e.payload));
+        unlistenPermissionDismissed ??= await events.permissionDismissed.listen((e) => set((s) => ({permissionRequests: withoutRequest(s.permissionRequests,e.payload.tab_id,e.payload)})));
+        unlistenWindowChanged ??= await events.tabWindowChanged.listen((e) => set(reduceWindowChange(get(), e.payload.tab, e.payload.detached)));
+        unlistenDownload ??= await events.downloadNotice.listen((e) => {
+          const d = e.payload;
+          useDownloads.getState().apply(d);
+          const name = d.path.split("/").pop() ?? d.url;
+          get().notify(d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : `Download failed: ${name}`, 5000);
+        });
+        await Promise.all([listenConsole(), listenNetwork(), listenPrivacy(), usePrivacy.getState().loadInfo()]);
+        set({ ...fromSnapshot(await ipc.snapshot()), ready: true, error: null });
+        void get().refreshCounts();
+      } catch (e) {
+        set({ error: String(e), ready: true });
+      } finally {
+        booting = null;
+      }
+    })();
+    return booting;
   },
 
   openTab: async (url) => {
@@ -352,7 +370,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       await ipc.tabActivate(id);
       set({ error: null });
     } catch (e) {
-      set((s) => ({ activeTab: s.activeTab === id ? prev : s.activeTab, error: message(e) }));
+      set((s) => ({ activeTab: s.activeTab === id ? prev : s.activeTab, error: errorMessage(e) }));
     }
   },
   navigate: async (url) => {
@@ -372,7 +390,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     } catch (e) {
       set((s) => ({
         tabs: s.tabs.map((t) => (t.id === id ? { ...t, url: prevUrl ?? t.url } : t)),
-        error: message(e),
+        error: errorMessage(e),
       }));
     }
   },
@@ -400,7 +418,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       if (outcome === "no-video") set({ error: "No video on this page to fill the tab with." });
       else if (outcome === "unavailable") set({ error: "Fill tab is off for this page. Turn it on in Settings › General." });
     } catch (e) {
-      set({ error: e instanceof Error ? e.message : String(e) });
+      set({ error: errorMessage(e) });
     }
   },
   print: async () => {
@@ -420,8 +438,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     if (!id) return;
     await run(set, async () => {
       const path = await ipc.tabBugReport(id);
-      set({ notice: `Bug report copied · saved ${path.split("/").pop() ?? path}` });
-      setTimeout(() => set({ notice: null }), 5000);
+      get().notify(`Bug report copied · saved ${path.split("/").pop() ?? path}`, 5000);
     });
   },
   devtools: async () => {
@@ -451,10 +468,9 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       if (tab?.url) params.set("url", tab.url);
       if (tab?.title) params.set("title", tab.title);
       if (workspace) await ipc.tabOpen(workspace, `dive://capture?${params.toString()}`);
-      set({ annotating: null, notice: `Captured ${path.split("/").pop() ?? path}` });
-      setTimeout(() => set({ notice: null }), 4000);
+      get().notify(`Captured ${path.split("/").pop() ?? path}`, 4000);
     } catch (cause) {
-      set({ error: message(cause) });
+      set({ error: errorMessage(cause) });
     } finally {
       set({ capturing: false });
     }
@@ -469,7 +485,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       await ipc.tabReorder(ws, ordered);
       set({ error: null });
     } catch (e) {
-      set({ tabs: prevTabs, error: message(e) });
+      set({ tabs: prevTabs, error: errorMessage(e) });
     }
   },
   setPinned: async (id, pinned) => run(set, () => ipc.tabSetPinned(id, pinned)),
@@ -483,7 +499,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     try {
       await ipc.workspaceActivate(id);
     } catch (e) {
-      set((s) => ({ activeWorkspace: s.activeWorkspace === id ? prev : s.activeWorkspace, error: message(e) }));
+      set((s) => ({ activeWorkspace: s.activeWorkspace === id ? prev : s.activeWorkspace, error: errorMessage(e) }));
       return;
     }
     await run(set, async () => set(fromSnapshot(await ipc.snapshot())));
@@ -505,7 +521,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       await ipc.workspaceReorder(ordered);
       set({ error: null });
     } catch (e) {
-      set({ workspaces: prevWorkspaces, error: message(e) });
+      set({ workspaces: prevWorkspaces, error: errorMessage(e) });
     }
   },
   createWorkspace: async (draft, separateContainer) => {
@@ -553,12 +569,8 @@ async function run(set: (p: Partial<BrowserState>) => void, f: () => Promise<unk
     await f();
     set({ error: null });
   } catch (e) {
-    set({ error: message(e) });
+    set({ error: errorMessage(e) });
   }
-}
-
-function message(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
 }
 
 /** Zoom levels the chrome steps through; mirrors ZOOM_STEPS in commands.rs. */

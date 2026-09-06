@@ -2,7 +2,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import { contentCoverDepth, resetContentCover } from "../lib/overlay";
+import { useImportVideo } from "../screen/importVideo";
 import { useBrowser } from "../store/browser";
+import { screenUrl } from "./internal/InternalPage";
 import { Library, dayLabel, groupByDay, matches } from "./Library";
 
 const initial = useBrowser.getState();
@@ -30,6 +32,7 @@ afterEach(() => {
   cleanup();
   resetContentCover();
   useBrowser.setState(initial, true);
+  useImportVideo.setState({ busy: false });
   vi.restoreAllMocks();
 });
 
@@ -124,5 +127,42 @@ describe("Library dialog", () => {
     render(<Library />);
     fireEvent.keyDown(screen.getByLabelText("Filter bookmarks"), { key: "Escape" });
     await waitFor(() => expect(useBrowser.getState().open.library).toBe(false));
+  });
+});
+
+describe("Library recordings import", () => {
+  it("offers Open Video even with no recordings, imports through the engine, and opens the editor tab", async () => {
+    vi.spyOn(ipc, "recordingsList").mockResolvedValue([]);
+    let finish!: (path: string) => void;
+    vi.spyOn(ipc, "screenImportVideo").mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    render(<Library />);
+    fireEvent.click(screen.getByRole("tab", { name: "Recordings" }));
+    await waitFor(() => expect(screen.getByText(/No recordings yet/)).toBeTruthy());
+    const button = screen.getByRole("button", { name: /Open Video/ });
+    fireEvent.click(button);
+    expect(ipc.screenImportVideo).toHaveBeenCalledOnce();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Importing video/ })).toBeTruthy());
+    expect(screen.getByText(/this can take a moment/)).toBeTruthy();
+    finish("/captures/clip.mov");
+    await waitFor(() => expect(ipc.tabOpen).toHaveBeenCalledWith("w1", screenUrl("/captures/clip.mov")));
+    await waitFor(() => expect(useBrowser.getState().open.library).toBe(false));
+  });
+
+  it("lists imported containers with their own format and only offers editing when a companion exists", async () => {
+    vi.spyOn(ipc, "recordingsList").mockResolvedValue([
+      { path: "/captures/clip.mov", name: "clip.mov", format: "mov", bytes: 10, modified_ms: 1, editable: true, has_project: false },
+      { path: "/captures/raw.mkv", name: "raw.mkv", format: "mkv", bytes: 10, modified_ms: 0, editable: false, has_project: false },
+    ]);
+    vi.spyOn(ipc, "screenImportVideo").mockRejectedValue(new Error("ffmpeg could not make a playable copy"));
+    render(<Library />);
+    fireEvent.click(screen.getByRole("tab", { name: "Recordings" }));
+    await waitFor(() => expect(screen.getByText("clip.mov")).toBeTruthy());
+    expect(screen.getByText(/MOV ·/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit clip.mov in DiveScreen" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit raw.mkv in DiveScreen" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Open Video/ }));
+    await waitFor(() => expect(useBrowser.getState().error).toContain("ffmpeg could not make a playable copy"));
+    expect(ipc.tabOpen).not.toHaveBeenCalled();
+    expect(useBrowser.getState().open.library).toBe(true);
   });
 });

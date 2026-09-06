@@ -475,18 +475,7 @@ impl Client {
                 };
                 std::future::ready(next)
             });
-        let events = eventsource_stream::Eventsource::eventsource(bytes);
-        let state = std::sync::Arc::new(std::sync::Mutex::new(Parser::new(wire, self.provider)));
-        Ok(events.flat_map(move |item| {
-            let deltas = match item {
-                Ok(ev) => state
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .parse(&ev.event, &ev.data),
-                Err(e) => vec![Delta::Error(e.to_string())],
-            };
-            futures_util::stream::iter(deltas)
-        }))
+        Ok(deltas(bytes, wire, self.provider))
     }
 
     /// The models this provider offers, most useful first.
@@ -535,6 +524,46 @@ impl Client {
     }
 }
 
+/// The deltas in an SSE byte stream.
+///
+/// When the bytes end without the provider's own terminator (`[DONE]` on the
+/// `OpenAI` wire, `message_stop` on Anthropic's), a reply whose stop reason
+/// already arrived is still delivered rather than dropped on the floor.
+fn deltas<S, B, E>(
+    bytes: S,
+    wire: Wire,
+    provider: Provider,
+) -> impl Stream<Item = Delta> + use<S, B, E>
+where
+    S: Stream<Item = Result<B, E>>,
+    B: AsRef<[u8]>,
+    E: std::fmt::Display,
+{
+    let events = eventsource_stream::Eventsource::eventsource(bytes);
+    let state = std::sync::Arc::new(std::sync::Mutex::new(Parser::new(wire, provider)));
+    let at_close = std::sync::Arc::clone(&state);
+    events
+        .flat_map(move |item| {
+            let deltas = match item {
+                Ok(ev) => state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .parse(&ev.event, &ev.data),
+                Err(e) => vec![Delta::Error(e.to_string())],
+            };
+            futures_util::stream::iter(deltas)
+        })
+        .chain(
+            futures_util::stream::iter(std::iter::once_with(move || {
+                at_close
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .finish_on_close()
+            }))
+            .flat_map(futures_util::stream::iter),
+        )
+}
+
 #[derive(Debug, thiserror::Error)]
 enum StreamTransportError {
     #[error("{0}")]
@@ -561,6 +590,14 @@ impl Parser {
         match self {
             Self::Anthropic(s) => s.parse_event(event, data),
             Self::OpenAi(s) => s.parse_data(data),
+        }
+    }
+
+    /// What is still owed when the bytes ran out before the terminator.
+    fn finish_on_close(&mut self) -> Vec<Delta> {
+        match self {
+            Self::Anthropic(s) => s.finish_on_close(),
+            Self::OpenAi(s) => s.finish_on_close(),
         }
     }
 }
@@ -646,6 +683,42 @@ async fn read_json_body(response: reqwest::Response) -> Result<Value, AgentError
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn an_openai_stream_that_closes_without_done_delivers_the_reply() {
+        let body: &[u8] = b"data: {\"choices\":[{\"delta\":{\"content\":\"hi there\"}}]}\n\n\
+            data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n";
+        let bytes = futures_util::stream::iter([Ok::<_, std::convert::Infallible>(body)]);
+        let out: Vec<Delta> = deltas(bytes, Wire::OpenAi, Provider::Ollama)
+            .collect()
+            .await;
+        assert_eq!(out[0], Delta::Text("hi there".into()));
+        assert!(
+            matches!(&out[1], Delta::Assistant(t) if t.content[0]["text"] == "hi there"),
+            "{out:?}"
+        );
+        assert_eq!(out[2], Delta::Done("end_turn".into()));
+        assert_eq!(out.len(), 3);
+
+        // With [DONE] the tail is not emitted twice.
+        let body: &[u8] =
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":\"stop\"}]}\n\n\
+            data: [DONE]\n\n";
+        let bytes = futures_util::stream::iter([Ok::<_, std::convert::Infallible>(body)]);
+        let out: Vec<Delta> = deltas(bytes, Wire::OpenAi, Provider::Ollama)
+            .collect()
+            .await;
+        assert_eq!(out.len(), 3, "{out:?}");
+
+        // Cut off before the finish reason: the caller is told nothing
+        // finished, rather than handed a truncated answer as complete.
+        let body: &[u8] = b"data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n";
+        let bytes = futures_util::stream::iter([Ok::<_, std::convert::Infallible>(body)]);
+        let out: Vec<Delta> = deltas(bytes, Wire::OpenAi, Provider::Ollama)
+            .collect()
+            .await;
+        assert_eq!(out, vec![Delta::Text("partial".into())]);
+    }
 
     #[test]
     fn tool_result_turn_shape() {

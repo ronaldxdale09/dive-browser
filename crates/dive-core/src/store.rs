@@ -89,6 +89,20 @@ const MIGRATIONS: &[&str] = &[
         created_at TEXT NOT NULL
     );
     ALTER TABLE workspaces ADD COLUMN profile_id TEXT NOT NULL DEFAULT '';",
+    // v9: a scroll offset belongs to its tab and goes when the tab goes, so
+    // removing a workspace (which cascades to its tabs) leaves no orphans.
+    // SQLite cannot add a foreign key in place; rebuild the table.
+    "CREATE TABLE tab_scroll_new (
+        tab_id TEXT PRIMARY KEY REFERENCES tabs(id) ON DELETE CASCADE,
+        url TEXT NOT NULL,
+        x INTEGER NOT NULL DEFAULT 0,
+        y INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO tab_scroll_new (tab_id, url, x, y)
+        SELECT s.tab_id, s.url, s.x, s.y FROM tab_scroll s
+        WHERE EXISTS (SELECT 1 FROM tabs t WHERE t.id = s.tab_id);
+    DROP TABLE tab_scroll;
+    ALTER TABLE tab_scroll_new RENAME TO tab_scroll;",
 ];
 
 /// Copy an existing database aside when this build is about to migrate it,
@@ -188,12 +202,30 @@ impl Store {
     }
 
     fn init(conn: Connection) -> Result<Self> {
-        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        // WAL with synchronous=NORMAL fsyncs at checkpoints rather than on
+        // every commit. A crash can never corrupt the database or lose a
+        // committed transaction; only a power loss can drop the last few
+        // commits. That is the right trade for a store the app writes twice
+        // per tab switch on the main thread under its host and store locks.
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;",
+        )?;
         // A second Dive process or a short-lived SQLite checkpoint should wait
         // instead of surfacing an immediate, user-visible `database is locked`.
         conn.busy_timeout(Duration::from_secs(5))?;
         let store = Self { conn };
         store.migrate()?;
+        // v8 left pre-profile workspaces with an empty profile id, which
+        // `workspace_from_row` cannot parse. Repair here so every opener,
+        // not just the app, reads a consistent database.
+        let orphaned: i64 = store.conn.query_row(
+            "SELECT COUNT(*) FROM workspaces WHERE profile_id = ''",
+            [],
+            |r| r.get(0),
+        )?;
+        if orphaned > 0 {
+            store.ensure_default_profile()?;
+        }
         Ok(store)
     }
 
@@ -209,6 +241,13 @@ impl Store {
             .conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))?;
         let version = usize::try_from(version).unwrap_or(0);
+        if version > MIGRATIONS.len() {
+            return Err(CoreError::Invalid(format!(
+                "database schema is version {version}, newer than the {} this build knows; \
+                 open it with a newer Dive",
+                MIGRATIONS.len()
+            )));
+        }
         for (i, sql) in MIGRATIONS.iter().enumerate().skip(version) {
             let next = i + 1;
             tracing::info!(version = next, "applying migration");
@@ -375,6 +414,16 @@ impl Store {
 
     /// Remove a profile. Its workspaces must have been removed first.
     pub fn remove_profile(&self, id: ProfileId) -> Result<()> {
+        let workspaces: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM workspaces WHERE profile_id = ?1",
+            [id.to_string()],
+            |r| r.get(0),
+        )?;
+        if workspaces > 0 {
+            return Err(CoreError::Invalid(format!(
+                "profile {id} still owns {workspaces} workspace(s); remove or move them first"
+            )));
+        }
         let n = self
             .conn
             .execute("DELETE FROM profiles WHERE id = ?1", [id.to_string()])?;
@@ -488,17 +537,19 @@ impl Store {
 
     /// Remove a tab.
     pub fn remove_tab(&self, id: TabId) -> Result<()> {
-        let n = self
-            .conn
-            .execute("DELETE FROM tabs WHERE id = ?1", [id.to_string()])?;
+        // The scroll row cascades since v9; deleting it explicitly as well, in
+        // the same transaction, keeps a database whose foreign keys are off
+        // tidy without ever leaving a tab-less scroll row behind.
+        let tx = self.conn.unchecked_transaction()?;
+        let n = tx.execute("DELETE FROM tabs WHERE id = ?1", [id.to_string()])?;
         if n == 0 {
             return Err(CoreError::NotFound {
                 kind: "tab",
                 id: id.to_string(),
             });
         }
-        self.conn
-            .execute("DELETE FROM tab_scroll WHERE tab_id = ?1", [id.to_string()])?;
+        tx.execute("DELETE FROM tab_scroll WHERE tab_id = ?1", [id.to_string()])?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -610,8 +661,12 @@ impl Store {
 
     /// Bookmarks matching `query`, newest first.
     pub fn search_bookmarks(&self, query: &str, limit: usize) -> Result<Vec<Bookmark>> {
-        let like = format!("%{}%", query.trim());
-        let mut stmt = self.conn.prepare("SELECT url, title, created_at FROM bookmarks WHERE url LIKE ?1 OR title LIKE ?1 ORDER BY created_at DESC LIMIT ?2")?;
+        let like = format!("%{}%", like_escape(query.trim()));
+        let mut stmt = self.conn.prepare(
+            "SELECT url, title, created_at FROM bookmarks
+             WHERE url LIKE ?1 ESCAPE '\\' OR title LIKE ?1 ESCAPE '\\'
+             ORDER BY created_at DESC LIMIT ?2",
+        )?;
         let rows = stmt.query_map(
             params![like, i64::try_from(limit).unwrap_or(i64::MAX)],
             |r| {
@@ -691,6 +746,12 @@ impl Store {
         Ok(self.conn.execute("DELETE FROM history", [])?)
     }
 
+    /// Forget every cached site icon. Icons record which origins were
+    /// visited, so clearing history clears them too.
+    pub fn clear_favicons(&self) -> Result<usize> {
+        Ok(self.conn.execute("DELETE FROM favicons", [])?)
+    }
+
     /// Delete visits older than `cutoff`; returns how many rows went.
     pub fn prune_history(&self, cutoff: Timestamp) -> Result<usize> {
         Ok(self.conn.execute(
@@ -708,13 +769,13 @@ impl Store {
     /// on screen -- see [`display_key`] -- which is why the query over-fetches
     /// before the caller's `limit` is applied.
     pub fn search_history(&self, query: &str, limit: usize) -> Result<Vec<HistoryEntry>> {
-        let like = format!("%{}%", query.trim());
+        let like = format!("%{}%", like_escape(query.trim()));
         // Enough headroom that a run of near-duplicates cannot starve the
         // list, capped so an empty query never walks the whole table.
         let fetch = limit.saturating_mul(4).clamp(limit, 200);
         let mut stmt = self.conn.prepare(
             "SELECT url, MAX(title), MAX(visited_at), COUNT(*) FROM history
-             WHERE url LIKE ?1 OR title LIKE ?1
+             WHERE url LIKE ?1 ESCAPE '\\' OR title LIKE ?1 ESCAPE '\\'
              GROUP BY url ORDER BY MAX(visited_at) DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(
@@ -782,13 +843,7 @@ impl Store {
         let mut stmt = self.conn.prepare(
             "SELECT key, value FROM settings WHERE key LIKE ?1 ESCAPE '\\' ORDER BY key",
         )?;
-        let pattern = format!(
-            "{}%",
-            prefix
-                .replace('\\', "\\\\")
-                .replace('%', "\\%")
-                .replace('_', "\\_")
-        );
+        let pattern = format!("{}%", like_escape(prefix));
         let rows = stmt.query_map([pattern], |r| Ok((r.get(0)?, r.get(1)?)))?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
@@ -1032,6 +1087,15 @@ fn container_from_row(r: &Row<'_>) -> rusqlite::Result<Container> {
     })
 }
 
+/// Quote the characters `LIKE` treats as wildcards, so a query for `100%`
+/// or `a_b` matches those characters rather than anything. Pair with
+/// `ESCAPE '\\'` in the statement.
+fn like_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
 fn workspace_from_row(r: &Row<'_>) -> rusqlite::Result<Workspace> {
     Ok(Workspace {
         id: parse_id(&r.get::<_, String>(0)?)?,
@@ -1270,6 +1334,121 @@ mod tests {
         );
         t.favicon = None;
         assert_eq!(store.tab_after_upsert(&t).favicon, None);
+    }
+
+    #[test]
+    fn opening_a_pre_profile_database_adopts_its_workspaces() {
+        // Simulate a database whose v8 migration left workspaces without a
+        // profile: the store must repair it on open, not fail on read.
+        let store = Store::in_memory().unwrap();
+        let c = Container::new("Personal");
+        store.upsert_container(&c).unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO workspaces (id, name, color, icon, container_id, position, created_at, profile_id)
+                 VALUES (?1, 'Old', '#000', 'x', ?2, 0, ?3, '')",
+                params![
+                    WorkspaceId::new().to_string(),
+                    c.id.to_string(),
+                    Timestamp::now().to_rfc3339()
+                ],
+            )
+            .unwrap();
+        assert!(
+            store.workspaces().is_err(),
+            "an empty profile id is unreadable"
+        );
+        // Reopening the same connection is what `Store::init` does after
+        // migrating; run the repair path exactly as it would.
+        let store = Store::init(store.conn).unwrap();
+        let workspaces = store.workspaces().unwrap();
+        assert_eq!(workspaces.len(), 1);
+        let profiles = store.profiles().unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(workspaces[0].profile_id, profiles[0].id);
+        // A second explicit call is a no-op.
+        assert_eq!(store.ensure_default_profile().unwrap().id, profiles[0].id);
+        assert_eq!(store.profiles().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_profile_that_still_owns_workspaces_cannot_be_removed() {
+        let (store, w) = seeded();
+        let profile = store.profiles().unwrap().remove(0);
+        assert!(matches!(
+            store.remove_profile(profile.id),
+            Err(CoreError::Invalid(_))
+        ));
+        assert!(store.profile(profile.id).is_ok());
+        store.remove_workspace(w.id).unwrap();
+        store.remove_profile(profile.id).unwrap();
+        assert!(matches!(
+            store.remove_profile(profile.id),
+            Err(CoreError::NotFound {
+                kind: "profile",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn a_database_from_a_newer_build_is_refused() {
+        let store = Store::in_memory().unwrap();
+        store
+            .conn
+            .pragma_update(
+                None,
+                "user_version",
+                i64::try_from(MIGRATIONS.len() + 1).unwrap(),
+            )
+            .unwrap();
+        let err = store.migrate().unwrap_err();
+        assert!(matches!(err, CoreError::Invalid(_)), "{err}");
+        assert!(err.to_string().contains("newer"), "{err}");
+    }
+
+    #[test]
+    fn removing_a_workspace_removes_its_scroll_rows_too() {
+        let (store, w) = seeded();
+        let t = Tab::new(w.id, "https://x", 0);
+        store.upsert_tab(&t).unwrap();
+        store.set_scroll(t.id, "https://x", 0, 40).unwrap();
+        assert_eq!(store.scroll(t.id, "https://x").unwrap(), Some((0, 40)));
+        store.remove_workspace(w.id).unwrap();
+        let rows: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM tab_scroll", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0);
+    }
+
+    #[test]
+    fn searches_treat_like_wildcards_literally() {
+        let (store, _) = seeded();
+        let now = Timestamp::now();
+        store
+            .record_visit("https://a.dev/100%25", "100% done", now)
+            .unwrap();
+        store
+            .record_visit("https://a.dev/plain", "plain", now)
+            .unwrap();
+        store
+            .record_visit("https://a.dev/a_b", "under", now)
+            .unwrap();
+        // Unescaped, `%` matches everything and `_` any one character.
+        assert_eq!(store.search_history("%", 10).unwrap().len(), 1);
+        assert_eq!(store.search_history("a_b", 10).unwrap().len(), 1);
+        let found = store.search_history("a_b", 10).unwrap();
+        assert_eq!(found[0].url, "https://a.dev/a_b");
+        store
+            .add_bookmark("https://b.dev/x", "50% off", now)
+            .unwrap();
+        store
+            .add_bookmark("https://b.dev/y", "full price", now)
+            .unwrap();
+        assert_eq!(store.search_bookmarks("%", 10).unwrap().len(), 1);
+        assert_eq!(store.search_bookmarks("50%", 10).unwrap().len(), 1);
     }
 
     #[test]
@@ -1704,6 +1883,7 @@ mod tests {
             0xa4b7_de1f_1a35_d3a6,
             0x1d6d_f725_f438_8a3c,
             0x0b4e_ecbb_d242_ffaf,
+            0x99e5_fa52_17a9_ae16,
         ];
         assert!(
             MIGRATIONS.len() >= SHIPPED.len(),

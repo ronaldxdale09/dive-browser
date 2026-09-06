@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Writes a release version into the three manifests that carry one.
+ * Writes a release version into every manifest that carries one.
  *
  * Build jobs call this against a checkout they then throw away, so the version
  * reaches the binary without the repository having to record it first. The
@@ -16,7 +16,8 @@ export const VERSIONED_FILES = [
   'Cargo.toml',
   'Cargo.lock',
   'apps/desktop/package.json',
-  'apps/desktop/src-tauri/tauri.conf.json'
+  'apps/desktop/src-tauri/tauri.conf.json',
+  'apps/desktop/src-tauri/cef/crash_reporter.cfg'
 ]
 
 const CARGO_VERSION = /(\[workspace\.package\][\s\S]*?\bversion\s*=\s*")[^"]*(")/
@@ -96,6 +97,19 @@ export function stampJsonVersion(source, version, file) {
   return source.replace(pattern, `$1${version}$2`)
 }
 
+/**
+ * Replace `ProductVersion=` in the crashpad config so a minidump names the
+ * release it came from. `prepare-bundle.sh` rewrites the installed copy as
+ * well; stamping the source keeps the checkout truthful between releases.
+ */
+export function stampCrashReporterCfg(source, version) {
+  const pattern = /^(ProductVersion=).*$/m
+  if (!pattern.test(source)) {
+    throw new Error('Could not find ProductVersion in crash_reporter.cfg')
+  }
+  return source.replace(pattern, `$1${version}`)
+}
+
 /** Write `version` into every manifest under `root`. Returns which files changed. */
 export function stampVersions(root, version) {
   const changed = []
@@ -106,7 +120,9 @@ export function stampVersions(root, version) {
       ? stampCargoLock(before, version, workspaceCrates(root))
       : file.endsWith('.toml')
         ? stampCargoToml(before, version)
-        : stampJsonVersion(before, version, file)
+        : file.endsWith('.cfg')
+          ? stampCrashReporterCfg(before, version)
+          : stampJsonVersion(before, version, file)
     if (after !== before) {
       writeFileSync(path, after)
       changed.push(file)

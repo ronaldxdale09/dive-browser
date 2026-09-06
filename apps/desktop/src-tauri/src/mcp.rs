@@ -48,6 +48,8 @@ const SCROLL_SETTLE_MS: u64 = 50;
 const SCREENSHOT_TOOL_CAP: usize = 16 * 1024 * 1024;
 /// How often `page_wait_for` re-checks its conditions.
 const WAIT_POLL_MS: u64 = 100;
+/// Longest a hop to the main thread may wait for its answer.
+const MAIN_THREAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 pub struct AppBrowser {
     app: AppHandle<Runtime>,
@@ -80,6 +82,9 @@ impl AppBrowser {
     /// the MCP server's own thread, that pairing deadlocks the moment the
     /// chrome sends a command that wants the same lock. Hopping over first
     /// puts the call on the thread the chrome's commands already use.
+    ///
+    /// The wait is bounded: a main thread stuck in a modal or a native
+    /// dialog must not hang every MCP call forever.
     async fn on_main<T: Send + 'static>(
         &self,
         f: impl FnOnce(&AppHandle<Runtime>) -> T + Send + 'static,
@@ -91,8 +96,28 @@ impl AppBrowser {
                 let _ = tx.send(f(&app));
             })
             .map_err(other)?;
-        rx.await
-            .map_err(|_| other("the main thread dropped the request"))
+        match tokio::time::timeout(MAIN_THREAD_TIMEOUT, rx).await {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(_)) => Err(other("the main thread dropped the request")),
+            Err(_) => Err(other(format!(
+                "the browser's main thread did not answer within {}s; it may be blocked by a dialog",
+                MAIN_THREAD_TIMEOUT.as_secs()
+            ))),
+        }
+    }
+
+    /// The URL an MCP client or the agent may open or navigate to.
+    ///
+    /// The omnibox path (`normalize_url_with`) also accepts `file:`, `data:`,
+    /// `blob:` and the internal scheme, which is right for a person typing
+    /// and wrong for a remote client: a page can steer the agent, and the
+    /// agent must not be able to read local files or open built-in pages.
+    fn web_url(&self, url: &str) -> Result<url::Url, BrowserError> {
+        let state = self.state();
+        let url = normalize_url_with(url, state.prefs.snapshot(&state).search_template())
+            .map_err(|e| BrowserError::BadRequest(e.message))?;
+        check_web_url(&url)?;
+        Ok(url)
     }
 
     /// Make sure a view (and therefore a CDP session) exists for `tab`.
@@ -353,7 +378,7 @@ impl AppBrowser {
         let session = self.session_for(tab).await?;
         crate::emulate::apply(&session, crate::emulate::device_calls(device.as_ref()))
             .await
-            .map_err(|e| other(e.message))?;
+            .map_err(|e| BrowserError::BadRequest(e.message))?;
         // Metrics apply live; a user agent only takes effect on the next
         // document. Reloading for a rotation would throw away the page's
         // state for nothing.
@@ -414,6 +439,18 @@ fn other(e: impl std::fmt::Display) -> BrowserError {
     BrowserError::Other(e.to_string())
 }
 
+/// Reject anything but `http`, `https` and `about:blank` for a URL that a
+/// remote client or the model chose.
+pub(crate) fn check_web_url(url: &url::Url) -> Result<(), BrowserError> {
+    match url.scheme() {
+        "http" | "https" => Ok(()),
+        "about" if url.path() == "blank" => Ok(()),
+        scheme => Err(BrowserError::BadRequest(format!(
+            "{scheme}: URLs are not allowed here; use http, https or about:blank"
+        ))),
+    }
+}
+
 #[allow(clippy::too_many_lines)] // Browser adapter methods stay together so the MCP surface is auditable.
 #[async_trait]
 impl Browser for AppBrowser {
@@ -440,6 +477,7 @@ impl Browser for AppBrowser {
     }
 
     async fn open_tab(&self, url: String) -> Result<TabInfo, BrowserError> {
+        let url = self.web_url(&url)?.to_string();
         // Creating the native view has to happen on the main thread; from
         // the server's thread CEF takes the process down.
         let tab = self
@@ -460,11 +498,7 @@ impl Browser for AppBrowser {
     }
 
     async fn navigate(&self, tab: TabId, url: String) -> Result<(), BrowserError> {
-        let url = {
-            let state = self.state();
-            normalize_url_with(&url, state.prefs.get(&state).search_template())
-                .map_err(|e| other(e.message))?
-        };
+        let url = self.web_url(&url)?;
         self.tracked(tab, "tab_navigate", Some(url.to_string()), async {
             let state = self.state();
             let host = lock(&state.host);

@@ -3,6 +3,7 @@ import { ipc } from "../lib/ipc";
 import type { Prefs as WirePrefs } from "../lib/ipc";
 import { useBrowser } from "./browser";
 import { APPEARANCE_KEYS, THEME_VARS, accentInk, resolveScheme, themeCss } from "../lib/theme";
+import { errorMessage } from "../lib/errors";
 
 /**
  * User preferences. The host owns them (it clamps and persists), so writes go
@@ -153,7 +154,7 @@ function complete(wire: WirePrefs): Prefs {
 }
 
 function report(e: unknown) {
-  useBrowser.setState({ error: e instanceof Error ? e.message : String(e) });
+  useBrowser.setState({ error: errorMessage(e) });
 }
 
 /** The scheme the OS asks for, used when the theme follows the system. */

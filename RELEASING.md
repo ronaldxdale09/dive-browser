@@ -83,7 +83,33 @@ failure this pipeline exists to prevent.
 | `RELEASE_TOKEN` | Only needed if `main` is protected against the default `GITHUB_TOKEN`. |
 
 `scripts/release/setup-signing-secrets.sh` loads the Apple ones through the
-`gh` CLI.
+`gh` CLI. It reads the identity from `APPLE_SIGNING_IDENTITY`, the repository
+from the checkout it runs in, and exports the certificate to the path given as
+its argument (or `DIVE_SIGNING_P12`; default `./dive-signing.p12`, deleted after
+upload):
+
+```bash
+APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+  scripts/release/setup-signing-secrets.sh
+```
+
+### The updater public key
+
+`plugins.updater.pubkey` in `apps/desktop/src-tauri/tauri.conf.json` is
+deliberately empty in the repository. JSON cannot carry a comment saying so, so
+this is the note: the `build` job injects `TAURI_SIGNING_PUBLIC_KEY` through
+`tauri build --config '{"plugins":{"updater":{"pubkey":…}}}'`, and refuses to
+build without it. A local `tauri build` therefore produces an app that cannot
+verify updates, which is why local builds go through
+`tauri.no-updater.conf.json` (below).
+
+### Local builds
+
+`pnpm --filter @dive/desktop build` runs `tauri build --config
+src-tauri/tauri.no-updater.conf.json`, an overlay that sets
+`bundle.createUpdaterArtifacts: false`. It exists so a developer can produce a
+`.app` without the updater keypair; nothing built that way is publishable, and
+the release workflow never uses it.
 
 ---
 
@@ -95,9 +121,11 @@ decisions can be exercised without cutting a release.
 | Script | Does |
 |---|---|
 | `resolve-release.mjs` | Version from a tag or a bump; refuses a duplicate; decides prerelease and `make_latest`. |
-| `stamp-versions.mjs` | Writes the version into `Cargo.toml`, `Cargo.lock` (workspace crates only), `apps/desktop/package.json` and `tauri.conf.json`. Textual, so `finalize` needs no cargo. |
+| `stamp-versions.mjs` | Writes the version into `Cargo.toml`, `Cargo.lock` (workspace crates only), `apps/desktop/package.json`, `tauri.conf.json` and the crashpad `crash_reporter.cfg`. Textual, so `finalize` needs no cargo. |
 | `update-manifest.mjs` | Builds and merges `latest.json`. Every field is required; a missing signature is an error, not an empty string. |
 | `verify-release-assets.mjs` | Checks the published release carries `latest.json`, the `.dmg`, the `.tar.gz` and its `.sig`, none of them empty. |
+| `prepare-bundle.sh` | Copies `crash_reporter.cfg` into the CEF framework of a built `.app`, with `ProductVersion` set to the bundled version. |
+| `setup-signing-secrets.sh` | Exports the Developer ID certificate and uploads the Apple secrets with `gh`. |
 
 ---
 

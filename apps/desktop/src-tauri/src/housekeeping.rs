@@ -256,6 +256,14 @@ async fn discard_one(app: &AppHandle<Runtime>, tab: Tab) -> dive_core::Result<bo
     .await;
     if !matches!(receipt, Ok(Ok(()))) {
         tracing::warn!(id = %tab.id, "native discard close not confirmed; persisted tab remains active");
+        // The native browser was already told to close; release the Tauri
+        // webview entry too so its label and listeners do not outlive it.
+        let unconfirmed = view.clone();
+        let _ = on_main(app, move |_| {
+            let _ = unconfirmed.close();
+            Ok(())
+        })
+        .await;
         return Ok(false);
     }
     on_main(app, move |state| {

@@ -10,6 +10,7 @@ import { useFocusTrap } from "../../lib/useFocusTrap";
 import { useBrowser } from "../../store/browser";
 import { useRecording } from "../../store/recording";
 import { Icon } from "../Icon";
+import { errorMessage } from "../../lib/errors";
 
 /**
  * The finished recording: watch it, find it, share its path, or throw it
@@ -35,11 +36,8 @@ export function RecordingDoneDialog() {
 
   if (!open || !result) return null;
   const name = result.path.split("/").pop() ?? result.path;
-  const notify = (notice: string) => {
-    useBrowser.setState({ notice });
-    setTimeout(() => useBrowser.setState({ notice: null }), 4000);
-  };
-  const fail = (e: unknown) => useBrowser.setState({ error: e instanceof Error ? e.message : String(e) });
+  const notify = (notice: string) => useBrowser.getState().notify(notice, 4000);
+  const fail = (e: unknown) => useBrowser.setState({ error: errorMessage(e) });
 
   return (
     <div ref={root} className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] ${className}`} onMouseDown={close}>

@@ -13,7 +13,6 @@
 #![allow(clippy::cast_precision_loss)]
 
 use std::collections::{HashMap, VecDeque};
-use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -37,6 +36,10 @@ use crate::state::AppState;
 const AUDIO_BINDING: &str = "__diveSubtitleAudio";
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 static MODEL_DOWNLOAD_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// How long a model download may take to connect.
+const MODEL_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+/// Longest silence tolerated between chunks of a model download.
+const MODEL_READ_TIMEOUT: Duration = Duration::from_secs(60);
 /// Sample rate whisper expects; the page downsamples to this.
 const SAMPLE_RATE: usize = 16_000;
 /// Seconds of audio each transcription pass looks at. Smaller means the
@@ -233,28 +236,55 @@ pub async fn download_model(app: &AppHandle<Runtime>, id: &str) -> Result<(), St
         return Ok(());
     }
     let url = model_url(id).ok_or_else(|| format!("unknown model {id}"))?;
-    std::fs::create_dir_all(models_dir()).map_err(|e| e.to_string())?;
+    tokio::fs::create_dir_all(models_dir())
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let client = reqwest::Client::new();
+    // Write to a temp file, then rename, so a half-download is never mistaken
+    // for a usable model. Whatever fails, the temp file does not outlive the
+    // attempt.
+    let tmp = dest.with_extension("part");
+    let outcome = fetch_model_to(app, id, &url, &tmp, &dest).await;
+    if outcome.is_err() {
+        let _ = tokio::fs::remove_file(&tmp).await;
+    }
+    outcome
+}
+
+/// Stream `url` into `tmp`, verify it, and move it to `dest`. Progress is
+/// emitted while it runs and once at the end.
+async fn fetch_model_to(
+    app: &AppHandle<Runtime>,
+    id: &str,
+    url: &str,
+    tmp: &std::path::Path,
+    dest: &std::path::Path,
+) -> Result<(), String> {
+    use tokio::io::AsyncWriteExt as _;
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(MODEL_CONNECT_TIMEOUT)
+        .read_timeout(MODEL_READ_TIMEOUT)
+        .build()
+        .map_err(|e| format!("download client: {e}"))?;
     let resp = client
-        .get(&url)
+        .get(url)
         .send()
         .await
         .and_then(reqwest::Response::error_for_status)
         .map_err(|e| format!("download failed: {e}"))?;
     let total = resp.content_length().map(|n| n as f64);
 
-    // Write to a temp file, then rename, so a half-download is never mistaken
-    // for a usable model.
-    let tmp = dest.with_extension("part");
-    let mut file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+    let mut file = tokio::fs::File::create(tmp)
+        .await
+        .map_err(|e| e.to_string())?;
     let mut received: f64 = 0.0;
     let mut hash = Sha256::new();
     let mut last_emit = std::time::Instant::now();
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("download interrupted: {e}"))?;
-        file.write_all(&chunk).map_err(|e| e.to_string())?;
+        file.write_all(&chunk).await.map_err(|e| e.to_string())?;
         hash.update(&chunk);
         received += chunk.len() as f64;
         if last_emit.elapsed().as_millis() > 200 {
@@ -269,16 +299,20 @@ pub async fn download_model(app: &AppHandle<Runtime>, id: &str) -> Result<(), St
             .emit(app);
         }
     }
-    file.flush().map_err(|e| e.to_string())?;
-    file.sync_all().map_err(|e| e.to_string())?;
+    file.flush().await.map_err(|e| e.to_string())?;
+    file.sync_all().await.map_err(|e| e.to_string())?;
     drop(file);
     let (expected_size, expected_hash) = model_integrity(id).ok_or("Unknown model")?;
-    if std::fs::metadata(&tmp).map_err(|e| e.to_string())?.len() != expected_size
-        || format!("{:x}", hash.finalize()) != expected_hash
-    {
+    let written = tokio::fs::metadata(tmp)
+        .await
+        .map_err(|e| e.to_string())?
+        .len();
+    if written != expected_size || format!("{:x}", hash.finalize()) != expected_hash {
         return Err("Model download failed integrity verification. Please retry.".into());
     }
-    std::fs::rename(&tmp, &dest).map_err(|e| e.to_string())?;
+    tokio::fs::rename(tmp, dest)
+        .await
+        .map_err(|e| e.to_string())?;
     let _ = SubtitleModelProgress {
         id: id.to_owned(),
         received,
@@ -853,7 +887,13 @@ fn route_audio(
             {
                 Err(_) => continue,
                 Ok(Ok(event)) => event,
-                Ok(Err(_)) => {
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(n))) => {
+                    // A burst of unrelated CDP events overflowed the buffer;
+                    // a few lost audio frames are a hiccup, not a lost session.
+                    tracing::debug!(n, "subtitle audio listener lagged; continuing");
+                    continue;
+                }
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
                     input
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)

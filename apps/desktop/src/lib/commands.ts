@@ -4,6 +4,8 @@ import { useRecording } from "../store/recording";
 import { usePicker } from "../store/simulator";
 import type { Command } from "./ipc";
 import { traceInputCommand } from "./inputTimingProbe";
+import { errorMessage } from "./errors";
+import { orderTabs } from "./tabOrder";
 
 /** Rail positions a workspace chord can reach. */
 const WORKSPACE_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
@@ -68,7 +70,7 @@ async function openWindow() {
     await ipc.windowOpen();
     useBrowser.setState({ error: null });
   } catch (error) {
-    useBrowser.setState({ error: message(error) });
+    useBrowser.setState({ error: errorMessage(error) });
   }
 }
 
@@ -78,15 +80,11 @@ async function toggleBookmark() {
   if (!tab) return;
   try {
     const saved = await ipc.bookmarkToggle(tab);
-    useBrowser.setState({ error: null, notice: saved ? "Bookmark saved" : "Bookmark removed" });
-    setTimeout(() => useBrowser.setState({ notice: null }), 3000);
+    useBrowser.setState({ error: null });
+    useBrowser.getState().notify(saved ? "Bookmark saved" : "Bookmark removed");
   } catch (error) {
-    useBrowser.setState({ error: message(error) });
+    useBrowser.setState({ error: errorMessage(error) });
   }
-}
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** Activate the workspace sitting at `index` in the rail, if there is one. */
@@ -99,9 +97,14 @@ function jumpToWorkspace(index: number) {
 /** Asks the toolbar to select its address field; the Toolbar listens for it. */
 export const FOCUS_ADDRESS = "dive:focus-address";
 
-/** Activate the tab `delta` places away, wrapping at both ends. */
+/**
+ * Activate the tab `delta` places away, wrapping at both ends. Walks the
+ * strip's order (pinned first, then by position) and skips tabs that live in
+ * their own window, so the chord lands where the eye expects.
+ */
 function stepTab(delta: number) {
-  const { tabs, activeTab, activateTab } = useBrowser.getState();
+  const { tabs: all, detached, activeTab, activateTab } = useBrowser.getState();
+  const tabs = orderTabs(all).filter((t) => !detached.includes(t.id));
   if (tabs.length === 0) return;
   const from = tabs.findIndex((t) => t.id === activeTab);
   const next = tabs[(((from < 0 ? 0 : from + delta) % tabs.length) + tabs.length) % tabs.length];
@@ -116,7 +119,7 @@ export function runCommand(id: string, source: "keyboard" | "native-menu" | "com
     return;
   }
   void ipc.commandRun(id).catch((e: unknown) => {
-    useBrowser.setState({ error: e instanceof Error ? e.message : String(e) });
+    useBrowser.setState({ error: errorMessage(e) });
   });
 }
 

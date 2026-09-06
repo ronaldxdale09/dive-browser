@@ -112,11 +112,29 @@ fn client_for(state: &AppState, provider: Provider, key: Option<String>) -> Clie
 /// every boundary and wakes from any await through the notifier.
 #[derive(Default)]
 pub struct Run {
+    /// The chrome's id for this run; namespaces every step id it sees.
+    id: String,
     cancelled: AtomicBool,
     notify: tokio::sync::Notify,
 }
 
 impl Run {
+    fn new(id: &str) -> Self {
+        Self {
+            id: id.to_owned(),
+            ..Self::default()
+        }
+    }
+
+    /// The id a tool call is known by in the chrome and in the approval
+    /// table: `run id` and `call id` together. Provider-issued call ids are
+    /// only unique within one reply, so two runs (or one retried reply) can
+    /// carry the same one; keyed by call id alone, an answer for one run's
+    /// step could resolve another's.
+    fn step_id(&self, call_id: &str) -> String {
+        format!("{}:{call_id}", self.id)
+    }
+
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
         self.notify.notify_one();
@@ -146,7 +164,8 @@ pub struct ChatTurn {
 /// A tool call, as shown in the thread.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct ToolStep {
-    /// Call id.
+    /// Step id: the run id and the provider's call id, joined by a colon,
+    /// so it is unique across runs (see `agent_approve`).
     pub id: String,
     /// Tool name.
     pub name: String,
@@ -377,7 +396,7 @@ pub(crate) async fn agent_send(
     on_delta: Channel<ChatDelta>,
 ) -> AppResult<()> {
     validate_send(&run_id, &turns)?;
-    let run = Arc::new(Run::default());
+    let run = Arc::new(Run::new(&run_id));
     {
         let mut runs = lock(&state.agent_runs);
         if runs.contains_key(&run_id) {
@@ -503,7 +522,7 @@ async fn drive(
                     let _ = on_delta.send(ChatDelta::Reasoning(t));
                 }
                 Delta::ToolUse(call) => {
-                    let _ = on_delta.send(ChatDelta::ToolCall(step_for(state, tab_id, &call)));
+                    let _ = on_delta.send(ChatDelta::ToolCall(step_for(state, run, tab_id, &call)));
                     calls.push(call);
                 }
                 Delta::Usage(u) => {
@@ -572,7 +591,7 @@ async fn run_calls(
 ) -> Vec<dive_agent::ToolResult> {
     let mut results = Vec::with_capacity(calls.len());
     for call in calls {
-        let step = step_for(state, tab_id, call);
+        let step = step_for(state, run, tab_id, call);
         let denied = |why: &str| dive_agent::ToolResult {
             tool_use_id: call.id.clone(),
             content: serde_json::Value::String(why.into()),
@@ -598,7 +617,7 @@ async fn run_calls(
             _ => "image".to_owned(),
         };
         let _ = on_delta.send(ChatDelta::ToolDone {
-            id: call.id.clone(),
+            id: run.step_id(&call.id),
             summary,
             error: result.is_error,
         });
@@ -607,9 +626,14 @@ async fn run_calls(
     results
 }
 
-fn step_for(state: &AppState, tab_id: Option<TabId>, call: &dive_agent::ToolUse) -> ToolStep {
+fn step_for(
+    state: &AppState,
+    run: &Run,
+    tab_id: Option<TabId>,
+    call: &dive_agent::ToolUse,
+) -> ToolStep {
     ToolStep {
-        id: call.id.clone(),
+        id: run.step_id(&call.id),
         name: call.name.clone(),
         input: call.input.to_string(),
         action: crate::agent_tools::is_action(&call.name),
@@ -839,6 +863,14 @@ mod tests {
                 .await
                 .expect("cancel must wake a later waiter");
         });
+    }
+
+    #[test]
+    fn step_ids_are_namespaced_by_run() {
+        let a = Run::new("run-a");
+        let b = Run::new("run-b");
+        assert_ne!(a.step_id("call_0"), b.step_id("call_0"));
+        assert_eq!(a.step_id("call_0"), "run-a:call_0");
     }
 
     #[test]

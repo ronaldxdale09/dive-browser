@@ -3,6 +3,7 @@ node_modules/
 target/
 dist/
 .pnpm-store/
+*.tsbuildinfo
 # tauri
 apps/desktop/src-tauri/gen/
 # cef binaries / vendored engine
@@ -14,9 +15,14 @@ vendor/cef/
 !.env.example
 .DS_Store
 *.log
+*.p12
+*.dmg
+.vscode/
+.idea/
 # generated
 packages/protocol/src/generated/
-# autopilot state
+# agent working state, never source
 .claude/autopilot/
-/docs
 /.agents
+/.superpowers
+/scratchpad

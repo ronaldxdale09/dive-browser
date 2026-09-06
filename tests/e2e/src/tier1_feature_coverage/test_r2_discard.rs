@@ -20,7 +20,9 @@ use crate::fixtures::{create_sample_tabs, create_test_store, is_localhost_or_dev
 /// Specification threshold for idle discarding (30 minutes).
 pub const SPEC_MAX_IDLE: Duration = Duration::minutes(30);
 
-/// Safe discard policy decision engine based on PROJECT.md § M2 contract.
+/// Safe discard policy: only Today-tier tabs idle for longer than `max_idle` may
+/// be discarded; showing, pinned/essential, audible, local-dev and automated
+/// tabs are always kept.
 pub fn should_discard_tab(
     tab: &Tab,
     is_active_showing: bool,
@@ -260,7 +262,7 @@ fn test_tab_reactivation_and_scroll_restoration() {
 
 #[test]
 fn test_tabstrip_sleeping_tab_display_contract() {
-    // Contract from PROJECT.md:
+    // Contract:
     // Frontend TabStrip renders sleeping/discarded tabs with indicator/opacity
     // and allows clicking to activate.
     // Ensure Tab model accurately reflects Discarded and Sleeping states for the UI.

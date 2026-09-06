@@ -48,7 +48,7 @@ describe("DevicePicker", () => {
 
   it("sits beside the page rather than over it, so the page stays visible", () => {
     render(<DevicePicker />);
-    expect(screen.getByRole("dialog", { name: "Device simulator" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Device simulator" })).toBeTruthy();
     expect(ipc.setContentCovered).not.toHaveBeenCalled();
   });
 

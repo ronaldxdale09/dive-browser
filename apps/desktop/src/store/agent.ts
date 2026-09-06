@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { ipc } from "../lib/ipc";
 import type { ChatDeltaOut, KeyCheck, ModelInfo, Provider, ProviderInfo, Usage } from "../lib/ipc";
 import { usePrefs } from "./prefs";
+import { errorMessage } from "../lib/errors";
 
 export interface Step {
   id: string;
@@ -157,7 +158,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     set({ loaded: false, initError: null });
     initializing = initializationDeadline(Promise.all([ipc.agentProviders(), ipc.agentKeys()]))
       .then(([providers, keyed]) => set({ providers, ...(generation === keyGeneration ? { keyed } : {}), loaded: true }))
-      .catch((error: unknown) => set({ loaded: true, initError: error instanceof Error ? error.message : String(error) }))
+      .catch((error: unknown) => set({ loaded: true, initError: errorMessage(error) }))
       .finally(() => { initializing = null; });
     return initializing;
   },
@@ -190,7 +191,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       set((s) => ({ models: { ...s.models, [provider]: list }, modelsLoading: null }));
       return list;
     } catch (e) {
-      set({ modelsLoading: null, modelsError: e instanceof Error ? e.message : String(e) });
+      set({ modelsLoading: null, modelsError: errorMessage(e) });
       return [];
     }
   },
@@ -208,7 +209,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     try {
       await ipc.agentSend(runId, turns, tabId, options, (d) => set((s) => ({ messages: applyDelta(s.messages, d) })));
     } catch (e) {
-      set((s) => ({ messages: applyDelta(s.messages, { type: "error", data: e instanceof Error ? e.message : String(e) }) }));
+      set((s) => ({ messages: applyDelta(s.messages, { type: "error", data: errorMessage(e) }) }));
     } finally {
       set((s) => ({ busy: false, runId: null, messages: applyDelta(s.messages, { type: "done", data: "end_turn" }) }));
     }

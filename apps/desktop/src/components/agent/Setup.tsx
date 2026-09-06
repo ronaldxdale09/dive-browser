@@ -5,6 +5,7 @@ import { useAgent } from "../../store/agent";
 import { useBrowser } from "../../store/browser";
 import { usePrefs } from "../../store/prefs";
 import { Icon } from "../Icon";
+import { errorMessage } from "../../lib/errors";
 
 const TOP_PROVIDERS: { id: Provider; badge?: string }[] = [
   { id: "anthropic", badge: "Recommended" },
@@ -98,7 +99,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
     } catch (e) {
       if (current()) {
         setVerifiedSuccess(false);
-        setResult({ ok: false, message: e instanceof Error ? e.message : String(e) });
+        setResult({ ok: false, message: errorMessage(e) });
       }
     } finally {
       if (current()) setBusy(false);

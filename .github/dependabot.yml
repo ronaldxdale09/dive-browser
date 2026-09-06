@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      rust-minor:
+        update-types: [minor, patch]
+    ignore:
+      # Pinned to the CEF distribution the vendored runtime is built against.
+      - dependency-name: cef
+      - dependency-name: cef-dll-sys
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      js-minor:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "@tauri-apps/cli-cef"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

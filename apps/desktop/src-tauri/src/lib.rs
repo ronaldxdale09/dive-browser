@@ -225,12 +225,29 @@ pub fn run() {
             {
                 engine::remember_window_bounds(window);
             }
+            // Closing the main window with popouts open would leave a headless
+            // app: the tab host's window is gone but its views and the popouts
+            // stay. Quit instead, the way a browser does when its primary
+            // window goes away.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                && window.label() == MAIN_WINDOW
+                && !window
+                    .app_handle()
+                    .windows()
+                    .keys()
+                    .all(|label| label == MAIN_WINDOW)
+            {
+                api.prevent_close();
+                window.app_handle().exit(0);
+                return;
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event
                 && let Some(tab) = engine::popout_tab(window.label())
             {
                 api.prevent_close();
-                // Deferred a turn: tearing the window down from inside its own
-                // close callback re-enters the engine while it is mid-event.
+                // On the main thread this runs inline, inside the window's own
+                // close callback; the engine only sends messages on this path,
+                // so no synchronous getter re-enters the runtime mid-event.
                 let app = window.app_handle().clone();
                 let _ = app.clone().run_on_main_thread(move || {
                     let Some(main) = engine::MainThread::here() else {

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { ipc, events } from "../lib/ipc";
 import type { SubtitleModel } from "../lib/ipc";
 import { useBrowser } from "./browser";
+import { errorMessage } from "../lib/errors";
 
 /** Bytes seen and expected for a model that is downloading; `total` is null until the server reports a length. */
 export type DownloadProgress = { received: number; total: number | null };
@@ -53,7 +54,7 @@ export const useSubtitles = create<SubtitlesState>((set, get) => ({
       const models = await ipc.subtitleModels();
       set({ models, error: null });
     } catch (e) {
-      set({ error: message(e) });
+      set({ error: errorMessage(e) });
     }
   },
 
@@ -63,7 +64,7 @@ export const useSubtitles = create<SubtitlesState>((set, get) => ({
     try {
       await ipc.subtitleModelDownload(modelId);
     } catch (e) {
-      set((s) => ({ downloading: without(s.downloading, modelId), error: message(e) }));
+      set((s) => ({ downloading: without(s.downloading, modelId), error: errorMessage(e) }));
     }
   },
 
@@ -89,7 +90,7 @@ export const useSubtitles = create<SubtitlesState>((set, get) => ({
       return true;
     } catch (e) {
       if (attempt !== startAttempt) return false;
-      if (useBrowser.getState().activeTab === tab) set({ active: false, error: message(e), lastCue: "" });
+      if (useBrowser.getState().activeTab === tab) set({ active: false, error: errorMessage(e), lastCue: "" });
       return false;
     } finally {
       if (attempt === startAttempt) set({ starting: false });
@@ -105,7 +106,7 @@ export const useSubtitles = create<SubtitlesState>((set, get) => ({
       await ipc.subtitleStop(tab);
       if (useBrowser.getState().activeTab === tab) set({ active: false, error: null, lastCue: "" });
     } catch (e) {
-      set({ error: message(e) });
+      set({ error: errorMessage(e) });
     }
   },
 }));
@@ -116,9 +117,6 @@ function without<T>(rec: Record<string, T>, key: string): Record<string, T> {
   return Object.fromEntries(Object.entries(rec).filter(([k]) => k !== key));
 }
 
-function message(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
 
 let listening = false;
 const subscriptions: (() => void)[] = [];
@@ -177,7 +175,7 @@ export async function bootSubtitles(): Promise<void> {
   } catch (e) {
     subscriptions.splice(0).forEach((unsubscribe) => unsubscribe());
     listening = false;
-    useSubtitles.setState({ error: message(e) });
+    useSubtitles.setState({ error: errorMessage(e) });
   }
 }
 

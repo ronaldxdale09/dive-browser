@@ -18,7 +18,24 @@
   ];
   const xhrTargets = new WeakSet();
   const xhrListeners = new Set();
-  const xhrPatches = new Map();
+  // Keyed weakly so a finished XHR is not kept alive by its patch record.
+  // Dispose still has to find every patched object, so `patchedXhrs` keeps
+  // weak references to them, pruned as they are collected.
+  const xhrPatches = new WeakMap();
+  const patchedXhrs = new Set();
+  const trackPatched = (xhr) => {
+    if (typeof WeakRef !== "function") return;
+    if (patchedXhrs.size >= 64) {
+      for (const ref of patchedXhrs) if (!ref.deref()) patchedXhrs.delete(ref);
+    }
+    patchedXhrs.add(new WeakRef(xhr));
+  };
+  const untrackPatched = (xhr) => {
+    for (const ref of patchedXhrs) {
+      const held = ref.deref();
+      if (!held || held === xhr) patchedXhrs.delete(ref);
+    }
+  };
   const accelerated = new Map();
   const skippedPlayers = new Map();
   const state = {
@@ -166,6 +183,7 @@
       // Record ownership before the first mutation so a later define failure
       // can roll back every descriptor already installed by this attempt.
       xhrPatches.set(xhr, patch);
+      trackPatched(xhr);
       Object.defineProperty(xhr, "response", {
         configurable: true,
         enumerable: patch.response ? patch.response.enumerable : false,
@@ -203,6 +221,7 @@
       }
     }
     xhrPatches.delete(xhr);
+    untrackPatched(xhr);
   }
 
   const removeXhrListeners = (xhr) => {
@@ -400,7 +419,11 @@
       entry.xhr.removeEventListener("readystatechange", entry.listener, true);
     }
     xhrListeners.clear();
-    for (const xhr of xhrPatches.keys()) restoreXhrResponse(xhr);
+    for (const ref of Array.from(patchedXhrs)) {
+      const xhr = ref.deref();
+      if (xhr) restoreXhrResponse(xhr);
+    }
+    patchedXhrs.clear();
     skippedPlayers.clear();
     restoreInactiveMedia(new Set());
     if (previousFetch && wrappedFetch && window.fetch === wrappedFetch) {

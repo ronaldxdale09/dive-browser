@@ -12,10 +12,11 @@ import { usePopoutPage } from "../lib/usePopoutPage";
 import { useTabHistory } from "../lib/useTabHistory";
 import { isMac, shortcutFor } from "../lib/commands";
 import { selectAllInChromeField } from "../lib/chromeEditing";
+import { errorMessage } from "../lib/errors";
 
 /** Keep commands in a detached window on the same visible error path as the main chrome. */
 function run(action: Promise<unknown>) {
-  void action.catch((error: unknown) => useBrowser.setState({ error: error instanceof Error ? error.message : String(error) }));
+  void action.catch((error: unknown) => useBrowser.setState({ error: errorMessage(error) }));
 }
 
 /**
@@ -62,7 +63,7 @@ export function Popout({ tabId }: { tabId: string }) {
         inputRef.current?.select();
       }
     }).catch((error: unknown) => {
-      if (live) useBrowser.setState({ error: error instanceof Error ? error.message : String(error) });
+      if (live) useBrowser.setState({ error: errorMessage(error) });
     });
     return () => { live = false; };
   }, [ready, menuReady, tabId]);
@@ -133,7 +134,7 @@ export function Popout({ tabId }: { tabId: string }) {
         if (live) { stop = un; setMenuReady(true); }
         else un();
       })
-      .catch((error: unknown) => useBrowser.setState({ error: error instanceof Error ? error.message : String(error) }));
+      .catch((error: unknown) => useBrowser.setState({ error: errorMessage(error) }));
     return () => {
       live = false;
       stop?.();

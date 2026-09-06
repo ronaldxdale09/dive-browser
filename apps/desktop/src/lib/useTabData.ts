@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { errorMessage } from "./errors";
 
 /**
  * Fetch something about the active tab whenever the tab or its URL changes,
@@ -19,7 +20,7 @@ export function useTabData<T>(tabId: string | null, url: string | undefined, fet
           setData(d);
           setError(null);
         })
-        .catch((e: unknown) => alive && setError(e instanceof Error ? e.message : String(e)));
+        .catch((e: unknown) => alive && setError(errorMessage(e)));
     }, delayMs);
     return () => {
       alive = false;

@@ -10,6 +10,7 @@ import type { RequestRow } from "../store/network";
 import { Icon, IconButton } from "./Icon";
 import { ReplayEditor } from "./ReplayEditor";
 import { AgentIcon } from "./agent/AgentIcon";
+import { errorMessage } from "../lib/errors";
 
 export function NetworkTools() {
   const activeTab = useBrowser((s) => s.activeTab);
@@ -17,9 +18,8 @@ export function NetworkTools() {
   const exportWith = (run: (tab: string) => Promise<string>, label: string) => () => {
     if (!activeTab) return;
     run(activeTab)
-      .then((path) => useBrowser.setState({ notice: `${label} · saved ${path.split("/").pop() ?? path}` }))
-      .catch((e: unknown) => useBrowser.setState({ error: e instanceof Error ? e.message : String(e) }));
-    setTimeout(() => useBrowser.setState({ notice: null }), 4000);
+      .then((path) => useBrowser.getState().notify(`${label} · saved ${path.split("/").pop() ?? path}`, 4000))
+      .catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
   };
   return (
     <>

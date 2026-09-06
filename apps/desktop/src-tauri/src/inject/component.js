@@ -14,8 +14,11 @@
 // @dive-include css-path.js
 
 return (function () {
+  // `__diveHeld` is written by the locator engine's `hold` and by the host
+  // for a point pick; a page can write it too, so accept only a real,
+  // attached element and read nothing else from it.
   const el = window.__diveHeld;
-  if (!el || !el.isConnected) {
+  if (!(el instanceof Element) || !el.isConnected) {
     return { error: "not_found" };
   }
   const context = componentOf(el);

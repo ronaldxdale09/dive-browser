@@ -18,7 +18,10 @@ use specta::Type;
 use tauri::State;
 
 use crate::error::{AppError, AppResult};
-use crate::screencast::{PREVIEW_DIR, RecordingResult, ffmpeg_path};
+use crate::screencast::{
+    PREVIEW_DIR, PROBE_LIMIT, RecordingResult, ffmpeg_path, ffprobe_path, run_with_deadline,
+    write_companion,
+};
 use crate::state::AppState;
 
 /// A recording's facts the editor needs before it can draw anything.
@@ -67,7 +70,7 @@ pub struct ExportRequest {
 pub struct RecordingInfo {
     pub path: String,
     pub name: String,
-    /// `mp4` or `gif`.
+    /// The file's extension, lower-cased: `mp4`, `gif`, `mov`, `webm`…
     pub format: String,
     /// Size on disk. A float because the bindings cannot carry a u64.
     pub bytes: f64,
@@ -79,6 +82,20 @@ pub struct RecordingInfo {
     pub has_project: bool,
 }
 
+/// What the library lists and the import dialog offers: the recorder's
+/// own formats plus the containers people have lying around.
+pub const VIDEO_EXTENSIONS: [&str; 7] = ["mp4", "m4v", "mov", "webm", "mkv", "avi", "gif"];
+
+/// Widest picture the imported companion keeps; VP8 above this is slow to
+/// decode and the editor scales it down anyway.
+const IMPORT_MAX_WIDTH: u32 = 1920;
+
+/// The lower-cased extension of `path`, when it is one the editor lists.
+fn video_extension(path: &Path) -> Option<String> {
+    let ext = path.extension()?.to_string_lossy().to_ascii_lowercase();
+    VIDEO_EXTENSIONS.contains(&ext.as_str()).then_some(ext)
+}
+
 /// Every recording on disk, newest first.
 #[tauri::command]
 #[specta::specta]
@@ -88,13 +105,9 @@ pub(crate) fn recordings_list() -> AppResult<Vec<RecordingInfo>> {
     for entry in std::fs::read_dir(&dir)? {
         let entry = entry?;
         let path = entry.path();
-        let ext = path
-            .extension()
-            .map(|e| e.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_default();
-        if ext != "mp4" && ext != "gif" {
+        let Some(ext) = video_extension(&path) else {
             continue;
-        }
+        };
         let meta = entry.metadata()?;
         #[allow(clippy::cast_precision_loss)]
         let modified_ms = meta
@@ -157,12 +170,8 @@ fn companion(source: &Path, ext: &str) -> Option<String> {
 
 /// Duration, picture size and sound of a media file, from ffprobe.
 fn probe(path: &Path) -> AppResult<(f64, u32, u32, bool)> {
-    let probe = ffmpeg_path()
-        .ok_or_else(|| AppError::new("ffmpeg not found"))?
-        .with_file_name("ffprobe");
-    let out = probe_command(&probe, path)
-        .output()
-        .map_err(AppError::new)?;
+    let probe = ffprobe_path().ok_or_else(|| AppError::new("ffprobe not found"))?;
+    let out = run_with_deadline(&mut probe_command(&probe, path), PROBE_LIMIT)?;
     parse_probe(&out)
 }
 
@@ -182,9 +191,7 @@ fn probe_command(binary: &Path, path: &Path) -> Command {
 }
 
 fn probe_job(job: &jobs::Job, path: &Path) -> AppResult<(f64, u32, u32, bool)> {
-    let binary = ffmpeg_path()
-        .ok_or_else(|| AppError::new("ffmpeg not found"))?
-        .with_file_name("ffprobe");
+    let binary = ffprobe_path().ok_or_else(|| AppError::new("ffprobe not found"))?;
     parse_probe(&job.run(&mut probe_command(&binary, path))?)
 }
 
@@ -234,6 +241,150 @@ pub(crate) async fn screen_media_info(source: String) -> Result<MediaInfo, AppEr
     })
     .await
     .map_err(AppError::new)?
+}
+
+#[tauri::command]
+#[specta::specta]
+/// Ask for a video file and bring it into the captures directory with a
+/// playable companion, so `DiveScreen` can open it. `None` when the
+/// dialog was dismissed.
+pub(crate) async fn screen_import_video() -> Result<Option<String>, AppError> {
+    let picked = rfd::AsyncFileDialog::new()
+        .set_title("Open a video in DiveScreen")
+        .add_filter("Video", &VIDEO_EXTENSIONS)
+        .pick_file()
+        .await;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    import_command(picked.path().to_path_buf()).await.map(Some)
+}
+
+#[tauri::command]
+#[specta::specta]
+/// Bring the video at `path` into the captures directory with a playable
+/// companion (the same pipeline as the dialog), returning the new path.
+pub(crate) async fn screen_import_path(path: String) -> Result<String, AppError> {
+    import_command(PathBuf::from(path)).await
+}
+
+async fn import_command(source: PathBuf) -> Result<String, AppError> {
+    let dir = crate::commands::captures_dir()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        import_into(&dir, &source).map(|p| p.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(AppError::new)?
+}
+
+/// Copy `source` into `dir` under its own name (deduplicated), check that
+/// ffprobe sees a video stream, and write the VP8 companion beside it. A
+/// file already in `dir` is not copied; only its missing companion is made.
+fn import_into(dir: &Path, source: &Path) -> AppResult<PathBuf> {
+    let dir = dir.canonicalize()?;
+    let source = importable(source)?;
+    let copied = source.parent() != Some(&dir);
+    if copied && source.starts_with(&dir) {
+        return Err(AppError::new("this file already belongs to a recording"));
+    }
+    let (duration_ms, width, height, has_audio) = probe(&source)?;
+    if width == 0 || height == 0 || !(duration_ms.is_finite() && duration_ms > 0.0) {
+        return Err(AppError::new(
+            "this file has no video stream ffmpeg can read",
+        ));
+    }
+    let target = if copied {
+        copy_unique(&source, &dir)?
+    } else {
+        source
+    };
+    let stem = target
+        .file_stem()
+        .ok_or_else(|| AppError::new("not a file"))?
+        .to_string_lossy()
+        .into_owned();
+    let playable = dir.join(PREVIEW_DIR).join(format!("{stem}.webm"));
+    if !playable.exists()
+        && write_companion(&target, &playable, IMPORT_MAX_WIDTH, has_audio).is_none()
+    {
+        if copied {
+            let _ = std::fs::remove_file(&target);
+        }
+        let _ = std::fs::remove_file(&playable);
+        return Err(AppError::new(
+            "ffmpeg could not make a playable copy of this video; check that ffmpeg is installed and the file decodes",
+        ));
+    }
+    Ok(target)
+}
+
+/// A file the import may read: a regular, readable file with a video
+/// extension, never a directory or a companion under `.previews`.
+fn importable(path: &Path) -> AppResult<PathBuf> {
+    let file = path
+        .canonicalize()
+        .map_err(|e| AppError::new(format!("cannot read {}: {e}", path.display())))?;
+    if !file.is_file() {
+        return Err(AppError::new("not a video file"));
+    }
+    if video_extension(&file).is_none() {
+        return Err(AppError::new(format!(
+            "not a supported video file ({})",
+            VIDEO_EXTENSIONS.join(", ")
+        )));
+    }
+    std::fs::File::open(&file)
+        .map_err(|e| AppError::new(format!("cannot read {}: {e}", file.display())))?;
+    Ok(file)
+}
+
+/// The first free name for `stem.ext` in `dir`: the name itself, then
+/// `stem 2.ext`, `stem 3.ext`…
+fn unique_name(dir: &Path, stem: &str, ext: &str) -> PathBuf {
+    (1u32..=u32::MAX)
+        .map(|n| {
+            if n == 1 {
+                dir.join(format!("{stem}.{ext}"))
+            } else {
+                dir.join(format!("{stem} {n}.{ext}"))
+            }
+        })
+        .find(|p| !p.exists())
+        .expect("some counter is free")
+}
+
+/// Copy `source` into `dir` through a hidden temporary name, so a listing
+/// never shows a half-copied video, then link it under a free name.
+fn copy_unique(source: &Path, dir: &Path) -> AppResult<PathBuf> {
+    let stem = source
+        .file_stem()
+        .ok_or_else(|| AppError::new("not a file"))?
+        .to_string_lossy()
+        .into_owned();
+    let ext = video_extension(source).ok_or_else(|| AppError::new("not a video file"))?;
+    let temp = dir.join(format!(".import-{}.part", dive_core::TabId::new()));
+    let copy = std::fs::copy(source, &temp).and_then(|_| {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&temp)?
+            .sync_all()
+    });
+    if let Err(error) = copy {
+        let _ = std::fs::remove_file(&temp);
+        return Err(error.into());
+    }
+    // Hard links refuse an existing destination, so a name is claimed
+    // atomically even if two imports race for it.
+    let linked = loop {
+        let target = unique_name(dir, &stem, &ext);
+        match std::fs::hard_link(&temp, &target) {
+            Ok(()) => break Ok(target),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => break Err(e),
+        }
+    };
+    let _ = std::fs::remove_file(&temp);
+    Ok(linked?)
 }
 
 #[tauri::command]
@@ -806,6 +957,113 @@ mod tests {
         let result = fixture.export("gif");
         assert_export_media(&result, false);
         assert_eq!(result.format, "gif");
+    }
+
+    #[test]
+    fn library_lists_common_video_containers_only() {
+        for name in [
+            "a.mp4", "b.GIF", "c.mov", "d.webm", "e.mkv", "f.m4v", "g.avi",
+        ] {
+            assert!(video_extension(Path::new(name)).is_some(), "{name}");
+        }
+        assert_eq!(video_extension(Path::new("B.MoV")).as_deref(), Some("mov"));
+        for name in ["notes.txt", "clip.mp3", "still.png", "noext", ".previews"] {
+            assert!(video_extension(Path::new(name)).is_none(), "{name}");
+        }
+    }
+
+    #[test]
+    fn imported_names_are_deduplicated_with_a_counter() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            unique_name(dir.path(), "clip", "mp4"),
+            dir.path().join("clip.mp4")
+        );
+        std::fs::write(dir.path().join("clip.mp4"), b"1").unwrap();
+        assert_eq!(
+            unique_name(dir.path(), "clip", "mp4"),
+            dir.path().join("clip 2.mp4")
+        );
+        std::fs::write(dir.path().join("clip 2.mp4"), b"2").unwrap();
+        assert_eq!(
+            unique_name(dir.path(), "clip", "mp4"),
+            dir.path().join("clip 3.mp4")
+        );
+        let src = dir.path().join("src").join("clip.mp4");
+        std::fs::create_dir(dir.path().join("src")).unwrap();
+        std::fs::write(&src, b"source bytes").unwrap();
+        let copied = copy_unique(&src, dir.path()).unwrap();
+        assert_eq!(copied, dir.path().join("clip 3.mp4"));
+        assert_eq!(std::fs::read(&copied).unwrap(), b"source bytes");
+        assert!(std::fs::read_dir(dir.path()).unwrap().all(|e| {
+            !e.unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".import-")
+        }));
+    }
+
+    #[test]
+    fn import_refuses_directories_unreadable_and_non_video_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let captures = dir.path().join("captures");
+        std::fs::create_dir(&captures).unwrap();
+        let folder = dir.path().join("folder.mp4");
+        std::fs::create_dir(&folder).unwrap();
+        assert!(import_into(&captures, &folder).is_err());
+        assert!(import_into(&captures, &dir.path().join("missing.mp4")).is_err());
+        let text = dir.path().join("notes.txt");
+        std::fs::write(&text, b"hello").unwrap();
+        let error = import_into(&captures, &text).unwrap_err();
+        assert!(
+            error.to_string().contains("not a supported video"),
+            "{error}"
+        );
+        assert!(importable(&captures).is_err());
+        let previews = captures.join(PREVIEW_DIR);
+        std::fs::create_dir(&previews).unwrap();
+        std::fs::write(previews.join("clip.webm"), b"companion").unwrap();
+        let error = import_into(&captures, &previews.join("clip.webm")).unwrap_err();
+        assert!(error.to_string().contains("already belongs"), "{error}");
+        assert_eq!(std::fs::read_dir(&captures).unwrap().count(), 1);
+    }
+
+    #[test]
+    #[ignore = "requires ffmpeg and ffprobe; run explicitly with --ignored"]
+    fn import_copies_into_captures_and_writes_a_playable_companion() {
+        let fixture = std::env::var_os("DIVE_IMPORT_FIXTURE")
+            .map(PathBuf::from)
+            .expect("DIVE_IMPORT_FIXTURE names an H.264 MP4 with audio");
+        let dir = tempfile::tempdir().unwrap();
+        let captures = dir.path().join("captures");
+        std::fs::create_dir(&captures).unwrap();
+        let imported = import_into(&captures, &fixture).expect("import fixture");
+        assert_eq!(
+            imported.parent(),
+            Some(captures.canonicalize().unwrap().as_path())
+        );
+        assert_eq!(imported.file_name(), fixture.file_name());
+        let playable = companion(&imported, "webm").expect("companion written");
+        let (duration, width, height, has_audio) = probe(Path::new(&playable)).unwrap();
+        let (src_duration, _, _, src_audio) = probe(&fixture).unwrap();
+        assert!(
+            (duration - src_duration).abs() < 500.0,
+            "{duration} vs {src_duration}"
+        );
+        assert!(width <= IMPORT_MAX_WIDTH && width > 0 && height > 0);
+        assert_eq!(has_audio, src_audio);
+        // Importing the same file again lands beside it under a new name.
+        let again = import_into(&captures, &fixture).unwrap();
+        assert_ne!(again, imported);
+        assert!(again.file_name().unwrap().to_string_lossy().contains(" 2."));
+        assert!(companion(&again, "webm").is_some());
+        // A file already in captures is not copied; the listing gate holds.
+        assert_eq!(import_into(&captures, &imported).unwrap(), imported);
+        let listed: Vec<_> = std::fs::read_dir(&captures)
+            .unwrap()
+            .filter_map(|e| video_extension(&e.unwrap().path()))
+            .collect();
+        assert_eq!(listed.len(), 2);
     }
 
     #[test]

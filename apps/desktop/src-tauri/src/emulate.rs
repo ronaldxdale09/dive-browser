@@ -131,9 +131,12 @@ impl Call {
 }
 
 /// Build the CDP calls for a device, or the calls that clear emulation.
-pub fn device_calls(device: Option<&Device>) -> Vec<Call> {
+///
+/// The device is validated first, so every apply path (the chrome's device
+/// menu, `page_resize`, a preset) runs the same viewport and DPR guard.
+pub fn device_calls(device: Option<&Device>) -> AppResult<Vec<Call>> {
     let Some(d) = device else {
-        return vec![
+        return Ok(vec![
             Call::required("Emulation.clearDeviceMetricsOverride", json!({})),
             Call::required(
                 "Emulation.setTouchEmulationEnabled",
@@ -142,8 +145,9 @@ pub fn device_calls(device: Option<&Device>) -> Vec<Call> {
             Call::required("Emulation.setUserAgentOverride", json!({"userAgent": ""})),
             Call::optional("Emulation.setSafeAreaInsetsOverride", json!({"insets": {}})),
             Call::optional("Emulation.setScrollbarsHidden", json!({"hidden": false})),
-        ];
+        ]);
     };
+    d.validate()?;
     let landscape = d.width > d.height;
     let (orientation, angle) = if landscape {
         ("landscapePrimary", 90)
@@ -233,7 +237,7 @@ pub fn device_calls(device: Option<&Device>) -> Vec<Call> {
             }),
         ));
     }
-    calls
+    Ok(calls)
 }
 
 /// Build the `Emulation.setEmulatedMedia` call.
@@ -626,17 +630,41 @@ pub fn realize(preset: &Preset, landscape: bool, mode: UiMode) -> Device {
 /// Chromium allocate a surface big enough to take the tab down with it.
 pub const MAX_VIEWPORT_AREA: u64 = 8_294_400;
 
+/// Largest device pixel ratio accepted. The backing surface scales with the
+/// square of it, so an unbounded value is the viewport limit by another name.
+pub const MAX_DPR: f64 = 8.0;
+
+impl Device {
+    /// Check the viewport and pixel ratio against the limits Chromium can
+    /// allocate for, whichever path the device came in on.
+    pub fn validate(&self) -> AppResult<()> {
+        if self.width == 0 || self.height == 0 {
+            return Err(AppError::new("width and height have to be above zero"));
+        }
+        if u64::from(self.width) * u64::from(self.height) > MAX_VIEWPORT_AREA {
+            return Err(AppError::new(format!(
+                "{}x{} is larger than the {MAX_VIEWPORT_AREA} pixel limit",
+                self.width, self.height
+            )));
+        }
+        if !self.dpr.is_finite() || self.dpr <= 0.0 || self.dpr > MAX_DPR {
+            return Err(AppError::new(format!(
+                "device pixel ratio {} is outside 0 to {MAX_DPR}",
+                self.dpr
+            )));
+        }
+        if let Some(scale) = self.scale
+            && (!scale.is_finite() || scale <= 0.0)
+        {
+            return Err(AppError::new(format!("scale {scale} has to be above zero")));
+        }
+        Ok(())
+    }
+}
+
 /// A plain viewport of exactly `width` by `height`, with no device traits.
 pub fn exact(width: u32, height: u32) -> Result<Device, AppError> {
-    if width == 0 || height == 0 {
-        return Err(AppError::new("width and height have to be above zero"));
-    }
-    if u64::from(width) * u64::from(height) > MAX_VIEWPORT_AREA {
-        return Err(AppError::new(format!(
-            "{width}x{height} is larger than the {MAX_VIEWPORT_AREA} pixel limit"
-        )));
-    }
-    Ok(Device {
+    let device = Device {
         width,
         height,
         dpr: 1.0,
@@ -646,13 +674,35 @@ pub fn exact(width: u32, height: u32) -> Result<Device, AppError> {
         platform: "macOS".to_owned(),
         scale: None,
         safe_area: None,
-    })
+    };
+    device.validate()?;
+    Ok(device)
+}
+
+/// A call plan [`apply`] accepts: a ready list, or one whose construction
+/// may already have failed validation (see [`device_calls`]).
+pub trait IntoCalls {
+    /// The calls to send, or the reason none should be.
+    fn into_calls(self) -> AppResult<Vec<Call>>;
+}
+
+impl IntoCalls for Vec<Call> {
+    fn into_calls(self) -> AppResult<Vec<Call>> {
+        Ok(self)
+    }
+}
+
+impl IntoCalls for AppResult<Vec<Call>> {
+    fn into_calls(self) -> AppResult<Vec<Call>> {
+        self
+    }
 }
 
 /// Apply calls in order. A required failure stops and reports; an optional
 /// one (an experimental method this engine lacks) is logged and skipped.
-pub async fn apply(session: &CdpSession, calls: Vec<Call>) -> AppResult<()> {
-    for call in calls {
+/// A plan that failed validation is reported before anything is sent.
+pub async fn apply(session: &CdpSession, calls: impl IntoCalls) -> AppResult<()> {
+    for call in calls.into_calls()? {
         if let Err(e) = session.call(call.method, call.params).await {
             if call.required {
                 return Err(AppError::new(format!("{}: {e}", call.method)));
@@ -854,6 +904,35 @@ mod tests {
     }
 
     #[test]
+    fn every_device_apply_path_is_bounded() {
+        // The chrome's `tab_emulate` hands a raw `Device`; it goes through the
+        // same guard as `exact`, so an oversized surface never reaches CDP.
+        let mut huge = phone();
+        huge.width = 100_000;
+        huge.height = 100_000;
+        assert!(huge.validate().is_err());
+        assert!(device_calls(Some(&huge)).is_err());
+        let mut dense = phone();
+        dense.dpr = 64.0;
+        assert!(device_calls(Some(&dense)).is_err());
+        let mut nan = phone();
+        nan.dpr = f64::NAN;
+        assert!(device_calls(Some(&nan)).is_err());
+        let mut zero = phone();
+        zero.width = 0;
+        assert!(device_calls(Some(&zero)).is_err());
+        assert!(device_calls(Some(&phone())).is_ok());
+        assert!(device_calls(None).is_ok(), "clearing needs no device");
+        for preset in presets() {
+            assert!(
+                realize(&preset, false, UiMode::Browser).validate().is_ok(),
+                "preset {} is within the limits",
+                preset.id
+            );
+        }
+    }
+
+    #[test]
     fn network_presets_clear_and_throttle() {
         let (_, clear) = network_call(None);
         assert_eq!(clear["downloadThroughput"], -1.0);
@@ -883,7 +962,7 @@ mod tests {
 
     #[test]
     fn device_calls_cover_metrics_touch_scrollbars_and_ua() {
-        let calls = device_calls(Some(&phone()));
+        let calls = device_calls(Some(&phone())).unwrap();
         assert_eq!(
             names(&calls),
             [
@@ -916,7 +995,7 @@ mod tests {
     fn metrics_never_resize_the_widget() {
         // The stage sizes the native view; the override must not fight it.
         let d = exact(375, 667).unwrap();
-        let calls = device_calls(Some(&d));
+        let calls = device_calls(Some(&d)).unwrap();
         assert_eq!(
             find(&calls, "Emulation.setDeviceMetricsOverride").params["dontSetVisibleSize"],
             json!(true)
@@ -933,7 +1012,7 @@ mod tests {
             left: 0,
             right: 0,
         });
-        let calls = device_calls(Some(&d));
+        let calls = device_calls(Some(&d)).unwrap();
         assert_eq!(
             find(&calls, "Emulation.setDeviceMetricsOverride").params["scale"],
             0.5
@@ -945,7 +1024,7 @@ mod tests {
 
         // A scale of exactly 1 is the default and is not sent.
         d.scale = Some(1.0);
-        let calls = device_calls(Some(&d));
+        let calls = device_calls(Some(&d)).unwrap();
         assert!(
             find(&calls, "Emulation.setDeviceMetricsOverride")
                 .params
@@ -961,7 +1040,7 @@ mod tests {
         d.height = 393;
         d.user_agent.clear();
         d.mobile = false;
-        let calls = device_calls(Some(&d));
+        let calls = device_calls(Some(&d)).unwrap();
         assert_eq!(
             find(&calls, "Emulation.setDeviceMetricsOverride").params["screenOrientation"]["angle"],
             90
@@ -980,7 +1059,7 @@ mod tests {
 
     #[test]
     fn clearing_resets_everything_including_the_optional_overrides() {
-        let calls = device_calls(None);
+        let calls = device_calls(None).unwrap();
         assert_eq!(names(&calls)[0], "Emulation.clearDeviceMetricsOverride");
         assert!(names(&calls).contains(&"Emulation.setSafeAreaInsetsOverride"));
         assert_eq!(

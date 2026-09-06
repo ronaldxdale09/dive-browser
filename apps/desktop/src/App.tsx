@@ -30,7 +30,6 @@ import { useRecorder } from "./store/recorder";
 const Sidecar = lazy(() => import("./components/Sidecar").then(({ Sidecar }) => ({ default: Sidecar })));
 const Dock = lazy(() => import("./components/Dock").then(({ Dock }) => ({ default: Dock })));
 const SettingsDialog = lazy(() => import("./components/SettingsDialog").then(({ SettingsDialog }) => ({ default: SettingsDialog })));
-const Annotator = lazy(() => import("./components/Annotator").then(({ Annotator }) => ({ default: Annotator })));
 const Library = lazy(() => import("./components/Library").then(({ Library }) => ({ default: Library })));
 const Extensions = lazy(() => import("./components/Extensions").then(({ Extensions }) => ({ default: Extensions })));
 const Shortcuts = lazy(() => import("./components/Shortcuts").then(({ Shortcuts }) => ({ default: Shortcuts })));
@@ -45,7 +44,6 @@ export function App() {
   const boot = useBrowser((s) => s.boot);
   const error = useBrowser((s) => s.error);
   const notice = useBrowser((s) => s.notice);
-  const annotating = useBrowser((s) => s.annotating);
   const editing = useBrowser((s) => s.editing);
   const open = useBrowser((s) => s.open);
   // Keep the native page covered between navigation dialogs, including while
@@ -172,7 +170,7 @@ export function App() {
         )}
         {showSidecar && <IsolatedPanel label="Agent" onClose={() => toggle("sidecar", false)}><Suspense fallback={<PanelSkeleton label="agent" />}><Sidecar /></Suspense></IsolatedPanel>}
       </main>
-      <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || open.subtitles || annotating) ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
+      <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || open.subtitles) ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
         {open.palette && <Palette />}
         {open.settings && <SettingsDialog />}
         {open.library && <Library />}
@@ -181,7 +179,6 @@ export function App() {
         {open.subtitles && <Subtitles />}
       </Suspense>
       {open.extensions && <IsolatedPanel label="Extensions" modal onClose={() => toggle("extensions", false)}><Suspense fallback={<div className="fixed inset-0 z-50 bg-ground/75 backdrop-blur-sm" aria-label="Loading extensions" />}><Extensions /></Suspense></IsolatedPanel>}
-      {annotating && <IsolatedPanel key={annotating} label="Image editor" modal onClose={() => useBrowser.getState().setAnnotating(null)}><Suspense fallback={<div className="fixed inset-0 z-50 bg-ground/75 backdrop-blur-sm" aria-label="Loading image editor" />}><Annotator path={annotating} /></Suspense></IsolatedPanel>}
       <Splash />
       <Suspense fallback={(editing || recorderOpen || recordingPhase === "setup" || recordingPhase === "done") ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
         {editing && <WorkspaceDialog key={editing.id ?? "new"} />}

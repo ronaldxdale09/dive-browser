@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { ReactNode } from "react";
 
 /**
@@ -148,7 +149,7 @@ function Inlines({ text, onLink }: { text: string; onLink?: ((href: string) => v
 
 /** Render Markdown as chrome-styled React. */
 export function Markdown({ text, onLink }: { text: string; onLink?: ((href: string) => void) | undefined }): ReactNode {
-  const blocks = parseBlocks(text);
+  const blocks = useMemo(() => parseBlocks(text), [text]);
   return (
     <div className="space-y-2">
       {blocks.map((b, i) => {

@@ -14,7 +14,20 @@
 // @dive-include actionability.js
 
 (function () {
-  if (window.__diveLocator && window.__diveLocator.version === 1) return true;
+  // Re-evaluating on a page that already carries this engine is a no-op,
+  // but only when the property is the frozen, read-only one this file
+  // installs. Anything a page assigned itself (a writable value, an
+  // accessor) is replaced rather than trusted.
+  const installed = Object.getOwnPropertyDescriptor(window, "__diveLocator");
+  if (
+    installed &&
+    "value" in installed &&
+    installed.writable === false &&
+    Object.isFrozen(installed.value) &&
+    window.__diveLocator && window.__diveLocator.version === 1
+  ) {
+    return true;
+  }
 
   const MAX_CANDIDATES = __MAX_CANDIDATES__;
   const ENGINES = ["css", "role", "text", "testid", "label", "placeholder", "alt", "title", "nth", "visible"];
@@ -267,7 +280,7 @@
     return { element: el, described: describe(el, all.length) };
   };
 
-  window.__diveLocator = {
+  const engine = {
     version: 1,
 
     // Resolve to a click point.
@@ -414,5 +427,18 @@
       return describe(all[0], all.length);
     }),
   };
+  Object.freeze(engine);
+  // Read-only so page script cannot swap methods out from under the host;
+  // configurable so a later install (or a test) can still replace it whole.
+  try {
+    Object.defineProperty(window, "__diveLocator", {
+      configurable: true,
+      enumerable: false,
+      writable: false,
+      value: engine,
+    });
+  } catch {
+    window.__diveLocator = engine;
+  }
   return true;
 })();

@@ -438,6 +438,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             recording_delete,
             crate::screen::recordings_list,
             crate::screen::screen_media_info,
+            crate::screen::screen_import_video,
+            crate::screen::screen_import_path,
             crate::screen::screen_project_read,
             crate::screen::screen_project_write,
             crate::screen::file_read_chunk,
@@ -614,15 +616,17 @@ pub fn register_builtin(registry: &dive_core::CommandRegistry) {
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn snapshot(state: State<'_, AppState>) -> AppResult<Snapshot> {
+    // Host before store: the main thread takes them in that order while it
+    // activates or closes a tab, and this runs on a worker thread.
+    let (active_tab, detached) = lock(&state.host)
+        .as_ref()
+        .map_or((None, Vec::new()), |h| (h.active(), h.detached()));
     let store = lock(&state.store);
     let active_workspace = *lock(&state.active_workspace);
     let tabs = match active_workspace {
         Some(id) => store.tabs_for_workspace(id)?,
         None => Vec::new(),
     };
-    let (active_tab, detached) = lock(&state.host)
-        .as_ref()
-        .map_or((None, Vec::new()), |h| (h.active(), h.detached()));
     let workspaces = store.workspaces()?;
     let active_profile = active_workspace
         .and_then(|id| workspaces.iter().find(|w| w.id == id).map(|w| w.profile_id));
@@ -1228,6 +1232,7 @@ pub fn close_tab(
     state.buffers.drop_tab(id);
     state.inspector.drop_tab(id);
     state.crashes.drop_tab(id);
+    state.privacy_pages.drop_tab(id);
     state.screencast.discard(id);
     state.bus.publish(CoreEvent::TabClosed(id));
     // Picked in its own statement so the store guard is released before
@@ -2350,14 +2355,16 @@ fn with_view(
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn layout_set_content_bounds(
-    state: State<'_, AppState>,
-    bounds: Bounds,
-) -> AppResult<()> {
-    if let Some(host) = lock(&state.host).as_mut() {
-        host.set_bounds(bounds)?;
-    }
-    Ok(())
+pub(crate) fn layout_set_content_bounds(app: AppHandle<Runtime>, bounds: Bounds) -> AppResult<()> {
+    // Native show/hide/move messages sent from a worker thread can overtake
+    // the ones a main-thread command issues inline, so every visibility
+    // change originates on the main thread.
+    on_main(&app, move |_, _, state| {
+        if let Some(host) = lock(&state.host).as_mut() {
+            host.set_bounds(bounds)?;
+        }
+        Ok(())
+    })
 }
 
 /// Freeze every page shown in the main window before a DOM overlay hides its
@@ -2410,14 +2417,13 @@ pub(crate) async fn layout_prepare_content_cover(
 #[specta::specta]
 /// Hide the native content view while a DOM overlay (dialog, menu, popover)
 /// is on screen, since child webviews always paint above the main webview.
-pub(crate) fn layout_set_content_covered(
-    state: State<'_, AppState>,
-    covered: bool,
-) -> AppResult<()> {
-    if let Some(host) = lock(&state.host).as_mut() {
-        host.set_covered(covered)?;
-    }
-    Ok(())
+pub(crate) fn layout_set_content_covered(app: AppHandle<Runtime>, covered: bool) -> AppResult<()> {
+    on_main(&app, move |_, _, state| {
+        if let Some(host) = lock(&state.host).as_mut() {
+            host.set_covered(covered)?;
+        }
+        Ok(())
+    })
 }
 
 /// Make sure `id` has a live view, recreating one if it was discarded. The
@@ -2593,14 +2599,16 @@ fn persist_reattach_workspace(
 #[specta::specta]
 /// The chrome of a popout window reports where its page sits.
 pub(crate) fn popout_set_bounds(
-    state: State<'_, AppState>,
+    app: AppHandle<Runtime>,
     id: TabId,
     bounds: Bounds,
 ) -> AppResult<()> {
-    if let Some(host) = lock(&state.host).as_mut() {
-        host.set_popout_bounds(id, bounds)?;
-    }
-    Ok(())
+    on_main(&app, move |_, _, state| {
+        if let Some(host) = lock(&state.host).as_mut() {
+            host.set_popout_bounds(id, bounds)?;
+        }
+        Ok(())
+    })
 }
 
 #[tauri::command]

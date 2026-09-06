@@ -1,5 +1,5 @@
 import { ArrowUp, Brain, ChevronRight, Globe, ShieldOff, Square } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { compactNumber, formatCost } from "../../lib/agentSteps";
 import { Markdown } from "../../lib/markdown";
 import type { Message } from "../../store/agent";
@@ -73,7 +73,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
     void send(text, activeTab);
     textRef.current?.focus();
   };
-  const onLink = (href: string) => void openTab(href);
+  const onLink = useCallback((href: string) => void openTab(href), [openTab]);
 
   return (
     <>
@@ -215,15 +215,17 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
   );
 }
 
-function UserBubble({ message }: { message: Message }) {
+// Settled messages do not change; memo keeps a streaming reply from
+// re-rendering the whole transcript on every delta.
+const UserBubble = memo(function UserBubble({ message }: { message: Message }) {
   return (
     <div className="max-w-[85%] self-end rounded-2xl rounded-br-md bg-surface-3 border border-line px-3 py-2 text-xs whitespace-pre-wrap text-ink shadow-2xs">
       {message.content}
     </div>
   );
-}
+});
 
-function AssistantMessage({
+const AssistantMessage = memo(function AssistantMessage({
   message: m,
   onLink,
 }: {
@@ -269,7 +271,7 @@ function AssistantMessage({
       )}
     </div>
   );
-}
+});
 
 /** The model's reasoning summary: open while it is the only thing there, folded once the answer starts. */
 function Reasoning({ text, live }: { text: string; live: boolean }) {

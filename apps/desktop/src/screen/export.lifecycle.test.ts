@@ -7,8 +7,13 @@ const mock = vi.hoisted(() => ({ begin: vi.fn(), append: vi.fn(), finish: vi.fn(
 vi.mock("../lib/ipc", () => ({ ipc: { screenExportBegin: mock.begin, screenExportAppend: mock.append, screenExportFinish: mock.finish, screenExportCancel: mock.cancel } }));
 vi.mock("./render", () => ({ Renderer: class { draw = mock.draw; snap() {} } }));
 vi.mock("webm-muxer", () => ({
-  ArrayBufferTarget: class { buffer = new ArrayBuffer(8); },
-  Muxer: class { addVideoChunk() {} finalize() {} },
+  StreamTarget: class { constructor(public options: { onData: (data: Uint8Array, position: number) => void }) {} },
+  Muxer: class {
+    private target: { options: { onData: (data: Uint8Array, position: number) => void } };
+    constructor(options: { target: { options: { onData: (data: Uint8Array, position: number) => void } } }) { this.target = options.target; }
+    addVideoChunk() {}
+    finalize() { this.target.options.onData(new Uint8Array(8), 0); }
+  },
 }));
 
 function deferred<T>() {
@@ -71,6 +76,12 @@ afterEach(() => {
   vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.clearAllMocks();
 });
 
+/** A job is admitted before the first frame encodes; cancelling after that must clean it. */
+function expectJobHandled() {
+  if (mock.begin.mock.calls.length === 0) expect(mock.cancel).not.toHaveBeenCalled();
+  else expect(mock.cancel).toHaveBeenCalledExactlyOnceWith("stage");
+}
+
 async function expectCancelled(pending: Promise<unknown>, controller: AbortController) {
   let settled = false;
   const outcome = pending.then(() => null, (error: Error) => error).then((error) => { settled = true; return error; });
@@ -78,7 +89,8 @@ async function expectCancelled(pending: Promise<unknown>, controller: AbortContr
   await vi.advanceTimersByTimeAsync(1);
   expect(settled).toBe(true);
   expect((await outcome)?.message).toMatch(/cancel/i);
-  expect(mock.begin).not.toHaveBeenCalled();
+  expectJobHandled();
+  expect(mock.finish).not.toHaveBeenCalled();
 }
 
 describe("export frontend ownership and bounded waits", () => {
@@ -89,6 +101,7 @@ describe("export frontend ownership and bounded waits", () => {
     await expectCancelled(exportProject(input(element, controller.signal)), controller);
     expect(removed.mock.calls.map(([name]) => name)).toEqual(expect.arrayContaining(["loadeddata", "canplay", "error"]));
     expect(element.hasAttribute("src")).toBe(true);
+    expect(mock.begin).not.toHaveBeenCalled();
   });
 
   it("cancels a seek that never acknowledges", async () => {
@@ -123,7 +136,8 @@ describe("export frontend ownership and bounded waits", () => {
     await vi.advanceTimersByTimeAsync(25_000);
     expect(settled).toBe(true);
     expect((await outcome)?.message).toMatch(/too long|timed out/i);
-    expect(mock.begin).not.toHaveBeenCalled();
+    expectJobHandled();
+    expect(mock.finish).not.toHaveBeenCalled();
     if (encoders[0]) expect(encoders[0].close).toHaveBeenCalledOnce();
   });
 

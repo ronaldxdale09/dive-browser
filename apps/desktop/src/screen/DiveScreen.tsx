@@ -7,6 +7,8 @@ import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { useRecording } from "../store/recording";
 import { ExportDialog } from "./ExportDialog";
+import { IMPORT_BUSY, useImportVideo } from "./importVideo";
+import { OpenVideoButton } from "./OpenVideoButton";
 import { SettingsPanel } from "./SettingsPanel";
 import { Stage } from "./Stage";
 import { Timeline } from "./Timeline";
@@ -104,6 +106,7 @@ function TopBar({ onExport }: { onExport: () => void }) {
       <span className="mr-3 text-[13px] font-semibold tracking-tight">DiveScreen</span>
       <Bar icon={Video} label="Return to Recorder" onClick={() => openSetup()} />
       <Bar icon={FolderOpen} label="Show in Finder" onClick={() => source && void ipc.downloadsReveal(source).catch(() => undefined)} />
+      <OpenVideoButton />
       <Bar icon={Save} label={dirty ? "Save Project" : "Saved"} onClick={() => void save()} />
       <span className="flex-1" />
       <span className="mr-3 truncate font-mono text-[11px] text-ink-3" title={source ?? ""}>
@@ -210,13 +213,18 @@ function useShortcuts(active: boolean) {
 function Empty() {
   const openSetup = useRecording((s) => s.openSetup);
   const active = useBrowser((s) => s.activeTab);
+  const importing = useImportVideo((s) => s.busy);
   return (
     <div className="grid h-full place-items-center text-sm text-ink-3">
       <div className="text-center">
-        <p>Open a recording to edit it.</p>
-        <button type="button" disabled={!active} onClick={() => openSetup()} className="mt-3 rounded-lg bg-surface-2 px-3 py-1.5 text-xs text-ink hover:bg-surface-3 disabled:opacity-40">
-          Record a tab
-        </button>
+        <p>Open a recording or a video file to edit it.</p>
+        <div className="mt-3 flex items-center justify-center gap-2">
+          <button type="button" disabled={!active} onClick={() => openSetup()} className="h-8 rounded-lg bg-surface-2 px-3 text-xs text-ink hover:bg-surface-3 disabled:opacity-40">
+            Record a tab
+          </button>
+          <OpenVideoButton className="flex h-8 items-center gap-1.5 rounded-lg bg-surface-2 px-3 text-xs text-ink hover:bg-surface-3 disabled:opacity-60" />
+        </div>
+        {importing && <p role="status" className="mt-3 text-xs">{IMPORT_BUSY}</p>}
       </div>
     </div>
   );

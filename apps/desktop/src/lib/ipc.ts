@@ -102,6 +102,9 @@ export const ipc = {
   recordingDelete: async (path: string) => unwrap(await commands.recordingDelete(path)),
   recordingsList: async () => unwrap(await commands.recordingsList()),
   screenMediaInfo: async (source: string) => unwrap(await commands.screenMediaInfo(source)),
+  /** Pick a video file and copy it into the captures directory with a playable companion; null when dismissed. */
+  screenImportVideo: async () => unwrap(await commands.screenImportVideo()),
+  screenImportPath: async (path: string) => unwrap(await commands.screenImportPath(path)),
   screenProjectRead: async (source: string) => unwrap(await commands.screenProjectRead(source)),
   screenProjectWrite: async (source: string, json: string) => unwrap(await commands.screenProjectWrite(source, json)),
   fileSize: async (path: string) => unwrap(await commands.fileSize(path)),

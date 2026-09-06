@@ -296,15 +296,21 @@ pub async fn attach_page(
     let handler_app = app.clone();
     let handler_label = label.clone();
     let (tx, rx) = tokio::sync::oneshot::channel();
+    // Every path answers, so a bridge that cannot be installed is reported
+    // now rather than after the timeout runs out.
     let result = view.with_webview(move |native| {
-        if install_page_callbacks(&native, &handler_app, tab_id, &handler_label, scope) {
-            let _ = tx.send(());
-        }
+        let _ = tx.send(install_page_callbacks(
+            &native,
+            &handler_app,
+            tab_id,
+            &handler_label,
+            scope,
+        ));
     });
     if result.is_err()
         || !matches!(
             tokio::time::timeout(std::time::Duration::from_secs(5), rx).await,
-            Ok(Ok(()))
+            Ok(Ok(true))
         )
     {
         tracing::warn!(%tab_id,"native permission bridge setup failed; requests remain denied");

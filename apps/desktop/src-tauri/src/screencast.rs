@@ -8,9 +8,10 @@
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::fs::File;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -775,21 +776,117 @@ fn poll_period(fps: u32) -> Duration {
 
 /// Where ffmpeg is, if anywhere on this machine.
 pub fn ffmpeg_path() -> Option<PathBuf> {
-    let candidates = [
-        "/opt/homebrew/bin/ffmpeg",
-        "/usr/local/bin/ffmpeg",
-        "/usr/bin/ffmpeg",
-    ];
+    tool_path("ffmpeg")
+}
+
+/// Where ffprobe is: the same places as ffmpeg, since they ship together.
+pub fn ffprobe_path() -> Option<PathBuf> {
+    tool_path("ffprobe")
+}
+
+/// The usual install locations first, then whatever `PATH` says.
+fn tool_path(name: &str) -> Option<PathBuf> {
+    let candidates = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
     for c in candidates {
-        let p = Path::new(c);
+        let p = Path::new(c).join(name);
         if p.is_file() {
-            return Some(p.to_path_buf());
+            return Some(p);
         }
     }
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
-        .map(|d| d.join("ffmpeg"))
+        .map(|d| d.join(name))
         .find(|p| p.is_file())
+}
+
+/// Most a subprocess may print on either stream before it is stopped.
+pub(crate) const OUTPUT_LIMIT: u64 = 256 * 1024;
+/// How long one ffmpeg or ffprobe run may take outside an export job.
+pub(crate) const PROCESS_LIMIT: Duration = Duration::from_mins(30);
+/// ffprobe only reads headers; anything longer is a stuck disk or file.
+pub(crate) const PROBE_LIMIT: Duration = Duration::from_secs(120);
+
+/// Run `command` to completion with a deadline and output caps, killing and
+/// reaping it when it overruns. Output is capped at [`OUTPUT_LIMIT`].
+pub(crate) fn run_with_deadline(command: &mut Command, timeout: Duration) -> AppResult<Output> {
+    let name = program_name(command);
+    let mut stdout = tempfile::tempfile()?;
+    let mut stderr = tempfile::tempfile()?;
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(stdout.try_clone()?)
+        .stderr(stderr.try_clone()?)
+        .spawn()?;
+    let result = wait_with_deadline(
+        &mut child,
+        &mut stdout,
+        &mut stderr,
+        Instant::now() + timeout,
+        &name,
+        || Ok(()),
+    );
+    if result.is_err() {
+        stop_child(&mut child)?;
+    }
+    result
+}
+
+/// The program's file name, for messages.
+pub(crate) fn program_name(command: &Command) -> String {
+    Path::new(command.get_program())
+        .file_name()
+        .map_or_else(|| "subprocess".into(), |n| n.to_string_lossy().into_owned())
+}
+
+/// Poll `child` (named `name` in messages) until it exits, `interrupt`
+/// fails, the deadline passes, or either output stream outgrows
+/// [`OUTPUT_LIMIT`]. The child is left running on error so the caller can
+/// stop it the way it owns it.
+pub(crate) fn wait_with_deadline(
+    child: &mut Child,
+    stdout: &mut File,
+    stderr: &mut File,
+    deadline: Instant,
+    name: &str,
+    mut interrupt: impl FnMut() -> AppResult<()>,
+) -> AppResult<Output> {
+    use std::io::{Read as _, Seek as _};
+    let status = loop {
+        interrupt()?;
+        if Instant::now() >= deadline {
+            return Err(AppError::new(format!("{name} timed out")));
+        }
+        if stdout.metadata()?.len() > OUTPUT_LIMIT || stderr.metadata()?.len() > OUTPUT_LIMIT {
+            return Err(AppError::new(format!("{name} output exceeded limit")));
+        }
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    stdout.rewind()?;
+    stderr.rewind()?;
+    let mut output = Output {
+        status,
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+    };
+    stdout.take(OUTPUT_LIMIT).read_to_end(&mut output.stdout)?;
+    stderr.take(OUTPUT_LIMIT).read_to_end(&mut output.stderr)?;
+    Ok(output)
+}
+
+/// Kill a child that is still running and reap it; an error means it could
+/// not be confirmed gone.
+pub(crate) fn stop_child(child: &mut Child) -> AppResult<()> {
+    if child.try_wait()?.is_none()
+        && let Err(error) = child.kill()
+        && child.try_wait()?.is_none()
+    {
+        return Err(error.into());
+    }
+    child.wait()?;
+    Ok(())
 }
 
 /// What the recording dialog may offer.
@@ -1126,8 +1223,8 @@ pub fn write_companion(mp4: &Path, out: &Path, max_width: u32, with_audio: bool)
     } else {
         cmd.arg("-an");
     }
-    cmd.arg(out).stdin(Stdio::null());
-    let ok = cmd.output().is_ok_and(|o| o.status.success());
+    cmd.arg(out);
+    let ok = run_with_deadline(&mut cmd, PROCESS_LIMIT).is_ok_and(|o| o.status.success());
     (ok && out.exists()).then(|| out.to_string_lossy().into_owned())
 }
 

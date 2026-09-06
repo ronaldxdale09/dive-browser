@@ -34,12 +34,18 @@ production `vite build`, `cargo clippy --workspace --all-targets -- -D warnings`
 and `cargo test --workspace`. Clippy runs at `pedantic` with warnings denied, so
 a lint is a build failure, not a suggestion.
 
+The integration suites live in `tests/e2e` as the `dive-integration` crate
+(`cargo test -p dive-integration`, or a tier such as
+`cargo test -p dive-integration tier2_boundaries`); `cargo test --workspace`
+already includes them.
+
 CI additionally runs `cargo audit`, `pnpm audit`, and a `live` job that builds
 the real app bundle and drives it through its own MCP server
 (`scripts/live-check.sh`), plus the memory and startup benchmarks. Unit tests
 cannot see the things that job checks — renderer crash recovery, tab discard
 actually reclaiming memory — so expect to be asked for live evidence on
-anything touching the engine lifecycle.
+anything touching the engine lifecycle. `scripts/README.md` lists every manual
+probe and how to run it against a bundle.
 
 ### Generated bindings
 
@@ -58,6 +64,9 @@ crates/dive-cdp/           In-process CDP client
 crates/dive-core/          SQLite (WAL), migrations, event bus
 crates/dive-mcp/           MCP server
 crates/dive-agent/         Agent loop, provider dialects, tool dispatch
+tests/e2e/                 dive-integration: tiered integration and stress suites
+vendor/tauri-runtime-cef/  Patched Tauri CEF runtime; see its UPSTREAM.md
+docs/design/               Design notes for larger features
 ```
 
 ### Injected page scripts

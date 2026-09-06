@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { ipc } from "../lib/ipc";
 import type { Rule, RuleAction } from "../lib/ipc";
 import { useBrowser } from "./browser";
+import { errorMessage } from "../lib/errors";
 
 interface RulesState {
   /** Rules per workspace, loaded on first open. */
@@ -28,7 +29,7 @@ export const useRules = create<RulesState>((set, get) => ({
       const rules = await ipc.rulesList(workspace);
       set({ byWorkspace: { ...get().byWorkspace, [workspace]: rules } });
     } catch (e) {
-      useBrowser.setState({ error: e instanceof Error ? e.message : String(e) });
+      useBrowser.setState({ error: errorMessage(e) });
     }
   },
   save: async (workspace, rules) => {
@@ -36,7 +37,7 @@ export const useRules = create<RulesState>((set, get) => ({
     try {
       await ipc.rulesSet(workspace, rules);
     } catch (e) {
-      useBrowser.setState({ error: e instanceof Error ? e.message : String(e) });
+      useBrowser.setState({ error: errorMessage(e) });
     }
   },
 }));

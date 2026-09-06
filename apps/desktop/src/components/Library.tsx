@@ -10,6 +10,8 @@ import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
+import { IMPORT_BUSY, useImportVideo } from "../screen/importVideo";
+import { OpenVideoButton } from "../screen/OpenVideoButton";
 import { Favicon } from "./Favicon";
 import { Icon, IconButton } from "./Icon";
 
@@ -324,6 +326,7 @@ function DownloadsList({ query }: { query: string }) {
 function Recordings({ query, onOpened }: { query: string; onOpened: () => void }) {
   const [items, setItems] = useState<RecordingInfo[] | null>(null);
   const openTab = useBrowser((s) => s.openTab);
+  const importing = useImportVideo((s) => s.busy);
   useEffect(() => {
     let alive = true;
     ipc
@@ -352,10 +355,27 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
       useBrowser.setState({ error: err instanceof Error ? err.message : String(err) });
     });
   };
-  if (items === null) return <p className="p-3 text-xs text-ink-3">Loading…</p>;
-  const shown = items.filter((r) => matches(query, r.name, r.format));
-  if (shown.length === 0) return <Empty>{items.length === 0 ? "No recordings yet. Press Record in the title bar to make one." : "Nothing matches."}</Empty>;
+  const shown = (items ?? []).filter((r) => matches(query, r.name, r.format));
+  const header = (
+    <div className="flex items-center justify-between gap-2 px-2.5 pt-1 pb-2">
+      <span className="min-w-0 truncate text-[11px] text-ink-3">
+        {importing ? IMPORT_BUSY : items === null ? "Loading…" : `${items.length} ${items.length === 1 ? "recording" : "recordings"}`}
+      </span>
+      <OpenVideoButton onOpened={onOpened} className="flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-line px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-60" />
+    </div>
+  );
+  if (items === null) return header;
+  if (shown.length === 0) {
+    return (
+      <>
+        {header}
+        <Empty>{items.length === 0 ? "No recordings yet. Press Record in the title bar to make one, or open a video file." : "Nothing matches."}</Empty>
+      </>
+    );
+  }
   return (
+    <>
+    {header}
     <ul className="flex flex-col">
       {shown.map((r) => (
         <li key={r.path} className="group flex items-center gap-1">
@@ -392,5 +412,6 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
         </li>
       ))}
     </ul>
+    </>
   );
 }

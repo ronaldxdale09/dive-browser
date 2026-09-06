@@ -13,6 +13,7 @@ import { usePicker } from "../store/simulator";
 import { DropZones, SplitView } from "./SplitView";
 import { useTabDrag } from "./TabDnd";
 import { InternalPage, isInternalUrl } from "./internal/InternalPage";
+import { errorMessage } from "../lib/errors";
 
 const DevicePicker = lazy(() => import("./simulator/DevicePicker").then(({ DevicePicker }) => ({ default: DevicePicker })));
 const DeviceStage = lazy(() => import("./simulator/DeviceStage").then(({ DeviceStage }) => ({ default: DeviceStage })));
@@ -139,7 +140,7 @@ function PermissionBanner({ tabId, request }: { tabId: string; request: Permissi
   const answer = async (decision: "allow" | "deny") => {
     setBusy(true); setError(null);
     try { await decide(tabId, request, decision, duration); }
-    catch (error) { setError(error instanceof Error ? error.message : String(error)); }
+    catch (error) { setError(errorMessage(error)); }
     finally { setBusy(false); }
   };
   return (

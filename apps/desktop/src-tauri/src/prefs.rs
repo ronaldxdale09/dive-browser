@@ -5,7 +5,7 @@
 //! read by the chrome (theme, accent); the rest turn into `DevTools` calls,
 //! the search template, the download directory or the agent's request.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use dive_cdp::CdpSession;
 use serde::{Deserialize, Serialize};
@@ -450,9 +450,13 @@ fn is_hex_color(s: &str) -> bool {
 }
 
 /// Preferences held in memory, loaded from the store on first use.
+///
+/// The cached value sits behind an `Arc` so hot paths (one call per paused
+/// request) can take a [`Registry::snapshot`] without deep-cloning the
+/// pattern lists; [`Registry::set`] swaps the `Arc` rather than mutating it.
 #[derive(Default)]
 pub struct Registry {
-    cached: Mutex<Option<Prefs>>,
+    cached: Mutex<Option<Arc<Prefs>>>,
     updates: tokio::sync::Mutex<()>,
 }
 
@@ -466,18 +470,21 @@ impl Registry {
 
     /// Current preferences, reading the store the first time.
     pub fn get(&self, state: &AppState) -> Prefs {
-        if let Some(prefs) = crate::state::lock(&self.cached).clone() {
-            return prefs;
+        self.snapshot(state).as_ref().clone()
+    }
+
+    /// A shared snapshot of the current preferences, reading the store the
+    /// first time. Cheap to take per request.
+    pub fn snapshot(&self, state: &AppState) -> Arc<Prefs> {
+        if let Some(prefs) = crate::state::lock(&self.cached).as_ref() {
+            return Arc::clone(prefs);
         }
         let stored = crate::state::lock(&state.store)
             .setting(KEY)
             .ok()
             .flatten()
-            .and_then(|json| parse_stored(&json).ok())
-            .unwrap_or_default();
-        crate::state::lock(&self.cached)
-            .get_or_insert(stored)
-            .clone()
+            .map_or_else(Prefs::default, |json| parse_stored(&json));
+        Arc::clone(crate::state::lock(&self.cached).get_or_insert_with(|| Arc::new(stored)))
     }
 
     /// Persist `prefs` and return them as stored (clamped).
@@ -485,24 +492,56 @@ impl Registry {
         let prefs = prefs.clamp();
         let json = serde_json::to_string(&prefs).map_err(AppError::new)?;
         crate::state::lock(&state.store).set_setting(KEY, &json)?;
-        *crate::state::lock(&self.cached) = Some(prefs.clone());
+        *crate::state::lock(&self.cached) = Some(Arc::new(prefs.clone()));
         Ok(prefs)
     }
 }
 
-fn parse_stored(json: &str) -> serde_json::Result<Prefs> {
-    let mut complete = serde_json::to_value(Prefs::default())?;
-    let incoming: Value = serde_json::from_str(json)?;
-    let mut prefs: Prefs = if let (Some(complete), Some(incoming)) =
-        (complete.as_object_mut(), incoming.as_object())
-    {
-        complete.extend(incoming.clone());
-        serde_json::from_value(Value::Object(complete.clone()))?
-    } else {
-        serde_json::from_value(incoming)?
+/// Rebuild preferences from a stored blob, field by field.
+///
+/// Known keys are folded into the defaults one at a time; a field the current
+/// build cannot read (a renamed value, a wrong type, a hand-edited file) is
+/// logged and left at its default instead of throwing every other preference
+/// away. The next [`Registry::set`] would otherwise persist that reset.
+///
+/// A blob that is not a JSON object at all yields the defaults.
+fn parse_stored(json: &str) -> Prefs {
+    let incoming: Value = match serde_json::from_str(json) {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!("stored preferences are not JSON; using defaults: {error}");
+            return Prefs::default();
+        }
     };
+    let Some(incoming) = incoming.as_object() else {
+        tracing::warn!("stored preferences are not an object; using defaults");
+        return Prefs::default();
+    };
+    let Ok(Value::Object(mut merged)) = serde_json::to_value(Prefs::default()) else {
+        return Prefs::default();
+    };
+    let mut prefs = Prefs::default();
+    for (key, value) in incoming {
+        if !merged.contains_key(key) {
+            // A key from a newer or older build: nothing to fold it into.
+            continue;
+        }
+        let previous = merged.insert(key.clone(), value.clone());
+        match serde_json::from_value::<Prefs>(Value::Object(merged.clone())) {
+            Ok(parsed) => prefs = parsed,
+            Err(error) => {
+                tracing::warn!(
+                    key,
+                    "stored preference rejected; keeping its default: {error}"
+                );
+                if let Some(previous) = previous {
+                    merged.insert(key.clone(), previous);
+                }
+            }
+        }
+    }
     prefs.privacy_exceptions = normalize_privacy_exceptions(prefs.privacy_exceptions);
-    Ok(prefs)
+    prefs
 }
 
 /// The `DevTools` calls that put `prefs` into force on one tab.
@@ -702,7 +741,10 @@ fn queue_profile_clear(profiles: &[String], what: ClearRequest) -> AppResult<()>
 pub async fn clear(state: &AppState, what: ClearRequest) -> AppResult<String> {
     let mut done: Vec<String> = Vec::new();
     if what.history {
-        let n = crate::state::lock(&state.store).clear_history()?;
+        let store = crate::state::lock(&state.store);
+        let n = store.clear_history()?;
+        store.clear_favicons()?;
+        drop(store);
         done.push(format!("history ({n})"));
     }
     let sessions: Vec<(String, CdpSession)> = {
@@ -857,16 +899,34 @@ mod tests {
 
     #[test]
     fn defaults_survive_a_partial_blob() {
-        let prefs = parse_stored(r#"{"theme":"dark"}"#).unwrap();
+        let prefs = parse_stored(r#"{"theme":"dark"}"#);
         assert_eq!(prefs.theme, "dark");
         assert_eq!(prefs.search_engine, "duckduckgo");
         assert!(prefs.javascript);
     }
 
     #[test]
+    fn one_malformed_field_keeps_every_other_preference() {
+        // `default_zoom` is a number; a string there used to throw the whole
+        // blob away and the next write persisted a full reset.
+        let prefs = parse_stored(
+            r#"{"theme":"dark","search_engine":"bing","default_zoom":"big","javascript":false,"history_days":"forever"}"#,
+        );
+        assert_eq!(prefs.theme, "dark");
+        assert_eq!(prefs.search_engine, "bing");
+        assert!(!prefs.javascript);
+        let defaults = Prefs::default();
+        assert!((prefs.default_zoom - defaults.default_zoom).abs() < f64::EPSILON);
+        assert_eq!(prefs.history_days, defaults.history_days);
+        // Unknown keys and junk that is not an object fall back cleanly too.
+        assert_eq!(parse_stored(r#"{"theme":"dark","future":1}"#).theme, "dark");
+        assert_eq!(parse_stored("[1,2]"), Prefs::default());
+        assert_eq!(parse_stored("not json"), Prefs::default());
+    }
+
+    #[test]
     fn old_profiles_receive_diveprivacy_defaults() {
-        let prefs =
-            parse_stored(r#"{"block_trackers":true,"blocked_patterns":["ads.test"]}"#).unwrap();
+        let prefs = parse_stored(r#"{"block_trackers":true,"blocked_patterns":["ads.test"]}"#);
         assert!(prefs.block_trackers);
         assert_eq!(prefs.blocked_patterns, vec!["ads.test"]);
         assert!(prefs.youtube_protection);
@@ -877,8 +937,7 @@ mod tests {
     fn stored_exceptions_are_normalized_without_clamping_legacy_preferences() {
         let prefs = parse_stored(
             r#"{"block_trackers":true,"blocked_patterns":["  ads.test ","   "],"privacy_exceptions":["com","Example.COM.","https://bad.test/path"]}"#,
-        )
-        .unwrap();
+        );
         assert!(prefs.block_trackers);
         assert_eq!(prefs.blocked_patterns, vec!["  ads.test ", "   "]);
         assert_eq!(prefs.privacy_exceptions, vec!["example.com"]);
@@ -1033,7 +1092,7 @@ mod tests {
 
     #[test]
     fn appearance_fields_default_and_clamp() {
-        let prefs = parse_stored(r#"{"theme":"dark"}"#).unwrap();
+        let prefs = parse_stored(r#"{"theme":"dark"}"#);
         assert_eq!(prefs.appearance_preset, "graphite");
         assert!((prefs.ui_scale - 1.0).abs() < f64::EPSILON);
         let wild = Prefs {

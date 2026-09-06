@@ -7,6 +7,7 @@ import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
+import { errorMessage } from "../lib/errors";
 
 /** Manage unpacked Chromium extensions loaded into CEF on restart. */
 export function Extensions() {
@@ -22,14 +23,14 @@ export function Extensions() {
 
   useEffect(() => {
     let alive = true;
-    ipc.extensionsList().then((value) => alive && setData(value)).catch((reason: unknown) => alive && setError(message(reason)));
+    ipc.extensionsList().then((value) => alive && setData(value)).catch((reason: unknown) => alive && setError(errorMessage(reason)));
     return () => { alive = false; };
   }, []);
 
   const update = async (operation: () => Promise<ExtensionList>) => {
     setBusy(true);
     setError(null);
-    try { setData(await operation()); } catch (reason) { setError(message(reason)); } finally { setBusy(false); }
+    try { setData(await operation()); } catch (reason) { setError(errorMessage(reason)); } finally { setBusy(false); }
   };
   const load = async () => {
     const selected = await ipc.extensionPick();
@@ -73,4 +74,3 @@ function EmptyState() {
   return <div className="grid min-h-72 place-items-center text-center"><div className="max-w-sm"><span className="mx-auto grid size-14 place-items-center rounded-2xl border border-line bg-surface-2 text-ink-3"><Icon icon={Puzzle} size={24} /></span><h3 className="mt-4 text-sm font-medium text-ink">No extensions loaded</h3><p className="mt-1.5 text-xs leading-5 text-ink-3">Choose an unpacked extension folder containing a valid <code>manifest.json</code>. Chrome Web Store installation and Google-only services are not available in embedded Chromium.</p></div></div>;
 }
 
-function message(reason: unknown): string { return reason instanceof Error ? reason.message : String(reason); }

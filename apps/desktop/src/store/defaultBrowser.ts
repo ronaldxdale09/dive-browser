@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { ipc } from "../lib/ipc";
 import type { DefaultBrowserStatus } from "../lib/ipc";
+import { errorMessage } from "../lib/errors";
 
 /**
  * Where the "make Dive the default" flow stands. `asking` while the host is
@@ -40,7 +41,7 @@ export const useDefaultBrowser = create<DefaultBrowserState>((set) => ({
       set({ status, phase: status.is_default ? "done" : "waiting" });
       return status;
     } catch (e) {
-      set({ phase: "error", error: e instanceof Error ? e.message : String(e) });
+      set({ phase: "error", error: errorMessage(e) });
       return null;
     }
   },

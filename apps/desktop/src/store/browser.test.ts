@@ -266,18 +266,21 @@ describe("boot", () => {
     vi.spyOn(events.permissionDismissed,"listen").mockImplementation(async(cb)=>((onDismissed=cb),()=>undefined));
     let onAsked!: (e: Event<PermissionAsked>) => void;
     const askedListen = vi.spyOn(events.permissionAsked, "listen").mockImplementation(async (cb) => ((onAsked = cb), () => undefined));
-    vi.spyOn(events.tabWindowChanged, "listen").mockResolvedValue(() => undefined);
-    vi.spyOn(events.downloadNotice, "listen").mockResolvedValue(() => undefined);
+    const windowListen = vi.spyOn(events.tabWindowChanged, "listen").mockResolvedValue(() => undefined);
+    const downloadListen = vi.spyOn(events.downloadNotice, "listen").mockResolvedValue(() => undefined);
     vi.spyOn(events.consoleEntry, "listen").mockResolvedValue(() => undefined);
     vi.spyOn(events.networkEvent, "listen").mockResolvedValue(() => undefined);
     vi.spyOn(ipc, "snapshot").mockResolvedValue({ workspaces: [], active_workspace: null, tabs: [], active_tab: null, detached: [], profiles: [], active_profile: null });
     vi.spyOn(ipc, "workspaceTabCounts").mockResolvedValue([]);
 
-    await useBrowser.getState().boot();
+    // Concurrent boots (StrictMode, a boundary retry) share one subscription pass.
+    await Promise.all([useBrowser.getState().boot(), useBrowser.getState().boot()]);
     await useBrowser.getState().boot();
     expect(loadListen).toHaveBeenCalledTimes(1);
     expect(crashListen).toHaveBeenCalledTimes(1);
     expect(askedListen).toHaveBeenCalledTimes(1);
+    expect(windowListen).toHaveBeenCalledTimes(1);
+    expect(downloadListen).toHaveBeenCalledTimes(1);
 
     onAsked({ event: "permission-asked", id: 3, payload: request("r1","a") });
     expect(useBrowser.getState().permissionRequests).toEqual({ a: [request("r1","a")] });
@@ -305,5 +308,31 @@ describe("fillVideo", () => {
     useBrowser.setState({ error: null });
     await useBrowser.getState().fillVideo();
     expect(useBrowser.getState().error).toBeNull();
+  });
+});
+
+describe("notify", () => {
+  it("shows a notice, clears it after the delay, and lets a newer notice cancel the older timer", () => {
+    vi.useFakeTimers();
+    useBrowser.getState().notify("first", 1000);
+    expect(useBrowser.getState().notice).toBe("first");
+    vi.advanceTimersByTime(600);
+    useBrowser.getState().notify("second", 1000);
+    vi.advanceTimersByTime(600);
+    // The first timer would have fired by now; it must not blank the second notice.
+    expect(useBrowser.getState().notice).toBe("second");
+    vi.advanceTimersByTime(400);
+    expect(useBrowser.getState().notice).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("defaults to three seconds", () => {
+    vi.useFakeTimers();
+    useBrowser.getState().notify("hello");
+    vi.advanceTimersByTime(2999);
+    expect(useBrowser.getState().notice).toBe("hello");
+    vi.advanceTimersByTime(1);
+    expect(useBrowser.getState().notice).toBeNull();
+    vi.useRealTimers();
   });
 });

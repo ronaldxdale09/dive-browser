@@ -162,8 +162,6 @@ fn test_playwright_recorder_spec_generation() {
 
 #[tokio::test]
 async fn test_mcp_server_bearer_auth() {
-    use crate::fixtures::check_mcp_auth_and_origin;
-
     let fake = Arc::new(TestFakeBrowser::default());
     let token = "test-secret-token-xyz-123";
     let config = Config {
@@ -209,20 +207,12 @@ async fn test_mcp_server_bearer_auth() {
         Err(e) => {
             let msg = format!("{e:?}");
             if msg.contains("PermissionDenied") || msg.contains("Operation not permitted") {
-                // Loopback TCP connect blocked by sandbox; verify contract directly
-                assert_eq!(check_mcp_auth_and_origin(Some(token), None, None), Err(401));
-                assert_eq!(
-                    check_mcp_auth_and_origin(Some(token), Some("Bearer invalid-token"), None),
-                    Err(401)
+                // Loopback TCP is blocked here: there is no substitute for
+                // the real server, so say so and stop rather than pass.
+                eprintln!(
+                    "skipping: loopback TCP is blocked in this sandbox, so the HTTP contract was not exercised"
                 );
-                assert_eq!(
-                    check_mcp_auth_and_origin(
-                        Some(token),
-                        Some(&format!("Bearer {}", token)),
-                        Some("http://localhost:3000")
-                    ),
-                    Ok(())
-                );
+                return;
             } else {
                 panic!("Unexpected error: {e:?}");
             }
@@ -284,24 +274,10 @@ async fn test_mcp_concurrency_50_parallel_requests() {
         Err(e) => {
             let msg = format!("{e:?}");
             if msg.contains("PermissionDenied") || msg.contains("Operation not permitted") {
-                // Loopback TCP connect blocked by sandbox; verify 50 concurrent Browser trait operations directly
-                use dive_mcp::Browser;
-                let mut handles = Vec::new();
-                for i in 0..50 {
-                    let fake = fake.clone();
-                    handles.push(tokio::spawn(async move {
-                        fake.open_tab(format!("https://concurrent-test-{i}.dev"))
-                            .await
-                    }));
-                }
-                for handle in handles {
-                    let res = handle
-                        .await
-                        .expect("Task panicked")
-                        .expect("Open tab failed");
-                    assert!(res.url.starts_with("https://concurrent-test-"));
-                }
-                assert_eq!(fake.tabs().await.unwrap().len(), 50);
+                eprintln!(
+                    "skipping: loopback TCP is blocked in this sandbox, so the HTTP contract was not exercised"
+                );
+                return;
             } else {
                 panic!("Unexpected error: {e:?}");
             }

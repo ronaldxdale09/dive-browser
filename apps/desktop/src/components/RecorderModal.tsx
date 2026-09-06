@@ -4,6 +4,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { recordedToSteps, toPlaywrightSpec } from "../lib/playwright";
+import { DEFAULT_START_URL } from "../lib/constants";
 import { useBrowser } from "../store/browser";
 import { useRecorder } from "../store/recorder";
 import { IconButton } from "./Icon";
@@ -26,7 +27,7 @@ export function RecorderModal() {
   if (!isOpen) return null;
 
   const currentTab = tabs.find((t) => t.id === activeTabId);
-  const startUrl = currentTab?.url || "https://example.com";
+  const startUrl = currentTab?.url || DEFAULT_START_URL;
   const title = currentTab?.title ? `flow on ${currentTab.title}` : "recorded flow";
   const spec = toPlaywrightSpec(recordedToSteps(steps), startUrl, title);
 

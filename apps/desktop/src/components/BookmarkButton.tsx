@@ -4,6 +4,7 @@ import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { Tooltip } from "./Tooltip";
+import { errorMessage } from "../lib/errors";
 
 /** Star toggles a bookmark for the active tab's current URL. */
 export function BookmarkButton() {
@@ -27,10 +28,9 @@ export function BookmarkButton() {
       .bookmarkToggle(current.id)
       .then((v) => {
         setSaved(v);
-        useBrowser.setState({ notice: v ? "Bookmarked" : "Bookmark removed" });
-        setTimeout(() => useBrowser.setState({ notice: null }), 2000);
+        useBrowser.getState().notify(v ? "Bookmarked" : "Bookmark removed", 2000);
       })
-      .catch((e: unknown) => useBrowser.setState({ error: e instanceof Error ? e.message : String(e) }));
+      .catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
   };
   const label = saved ? "Remove bookmark" : "Bookmark this page";
   return (

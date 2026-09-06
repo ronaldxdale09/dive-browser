@@ -1,7 +1,7 @@
 import { SortableContext, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AppWindow, Columns2, Loader2, Moon, Pin, Plus, Star, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBrowser } from "../store/browser";
 import { MAX_PANES, useLayout, type Split } from "../store/layout";
 import type { Tab } from "../lib/ipc";
@@ -9,6 +9,9 @@ import { Favicon } from "./Favicon";
 import { Icon, IconButton } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
 import { clampFloatingPosition } from "../lib/floating";
+import { essentialTabs, orderTabs } from "../lib/tabOrder";
+
+export { essentialTabs, orderTabs };
 
 /** What a tab is called in the strip: its title, else its host. */
 export function tabLabel(t: Tab) {
@@ -20,20 +23,6 @@ export function tabLabel(t: Tab) {
   }
 }
 const label = tabLabel;
-
-/** Sort for display: pinned first, then by position. Sleeping (discarded)
- * tabs stay in the strip so one click wakes them. Essentials have a rail of
- * their own (see `essentialTabs`). */
-export function orderTabs(tabs: Tab[]): Tab[] {
-  return tabs
-    .filter((t) => t.tier !== "essential")
-    .sort((a, b) => (a.tier === b.tier ? a.position - b.position : a.tier === "pinned" ? -1 : 1));
-}
-
-/** The essentials, in position order: the tabs every workspace shows. */
-export function essentialTabs(tabs: Tab[]): Tab[] {
-  return tabs.filter((t) => t.tier === "essential").sort((a, b) => a.position - b.position);
-}
 
 /** What the tab menu offers for split view, if anything. */
 export type SplitAction =
@@ -92,14 +81,20 @@ export function TabStrip() {
   const removePane = useLayout((s) => s.remove);
   const split = useLayout((s) => (workspace ? s.splits[workspace] : undefined));
   const loading = useBrowser((s) => s.loading);
-  const tabs = orderTabs(all);
+  const tabs = useMemo(() => orderTabs(all), [all]);
   const paneIds = new Set((split?.tabs ?? []).filter((id) => !detached.includes(id)));
-  const essentials = essentialTabs(all);
+  const essentials = useMemo(() => essentialTabs(all), [all]);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [tablistRef, narrow] = useNarrowTabs(tabs.length);
   // Roving tabindex: one tab is in the Tab order at a time, the focused one
   // if any, else the active one. The arrow keys move focus without activating.
   const [focused, setFocused] = useState<string | null>(null);
+  // Stable per-id handlers so a memoised tab only re-renders when its own
+  // props change, not when a sibling starts loading.
+  const onTabFocus = useCallback((id: string) => setFocused(id), []);
+  const onTabActivate = useCallback((id: string) => void activate(id), [activate]);
+  const onTabClose = useCallback((id: string) => void close(id), [close]);
+  const onTabMenu = useCallback((id: string, x: number, y: number) => setMenu({ id, x, y }), []);
   const stop = tabs.some((t) => t.id === focused) ? focused : active;
 
   return (
@@ -151,10 +146,10 @@ export function TabStrip() {
               inSplit={paneIds.has(t.id) && paneIds.size >= 2}
               narrow={narrow}
               inTabOrder={t.id === stop || (stop === null && t === tabs[0])}
-              onFocus={() => setFocused(t.id)}
-              onActivate={() => void activate(t.id)}
-              onClose={() => void close(t.id)}
-              onMenu={(x, y) => setMenu({ id: t.id, x, y })}
+              onFocus={onTabFocus}
+              onActivate={onTabActivate}
+              onClose={onTabClose}
+              onMenu={onTabMenu}
             />
           ))}
         </div>
@@ -246,13 +241,23 @@ function useNarrowTabs(count: number): [React.RefObject<HTMLDivElement | null>, 
     ro.observe(sample);
     return () => ro.disconnect();
   }, [count]);
-  return [ref, { close: width > 0 && width < CLOSE_MIN, title: width > 0 && width < TITLE_MIN }];
+  const close = width > 0 && width < CLOSE_MIN;
+  const title = width > 0 && width < TITLE_MIN;
+  return [ref, useMemo(() => ({ close, title }), [close, title])];
 }
 
 type Narrow = { close: boolean; title: boolean };
 
-function SortableTab({ tab: t, active, loading, detached, inSplit, narrow, inTabOrder, onFocus, onActivate, onClose, onMenu }: { tab: Tab; active: boolean; loading: boolean; detached: boolean; inSplit: boolean; narrow: Narrow; inTabOrder: boolean; onFocus: () => void; onActivate: () => void; onClose: () => void; onMenu: (x: number, y: number) => void }) {
+/**
+ * One tab in the strip. Memoised: the strip re-renders on every load-state
+ * tick of any tab, and each tab only needs its own boolean.
+ */
+const SortableTab = memo(function SortableTab({ tab: t, active, loading, detached, inSplit, narrow, inTabOrder, onFocus: focusTab, onActivate: activateTab, onClose: closeTab, onMenu: openMenu }: { tab: Tab; active: boolean; loading: boolean; detached: boolean; inSplit: boolean; narrow: Narrow; inTabOrder: boolean; onFocus: (id: string) => void; onActivate: (id: string) => void; onClose: (id: string) => void; onMenu: (id: string, x: number, y: number) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id });
+  const onFocus = () => focusTab(t.id);
+  const onActivate = () => activateTab(t.id);
+  const onClose = () => closeTab(t.id);
+  const onMenu = (x: number, y: number) => openMenu(t.id, x, y);
   // DragOverlay is the one tab that follows the pointer. The sortable item
   // becomes an invisible placeholder so the strip does not show a second,
   // half-opacity copy moving underneath it.
@@ -362,7 +367,7 @@ function SortableTab({ tab: t, active, loading, detached, inSplit, narrow, inTab
       )}
     </div>
   );
-}
+});
 
 /** An essential in the rail: the site's icon, and nothing else, in every workspace. */
 function EssentialTab({ tab: t, active, loading, onActivate, onMenu }: { tab: Tab; active: boolean; loading: boolean; onActivate: () => void; onMenu: (x: number, y: number) => void }) {

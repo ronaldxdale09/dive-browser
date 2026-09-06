@@ -189,6 +189,17 @@ pub async fn run<B: Browser>(
     }
 }
 
+/// Refuse a model-chosen URL with a scheme the agent may not open. Page
+/// content can steer the model, so `file:`, `data:`, the internal scheme and
+/// the rest stop here as well as in the browser; a bare host or search term
+/// is left for the browser to normalize.
+fn web_url(url: String) -> Result<String, String> {
+    if let Ok(parsed) = url::Url::parse(url.trim()) {
+        crate::mcp::check_web_url(&parsed).map_err(err)?;
+    }
+    Ok(url)
+}
+
 /// Render a browser failure for the model.
 ///
 /// The machine-readable tag and the retry hint go in the text: the sidecar
@@ -395,7 +406,7 @@ async fn execute<B: Browser>(
             .map(|()| Value::String("activated".into()))
             .map_err(err),
         "tab_navigate" => browser
-            .navigate(tab()?, s("url")?)
+            .navigate(tab()?, web_url(s("url")?)?)
             .await
             .map(|()| Value::String("navigating".into()))
             .map_err(err),
@@ -436,6 +447,30 @@ async fn execute<B: Browser>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_agent_may_only_navigate_to_web_urls() {
+        for ok in [
+            "https://example.test/",
+            "http://localhost:3000",
+            "about:blank",
+            "example.test",
+            "cats",
+        ] {
+            assert!(super::web_url(ok.into()).is_ok(), "{ok}");
+        }
+        for bad in [
+            "file:///etc/passwd",
+            "data:text/html,<script>1</script>",
+            "blob:https://x/1",
+            "about:srcdoc",
+            "javascript:alert(1)",
+            "dive://settings",
+        ] {
+            let error = super::web_url(bad.into()).expect_err(bad);
+            assert!(error.contains("not allowed"), "{bad}: {error}");
+        }
+    }
+
     #[test]
     fn the_agent_catalog_is_the_mcp_catalog_minus_documented_exceptions() {
         use std::collections::{BTreeSet, HashMap};

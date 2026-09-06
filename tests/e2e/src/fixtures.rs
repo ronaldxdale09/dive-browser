@@ -1,6 +1,24 @@
 //! Shared fixtures, fakes, and test helpers for Dive Browser E2E tests.
 //!
-//! Opaque-box fixtures exercising public contracts defined in PROJECT.md:
+//! Read this before trusting a green test. Some items here are the real
+//! crates under test (`dive_core::Store`, `dive_mcp::serve`, the CDP session
+//! over `MockCdpTransport`). Others are local models of app logic, written
+//! in this crate to pin down a contract, and they are NOT the app: a test
+//! that asserts against one of them checks the model against itself, not
+//! the desktop app's behaviour. The local models are:
+//! - `is_localhost_or_devserver`
+//! - `StartupTimelineModel`
+//! - `plan_crash_recovery` and the `SPEC_*` crash constants
+//! - `TestRingBufferRegistry` and the `SPEC_*_CAP` constants
+//! - `RecordedInteractionStep`
+//! - `TestFakeBrowser` (a scripted `dive_mcp::Browser`, not the CEF one)
+//!
+//! Sibling test files carry their own local models too (`should_discard_tab`
+//! in `test_r2_discard`, `format_cef_switches` in `test_r1_startup`,
+//! `parse_renderer_process_limit` in `test_r1_limits`). Evidence about the
+//! running app comes from `scripts/live-check.sh`, not from these.
+//!
+//! Opaque-box fixtures exercising the public contracts the desktop app relies on:
 //! - SQLite Store (`dive_core::Store`)
 //! - In-process CDP (`dive_cdp::CdpSession`)
 //! - MCP Server (`dive_mcp::serve`)
@@ -138,7 +156,9 @@ pub fn is_localhost_or_devserver(url: &str) -> bool {
 }
 
 // ==============================================================================
-// Startup Timeline Contract Model (PROJECT.md § M1)
+// Startup timeline contract: milestones are host-observed since launch and must
+// be ordered state init <= window <= setup <= paint <= controls; incomplete
+// observations never synthesise a total.
 // ==============================================================================
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -174,7 +194,9 @@ impl StartupTimelineModel {
 }
 
 // ==============================================================================
-// Crash Isolation & Recovery Contract Models (PROJECT.md § M3)
+// Crash recovery contract: a crashed tab is reloaded automatically with backoff
+// for at most SPEC_MAX_CRASH_ATTEMPTS inside SPEC_CRASH_WINDOW, then left to a
+// manual reload.
 // ==============================================================================
 
 pub const SPEC_MAX_CRASH_ATTEMPTS: u32 = 3;
@@ -201,7 +223,8 @@ pub struct CrashRecoveryPlan {
     pub next: CrashAttempts,
 }
 
-/// Backoff decision algorithm conforming to PROJECT.md § M3 contract.
+/// Backoff decision: retry with growing delay while attempts in the window stay
+/// under the cap, otherwise hand recovery to the user.
 pub fn plan_crash_recovery(state: CrashAttempts, now: Instant) -> Option<CrashRecoveryPlan> {
     let fresh = state
         .started
@@ -225,7 +248,8 @@ pub fn plan_crash_recovery(state: CrashAttempts, now: Instant) -> Option<CrashRe
 }
 
 // ==============================================================================
-// Buffer Ring Contracts (PROJECT.md § M4)
+// Ring buffer contract: console and network capture keep a bounded window
+// (SPEC_CONSOLE_CAP / SPEC_NETWORK_CAP) and drop the oldest entries first.
 // ==============================================================================
 
 pub const SPEC_CONSOLE_CAP: usize = 500;
@@ -339,7 +363,8 @@ impl TestRingBufferRegistry {
 }
 
 // ==============================================================================
-// Playwright Step Recording Contract (PROJECT.md § M4)
+// Playwright recording contract: every recorded interaction carries an action,
+// a locator and a value, and exports as deterministic Playwright steps.
 // ==============================================================================
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -573,40 +598,4 @@ impl Browser for TestFakeBrowser {
     async fn page_diff(&self, _tab: TabId) -> Result<serde_json::Value, BrowserError> {
         Ok(json!({ "summary": "no differences" }))
     }
-}
-
-/// Validate MCP request Authorization and Origin headers per PROJECT.md § M4 contract.
-pub fn check_mcp_auth_and_origin(
-    expected_token: Option<&str>,
-    auth_header: Option<&str>,
-    origin_header: Option<&str>,
-) -> Result<(), u16> {
-    if let Some(origin) = origin_header
-        && !origin.is_empty()
-    {
-        let is_local = if let Ok(parsed) = url::Url::parse(origin) {
-            parsed.host_str().is_some_and(|h| {
-                h == "localhost" || h == "127.0.0.1" || h == "[::1]" || h == "0.0.0.0"
-            })
-        } else {
-            false
-        };
-        if !is_local {
-            return Err(403); // Forbidden
-        }
-    }
-
-    if let Some(token) = expected_token {
-        let Some(header) = auth_header else {
-            return Err(401); // Unauthorized
-        };
-        let Some(bearer_val) = header.strip_prefix("Bearer ") else {
-            return Err(401);
-        };
-        if bearer_val != token {
-            return Err(401);
-        }
-    }
-
-    Ok(())
 }

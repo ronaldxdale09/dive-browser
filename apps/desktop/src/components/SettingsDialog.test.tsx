@@ -4,7 +4,8 @@ import { ipc } from "../lib/ipc";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { useBrowser } from "../store/browser";
 import { usePrivacy } from "../store/privacy";
-import { SettingsDialog, groupPermissions } from "./SettingsDialog";
+import { SettingsDialog } from "./SettingsDialog";
+import { groupPermissions } from "./settings/Privacy";
 import { useUpdates } from "../store/updates";
 
 beforeEach(() => {

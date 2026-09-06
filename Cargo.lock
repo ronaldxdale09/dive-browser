@@ -1563,7 +1563,6 @@ dependencies = [
  "specta",
  "thiserror 2.0.20",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -1617,7 +1616,6 @@ dependencies = [
  "local-ip-address",
  "objc2",
  "objc2-app-kit",
- "objc2-foundation",
  "psl",
  "qrcode",
  "reqwest",
@@ -1657,9 +1655,7 @@ dependencies = [
  "serde_json",
  "time",
  "tokio",
- "tracing",
  "url",
- "uuid",
 ]
 
 [[package]]

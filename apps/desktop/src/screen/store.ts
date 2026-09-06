@@ -356,11 +356,14 @@ async function readText(path: string): Promise<string> {
   if (size === null) throw new Error(`Could not read file size: ${path}`);
   let out = "";
   const CHUNK = 8 * 1024 * 1024;
+  // One streaming decoder: a multi-byte character split across chunks
+  // must not turn into replacement characters at the seam.
+  const decoder = new TextDecoder();
   for (let offset = 0; offset < size; offset += CHUNK) {
     const b64 = await ipc.fileReadChunk(path, offset, Math.min(CHUNK, size - offset));
-    out += new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+    out += decoder.decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)), { stream: true });
   }
-  return out;
+  return out + decoder.decode();
 }
 
 // Reachable from the DevTools console while developing.

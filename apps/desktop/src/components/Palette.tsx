@@ -61,7 +61,7 @@ export function Palette() {
   }, [query]);
   useEffect(() => {
     let alive = true;
-    void ipc.commandsList().then((list) => setCmds([...list, ...chromeCommands(list)]));
+    void ipc.commandsList().then((list) => alive && setCmds([...list, ...chromeCommands(list)])).catch(() => alive && setCmds([]));
     void ipc.devServersWatch(true).then((found) => alive && setServers(found)).catch(() => alive && setServers([]));
     const listener = events.devServersChanged.listen((event) => {
       if (alive) setServers(event.payload.servers);

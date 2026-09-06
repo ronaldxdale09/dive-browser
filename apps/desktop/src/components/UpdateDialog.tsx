@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUpCircle, ExternalLink, Loader2, RefreshCw, X } from "lucide-react";
 import { useUpdates } from "../store/updates";
+import { useFocusTrap } from "../lib/useFocusTrap";
+import { REPO_URL } from "../lib/constants";
 
 export function UpdateDialog() {
   const status = useUpdates((s) => s.status);
@@ -12,6 +14,9 @@ export function UpdateDialog() {
   const install = useUpdates((s) => s.install);
 
   const [exiting, setExiting] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const visible = status === "available" && update !== null && !dismissed;
+  useFocusTrap(root, { active: visible });
 
   const handleDismiss = useCallback(() => {
     setExiting(true);
@@ -32,7 +37,7 @@ export function UpdateDialog() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [status, dismissed, handleDismiss]);
 
-  if (status !== "available" || !update || dismissed) {
+  if (!visible || !update) {
     return null;
   }
 
@@ -40,6 +45,7 @@ export function UpdateDialog() {
 
   return (
     <div
+      ref={root}
       role="dialog"
       aria-labelledby="update-dialog-title"
       className={`fixed bottom-5 right-5 z-50 w-96 max-w-[calc(100vw-40px)] rounded-2xl border border-dive-accent/30 bg-elevated/95 p-4 text-ink shadow-2xl shadow-black/70 backdrop-blur-xl transition-all duration-200 ease-out ${
@@ -101,7 +107,7 @@ export function UpdateDialog() {
       {/* Action Footer */}
       <div className="mt-4 flex items-center justify-between gap-2 pt-1 border-t border-line/40">
         <a
-          href={`https://github.com/ronaldxdale09/dive-browser/releases/tag/${versionString}`}
+          href={`${REPO_URL}/releases/tag/${versionString}`}
           target="_blank"
           rel="noreferrer"
           className="inline-flex items-center gap-1 text-xs text-ink-subtle hover:text-dive-accent transition-colors"

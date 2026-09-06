@@ -17,13 +17,17 @@
 // @dive-include css-path.js
 
 (function () {
-  if (
-    window.__divePicker &&
-    window.__divePicker.version === 1 &&
-    typeof window.__divePicker.setNonce === "function"
-  ) {
-    window.__divePicker.setNonce(__NONCE__);
-    return true;
+  // Never reuse an engine found on `window`: a page could have put it there
+  // to substitute its own or to be handed the nonce. Each injection installs
+  // a fresh engine whose nonce lives only in this closure; an earlier
+  // genuine install is asked to stand down so its listeners do not linger.
+  const previous = window.__divePicker;
+  if (previous && typeof previous.cancel === "function") {
+    try {
+      previous.cancel();
+    } catch {
+      // A page-owned object may throw; it is being replaced either way.
+    }
   }
 
   const OVERLAY_ATTRIBUTE = "data-dive-picker";
@@ -211,10 +215,6 @@
 
   window.__divePicker = {
     version: 1,
-    setNonce: (nonce) => {
-      state.nonce = nonce;
-      return true;
-    },
     start,
     cancel: () => {
       const was = state.active;

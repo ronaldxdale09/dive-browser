@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Clapperboard,
   Download,
+  Film,
   History,
   Keyboard,
   LayoutGrid,
@@ -34,6 +35,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { screenUrl } from "./internal/InternalPage";
+import { useImportVideo } from "../screen/importVideo";
 import { useBrowser } from "../store/browser";
 import { useRecording } from "../store/recording";
 import { usePicker } from "../store/simulator";
@@ -253,6 +255,7 @@ function useMenu(close: () => void): Group[] {
       items: [
         { id: "record", label: "Record a Video", icon: Video, shortcut: "⌘⇧R", keywords: "screen recording gif capture loom", disabled: !active, run: done(() => useRecording.getState().openSetup()) },
         { id: "divescreen", label: "Edit Latest Recording in DiveScreen", icon: Clapperboard, keywords: "editor zoom trim video", disabled: !latest, run: done(() => (latest ? b().openTab(screenUrl(latest)) : undefined)) },
+        { id: "divescreen.open", label: "Open a Video in DiveScreen", icon: Film, keywords: "import mp4 mov webm mkv gif file editor", run: done(() => useImportVideo.getState().open().then(() => undefined)) },
         { id: "simulator", label: "Device Simulator", icon: Smartphone, shortcut: "⌘⇧M", keywords: "mobile phone responsive emulate", disabled: !active, run: done(() => usePicker.getState().toggle()) },
         { id: "agent", label: "Agent", glyph: <AgentIcon size={15} className="text-highlight" />, shortcut: "⌘J", keywords: "ai assistant sidecar chat", run: done(() => b().toggle("sidecar")) },
         { id: "dock", label: "Developer Dock", icon: PanelBottom, shortcut: "⌘⇧D", keywords: "console network vitals storage", run: done(() => b().toggle("dock")) },

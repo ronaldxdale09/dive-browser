@@ -370,6 +370,27 @@ fn popout_content_bounds(width: f64, height: f64) -> Bounds {
     }
 }
 
+/// Destroys a window on drop unless disarmed: the popout builder's rollback.
+struct DestroyOnDrop(Option<Window<Runtime>>);
+
+impl DestroyOnDrop {
+    fn disarm(mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for DestroyOnDrop {
+    fn drop(&mut self) {
+        if let Some(window) = self.0.take() {
+            let _ = window.destroy();
+        }
+    }
+}
+
+fn scopeguard_destroy(window: Window<Runtime>) -> DestroyOnDrop {
+    DestroyOnDrop(Some(window))
+}
+
 /// Window label for the `seq`th popout, holding `id`.
 fn popout_label(seq: u64, id: TabId) -> String {
     format!("pop-{seq}-{id}")
@@ -839,6 +860,10 @@ impl TabHost {
             );
         }
         let window = builder.build()?;
+        // Nothing may fail between here and the reparent without taking the
+        // window down again: an empty invisible window would keep the app
+        // from exiting once every other window is gone.
+        let window_guard = scopeguard_destroy(window.clone());
         let chrome_dev_url = if cfg!(debug_assertions) {
             app.config().build.dev_url.clone()
         } else {
@@ -870,10 +895,8 @@ impl TabHost {
         crate::permissions::attach_chrome(&chrome_view)?;
         reveal_soon(window.clone());
         crate::titlebar::keep_drags_in_chrome_soon(&window);
-        if let Err(error) = view.reparent(&window) {
-            let _ = window.destroy();
-            return Err(error);
-        }
+        view.reparent(&window)?;
+        window_guard.disarm();
         #[cfg(all(feature = "cef", target_os = "macos"))]
         bind_detached_new_tab_shortcuts(&view, &chrome_view, &self.window);
         let bounds = popout_content_bounds(width, height);
@@ -902,15 +925,20 @@ impl TabHost {
     /// Bring `id` back from its own window into the main one. The caller
     /// decides whether it becomes the active tab.
     pub fn attach(&mut self, id: TabId) -> tauri::Result<()> {
-        let Some(popout) = self.popouts.remove(&id) else {
+        if !self.popouts.contains_key(&id) {
             return Ok(());
-        };
+        }
+        // Reparent before forgetting the popout, so a failed move leaves the
+        // tab where it was instead of in a window nobody tracks.
         if let Some(view) = self.views.get(&id) {
             view.reparent(&self.window)?;
             #[cfg(all(feature = "cef", target_os = "macos"))]
             refresh_new_tab_shortcut(view, &self.window);
             view.hide()?;
         }
+        let Some(popout) = self.popouts.remove(&id) else {
+            return Ok(());
+        };
         let _ = popout.window.destroy();
         let _ = self.window.set_focus();
         self.layout()
@@ -1152,7 +1180,7 @@ fn attach_cdp(
                 Ok(text) => {
                     tracing::trace!(
                         len = text.len(),
-                        head = &text[..text.len().min(160)],
+                        head = &text[..text.floor_char_boundary(160)],
                         "cdp <-"
                     );
                     activity.ingest(tab, &nonce, text);

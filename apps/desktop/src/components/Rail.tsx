@@ -266,7 +266,6 @@ function WorkspaceRow({
  * every tab in the workspace, which is not something to do on one click.
  */
 function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number; onClose: () => void }) {
-  useCoversContent(true);
   const root = useRef<HTMLDivElement>(null);
   useFocusTrap(root, { menu: true });
   const workspaces = useBrowser((s) => s.workspaces);
@@ -277,6 +276,8 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
   const toggle = useBrowser((s) => s.toggle);
   const [confirming, setConfirming] = useState(false);
   const workspace = workspaces.find((w) => w.id === id);
+  // Only a menu that renders covers the page; a stale id renders nothing.
+  useCoversContent(Boolean(workspace));
   const position = clampFloatingPosition({ x, y, width: 224, height: confirming ? 150 : 176, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
   const item = "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink";
   if (!workspace) return null;

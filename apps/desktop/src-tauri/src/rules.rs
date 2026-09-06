@@ -3,7 +3,7 @@
 //! through the `DevTools` `Fetch` domain on every tab of the workspace.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use base64::Engine as _;
 use dive_cdp::CdpSession;
@@ -165,9 +165,12 @@ const MAX_PATTERN: usize = 2 * 1024;
 const MAX_HEADER_VALUE: usize = 8 * 1024;
 
 /// Rules per workspace, loaded from settings on first use.
+///
+/// Each workspace's list is held behind an `Arc` so the request-pause loop
+/// can take a snapshot per event without deep-cloning every rule body.
 #[derive(Default)]
 pub struct Registry {
-    by_workspace: Mutex<HashMap<WorkspaceId, Vec<Rule>>>,
+    by_workspace: Mutex<HashMap<WorkspaceId, Arc<Vec<Rule>>>>,
 }
 
 fn setting_key(workspace: WorkspaceId) -> String {
@@ -175,7 +178,7 @@ fn setting_key(workspace: WorkspaceId) -> String {
 }
 
 impl Registry {
-    fn map(&self) -> std::sync::MutexGuard<'_, HashMap<WorkspaceId, Vec<Rule>>> {
+    fn map(&self) -> std::sync::MutexGuard<'_, HashMap<WorkspaceId, Arc<Vec<Rule>>>> {
         self.by_workspace
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -183,8 +186,15 @@ impl Registry {
 
     /// Rules for `workspace`, reading the store the first time.
     pub fn list(&self, state: &AppState, workspace: WorkspaceId) -> Vec<Rule> {
+        self.snapshot(state, workspace).as_ref().clone()
+    }
+
+    /// A shared snapshot of the rules for `workspace`, reading the store the
+    /// first time. Cheap to take per paused request; a later [`Self::set`]
+    /// replaces the `Arc` rather than mutating it.
+    pub fn snapshot(&self, state: &AppState, workspace: WorkspaceId) -> Arc<Vec<Rule>> {
         if let Some(rules) = self.map().get(&workspace) {
-            return rules.clone();
+            return Arc::clone(rules);
         }
         let stored: Vec<Rule> = crate::state::lock(&state.store)
             .setting(&setting_key(workspace))
@@ -197,7 +207,11 @@ impl Registry {
             .take(MAX_RULES)
             .filter_map(|rule| validate(rule).ok())
             .collect();
-        self.map().entry(workspace).or_insert(stored).clone()
+        Arc::clone(
+            self.map()
+                .entry(workspace)
+                .or_insert_with(|| Arc::new(stored)),
+        )
     }
 
     /// Replace the rules for `workspace` and persist them.
@@ -211,7 +225,7 @@ impl Registry {
         let rules: Vec<Rule> = rules.into_iter().map(validate).collect::<AppResult<_>>()?;
         let json = serde_json::to_string(&rules).map_err(AppError::new)?;
         crate::state::lock(&state.store).set_setting(&setting_key(workspace), &json)?;
-        self.map().insert(workspace, rules);
+        self.map().insert(workspace, Arc::new(rules));
         Ok(())
     }
 }
@@ -280,26 +294,35 @@ fn validate(mut rule: Rule) -> AppResult<Rule> {
 }
 
 /// Glob match with `*` wildcards, case-insensitive.
+///
+/// A two-pointer match that backtracks to the last `*`, so `*.png` matches
+/// `https://cdn.png.host/logo.png`: the first `.png` it finds is not the one
+/// that has to end the string.
 pub fn matches(pattern: &str, url: &str) -> bool {
-    let (p, u) = (pattern.to_ascii_lowercase(), url.to_ascii_lowercase());
-    let parts: Vec<&str> = p.split('*').collect();
-    if parts.len() == 1 {
-        return p == u;
-    }
-    let mut pos = 0;
-    for (i, part) in parts.iter().enumerate() {
-        if part.is_empty() {
-            continue;
-        }
-        let Some(found) = u[pos..].find(part) else {
+    let p = pattern.to_ascii_lowercase();
+    let u = url.to_ascii_lowercase();
+    let (p, u) = (p.as_bytes(), u.as_bytes());
+    let (mut pi, mut ui) = (0usize, 0usize);
+    let mut star: Option<(usize, usize)> = None;
+    while ui < u.len() {
+        if pi < p.len() && p[pi] == b'*' {
+            star = Some((pi, ui));
+            pi += 1;
+        } else if pi < p.len() && p[pi] == u[ui] {
+            pi += 1;
+            ui += 1;
+        } else if let Some((star_p, star_u)) = star {
+            pi = star_p + 1;
+            ui = star_u + 1;
+            star = Some((star_p, star_u + 1));
+        } else {
             return false;
-        };
-        if i == 0 && found != 0 {
-            return false;
         }
-        pos += found + part.len();
     }
-    parts.last().is_some_and(|last| last.is_empty()) || pos == u.len()
+    while pi < p.len() && p[pi] == b'*' {
+        pi += 1;
+    }
+    pi == p.len()
 }
 
 /// First enabled rule matching `url`.
@@ -356,8 +379,9 @@ pub fn decide_paused_request(
 /// aborting the entire enable before any patterns are installed. See Chromium
 /// 52a94675, `content/browser/devtools/protocol/network_handler.cc`,
 /// `NetworkHandler::AddInterceptedResourceType` (not the Network domain schema).
-/// Privacy never blocks media, so leave streaming byte ranges off this pause
-/// pipeline. Explicit workspace rules still use an unrestricted URL pattern.
+/// Media is left off this pause pipeline on purpose: pausing every streaming
+/// byte range stalled googlevideo playback, and neither privacy nor a
+/// workspace rule is worth a stuck video.
 const NON_MEDIA_RESOURCE_TYPES: &[&str] = &[
     "Document",
     "Stylesheet",
@@ -371,21 +395,17 @@ const NON_MEDIA_RESOURCE_TYPES: &[&str] = &[
     "Other",
 ];
 
-/// The `Fetch.enable` patterns for the current rules and prefs. A workspace
-/// mock/rewrite/block rule may target any URL, media included, so an enabled
-/// rule intercepts everything; privacy alone excludes media so video plays
-/// without per-segment interception latency.
-fn interception_patterns(rules: &[Rule]) -> serde_json::Value {
-    if rules.iter().any(|rule| rule.enabled) {
-        json!([{"urlPattern": "*"}])
-    } else {
-        json!(
-            NON_MEDIA_RESOURCE_TYPES
-                .iter()
-                .map(|t| json!({"urlPattern": "*", "resourceType": t}))
-                .collect::<Vec<_>>()
-        )
-    }
+/// The `Fetch.enable` patterns for the current rules and prefs: one filter
+/// per supported non-media resource type, whether interception is there for
+/// privacy or for a workspace rule. A bare `"*"` would include `Media` and
+/// stall streaming playback, so it is never sent.
+fn interception_patterns(_rules: &[Rule]) -> serde_json::Value {
+    json!(
+        NON_MEDIA_RESOURCE_TYPES
+            .iter()
+            .map(|t| json!({"urlPattern": "*", "resourceType": t}))
+            .collect::<Vec<_>>()
+    )
 }
 
 /// Enable shared interception when workspace rules or `DivePrivacy` need it.
@@ -516,8 +536,11 @@ pub fn attach(
         let mut events = session.subscribe();
         let (initial_rules, initial_prefs, initial_document_url) = {
             let state = app.state::<AppState>();
-            let rules = workspace.map_or_else(Vec::new, |id| state.rules.list(&state, id));
-            let prefs = state.prefs.get(&state);
+            let rules = workspace.map_or_else(
+                || Arc::new(Vec::new()),
+                |id| state.rules.snapshot(&state, id),
+            );
+            let prefs = state.prefs.snapshot(&state);
             let document_url = crate::state::lock(&state.store)
                 .tab(tab_id)
                 .map(|tab| tab.url)
@@ -540,8 +563,11 @@ pub fn attach(
                     let (rules, prefs) = {
                         let state = app.state::<AppState>();
                         (
-                            workspace.map_or_else(Vec::new, |id| state.rules.list(&state, id)),
-                            state.prefs.get(&state),
+                            workspace.map_or_else(
+                                || Arc::new(Vec::new()),
+                                |id| state.rules.snapshot(&state, id),
+                            ),
+                            state.prefs.snapshot(&state),
                         )
                     };
                     reset_interception(&session, &rules, &prefs).await;
@@ -557,8 +583,11 @@ pub fn attach(
             let (rules, prefs) = {
                 let state = app.state::<AppState>();
                 (
-                    workspace.map_or_else(Vec::new, |id| state.rules.list(&state, id)),
-                    state.prefs.get(&state),
+                    workspace.map_or_else(
+                        || Arc::new(Vec::new()),
+                        |id| state.rules.snapshot(&state, id),
+                    ),
+                    state.prefs.snapshot(&state),
                 )
             };
             let Some(request_id) = request_id_or_reset(&session, tab_id, p, &rules, &prefs).await
@@ -684,6 +713,14 @@ mod tests {
         assert!(matches("*/users/*", "https://API.dev/users/1"));
         assert!(matches("*.png", "https://a.dev/x.PNG"));
         assert!(!matches("*.png", "https://a.dev/x.png?x=1"));
+        // Backtracking: the first `.png` is not the one that ends the URL.
+        assert!(matches("*.png", "https://cdn.png.host/logo.png"));
+        assert!(matches("https://*/a/*/c", "https://h.dev/a/x/a/y/c"));
+        assert!(!matches("https://*/a/*/c", "https://h.dev/a/x/a/y/d"));
+        assert!(matches("*", ""));
+        assert!(matches("**", "https://a.dev/"));
+        assert!(!matches("", "https://a.dev/"));
+        assert!(!matches("https://a.dev/*/x", "https://a.dev/x"));
         assert!(matches("https://a.dev/", "https://a.dev/"));
         assert!(!matches("https://a.dev/", "https://a.dev/x"));
         assert!(!matches(
@@ -1062,7 +1099,15 @@ mod tests {
         apply(&session, &[], &Prefs::default()).await.unwrap();
         let sent = sent.lock().unwrap();
         assert_eq!(sent.len(), 3);
-        assert_eq!(sent[0]["params"]["patterns"], json!([{"urlPattern":"*"}]));
+        for message in &sent[..2] {
+            let patterns = message["params"]["patterns"].as_array().unwrap();
+            assert!(
+                patterns.iter().all(|p| p["resourceType"]
+                    .as_str()
+                    .is_some_and(|kind| kind != "Media")),
+                "a workspace rule must not widen interception to media"
+            );
+        }
         assert!(
             sent[1]["params"]["patterns"]
                 .as_array()
@@ -1113,7 +1158,7 @@ mod tests {
     }
 
     #[test]
-    fn a_workspace_rule_intercepts_everything_including_media() {
+    fn a_workspace_rule_never_intercepts_media() {
         let rule = Rule {
             id: "r".into(),
             pattern: "*://media.example/*".into(),
@@ -1121,7 +1166,17 @@ mod tests {
             action: RuleAction::Block,
         };
         let patterns = interception_patterns(&[rule]);
-        assert_eq!(patterns, json!([{"urlPattern": "*"}]));
+        let arr = patterns.as_array().unwrap();
+        assert!(
+            arr.iter().all(|p| p.get("resourceType").is_some()),
+            "a bare urlPattern would include Media and stall streaming"
+        );
+        let types: Vec<&str> = arr
+            .iter()
+            .map(|p| p["resourceType"].as_str().unwrap())
+            .collect();
+        assert!(!types.contains(&"Media"));
+        assert_eq!(patterns, interception_patterns(&[]));
     }
 
     #[tokio::test]

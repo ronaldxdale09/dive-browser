@@ -10,13 +10,34 @@
 (function () {
   if (window.top !== window) return; // main frame only: never read inside cross-origin iframes
   const NONCE = __NONCE__;
+  // The nonce never sits on `window` where page script could read it and
+  // forge steps. `window.__diveRecorderNonce` is an accessor owned by the
+  // first install: the host writes a new nonce through it on restart and
+  // `null` to stop, and reading it only says whether recording is armed.
+  let nonce = null;
+  const armed = Object.getOwnPropertyDescriptor(window, "__diveRecorderNonce");
+  if (!armed || armed.configurable) {
+    try {
+      Object.defineProperty(window, "__diveRecorderNonce", {
+        configurable: false,
+        enumerable: false,
+        get: () => (nonce ? true : null),
+        set: (value) => {
+          nonce = typeof value === "string" && value ? value : null;
+        },
+      });
+    } catch {
+      return; // the page pinned the name first; do not hand it a nonce
+    }
+  } else if (!window.__diveRecorderInstalled) {
+    return; // a non-configurable property that is not ours: page interference
+  }
   window.__diveRecorderNonce = NONCE;
   if (window.__diveRecorderInstalled) return;
   window.__diveRecorderInstalled = true;
 
   const send = (payload) => {
     try {
-      const nonce = window.__diveRecorderNonce;
       if (!nonce) return;
       payload.nonce = nonce;
       window.__BINDING__(JSON.stringify(payload));

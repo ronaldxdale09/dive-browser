@@ -18,7 +18,7 @@ import {
   parseTag,
   resolveRelease
 } from './resolve-release.mjs'
-import { stampCargoLock, stampCargoToml, stampJsonVersion, VERSIONED_FILES, workspaceCrates } from './stamp-versions.mjs'
+import { stampCargoLock, stampCargoToml, stampCrashReporterCfg, stampJsonVersion, VERSIONED_FILES, workspaceCrates } from './stamp-versions.mjs'
 import {
   assertManifestComplete,
   buildManifest,
@@ -104,9 +104,15 @@ describe('stamp-versions', () => {
     )
   })
 
+  it('replaces only ProductVersion in the crashpad config', () => {
+    const source = '[Config]\nProductName=Dive\nProductVersion=0.1.0\nAppName=Dive\n'
+    expect(stampCrashReporterCfg(source, '0.2.0')).toBe('[Config]\nProductName=Dive\nProductVersion=0.2.0\nAppName=Dive\n')
+  })
+
   it('fails loudly when a manifest has no version to stamp', () => {
     expect(() => stampCargoToml('[workspace]\n', '1.0.0')).toThrow(/workspace.package/)
     expect(() => stampJsonVersion('{}', '1.0.0', 'x.json')).toThrow(/version/)
+    expect(() => stampCrashReporterCfg('[Config]\n', '1.0.0')).toThrow(/ProductVersion/)
   })
 
   const lock = [
@@ -165,7 +171,8 @@ describe('stamp-versions', () => {
       'Cargo.toml',
       'Cargo.lock',
       'apps/desktop/package.json',
-      'apps/desktop/src-tauri/tauri.conf.json'
+      'apps/desktop/src-tauri/tauri.conf.json',
+      'apps/desktop/src-tauri/cef/crash_reporter.cfg'
     ])
   })
 })

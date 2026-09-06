@@ -344,9 +344,39 @@ pub(crate) struct AppWebview {
   pub(crate) devtools_observer_registration: Arc<Mutex<Option<cef::Registration>>>,
   pub(crate) listeners: WebviewEventListeners,
   pub(crate) bounds_rate: Option<BoundsRate>,
+  /// Set once a close was handed to CEF. CEF runs `do_close` for every
+  /// `close_browser` call, and a second host-view removal while the first
+  /// close is still in flight leaves the browser without its `on_before_close`
+  /// acknowledgement, so the window it lives in is retained forever.
+  closing: std::sync::atomic::AtomicBool,
+  /// Set once `do_close` removed the browser's host view.
+  host_destroyed: std::sync::atomic::AtomicBool,
 }
 
 impl AppWebview {
+  /// Ask CEF to close this browser at most once. Returns whether the request
+  /// was issued now; a repeat (graceful, then forced, or the window closing
+  /// after its tab) is a no-op because the first close is already draining.
+  pub(crate) fn request_close(&self, force: bool) -> bool {
+    use std::sync::atomic::Ordering;
+    if self.closing.swap(true, Ordering::AcqRel) {
+      return false;
+    }
+    log::debug!(target: "dive_native_close", "stage=request webview={} browser={} force={force}", self.webview_id, self.browser_id);
+    self.host.close_browser(i32::from(force));
+    true
+  }
+
+  /// Remove the browser's host view exactly once; `do_close` may repeat.
+  pub(crate) fn destroy_host_window_once(&self) -> bool {
+    use std::sync::atomic::Ordering;
+    if self.host_destroyed.swap(true, Ordering::AcqRel) {
+      return false;
+    }
+    self.destroy_host_window();
+    true
+  }
+
   pub(crate) fn set_bounds(&mut self, parent_size: PhysicalSize<u32>, scale: f64, bounds: Rect) {
     let position = bounds.position.to_physical::<i32>(scale);
     let size = bounds.size.to_physical::<u32>(scale);
@@ -698,6 +728,8 @@ impl<T: UserEvent> WinitCefApp<T> {
             devtools_observer_registration,
             listeners: Default::default(),
             bounds_rate,
+            closing: std::sync::atomic::AtomicBool::new(false),
+            host_destroyed: std::sync::atomic::AtomicBool::new(false),
           })
           .expect("failed to send initialized CEF browser");
       }
@@ -739,12 +771,23 @@ impl<T: UserEvent> WinitCefApp<T> {
     let Some(window_id) = crate::webview_routing::resolve_owner(
       window_id,
       message.follows_browser(),
-      |owner| self.state.windows.get(&owner).is_some_and(|window| {
-        window.children.iter().any(|child| child.webview_id == webview_id)
-      }),
-      || self.state.windows.iter().find_map(|(owner, window)| {
-        window.children.iter().any(|child| child.webview_id == webview_id).then_some(*owner)
-      }),
+      |owner| {
+        self.state.windows.get(&owner).is_some_and(|window| {
+          window
+            .children
+            .iter()
+            .any(|child| child.webview_id == webview_id)
+        })
+      },
+      || {
+        self.state.windows.iter().find_map(|(owner, window)| {
+          window
+            .children
+            .iter()
+            .any(|child| child.webview_id == webview_id)
+            .then_some(*owner)
+        })
+      },
       |owner| self.state.is_window_closing(owner),
     ) else {
       return;
@@ -817,8 +860,9 @@ impl<T: UserEvent> WinitCefApp<T> {
       WebviewMessage::GoForward => child.browser.go_forward(),
       WebviewMessage::CanGoForward(tx) => _ = tx.send(Ok(child.browser.can_go_forward() == 1)),
       WebviewMessage::Close => {
-        log::debug!(target: "dive_native_close", "stage=request webview={} browser={}", child.webview_id, child.browser_id);
-        child.host.close_browser(0);
+        // Forced: the embedder has already forgotten the view, so a page that
+        // vetoed a graceful close would keep painting with nobody to hide it.
+        child.request_close(true);
       }
       WebviewMessage::SetBounds(bounds) => {
         let parent_size = appwindow.window.surface_size();

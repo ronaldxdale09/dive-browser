@@ -21,6 +21,7 @@ import { DeviceFrame } from "./DeviceFrame";
 import { captureFramed } from "./frameCapture";
 import { layoutFor } from "./geometry";
 import type { UiMode, Zoom } from "./geometry";
+import { errorMessage } from "../../lib/errors";
 
 /** Width of the tool strip down the right edge of the stage. */
 const TOOLS_WIDTH = 44;
@@ -104,7 +105,7 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
       setNotice(`Saved ${path.split("/").pop() ?? path}`);
       setTimeout(() => setNotice(null), 4000);
     } catch (e) {
-      useBrowser.setState({ error: e instanceof Error ? e.message : String(e) });
+      useBrowser.setState({ error: errorMessage(e) });
     }
   };
 

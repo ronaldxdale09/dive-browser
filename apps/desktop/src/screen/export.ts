@@ -4,7 +4,7 @@
  * to the engine, and let ffmpeg finish the MP4 or GIF with the source's
  * sound cut and sped to match.
  */
-import { Muxer, ArrayBufferTarget } from "webm-muxer";
+import { Muxer, StreamTarget } from "webm-muxer";
 import { ipc } from "../lib/ipc";
 import type { RecordingResult } from "../lib/ipc";
 import { outputSize, sourceTime } from "./math";
@@ -12,6 +12,12 @@ import type { Segment } from "./math";
 import type { CursorSample, Project } from "./model";
 import { Renderer } from "./render";
 import { recordMediaProbe, setMediaProbePhase } from "./mediaProbe";
+
+/** Longest output the exporter renders in one go; past this the render
+ * alone would take longer than anyone waits at a progress bar. */
+export const MAX_OUTPUT_MS = 20 * 60 * 1000;
+/** Size of the pieces the muxer hands over; under the engine's 8 MB cap. */
+const UPLOAD_CHUNK = 6 * 1024 * 1024;
 
 export interface ExportProgress {
   phase: "preparing" | "rendering" | "uploading" | "finishing" | "done";
@@ -139,6 +145,9 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
   const { width, height } = outputSize(e.aspectRatio, gif ? "720p" : e.export.resolution, project.media);
   const durationMs = segments.length ? segments[segments.length - 1]!.outEndMs : 0;
   const frames = Math.max(1, Math.round((durationMs / 1000) * fps));
+  if ((frames / fps) * 1000 > MAX_OUTPUT_MS) {
+    throw new Error(`This export would be ${Math.round(frames / fps / 60)} minutes long; DiveScreen exports up to ${MAX_OUTPUT_MS / 60_000} minutes at a time. Trim the recording or speed it up first.`);
+  }
   onProgress({ phase: "preparing", progress: 0 });
 
   // Borrow the stage's element when it is there; otherwise make one in the
@@ -203,25 +212,33 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
     const codec = "vp09.00.10.08";
     const support = await bounded(VideoEncoder.isConfigSupported({ codec, width, height, bitrate: bitrateFor(width, height, fps), framerate: fps }), "configuring video encoder", 10_000, signal);
     if (!support.supported) throw new Error("this build cannot encode video");
-    const target = new ArrayBufferTarget();
-    const muxer = new Muxer({ target, video: { codec: "V_VP9", width, height, frameRate: fps }, firstTimestampBehavior: "offset" });
+
+    // The job exists before the first frame: the muxer streams into it as
+    // it goes, so a long export never sits whole in renderer memory.
+    checkCancelled(signal);
+    jobId = await ipc.screenExportBegin();
+    if (signal?.aborted) cancelJob();
+    const stream = new Uploader(jobId);
+    const target = new StreamTarget({ onData: (data, position) => stream.push(data, position), chunked: true, chunkSize: UPLOAD_CHUNK });
+    const muxer = new Muxer({ target, video: { codec: "V_VP9", width, height, frameRate: fps }, firstTimestampBehavior: "offset", streaming: true });
     let encodeError: Error | null = null;
     encoder = new VideoEncoder({
       output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
       error: (err) => (encodeError = err),
     });
     encoder.configure({ codec, width, height, bitrate: bitrateFor(width, height, fps), framerate: fps, latencyMode: "quality" });
+    const failed = () => { if (encodeError) throw encodeError; stream.check(); };
 
     renderer.snap();
     for (let i = 0; i < frames; i++) {
       checkCancelled(signal);
-      if (encodeError) throw encodeError;
+      failed();
       const outMs = (i / fps) * 1000;
       const srcMs = sourceTime(segments, outMs) ?? project.media.durationMs;
       setMediaProbePhase(video, "seeking", i + 1, srcMs);
       await seekTo(video, srcMs, signal);
       setMediaProbePhase(video, "draining", i + 1, srcMs);
-      await drain(encoder, () => { if (encodeError) throw encodeError; }, signal);
+      await drain(encoder, failed, signal);
       setMediaProbePhase(video, "rendering", i + 1, srcMs);
       renderer.draw(ctx, project, video, srcMs, cursorSmooth, cursorRaw, { width, height, playing: true });
       const frame = new VideoFrame(canvas, { timestamp: Math.round(outMs * 1000), duration: Math.round(1_000_000 / fps) });
@@ -230,28 +247,22 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
       } finally {
         frame.close();
       }
+      // Pieces the muxer finished while this frame encoded go out now, in order.
+      await stream.flush(signal);
       if (i % 3 === 0) onProgress({ phase: "rendering", progress: (i + 1) / frames, frame: i + 1, frames });
     }
     setMediaProbePhase(video, "flushing");
     await bounded(encoder.flush(), "flushing video encoder", 10_000, signal);
-    if (encodeError) throw encodeError;
+    failed();
     encoder.close();
     muxer.finalize();
     release();
-    const webm = new Uint8Array(target.buffer);
 
     checkCancelled(signal);
     setMediaProbePhase(video, "uploading");
     onProgress({ phase: "uploading", progress: 0 });
-    jobId = await ipc.screenExportBegin();
-    if (signal?.aborted) cancelJob();
-    const CHUNK = 6 * 1024 * 1024;
-    for (let offset = 0; offset < webm.length; offset += CHUNK) {
-      checkCancelled(signal);
-      const piece = webm.subarray(offset, Math.min(webm.length, offset + CHUNK));
-      await ipc.screenExportAppend(jobId, offset, toBase64(piece));
-      onProgress({ phase: "uploading", progress: Math.min(1, (offset + piece.length) / webm.length) });
-    }
+    await stream.flush(signal, (done) => onProgress({ phase: "uploading", progress: done }));
+    onProgress({ phase: "uploading", progress: 1 });
 
     // Cancellation requests run beside finish; the native job acknowledges only
     // after its child exits and private staging has been removed.
@@ -281,6 +292,45 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
       signal?.removeEventListener("abort", cancelJob);
       if (jobId && !completed) cancelJob();
       await confirmCleanup();
+    }
+  }
+}
+
+/**
+ * Pieces of the WebM in the order the muxer produced them, appended to the
+ * native job at the offsets it expects. `push` runs inside the muxer's
+ * callback (so it never throws); `flush` sends what has piled up.
+ */
+class Uploader {
+  private queue: Uint8Array[] = [];
+  private queued = 0;
+  private sent = 0;
+  private error: Error | null = null;
+  constructor(private readonly jobId: string) {}
+
+  push(data: Uint8Array, position: number): void {
+    if (this.error) return;
+    if (position !== this.queued) {
+      this.error = new Error(`export stream is not contiguous (expected ${this.queued}, got ${position})`);
+      return;
+    }
+    // The muxer reuses its buffers once it has handed a piece over.
+    this.queue.push(data.slice());
+    this.queued += data.byteLength;
+  }
+
+  check(): void {
+    if (this.error) throw this.error;
+  }
+
+  async flush(signal?: AbortSignal, onProgress?: (fraction: number) => void): Promise<void> {
+    this.check();
+    while (this.queue.length) {
+      checkCancelled(signal);
+      const piece = this.queue.shift()!;
+      await ipc.screenExportAppend(this.jobId, this.sent, toBase64(piece));
+      this.sent += piece.byteLength;
+      onProgress?.(this.queued ? this.sent / this.queued : 1);
     }
   }
 }

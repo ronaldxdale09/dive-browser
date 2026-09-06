@@ -62,11 +62,15 @@ export function Stage() {
 
   // Draw loop: while playing, advance in output time with the clock, seek
   // the video to the matching source time; otherwise draw the playhead.
+  // The project is read from the store inside each tick, so edits (a
+  // dragged focus, a new padding) redraw without tearing the loop down.
+  const hasProject = project !== null;
   useEffect(() => {
     const cv = canvas.current;
     const v = video.current;
-    if (!cv || !v || !project) return;
-    const ctx = cv.getContext("2d", { willReadFrequently: project.editor.annotations.some((a) => a.type === "blur") });
+    const opened = useEditor.getState().project;
+    if (!cv || !v || !hasProject || !opened) return;
+    const ctx = cv.getContext("2d", { willReadFrequently: opened.editor.annotations.some((a) => a.type === "blur") });
     if (!ctx) return;
     let raf = 0;
     let last = performance.now();
@@ -78,8 +82,8 @@ export function Stage() {
       cv.width = W;
       cv.height = H;
     }
-    const drawAt = (srcMs: number, isPlaying: boolean) => {
-      renderer.current.draw(ctx, project, v.readyState >= 2 ? v : null, srcMs, cursorSmooth, cursorRaw, { width: W, height: H, playing: isPlaying });
+    const drawAt = (current: Project, srcMs: number, isPlaying: boolean) => {
+      renderer.current.draw(ctx, current, v.readyState >= 2 ? v : null, srcMs, cursorSmooth, cursorRaw, { width: W, height: H, playing: isPlaying });
     };
     const paintControls = (positionMs: number) => {
       if (currentTimeLabel.current) currentTimeLabel.current.textContent = recordingClock(positionMs / 1000);
@@ -91,7 +95,8 @@ export function Stage() {
     const tick = (now: number) => {
       raf = 0;
       const state = useEditor.getState();
-      if (state.exporting) {
+      const current = state.project;
+      if (state.exporting || !current) {
         last = now;
         return;
       }
@@ -101,7 +106,7 @@ export function Stage() {
           outMs = duration;
           setPlaying(false);
         }
-        const src = sourceTime(segments, outMs) ?? project.media.durationMs;
+        const src = sourceTime(segments, outMs) ?? current.media.durationMs;
         const seg = segments.find((s) => outMs >= s.outStartMs && outMs < s.outEndMs);
         const rate = seg?.speed ?? 1;
         if (v.paused) void v.play().catch(() => undefined);
@@ -109,14 +114,14 @@ export function Stage() {
         if (Math.abs(v.currentTime * 1000 - src) > 120) v.currentTime = src / 1000;
         useEditor.setState({ playhead: src });
         paintControls(outMs);
-        drawAt(src, true);
+        drawAt(current, src, true);
       } else {
         if (!v.paused) v.pause();
         const src = state.playhead;
         outMs = outputTime(segments, src);
         if (Math.abs(v.currentTime * 1000 - src) > 8) v.currentTime = src / 1000;
         paintControls(outMs);
-        drawAt(src, false);
+        drawAt(current, src, false);
       }
       last = now;
       if (previewNeedsFrame(state.playing, v.readyState, v.seeking)) schedule();
@@ -132,6 +137,8 @@ export function Stage() {
       } else if (state.playhead !== previous.playhead && !state.playing) {
         renderer.current.snap();
         schedule();
+      } else if (state.project !== previous.project) {
+        schedule();
       }
     });
     v.addEventListener("loadeddata", schedule);
@@ -143,7 +150,7 @@ export function Stage() {
       v.removeEventListener("seeked", schedule);
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [project, segments, duration, cursorRaw, cursorSmooth, size, setPlaying]);
+  }, [hasProject, segments, duration, cursorRaw, cursorSmooth, size, setPlaying]);
 
   // The stage owns one media resource and lends only that live element to
   // export. Cleanup must not clear a replacement stage's borrowed pointer.

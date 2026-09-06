@@ -223,6 +223,34 @@ describe("command dispatch", () => {
     expect(activate).toHaveBeenLastCalledWith("c");
   });
 
+  it("steps in the strip's order, skipping essentials and tabs in their own window", async () => {
+    const activate = vi.spyOn(ipc, "tabActivate").mockResolvedValue(null);
+    // Store order is arrival order; the strip shows pinned first, then by position.
+    useBrowser.setState({
+      tabs: [
+        { ...tab("late"), position: 2 },
+        { ...tab("essential"), tier: "essential", position: 0 },
+        { ...tab("early"), position: 1 },
+        { ...tab("popout"), position: 3 },
+        { ...tab("pinned"), tier: "pinned", position: 5 },
+      ],
+      detached: ["popout"],
+      activeTab: "late",
+    });
+
+    await UI_COMMANDS["tab.next"]!();
+    expect(activate).toHaveBeenLastCalledWith("pinned");
+
+    useBrowser.setState({ activeTab: "pinned" });
+    await UI_COMMANDS["tab.next"]!();
+    expect(activate).toHaveBeenLastCalledWith("early");
+
+    useBrowser.setState({ activeTab: "early" });
+    await UI_COMMANDS["tab.prev"]!();
+    expect(activate).toHaveBeenLastCalledWith("pinned");
+    useBrowser.setState({ detached: [] });
+  });
+
   it("does nothing when stepping with no tabs open", async () => {
     const activate = vi.spyOn(ipc, "tabActivate").mockResolvedValue(null);
     await UI_COMMANDS["tab.next"]!();

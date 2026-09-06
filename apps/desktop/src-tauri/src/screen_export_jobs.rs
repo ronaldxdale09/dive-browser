@@ -1,14 +1,14 @@
 //! Per-export capabilities and private files. Cancellation waits for worker cleanup.
 use crate::{
     error::{AppError, AppResult},
-    screencast::RecordingResult,
+    screencast::{RecordingResult, program_name, stop_child, wait_with_deadline},
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::{
     collections::HashMap,
     fs::File,
-    io::{Read as _, Seek as _, Write as _},
+    io::Write as _,
     path::{Path, PathBuf},
     process::{Child, Command, Output, Stdio},
     sync::{
@@ -36,6 +36,8 @@ pub(crate) enum CancelResult {
 pub(crate) struct Registry {
     jobs: Arc<Mutex<HashMap<String, Arc<Job>>>>,
     lifecycle: Arc<Lifecycle>,
+    /// Staging left by a crashed run is removed once, before the first job.
+    swept: Arc<AtomicBool>,
 }
 
 // Admission and Quit publish to separate atomics, then read the other one.
@@ -192,6 +194,9 @@ impl Registry {
         let staging = staging.canonicalize()?;
         if !staging.starts_with(&root) {
             return Err(AppError::new("export staging escapes captures"));
+        }
+        if !self.swept.swap(true, Ordering::SeqCst) {
+            sweep_stale(&root, &staging);
         }
         let directory = tempfile::Builder::new()
             .prefix("job-")
@@ -418,6 +423,7 @@ impl Job {
     }
     fn run_for(&self, command: &mut Command, timeout: Duration) -> AppResult<Output> {
         self.check()?;
+        let name = program_name(command);
         let mut stdout = tempfile::tempfile()?;
         let mut stderr = tempfile::tempfile()?;
         let child = command
@@ -429,44 +435,46 @@ impl Job {
             child: Some(child),
             unreaped: &self.unreaped,
         };
-        let deadline = Instant::now() + timeout;
-        let status = loop {
-            let interrupted = self.check().and_then(|()| {
-                if Instant::now() >= deadline {
-                    Err(AppError::new("export subprocess timed out"))
-                } else if stdout.metadata()?.len() > 256 * 1024
-                    || stderr.metadata()?.len() > 256 * 1024
-                {
-                    Err(AppError::new("export subprocess output exceeded limit"))
-                } else {
-                    Ok(())
-                }
-            });
-            if let Err(error) = interrupted {
+        let waited = wait_with_deadline(
+            child.child.as_mut().expect("worker owns child"),
+            &mut stdout,
+            &mut stderr,
+            Instant::now() + timeout,
+            &name,
+            || self.check(),
+        );
+        let output = match waited {
+            Ok(output) => output,
+            Err(error) => {
                 child.stop()?;
                 return Err(error);
             }
-            if let Some(status) = child
-                .child
-                .as_mut()
-                .expect("worker owns child")
-                .try_wait()?
-            {
-                break status;
-            }
-            std::thread::sleep(Duration::from_millis(20));
         };
-        stdout.rewind()?;
-        stderr.rewind()?;
-        let mut output = Output {
-            status,
-            stdout: Vec::new(),
-            stderr: Vec::new(),
-        };
-        stdout.take(256 * 1024).read_to_end(&mut output.stdout)?;
-        stderr.take(256 * 1024).read_to_end(&mut output.stderr)?;
         self.check()?;
         Ok(output)
+    }
+}
+
+/// Remove `job-*` directories a crashed run left in `staging`. Nothing else
+/// is touched: `staging` must be the canonical `.export` directly under
+/// the canonical captures `root`.
+fn sweep_stale(root: &Path, staging: &Path) {
+    if staging.parent() != Some(root) || staging.file_name().is_none_or(|n| n != ".export") {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(staging) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let stale = path
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with("job-"))
+            && entry.file_type().is_ok_and(|t| t.is_dir())
+            && path.parent() == Some(staging);
+        if stale {
+            let _ = std::fs::remove_dir_all(&path);
+        }
     }
 }
 
@@ -474,16 +482,6 @@ impl Job {
 struct OwnedChild<'a> {
     child: Option<Child>,
     unreaped: &'a Mutex<Vec<Child>>,
-}
-fn stop_child(child: &mut Child) -> AppResult<()> {
-    if child.try_wait()?.is_none()
-        && let Err(error) = child.kill()
-        && child.try_wait()?.is_none()
-    {
-        return Err(error.into());
-    }
-    child.wait()?;
-    Ok(())
 }
 impl OwnedChild<'_> {
     fn stop(&mut self) -> AppResult<()> {
@@ -692,6 +690,28 @@ mod tests {
         assert!(job.settle(Err(error)).is_err());
         assert!(!job.path.exists());
     }
+    #[test]
+    fn first_begin_sweeps_stale_staging_and_leaves_live_jobs_and_captures_alone() {
+        let root = tempfile::tempdir().unwrap();
+        let staging = root.path().join(".export");
+        std::fs::create_dir_all(staging.join("job-stale")).unwrap();
+        std::fs::write(staging.join("job-stale").join("render.webm"), b"half").unwrap();
+        std::fs::write(staging.join("notes.txt"), b"keep").unwrap();
+        std::fs::write(root.path().join("job-lookalike.mp4"), b"keep").unwrap();
+        std::fs::create_dir_all(root.path().join("job-dir")).unwrap();
+        let jobs = Registry::default();
+        let first = jobs.begin(root.path(), "chrome").unwrap();
+        assert!(!staging.join("job-stale").exists());
+        assert!(staging.join("notes.txt").exists());
+        assert!(root.path().join("job-lookalike.mp4").exists());
+        assert!(root.path().join("job-dir").exists());
+        let live = jobs.get("chrome", &first).unwrap();
+        assert!(live.path.exists());
+        // A second admission never sweeps: the first job's directory survives.
+        jobs.begin(root.path(), "chrome").unwrap();
+        assert!(live.path.exists());
+    }
+
     #[test]
     fn unconfirmed_cancellation_can_be_retried_after_worker_cleanup() {
         let root = tempfile::tempdir().unwrap();

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { ipc } from "../lib/ipc";
 import type { UpdateInfo } from "../lib/ipc";
+import { errorMessage } from "../lib/errors";
 
 /**
  * Where the last update check landed. `idle` before any check; `none` when the
@@ -34,7 +35,7 @@ export const useUpdates = create<UpdatesState>((set, get) => ({
       const update = await ipc.updateCheck();
       set(update ? { status: "available", update, dismissed: false } : { status: "none", update: null, dismissed: false });
     } catch (e) {
-      set({ status: "error", error: e instanceof Error ? e.message : String(e) });
+      set({ status: "error", error: errorMessage(e) });
     }
   },
   install: async () => {
@@ -43,7 +44,7 @@ export const useUpdates = create<UpdatesState>((set, get) => ({
     try {
       await ipc.updateInstall();
     } catch (e) {
-      set({ installing: false, error: e instanceof Error ? e.message : String(e) });
+      set({ installing: false, error: errorMessage(e) });
     }
   },
   dismiss: () => set({ dismissed: true }),

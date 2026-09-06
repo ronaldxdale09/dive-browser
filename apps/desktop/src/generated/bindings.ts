@@ -155,6 +155,17 @@ export const commands = {
 	recordingsList: () => typedError<RecordingInfo[], AppError>(__TAURI_INVOKE("recordings_list")),
 	/**  What a recording is, so the editor can open it. */
 	screenMediaInfo: (source: string) => typedError<MediaInfo, AppError>(__TAURI_INVOKE("screen_media_info", { source })),
+	/**
+	 *  Ask for a video file and bring it into the captures directory with a
+	 *  playable companion, so `DiveScreen` can open it. `None` when the
+	 *  dialog was dismissed.
+	 */
+	screenImportVideo: () => typedError<string | null, AppError>(__TAURI_INVOKE("screen_import_video")),
+	/**
+	 *  Bring the video at `path` into the captures directory with a playable
+	 *  companion (the same pipeline as the dialog), returning the new path.
+	 */
+	screenImportPath: (path: string) => typedError<string, AppError>(__TAURI_INVOKE("screen_import_path", { path })),
 	/**  The saved project for a recording, if any. */
 	screenProjectRead: (source: string) => typedError<string | null, AppError>(__TAURI_INVOKE("screen_project_read", { source })),
 	/**  Save the project for a recording. */
@@ -1447,7 +1458,7 @@ export type RecordingEvent = {
 export type RecordingInfo = {
 	path: string,
 	name: string,
-	/**  `mp4` or `gif`. */
+	/**  The file's extension, lower-cased: `mp4`, `gif`, `mov`, `webm`… */
 	format: string,
 	/**  Size on disk. A float because the bindings cannot carry a u64. */
 	bytes: number | null,
@@ -1790,7 +1801,10 @@ export type TabWindowChanged = {
 
 /**  A tool call, as shown in the thread. */
 export type ToolStep = {
-	/**  Call id. */
+	/**
+	 *  Step id: the run id and the provider's call id, joined by a colon,
+	 *  so it is unique across runs (see `agent_approve`).
+	 */
 	id: string,
 	/**  Tool name. */
 	name: string,

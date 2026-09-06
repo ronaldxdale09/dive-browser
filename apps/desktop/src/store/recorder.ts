@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { RecordedStep } from "../lib/ipc";
 import { useBrowser } from "./browser";
+import { errorMessage } from "../lib/errors";
 
 interface RecorderState {
   recordingTab: string | null;
@@ -29,7 +30,7 @@ export const useRecorder = create<RecorderState>((set, get) => ({
       await ipc.tabRecordStart(tabId);
       set({ recordingTab: tabId, steps: [], isOpen: false });
     } catch (e) {
-      useBrowser.setState({ error: e instanceof Error ? e.message : String(e) });
+      useBrowser.setState({ error: errorMessage(e) });
     }
   },
   stop: async () => {

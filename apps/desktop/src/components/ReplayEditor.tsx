@@ -4,6 +4,7 @@ import { ipc } from "../lib/ipc";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import type { ReplayRequestInput, ReplayResponse } from "../lib/ipc";
 import { Icon, IconButton } from "./Icon";
+import { errorMessage } from "../lib/errors";
 
 function headersToText(h: Record<string, string>) {
   return Object.entries(h)
@@ -43,7 +44,7 @@ export function ReplayEditor({ tabId, requestId, onClose }: { tabId: string; req
         setDraft(r);
         setHeadersText(headersToText(r.headers));
       })
-      .catch((e: unknown) => alive && setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => alive && setError(errorMessage(e)));
     return () => {
       alive = false;
     };
@@ -56,7 +57,7 @@ export function ReplayEditor({ tabId, requestId, onClose }: { tabId: string; req
     try {
       setResponse(await ipc.requestReplay(tabId, { ...draft, headers: textToHeaders(headersText) }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

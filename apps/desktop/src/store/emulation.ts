@@ -6,6 +6,7 @@ import type { UiMode, Zoom } from "../components/simulator/geometry";
 import { ipc } from "../lib/ipc";
 import type { DeviceInput, EnvironmentInput, MediaInput, NetworkProfile } from "../lib/ipc";
 import { useBrowser } from "./browser";
+import { errorMessage } from "../lib/errors";
 
 export interface Media {
   colorScheme: "light" | "dark" | null;
@@ -157,7 +158,7 @@ async function push(tabId: string, sel: DeviceSelection | undefined, scale: numb
   try {
     await ipc.tabEmulate(tabId, input, reload);
   } catch (e) {
-    useBrowser.setState({ error: e instanceof Error ? e.message : String(e) });
+    useBrowser.setState({ error: errorMessage(e) });
   }
 }
 
@@ -186,7 +187,7 @@ export const useEmulation = create<EmulationState>((set, get) => ({
     try {
       await ipc.tabThrottle(tabId, profile);
     } catch (e) {
-      useBrowser.setState({ error: e instanceof Error ? e.message : String(e) });
+      useBrowser.setState({ error: errorMessage(e) });
     }
   },
   setDevice: async (tabId, deviceId) => {
@@ -250,7 +251,7 @@ export const useEmulation = create<EmulationState>((set, get) => ({
     try {
       await ipc.tabMedia(tabId, toMediaInput(media));
     } catch (e) {
-      useBrowser.setState({ error: e instanceof Error ? e.message : String(e) });
+      useBrowser.setState({ error: errorMessage(e) });
     }
   },
   setEnvironment: async (tabId, patch) => {
@@ -259,7 +260,7 @@ export const useEmulation = create<EmulationState>((set, get) => ({
     try {
       await ipc.tabEnvironment(tabId, toEnvironmentInput(environment));
     } catch (e) {
-      useBrowser.setState({ error: e instanceof Error ? e.message : String(e) });
+      useBrowser.setState({ error: errorMessage(e) });
     }
   },
   drop: (tabId) => {

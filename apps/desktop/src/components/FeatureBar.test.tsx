@@ -29,7 +29,6 @@ beforeEach(() => {
     open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false },
     error: null,
     notice: null,
-    annotating: null,
     recordingTab: null,
   });
   useEmulation.setState({ byTab: {}, media: {}, throttle: {} });

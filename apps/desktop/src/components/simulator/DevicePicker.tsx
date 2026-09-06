@@ -58,7 +58,7 @@ export function DevicePicker() {
   const choose = (d: DevicePreset) => void setDevice(tab, d.id);
 
   return (
-    <aside role="dialog" aria-label="Device simulator" className="surface-enter flex h-full w-[min(420px,46%)] min-w-[300px] shrink-0 flex-col border-l border-line bg-surface">
+    <aside role="region" aria-label="Device simulator" className="surface-enter flex h-full w-[min(420px,46%)] min-w-[300px] shrink-0 flex-col border-l border-line bg-surface">
       <div className="flex h-full min-h-0 flex-col">
         <div className="flex items-center gap-2 px-4 pt-3 pb-2">
           <Icon icon={Smartphone} size={14} className="text-highlight" />

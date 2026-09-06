@@ -4,8 +4,10 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ipc } from "../../lib/ipc";
+import { isEditable } from "../../lib/commands";
 import { useBrowser } from "../../store/browser";
 import { Icon } from "../Icon";
+import { errorMessage } from "../../lib/errors";
 
 type Tool = "crop" | "rect" | "arrow" | "pen" | "highlight" | "text" | "blur";
 type Point = { x: number; y: number };
@@ -73,7 +75,7 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
       next.onload = () => alive && setImage(next);
       next.onerror = () => alive && setLoadError("Dive could not decode this capture. The original file is still safe.");
       next.src = `data:image/png;base64,${base64}`;
-    }, (cause) => alive && setLoadError(message(cause)));
+    }, (cause) => alive && setLoadError(errorMessage(cause)));
     return () => { alive = false; };
   }, [src]);
 
@@ -108,7 +110,7 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
   }), []);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (textAt) return;
+      if (textAt || isEditable(event.target)) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") { event.preventDefault(); if (event.shiftKey) redoOne(); else undoOne(); }
       if (event.key === "+" || event.key === "=") setZoom((value) => Math.min(2, value + 0.1));
       if (event.key === "-") setZoom((value) => Math.max(0.2, value - 0.1));
@@ -179,7 +181,7 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
     try {
       await ipc.captureSave(output().toDataURL("image/png").split(",")[1] ?? "");
       setCopied(true); setTimeout(() => setCopied(false), 1800);
-    } catch (cause) { useBrowser.setState({ error: message(cause) }); }
+    } catch (cause) { useBrowser.setState({ error: errorMessage(cause) }); }
     finally { setBusy(null); }
   };
   const exportAs = async (format: "png" | "jpeg" | "pdf") => {
@@ -189,9 +191,8 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
       const filename = `${name}.${format === "jpeg" ? "jpg" : format}`;
       if (format === "pdf") download(await canvasPdf(canvas, pdfSize), filename);
       else download(await canvasBlob(canvas, `image/${format}`, format === "jpeg" ? 0.92 : undefined), filename);
-      useBrowser.setState({ notice: `Exported ${filename}` });
-      setTimeout(() => useBrowser.setState({ notice: null }), 4000);
-    } catch (cause) { useBrowser.setState({ error: message(cause) }); }
+      useBrowser.getState().notify(`Exported ${filename}`, 4000);
+    } catch (cause) { useBrowser.setState({ error: errorMessage(cause) }); }
     finally { setBusy(null); }
   };
 
@@ -288,4 +289,3 @@ function buildPdf(pages: PdfPage[]): Uint8Array {
   pages.forEach((page, index) => { const pageId = 3 + index * 3, contentId = pageId + 1, imageId = pageId + 2; const drawHeight = page.pageWidth * (page.height / page.width); const y = page.pageHeight - drawHeight; objects[pageId] = encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${page.pageWidth.toFixed(2)} ${page.pageHeight.toFixed(2)}] /Resources << /XObject << /Im0 ${imageId} 0 R >> >> /Contents ${contentId} 0 R >>`); const content = encode(`q ${page.pageWidth.toFixed(2)} 0 0 ${drawHeight.toFixed(2)} 0 ${y.toFixed(2)} cm /Im0 Do Q`); objects[contentId] = join([encode(`<< /Length ${content.length} >>\nstream\n`), content, encode("\nendstream")]); objects[imageId] = join([encode(`<< /Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${page.jpeg.length} >>\nstream\n`), page.jpeg, encode("\nendstream")]); });
   const chunks = [encode("%PDF-1.4\n%Dive Capture\n")]; const offsets = new Array<number>(objectCount + 1).fill(0); let cursor = chunks[0]?.length ?? 0; for (let id = 1; id <= objectCount; id += 1) { const object = join([encode(`${id} 0 obj\n`), objects[id] ?? new Uint8Array(), encode("\nendobj\n")]); offsets[id] = cursor; cursor += object.length; chunks.push(object); } const xref = cursor; chunks.push(encode(`xref\n0 ${objectCount + 1}\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n `).join("\n")}\ntrailer\n<< /Size ${objectCount + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`)); return join(chunks);
 }
-function message(cause: unknown): string { return cause instanceof Error ? cause.message : String(cause); }

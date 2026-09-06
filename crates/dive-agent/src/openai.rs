@@ -411,6 +411,18 @@ impl StreamState {
         }
     }
 
+    /// The trailing deltas when the bytes ended without `[DONE]`, which some
+    /// OpenAI-compatible servers never send: a reply whose `finish_reason`
+    /// arrived is complete and is delivered; one cut off before that stays
+    /// unfinished so the caller reports it.
+    pub(crate) fn finish_on_close(&mut self) -> Vec<Delta> {
+        if self.finish_reason.is_some() {
+            self.finish()
+        } else {
+            Vec::new()
+        }
+    }
+
     /// The trailing deltas: tool calls, usage, the replayable turn, then the
     /// stop reason in Anthropic vocabulary.
     fn finish(&mut self) -> Vec<Delta> {
@@ -424,17 +436,22 @@ impl StreamState {
             blocks.push(json!({"type": "text", "text": std::mem::take(&mut self.text)}));
         }
         for (i, (id, name, raw)) in std::mem::take(&mut self.calls) {
-            let input = if raw.trim().is_empty() {
-                json!({})
-            } else {
-                serde_json::from_str(&raw).unwrap_or(json!({}))
-            };
             // Some servers omit ids on streamed calls; the result still has
             // to name its call, so mint one.
             let id = if id.is_empty() {
                 format!("call_{i}")
             } else {
                 id
+            };
+            let input = match crate::anthropic::parse_arguments(&raw) {
+                Ok(input) => input,
+                // Running a tool with made-up empty arguments is worse than
+                // stopping: the caller learns the call was unusable.
+                Err(reason) => {
+                    return vec![Delta::Error(crate::anthropic::malformed_call(
+                        &name, &id, &reason,
+                    ))];
+                }
             };
             blocks.push(json!({"type": "tool_use", "id": id, "name": name, "input": input}));
             out.push(Delta::ToolUse(ToolUse { id, name, input }));
@@ -694,6 +711,36 @@ mod tests {
             st.parse_data(r#"{"error":{"message":"Rate limit exceeded","code":429}}"#),
             vec![Delta::Error("Rate limit exceeded".into())]
         );
+    }
+
+    #[test]
+    fn a_call_with_malformed_arguments_is_an_error_not_an_empty_call() {
+        let mut st = StreamState::new(Provider::Ollama);
+        st.parse_data(r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_9","function":{"name":"page_click","arguments":"{\"locator\": text=Go}"}}]},"finish_reason":"tool_calls"}]}"#);
+        let tail = st.parse_data("[DONE]");
+        let [Delta::Error(message)] = tail.as_slice() else {
+            panic!("expected one error, got {tail:?}");
+        };
+        assert!(message.contains("page_click"), "{message}");
+        assert!(message.contains("call_9"), "{message}");
+        assert!(message.contains("not valid JSON"), "{message}");
+        assert!(st.parse_data("[DONE]").is_empty(), "finished once");
+    }
+
+    #[test]
+    fn a_stream_that_closes_without_done_still_delivers_a_finished_reply() {
+        let mut st = StreamState::new(Provider::Ollama);
+        st.parse_data(r#"{"choices":[{"delta":{"content":"hello"}}]}"#);
+        // No finish_reason yet: the reply was cut off, so nothing to deliver.
+        assert!(st.finish_on_close().is_empty());
+        st.parse_data(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        let tail = st.finish_on_close();
+        assert!(
+            matches!(&tail[0], Delta::Assistant(t) if t.content[0]["text"] == "hello"),
+            "{tail:?}"
+        );
+        assert_eq!(tail[1], Delta::Done("end_turn".into()));
+        assert!(st.finish_on_close().is_empty());
     }
 
     #[test]

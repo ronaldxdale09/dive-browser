@@ -17,8 +17,7 @@
 //! from a stale classification.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt as _;
@@ -40,6 +39,12 @@ const MAX_PROBE_BODY: usize = 256 * 1024;
 const PROBE_CACHE_TTL: Duration = Duration::from_secs(15);
 /// Gap between scans while anything is watching.
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
+/// How long one `watch(true)` keeps polling alive without another. A chrome
+/// reload drops the panel that would have sent `watch(false)`, so a watch
+/// is a lease, not a counter: it lapses on its own. The chrome renews it by
+/// calling `watch(true)` again; a panel open longer than this goes quiet
+/// until it does.
+const WATCH_LEASE: Duration = Duration::from_mins(15);
 /// Ceiling on concurrent HTTP probes, so a machine with a hundred listeners
 /// does not open a hundred sockets at once.
 const PROBE_CONCURRENCY: usize = 16;
@@ -212,13 +217,14 @@ struct Cached {
     expires: Instant,
 }
 
-/// Discovery state: the last published list, the probe cache, and how many
-/// chrome panels are currently interested in updates.
+/// Discovery state: the last published list, the probe cache, and until when
+/// a chrome panel has asked for updates.
 #[derive(Default)]
 pub struct Registry {
     last: Mutex<Vec<DevServer>>,
     cache: Mutex<HashMap<u16, Cached>>,
-    watchers: AtomicUsize,
+    /// Polling runs until this instant; `None` while nobody is watching.
+    lease: Mutex<Option<Instant>>,
 }
 
 impl Registry {
@@ -229,20 +235,24 @@ impl Registry {
 
     /// Start or stop watching. Polling costs an `lsof` and a handful of HTTP
     /// probes every few seconds, so it only runs while a panel is open.
+    ///
+    /// `true` is a heartbeat: it (re)arms a lease of [`WATCH_LEASE`], so a
+    /// panel that vanished in a chrome reload without saying `false` cannot
+    /// keep polling running forever. `false` ends the lease now.
     pub fn watch(&self, on: bool) {
-        if on {
-            self.watchers.fetch_add(1, Ordering::Relaxed);
-        } else {
-            let _ = self
-                .watchers
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
-                    Some(count.saturating_sub(1))
-                });
-        }
+        self.watch_at(on, Instant::now());
+    }
+
+    fn watch_at(&self, on: bool, now: Instant) {
+        *crate::state::lock(&self.lease) = on.then(|| now + WATCH_LEASE);
     }
 
     fn watched(&self) -> bool {
-        self.watchers.load(Ordering::Relaxed) > 0
+        self.watched_at(Instant::now())
+    }
+
+    fn watched_at(&self, now: Instant) -> bool {
+        crate::state::lock(&self.lease).is_some_and(|until| until > now)
     }
 
     /// Whether `port` is known to be (or not to be) a web server.
@@ -301,6 +311,25 @@ pub fn start(app: AppHandle<Runtime>) {
     });
 }
 
+/// The one HTTP client every probe shares.
+///
+/// Local HTTPS development commonly uses a self-signed certificate. Probes
+/// never follow redirects or leave loopback. Built once: a client per scan
+/// was a connection pool and a TLS config every three seconds, and the
+/// `unwrap_or_default` fallback it had would have followed redirects.
+fn probe_client() -> Option<reqwest::Client> {
+    static CLIENT: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_millis(1500))
+            .danger_accept_invalid_certs(true)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| tracing::warn!("dev server probes are off; HTTP client failed: {e}"))
+            .ok()
+    });
+    CLIENT.clone()
+}
+
 async fn scan_with(registry: &Registry) -> Vec<DevServer> {
     let candidates = match listeners().await {
         Some(found) => found,
@@ -313,14 +342,9 @@ async fn scan_with(registry: &Registry) -> Vec<DevServer> {
             })
             .collect(),
     };
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(1500))
-        // Local HTTPS development commonly uses a self-signed certificate.
-        // Probes never follow redirects or leave loopback.
-        .danger_accept_invalid_certs(true)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .unwrap_or_default();
+    let Some(client) = probe_client() else {
+        return Vec::new();
+    };
     let probes = candidates.into_iter().map(|listener| {
         let client = client.clone();
         async move {
@@ -658,28 +682,28 @@ fnot-a-tag
     }
 
     #[test]
-    fn watching_is_reference_counted_and_cannot_go_negative() {
+    fn watching_is_a_lease_that_reloads_cannot_leak() {
         let registry = Registry::default();
         assert!(
             !registry.watched(),
             "idle by default: polling costs an lsof"
         );
-
-        registry.watch(true);
-        registry.watch(true);
-        assert!(registry.watched());
-
-        registry.watch(false);
-        assert!(
-            registry.watched(),
-            "one panel closed, another is still open"
-        );
-        registry.watch(false);
-        assert!(!registry.watched());
-
-        // An unbalanced release must not wrap around into "watched forever".
-        registry.watch(false);
-        assert!(!registry.watched());
+        let t0 = Instant::now();
+        registry.watch_at(true, t0);
+        assert!(registry.watched_at(t0));
+        assert!(registry.watched_at(t0 + WATCH_LEASE / 2));
+        // A panel lost in a chrome reload never says false; the lease lapses.
+        assert!(!registry.watched_at(t0 + WATCH_LEASE));
+        // A heartbeat before it lapses extends it.
+        let t1 = t0 + WATCH_LEASE / 2;
+        registry.watch_at(true, t1);
+        assert!(registry.watched_at(t0 + WATCH_LEASE));
+        assert!(!registry.watched_at(t1 + WATCH_LEASE));
+        // Closing the panel stops polling at once, and again is harmless.
+        registry.watch_at(false, t1);
+        assert!(!registry.watched_at(t1));
+        registry.watch_at(false, t1);
+        assert!(!registry.watched_at(t1));
     }
 
     #[tokio::test]

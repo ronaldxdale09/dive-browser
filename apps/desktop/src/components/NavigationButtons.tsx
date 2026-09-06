@@ -7,6 +7,7 @@ import { useFocusTrap } from "../lib/useFocusTrap";
 import { useTabHistory } from "../lib/useTabHistory";
 import { useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
+import { errorMessage } from "../lib/errors";
 
 export function NavigationButtons({ tabId, url, loading }: { tabId: string | null; url: string; loading: boolean }) {
   const { history, canBack, canForward } = useTabHistory(tabId, url, loading);
@@ -56,7 +57,7 @@ function HistoryButton({ direction, tabId, history, disabled, navigate }: {
         onClick={() => {
           setOpen(false);
           if (tabId && history) void ipc.tabHistoryNavigate(tabId, history.generation, entry.id).catch((error: unknown) => {
-            useBrowser.setState({ error: error instanceof Error ? error.message : String(error) });
+            useBrowser.setState({ error: errorMessage(error) });
           });
         }}>
         <span className="block truncate text-[12px]">{entry.title.trim() || entry.url}</span>

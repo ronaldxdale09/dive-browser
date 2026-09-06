@@ -4,6 +4,7 @@ import { ipc } from "../lib/ipc";
 import type { A11yReport } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
+import { errorMessage } from "../lib/errors";
 
 const IMPACT: Record<string, string> = {
   critical: "text-danger",
@@ -27,7 +28,7 @@ export function A11yPanel() {
       const { default: axeSource } = await import("axe-core/axe.min.js?raw");
       setReport(await ipc.tabA11y(activeTab, axeSource));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

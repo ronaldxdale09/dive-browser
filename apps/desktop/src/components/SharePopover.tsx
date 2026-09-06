@@ -7,6 +7,7 @@ import { Icon } from "./Icon";
 import { Tooltip } from "./Tooltip";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
+import { errorMessage } from "../lib/errors";
 
 /** Share button: the current URL rewritten to this machine's LAN address, as a QR code. */
 export function SharePopover() {
@@ -27,7 +28,7 @@ export function SharePopover() {
     ipc
       .shareUrl(current.url)
       .then((i) => alive && (setInfo(i), setError(null)))
-      .catch((e: unknown) => alive && setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => alive && setError(errorMessage(e)));
     const onDown = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     };
@@ -77,7 +78,7 @@ export function SharePopover() {
                         setCopied(true);
                         setTimeout(() => setCopied(false), 1500);
                       })
-                      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+                      .catch((e: unknown) => setError(errorMessage(e)))
                       .finally(() => setCopying(false));
                   }}
                   className="grid size-6 place-items-center rounded-full text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40"

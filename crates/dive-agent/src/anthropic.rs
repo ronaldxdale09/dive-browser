@@ -155,20 +155,19 @@ impl StreamState {
                 let Some(raw) = self.partial_inputs.remove(&index) else {
                     return Vec::new();
                 };
-                let input = if raw.trim().is_empty() {
-                    json!({})
-                } else {
-                    serde_json::from_str(&raw).unwrap_or(json!({}))
-                };
                 let Some(block) = self.blocks.get_mut(&index) else {
                     return Vec::new();
                 };
+                let id = block["id"].as_str().unwrap_or_default().to_owned();
+                let name = block["name"].as_str().unwrap_or_default().to_owned();
+                let input = match parse_arguments(&raw) {
+                    Ok(input) => input,
+                    // Running a tool with made-up empty arguments is worse
+                    // than stopping: the caller learns the call was unusable.
+                    Err(reason) => return vec![Delta::Error(malformed_call(&name, &id, &reason))],
+                };
                 block["input"] = input.clone();
-                vec![Delta::ToolUse(ToolUse {
-                    id: block["id"].as_str().unwrap_or_default().to_owned(),
-                    name: block["name"].as_str().unwrap_or_default().to_owned(),
-                    input,
-                })]
+                vec![Delta::ToolUse(ToolUse { id, name, input })]
             }
             "message_delta" => {
                 if let Some(s) = v["delta"]["stop_reason"].as_str() {
@@ -187,6 +186,17 @@ impl StreamState {
                     .to_owned(),
             )],
             _ => Vec::new(),
+        }
+    }
+
+    /// The trailing deltas when the bytes ended without `message_stop`: a
+    /// reply whose stop reason already arrived is complete and is delivered;
+    /// one cut off before that stays unfinished so the caller reports it.
+    pub(crate) fn finish_on_close(&mut self) -> Vec<Delta> {
+        if self.stop_reason.is_some() {
+            self.finish()
+        } else {
+            Vec::new()
         }
     }
 
@@ -211,6 +221,19 @@ impl StreamState {
             ),
         ]
     }
+}
+
+/// A tool call's streamed arguments as JSON; absent arguments are `{}`.
+pub(crate) fn parse_arguments(raw: &str) -> Result<Value, String> {
+    if raw.trim().is_empty() {
+        return Ok(json!({}));
+    }
+    serde_json::from_str(raw).map_err(|e| e.to_string())
+}
+
+/// The error reported when a model's tool call cannot be parsed.
+pub(crate) fn malformed_call(name: &str, id: &str, reason: &str) -> String {
+    format!("The model called {name} ({id}) with arguments that are not valid JSON: {reason}")
 }
 
 fn index_of(v: &Value) -> usize {
@@ -371,6 +394,57 @@ mod tests {
 
         // A second stop is not a second turn.
         assert!(st.parse_event("message_stop", "{}").is_empty());
+    }
+
+    #[test]
+    fn a_tool_call_with_malformed_arguments_is_an_error_not_an_empty_call() {
+        let mut st = StreamState::default();
+        st.parse_event(
+            "content_block_start",
+            r#"{"index":0,"content_block":{"type":"tool_use","id":"tu_1","name":"page_click","input":{}}}"#,
+        );
+        st.parse_event(
+            "content_block_delta",
+            r#"{"index":0,"delta":{"type":"input_json_delta","partial_json":"{\"locator\": "}}"#,
+        );
+        let out = st.parse_event("content_block_stop", r#"{"index":0}"#);
+        let [Delta::Error(message)] = out.as_slice() else {
+            panic!("expected one error, got {out:?}");
+        };
+        assert!(message.contains("page_click"), "{message}");
+        assert!(message.contains("tu_1"), "{message}");
+        assert!(message.contains("not valid JSON"), "{message}");
+        assert!(
+            !out.iter().any(|d| matches!(d, Delta::ToolUse(_))),
+            "no call with invented arguments"
+        );
+    }
+
+    #[test]
+    fn a_reply_whose_stop_reason_arrived_survives_a_missing_message_stop() {
+        let mut st = StreamState::default();
+        st.parse_event(
+            "message_start",
+            r#"{"message":{"usage":{"input_tokens":1}}}"#,
+        );
+        st.parse_event(
+            "content_block_start",
+            r#"{"index":0,"content_block":{"type":"text","text":""}}"#,
+        );
+        st.parse_event(
+            "content_block_delta",
+            r#"{"index":0,"delta":{"type":"text_delta","text":"done"}}"#,
+        );
+        // Cut off before the stop reason: nothing to deliver.
+        assert!(st.finish_on_close().is_empty());
+        st.parse_event(
+            "message_delta",
+            r#"{"delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}"#,
+        );
+        let tail = st.finish_on_close();
+        assert!(matches!(&tail[1], Delta::Assistant(t) if t.content[0]["text"] == "done"));
+        assert_eq!(tail[2], Delta::Done("end_turn".into()));
+        assert!(st.finish_on_close().is_empty(), "finishing is idempotent");
     }
 
     #[test]

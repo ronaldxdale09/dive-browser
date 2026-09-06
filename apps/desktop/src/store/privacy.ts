@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { PrivacyEvent, PrivacyInfo } from "../lib/ipc";
+import { errorMessage } from "../lib/errors";
 
 export interface PrivacyCounts {
   ads: number;
@@ -96,9 +97,6 @@ export function listenPrivacy() {
   return listening;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /** Clear this tab's summary when its document starts over. */
 export function clearPrivacy(tabId: string) {

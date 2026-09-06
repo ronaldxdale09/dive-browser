@@ -37,8 +37,6 @@ async fn test_mcp_invalid_bearer_token_variations() {
         "bearer valid-secret-999", // Lowercase scheme
     ];
 
-    use crate::fixtures::check_mcp_auth_and_origin;
-
     for auth in invalid_headers {
         let mut req = client.post(&url).header("Origin", "http://localhost:3000");
         if !auth.is_empty() {
@@ -57,15 +55,10 @@ async fn test_mcp_invalid_bearer_token_variations() {
             Err(e) => {
                 let msg = format!("{e:?}");
                 if msg.contains("PermissionDenied") || msg.contains("Operation not permitted") {
-                    let header_opt = if auth.is_empty() { None } else { Some(auth) };
-                    assert_eq!(
-                        check_mcp_auth_and_origin(
-                            Some(token),
-                            header_opt,
-                            Some("http://localhost:3000")
-                        ),
-                        Err(401)
+                    eprintln!(
+                        "skipping: loopback TCP is blocked in this sandbox, so the HTTP contract was not exercised"
                     );
+                    return;
                 } else {
                     panic!("unexpected error: {e:?}");
                 }
@@ -76,8 +69,6 @@ async fn test_mcp_invalid_bearer_token_variations() {
 
 #[tokio::test]
 async fn test_mcp_untrusted_origin_rejection() {
-    use crate::fixtures::check_mcp_auth_and_origin;
-
     let fake = Arc::new(TestFakeBrowser::default());
     let token = "test-token";
     let config = Config {
@@ -119,14 +110,10 @@ async fn test_mcp_untrusted_origin_rejection() {
             Err(e) => {
                 let msg = format!("{e:?}");
                 if msg.contains("PermissionDenied") || msg.contains("Operation not permitted") {
-                    assert_eq!(
-                        check_mcp_auth_and_origin(
-                            Some(token),
-                            Some(&format!("Bearer {}", token)),
-                            Some(origin)
-                        ),
-                        Err(403)
+                    eprintln!(
+                        "skipping: loopback TCP is blocked in this sandbox, so the HTTP contract was not exercised"
                     );
+                    return;
                 } else {
                     panic!("unexpected error: {e:?}");
                 }
