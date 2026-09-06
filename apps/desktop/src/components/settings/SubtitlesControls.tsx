@@ -43,6 +43,7 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
   const translate = useSubtitles((s) => s.translate);
   const downloading = useSubtitles((s) => s.downloading);
   const active = useSubtitles((s) => s.active);
+  const starting = useSubtitles((s) => s.starting);
   const lastCue = useSubtitles((s) => s.lastCue);
   const error = useSubtitles((s) => s.error);
   const setModel = useSubtitles((s) => s.setModel);
@@ -56,13 +57,15 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
   // Refresh the model list and the tab's running state when the controls
   // mount, so they reflect a download or a session begun elsewhere.
   useEffect(() => {
+    let cancelled = false;
     void loadModels();
     if (activeTab) {
       void ipc
         .subtitleRunning(activeTab)
-        .then((running) => useSubtitles.setState({ active: running }))
+        .then((running) => { if (!cancelled) useSubtitles.setState({ active: running }); })
         .catch(() => undefined);
     }
+    return () => { cancelled = true; };
   }, [activeTab, loadModels]);
 
   const chosen = models.find((m) => m.id === model);
@@ -94,13 +97,13 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
                   </button>
                   <button type="button" onClick={() => setModel(m.id)} className="min-w-0 flex-1 text-left">
                     <p className="truncate text-[13px] text-ink">{m.label}</p>
-                    <p className="truncate text-[11px] text-ink-3">{m.detail}</p>
+                    <p className="line-clamp-2 text-[11px] text-ink-3">{m.detail}</p>
                   </button>
                   {m.downloaded ? (
-                    <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-ink-2">
+                    <button type="button" disabled={Boolean(progress)} onClick={() => void download(m.id)} title="Verify or repair this model" className="inline-flex shrink-0 items-center gap-1 text-[11px] text-ink-2">
                       <Icon icon={Check} size={12} className="text-highlight" />
-                      Downloaded
-                    </span>
+                      {progress ? "Verifying…" : "Downloaded"}
+                    </button>
                   ) : progress ? (
                     <span className="shrink-0 text-[11px] text-ink-3" role="status">
                       {progress.total ? `${mb(progress.received)} / ${mb(progress.total)}` : `${mb(progress.received)}…`}
@@ -164,7 +167,7 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
         </p>
       )}
 
-      {active && (
+      {(active || starting) && (
         <p className="truncate rounded-lg bg-surface-2 px-2.5 py-1.5 text-[11px] text-ink-2" role="status" aria-live="polite">
           {lastCue ? lastCue : "Listening…"}
         </p>
@@ -180,14 +183,13 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
           <button
             ref={autoFocusPrimary}
             type="button"
-            disabled={!canStart}
-            onClick={() => {
-              void start();
-              onStarted?.();
+            disabled={!canStart || starting}
+            onClick={async () => {
+              if (await start()) onStarted?.();
             }}
             className="h-8 rounded-full bg-accent px-4 text-xs font-medium text-accent-ink disabled:opacity-40"
           >
-            Start subtitles
+            {starting ? "Loading model…" : "Start subtitles"}
           </button>
         )}
       </div>

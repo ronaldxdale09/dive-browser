@@ -5,10 +5,12 @@ import { useBrowser } from "./browser";
 
 /** Bytes seen and expected for a model that is downloading; `total` is null until the server reports a length. */
 export type DownloadProgress = { received: number; total: number | null };
+let startAttempt = 0;
 
 interface SubtitlesState {
   /** Running on the active tab, per the last `subtitle-state` event. */
   active: boolean;
+  starting: boolean;
   /** Chosen caption language: an ISO code or "auto". */
   language: string;
   /** Render English regardless of the spoken language. */
@@ -28,12 +30,13 @@ interface SubtitlesState {
   setModel: (model: string) => void;
   loadModels: () => Promise<void>;
   download: (modelId: string) => Promise<void>;
-  start: () => Promise<void>;
+  start: () => Promise<boolean>;
   stop: () => Promise<void>;
 }
 
 export const useSubtitles = create<SubtitlesState>((set, get) => ({
   active: false,
+  starting: false,
   language: "en",
   translate: false,
   model: "base",
@@ -65,31 +68,42 @@ export const useSubtitles = create<SubtitlesState>((set, get) => ({
   },
 
   start: async () => {
+    if (get().starting) return false;
     const tab = useBrowser.getState().activeTab;
     if (!tab) {
       set({ error: "Open a tab with a playing video first." });
-      return;
+      return false;
     }
     const { model, models, language, translate } = get();
     const chosen = models.find((m) => m.id === model);
     if (!chosen?.downloaded) {
       set({ error: "Download this model before starting subtitles." });
-      return;
+      return false;
     }
+    set({ starting: true, error: null, lastCue: "Loading local model…" });
+    const attempt = ++startAttempt;
     try {
       await ipc.subtitleStart(tab, model, language, translate);
-      set({ error: null });
+      if (attempt !== startAttempt) return false;
+      if (useBrowser.getState().activeTab === tab) set({ active: true, error: null, lastCue: "Waiting for video audio…" });
+      return true;
     } catch (e) {
-      set({ error: message(e) });
+      if (attempt !== startAttempt) return false;
+      if (useBrowser.getState().activeTab === tab) set({ active: false, error: message(e), lastCue: "" });
+      return false;
+    } finally {
+      if (attempt === startAttempt) set({ starting: false });
     }
   },
 
   stop: async () => {
     const tab = useBrowser.getState().activeTab;
     if (!tab) return;
+    ++startAttempt;
+    set({ starting: false });
     try {
       await ipc.subtitleStop(tab);
-      set({ active: false, error: null });
+      if (useBrowser.getState().activeTab === tab) set({ active: false, error: null, lastCue: "" });
     } catch (e) {
       set({ error: message(e) });
     }
@@ -107,6 +121,8 @@ function message(e: unknown): string {
 }
 
 let listening = false;
+const subscriptions: (() => void)[] = [];
+let stateRevision = 0;
 
 /**
  * Subscribe once to the subtitle events. Idempotent, like the other stores'
@@ -118,7 +134,7 @@ export async function bootSubtitles(): Promise<void> {
   if (listening) return;
   listening = true;
   try {
-    await events.subtitleModelProgress.listen((e) => {
+    subscriptions.push(await events.subtitleModelProgress.listen((e) => {
       const p = e.payload;
       useSubtitles.setState((s) => {
         if (p.error) {
@@ -132,22 +148,34 @@ export async function bootSubtitles(): Promise<void> {
         }
         return { downloading: { ...s.downloading, [p.id]: { received: p.received ?? 0, total: p.total } } };
       });
-    });
-    await events.subtitleState.listen((e) => {
+    }));
+    subscriptions.push(await events.subtitleState.listen((e) => {
       const st = e.payload;
       const tab = useBrowser.getState().activeTab;
       // Only the active tab's state drives the chrome; other tabs' state is
       // theirs. When no tab is active yet, take it anyway.
       if (tab && st.tab_id !== tab) return;
+      stateRevision++;
       useSubtitles.setState({ active: st.active, error: st.error, ...(st.active ? {} : { lastCue: "" }) });
-    });
-    await events.subtitleCue.listen((e) => {
+    }));
+    subscriptions.push(await events.subtitleCue.listen((e) => {
       const cue = e.payload;
       const tab = useBrowser.getState().activeTab;
       if (tab && cue.tab_id !== tab) return;
       useSubtitles.setState({ lastCue: cue.text });
-    });
+    }));
+    subscriptions.push(useBrowser.subscribe((current, previous) => {
+      if (current.activeTab === previous.activeTab) return;
+      const revision = ++stateRevision;
+      useSubtitles.setState({ active: false, lastCue: "", error: null });
+      if (current.activeTab) {
+        void ipc.subtitleRunning(current.activeTab).then((active) => {
+          if (revision === stateRevision) useSubtitles.setState({ active });
+        }).catch(() => undefined);
+      }
+    }));
   } catch (e) {
+    subscriptions.splice(0).forEach((unsubscribe) => unsubscribe());
     listening = false;
     useSubtitles.setState({ error: message(e) });
   }
@@ -155,5 +183,7 @@ export async function bootSubtitles(): Promise<void> {
 
 /** Tests only: forget the singleton subscription. */
 export function resetSubtitlesListener() {
+  subscriptions.splice(0).forEach((unsubscribe) => unsubscribe());
+  stateRevision++;
   listening = false;
 }

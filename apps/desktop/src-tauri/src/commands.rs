@@ -1139,6 +1139,7 @@ pub fn close_tab(
     state: &AppState,
     id: TabId,
 ) -> AppResult<()> {
+    crate::subtitles::stop_tab(app, id);
     let (was_active, workspace) = {
         let mut host = lock(&state.host);
         let store = lock(&state.store);
@@ -1693,10 +1694,8 @@ pub(crate) async fn subtitle_start(
 /// Stop live subtitles on a tab and clear the overlay.
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn subtitle_stop(app: AppHandle<Runtime>, state: State<'_, AppState>, id: TabId) {
-    if let Some(session) = lock(&state.host).as_ref().and_then(|h| h.cdp(id)) {
-        crate::subtitles::stop(&app, id, &session);
-    }
+pub(crate) fn subtitle_stop(app: AppHandle<Runtime>, id: TabId) {
+    crate::subtitles::stop_tab(&app, id);
 }
 
 /// Whether a tab is transcribing right now.

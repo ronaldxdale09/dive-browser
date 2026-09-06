@@ -52,6 +52,16 @@ afterEach(() => {
 });
 
 describe("Subtitles dialog", () => {
+  it("keeps a failed start visible and allows retry", async () => {
+    vi.mocked(ipc.subtitleStart).mockRejectedValueOnce(new Error("No audio track"));
+    useSubtitles.setState({ model: "small" });
+    render(<Subtitles />);
+    await screen.findByText("Small");
+    fireEvent.click(screen.getByRole("button", { name: "Start subtitles" }));
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "No audio track");
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Start subtitles" })).toHaveProperty("disabled", false);
+  });
   it("lists the models with sizes and download state", async () => {
     render(<Subtitles />);
     expect(await screen.findByText("Base")).toBeTruthy();

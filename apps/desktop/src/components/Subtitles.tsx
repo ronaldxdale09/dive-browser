@@ -32,7 +32,7 @@ export function Subtitles() {
         aria-modal="true"
         aria-label="Live subtitles"
         onKeyDown={(e) => e.key === "Escape" && close()}
-        className="mx-auto mt-24 w-[420px] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
+        className="mx-auto mt-24 max-h-[calc(100dvh-8rem)] w-[420px] overflow-y-auto rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
       >
         <div className="mb-3 flex items-center gap-2.5">
           <span className="grid size-8 shrink-0 place-items-center rounded-[11px] bg-surface-2 text-ink-2">

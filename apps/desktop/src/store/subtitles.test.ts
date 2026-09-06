@@ -47,6 +47,38 @@ afterEach(() => {
 });
 
 describe("useSubtitles", () => {
+  it("does not reactivate a stopped session when a pending start resolves", async () => {
+    let finish!: () => void;
+    vi.spyOn(ipc, "subtitleStart").mockReturnValue(new Promise<null>((resolve) => { finish = () => resolve(null); }));
+    vi.spyOn(ipc, "subtitleStop").mockResolvedValue(undefined);
+    useSubtitles.setState({ models: MODELS.map((m) => ({ ...m, downloaded: true })) });
+    const pending = useSubtitles.getState().start();
+    await useSubtitles.getState().stop();
+    finish();
+    expect(await pending).toBe(false);
+    expect(useSubtitles.getState().active).toBe(false);
+  });
+
+  it("clears another tab's caption and running state on tab switch", async () => {
+    stubListeners();
+    vi.spyOn(ipc, "subtitleRunning").mockResolvedValue(false);
+    await bootSubtitles();
+    useSubtitles.setState({ active: true, lastCue: "Tab one words" });
+    useBrowser.setState({ activeTab: "t2" });
+    expect(useSubtitles.getState().lastCue).toBe("");
+    expect(useSubtitles.getState().active).toBe(false);
+  });
+  it("suppresses duplicate starts while the model is loading", async () => {
+    let finish!: () => void;
+    const pending = new Promise<null>((resolve) => { finish = () => resolve(null); });
+    const start = vi.spyOn(ipc, "subtitleStart").mockReturnValue(pending);
+    useSubtitles.setState({ models: MODELS.map((m) => ({ ...m, downloaded: true })) });
+    const first = useSubtitles.getState().start();
+    const second = useSubtitles.getState().start();
+    expect(start).toHaveBeenCalledTimes(1);
+    finish();
+    await Promise.all([first, second]);
+  });
   it("loads the model list", async () => {
     vi.spyOn(ipc, "subtitleModels").mockResolvedValue(MODELS);
     await useSubtitles.getState().loadModels();
