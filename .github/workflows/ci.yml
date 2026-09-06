@@ -50,6 +50,7 @@ jobs:
           path: .cef
           key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
 
+      - run: pnpm test:probes
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
@@ -93,6 +94,10 @@ jobs:
         run: scripts/live-check.sh
         env:
           DIVE_BIN: target/debug/bundle/macos/Dive.app/Contents/MacOS/dive-desktop
+      - name: Native window close and restart
+        run: python3 scripts/native_lifecycle_check.py
+        env:
+          DIVE_BIN: target/debug/bundle/macos/Dive.app/Contents/MacOS/dive-desktop
       - name: Memory harness (discard must reclaim)
         run: scripts/benchmark-memory.sh
         env:
@@ -111,5 +116,7 @@ jobs:
           path: |
             target/live-check.log
             target/memory-benchmark.json
-            target/memory-benchmark.log
+            target/memory-probe-*/
             target/startup-benchmark-summary.json
+            target/startup-probes-*/
+            target/lifecycle-probes-*/

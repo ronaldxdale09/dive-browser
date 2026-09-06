@@ -43,6 +43,8 @@ pub struct AppState {
     pub agent_models: crate::agent::ModelCache,
     /// Tab screen recordings in progress.
     pub screencast: crate::screencast::Registry,
+    /// Opaque recording export jobs and their owned subprocesses.
+    pub(crate) screen_exports: crate::screen::jobs::Registry,
     /// Mock and rewrite rules per workspace.
     pub rules: crate::rules::Registry,
     /// User preferences, cached from the settings table.
@@ -57,6 +59,10 @@ pub struct AppState {
     pub inspector: crate::inspect::Registry,
     /// Renderer crash history, so recovery has a budget.
     pub crashes: crate::crash::Registry,
+    /// Native receipt generations and pending activity for safe discard.
+    pub activity: std::sync::Arc<crate::activity::Registry>,
+    /// Native permission requests and page-lifetime decisions.
+    pub permissions: crate::permissions::Registry,
     /// Live-subtitle transcription sessions per tab.
     pub subtitles: crate::subtitles::Registry,
 }
@@ -109,6 +115,7 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
         agent_runs: Mutex::new(std::collections::HashMap::new()),
         agent_models: Mutex::new(std::collections::HashMap::new()),
         screencast: crate::screencast::Registry::default(),
+        screen_exports: crate::screen::jobs::Registry::default(),
         rules: crate::rules::Registry::default(),
         prefs: crate::prefs::Registry::default(),
         privacy: crate::privacy::DivePrivacy::new(),
@@ -116,6 +123,8 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
         devservers: crate::devservers::Registry::default(),
         inspector: crate::inspect::Registry::default(),
         crashes: crate::crash::Registry::default(),
+        activity: std::sync::Arc::default(),
+        permissions: crate::permissions::Registry::default(),
         subtitles: crate::subtitles::Registry::default(),
     };
     crate::commands::register_builtin(&state.commands);

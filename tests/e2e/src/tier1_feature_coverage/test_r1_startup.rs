@@ -5,8 +5,17 @@
 //! - Feature 2: `--process-per-site` Chromium switch
 //! - Feature 3: `--renderer-process-limit` switch (and DIVE_RENDERER_PROCESS_LIMIT env)
 //! - Feature 4: Startup timeline instrumentation (StartupTimeline)
-//! - Feature 5: Initial window paint & chrome readiness (report_startup_milestone IPC)
-//! - Feature 6: Startup benchmarking harness contract
+//!
+//! These switch/timeline fixtures are model checks, not measurements of a running
+//! browser. Real startup IPC, readiness, and failure handling are exercised by
+//! `apps/desktop/src-tauri/src/startup.rs` and `lib.rs` unit tests, plus
+//! `apps/desktop/src/lib/startup.test.ts` and `components/Splash.test.tsx`.
+//! The process harness and its controlled failure fixtures live in
+//! `scripts/startup_benchmark.py` and `scripts/tests/`.
+//!
+//! Renderer reports carry only `chrome_first_paint` or `controls_ready`; Rust
+//! timestamps host receipt. Missing readiness produces a null total and nonzero
+//! exit. Fabricated JSON values cannot validate that IPC or benchmark contract.
 
 use crate::fixtures::StartupTimelineModel;
 
@@ -112,46 +121,4 @@ fn test_startup_timeline_monotonic_milestones() {
     let deserialized: StartupTimelineModel =
         serde_json::from_str(&json_str).expect("Failed to deserialize StartupTimeline");
     assert_eq!(timeline, deserialized);
-}
-
-#[test]
-fn test_report_startup_milestone_ipc_contract() {
-    // Contract: report_startup_milestone(milestone: String, elapsed_ms: f64)
-    let payload = serde_json::json!({
-        "milestone": "chrome_first_paint",
-        "elapsed_ms": 195.5
-    });
-
-    let milestone_name = payload["milestone"]
-        .as_str()
-        .expect("milestone must be string");
-    let elapsed = payload["elapsed_ms"]
-        .as_f64()
-        .expect("elapsed_ms must be f64");
-
-    assert_eq!(milestone_name, "chrome_first_paint");
-    assert!(elapsed > 0.0);
-    assert!(
-        elapsed < 5000.0,
-        "Initial paint milestone should complete within 5s budget"
-    );
-}
-
-#[test]
-fn test_startup_benchmark_runner_contract() {
-    // Contract from PROJECT.md: scripts/benchmark-startup.sh captures p50/p95 reporting
-    // We verify the benchmark output JSON schema contract
-    let mock_benchmark_result = serde_json::json!({
-        "runs": 10,
-        "cold_start_p50_ms": 280.5,
-        "cold_start_p95_ms": 345.0,
-        "warm_start_p50_ms": 120.2,
-        "warm_start_p95_ms": 165.8,
-        "initial_paint_p50_ms": 195.0,
-        "zero_ui_blocked": true
-    });
-
-    assert!(mock_benchmark_result["cold_start_p50_ms"].as_f64().unwrap() < 1000.0);
-    assert!(mock_benchmark_result["cold_start_p95_ms"].as_f64().unwrap() < 2000.0);
-    assert!(mock_benchmark_result["zero_ui_blocked"].as_bool().unwrap());
 }

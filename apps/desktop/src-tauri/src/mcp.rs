@@ -1167,6 +1167,7 @@ impl Browser for AppBrowser {
                 "total_frames": frames.len(),
             }));
         }
+        let captured = row.response_body.is_some();
         let body = row.response_body.unwrap_or_default();
         let truncated = body.chars().count() > BODY_TOOL_CAP;
         Ok(serde_json::json!({
@@ -1174,6 +1175,8 @@ impl Browser for AppBrowser {
             "mime_type": row.mime_type,
             "body": body.chars().take(BODY_TOOL_CAP).collect::<String>(),
             "truncated": truncated,
+            "captured": captured,
+            "capture_note": row.response_body_note,
         }))
     }
 

@@ -4,9 +4,9 @@
 # Starts a private instance against a local HTTP server, then checks: a tab
 # opens and its text reads back; popup, camera, PDF, localhost and offline
 # paths behave; a screenshot comes back; a background tab is discarded by the
-# sweep and wakes with its page on activation; killing the renderer process
-# recovers the tab in place without touching its sibling; and the in-process
-# CDP round trip stays inside its budget.
+# sweep and wakes with its page on activation; and the in-process CDP round
+# trip stays inside its budget. A separate disposable native lifecycle phase
+# crashes exactly one isolated renderer and proves unchanged control documents.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -111,17 +111,28 @@ cleanup() {
         done
         kill -9 "${APP}" 2>/dev/null || true
     fi
-    kill "${HTTP}" 2>/dev/null || true
-    wait "${APP:-}" 2>/dev/null || true
+    if [[ -n "${HTTP:-}" ]]; then
+        kill "${HTTP}" 2>/dev/null || true
+        wait "${HTTP}" 2>/dev/null || true
+        HTTP=""
+    fi
+    if [[ -n "${APP:-}" ]]; then
+        wait "${APP}" 2>/dev/null || true
+        APP=""
+    fi
     rm -rf "${DATA_DIR}"
 }
 trap cleanup EXIT
 
+APP_ARGS=()
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    APP_ARGS=(-ApplePersistenceIgnoreState YES)
+fi
 step "starting ${BIN}"
-NO_COLOR=1 DIVE_DATA_DIR="${DATA_DIR}" DIVE_MCP_PORT="${PORT}" DIVE_OPEN_URL="${SITE}/a.html" \
+NO_COLOR=1 DIVE_USE_MOCK_KEYCHAIN=1 DIVE_DATA_DIR="${DATA_DIR}" DIVE_MCP_PORT="${PORT}" DIVE_OPEN_URL="${SITE}/a.html" \
 DIVE_MAX_IDLE_SECS=0 DIVE_SWEEP_SECS="${DIVE_SWEEP_SECS:-2}" DIVE_DISCARD_LOCAL_TABS=1 DIVE_CDP_BENCH=1 DIVE_MCP_ALLOW_EVAL=1 \
 DIVE_CHROMIUM_FLAGS="${DIVE_CHROMIUM_FLAGS:-} --disable-popup-blocking" RUST_LOG="${RUST_LOG:-info},dive_desktop_lib=info" \
-    "${BIN}" >"${LOG}" 2>&1 &
+    "${BIN}" "${APP_ARGS[@]}" >"${LOG}" 2>&1 &
 APP=$!
 
 for _ in $(seq 1 120); do
@@ -166,11 +177,13 @@ mcp call page_wait_for "{\"tab_id\": \"${POPUP_ID}\", \"text\": \"Popup opened\"
 mcp call tab_close "{\"tab_id\": \"${POPUP_ID}\"}" >/dev/null
 mcp call tab_activate "{\"tab_id\": \"${B_ID}\"}" >/dev/null
 
+# Native PermissionBridge allows 30 seconds for an undecided request.
+# Observe its real fail-closed deadline; do not change the browser policy.
 step "undecided camera and microphone requests fail closed"
 mcp call page_click "{\"tab_id\": \"${B_ID}\", \"locator\": \"role=button[name=\\\"Request camera\\\"]\"}" >/dev/null || fail "camera button could not be clicked"
-mcp call page_wait_for "{\"tab_id\": \"${B_ID}\", \"text\": \"camera request handled: NotAllowedError\", \"timeout_ms\": 15000}" >/dev/null || fail "undecided camera request did not fail closed"
+mcp call page_wait_for "{\"tab_id\": \"${B_ID}\", \"text\": \"camera request handled: NotAllowedError\", \"timeout_ms\": 35000}" >/dev/null || fail "undecided camera request did not fail closed"
 mcp call page_click "{\"tab_id\": \"${B_ID}\", \"locator\": \"role=button[name=\\\"Request microphone\\\"]\"}" >/dev/null || fail "microphone button could not be clicked"
-mcp call page_wait_for "{\"tab_id\": \"${B_ID}\", \"text\": \"microphone request handled: NotAllowedError\", \"timeout_ms\": 15000}" >/dev/null || fail "undecided microphone request did not fail closed"
+mcp call page_wait_for "{\"tab_id\": \"${B_ID}\", \"text\": \"microphone request handled: NotAllowedError\", \"timeout_ms\": 35000}" >/dev/null || fail "undecided microphone request did not fail closed"
 
 step "PDF renders in its own tab"
 PDF=$(mcp call tab_open "{\"url\": \"${SITE}/sample.pdf\"}")
@@ -216,21 +229,6 @@ plain_log | grep -q "discarded idle tabs" || fail "sweep never discarded the bac
 mcp call tab_activate "{\"tab_id\": \"${A_ID}\"}" >/dev/null || fail "waking tab A failed"
 mcp call page_wait_for "{\"tab_id\": \"${A_ID}\", \"text\": \"alpha content\", \"timeout_ms\": 15000}" >/dev/null || fail "tab A did not come back with its page"
 
-step "renderer crash recovers in place, sibling untouched"
-mcp call tab_activate "{\"tab_id\": \"${B_ID}\"}" >/dev/null
-RENDERERS=$(ps -axo pid=,ppid=,comm= | awk -v root="${APP}" '$2==root && /Helper \(Renderer\)/ {print $1}')
-[[ -n "${RENDERERS}" ]] || fail "no renderer helper processes found under ${APP}"
-kill -9 ${RENDERERS}
-for _ in $(seq 1 40); do
-    plain_log | grep -q "renderer crashed; reloading" && break; sleep 0.25
-done
-plain_log | grep -q "renderer crashed; reloading" || fail "crash was never noticed"
-sleep 2
-mcp call page_wait_for "{\"tab_id\": \"${B_ID}\", \"text\": \"bravo content\", \"timeout_ms\": 20000}" >/dev/null || fail "tab B did not recover after its renderer died"
-mcp call tab_activate "{\"tab_id\": \"${A_ID}\"}" >/dev/null
-mcp call page_wait_for "{\"tab_id\": \"${A_ID}\", \"text\": \"alpha content\", \"timeout_ms\": 20000}" >/dev/null || fail "sibling tab A was disturbed by the crash"
-kill -0 "${APP}" || fail "the app itself went down with the renderer"
-
 step "in-process CDP latency"
 for _ in $(seq 1 40); do
     plain_log | grep -q "cdp bench:" && break; sleep 0.5
@@ -241,4 +239,10 @@ echo "   ${BENCH#*cdp bench: }"
 P95=$(sed -n 's/.*p95_ms=\([0-9.]*\).*/\1/p' <<<"${BENCH}")
 python3 -c "import sys; sys.exit(0 if float('${P95}') <= float('${CDP_P95_BUDGET_MS}') else 1)" || fail "CDP p95 ${P95} ms is over the ${CDP_P95_BUDGET_MS} ms budget"
 
+# Finish this fixture before the native qualification creates its own profile.
+# Its normal-exit/helper-drain checks are independent of this shell cleanup.
+cleanup
+trap - EXIT
+step "isolated renderer crash, unchanged controls, and native lifecycle"
+DIVE_CRASH_PROBE=1 DIVE_BIN="${BIN}" python3 "${SCRIPT_DIR}/native_lifecycle_check.py"
 echo ">> live check passed"

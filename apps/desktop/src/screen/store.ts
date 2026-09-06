@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { ipc } from "../lib/ipc";
 import { captureMediaUrl } from "../lib/mediaUrl";
+import { useBrowser } from "../store/browser";
 import { buildSegments, outputDuration, smoothCursorPath, suggestZooms } from "./math";
 import type { Segment } from "./math";
 import { cursorSamples, newId, newProject, normalizeProject, DEFAULT_ANNOTATION_STYLE } from "./model";
@@ -21,6 +22,9 @@ export interface EditorState {
   playable: string | null;
   loading: string | null;
   error: string | null;
+  saveError: string | null;
+  /** Ownership of the mounted editor, including same-source replacements. */
+  generation: number;
   /** Raw and smoothed pointer paths. */
   cursorRaw: CursorSample[];
   cursorSmooth: CursorSample[];
@@ -44,7 +48,7 @@ export interface EditorState {
   setExporting: (v: boolean) => void;
 
   open: (source: string) => Promise<void>;
-  close: () => void;
+  close: (generation?: number) => void;
   /** Change the project; `history` false for drags in progress. */
   update: (fn: (e: Project["editor"]) => Project["editor"], history?: boolean) => void;
   checkpoint: () => void;
@@ -64,6 +68,52 @@ export interface EditorState {
 
 const MAX_HISTORY = 80;
 let saveTimer = 0;
+let nextRevision = 0;
+let activeRevision = 0;
+interface Draft { project: Project; revision: number; error: string | null }
+const drafts = new Map<string, Draft>();
+const writes = new Map<string, { revision: number; promise: Promise<void> }>();
+
+function remember(source: string, project: Project): Draft {
+  const draft = { project, revision: ++nextRevision, error: drafts.get(source)?.error ?? null };
+  activeRevision = draft.revision;
+  drafts.set(source, draft);
+  return draft;
+}
+
+function scheduleSave() {
+  window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => void useEditor.getState().save(), 600);
+}
+
+/** Capture the project before queueing: later editor state cannot change its file or payload. */
+function writeDraft(source: string, draft: Draft, generation: number): Promise<void> {
+  const queued = writes.get(source);
+  if (queued && queued.revision >= draft.revision) return queued.promise;
+  const json = JSON.stringify(draft.project, null, 2);
+  const current = () => {
+    const state = useEditor.getState();
+    return state.source === source && state.generation === generation && activeRevision === draft.revision;
+  };
+  const promise = (queued?.promise ?? Promise.resolve()).then(async () => {
+    try {
+      await ipc.screenProjectWrite(source, json);
+      if (drafts.get(source)?.revision === draft.revision) drafts.delete(source);
+      if (current()) useEditor.setState({ dirty: false, saved: true, saveError: null });
+    } catch (cause) {
+      const error = cause instanceof Error ? cause.message : String(cause);
+      if (drafts.get(source)?.revision === draft.revision) drafts.set(source, { ...draft, error });
+      if (current()) useEditor.setState({ saveError: error });
+      else if (drafts.get(source)?.revision === draft.revision) {
+        useBrowser.setState({ error: `Edits to ${source.split("/").pop() ?? source} could not be saved: ${error}. Reopen the recording to retry.` });
+      }
+    }
+  }).finally(() => {
+    if (writes.get(source)?.promise === promise) writes.delete(source);
+  });
+  writes.set(source, { revision: draft.revision, promise });
+  return promise;
+}
 
 /** Default length of a new region: 5% of the video, 1 to 30 s. */
 export function defaultRegionLength(durationMs: number): number {
@@ -90,6 +140,8 @@ export const useEditor = create<EditorState>((set, get) => ({
   playable: null,
   loading: null,
   error: null,
+  saveError: null,
+  generation: 0,
   cursorRaw: [],
   cursorSmooth: [],
   segments: [],
@@ -108,12 +160,25 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   open: async (source) => {
     get().close();
-    set({ source, loading: "Reading the recording…", error: null });
+    const generation = get().generation + 1;
+    const current = () => get().generation === generation && get().source === source;
+    set({ generation, source, loading: "Reading the recording…", error: null, saveError: null });
     try {
+      // A tab can reopen before its unmount save reaches disk. On failure the
+      // retained draft below takes precedence over the older sidecar.
+      const pending = writes.get(source);
+      if (pending) await pending.promise;
+      if (!current()) return;
       const info = await ipc.screenMediaInfo(source);
+      if (!current()) return;
       const media: Project["media"] = { source, playable: info.playable, events: info.events, durationMs: info.duration_ms ?? 0, width: info.width, height: info.height };
-      const saved = await ipc.screenProjectRead(source);
-      const project = saved ? normalizeProject(JSON.parse(saved), media) : newProject(media);
+      const draft = drafts.get(source);
+      const saved = draft ? null : await ipc.screenProjectRead(source);
+      if (!current()) return;
+      const stored = draft?.project ?? (saved ? JSON.parse(saved) as Partial<Project> | null : null);
+      // A copied or stale sidecar owns edits, never the opened file's identity
+      // or dimensions. Apply current media before normalization clamps regions.
+      const project = stored ? normalizeProject({ ...stored, media }, media) : newProject(media);
       let track: RecordingEvents | null = null;
       if (info.events) {
         try {
@@ -122,33 +187,43 @@ export const useEditor = create<EditorState>((set, get) => ({
           track = null;
         }
       }
+      if (!current()) return;
       const raw = cursorSamples(track);
-      set({ loading: "Loading the video…" });
-      const playableFile = info.playable ?? (source.endsWith(".gif") ? null : null);
+      const playableFile = info.playable;
       if (!playableFile) throw new Error("This recording has no playable copy to edit. Record again with the video format.");
-      const url = captureMediaUrl(playableFile);
+      // Chromium can reuse its separate media buffer cache for the same URL
+      // despite no-store. A reopened/repaired companion needs a new cache key;
+      // the revision belongs only to this preview lease, never the saved path.
+      const url = new URL(captureMediaUrl(playableFile), window.location.href);
+      url.searchParams.set("dive-screen-revision", String(generation));
       const derived = derive(project, project.editor.cursor.smoothing, raw);
-      set({ project, playable: url, cursorRaw: raw, ...derived, loading: null, playhead: 0, past: [], future: [], saved: Boolean(saved) });
-      // A fresh project gets automatic zooms from the pointer's dwells.
-      if (!saved && project.editor.autoZoom && raw.length) get().autoZoom();
+      activeRevision = draft?.revision ?? ++nextRevision;
+      if (draft) drafts.set(source, { ...draft, project });
+      set({ project, playable: url.href, cursorRaw: raw, ...derived, loading: null, playhead: 0, past: [], future: [], saved: Boolean(saved), dirty: Boolean(draft), saveError: draft?.error ?? null });
+      if (!saved && !draft && project.editor.autoZoom && raw.length) get().autoZoom();
     } catch (e) {
-      set({ loading: null, error: e instanceof Error ? e.message : String(e) });
+      if (current()) set({ loading: null, error: e instanceof Error ? e.message : String(e) });
     }
   },
 
-  close: () => {
-    const { playable } = get();
-    if (playable?.startsWith("blob:")) URL.revokeObjectURL(playable);
+  close: (generation) => {
+    const state = get();
+    if (generation !== undefined && state.generation !== generation) return;
+    // save() captures and queues the dirty snapshot synchronously, before the
+    // editor is cleared. React unmount need not wait for native disk I/O.
+    if (state.dirty) void state.save();
+    if (state.playable?.startsWith("blob:")) URL.revokeObjectURL(state.playable);
     window.clearTimeout(saveTimer);
-    set({ source: null, project: null, playable: null, cursorRaw: [], cursorSmooth: [], segments: [], duration: 0, playhead: 0, playing: false, selection: null, past: [], future: [], dirty: false });
+    set({ generation: state.generation + 1, source: null, project: null, playable: null, loading: null, error: null, saveError: null, cursorRaw: [], cursorSmooth: [], segments: [], duration: 0, playhead: 0, playing: false, selection: null, past: [], future: [], dirty: false, saved: false, videoEl: null, exporting: false });
   },
 
   update: (fn, history = true) => {
-    const { project, past, cursorRaw } = get();
-    if (!project) return;
+    const { source, project, past, cursorRaw } = get();
+    if (!source || !project) return;
     const editor = fn(project.editor);
     if (editor === project.editor) return;
     const next = { ...project, editor };
+    remember(source, next);
     const smoothingChanged = editor.cursor.smoothing !== project.editor.cursor.smoothing;
     const timeChanged = editor.trims !== project.editor.trims || editor.speeds !== project.editor.speeds;
     set({
@@ -157,28 +232,29 @@ export const useEditor = create<EditorState>((set, get) => ({
       ...(history ? { past: [...past.slice(-MAX_HISTORY + 1), project.editor], future: [] } : {}),
       ...(timeChanged || smoothingChanged ? derive(next, editor.cursor.smoothing, cursorRaw) : {}),
     });
-    window.clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(() => void get().save(), 600);
+    scheduleSave();
   },
   checkpoint: () => {
     const { project, past } = get();
     if (project) set({ past: [...past.slice(-MAX_HISTORY + 1), project.editor], future: [] });
   },
   undo: () => {
-    const { project, past, future, cursorRaw } = get();
-    if (!project || past.length === 0) return;
+    const { source, project, past, future, cursorRaw } = get();
+    if (!source || !project || past.length === 0) return;
     const editor = past[past.length - 1]!;
     const next = { ...project, editor };
+    remember(source, next);
     set({ project: next, past: past.slice(0, -1), future: [project.editor, ...future], dirty: true, ...derive(next, editor.cursor.smoothing, cursorRaw) });
-    saveTimer = window.setTimeout(() => void get().save(), 600);
+    scheduleSave();
   },
   redo: () => {
-    const { project, past, future, cursorRaw } = get();
-    if (!project || future.length === 0) return;
+    const { source, project, past, future, cursorRaw } = get();
+    if (!source || !project || future.length === 0) return;
     const editor = future[0]!;
     const next = { ...project, editor };
+    remember(source, next);
     set({ project: next, past: [...past, project.editor], future: future.slice(1), dirty: true, ...derive(next, editor.cursor.smoothing, cursorRaw) });
-    saveTimer = window.setTimeout(() => void get().save(), 600);
+    scheduleSave();
   },
   select: (selection) => set({ selection }),
   seek: (srcMs) => {
@@ -265,14 +341,13 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (made.length) get().update((e) => ({ ...e, zooms: [...e.zooms, ...made] }));
   },
   save: async () => {
-    const { source, project } = get();
+    const { source, project, generation } = get();
     if (!source || !project) return;
-    try {
-      await ipc.screenProjectWrite(source, JSON.stringify(project, null, 2));
-      set({ dirty: false, saved: true });
-    } catch (e) {
-      set({ error: e instanceof Error ? e.message : String(e) });
-    }
+    window.clearTimeout(saveTimer);
+    const retained = drafts.get(source);
+    const draft = retained?.project === project ? retained : remember(source, project);
+    set({ dirty: true });
+    await writeDraft(source, draft, generation);
   },
 }));
 

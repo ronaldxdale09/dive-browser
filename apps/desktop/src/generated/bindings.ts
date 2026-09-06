@@ -7,7 +7,17 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 
 /** Commands */
 export const commands = {
+	keepSitesList: (profileId: ProfileId) => typedError<string[], AppError>(__TAURI_INVOKE("keep_sites_list", { profileId })),
+	keepSiteSet: (profileId: ProfileId, url: string, keep: boolean) => typedError<string[], AppError>(__TAURI_INVOKE("keep_site_set", { profileId, url, keep })),
 	snapshot: () => typedError<Snapshot, AppError>(__TAURI_INVOKE("snapshot")),
+	/**  A detached window reads its own page, independently of the main workspace. */
+	tabInfo: (id: TabId) => typedError<Tab, AppError>(__TAURI_INVOKE("tab_info", { id })),
+	/**  Fixed window commands from trusted detached chrome; never arbitrary script. */
+	windowCommand: (command: string) => typedError<null, AppError>(__TAURI_INVOKE("window_command", { command })),
+	/**  Create a blank detached window using the authoritative current workspace. */
+	windowOpen: () => typedError<null, AppError>(__TAURI_INVOKE("window_open")),
+	/**  Only the current registered popout chrome can acknowledge its readiness. */
+	popoutReady: (id: TabId) => typedError<boolean, AppError>(__TAURI_INVOKE("popout_ready", { id })),
 	workspaceActivate: (id: WorkspaceId) => typedError<null, AppError>(__TAURI_INVOKE("workspace_activate", { id })),
 	/**  Every profile, in switcher order. */
 	profilesList: () => typedError<Profile[], AppError>(__TAURI_INVOKE("profiles_list")),
@@ -38,7 +48,7 @@ export const commands = {
 	 */
 	workspaceReorder: (ordered: WorkspaceId[]) => typedError<null, AppError>(__TAURI_INVOKE("workspace_reorder", { ordered })),
 	/**
-	 *  Live tab count of every workspace. The snapshot only carries the active
+	 *  Open tab count of every workspace, including discarded tabs. The snapshot carries the active
 	 *  workspace's tabs, so the rail asks for the rest separately.
 	 */
 	workspaceTabCounts: () => typedError<WorkspaceTabs[], AppError>(__TAURI_INVOKE("workspace_tab_counts")),
@@ -55,6 +65,8 @@ export const commands = {
 	tabSetPinned: (id: TabId, pinned: boolean) => typedError<null, AppError>(__TAURI_INVOKE("tab_set_pinned", { id, pinned })),
 	tabBack: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_back", { id })),
 	tabForward: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_forward", { id })),
+	tabHistory: (id: TabId) => typedError<NavigationHistory, AppError>(__TAURI_INVOKE("tab_history", { id })),
+	tabHistoryNavigate: (id: TabId, generation: string, entryId: number) => typedError<null, AppError>(__TAURI_INVOKE("tab_history_navigate", { id, generation, entryId })),
 	tabReload: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_reload", { id })),
 	/**  Set a tab's zoom factor (clamped to the step range). */
 	tabZoom: (id: TabId, factor: number | null) => typedError<null, AppError>(__TAURI_INVOKE("tab_zoom", { id, factor })),
@@ -71,10 +83,12 @@ export const commands = {
 	tabSetTier: (id: TabId, tier: TabTier) => typedError<null, AppError>(__TAURI_INVOKE("tab_set_tier", { id, tier })),
 	/**  Forget a bookmark by URL. */
 	bookmarkRemove: (url: string) => typedError<boolean, AppError>(__TAURI_INVOKE("bookmark_remove", { url })),
-	/**  Remember or forget a site permission decision. */
-	permissionSet: (origin: string, kind: string, decision: Decision) => typedError<null, AppError>(__TAURI_INVOKE("permission_set", { origin, kind, decision })),
-	/**  Every remembered site permission. */
-	permissionsList: () => typedError<SitePermission[], AppError>(__TAURI_INVOKE("permissions_list")),
+	/**  Remember or forget a permission in the selected profile and real container. */
+	permissionSet: (scope: Scope, origin: string, kind: string, decision: Decision) => typedError<null, AppError>(__TAURI_INVOKE("permission_set", { scope, origin, kind, decision })),
+	/**  Resolve the original native request; its opaque ID carries trusted provenance. */
+	permissionReply: (tabId: TabId, requestId: string, decision: Decision, duration: Duration) => typedError<null, AppError>(__TAURI_INVOKE("permission_reply", { tabId, requestId, decision, duration })),
+	/**  Remembered permissions in the active profile and container. */
+	permissionsList: () => typedError<PermissionList, AppError>(__TAURI_INVOKE("permissions_list")),
 	/**  List installed extensions. */
 	extensionsList: () => typedError<ExtensionList, AppError>(__TAURI_INVOKE("extensions_list")),
 	/**  Ask the operating system for an unpacked extension directory. */
@@ -152,15 +166,14 @@ export const commands = {
 	fileReadChunk: (path: string, offset: number | null, len: number | null) => typedError<string, AppError>(__TAURI_INVOKE("file_read_chunk", { path, offset, len })),
 	/**  Size of a recording or companion, for chunked reads. */
 	fileSize: (path: string) => typedError<number | null, AppError>(__TAURI_INVOKE("file_size", { path })),
-	/**  Open a staging file for the editor's rendered `WebM`; returns its path. */
+	/**  Create an owned export job; its ID never names a capture file. */
 	screenExportBegin: () => typedError<string, AppError>(__TAURI_INVOKE("screen_export_begin")),
-	/**  Append a base64 piece to the staging file. */
-	screenExportAppend: (path: string, base64: string) => typedError<null, AppError>(__TAURI_INVOKE("screen_export_append", { path, base64 })),
-	/**
-	 *  Encode the staged render into the final file, with the source's sound
-	 *  cut and sped the same way, and a preview companion beside it.
-	 */
+	/**  Append exactly the next bounded chunk of an owned upload. */
+	screenExportAppend: (jobId: string, offset: number, base64: string) => typedError<null, AppError>(__TAURI_INVOKE("screen_export_append", { jobId, offset, base64 })),
+	/**  Finish an owned job once. Every child is reaped before cleanup/receipt. */
 	screenExportFinish: (request: ExportRequest) => typedError<RecordingResult, AppError>(__TAURI_INVOKE("screen_export_finish", { request })),
+	/**  Cancel only this chrome's job and wait for owned child/file cleanup. */
+	screenExportCancel: (jobId: string) => typedError<CancelResult, AppError>(__TAURI_INVOKE("screen_export_cancel", { jobId })),
 	/**
 	 *  Screenshot a tab (viewport, or the whole document when `full_page`) to a
 	 *  PNG under the app data dir and return its path.
@@ -365,6 +378,7 @@ export const events = {
 	menuCommand: makeEvent<MenuCommand>("menu-command"),
 	networkEvent: makeEvent<NetworkEvent>("network-event"),
 	permissionAsked: makeEvent<PermissionAsked>("permission-asked"),
+	permissionDismissed: makeEvent<PermissionDismissed>("permission-dismissed"),
 	privacyEvent: makeEvent<PrivacyEvent>("privacy-event"),
 	recorderEvent: makeEvent<RecorderEvent>("recorder-event"),
 	recordingEvent: makeEvent<RecordingEvent>("recording-event"),
@@ -373,6 +387,7 @@ export const events = {
 	subtitleModelProgress: makeEvent<SubtitleModelProgress>("subtitle-model-progress"),
 	subtitleState: makeEvent<SubtitleState>("subtitle-state"),
 	tabCrashed: makeEvent<TabCrashed>("tab-crashed"),
+	tabHistoryChanged: makeEvent<TabHistoryChanged>("tab-history-changed"),
 	tabLoad: makeEvent<TabLoad>("tab-load"),
 	tabWindowChanged: makeEvent<TabWindowChanged>("tab-window-changed"),
 };
@@ -453,6 +468,8 @@ export type Bounds = {
 	/**  Height. */
 	height: number | null,
 };
+
+export type CancelResult = "cancelled" | "completed";
 
 /**  A streamed piece of the reply. */
 export type ChatDelta =
@@ -607,7 +624,7 @@ export type Decision =
 "allow" |
 /**  Refused. */
 "deny" |
-/**  Not decided; the engine refuses and the chrome asks. */
+/**  Not decided; the original native request waits for the chrome. */
 "ask";
 
 /**  Where Dive stands as the handler for web links. */
@@ -677,6 +694,8 @@ export type DownloadNotice = {
 	status: string,
 };
 
+export type Duration = "page" | "remember";
+
 /**  Where and when the page thinks it is. */
 export type Environment = {
 	/**  Reported by `navigator.geolocation`; none clears the override. */
@@ -689,8 +708,8 @@ export type Environment = {
 
 /**  What the editor asks for when it hands over its rendered frames. */
 export type ExportRequest = {
-	/**  The staged `WebM` the chrome rendered and uploaded. */
-	staged: string,
+	/**  Opaque job capability returned by export begin. */
+	job_id: string,
 	/**  The recording the project belongs to (for its sound). */
 	source: string,
 	/**  `mp4` or `gif`. */
@@ -943,6 +962,18 @@ export type ModelInfo = {
 	output_per_mtok: number | null,
 };
 
+export type NavigationEntry = {
+	id: number,
+	url: string,
+	title: string,
+};
+
+export type NavigationHistory = {
+	generation: string,
+	current_index: number,
+	entries: NavigationEntry[],
+};
+
 /**  One step in a request's life. The chrome merges these by `request_id`. */
 export type NetworkEvent =
 /**  A request left the browser. */
@@ -1053,12 +1084,27 @@ export type PaneBounds = {
 
 /**  A page asked for something no decision covers yet. */
 export type PermissionAsked = {
-	/**  The tab whose page asked. */
+	page_lifetime: boolean,
+	request_id: string,
 	tab_id: TabId,
-	/**  The page's origin. */
 	origin: string,
-	/**  What it asked for, as in [`SitePermission::kind`]. */
-	kind: string,
+	kinds: string[],
+	scope: Scope,
+};
+
+/**  A pending native request ended, including navigation, closure and timeout. */
+export type PermissionDismissed = {
+	request_id: string,
+	tab_id: TabId,
+};
+
+/**  Settings are scoped to the currently selected workspace's real CEF container. */
+export type PermissionList = {
+	scope: Scope,
+	profile_name: string,
+	container_name: string,
+	legacy_ignored: boolean,
+	permissions: SitePermission[],
 };
 
 /**  What the picker found. */
@@ -1491,6 +1537,11 @@ export type RuleAction =
 /**  Add or replace one request header. */
 { kind: "header"; name: string; value: string };
 
+export type Scope = {
+	profile_id: ProfileId,
+	container_id: ContainerId,
+};
+
 /**  Per-message switches from the chrome. */
 export type SendOptions = {
 	/**  Attach the current tab's title, URL, console, failed requests and text. */
@@ -1518,6 +1569,7 @@ export type SitePermission = {
 	kind: string,
 	/**  The decision. */
 	decision: Decision,
+	scope: Scope,
 };
 
 /**  Everything the chrome needs to render on boot. */
@@ -1691,6 +1743,10 @@ export type TabCrashed = {
 	recovering: boolean,
 };
 
+export type TabHistoryChanged = {
+	tab_id: TabId,
+};
+
 /**  Identifies a [`Tab`]. */
 export type TabId = string;
 
@@ -1848,7 +1904,7 @@ export type WorkspaceId = string;
 export type WorkspaceTabs = {
 	/**  The workspace. */
 	workspace_id: WorkspaceId,
-	/**  Live tabs in it. */
+	/**  Open tabs in it, including discarded tabs. */
 	tabs: number,
 };
 

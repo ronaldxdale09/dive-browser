@@ -1,5 +1,5 @@
 import { Download, FolderOpen, Redo2, RefreshCw, Save, Undo2, Video } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Icon } from "../components/Icon";
 import { Tooltip } from "../components/Tooltip";
@@ -20,22 +20,25 @@ import { useEditor } from "./store";
 export function DiveScreen({ src, tabId }: { src: string | null; tabId: string }) {
   const open = useEditor((s) => s.open);
   const close = useEditor((s) => s.close);
-  const source = useEditor((s) => s.source);
   const project = useEditor((s) => s.project);
   const loading = useEditor((s) => s.loading);
   const error = useEditor((s) => s.error);
+  const saveError = useEditor((s) => s.saveError);
+  const save = useEditor((s) => s.save);
   const [exporting, setExporting] = useState(false);
+  const owner = useRef<number | null>(null);
+  const openRecording = useCallback(() => {
+    if (!src) return;
+    void open(src);
+    owner.current = useEditor.getState().generation;
+  }, [open, src]);
 
   useEffect(() => {
-    if (import.meta.env.DEV) console.debug("[divescreen] mount", src);
-    if (src && src !== source) void open(src);
+    openRecording();
     return () => {
-      if (import.meta.env.DEV) console.debug("[divescreen] unmount", src);
-      if (src) close();
+      if (owner.current !== null) close(owner.current);
     };
-    // Open once per source; the store guards against duplicate opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [src]);
+  }, [openRecording, close]);
 
   useShortcuts(project !== null && !exporting);
 
@@ -47,7 +50,7 @@ export function DiveScreen({ src, tabId }: { src: string | null; tabId: string }
           <p className="text-ink">This recording could not be opened.</p>
           <p className="mt-1 text-xs">{error}</p>
           <div className="mt-4 flex items-center justify-center gap-2">
-            <button type="button" onClick={() => void open(src)} className="flex h-8 items-center gap-1.5 rounded-lg bg-ink px-3 text-xs font-medium text-ground hover:brightness-90">
+            <button type="button" onClick={openRecording} className="flex h-8 items-center gap-1.5 rounded-lg bg-ink px-3 text-xs font-medium text-ground hover:brightness-90">
               <Icon icon={RefreshCw} size={13} /> Try again
             </button>
             <button type="button" onClick={() => void ipc.downloadsReveal(src).catch((cause) => useEditor.setState({ error: cause instanceof Error ? cause.message : String(cause) }))} className="flex h-8 items-center gap-1.5 rounded-lg bg-surface-2 px-3 text-xs text-ink hover:bg-surface-3">
@@ -68,6 +71,12 @@ export function DiveScreen({ src, tabId }: { src: string | null; tabId: string }
   return (
     <div className="flex h-full min-h-0 flex-col bg-ground text-ink" data-tab={tabId}>
       <TopBar onExport={() => setExporting(true)} />
+      {saveError && (
+        <div role="alert" className="mx-3 mb-3 flex items-center gap-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs">
+          <p className="min-w-0 flex-1 text-ink">Your edits could not be saved: {saveError}. They remain available in this session.</p>
+          <button type="button" onClick={() => void save()} className="h-8 shrink-0 rounded-lg bg-surface px-3 font-medium text-ink hover:bg-surface-2">Retry save</button>
+        </div>
+      )}
       <div className="flex min-h-0 flex-1 gap-3 px-3">
         <Stage />
         <SettingsPanel onExport={() => setExporting(true)} />

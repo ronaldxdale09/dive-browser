@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve a deterministic, memory-bearing page on distinct loopback sites."""
+"""Serve a deterministic, memory-bearing page on loopback using the shipping process model."""
 
 import http.server
 import threading

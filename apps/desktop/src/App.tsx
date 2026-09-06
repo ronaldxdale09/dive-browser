@@ -10,12 +10,15 @@ import { Content } from "./components/Content";
 import { FindBar } from "./components/FindBar";
 import { Splash } from "./components/Splash";
 import { ResizeHandle } from "./components/ResizeHandle";
+import { IsolatedPanel } from "./components/IsolatedPanel";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { DOCK_LIMITS, SIDECAR_LIMITS } from "./lib/resize";
 import { useBrowser } from "./store/browser";
 import { useLayout } from "./store/layout";
 import { usePrefs, watchReducedMotion, watchSystemTheme } from "./store/prefs";
 import { useShortcuts } from "./lib/shortcuts";
+import { useCoversContent } from "./lib/overlay";
+import { Palette } from "./components/Palette";
 import { useChromeLayout } from "./lib/adaptiveLayout";
 import { PanelSkeleton, ToastViewport } from "./components/ChromeFeedback";
 import { usePicker } from "./store/simulator";
@@ -26,7 +29,6 @@ import { useRecorder } from "./store/recorder";
 
 const Sidecar = lazy(() => import("./components/Sidecar").then(({ Sidecar }) => ({ default: Sidecar })));
 const Dock = lazy(() => import("./components/Dock").then(({ Dock }) => ({ default: Dock })));
-const Palette = lazy(() => import("./components/Palette").then(({ Palette }) => ({ default: Palette })));
 const SettingsDialog = lazy(() => import("./components/SettingsDialog").then(({ SettingsDialog }) => ({ default: SettingsDialog })));
 const Annotator = lazy(() => import("./components/Annotator").then(({ Annotator }) => ({ default: Annotator })));
 const Library = lazy(() => import("./components/Library").then(({ Library }) => ({ default: Library })));
@@ -46,6 +48,9 @@ export function App() {
   const annotating = useBrowser((s) => s.annotating);
   const editing = useBrowser((s) => s.editing);
   const open = useBrowser((s) => s.open);
+  // Keep the native page covered between navigation dialogs, including while
+  // a replacement's lazy chunk is loading inside Suspense.
+  useCoversContent(open.palette || open.settings || open.library || open.shortcuts);
   const loadPrefs = usePrefs((s) => s.load);
   const railExpanded = usePrefs((s) => s.prefs.rail_expanded);
   const responsive = useChromeLayout();
@@ -150,7 +155,7 @@ export function App() {
               }}
             />
           )}
-          <Suspense fallback={showDock ? <PanelSkeleton label="developer dock" horizontal /> : null}>{showDock && <Dock />}</Suspense>
+          {showDock && <IsolatedPanel label="Developer dock" onClose={() => toggle("dock", false)}><Suspense fallback={<PanelSkeleton label="developer dock" horizontal />}><Dock /></Suspense></IsolatedPanel>}
         </div>
         {showSidecar && (
           <ResizeHandle
@@ -165,18 +170,18 @@ export function App() {
             }}
           />
         )}
-        <Suspense fallback={showSidecar ? <PanelSkeleton label="agent" /> : null}>{showSidecar && <Sidecar />}</Suspense>
+        {showSidecar && <IsolatedPanel label="Agent" onClose={() => toggle("sidecar", false)}><Suspense fallback={<PanelSkeleton label="agent" />}><Sidecar /></Suspense></IsolatedPanel>}
       </main>
       <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || open.subtitles || annotating) ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
         {open.palette && <Palette />}
         {open.settings && <SettingsDialog />}
         {open.library && <Library />}
-        {open.extensions && <Extensions />}
         {open.shortcuts && <Shortcuts />}
         {open.defaultBrowser && <DefaultBrowserDialog />}
         {open.subtitles && <Subtitles />}
-        {annotating && <Annotator path={annotating} />}
       </Suspense>
+      {open.extensions && <IsolatedPanel label="Extensions" modal onClose={() => toggle("extensions", false)}><Suspense fallback={<div className="fixed inset-0 z-50 bg-ground/75 backdrop-blur-sm" aria-label="Loading extensions" />}><Extensions /></Suspense></IsolatedPanel>}
+      {annotating && <IsolatedPanel key={annotating} label="Image editor" modal onClose={() => useBrowser.getState().setAnnotating(null)}><Suspense fallback={<div className="fixed inset-0 z-50 bg-ground/75 backdrop-blur-sm" aria-label="Loading image editor" />}><Annotator path={annotating} /></Suspense></IsolatedPanel>}
       <Splash />
       <Suspense fallback={(editing || recorderOpen || recordingPhase === "setup" || recordingPhase === "done") ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
         {editing && <WorkspaceDialog key={editing.id ?? "new"} />}

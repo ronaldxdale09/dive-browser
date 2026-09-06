@@ -79,6 +79,26 @@ afterEach(() => {
 });
 
 describe("Sidecar", () => {
+  it("shows initialization failure with retry and keeps its close control", () => {
+    useAgent.setState({ loaded: true, initError: "Credential discovery timed out" });
+    render(<Sidecar />);
+    expect(screen.getByRole("alert").textContent).toContain("timed out");
+    expect(screen.queryByText("Connect Model Provider")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry loading agent" }));
+    expect(useAgent.getState().init).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: "Close agent" }));
+    expect(useBrowser.getState().toggle).toHaveBeenCalledWith("sidecar", false);
+  });
+
+  it("refreshes credentials only when Settings closes, not alongside initialization", () => {
+    render(<Sidecar />);
+    expect(useAgent.getState().refreshKeys).not.toHaveBeenCalled();
+    act(() => useBrowser.setState({ open: { ...useBrowser.getState().open, settings: true } }));
+    expect(useAgent.getState().refreshKeys).not.toHaveBeenCalled();
+    act(() => useBrowser.setState({ open: { ...useBrowser.getState().open, settings: false } }));
+    expect(useAgent.getState().refreshKeys).toHaveBeenCalledTimes(1);
+  });
+
   it("can be closed from its own header", () => {
     render(<Sidecar />);
     fireEvent.click(screen.getByRole("button", { name: "Close agent" }));
@@ -88,7 +108,7 @@ describe("Sidecar", () => {
   it("loads the provider catalog and shows the thread with the ready provider", () => {
     render(<Sidecar />);
     expect(useAgent.getState().init).toHaveBeenCalledTimes(1);
-    expect(useAgent.getState().refreshKeys).toHaveBeenCalledTimes(1);
+    expect(useAgent.getState().refreshKeys).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { name: "Agent" })).toBeTruthy();
     expect(screen.getByText("Anthropic")).toBeTruthy();
     expect(screen.getByPlaceholderText("Ask, or direct the agent on this page…")).toBeTruthy();

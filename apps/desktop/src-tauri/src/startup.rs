@@ -60,7 +60,7 @@ pub struct StartupTimeline {
     pub window_created_ms: f64,
     /// Elapsed milliseconds until Tauri setup hook completed.
     pub setup_complete_ms: f64,
-    /// Elapsed milliseconds until React chrome first contentful paint was reported.
+    /// Host-observed elapsed milliseconds when the chrome FCP IPC arrived.
     pub chrome_paint_ms: Option<f64>,
 }
 
@@ -83,8 +83,10 @@ impl StartupTimeline {
 pub struct StartupBenchmarkReport {
     /// Whether this was a cold launch (fresh profile/database).
     pub cold_start: bool,
-    /// Total elapsed milliseconds to full readiness.
-    pub total_startup_ms: f64,
+    /// Host-observed readiness time; absent until paint and usable controls are observed.
+    pub total_startup_ms: Option<f64>,
+    /// Timings include renderer scheduling and IPC delivery latency.
+    pub timing_basis: String,
     /// Detailed timeline milestones.
     pub timeline: StartupTimeline,
     /// Milestone name to elapsed milliseconds map, including delta intervals.
@@ -127,10 +129,17 @@ pub fn record_milestone(name: &str) -> f64 {
 
 /// Record a milestone with an explicitly provided elapsed millisecond duration.
 pub fn record_custom_milestone(name: &str, elapsed: f64) {
+    if !elapsed.is_finite() || elapsed < 0.0 {
+        tracing::warn!(milestone = name, "ignoring invalid startup timestamp");
+        return;
+    }
     let mut milestones_guard = MILESTONES
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let milestones = milestones_guard.get_or_insert_with(HashMap::new);
+    if milestones.contains_key(name) {
+        return;
+    }
     milestones.insert(name.to_owned(), elapsed);
 
     let mut timeline_guard = TIMELINE
@@ -205,8 +214,8 @@ pub fn generate_benchmark_report(cold_start: bool) -> StartupBenchmarkReport {
     milestones.insert("window_created_ms".into(), timeline.window_created_ms);
     milestones.insert("setup_complete_ms".into(), timeline.setup_complete_ms);
 
-    let state_init_to_window = (timeline.window_created_ms - timeline.state_init_ms).max(0.0);
-    let window_to_setup = (timeline.setup_complete_ms - timeline.window_created_ms).max(0.0);
+    let state_init_to_window = timeline.window_created_ms - timeline.state_init_ms;
+    let window_to_setup = timeline.setup_complete_ms - timeline.window_created_ms;
 
     milestones.insert("process_to_state_init_ms".into(), timeline.state_init_ms);
     milestones.insert(
@@ -222,17 +231,29 @@ pub fn generate_benchmark_report(cold_start: bool) -> StartupBenchmarkReport {
         milestones.insert("chrome_paint_ms".into(), paint_ms);
         milestones.insert(
             "setup_to_chrome_fcp_ms".into(),
-            (paint_ms - timeline.setup_complete_ms).max(0.0),
+            paint_ms - timeline.setup_complete_ms,
         );
     }
 
-    let total_startup_ms = timeline
-        .chrome_paint_ms
-        .unwrap_or(timeline.setup_complete_ms);
+    let total_startup_ms = milestones
+        .get("controls_ready")
+        .copied()
+        .filter(|controls| {
+            ["state_init", "window_created", "setup_complete"]
+                .iter()
+                .all(|name| milestones.contains_key(*name))
+                && timeline.window_created_ms >= timeline.state_init_ms
+                && timeline.setup_complete_ms >= timeline.window_created_ms
+                && timeline
+                    .chrome_paint_ms
+                    .is_some_and(|paint| paint >= timeline.window_created_ms && *controls >= paint)
+                && *controls >= timeline.setup_complete_ms
+        });
 
     StartupBenchmarkReport {
         cold_start,
         total_startup_ms,
+        timing_basis: "host_observed_since_record_launch".into(),
         timeline,
         milestones,
     }
@@ -264,7 +285,7 @@ pub fn write_benchmark_file(output_path: Option<&Path>) -> std::io::Result<PathB
     if let Some(parent) = resolved_path.parent()
         && !parent.as_os_str().is_empty()
     {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent)?;
     }
 
     std::fs::write(&resolved_path, &json)?;
@@ -274,12 +295,27 @@ pub fn write_benchmark_file(output_path: Option<&Path>) -> std::io::Result<PathB
     Ok(resolved_path)
 }
 
+fn finish_benchmark(output_path: Option<&Path>) -> i32 {
+    let complete = generate_benchmark_report(is_cold_launch())
+        .total_startup_ms
+        .is_some();
+    if let Err(error) = write_benchmark_file(output_path) {
+        tracing::error!(%error, "failed to write startup benchmark report");
+        return 2;
+    }
+    if !complete {
+        tracing::error!("startup benchmark incomplete: paint and usable controls are required");
+        return 1;
+    }
+    0
+}
+
 /// Background handler spawned when `DIVE_STARTUP_BENCHMARK=1` is set.
 ///
-/// Waits for initial chrome first paint or times out, dumps the benchmark JSON,
-/// and exits the application cleanly.
+/// Waits for paint AND usable controls. A timeout writes an incomplete report
+/// and exits unsuccessfully; a report write error also produces a nonzero exit.
 pub fn on_setup_completed(app: tauri::AppHandle<crate::Runtime>) {
-    if std::env::var_os("DIVE_STARTUP_BENCHMARK").is_none() {
+    if std::env::var("DIVE_STARTUP_BENCHMARK").as_deref() != Ok("1") {
         return;
     }
 
@@ -287,39 +323,43 @@ pub fn on_setup_completed(app: tauri::AppHandle<crate::Runtime>) {
         let timeout_ms = std::env::var("DIVE_BENCHMARK_TIMEOUT_MS")
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(1500);
+            .unwrap_or(10_000);
 
         let start = Instant::now();
         let interval = std::time::Duration::from_millis(50);
         while start.elapsed().as_millis() < u128::from(timeout_ms) {
             tokio::time::sleep(interval).await;
-            if has_chrome_paint() {
+            if generate_benchmark_report(is_cold_launch())
+                .total_startup_ms
+                .is_some()
+            {
                 break;
             }
         }
 
-        if let Err(err) = write_benchmark_file(None) {
-            tracing::error!(%err, "failed to write benchmark file on setup completion");
-        }
-
-        tracing::info!("startup benchmark completed, exiting process");
-        app.exit(0);
+        app.exit(finish_benchmark(None));
     });
 }
 
-/// IPC command exposed to frontend or tests to report startup milestone timings.
-#[tauri::command]
-#[allow(clippy::needless_pass_by_value)]
-pub fn report_startup_milestone(milestone: String, elapsed_ms: f64) -> Result<(), String> {
-    record_custom_milestone(&milestone, elapsed_ms);
-
-    if std::env::var_os("DIVE_STARTUP_BENCHMARK").is_some()
-        && (milestone == "chrome_first_paint" || milestone == "chrome_paint")
-        && let Err(err) = write_benchmark_file(None)
-    {
-        tracing::error!(%err, "failed to write benchmark file on chrome paint IPC");
+/// Timestamp a renderer milestone at host receipt on the process launch clock.
+/// Only the main chrome may report the two supported renderer observations.
+pub fn observe_renderer_milestone(
+    webview: &str,
+    window: &str,
+    milestone: &str,
+) -> Result<(), String> {
+    if webview != crate::CHROME_LABEL || window != crate::MAIN_WINDOW {
+        return Err("startup observations are restricted to the main chrome".into());
     }
-
+    match milestone {
+        "chrome_first_paint" => {}
+        "controls_ready" if has_chrome_paint() => {}
+        "controls_ready" => {
+            return Err("contentful paint must be observed before controls readiness".into());
+        }
+        _ => return Err("unsupported startup milestone".into()),
+    }
+    record_milestone(milestone);
     Ok(())
 }
 
@@ -438,8 +478,16 @@ pub fn validate_switch_syntax(args: &[(&str, Option<String>)]) -> Result<(), Str
     Ok(())
 }
 
+#[cfg(test)]
+pub(crate) fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Reset global benchmark state for isolated unit testing.
-pub fn reset_for_test(new_launch: Option<Instant>) {
+#[cfg(test)]
+pub(crate) fn reset_for_test(new_launch: Option<Instant>) {
     let instant = new_launch.unwrap_or_else(Instant::now);
     // Do not hold both locks at once. Production milestone recording takes
     // MILESTONES before TIMELINE; taking them in the opposite order here can
@@ -556,6 +604,7 @@ mod tests {
 
     #[test]
     fn test_timeline_milestones_and_intervals() {
+        let _serial = test_lock();
         let launch = Instant::now();
         reset_for_test(Some(launch));
 
@@ -563,6 +612,7 @@ mod tests {
         record_custom_milestone("window_created", 45.0);
         record_custom_milestone("setup_complete", 62.0);
         record_custom_milestone("chrome_first_paint", 110.0);
+        record_custom_milestone("controls_ready", 125.0);
 
         let timeline = get_timeline();
         assert_eq!(timeline.state_init_ms, 15.5);
@@ -572,7 +622,7 @@ mod tests {
 
         let report = generate_benchmark_report(true);
         assert!(report.cold_start);
-        assert_eq!(report.total_startup_ms, 110.0);
+        assert_eq!(report.total_startup_ms, Some(125.0));
 
         assert_eq!(
             report.milestones.get("process_to_state_init_ms"),
@@ -587,6 +637,64 @@ mod tests {
             Some(&17.0)
         );
         assert_eq!(report.milestones.get("setup_to_chrome_fcp_ms"), Some(&48.0));
+    }
+
+    #[test]
+    fn incomplete_startup_never_reports_success_from_setup_or_paint_alone() {
+        let _serial = test_lock();
+        reset_for_test(None);
+        record_custom_milestone("state_init", 10.0);
+        record_custom_milestone("window_created", 30.0);
+        record_custom_milestone("setup_complete", 40.0);
+        let report: serde_json::Value = serde_json::from_str(&dump_benchmark_json()).unwrap();
+        assert!(report["total_startup_ms"].is_null());
+        record_custom_milestone("chrome_first_paint", 50.0);
+        let report: serde_json::Value = serde_json::from_str(&dump_benchmark_json()).unwrap();
+        assert!(report["total_startup_ms"].is_null());
+    }
+
+    #[test]
+    fn duplicate_reports_preserve_the_first_observation() {
+        let _serial = test_lock();
+        reset_for_test(None);
+        record_custom_milestone("chrome_first_paint", 50.0);
+        record_custom_milestone("chrome_first_paint", 100.0);
+        assert_eq!(get_timeline().chrome_paint_ms, Some(50.0));
+    }
+
+    #[test]
+    fn renderer_observations_reject_foreign_chrome_unknown_names_and_wrong_order() {
+        let _serial = test_lock();
+        reset_for_test(None);
+        assert!(observe_renderer_milestone("tab-1", "main", "chrome_first_paint").is_err());
+        assert!(observe_renderer_milestone("chrome", "popout-1", "chrome_first_paint").is_err());
+        assert!(observe_renderer_milestone("chrome", "main", "state_init").is_err());
+        assert!(observe_renderer_milestone("chrome", "main", "controls_ready").is_err());
+        assert!(get_milestones().is_empty());
+        let before = elapsed_ms();
+        observe_renderer_milestone("chrome", "main", "chrome_first_paint").unwrap();
+        let after = elapsed_ms();
+        let paint = get_timeline().chrome_paint_ms.unwrap();
+        assert!(paint >= before && paint <= after);
+        observe_renderer_milestone("chrome", "main", "controls_ready").unwrap();
+        assert!(get_milestones()["controls_ready"] >= paint);
+    }
+
+    #[test]
+    fn benchmark_exit_fails_on_missing_observations_or_unwritable_output() {
+        let _serial = test_lock();
+        reset_for_test(None);
+        let root = std::env::temp_dir().join(format!("dive-startup-{}", dive_core::TabId::new()));
+        std::fs::create_dir_all(&root).unwrap();
+        assert_eq!(finish_benchmark(Some(&root.join("missing.json"))), 1);
+        record_custom_milestone("state_init", 10.0);
+        record_custom_milestone("window_created", 25.0);
+        record_custom_milestone("setup_complete", 35.0);
+        record_custom_milestone("chrome_first_paint", 40.0);
+        record_custom_milestone("controls_ready", 45.0);
+        assert_eq!(finish_benchmark(Some(&root.join("complete.json"))), 0);
+        assert_eq!(finish_benchmark(Some(&root)), 2);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -611,6 +719,7 @@ mod tests {
 
     #[test]
     fn test_benchmark_report_json_export() {
+        let _serial = test_lock();
         reset_for_test(None);
         record_custom_milestone("state_init", 10.0);
         record_custom_milestone("window_created", 30.0);
@@ -626,6 +735,7 @@ mod tests {
 
     #[test]
     fn test_write_benchmark_file_to_temp_path() {
+        let _serial = test_lock();
         reset_for_test(None);
         record_custom_milestone("state_init", 10.0);
         record_custom_milestone("window_created", 25.0);

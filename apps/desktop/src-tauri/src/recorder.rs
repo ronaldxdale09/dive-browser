@@ -69,6 +69,7 @@ fn script(nonce: &str) -> String {
 /// Install the binding and script, and forward events while recording.
 pub async fn start(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) -> AppResult<()> {
     let state = app.state::<AppState>();
+    let _pending = state.activity.pending(tab_id);
     if state.buffers.is_recording(tab_id) {
         return Err(AppError::new("already recording this tab"));
     }

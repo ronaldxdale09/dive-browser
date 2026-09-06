@@ -2,15 +2,19 @@
 //! typed IPC surface used by the React chrome.
 
 mod a11y;
+mod activity;
 mod agent;
 mod agent_tools;
 mod automation;
 mod ax;
 mod buffers;
+mod capture_scope;
 mod cdp_feed;
 mod commands;
 mod console;
 mod crash;
+#[cfg(feature = "cef")]
+mod crash_probe;
 mod default_browser;
 mod devservers;
 mod emulate;
@@ -23,14 +27,22 @@ mod find;
 mod har;
 mod housekeeping;
 mod inspect;
+mod ipc_security;
+mod lifecycle_probe;
 mod loading;
 mod locator;
 mod mcp;
+mod memory_probe;
 mod menu;
 mod meta;
+mod navigation;
 mod network;
+#[cfg(feature = "cef")]
+mod network_probe;
 mod openapi;
 mod pagescript;
+#[cfg(feature = "cef")]
+mod permission_probe;
 mod permissions;
 mod prefs;
 /// Dive-owned network privacy matching.
@@ -48,6 +60,8 @@ mod state;
 mod storage;
 mod subtitles;
 mod titlebar;
+#[cfg(feature = "cef")]
+mod ui_probe;
 mod vitals;
 
 pub use error::AppError;
@@ -68,10 +82,9 @@ pub const CHROME_LABEL: &str = "chrome";
 pub const MAIN_WINDOW: &str = "main";
 
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StartupMilestonePayload {
     milestone: String,
-    #[serde(alias = "elapsedMs")]
-    elapsed_ms: f64,
 }
 
 fn handle_startup_invoke(invoke: tauri::ipc::Invoke<Runtime>) -> bool {
@@ -88,8 +101,15 @@ fn handle_startup_invoke(invoke: tauri::ipc::Invoke<Runtime>) -> bool {
     };
     match payload {
         Ok(data) => {
-            startup::record_custom_milestone(&data.milestone, data.elapsed_ms);
-            resolver.resolve(());
+            let webview = message.webview();
+            match startup::observe_renderer_milestone(
+                webview.label(),
+                webview.window().label(),
+                &data.milestone,
+            ) {
+                Ok(()) => resolver.resolve(()),
+                Err(error) => resolver.reject(error),
+            }
         }
         Err(err) => {
             resolver.reject(err.to_string());
@@ -98,13 +118,40 @@ fn handle_startup_invoke(invoke: tauri::ipc::Invoke<Runtime>) -> bool {
     true
 }
 
+/// Keep CEF responsive while owned export children stop; only reissue Quit
+/// after background cleanup confirms they have exited.
+fn drain_export_exit(app: tauri::AppHandle<Runtime>, registry: screen::jobs::Registry, code: i32) {
+    tauri::async_runtime::spawn(async move {
+        let worker = registry.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            worker.drain_shutdown(std::time::Duration::from_secs(15))
+        })
+        .await
+        .map_err(AppError::new)
+        .and_then(std::convert::identity);
+        match result {
+            Ok(()) => {
+                registry.finish_exit(true);
+                app.exit(code);
+            }
+            Err(error) => {
+                tracing::error!(%error, "export cleanup prevented application exit");
+                rfd::AsyncMessageDialog::new().set_title("Dive could not finish quitting")
+                    .set_description("An export has not stopped yet. Dive is still open to protect your files. Try Quit again after closing this message.")
+                    .set_level(rfd::MessageLevel::Error).set_buttons(rfd::MessageButtons::Ok).show().await;
+                registry.finish_exit(false);
+            }
+        }
+    });
+}
+
 /// Start the application. Under CEF this also serves as the sub-process
 /// entry point.
 #[cfg_attr(feature = "cef", tauri::cef_entry_point)]
 pub fn run() {
     startup::record_launch();
 
-    let _log_guard = init_logging();
+    let log_guard = init_logging();
     install_panic_hook();
 
     if let Err(error) = prefs::finish_pending_clear() {
@@ -119,12 +166,21 @@ pub fn run() {
     let mut builder = tauri::Builder::<Runtime>::new();
     #[cfg(feature = "cef")]
     {
+        let mut chromium_args = startup::build_chromium_args(None);
+        match lifecycle_probe::fetch_filter_probe::chromium_args() {
+            Ok(probe_args) => chromium_args.extend(probe_args),
+            Err(error) => {
+                tracing::error!(%error, "Fetch probe admission rejected before native launch");
+                drop(log_guard);
+                std::process::exit(2);
+            }
+        }
         builder = builder
             .root_cache_path(state::profiles_root())
             // Leading dashes are load-bearing for valueless switches in the
             // CEF adapter. Normal launches use the operating system keychain;
             // isolated automation may explicitly opt into its mock backend.
-            .command_line_args(startup::build_chromium_args(None));
+            .command_line_args(chromium_args);
     }
 
     #[cfg(target_os = "macos")]
@@ -144,6 +200,13 @@ pub fn run() {
 
     let app = builder
         .invoke_handler(move |invoke: tauri::ipc::Invoke<Runtime>| {
+            let caller = invoke.message.webview_ref();
+            if !ipc_security::trusted_chrome_label(caller.label(), caller.window_ref().label()) {
+                invoke
+                    .resolver
+                    .reject("application commands are only available to Dive chrome");
+                return true;
+            }
             if invoke.message.command() == "report_startup_milestone" {
                 handle_startup_invoke(invoke)
             } else {
@@ -184,6 +247,7 @@ pub fn run() {
         .setup(move |app| {
             specta.mount_events(app);
             state::init(app)?;
+            capture_scope::install(app)?;
             startup::record_milestone("state_init");
             engine::create_main_window(app)?;
             startup::record_milestone("window_created");
@@ -199,6 +263,9 @@ pub fn run() {
             cdp_bench(app.handle().clone());
             startup::record_milestone("setup_complete");
             startup::on_setup_completed(app.handle().clone());
+            lifecycle_probe::start(app.handle().clone());
+            #[cfg(feature = "cef")]
+            ui_probe::start(app.handle().clone());
             Ok(())
         })
         .build(tauri::generate_context!());
@@ -206,14 +273,25 @@ pub fn run() {
         Ok(app) => app,
         Err(error) => {
             tracing::error!(%error, "failed to build Dive");
-            return;
+            drop(log_guard);
+            std::process::exit(1);
         }
     };
-    app.run(|app, event| match event {
+    let exit_code = app.run_return(|app, event| match event {
         // Why the process is going away is the first question after an
         // unexpected exit; say so in the log.
-        tauri::RunEvent::ExitRequested { code, .. } => {
+        tauri::RunEvent::ExitRequested { code, api, .. } => {
+            use tauri::Manager as _;
             tracing::info!(?code, "exit requested");
+            let registry = app.state::<state::AppState>().screen_exports.clone();
+            match registry.prepare_exit() {
+                screen::jobs::ExitAction::Immediate => {}
+                screen::jobs::ExitAction::InProgress => api.prevent_exit(),
+                screen::jobs::ExitAction::Drain => {
+                    api.prevent_exit();
+                    drain_export_exit(app.clone(), registry, code.unwrap_or(0));
+                }
+            }
         }
         tauri::RunEvent::Exit => tracing::info!("event loop exited"),
         // Links the system hands us once Dive is the default browser (or a
@@ -235,6 +313,27 @@ pub fn run() {
         } => tracing::info!(%label, "window close requested"),
         _ => {}
     });
+    // Flush the asynchronous file logger after CEF and the app have drained,
+    // then preserve the exit status for launchers and runtime probes.
+    drop(log_guard);
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
+}
+
+fn startup_urls(mut args: impl Iterator<Item = String>, from_env: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    while let Some(arg) = args.next() {
+        if arg == "-ApplePersistenceIgnoreState" {
+            // AppKit's per-launch preference consumes its own value. Neither
+            // token is a destination handed to the browser.
+            let _ = args.next();
+        } else if !arg.starts_with("--") && !arg.starts_with("-psn_") && !arg.trim().is_empty() {
+            urls.push(arg);
+        }
+    }
+    urls.extend(from_env.split_whitespace().map(str::to_owned));
+    urls
 }
 
 /// Open tabs for URLs given on the command line or in `DIVE_OPEN_URL`
@@ -243,12 +342,7 @@ pub fn run() {
 fn open_startup_urls(app: &tauri::App<Runtime>) {
     use tauri::Manager;
     let from_env = std::env::var("DIVE_OPEN_URL").unwrap_or_default();
-    let urls = std::env::args()
-        .skip(1)
-        .filter(|a| !a.starts_with("--"))
-        .chain(from_env.split_whitespace().map(str::to_owned))
-        .filter(|u| !u.trim().is_empty())
-        .collect::<Vec<_>>();
+    let urls = startup_urls(std::env::args().skip(1), &from_env);
     if urls.is_empty() {
         return;
     }
@@ -528,7 +622,15 @@ fn stress_test(app: tauri::AppHandle<Runtime>) {
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         }
         tokio::time::sleep(std::time::Duration::from_secs(settle)).await;
+        if let Err(error) = memory_probe::record(&app, "loaded").await {
+            tracing::error!(%error, "stress: heap diagnostics failed");
+            app.exit(1);
+            return;
+        }
         tracing::info!(tabs = opened, "stress: loaded");
+        // Keep the loaded phase alive long enough for the external harness to
+        // sample it before discard begins reclaiming renderer memory.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         let discarded = match housekeeping::sweep(&app).await {
             Ok(n) => n,
             Err(e) => {
@@ -538,10 +640,28 @@ fn stress_test(app: tauri::AppHandle<Runtime>) {
             }
         };
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        if let Err(error) = memory_probe::record(&app, "swept").await {
+            tracing::error!(%error, "stress: heap diagnostics failed");
+            app.exit(1);
+            return;
+        }
         tracing::info!(discarded, "stress: swept");
         tracing::info!("stress: done");
         // Give the harness time to sample memory before the process goes.
         tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+        tracing::info!("stress: exiting");
+        if let Err(error) = memory_probe::record(&app, "settled").await {
+            tracing::error!(%error, "stress: heap diagnostics failed");
+            app.exit(1);
+            return;
+        }
+        // Sampling has stopped; reopening a discarded tab must not contaminate
+        // the reclaim measurement, but still has to succeed before this passes.
+        if let Err(error) = lifecycle_probe::verify_discarded_and_wake(&app).await {
+            tracing::error!(%error, "stress: lifecycle registry or wake failed");
+            app.exit(1);
+            return;
+        }
         app.exit(if discarded + 1 >= opened { 0 } else { 2 });
     });
 }
@@ -636,9 +756,7 @@ fn restore_session(app: &tauri::App<Runtime>) {
             .flatten()
             .and_then(|s| s.parse::<dive_core::TabId>().ok())
             .and_then(|id| store.tab(id).ok())
-            .filter(|t| {
-                t.workspace_id == Some(workspace) && t.state != dive_core::TabState::Discarded
-            });
+            .filter(|t| t.workspace_id == Some(workspace));
         remembered.or_else(|| store.last_active_tab(workspace).ok().flatten())
     };
     if let (Some(tab), Some(main)) = (candidate, engine::MainThread::here()) {
@@ -651,6 +769,43 @@ fn restore_session(app: &tauri::App<Runtime>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn startup_urls_ignore_appkit_override_pairs_and_launch_services_tokens() {
+        let args = [
+            "-ApplePersistenceIgnoreState",
+            "YES",
+            "https://first.test/",
+            "-psn_0_42",
+            "--disable-gpu",
+            "https://second.test/",
+        ];
+        assert_eq!(
+            super::startup_urls(args.into_iter().map(str::to_owned), "https://env.test/"),
+            [
+                "https://first.test/",
+                "https://second.test/",
+                "https://env.test/"
+            ]
+        );
+    }
+
+    #[test]
+    fn startup_urls_accept_normal_urls_and_explicit_environment_values() {
+        assert_eq!(
+            super::startup_urls(
+                ["https://test/", "", "data:text/plain,hello"]
+                    .into_iter()
+                    .map(str::to_owned),
+                "https://env-a/ https://env-b/"
+            ),
+            [
+                "https://test/",
+                "data:text/plain,hello",
+                "https://env-a/",
+                "https://env-b/"
+            ]
+        );
+    }
     use super::{Startup, startup_plan};
 
     #[test]
@@ -685,8 +840,19 @@ mod tests {
     }
 
     #[test]
+    fn startup_ipc_rejects_renderer_clock_payloads() {
+        assert!(
+            serde_json::from_value::<super::StartupMilestonePayload>(
+                serde_json::json!({"milestone":"chrome_first_paint", "elapsedMs": 1.0})
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     #[allow(clippy::float_cmp)]
     fn test_startup_timeline_instrumentation() {
+        let _serial = crate::startup::test_lock();
         crate::startup::reset_for_test(None);
         crate::startup::record_custom_milestone("state_init", 12.0);
         crate::startup::record_custom_milestone("window_created", 35.0);

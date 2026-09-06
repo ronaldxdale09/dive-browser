@@ -1,15 +1,15 @@
 import { ArrowLeft, ChevronDown, ExternalLink, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Provider, ProviderInfo } from "../../lib/ipc";
 import { useAgent } from "../../store/agent";
 import { useBrowser } from "../../store/browser";
 import { usePrefs } from "../../store/prefs";
 import { Icon } from "../Icon";
 
-const TOP_PROVIDERS: { id: Provider; label: string; badge?: string }[] = [
-  { id: "anthropic", label: "Anthropic", badge: "Recommended" },
-  { id: "openai", label: "OpenAI" },
-  { id: "ollama", label: "Ollama", badge: "Local" },
+const TOP_PROVIDERS: { id: Provider; badge?: string }[] = [
+  { id: "anthropic", badge: "Recommended" },
+  { id: "openai" },
+  { id: "ollama", badge: "Local" },
 ];
 
 /**
@@ -29,19 +29,21 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
   const update = usePrefs((s) => s.update);
   const openTab = useBrowser((s) => s.openTab);
 
-  const [selected, setSelected] = useState<Provider>(
-    (prefs.agent_provider as Provider) || "anthropic",
-  );
+  const [selected, setSelected] = useState<Provider>(() => providers.find((p) => p.id === prefs.agent_provider)?.id ?? providers[0]?.id ?? "anthropic");
   const [key, setKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [baseUrl, setBaseUrl] = useState(prefs.agent_custom_base_url || "");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [verifiedSuccess, setVerifiedSuccess] = useState(false);
+  const attempt = useRef(0);
+  useEffect(() => () => { attempt.current += 1; }, []);
 
-  const info = providers.find((p) => p.id === selected) ?? providers[0];
+  const info = providers.find((p) => p.id === selected);
 
   const choose = (id: Provider) => {
+    if (busy || !providers.some((p) => p.id === id)) return;
+    attempt.current += 1;
     setSelected(id);
     setKey("");
     setResult(null);
@@ -49,19 +51,22 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
   };
 
   /** Make `p` the active provider and return to conversation. */
-  const activate = async (p: ProviderInfo) => {
+  const activate = async (p: ProviderInfo, token: number) => {
+    if (attempt.current !== token) return;
     const models = useAgent.getState().models[p.id] ?? [];
     const keep = prefs.agent_provider === p.id || models.some((m) => m.id === prefs.agent_model);
     await update({
       agent_provider: p.id,
       agent_model: keep ? prefs.agent_model : p.default_model,
       ...(p.id === "custom" ? { agent_custom_base_url: baseUrl.trim() } : {}),
-    });
-    onDone();
+    }, { rejectOnError: true });
+    if (attempt.current === token) onDone();
   };
 
   const submit = async (check: boolean) => {
-    if (!info) return;
+    if (!info || busy) return;
+    const token = ++attempt.current;
+    const current = () => attempt.current === token;
     setBusy(true);
     setResult(null);
     setVerifiedSuccess(false);
@@ -71,7 +76,8 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
         return;
       }
       if (info.id === "custom") {
-        await update({ agent_custom_base_url: baseUrl.trim() });
+        await update({ agent_custom_base_url: baseUrl.trim() }, { rejectOnError: true });
+        if (!current()) return;
       }
       if (info.needs_key && !key.trim() && !keyed.includes(info.id)) {
         setResult({ ok: false, message: "Please enter your API key to continue." });
@@ -79,31 +85,31 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
       }
       if (check) {
         const verdict = await verifyKey(info.id, key.trim() || null);
+        if (!current()) return;
         setResult(verdict);
         if (!verdict.ok) return;
         setVerifiedSuccess(true);
       }
       if (key.trim()) {
         await saveKey(info.id, key.trim());
+        if (!current()) return;
       }
-      if (check) {
-        setTimeout(() => {
-          void activate(info);
-        }, 500);
-      } else {
-        await activate(info);
-      }
+      await activate(info, token);
     } catch (e) {
-      setResult({ ok: false, message: e instanceof Error ? e.message : String(e) });
+      if (current()) {
+        setVerifiedSuccess(false);
+        setResult({ ok: false, message: e instanceof Error ? e.message : String(e) });
+      }
     } finally {
-      setBusy(false);
+      if (current()) setBusy(false);
     }
   };
 
   const handlePaste = async () => {
+    const token = attempt.current;
     try {
       const text = await navigator.clipboard.readText();
-      if (text) setKey(text.trim());
+      if (text && token === attempt.current) setKey(text.trim());
     } catch {
       // Clipboard permissions unavailable; ignored
     }
@@ -162,12 +168,13 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
 
           {/* Quick-select top providers */}
           <div className="grid grid-cols-3 gap-1.5">
-            {TOP_PROVIDERS.map((tp) => {
+            {TOP_PROVIDERS.filter((tp) => providers.some((p) => p.id === tp.id)).map((tp) => {
               const isSelected = selected === tp.id;
               return (
                 <button
                   key={tp.id}
                   type="button"
+                  disabled={busy}
                   onClick={() => choose(tp.id)}
                   className={`flex flex-col items-start rounded-lg border px-2.5 py-1.5 text-left transition-colors ${
                     isSelected
@@ -175,7 +182,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
                       : "border-line/60 bg-surface-2/40 text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink"
                   }`}
                 >
-                  <span className="text-xs font-medium truncate w-full">{tp.label}</span>
+                  <span className="text-xs font-medium truncate w-full">{providers.find((p) => p.id === tp.id)?.name}</span>
                   <span className="text-[9.5px] text-ink-3 mt-0.5">
                     {tp.badge || "Cloud"}
                   </span>
@@ -190,29 +197,11 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
               id="agent-provider-select"
               aria-label="All Providers"
               value={selected}
+              disabled={busy}
               onChange={(e) => choose(e.target.value as Provider)}
               className="w-full appearance-none rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs text-ink outline-none transition-colors hover:border-line-2 focus:border-highlight pr-7 cursor-pointer"
             >
-              <optgroup label="Recommended">
-                <option value="anthropic">Anthropic (Claude 3.7 Sonnet)</option>
-                <option value="openai">OpenAI (GPT-4o)</option>
-                <option value="ollama">Ollama (Local & Free)</option>
-              </optgroup>
-              <optgroup label="Cloud Gateways & Frontier">
-                <option value="openrouter">OpenRouter (Multi-model gateway)</option>
-                <option value="google">Google Gemini</option>
-                <option value="groq">Groq (Fast inference)</option>
-                <option value="deepseek">DeepSeek</option>
-                <option value="mistral">Mistral AI</option>
-                <option value="xai">xAI Grok</option>
-                <option value="together">Together AI</option>
-                <option value="fireworks">Fireworks AI</option>
-                <option value="cerebras">Cerebras</option>
-              </optgroup>
-              <optgroup label="Local & Custom">
-                <option value="lmstudio">LM Studio (Local server)</option>
-                <option value="custom">Custom (OpenAI-compatible URL)</option>
-              </optgroup>
+              {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
             </select>
             <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-ink-3">
               <Icon icon={ChevronDown} size={13} />
@@ -255,6 +244,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
                 </label>
                 <input
                   id="agent-base-url"
+                  disabled={busy}
                   value={baseUrl}
                   onChange={(e) => setBaseUrl(e.target.value)}
                   placeholder="https://api.example.com/v1"
@@ -273,6 +263,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
                 <div className="relative flex items-center">
                   <input
                     id="agent-api-key"
+                    disabled={busy}
                     type={showKey ? "text" : "password"}
                     value={key}
                     onChange={(e) => setKey(e.target.value)}
@@ -298,6 +289,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
                     <button
                       type="button"
                       onClick={handlePaste}
+                      disabled={busy}
                       className="px-1.5 py-0.5 text-[10px] text-ink-3 hover:text-ink"
                     >
                       Paste
@@ -331,8 +323,8 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
 
             {/* Error state */}
             {result && !result.ok && (
-              <div className="rounded-lg border border-danger/30 bg-danger/10 px-2.5 py-1.5 text-[11px] text-danger space-y-0.5">
-                <span className="font-medium">Verification failed:</span>
+              <div role="alert" className="rounded-lg border border-danger/30 bg-danger/10 px-2.5 py-1.5 text-[11px] text-danger space-y-0.5">
+                <span className="font-medium">Could not connect:</span>
                 <p className="text-[10.5px] opacity-90">{result.message}</p>
               </div>
             )}

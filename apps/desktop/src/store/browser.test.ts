@@ -3,7 +3,7 @@ import type { Event } from "@tauri-apps/api/event";
 import { reduceCrash, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, useBrowser, withoutRequest } from "./browser";
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
-import type { PermissionAsked, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
+import type { PermissionAsked, PermissionDismissed, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
 import { usePrivacy } from "./privacy";
 
 const tab = (id: string, url = "https://x"): Tab => ({
@@ -15,6 +15,39 @@ const ws = (id: string, name: string, position: number): Workspace => ({
 });
 
 describe("reduceEvent", () => {
+  it("keeps background workspace updates out of the main tab strip while retaining essentials", () => {
+    const base = { workspaces: [], tabs: [tab("a")], activeTab: "a", activeWorkspace: "w", recordingTab: null, detached: [], profiles: [], activeProfile: null };
+    const foreign = { ...tab("background"), workspace_id: "other" };
+    expect(reduceEvent(base, { type: "tab_upserted", data: foreign })).toEqual({});
+    const essential = { ...foreign, tier: "essential" as const };
+    expect(reduceEvent(base, { type: "tab_upserted", data: essential }).tabs).toEqual([tab("a"), essential]);
+    const moved = { ...tab("a"), workspace_id: "other" };
+    expect(reduceEvent(base, { type: "tab_upserted", data: moved })).toEqual({ tabs: [], activeTab: null });
+  });
+
+  it("replaces foreign strip entries before receiving the reattached workspace tabs", () => {
+    const essential = { ...tab("essential"), tier: "essential" as const, workspace_id: null };
+    const base = { workspaces: [ws("owner", "Home", 0)], tabs: [tab("foreign"), essential], activeTab: "foreign", activeWorkspace: "w", recordingTab: null, detached: ["returned"], profiles: [], activeProfile: "old" };
+    const switched = { ...base, ...reduceEvent(base, { type: "workspace_activated", data: "owner" }) };
+    expect(switched.tabs).toEqual([essential]);
+    expect(switched.activeTab).toBeNull();
+    expect(switched.activeProfile).toBe("p1");
+    const returned = { ...tab("returned"), workspace_id: "owner" };
+    const populated = { ...switched, ...reduceEvent(switched, { type: "tab_upserted", data: returned }) };
+    expect(populated.tabs).toEqual([essential, returned]);
+    const attached = { ...populated, ...reduceWindowChange(populated, returned.id, false) };
+    expect(reduceEvent(attached, { type: "tab_activated", data: returned.id }).activeTab).toBe(returned.id);
+  });
+
+  it.each([null, "a"])("ignores a delayed activation of a detached page with main selection %s", (activeTab) => {
+    const base = { workspaces: [], tabs: [tab("a")], activeTab, activeWorkspace: "w", recordingTab: null, detached: [], profiles: [], activeProfile: null };
+    const detached = { ...base, ...reduceWindowChange(base, "b", true) };
+    const upserted = { ...detached, ...reduceEvent(detached, { type: "tab_upserted", data: tab("b") }) };
+    const late = { ...upserted, ...reduceEvent(upserted, { type: "tab_activated", data: "b" }) };
+    expect(late.activeTab).toBe(activeTab);
+    expect(late.detached).toEqual(["b"]);
+  });
+
   it("upserts tabs in place", () => {
     const base = { workspaces: [], tabs: [tab("a"), tab("b")], activeTab: "a", activeWorkspace: "w", recordingTab: null, detached: [], profiles: [], activeProfile: null };
     const out = reduceEvent(base, { type: "tab_upserted", data: tab("a", "https://y") });
@@ -46,18 +79,17 @@ describe("reduceWindowChange", () => {
   });
 });
 
+const request = (id: string, tab = "t1"): PermissionAsked => ({page_lifetime:true,request_id:id,tab_id:tab,origin:"https://a.test",kinds:["camera"],scope:{profile_id:"p1",container_id:"c1"}});
 describe("permission helpers", () => {
-  it("deduplicates requests for the same origin and kind", () => {
-    const r1 = reducePermissionAsked({}, { tab_id: "t1", origin: "https://a.test", kind: "camera" });
-    expect(r1.t1).toEqual([{ origin: "https://a.test", kind: "camera" }]);
-    const r2 = reducePermissionAsked(r1, { tab_id: "t1", origin: "https://a.test", kind: "camera" });
-    expect(r2.t1?.length).toBe(1);
+  it("deduplicates event delivery by opaque native request, not origin", () => {
+    const r1=reducePermissionAsked({},request("r1"));
+    expect(reducePermissionAsked(r1,request("r1"))).toBe(r1);
+    const r2=reducePermissionAsked(r1,request("r2"));
+    expect(r2.t1).toHaveLength(2);
+    expect(withoutRequest(r2,"t1",request("r1"))).toEqual({t1:[request("r2")]});
   });
-
-  it("removes single request and cleans up empty tab list", () => {
-    const req = { origin: "https://a.test", kind: "camera" };
-    const r1 = { t1: [req] };
-    expect(withoutRequest(r1, "t1", req)).toEqual({});
+  it("removes a single request and cleans up the empty tab list", () => {
+    expect(withoutRequest({t1:[request("r1")]},"t1",request("r1"))).toEqual({});
   });
 });
 
@@ -124,6 +156,18 @@ describe("optimistic switching", () => {
   afterEach(() => {
     useBrowser.setState(initial, true);
     vi.restoreAllMocks();
+  });
+
+  it("raises a detached page without changing the main selection", async () => {
+    let finish!: () => void;
+    vi.spyOn(ipc, "tabActivate").mockReturnValue(new Promise<null>((resolve) => { finish = () => resolve(null); }));
+    useBrowser.setState({ tabs: [tab("a"), tab("b")], activeTab: "a", detached: ["b"] });
+    const raised = useBrowser.getState().activateTab("b");
+    expect(useBrowser.getState().activeTab).toBe("a");
+    expect(ipc.tabActivate).toHaveBeenCalledWith("b");
+    finish();
+    await raised;
+    expect(useBrowser.getState().activeTab).toBe("a");
   });
 
   it("highlights the tab before the engine answers and keeps it when it agrees", async () => {
@@ -218,6 +262,8 @@ describe("boot", () => {
     const loadListen = vi.spyOn(events.tabLoad, "listen").mockImplementation(async (cb) => ((onLoad = cb), () => undefined));
     const crashListen = vi.spyOn(events.tabCrashed, "listen").mockImplementation(async (cb) => ((onCrash = cb), () => undefined));
     vi.spyOn(events.stateChanged, "listen").mockResolvedValue(() => undefined);
+    let onDismissed!: (e: Event<PermissionDismissed>) => void;
+    vi.spyOn(events.permissionDismissed,"listen").mockImplementation(async(cb)=>((onDismissed=cb),()=>undefined));
     let onAsked!: (e: Event<PermissionAsked>) => void;
     const askedListen = vi.spyOn(events.permissionAsked, "listen").mockImplementation(async (cb) => ((onAsked = cb), () => undefined));
     vi.spyOn(events.tabWindowChanged, "listen").mockResolvedValue(() => undefined);
@@ -233,8 +279,10 @@ describe("boot", () => {
     expect(crashListen).toHaveBeenCalledTimes(1);
     expect(askedListen).toHaveBeenCalledTimes(1);
 
-    onAsked({ event: "permission-asked", id: 3, payload: { tab_id: "a", origin: "https://meet.test", kind: "camera" } });
-    expect(useBrowser.getState().permissionRequests).toEqual({ a: [{ origin: "https://meet.test", kind: "camera" }] });
+    onAsked({ event: "permission-asked", id: 3, payload: request("r1","a") });
+    expect(useBrowser.getState().permissionRequests).toEqual({ a: [request("r1","a")] });
+    onDismissed({event:"permission-dismissed",id:4,payload:{request_id:"r1",tab_id:"a"}});
+    expect(useBrowser.getState().permissionRequests).toEqual({});
 
     onLoad({ event: "tab-load", id: 1, payload: load("a", "started") });
     expect(useBrowser.getState().loading).toEqual({ a: true });

@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["vendor/tauri-runtime-cef"]
 members = ["crates/*", "apps/desktop/src-tauri", "tests/e2e"]
 
 [workspace.package]
@@ -57,3 +58,7 @@ tauri-build = { git = "https://github.com/tauri-apps/tauri", rev = "713203057982
 tauri-macros = { git = "https://github.com/tauri-apps/tauri", rev = "713203057982a38d810f64fe0930c9f7670b3a0d" }
 tauri-codegen = { git = "https://github.com/tauri-apps/tauri", rev = "713203057982a38d810f64fe0930c9f7670b3a0d" }
 tauri-plugin = { git = "https://github.com/tauri-apps/tauri", rev = "713203057982a38d810f64fe0930c9f7670b3a0d" }
+
+# Retain CEF host windows until asynchronous close acknowledgement.
+[patch."https://github.com/tauri-apps/tauri"]
+tauri-runtime-cef = { path = "vendor/tauri-runtime-cef" }

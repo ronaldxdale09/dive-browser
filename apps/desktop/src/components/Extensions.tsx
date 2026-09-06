@@ -42,7 +42,7 @@ export function Extensions() {
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4">
           <span className="grid size-8 place-items-center rounded-lg bg-accent/10 text-accent"><Icon icon={Puzzle} size={17} /></span>
           <div className="min-w-0 flex-1"><h2 className="text-sm font-medium text-ink">Chromium extensions</h2><p className="text-[11px] text-ink-3">Load trusted unpacked Manifest V2 or V3 extensions</p></div>
-          <button ref={loadButton} type="button" disabled={busy} onClick={() => void load()} className="flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-medium text-white hover:brightness-110 disabled:opacity-50"><Icon icon={FolderOpen} size={13} />Load unpacked</button>
+          <button ref={loadButton} type="button" disabled={busy} onClick={() => void load()} className="flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-medium text-accent-ink hover:brightness-110 disabled:opacity-50"><Icon icon={FolderOpen} size={13} />Load unpacked</button>
           <IconButton icon={X} label="Close extensions" onClick={close} />
         </header>
         {data?.restart_required && <div role="status" className="flex items-center gap-2 border-b border-highlight/25 bg-highlight/10 px-4 py-2 text-xs text-ink"><Icon icon={RotateCw} size={13} className="text-highlight" /><span className="flex-1">Restart Dive to apply extension changes.</span><button type="button" onClick={() => ipc.appRestart()} className="rounded-md border border-line-2 px-2.5 py-1 text-[11px] hover:bg-surface-3">Restart now</button></div>}

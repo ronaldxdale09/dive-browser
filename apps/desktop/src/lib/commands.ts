@@ -3,6 +3,7 @@ import { useBrowser } from "../store/browser";
 import { useRecording } from "../store/recording";
 import { usePicker } from "../store/simulator";
 import type { Command } from "./ipc";
+import { traceInputCommand } from "./inputTimingProbe";
 
 /** Rail positions a workspace chord can reach. */
 const WORKSPACE_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
@@ -63,11 +64,8 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
 
 /** Create a blank tab and move it into its own browser window. */
 async function openWindow() {
-  const workspace = useBrowser.getState().activeWorkspace;
-  if (!workspace) return;
   try {
-    const tab = await ipc.tabOpen(workspace, "about:blank");
-    await ipc.tabDetach(tab.id, null);
+    await ipc.windowOpen();
     useBrowser.setState({ error: null });
   } catch (error) {
     useBrowser.setState({ error: message(error) });
@@ -110,7 +108,8 @@ function stepTab(delta: number) {
   return next ? activateTab(next.id) : undefined;
 }
 
-export function runCommand(id: string): void {
+export function runCommand(id: string, source: "keyboard" | "native-menu" | "command" = "command"): void {
+  traceInputCommand(id, source);
   const handler = UI_COMMANDS[id];
   if (handler) {
     void handler();

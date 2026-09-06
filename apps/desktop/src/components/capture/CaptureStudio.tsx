@@ -37,6 +37,13 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
   const [operations, setOperations] = useState<Operation[]>([]);
   const [redo, setRedo] = useState<Operation[]>([]);
   const [draft, setDraft] = useState<Operation | null>(null);
+  // Pointer moves are continuous events: React may batch their render updates
+  // until after pointerup. Keep the live gesture independent of that schedule.
+  const draftRef = useRef<Operation | null>(null);
+  const updateDraft = (next: Operation | null) => {
+    draftRef.current = next;
+    setDraft(next);
+  };
   const [textAt, setTextAt] = useState<Point | null>(null);
   // "fit" follows the width of the viewing area so the whole page is in
   // view without hiding under the settings panel; a number is a zoom the
@@ -115,23 +122,37 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
     return { x: ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * event.currentTarget.width, y: ((event.clientY - bounds.top) / Math.max(1, bounds.height)) * event.currentTarget.height };
   };
   const onDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    // Suppress compatibility mousedown's focus transfer: text placement mounts
+    // and focuses an input during this pointerdown.
+    event.preventDefault();
     const start = point(event);
     if (tool === "text") { setTextAt(start); return; }
     event.currentTarget.setPointerCapture?.(event.pointerId);
-    setDraft(tool === "crop"
+    updateDraft(tool === "crop"
       ? { kind: "crop", x1: start.x, y1: start.y, x2: start.x, y2: start.y }
       : tool === "pen" || tool === "highlight"
         ? { kind: tool, color, width, x1: start.x, y1: start.y, x2: start.x, y2: start.y, points: [start] }
         : { kind: tool, color, width, x1: start.x, y1: start.y, x2: start.x, y2: start.y });
   };
+  const extendDraft = (current: Operation, next: Point): Operation => ({
+    ...current, x2: next.x, y2: next.y,
+    ...(current.kind === "pen" || current.kind === "highlight"
+      ? { points: [...(current.points ?? []), next] } : {}),
+  });
   const onMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!draft) return;
-    const next = point(event);
-    setDraft({ ...draft, x2: next.x, y2: next.y, ...(draft.kind === "pen" || draft.kind === "highlight" ? { points: [...(draft.points ?? []), next] } : {}) });
+    const current = draftRef.current;
+    if (current) updateDraft(extendDraft(current, point(event)));
   };
-  const onUp = () => {
-    if (draft && validRegion(draft)) { setOperations((current) => [...current, draft]); setRedo([]); }
-    setDraft(null);
+  const onUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const current = draftRef.current;
+    if (current) {
+      const completed = extendDraft(current, point(event));
+      if (validRegion(completed)) {
+        setOperations((operations) => [...operations, completed]);
+        setRedo([]);
+      }
+    }
+    updateDraft(null);
   };
   const commitText = (value: string) => {
     if (textAt && value.trim()) {
@@ -197,7 +218,7 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
           {loadError && <div role="alert" className="mx-auto mt-20 max-w-md rounded-xl border border-danger/30 bg-danger/10 p-5 text-sm text-danger">{loadError}</div>}
           {!image && !loadError && <div role="status" className="mx-auto mt-20 w-fit rounded-full border border-line bg-surface px-4 py-2 text-xs text-ink-3">Loading full-resolution capture…</div>}
           {image && <div className="relative mx-auto w-fit shadow-2xl" style={{ width: image.naturalWidth * zoom }}>
-            <canvas ref={canvasRef} role="img" aria-label="Full-page capture preview" width={image.naturalWidth} height={image.naturalHeight} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => setDraft(null)} className="block w-full touch-none bg-white" style={{ cursor: tool === "text" ? "text" : "crosshair" }} />
+            <canvas ref={canvasRef} role="img" aria-label="Full-page capture preview" width={image.naturalWidth} height={image.naturalHeight} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => updateDraft(null)} className="block w-full touch-none bg-white" style={{ cursor: tool === "text" ? "text" : "crosshair" }} />
             {textAt && <input autoFocus aria-label="Annotation text" placeholder="Type a note…" className="absolute min-w-40 rounded-md border border-highlight bg-surface px-2 py-1 text-xs text-ink shadow-xl outline-none" style={{ left: `${(textAt.x / image.naturalWidth) * 100}%`, top: `${(textAt.y / image.naturalHeight) * 100}%` }} onKeyDown={(event) => { if (event.key === "Enter") commitText(event.currentTarget.value); if (event.key === "Escape") setTextAt(null); }} onBlur={(event) => commitText(event.currentTarget.value)} />}
           </div>}
         </section>
@@ -224,7 +245,11 @@ export function fitZoom(mode: number | "fit", areaWidth: number, imageWidth: num
   return Math.min(1, Math.max(0.05, (areaWidth - AREA_PADDING) / imageWidth));
 }
 
-function validRegion(region: Region): boolean { return Math.abs(region.x2 - region.x1) > 3 || Math.abs(region.y2 - region.y1) > 3; }
+function validRegion(region: Operation): boolean {
+  const moved = (point: Point) => Math.abs(point.x - region.x1) > 3 || Math.abs(point.y - region.y1) > 3;
+  return moved({ x: region.x2, y: region.y2 })
+    || ((region.kind === "pen" || region.kind === "highlight") && !!region.points?.some(moved));
+}
 function normalized(region: Region) { return { x: Math.min(region.x1, region.x2), y: Math.min(region.y1, region.y2), width: Math.abs(region.x2 - region.x1), height: Math.abs(region.y2 - region.y1) }; }
 function offsetMark(mark: Mark, x: number, y: number): Mark {
   const shifted = { ...mark, x1: mark.x1 - x, x2: mark.x2 - x, y1: mark.y1 - y, y2: mark.y2 - y };

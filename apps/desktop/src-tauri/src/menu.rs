@@ -15,6 +15,11 @@ use tauri_specta::Event;
 
 use crate::Runtime;
 use crate::state::{AppState, lock};
+#[cfg(feature = "cef")]
+use crate::ui_probe::native_input_receipt;
+
+#[cfg(not(feature = "cef"))]
+fn native_input_receipt(_stage: &'static str, _command: &str) {}
 
 /// A menu item the chrome owns; the payload is a command id from `UI_COMMANDS`.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
@@ -37,6 +42,11 @@ const FOCUS_CHROME: [&str; 12] = [
     "workspace.edit",
     "shortcuts.open",
 ];
+
+/// These commands create browser chrome in the main workspace window.
+pub(crate) fn main_window_command(command: &str) -> bool {
+    matches!(command, "tab.new" | "window.new")
+}
 
 /// One chrome-owned menu item with its accelerator.
 fn item(app: &App<Runtime>, id: &str, text: &str, accel: &str) -> tauri::Result<MenuItem<Runtime>> {
@@ -245,6 +255,7 @@ pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
 
     app.on_menu_event(|app, event| {
         let id = event.id().0.clone();
+        native_input_receipt("menu-received", &id);
         // A tab in its own window has its own chrome; while that window is
         // focused the shortcut is about it, not the main window's page.
         let target = {
@@ -252,15 +263,27 @@ pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
             let host = lock(&state.host);
             match host.as_ref() {
                 Some(host) => {
-                    if FOCUS_CHROME.contains(&id.as_str()) {
-                        host.focus_chrome_for_menu();
+                    if main_window_command(&id) {
+                        if let Err(error) = host.focus_main_chrome() {
+                            tracing::warn!(%error, "focusing main window for menu failed");
+                            return;
+                        }
+                        crate::CHROME_LABEL.to_owned()
+                    } else {
+                        if FOCUS_CHROME.contains(&id.as_str()) {
+                            host.focus_chrome_for_menu();
+                        }
+                        host.chrome_for_menu()
                     }
-                    host.chrome_for_menu()
                 }
                 None => crate::CHROME_LABEL.to_owned(),
             }
         };
-        let _ = MenuCommand(id).emit_to(app, target.as_str());
+        native_input_receipt("menu-focus-returned", &id);
+        native_input_receipt("menu-emit-begin", &id);
+        let command = MenuCommand(id);
+        let _ = command.emit_to(app, target.as_str());
+        native_input_receipt("menu-emit-returned", &command.0);
     });
     Ok(())
 }

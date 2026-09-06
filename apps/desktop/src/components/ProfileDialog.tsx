@@ -1,6 +1,7 @@
+import { AvatarImage } from "./AvatarImage";
 import { Shield, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
-import { PROFILE_COLORS, PROFILE_SEEDS, profileAvatar, seedFromProfileName } from "../lib/profileAvatar";
+import { PROFILE_COLORS, PROFILE_SEEDS, seedFromProfileName } from "../lib/profileAvatar";
 import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
@@ -58,7 +59,7 @@ function ProfileForm({ id }: { id: string | null }) {
         className="mx-auto mt-24 w-[420px] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
       >
         <div className="flex items-center gap-3">
-          <img src={profileAvatar(avatar, color)} alt="" width={44} height={44} className="size-11 shrink-0 rounded-full" />
+          <AvatarImage kind="profile" seed={avatar} color={color} alt="" width={44} height={44} className="size-11 shrink-0 rounded-full" />
           <div className="min-w-0">
             <h2 className="text-sm font-semibold">{existing ? "Edit profile" : "New profile"}</h2>
             <p className="text-[11px] text-ink-3">A profile is a person using Dive: its own cookies and logins, and its own workspaces.</p>
@@ -78,7 +79,7 @@ function ProfileForm({ id }: { id: string | null }) {
         <div role="radiogroup" aria-label="Face" className="mt-1.5 grid grid-cols-6 gap-2">
           {seeds.map((s) => (
             <button key={s} type="button" role="radio" aria-checked={avatar === s} aria-label={`Face ${s}`} onClick={() => setSeed(s)} className={`aspect-square rounded-full ring-offset-2 ring-offset-surface transition ${avatar === s ? "ring-2 ring-highlight" : "opacity-80 hover:opacity-100"}`}>
-              <img src={profileAvatar(s, color)} alt="" className="size-full rounded-full" />
+              <AvatarImage kind="profile" seed={s} color={color} alt="" className="size-full rounded-full" />
             </button>
           ))}
         </div>

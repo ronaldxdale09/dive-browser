@@ -4,7 +4,7 @@ import { listenConsole, useConsole } from "./console";
 import { listenNetwork, useNetwork } from "./network";
 import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
 import { useDownloads } from "./downloads";
-import type { CoreEvent, Decision, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
+import type { CoreEvent, Decision, Duration, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
 
 export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser" | "subtitles";
 /** The sections of the library dialog. */
@@ -14,7 +14,7 @@ export type LibraryTab = "bookmarks" | "history" | "downloads" | "recordings";
 export type SettingsSection = "general" | "appearance" | "privacy" | "downloads" | "developer" | "agent" | "subtitles" | "shortcuts" | "about";
 
 /** A page's outstanding request for a capability, awaiting the person's answer. */
-export type PermissionRequest = { origin: string; kind: string };
+export type PermissionRequest = PermissionAsked;
 
 interface BrowserState {
   ready: boolean;
@@ -46,11 +46,11 @@ interface BrowserState {
   crashedTabs: Record<string, CrashState>;
   applyLoad: (load: TabLoad) => void;
   applyCrash: (crash: TabCrashed) => void;
-  /** Pages asking for a capability, per tab; one entry per origin and kind. */
+  /** Pages asking for a capability, per tab; one entry per native request. */
   permissionRequests: Record<string, PermissionRequest[]>;
   applyPermissionAsked: (asked: PermissionAsked) => void;
-  /** Remember the decision for that origin and drop the request. */
-  decidePermission: (tabId: string, request: PermissionRequest, decision: Decision) => Promise<void>;
+  /** Resolve the original native request, removing it only after success. */
+  decidePermission: (tabId: string, request: PermissionRequest, decision: Decision, duration: Duration) => Promise<void>;
   /** Stop the active tab's load. */
   stop: () => Promise<void>;
   /** Open the print dialog for the active tab. */
@@ -87,7 +87,7 @@ interface BrowserState {
   reorderTabs: (ordered: string[]) => Promise<void>;
   setPinned: (id: string, pinned: boolean) => Promise<void>;
   activateWorkspace: (id: string) => Promise<void>;
-  /** Live tab count per workspace id; the snapshot only carries the active one's tabs. */
+  /** Open tab count including discarded tabs per workspace id; the snapshot only carries the active one's tabs. */
   counts: Record<string, number>;
   refreshCounts: () => Promise<void>;
   reorderWorkspaces: (ordered: string[]) => Promise<void>;
@@ -105,6 +105,17 @@ interface BrowserState {
 
 export type NavError = { url: string; error: string };
 export type CrashState = { attempt: number; recovering: boolean };
+
+const NAVIGATION_DIALOGS = new Set<UiPanel>(["palette", "settings", "library", "shortcuts"]);
+
+/** Navigation dialogs replace each other; panels and editing workflows keep their state. */
+function togglePanel(open: BrowserState["open"], panel: UiPanel, value?: boolean): BrowserState["open"] {
+  const shown = value ?? !open[panel];
+  if (shown && NAVIGATION_DIALOGS.has(panel)) {
+    return { ...open, palette: false, settings: false, library: false, shortcuts: false, menu: false, [panel]: true };
+  }
+  return { ...open, [panel]: shown };
+}
 
 type LoadState = Pick<BrowserState, "loading" | "navError" | "crashedTabs">;
 
@@ -134,17 +145,17 @@ export function reduceLoad(state: LoadState, load: TabLoad): Partial<LoadState> 
 
 /**
  * Queue a page's request. Chromium may ask again for the same thing while the
- * banner is up (a page that retries), so an origin and kind appear once.
+ * banner is up (a page that retries), so an opaque native request ID appears once.
  */
 export function reducePermissionAsked(requests: Record<string, PermissionRequest[]>, asked: PermissionAsked): Record<string, PermissionRequest[]> {
   const list = requests[asked.tab_id] ?? [];
-  if (list.some((r) => r.origin === asked.origin && r.kind === asked.kind)) return requests;
-  return { ...requests, [asked.tab_id]: [...list, { origin: asked.origin, kind: asked.kind }] };
+  if (list.some((r) => r.request_id === asked.request_id)) return requests;
+  return { ...requests, [asked.tab_id]: [...list, asked] };
 }
 
 /** Drop one request; a tab with none left leaves the record. */
-export function withoutRequest(requests: Record<string, PermissionRequest[]>, tabId: string, request: PermissionRequest): Record<string, PermissionRequest[]> {
-  const rest = (requests[tabId] ?? []).filter((r) => !(r.origin === request.origin && r.kind === request.kind));
+export function withoutRequest(requests: Record<string, PermissionRequest[]>, tabId: string, request: Pick<PermissionRequest, "request_id">): Record<string, PermissionRequest[]> {
+  const rest = (requests[tabId] ?? []).filter((r) => r.request_id !== request.request_id);
   return rest.length === 0 ? without(requests, tabId) : { ...requests, [tabId]: rest };
 }
 
@@ -168,7 +179,9 @@ export function reduceEvent(state: Reduced, event: CoreEvent): Partial<Reduced> 
       return { workspaces: state.workspaces.filter((w) => w.id !== event.data) };
     case "workspace_activated": {
       const profile = state.workspaces.find((w) => w.id === event.data)?.profile_id ?? state.activeProfile;
-      return { activeWorkspace: event.data, activeProfile: profile };
+      const tabs = state.tabs.filter((tab) => tab.workspace_id === event.data || tab.tier === "essential");
+      const activeTab = tabs.some((tab) => tab.id === state.activeTab) ? state.activeTab : null;
+      return { activeWorkspace: event.data, activeProfile: profile, tabs, activeTab };
     }
     case "profile_upserted": {
       const others = state.profiles.filter((p) => p.id !== event.data.id);
@@ -179,6 +192,12 @@ export function reduceEvent(state: Reduced, event: CoreEvent): Partial<Reduced> 
     case "profile_activated":
       return { activeProfile: event.data };
     case "tab_upserted": {
+      // Events are global; mirror the active-workspace-plus-essentials snapshot.
+      // Detached windows subscribe to their own page independently.
+      if (event.data.workspace_id !== state.activeWorkspace && event.data.tier !== "essential") {
+        if (!state.tabs.some((tab) => tab.id === event.data.id)) return {};
+        return { tabs: state.tabs.filter((tab) => tab.id !== event.data.id), activeTab: state.activeTab === event.data.id ? null : state.activeTab };
+      }
       const idx = state.tabs.findIndex((t) => t.id === event.data.id);
       const tabs = idx === -1 ? [...state.tabs, event.data] : state.tabs.map((t, i) => (i === idx ? event.data : t));
       return { tabs };
@@ -193,7 +212,8 @@ export function reduceEvent(state: Reduced, event: CoreEvent): Partial<Reduced> 
       return { tabs, activeTab, recordingTab, detached };
     }
     case "tab_activated":
-      return { activeTab: event.data };
+      // Detachment arrives directly; an earlier queued activation can follow it.
+      return state.detached.includes(event.data) ? {} : { activeTab: event.data };
     default:
       return {};
   }
@@ -218,6 +238,7 @@ let unlisten: (() => void) | null = null;
 let unlistenLoad: (() => void) | null = null;
 let unlistenCrash: (() => void) | null = null;
 let unlistenPermission: (() => void) | null = null;
+let unlistenPermissionDismissed: (() => void) | null = null;
 
 export const useBrowser = create<BrowserState>((set, get) => ({
   ready: false,
@@ -252,13 +273,13 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   detached: [],
   open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false },
   libraryTab: "bookmarks",
-  openLibrary: (libraryTab) => set((s) => ({ libraryTab, open: { ...s.open, library: true, menu: false } })),
+  openLibrary: (libraryTab) => set((s) => ({ libraryTab, open: togglePanel(s.open, "library", true) })),
   settingsSection: "general",
-  openSettings: (section = "general") => set((s) => ({ settingsSection: section, open: { ...s.open, settings: true } })),
+  openSettings: (section = "general") => set((s) => ({ settingsSection: section, open: togglePanel(s.open, "settings", true) })),
   permissionRequests: {},
   applyPermissionAsked: (asked) => set((s) => ({ permissionRequests: reducePermissionAsked(s.permissionRequests, asked) })),
-  decidePermission: async (tabId, request, decision) => {
-    await run(set, () => ipc.permissionSet(request.origin, request.kind, decision));
+  decidePermission: async (tabId, request, decision, duration) => {
+    await ipc.permissionReply(tabId, request.request_id, decision, duration);
     set((s) => ({ permissionRequests: withoutRequest(s.permissionRequests, tabId, request) }));
   },
   counts: {},
@@ -286,6 +307,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       unlistenLoad ??= await events.tabLoad.listen((e) => get().applyLoad(e.payload));
       unlistenCrash ??= await events.tabCrashed.listen((e) => get().applyCrash(e.payload));
       unlistenPermission ??= await events.permissionAsked.listen((e) => get().applyPermissionAsked(e.payload));
+      unlistenPermissionDismissed ??= await events.permissionDismissed.listen((e) => set((s) => ({permissionRequests: withoutRequest(s.permissionRequests,e.payload.tab_id,e.payload)})));
       await events.tabWindowChanged.listen((e) => set(reduceWindowChange(get(), e.payload.tab, e.payload.detached)));
       await events.downloadNotice.listen((e) => {
         const d = e.payload;
@@ -316,6 +338,10 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     usePrivacy.getState().drop(id);
   },
   activateTab: async (id) => {
+    if (get().detached.includes(id)) {
+      await run(set, () => ipc.tabActivate(id));
+      return;
+    }
     // Optimistic: the strip highlights the tab at once and `tab_activated`
     // merely confirms. A refusal puts the selection back where it was, unless
     // something else moved it in the meantime.
@@ -497,7 +523,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     void get().refreshCounts();
   },
 
-  toggle: (panel, value) => set((s) => ({ open: { ...s.open, [panel]: value ?? !s.open[panel] } })),
+  toggle: (panel, value) => set((s) => ({ open: togglePanel(s.open, panel, value) })),
   applyEvent: (event) => {
     set((s) => reduceEvent(s, event));
     if (event.type === "tab_closed") {
@@ -505,8 +531,8 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       set((s) => ({ loading: without(s.loading, id), navError: without(s.navError, id), crashedTabs: without(s.crashedTabs, id), permissionRequests: without(s.permissionRequests, id) }));
       usePrivacy.getState().drop(id);
     }
-    // Tabs of other workspaces never reach this store, so their badges come
-    // from the host. Coalesced: a page load can emit several tab updates.
+    // Foreign-workspace tab events refresh badges without entering this strip.
+    // Coalesced: a page load can emit several tab updates.
     if (event.type === "tab_upserted" || event.type === "tab_closed") scheduleCounts(get);
   },
 }));

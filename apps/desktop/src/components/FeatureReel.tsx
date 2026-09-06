@@ -5,14 +5,7 @@ import { useReducedMotion } from "../lib/useReducedMotion";
 import { DURATION, POSTER_FRAME, Showcase } from "../video/Showcase";
 import { FPS, HEIGHT, WIDTH } from "../video/primitives";
 
-/**
- * The one-minute feature reel on the welcome screen.
- *
- * Played live by Remotion's Player rather than shipped as a video file: the
- * composition is React drawn from the chrome's own CSS variables, so it
- * follows the theme and accent, stays sharp at any width, and costs no
- * megabytes. It has no sound, so autoplay is never blocked.
- */
+/** Explicitly opened feature tour. Player controls own playback; it does not loop. */
 export function FeatureReel() {
   const ref = useRef<PlayerRef>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -27,14 +20,17 @@ export function FeatureReel() {
     if (reduced) {
       player.pause();
       player.seekTo(POSTER_FRAME);
-      return;
     }
     let inView = true;
+    let suspended = false;
+    let resume = false;
     const sync = () => {
       const player = ref.current;
       if (!player) return;
-      if (document.hidden || !inView) player.pause();
-      else player.play();
+      const hidden = document.hidden || !inView;
+      if (hidden && !suspended) { resume = player.isPlaying(); player.pause(); }
+      else if (!hidden && suspended && resume) player.play();
+      suspended = hidden;
     };
     const observer = new IntersectionObserver(([entry]) => {
       inView = entry?.isIntersecting ?? true;
@@ -52,7 +48,7 @@ export function FeatureReel() {
   return (
     <div
       ref={root}
-      role="img"
+      role="region"
       aria-label="A tour of what Dive can do: workspaces, coding agents, an agent that acts, network and console inspection, mock rules, a mobile simulator, GIF recording, full-page capture, a Playwright recorder, bug reports and local server sharing."
       className="w-full overflow-hidden rounded-2xl border border-line bg-surface shadow-[0_40px_90px_-50px_rgba(0,0,0,.8)]"
       style={{ aspectRatio: `${WIDTH} / ${HEIGHT}` }}
@@ -66,9 +62,9 @@ export function FeatureReel() {
         compositionHeight={HEIGHT}
         autoPlay={!reduced}
         initiallyMuted
-        loop
-        controls={false}
-        clickToPlay={false}
+        loop={false}
+        controls
+        clickToPlay
         initialFrame={reduced ? POSTER_FRAME : 0}
         style={{ width: "100%", height: "100%" }}
       />

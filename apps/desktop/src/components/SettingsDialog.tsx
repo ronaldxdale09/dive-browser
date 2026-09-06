@@ -16,7 +16,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { ipc } from "../lib/ipc";
-import type { AppInfo, Command, Decision, ProviderInfo, SitePermission } from "../lib/ipc";
+import type { AppInfo, Command, Decision, ProviderInfo, PermissionList, SitePermission } from "../lib/ipc";
 import { isReady, useAgent } from "../store/agent";
 import { useBrowser } from "../store/browser";
 import type { SettingsSection } from "../store/browser";
@@ -31,6 +31,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { AgentIcon } from "./agent/AgentIcon";
+import { KeepSitesActive } from "./settings/KeepSitesActive";
 import { Appearance } from "./settings/Appearance";
 import { SubtitlesControls } from "./settings/SubtitlesControls";
 
@@ -210,6 +211,8 @@ function General() {
           }
         />
       </Group>
+
+      <KeepSitesActive />
 
       <Group title="Search">
         <Row
@@ -431,6 +434,13 @@ export function groupPermissions(list: SitePermission[]): { origin: string; kind
 }
 
 function SitePermissions() {
+  const workspace = useBrowser((s) => s.activeWorkspace);
+  const profile = useBrowser((s) => s.activeProfile);
+  return <ScopedSitePermissions key={`${profile}-${workspace}`} />;
+}
+
+function ScopedSitePermissions() {
+  const [context, setContext] = useState<PermissionList | null>(null);
   const [list, setList] = useState<SitePermission[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
@@ -439,7 +449,7 @@ function SitePermissions() {
     let alive = true;
     ipc
       .permissionsList()
-      .then((l) => alive && setList(l))
+      .then((l) => { if (alive) {setContext(l); setList(l.permissions);} })
       .catch((e: unknown) => alive && setError(e instanceof Error ? e.message : String(e)));
     return () => {
       alive = false;
@@ -451,7 +461,7 @@ function SitePermissions() {
     setError(null);
     setSaving((s) => ({ ...s, [key]: true }));
     void ipc
-      .permissionSet(p.origin, p.kind, decision)
+      .permissionSet(p.scope, p.origin, p.kind, decision)
       .catch((e: unknown) => {
         setList((l) => {
           const current = l ?? [];
@@ -464,7 +474,8 @@ function SitePermissions() {
   };
   const groups = groupPermissions(list ?? []);
   return (
-    <Group title="Site permissions" description="What you have allowed or blocked, by site. A page asks again for anything set back to Ask.">
+    <Group title="Site permissions" description={context ? `Remembered for ${context.profile_name} · ${context.container_name}. Ask removes the remembered decision; page-only choices end when the requesting page navigates or closes.` : "Permissions for the selected profile and container."}>
+      {context && <p className="py-2 text-xs text-ink-3">Permissions from earlier versions must be approved again. Choices are now kept in this profile and container.</p>}
       {list === null && !error && <p className="py-3 text-xs text-ink-3">Loading…</p>}
       {error && (
         <div role="alert" className="flex items-center gap-3 py-3 text-xs text-danger">

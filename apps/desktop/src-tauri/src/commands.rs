@@ -374,7 +374,13 @@ fn reveal(path: &std::path::Path) -> AppResult<()> {
 pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
     tauri_specta::Builder::<Runtime>::new()
         .commands(collect_commands![
+            crate::activity::keep_sites_list,
+            crate::activity::keep_site_set,
             snapshot,
+            tab_info,
+            window_command,
+            window_open,
+            popout_ready,
             workspace_activate,
             profiles_list,
             profile_create,
@@ -394,6 +400,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_set_pinned,
             tab_back,
             tab_forward,
+            crate::navigation::tab_history,
+            crate::navigation::tab_history_navigate,
             tab_reload,
             tab_zoom,
             tab_stop,
@@ -402,6 +410,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_set_tier,
             bookmark_remove,
             permission_set,
+            permission_reply,
             permissions_list,
             crate::extensions::extensions_list,
             crate::extensions::extension_pick,
@@ -436,6 +445,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::screen::screen_export_begin,
             crate::screen::screen_export_append,
             crate::screen::screen_export_finish,
+            crate::screen::screen_export_cancel,
             tab_capture,
             capture_read,
             capture_save,
@@ -510,7 +520,9 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::network::NetworkEvent,
             crate::engine::DownloadNotice,
             crate::loading::TabLoad,
+            crate::navigation::TabHistoryChanged,
             crate::permissions::PermissionAsked,
+            crate::permissions::PermissionDismissed,
             crate::privacy::PrivacyEvent,
             crate::subtitles::SubtitleModelProgress,
             crate::subtitles::SubtitleCue,
@@ -625,6 +637,65 @@ pub(crate) fn snapshot(state: State<'_, AppState>) -> AppResult<Snapshot> {
     })
 }
 
+/// A detached window reads its own page, independently of the main workspace.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_info(state: State<'_, AppState>, id: TabId) -> AppResult<Tab> {
+    Ok(lock(&state.store).tab(id)?)
+}
+
+/// Create a blank detached window using the authoritative current workspace.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn window_open(app: AppHandle<Runtime>) -> AppResult<()> {
+    on_main(&app, move |main, app, state| {
+        let workspace =
+            (*lock(&state.active_workspace)).ok_or_else(|| AppError::new("no active workspace"))?;
+        let tab = open_tab(main, app, state, workspace, "about:blank")?;
+        detach_tab(main, app, state, tab.id, None)?;
+        lock(&state.host)
+            .as_mut()
+            .ok_or_else(|| AppError::new("engine not ready"))?
+            .request_popout_address_focus(tab.id)?;
+        Ok(())
+    })
+}
+
+/// Only the current registered popout chrome can acknowledge its readiness.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn popout_ready(
+    app: AppHandle<Runtime>,
+    webview: tauri::Webview<Runtime>,
+    id: TabId,
+) -> AppResult<bool> {
+    on_main(&app, move |_, _, state| {
+        Ok(lock(&state.host)
+            .as_mut()
+            .ok_or_else(|| AppError::new("engine not ready"))?
+            .popout_ready(id, webview.label())?)
+    })
+}
+
+/// Fixed window commands from trusted detached chrome; never arbitrary script.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn window_command(app: AppHandle<Runtime>, command: String) -> AppResult<()> {
+    if !crate::menu::main_window_command(&command) {
+        return Err(AppError::new("unsupported window command"));
+    }
+    on_main(&app, move |_, app, state| {
+        {
+            let host = lock(&state.host);
+            host.as_ref()
+                .ok_or_else(|| AppError::new("engine not ready"))?
+                .focus_main_chrome()?;
+        }
+        crate::menu::MenuCommand(command).emit_to(app, crate::CHROME_LABEL)?;
+        Ok(())
+    })
+}
+
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn workspace_activate(
@@ -660,11 +731,11 @@ pub(crate) fn workspace_activate(
 pub struct WorkspaceTabs {
     /// The workspace.
     pub workspace_id: WorkspaceId,
-    /// Live tabs in it.
+    /// Open tabs in it, including discarded tabs.
     pub tabs: u32,
 }
 
-/// Live tab count of every workspace. The snapshot only carries the active
+/// Open tab count of every workspace, including discarded tabs. The snapshot carries the active
 /// workspace's tabs, so the rail asks for the rest separately.
 #[tauri::command]
 #[specta::specta]
@@ -1373,6 +1444,7 @@ pub(crate) async fn tab_screencast_start(
     id: TabId,
     options: crate::screencast::RecordOptions,
 ) -> AppResult<()> {
+    let _pending = state.activity.pending(id);
     let session = cdp_for(&state, id)?;
     let window = window_rect(&app);
     state
@@ -1612,46 +1684,49 @@ pub(crate) fn bookmark_remove(state: State<'_, AppState>, url: String) -> AppRes
     Ok(lock(&state.store).remove_bookmark(&url)?)
 }
 
-/// Remember or forget a site permission decision.
+/// Remember or forget a permission in the selected profile and real container.
 #[tauri::command]
 #[specta::specta]
-pub(crate) async fn permission_set(
-    state: State<'_, AppState>,
+pub(crate) fn permission_set(
+    app: AppHandle<Runtime>,
+    webview: tauri::Webview<Runtime>,
+    scope: crate::permissions::Scope,
     origin: String,
     kind: String,
     decision: crate::permissions::Decision,
 ) -> AppResult<()> {
-    crate::permissions::set(&state, &origin, &kind, decision)?;
-    let sessions = {
-        let host = lock(&state.host);
-        let store = lock(&state.store);
-        host.as_ref().map_or_else(Vec::new, |host| {
-            host.sessions()
-                .into_iter()
-                .filter_map(|(id, session)| {
-                    let matches = store
-                        .tab(id)
-                        .ok()
-                        .and_then(|tab| dive_core::origin_of(&tab.url))
-                        .is_some_and(|tab_origin| tab_origin == origin);
-                    matches.then_some(session)
-                })
-                .collect()
-        })
-    };
-    for session in sessions {
-        crate::permissions::apply_origin(&state, &session, &origin).await;
-    }
-    Ok(())
+    on_main(&app, move |_, app, state| {
+        crate::permissions::require_chrome(&webview)?;
+        crate::permissions::set(app, state, &scope, &origin, &kind, decision)
+    })
 }
-
-/// Every remembered site permission.
+/// Resolve the original native request; its opaque ID carries trusted provenance.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn permission_reply(
+    app: AppHandle<Runtime>,
+    webview: tauri::Webview<Runtime>,
+    tab_id: TabId,
+    request_id: String,
+    decision: crate::permissions::Decision,
+    duration: crate::permissions::Duration,
+) -> AppResult<()> {
+    on_main(&app, move |_, _, state| {
+        crate::permissions::require_chrome(&webview)?;
+        crate::permissions::reply(state, tab_id, &request_id, decision, duration)
+    })
+}
+/// Remembered permissions in the active profile and container.
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn permissions_list(
-    state: State<'_, AppState>,
-) -> AppResult<Vec<crate::permissions::SitePermission>> {
-    Ok(crate::permissions::all(&state)?)
+    app: AppHandle<Runtime>,
+    webview: tauri::Webview<Runtime>,
+) -> AppResult<crate::permissions::PermissionList> {
+    on_main(&app, move |_, _, state| {
+        crate::permissions::require_chrome(&webview)?;
+        Ok(crate::permissions::all(state)?)
+    })
 }
 
 /// The local subtitle models and whether each is downloaded.
@@ -2460,8 +2535,27 @@ fn detach_tab(
 /// Bring `id` back from its own window and show it in the main one.
 pub(crate) fn tab_attach(app: AppHandle<Runtime>, id: TabId) -> AppResult<()> {
     on_main(&app, move |main, app, state| {
-        if let Some(host) = lock(&state.host).as_mut() {
+        let workspace = {
+            let mut host = lock(&state.host);
+            let host = host
+                .as_mut()
+                .ok_or_else(|| AppError::new("engine not ready"))?;
+            let store = lock(&state.store);
+            let tab = store.tab(id)?;
             host.attach(id)?;
+            let workspace =
+                persist_reattach_workspace(&store, &tab, *lock(&state.active_workspace))?;
+            if workspace.is_some() {
+                host.deactivate_all()?;
+            }
+            workspace
+        };
+        if let Some((workspace, tabs)) = workspace {
+            *lock(&state.active_workspace) = Some(workspace);
+            state.bus.publish(CoreEvent::WorkspaceActivated(workspace));
+            for tab in tabs {
+                state.bus.publish(CoreEvent::TabUpserted(tab));
+            }
         }
         let _ = TabWindowChanged {
             tab: id,
@@ -2470,6 +2564,29 @@ pub(crate) fn tab_attach(app: AppHandle<Runtime>, id: TabId) -> AppResult<()> {
         .emit(app);
         activate_tab(main, app, state, id)
     })
+}
+
+/// Reattachment selects the owning workspace without moving the page. Global
+/// essentials remain visible in the current workspace and do not select one.
+fn persist_reattach_workspace(
+    store: &dive_core::Store,
+    tab: &Tab,
+    active: Option<WorkspaceId>,
+) -> AppResult<Option<(WorkspaceId, Vec<Tab>)>> {
+    if tab.tier == dive_core::TabTier::Essential {
+        return Ok(None);
+    }
+    let Some(id) = tab.workspace_id.filter(|id| Some(*id) != active) else {
+        return Ok(None);
+    };
+    let workspace = store.workspace(id)?;
+    let tabs = store.tabs_for_workspace(id)?;
+    store.set_setting(crate::state::ACTIVE_WORKSPACE, &id.to_string())?;
+    store.set_setting(
+        &profile_workspace_key(workspace.profile_id),
+        &id.to_string(),
+    )?;
+    Ok(Some((id, tabs)))
 }
 
 #[tauri::command]
@@ -2554,6 +2671,81 @@ pub fn normalize_url_with(input: &str, template: &str) -> AppResult<url::Url> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reattachment_selects_owner_and_remembers_profile_without_moving_tabs() {
+        let store = dive_core::Store::in_memory().unwrap();
+        let profile = store.ensure_default_profile().unwrap();
+        let owner = Workspace::new("Home", profile.container_id, profile.id, 0);
+        let other_profile = dive_core::Profile::new("Other profile", profile.container_id, 1);
+        store.upsert_profile(&other_profile).unwrap();
+        let other = Workspace::new("Other", profile.container_id, other_profile.id, 1);
+        store.upsert_workspace(&owner).unwrap();
+        store.upsert_workspace(&other).unwrap();
+        let tab = Tab::new(owner.id, "https://owner.test", 0);
+        store.upsert_tab(&tab).unwrap();
+        let sibling = Tab::new(owner.id, "https://sibling.test", 1);
+        store.upsert_tab(&sibling).unwrap();
+        let foreign = Tab::new(other.id, "https://foreign.test", 0);
+        store.upsert_tab(&foreign).unwrap();
+        let mut global = Tab::new(owner.id, "https://global.test", 0);
+        global.tier = dive_core::TabTier::Essential;
+        global.workspace_id = None;
+        store.upsert_tab(&global).unwrap();
+        store
+            .set_setting(crate::state::ACTIVE_WORKSPACE, &other.id.to_string())
+            .unwrap();
+        store
+            .set_setting(
+                &profile_workspace_key(other_profile.id),
+                &other.id.to_string(),
+            )
+            .unwrap();
+        assert_eq!(
+            persist_reattach_workspace(&store, &tab, Some(other.id)).unwrap(),
+            Some((owner.id, vec![global, tab.clone(), sibling]))
+        );
+        assert_eq!(
+            store.setting(crate::state::ACTIVE_WORKSPACE).unwrap(),
+            Some(owner.id.to_string())
+        );
+        assert_eq!(
+            store.setting(&profile_workspace_key(profile.id)).unwrap(),
+            Some(owner.id.to_string())
+        );
+        assert_eq!(store.tab(tab.id).unwrap(), tab);
+        assert_eq!(store.workspace(owner.id).unwrap(), owner);
+        assert_eq!(store.workspace(other.id).unwrap(), other);
+        assert_eq!(
+            store
+                .setting(&profile_workspace_key(other_profile.id))
+                .unwrap(),
+            Some(other.id.to_string())
+        );
+        assert_eq!(
+            persist_reattach_workspace(&store, &tab, Some(owner.id)).unwrap(),
+            None
+        );
+
+        let mut essential = tab.clone();
+        essential.tier = dive_core::TabTier::Essential;
+        assert_eq!(
+            persist_reattach_workspace(&store, &essential, Some(other.id)).unwrap(),
+            None
+        );
+        essential.workspace_id = None;
+        store
+            .set_setting(crate::state::ACTIVE_WORKSPACE, &other.id.to_string())
+            .unwrap();
+        assert_eq!(
+            persist_reattach_workspace(&store, &essential, Some(other.id)).unwrap(),
+            None
+        );
+        assert_eq!(
+            store.setting(crate::state::ACTIVE_WORKSPACE).unwrap(),
+            Some(other.id.to_string())
+        );
+    }
 
     #[test]
     fn updater_calls_are_skipped_when_the_plugin_was_not_built() {

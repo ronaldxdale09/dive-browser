@@ -251,6 +251,7 @@ mod tests {
                 .collect(),
             post_data: body.map(str::to_owned),
             response_body: None,
+            response_body_note: None,
             response_headers: std::collections::BTreeMap::new(),
             started_at: 0.0,
             wall_time: 0.0,

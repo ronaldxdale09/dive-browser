@@ -1,7 +1,8 @@
+import { AvatarImage } from "./AvatarImage";
 import { Shield, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { useBrowser } from "../store/browser";
-import { AVATAR_SEEDS, seedFromName, workspaceAvatar } from "../lib/workspaceAvatar";
+import { AVATAR_SEEDS, seedFromName } from "../lib/workspaceAvatar";
 import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
@@ -52,7 +53,7 @@ export function WorkspaceDialog() {
         className="mx-auto mt-28 w-[380px] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
       >
         <div className="flex items-center gap-2.5">
-          <img src={workspaceAvatar(icon, color)} alt="" width={32} height={32} className="size-8 shrink-0 rounded-[11px]" />
+          <AvatarImage kind="workspace" seed={icon} color={color} alt="" width={32} height={32} className="size-8 shrink-0 rounded-[11px]" />
           <div className="min-w-0">
             <h2 className="text-sm font-semibold">{existing ? "Edit workspace" : "New workspace"}</h2>
             {/* Someone meeting workspaces for the first time meets them here,
@@ -103,7 +104,7 @@ export function WorkspaceDialog() {
               // so tinting the cell as well would just add noise.
               className="grid size-8 place-items-center rounded-lg ring-offset-2 ring-offset-surface aria-checked:ring-2 aria-checked:ring-ink"
             >
-              <img src={workspaceAvatar(s, color)} alt="" width={28} height={28} className="size-7 rounded-lg" />
+              <AvatarImage kind="workspace" seed={s} color={color} alt="" width={28} height={28} className="size-7 rounded-lg" />
             </button>
           ))}
         </div>

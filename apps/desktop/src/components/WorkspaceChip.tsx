@@ -1,7 +1,7 @@
+import { AvatarImage } from "./AvatarImage";
 import { ChevronDown, Plus, Shield } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useBrowser } from "../store/browser";
-import { workspaceAvatar } from "../lib/workspaceAvatar";
 import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
@@ -53,7 +53,7 @@ export function WorkspaceChip() {
         onClick={() => setOpen((o) => !o)}
         className="flex h-7 max-w-44 items-center gap-1.5 rounded-full border border-line pr-1.5 pl-1 text-xs text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
       >
-        <img src={workspaceAvatar(current.icon, current.color)} alt="" width={20} height={20} className="size-5 shrink-0 rounded-md" />
+        <AvatarImage kind="workspace" seed={current.icon} color={current.color} alt="" width={20} height={20} className="size-5 shrink-0 rounded-md" />
         <span className="truncate font-medium">{current.name}</span>
         <Icon icon={ChevronDown} size={12} className="shrink-0 text-ink-3" />
       </button>
@@ -75,7 +75,7 @@ export function WorkspaceChip() {
                 }}
                 className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink aria-checked:bg-surface-3 aria-checked:text-ink"
               >
-                <img src={workspaceAvatar(w.icon, w.color)} alt="" width={20} height={20} className="size-5 shrink-0 rounded-md" />
+                <AvatarImage kind="workspace" seed={w.icon} color={w.color} alt="" width={20} height={20} className="size-5 shrink-0 rounded-md" />
                 <span className="min-w-0 flex-1 truncate">{w.name}</span>
                 {separate && <Icon icon={Shield} size={11} className="shrink-0 text-ink-3" />}
                 <span className="shrink-0 font-mono text-[10px] text-ink-3 tabular-nums">{count}</span>

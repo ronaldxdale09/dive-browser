@@ -668,12 +668,12 @@ impl Store {
         Ok(())
     }
 
-    /// Live tab count per workspace, for the rail's badges. Discarded tabs are
-    /// left out: they are metadata for a tab that is no longer really open.
+    /// Open tab count per workspace, including tabs whose renderer was discarded.
+    /// Global essential tabs have no workspace and are counted separately.
     pub fn tab_counts(&self) -> Result<Vec<(WorkspaceId, u32)>> {
         let mut stmt = self.conn.prepare(
             "SELECT workspace_id, COUNT(*) FROM tabs
-             WHERE workspace_id IS NOT NULL AND state != 'discarded'
+             WHERE workspace_id IS NOT NULL
              GROUP BY workspace_id",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -801,6 +801,46 @@ impl Store {
             == 1)
     }
 
+    /// Origins explicitly exempted from automatic discard in one profile.
+    pub fn keep_active_sites(&self, profile: ProfileId) -> Result<Vec<String>> {
+        self.profile(profile)?;
+        let prefix = format!("keep_active:{profile}:");
+        Ok(self
+            .settings_with_prefix(&prefix)?
+            .into_iter()
+            .filter(|(_, value)| value == "1")
+            .map(|(key, _)| key[prefix.len()..].to_owned())
+            .collect())
+    }
+
+    /// Persist a site exemption, canonicalized to its HTTP(S) origin.
+    pub fn set_keep_active_site(&self, profile: ProfileId, url: &str, keep: bool) -> Result<()> {
+        self.profile(profile)?;
+        let parsed = url::Url::parse(url)
+            .map_err(|_| crate::CoreError::Invalid("Enter an HTTP or HTTPS site URL".into()))?;
+        if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+            return Err(crate::CoreError::Invalid(
+                "Enter an HTTP or HTTPS site URL".into(),
+            ));
+        }
+        let key = format!(
+            "keep_active:{profile}:{}",
+            parsed.origin().ascii_serialization()
+        );
+        if keep {
+            self.set_setting(&key, "1")
+        } else {
+            self.remove_setting(&key).map(|_| ())
+        }
+    }
+
+    /// Update activity without overwriting concurrent tab metadata.
+    pub fn touch_tab_activity(&self, tab: TabId, now: Timestamp) -> Result<()> {
+        self.conn.execute("UPDATE tabs SET last_active_at = ?2 WHERE id = ?1 AND state != 'discarded' AND last_active_at < ?2",
+            params![tab.to_string(), now.to_rfc3339()])?;
+        Ok(())
+    }
+
     /// Write a setting.
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
         self.conn.execute(
@@ -811,13 +851,24 @@ impl Store {
         Ok(())
     }
 
-    /// The most recently active, non-discarded tab of `workspace`, if any.
+    /// Write a related set of settings as one all-or-nothing decision.
+    pub fn set_settings_atomic(&self, entries: &[(String, String)]) -> Result<()> {
+        let transaction = self.conn.unchecked_transaction()?;
+        for (key, value) in entries {
+            transaction.execute("INSERT INTO settings (key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[key,value])?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// The most recently active open tab of `workspace`, if any.
+    /// Discarded tabs remain open and recreate their renderer when activated.
     pub fn last_active_tab(&self, workspace: WorkspaceId) -> Result<Option<Tab>> {
         let mut tab = self
             .conn
             .query_row(
                 &format!(
-                    "{TAB_SELECT} WHERE workspace_id = ?1 AND state != 'discarded'
+                    "{TAB_SELECT} WHERE workspace_id = ?1
                      ORDER BY last_active_at DESC LIMIT 1"
                 ),
                 [workspace.to_string()],
@@ -872,8 +923,64 @@ impl Store {
         Ok(out)
     }
 
+    /// Validate and save wake state before requesting native close. The row
+    /// remains active until a separate native destruction receipt arrives.
+    pub fn prepare_discard(
+        &self,
+        candidate: &Tab,
+        cutoff: Timestamp,
+        scroll: (i32, i32),
+        close: impl FnOnce() -> Result<()>,
+    ) -> Result<bool> {
+        self.transition_candidate(candidate, cutoff, scroll, false, close)
+            .map(|tab| tab.is_some())
+    }
+
+    /// Conditionally finalize discard after native destruction was confirmed.
+    pub fn discard_candidate(
+        &self,
+        candidate: &Tab,
+        cutoff: Timestamp,
+        scroll: (i32, i32),
+        close: impl FnOnce() -> Result<()>,
+    ) -> Result<Option<Tab>> {
+        self.transition_candidate(candidate, cutoff, scroll, true, close)
+    }
+
+    fn transition_candidate(
+        &self,
+        candidate: &Tab,
+        cutoff: Timestamp,
+        scroll: (i32, i32),
+        discard: bool,
+        close: impl FnOnce() -> Result<()>,
+    ) -> Result<Option<Tab>> {
+        let transaction = self.conn.unchecked_transaction()?;
+        let changed = transaction.execute(
+            "UPDATE tabs SET state = CASE WHEN ?7 THEN 'discarded' ELSE state END
+             WHERE id = ?1 AND tier = 'today' AND state = ?2 AND state != 'discarded'
+             AND url = ?3 AND workspace_id IS ?4 AND last_active_at = ?5 AND last_active_at < ?6",
+            params![
+                candidate.id.to_string(),
+                candidate.state.as_str(),
+                candidate.url,
+                candidate.workspace_id.map(|id| id.to_string()),
+                candidate.last_active_at.to_rfc3339(),
+                cutoff.to_rfc3339(),
+                discard
+            ],
+        )?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        self.set_scroll(candidate.id, &candidate.url, scroll.0, scroll.1)?;
+        close()?;
+        transaction.commit()?;
+        self.tab(candidate.id).map(Some)
+    }
+
     /// Discard every idle candidate at once, with no engine-side exclusions.
-    /// The app's sweep applies its rules first and calls [`Store::discard_tabs`].
+    /// Offline store convenience; the live app uses prepare/receipt/finalize.
     pub fn discard_idle_tabs(&self, now: Timestamp, max_idle: time::Duration) -> Result<Vec<Tab>> {
         let ids: Vec<TabId> = self
             .idle_tab_candidates(now, max_idle)?
@@ -990,6 +1097,60 @@ mod tests {
         let w = Workspace::new("Work", c.id, profile.id, 0);
         store.upsert_workspace(&w).unwrap();
         (store, w)
+    }
+
+    #[test]
+    fn keep_active_sites_are_canonical_origin_and_profile_scoped() {
+        let (store, w) = seeded();
+        let other = Profile::new("Other", w.container_id, 1);
+        store.upsert_profile(&other).unwrap();
+        store
+            .set_keep_active_site(w.profile_id, "https://EXAMPLE.com:443/path?q=1", true)
+            .unwrap();
+        assert_eq!(
+            store.keep_active_sites(w.profile_id).unwrap(),
+            vec!["https://example.com"]
+        );
+        assert!(store.keep_active_sites(other.id).unwrap().is_empty());
+        store
+            .set_keep_active_site(other.id, "https://example.com:8443/", true)
+            .unwrap();
+        assert_eq!(
+            store.keep_active_sites(other.id).unwrap(),
+            vec!["https://example.com:8443"]
+        );
+        assert_eq!(
+            store.keep_active_sites(w.profile_id).unwrap(),
+            vec!["https://example.com"]
+        );
+        assert!(store.keep_active_sites(ProfileId::new()).is_err());
+        assert!(
+            store
+                .set_keep_active_site(w.profile_id, "file:///private", true)
+                .is_err()
+        );
+        assert!(
+            store
+                .set_keep_active_site(w.profile_id, "data:text/plain,a", true)
+                .is_err()
+        );
+        store
+            .set_keep_active_site(w.profile_id, "https://example.com/other", false)
+            .unwrap();
+        assert!(store.keep_active_sites(w.profile_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn activity_touch_preserves_current_navigation_and_pinning() {
+        let (store, w) = seeded();
+        let mut tab = Tab::new(w.id, "https://new.example", 0);
+        tab.tier = TabTier::Pinned;
+        tab.last_active_at = Timestamp(Timestamp::now().0 - time::Duration::hours(2));
+        store.upsert_tab(&tab).unwrap();
+        let now = Timestamp::now();
+        store.touch_tab_activity(tab.id, now).unwrap();
+        tab.last_active_at = now;
+        assert_eq!(store.tab(tab.id).unwrap(), tab);
     }
 
     #[test]
@@ -1128,28 +1289,61 @@ mod tests {
     }
 
     #[test]
-    fn settings_roundtrip_and_last_active_tab() {
-        let (store, w) = seeded();
+    fn settings_roundtrip() {
+        let (store, _) = seeded();
         assert_eq!(store.setting("active_tab").unwrap(), None);
         store.set_setting("active_tab", "x").unwrap();
         store.set_setting("active_tab", "y").unwrap();
         assert_eq!(store.setting("active_tab").unwrap().as_deref(), Some("y"));
+    }
 
+    #[test]
+    fn last_active_tab_uses_recency_across_renderer_states_within_workspace() {
+        let (store, w) = seeded();
         assert!(store.last_active_tab(w.id).unwrap().is_none());
-        let now = Timestamp::now();
+        let now = Timestamp::parse("2026-09-05T12:00:00Z").unwrap();
         let mut older = Tab::new(w.id, "https://older", 0);
         older.last_active_at = now - time::Duration::hours(2);
-        let mut newest_but_discarded = Tab::new(w.id, "https://gone", 1);
-        newest_but_discarded.state = TabState::Discarded;
+        let mut discarded = Tab::new(w.id, "https://discarded", 1);
+        discarded.state = TabState::Discarded;
+        discarded.last_active_at = now - time::Duration::minutes(1);
         let mut newer = Tab::new(w.id, "https://newer", 2);
+        newer.state = TabState::Sleeping;
         newer.last_active_at = now - time::Duration::hours(1);
-        for t in [&older, &newest_but_discarded, &newer] {
+        let other = Workspace::new("Other", w.container_id, w.profile_id, 1);
+        store.upsert_workspace(&other).unwrap();
+        let mut foreign = Tab::new(other.id, "https://foreign", 0);
+        foreign.last_active_at = now;
+        for t in [&older, &discarded, &newer, &foreign] {
             store.upsert_tab(t).unwrap();
         }
+        assert_eq!(store.last_active_tab(w.id).unwrap().unwrap(), discarded);
         assert_eq!(
-            store.last_active_tab(w.id).unwrap().unwrap().url,
-            "https://newer"
+            store.last_active_tab(other.id).unwrap().unwrap().id,
+            foreign.id
         );
+    }
+
+    #[test]
+    fn last_active_tab_after_close_can_restore_discarded_remaining_tab() {
+        let (store, w) = seeded();
+        let now = Timestamp::parse("2026-09-05T12:00:00Z").unwrap();
+        let mut alpha = Tab::new(w.id, "https://fixture.test/alpha", 0);
+        alpha.last_active_at = now;
+        let mut beta = Tab::new(w.id, "https://fixture.test/beta?saved=1#section", 1);
+        beta.last_active_at = now - time::Duration::hours(2);
+        beta.state = TabState::Discarded;
+        store.upsert_tab(&alpha).unwrap();
+        store.upsert_tab(&beta).unwrap();
+        assert_eq!(store.last_active_tab(w.id).unwrap().unwrap().id, alpha.id);
+
+        store.remove_tab(alpha.id).unwrap();
+        // Closing a tab removes its row; discarding only releases its renderer.
+        // Replacement selection must retain the identity and persisted URL to wake.
+        assert_eq!(store.last_active_tab(w.id).unwrap().unwrap(), beta);
+
+        store.remove_tab(beta.id).unwrap();
+        assert!(store.last_active_tab(w.id).unwrap().is_none());
     }
 
     #[test]
@@ -1279,15 +1473,40 @@ mod tests {
     }
 
     #[test]
-    fn tab_counts_skip_discarded_tabs() {
+    fn workspace_counts_include_open_tabs_in_every_renderer_state() {
         let (store, w) = seeded();
-        store
-            .upsert_tab(&Tab::new(w.id, "https://a.dev", 0))
-            .unwrap();
-        let mut gone = Tab::new(w.id, "https://b.dev", 1);
-        gone.state = TabState::Discarded;
-        store.upsert_tab(&gone).unwrap();
-        assert_eq!(store.tab_counts().unwrap(), vec![(w.id, 1)]);
+        let other = Workspace::new("Other", w.container_id, w.profile_id, 1);
+        store.upsert_workspace(&other).unwrap();
+        let mut tabs = Vec::new();
+        for state in [TabState::Active, TabState::Sleeping, TabState::Discarded] {
+            let mut tab = Tab::new(w.id, "https://fixture.test", 0);
+            tab.state = state;
+            store.upsert_tab(&tab).unwrap();
+            tabs.push(tab);
+        }
+        let mut sleeping_only = Tab::new(other.id, "https://other.test", 0);
+        sleeping_only.state = TabState::Discarded;
+        store.upsert_tab(&sleeping_only).unwrap();
+        let mut essential = Tab::new(w.id, "https://essential.test", 0);
+        essential.workspace_id = None;
+        essential.tier = TabTier::Essential;
+        store.upsert_tab(&essential).unwrap();
+        let counts = || {
+            store
+                .tab_counts()
+                .unwrap()
+                .into_iter()
+                .collect::<std::collections::HashMap<_, _>>()
+        };
+        assert_eq!(counts().get(&w.id), Some(&3));
+        assert_eq!(counts().get(&other.id), Some(&1));
+        store.remove_tab(tabs[2].id).unwrap();
+        assert_eq!(counts().get(&w.id), Some(&2));
+        for tab in &tabs[..2] {
+            store.remove_tab(tab.id).unwrap();
+        }
+        assert!(!counts().contains_key(&w.id));
+        assert_eq!(counts().get(&other.id), Some(&1));
     }
 
     #[test]
@@ -1385,6 +1604,77 @@ mod tests {
     }
 
     #[test]
+    fn stale_discard_never_closes_a_tab_activated_pinned_or_navigated_during_probe() {
+        for change in ["activate", "pin", "navigate", "workspace"] {
+            let (store, workspace) = seeded();
+            let now = Timestamp::now();
+            let mut candidate = Tab::new(workspace.id, "https://example.com/original", 0);
+            candidate.last_active_at = now - time::Duration::hours(2);
+            store.upsert_tab(&candidate).unwrap();
+            let mut current = candidate.clone();
+            match change {
+                "activate" => current.last_active_at = now,
+                "pin" => current.tier = TabTier::Pinned,
+                "navigate" => current.url = "https://example.com/new".into(),
+                "workspace" => current.workspace_id = None,
+                _ => unreachable!(),
+            }
+            store.upsert_tab(&current).unwrap();
+            let closed = std::cell::Cell::new(false);
+            let result = store
+                .discard_candidate(&candidate, now - time::Duration::hours(1), (5, 8), || {
+                    closed.set(true);
+                    Ok(())
+                })
+                .unwrap();
+            assert!(
+                result.is_none(),
+                "stale {change} candidate must be rejected"
+            );
+            assert!(!closed.get(), "native close must not run after {change}");
+            assert_eq!(store.tab(candidate.id).unwrap(), current);
+        }
+    }
+
+    #[test]
+    fn native_close_request_does_not_persist_discard_before_receipt() {
+        let (store, workspace) = seeded();
+        let mut tab = Tab::new(workspace.id, "https://example.com", 0);
+        let now = Timestamp::now();
+        tab.last_active_at = now - time::Duration::hours(2);
+        store.upsert_tab(&tab).unwrap();
+        assert!(
+            store
+                .prepare_discard(&tab, now - time::Duration::hours(1), (50, 60), || Ok(()))
+                .unwrap()
+        );
+        assert_eq!(store.tab(tab.id).unwrap().state, TabState::Active);
+        assert_eq!(store.scroll(tab.id, &tab.url).unwrap(), Some((50, 60)));
+    }
+
+    #[test]
+    fn failed_native_discard_leaves_persisted_state_and_scroll_unchanged() {
+        let (store, workspace) = seeded();
+        let now = Timestamp::now();
+        let mut candidate = Tab::new(workspace.id, "https://example.com", 0);
+        candidate.last_active_at = now - time::Duration::hours(2);
+        store.upsert_tab(&candidate).unwrap();
+        store
+            .set_scroll(candidate.id, &candidate.url, 10, 20)
+            .unwrap();
+        let result =
+            store.discard_candidate(&candidate, now - time::Duration::hours(1), (55, 66), || {
+                Err(CoreError::Invalid("native close failed".into()))
+            });
+        assert!(result.is_err());
+        assert_eq!(store.tab(candidate.id).unwrap(), candidate);
+        assert_eq!(
+            store.scroll(candidate.id, &candidate.url).unwrap(),
+            Some((10, 20))
+        );
+    }
+
+    #[test]
     fn discard_tabs_skips_missing_and_already_discarded() {
         let (store, w) = seeded();
         let a = Tab::new(w.id, "https://a", 0);
@@ -1460,6 +1750,21 @@ mod tests {
         assert!(backup.is_file(), "no backup at {}", backup.display());
         assert_eq!(Store::file_version(&backup).unwrap(), 3);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn grouped_settings_roll_back_when_a_later_write_fails() {
+        let store = Store::in_memory().unwrap();
+        store.conn.execute_batch("CREATE TRIGGER reject_second BEFORE INSERT ON settings WHEN NEW.key = 'second' BEGIN SELECT RAISE(ABORT, 'test write failure'); END;").unwrap();
+        assert!(
+            store
+                .set_settings_atomic(&[
+                    ("first".into(), "allow".into()),
+                    ("second".into(), "allow".into())
+                ])
+                .is_err()
+        );
+        assert_eq!(store.setting("first").unwrap(), None);
     }
 
     #[test]

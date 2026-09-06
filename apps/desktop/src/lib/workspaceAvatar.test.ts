@@ -1,5 +1,8 @@
+import { generateAvatar } from "./avatarGenerator";
 import { describe, expect, it } from "vitest";
-import { seedFromName, workspaceAvatar } from "./workspaceAvatar";
+import { seedFromName } from "./workspaceAvatar";
+
+const workspaceAvatar = (seed: string, color: string) => generateAvatar({ kind: "workspace", seed, color });
 
 describe("workspaceAvatar", () => {
   it("draws an inline SVG, so nothing is fetched to paint the rail", () => {

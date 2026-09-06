@@ -65,7 +65,7 @@ interface PrefsState {
   loaded: boolean;
   load: () => Promise<void>;
   /** Merge `patch` into the preferences and persist the result. */
-  update: (patch: Partial<Prefs>) => Promise<void>;
+  update: (patch: Partial<Prefs>, options?: { rejectOnError?: boolean }) => Promise<void>;
 }
 
 interface PendingWrite {
@@ -103,7 +103,7 @@ export const usePrefs = create<PrefsState>((set, get) => ({
       report(e);
     }
   },
-  update: async (patch) => {
+  update: async (patch, options) => {
     const previous = get().prefs;
     const next = { ...previous, ...patch };
     if (pendingWrites.length === 0) confirmedPrefs = previous;
@@ -122,12 +122,20 @@ export const usePrefs = create<PrefsState>((set, get) => ({
         applyAppearance(current);
       } catch (e) {
         const hasLaterWrite = pendingWrites.some((pending) => pending.revision > write.revision);
-        if (!hasLaterWrite) {
+        if (options?.rejectOnError) {
+          // The caller was told this operation failed. A later unrelated
+          // snapshot must never replay it and silently commit it anyway.
+          pendingWrites = pendingWrites.filter((pending) => pending.revision !== write.revision);
+          const current = applyPending(confirmedPrefs);
+          set({ prefs: current });
+          applyAppearance(current);
+        } else if (!hasLaterWrite) {
           pendingWrites = pendingWrites.filter((pending) => pending.revision > write.revision);
           set({ prefs: confirmedPrefs });
           applyAppearance(confirmedPrefs);
         }
         report(e);
+        if (options?.rejectOnError) throw e;
       }
     });
     writeTail = persisted.catch(() => undefined);

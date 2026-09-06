@@ -53,6 +53,8 @@ fn entry(r: &RequestSummary) -> Value {
     let mut content = json!({"size": body_size, "mimeType": r.mime_type});
     if let Some(body) = &r.response_body {
         content["text"] = Value::String(body.clone());
+    } else if let Some(note) = &r.response_body_note {
+        content["comment"] = Value::String(note.clone());
     }
     let mut response = json!({
         "status": r.status.unwrap_or(0),
@@ -120,6 +122,7 @@ mod tests {
             headers: [("Accept".to_owned(), "application/json".to_owned())].into(),
             post_data: None,
             response_body: Some("[]".into()),
+            response_body_note: None,
             response_headers: [("content-type".to_owned(), "application/json".to_owned())].into(),
             started_at: 10.0,
             wall_time: 1_700_000_000.5,
@@ -137,6 +140,20 @@ mod tests {
         assert_eq!(e["response"]["content"]["text"], "[]");
         assert_eq!(e["response"]["headers"][0]["name"], "content-type");
         assert_eq!(har["log"]["pages"][0]["title"], "API");
+    }
+
+    #[test]
+    fn omitted_body_exports_a_reason_without_an_empty_sample() {
+        let mut r = req();
+        r.response_body = None;
+        r.response_body_note = Some("Response exceeds the 64 KiB capture limit".into());
+        let har = from_requests("https://api.dev/", "", &[r]);
+        let content = &har["log"]["entries"][0]["response"]["content"];
+        assert!(content.get("text").is_none());
+        assert_eq!(
+            content["comment"],
+            "Response exceeds the 64 KiB capture limit"
+        );
     }
 
     #[test]

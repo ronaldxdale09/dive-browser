@@ -11,7 +11,7 @@ pub mod page;
 mod session;
 
 pub use error::CdpError;
-pub use session::{CdpEvent, CdpSession, Transport};
+pub use session::{CdpEvent, CdpEventReceiver, CdpSession, Transport};
 
 /// Convenience alias used throughout the crate.
 pub type Result<T> = std::result::Result<T, CdpError>;

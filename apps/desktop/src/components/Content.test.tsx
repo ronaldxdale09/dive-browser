@@ -27,7 +27,7 @@ const initial = useBrowser.getState();
 
 beforeEach(() => {
   useBrowser.setState({ tabs: [tab], activeTab: tab.id, activeWorkspace: tab.workspace_id, navError: {}, crashedTabs: {}, loading: {}, permissionRequests: {} });
-  vi.spyOn(ipc, "permissionSet").mockResolvedValue(null);
+  vi.spyOn(ipc, "permissionReply").mockResolvedValue(null);
   vi.spyOn(ipc, "setContentBounds").mockResolvedValue(null);
   vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
@@ -136,7 +136,7 @@ describe("Content crash banner", () => {
 });
 
 describe("Content permission banner", () => {
-  const camera = { origin: "https://meet.test", kind: "camera" };
+  const camera = { page_lifetime:true, request_id: "r1", tab_id: "t1", origin: "https://meet.test", kinds: ["camera"], scope: {profile_id:"p1",container_id:"c1"} };
 
   it("names what the page wants in plain words", () => {
     expect(describePermission("camera")).toBe("use your camera");
@@ -158,24 +158,42 @@ describe("Content permission banner", () => {
     expect(container.firstElementChild!.firstElementChild).toBe(banner);
 
     fireEvent.click(screen.getByRole("button", { name: "Block" }));
-    expect(ipc.permissionSet).toHaveBeenCalledWith("https://meet.test", "camera", "deny");
+    expect(ipc.permissionReply).toHaveBeenCalledWith("t1", "r1", "deny", "remember");
     await waitFor(() => expect(useBrowser.getState().permissionRequests).toEqual({}));
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("after Allow offers a reload that applies it", async () => {
+  it("resumes the original request with a page-only choice without reloading", async () => {
     useBrowser.setState({ permissionRequests: { t1: [camera] } });
     render(<Content />);
+    fireEvent.change(screen.getByRole("combobox", {name:"Permission duration"}), {target:{value:"page"}});
     fireEvent.click(screen.getByRole("button", { name: "Allow" }));
-    expect(ipc.permissionSet).toHaveBeenCalledWith("https://meet.test", "camera", "allow");
-    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("reload to apply"));
-    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
-    expect(ipc.tabReload).toHaveBeenCalledWith("t1");
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(ipc.permissionReply).toHaveBeenCalledWith("t1", "r1", "allow", "page");
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    expect(ipc.tabReload).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed reply visible and allows retry instead of claiming success", async () => {
+    vi.mocked(ipc.permissionReply).mockRejectedValueOnce(new Error("write failed"));
+    useBrowser.setState({permissionRequests:{t1:[camera]}});
+    render(<Content />);
+    fireEvent.click(screen.getByRole("button",{name:"Allow"}));
+    await waitFor(()=>expect(screen.getByRole("alert").textContent).toContain("write failed"));
+    expect(useBrowser.getState().permissionRequests.t1).toEqual([camera]);
+    expect(screen.queryByText(/reload to apply/)).toBeNull();
+    fireEvent.click(screen.getByRole("button",{name:"Allow"}));
+    await waitFor(()=>expect(useBrowser.getState().permissionRequests).toEqual({}));
+  });
+
+  it("does not promise page-only lifetime for a persistent native prompt", () => {
+    useBrowser.setState({permissionRequests:{t1:[{...camera,page_lifetime:false,kinds:["notifications"]}]}});
+    render(<Content />);
+    expect(screen.queryByRole("option",{name:"Until this page navigates or closes"})).toBeNull();
+    expect(screen.getByText(/This permission is remembered/)).toBeTruthy();
   });
 
   it("queues a second request behind the first and only speaks for the active tab", async () => {
-    useBrowser.setState({ permissionRequests: { t1: [camera, { origin: "https://meet.test", kind: "microphone" }], other: [{ origin: "https://x", kind: "geolocation" }] } });
+    useBrowser.setState({ permissionRequests: { t1: [camera, { ...camera, request_id:"r2", kinds:["microphone"] }], other: [{ ...camera, tab_id:"other", request_id:"r3", origin:"https://x", kinds:["geolocation"] }] } });
     render(<Content />);
     expect(screen.getByRole("status").textContent).toContain("camera");
     fireEvent.click(screen.getByRole("button", { name: "Block" }));

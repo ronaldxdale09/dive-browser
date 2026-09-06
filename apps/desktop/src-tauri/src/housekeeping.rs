@@ -3,14 +3,14 @@
 
 use std::time::Duration;
 
-use dive_core::{CoreEvent, Tab, TabId, TabState, Timestamp};
+use dive_core::{CoreEvent, Tab, TabId, Timestamp};
 use tauri::{AppHandle, Manager};
 
 use crate::Runtime;
 use crate::state::{AppState, lock};
 
 /// Idle window before a `Today` tab is discarded, unless overridden.
-pub const DEFAULT_MAX_IDLE: time::Duration = time::Duration::minutes(30);
+pub const DEFAULT_MAX_IDLE: time::Duration = time::Duration::hours(1);
 /// How often the sweep runs, unless overridden.
 pub const DEFAULT_EVERY: Duration = Duration::from_secs(60);
 /// How long one page may take to answer a sweep-time question.
@@ -116,96 +116,240 @@ pub fn keep_reason(tab: &Tab, s: Signals) -> Option<Keep> {
     }
 }
 
-/// Discard idle tabs in every workspace, close their engine views, and
-/// announce the changes. Returns how many tabs were discarded.
+/// Discard only fully observed idle tabs. Native close is requested under the
+/// host -> store lock order on the main thread; native destruction is awaited
+/// without either lock. A fresh renderer/activation invalidates finalization.
 pub async fn sweep(app: &AppHandle<Runtime>) -> dive_core::Result<usize> {
-    let state = app.state::<AppState>();
-    let candidates = lock(&state.store).idle_tab_candidates(Timestamp::now(), max_idle())?;
-    if candidates.is_empty() {
-        return Ok(0);
-    }
-    // Every tab on screen in any window or pane counts as being looked at.
-    let showing_all = lock(&state.host)
-        .as_ref()
-        .map(crate::engine::TabHost::showing)
-        .unwrap_or_default();
-    let agent_busy = !lock(&state.agent_runs).is_empty();
-    let protect_local = std::env::var("DIVE_DISCARD_LOCAL_TABS").is_err();
-
-    let mut discard = Vec::new();
+    let candidates =
+        lock(&app.state::<AppState>().store).idle_tab_candidates(Timestamp::now(), max_idle())?;
+    let mut count = 0;
     for tab in candidates {
-        let session = lock(&state.host).as_ref().and_then(|h| h.cdp(tab.id));
-        let audible = match &session {
-            Some(s) => is_audible(s).await,
-            None => false,
-        };
-        let showing = showing_all.contains(&tab.id).then_some(tab.id);
-        let signals = Signals {
-            showing,
-            recording: state.screencast.is_recording(tab.id) || state.buffers.is_recording(tab.id),
-            agent_busy,
-            audible,
-            protect_local,
-        };
-        match keep_reason(&tab, signals) {
-            Some(Keep::Showing) => {
-                // The user is looking at it: count that as activity.
-                let mut keep = tab.clone();
-                keep.state = TabState::Active;
-                keep.last_active_at = Timestamp::now();
-                lock(&state.store).upsert_tab(&keep)?;
-            }
-            Some(why) => tracing::debug!(id = %tab.id, ?why, "idle tab kept"),
-            None => {
-                if let Some(s) = &session
-                    && let Some((x, y)) = read_scroll(s).await
-                {
-                    lock(&state.store).set_scroll(tab.id, &tab.url, x, y)?;
-                }
-                discard.push(tab.id);
-            }
+        #[cfg(feature = "cef")]
+        if discard_one(app, tab).await? {
+            count += 1;
         }
+        #[cfg(not(feature = "cef"))]
+        let _ = tab; // Unknown native activity/close confirmation: keep alive.
     }
-    if discard.is_empty() {
-        return Ok(0);
-    }
-    let discarded = lock(&state.store).discard_tabs(&discard)?;
-    for tab in discarded.iter().cloned() {
-        if let Some(host) = lock(&state.host).as_mut()
-            && host.has(tab.id)
-            && let Err(e) = host.close(tab.id)
-        {
-            tracing::warn!(id = %tab.id, "failed to close discarded view: {e}");
+    Ok(count)
+}
+
+fn protected(state: &AppState, host: &crate::engine::TabHost, tab: &Tab) -> bool {
+    let signals = Signals {
+        showing: host.showing().contains(&tab.id).then_some(tab.id),
+        recording: state.screencast.is_recording(tab.id) || state.buffers.is_recording(tab.id),
+        agent_busy: !lock(&state.agent_runs).is_empty(),
+        audible: false, // Renderer snapshot and native audio are checked separately.
+        protect_local: std::env::var("DIVE_DISCARD_LOCAL_TABS").as_deref() != Ok("1"),
+    };
+    keep_reason(tab, signals).is_some() || state.inspector.active(tab.id)
+}
+
+/// Marshal a short transaction to the runtime's guarded main-task callback.
+/// Cancelled work is never started after a caller has stopped waiting.
+#[cfg(feature = "cef")]
+async fn on_main<T: Send + 'static>(
+    app: &AppHandle<Runtime>,
+    f: impl FnOnce(&AppState) -> dive_core::Result<T> + Send + 'static,
+) -> dive_core::Result<T> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        if tx.is_closed() {
+            return;
         }
+        let result = if crate::engine::MainThread::here().is_some() {
+            f(&handle.state::<AppState>())
+        } else {
+            Err(dive_core::CoreError::Invalid(
+                "discard reached wrong thread".into(),
+            ))
+        };
+        let _ = tx.send(result);
+    })
+    .map_err(|e| dive_core::CoreError::Invalid(e.to_string()))?;
+    rx.await
+        .map_err(|e| dive_core::CoreError::Invalid(e.to_string()))?
+}
+
+#[cfg(feature = "cef")]
+async fn discard_one(app: &AppHandle<Runtime>, tab: Tab) -> dive_core::Result<bool> {
+    use cef::ImplBrowser;
+    let state = app.state::<AppState>();
+    let Some((session, ticket, view)) = ({
+        let host = lock(&state.host);
+        host.as_ref().and_then(|host| {
+            if host.showing().contains(&tab.id) {
+                // Touch just this column; never upsert an old Tab snapshot.
+                let _ = lock(&state.store).touch_tab_activity(tab.id, Timestamp::now());
+            }
+            if protected(&state, host, &tab) {
+                return None;
+            }
+            Some((
+                host.cdp(tab.id)?,
+                state.activity.ticket(tab.id)?,
+                host.with_view(tab.id, |view| Ok(view.clone())).ok()?,
+            ))
+        })
+    }) else {
+        return Ok(false);
+    };
+    let Some(page) = crate::activity::probe(&session)
+        .await
+        .filter(|page| page.idle_for(&tab.url))
+    else {
+        return Ok(false);
+    };
+    let observed = std::time::Instant::now();
+    // Obtain the native handle through the supported runtime bridge. The
+    // callback is asynchronous here; never synchronously wait under host/store.
+    let (native_tx, native_rx) = tokio::sync::oneshot::channel();
+    if view
+        .with_webview(move |view| {
+            let _ = native_tx.send(view.browser());
+        })
+        .is_err()
+    {
+        return Ok(false);
+    }
+    let Ok(Ok(native)) = tokio::time::timeout(PAGE_QUESTION, native_rx).await else {
+        return Ok(false);
+    };
+    let close_native = native.clone();
+    let close_tab = tab.clone();
+    let close_ticket = ticket.clone();
+    let scroll = (page.scroll[0], page.scroll[1]);
+    let started = tokio::time::timeout(
+        PAGE_QUESTION,
+        on_main(app, move |state| {
+            if observed.elapsed() > PAGE_QUESTION {
+                return Ok(false);
+            }
+            request_discard(
+                state,
+                &close_tab,
+                &close_ticket,
+                scroll,
+                &close_native,
+                observed,
+            )
+        }),
+    )
+    .await;
+    let Ok(started) = started else {
+        return Ok(false);
+    };
+    let started = started?;
+    if !started {
+        return Ok(false);
+    }
+    let receipt = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let native = native.clone();
+            if on_main(app, move |_| Ok(native.is_valid() == 0)).await? {
+                return Ok::<_, dive_core::CoreError>(());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await;
+    if !matches!(receipt, Ok(Ok(()))) {
+        tracing::warn!(id = %tab.id, "native discard close not confirmed; persisted tab remains active");
+        return Ok(false);
+    }
+    on_main(app, move |state| {
+        finish_discard(state, &tab, &ticket, scroll, &view)
+    })
+    .await
+}
+
+/// Finalize only after native receipt, always unregistering the old label.
+#[cfg(feature = "cef")]
+fn finish_discard(
+    state: &AppState,
+    tab: &Tab,
+    ticket: &crate::activity::Ticket,
+    scroll: (i32, i32),
+    view: &tauri::Webview<Runtime>,
+) -> dive_core::Result<bool> {
+    // Direct CEF close does not unregister Tauri's webview manager entry.
+    // Now that native destruction is confirmed, the redundant close also
+    // removes that entry. Always clean the old label, even after a reopen.
+    view.close()
+        .map_err(|e| dive_core::CoreError::Invalid(e.to_string()))?;
+    let host = lock(&state.host);
+    if !state.activity.is_closing(tab.id, ticket)
+        || host.as_ref().is_some_and(|host| host.has(tab.id))
+    {
+        return Ok(false);
+    }
+    let store = lock(&state.store);
+    let discarded =
+        store.discard_candidate(tab, Timestamp::now() - max_idle(), scroll, || Ok(()))?;
+    drop(store);
+    if let Some(tab) = discarded {
+        state.activity.drop_tab(tab.id);
         state.buffers.drop_tab(tab.id);
         state.inspector.drop_tab(tab.id);
         state.crashes.drop_tab(tab.id);
         state.bus.publish(CoreEvent::TabUpserted(tab));
+        Ok(true)
+    } else {
+        Ok(false)
     }
-    Ok(discarded.len())
 }
 
-/// Ask the page whether any media element is playing with sound.
-async fn is_audible(session: &dive_cdp::CdpSession) -> bool {
-    const EXPR: &str = "Array.from(document.querySelectorAll('audio,video'))\
-        .some(m => !m.paused && !m.ended && !m.muted && m.volume > 0)";
-    evaluate(session, EXPR)
-        .await
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-}
-
-/// Where the page is scrolled, rounded to whole pixels.
-async fn read_scroll(session: &dive_cdp::CdpSession) -> Option<(i32, i32)> {
-    let v = evaluate(
-        session,
-        "[Math.round(window.scrollX), Math.round(window.scrollY)]",
-    )
-    .await?;
-    let arr = v.as_array()?;
-    let x = i32::try_from(arr.first()?.as_i64()?).ok()?;
-    let y = i32::try_from(arr.get(1)?.as_i64()?).ok()?;
-    Some((x, y))
+/// Last safety check and native request run together on the main thread.
+#[cfg(feature = "cef")]
+fn request_discard(
+    state: &AppState,
+    tab: &Tab,
+    ticket: &crate::activity::Ticket,
+    scroll: (i32, i32),
+    native: &cef::Browser,
+    observed: std::time::Instant,
+) -> dive_core::Result<bool> {
+    use cef::{ImplBrowser, ImplBrowserHost};
+    let mut host = lock(&state.host);
+    let Some(host) = host.as_mut() else {
+        return Ok(false);
+    };
+    let store = lock(&state.store);
+    if protected(state, host, tab)
+        || !host.has(tab.id)
+        || !state.activity.current(tab.id, ticket)
+        || crate::activity::exempt(&store, tab)?
+        || native.is_valid() == 0
+        || native.is_loading() != 0
+    {
+        return Ok(false);
+    }
+    let Some(native_host) = native.host() else {
+        return Ok(false);
+    };
+    if native_host.has_dev_tools() != 0 {
+        return Ok(false);
+    }
+    let mut native_requested = false;
+    let prepared = store.prepare_discard(tab, Timestamp::now() - max_idle(), scroll, || {
+        if observed.elapsed() > PAGE_QUESTION || !state.activity.begin_close(tab.id, ticket) {
+            return Err(dive_core::CoreError::Invalid(
+                "activity changed before native discard".into(),
+            ));
+        }
+        // CEF force_close bypasses beforeunload veto; the guard already
+        // protects forms/unload handlers. This is a request, not a receipt.
+        native_requested = true;
+        native_host.close_browser(1);
+        Ok(())
+    });
+    if native_requested {
+        // Activation now sees a missing view and opens a new session. Its
+        // new token prevents this old close from discarding that session.
+        host.forget_closed(tab.id);
+    }
+    prepared
 }
 
 /// Evaluate `expr` in the page, giving up quietly if it does not answer in time.
@@ -244,9 +388,11 @@ pub fn restore_scroll(app: AppHandle<Runtime>, tab: TabId) {
             tracing::debug!(%tab, "Page.enable before scroll restore failed: {e}");
         }
         let loaded = async {
-            while let Ok(ev) = events.recv().await {
-                if ev.method == "Page.loadEventFired" {
-                    break;
+            loop {
+                match events.recv().await {
+                    Ok(ev) if ev.method == "Page.loadEventFired" => break,
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         };
@@ -335,8 +481,8 @@ mod tests {
     }
 
     #[test]
-    fn idle_window_defaults_to_thirty_minutes() {
-        assert_eq!(DEFAULT_MAX_IDLE, time::Duration::minutes(30));
+    fn idle_window_defaults_to_one_hour() {
+        assert_eq!(DEFAULT_MAX_IDLE, time::Duration::hours(1));
         assert_eq!(DEFAULT_EVERY, Duration::from_secs(60));
     }
 }

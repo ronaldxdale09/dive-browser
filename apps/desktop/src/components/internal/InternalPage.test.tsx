@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../../lib/ipc";
 import { ipc } from "../../lib/ipc";
@@ -106,6 +106,57 @@ describe("capture internal page", () => {
     await waitFor(() => expect(undo.disabled).toBe(false));
     fireEvent.click(undo);
     expect((screen.getByRole("button", { name: "Redo" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("commits a drag at the release position when no move event arrives", async () => {
+    render(<InternalPage tab={capture} />);
+    const canvas = await screen.findByRole("img", { name: "Full-page capture preview" });
+    fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 20, clientY: 30 });
+    fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 180, clientY: 130 });
+    expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(context.strokeRect).toHaveBeenCalledWith(40, 60, 320, 200);
+  });
+
+  it("keeps text placement focused through the initiating mouse click", async () => {
+    render(<InternalPage tab={capture} />);
+    const canvas = await screen.findByRole("img", { name: "Full-page capture preview" });
+    fireEvent.click(screen.getByRole("button", { name: "Text" }));
+    const runsMouseDefault = fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 20, clientY: 30 });
+    // JSDOM does not implement the browser's default mousedown focus transfer.
+    // Model it when the pointerdown has not suppressed compatibility mouse events.
+    if (runsMouseDefault) fireEvent.blur(screen.getByRole("textbox", { name: "Annotation text" }));
+    fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 20, clientY: 30 });
+    const input = screen.getByRole("textbox", { name: "Annotation text" });
+    expect(document.activeElement).toBe(input);
+    fireEvent.change(input, { target: { value: "A note" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(context.fillText).toHaveBeenCalledWith("A note", 40, 85);
+    expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it.each(["Pen", "Highlight"])("preserves batched %s strokes that return to their starting point", async (tool) => {
+    render(<InternalPage tab={capture} />);
+    const canvas = await screen.findByRole("img", { name: "Full-page capture preview" });
+    fireEvent.click(screen.getByRole("button", { name: tool }));
+    act(() => {
+      fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 20, clientY: 30 });
+      fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 80, clientY: 90 });
+      fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 150, clientY: 120 });
+      fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 20, clientY: 30 });
+    });
+    expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(context.lineTo).toHaveBeenCalledWith(160, 180);
+    expect(context.lineTo).toHaveBeenCalledWith(300, 240);
+  });
+
+  it("cancels a gesture without committing it on a later release", async () => {
+    render(<InternalPage tab={capture} />);
+    const canvas = await screen.findByRole("img", { name: "Full-page capture preview" });
+    fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 20, clientY: 30 });
+    fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 180, clientY: 130 });
+    fireEvent.pointerCancel(canvas, { pointerId: 1 });
+    fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 180, clientY: 130 });
+    expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("copies the edited pixels and reports completion", async () => {

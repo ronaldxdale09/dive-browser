@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProviderInfo } from "../../lib/ipc";
+import type { KeyCheck, ProviderInfo } from "../../lib/ipc";
+import { ipc } from "../../lib/ipc";
 import { useAgent } from "../../store/agent";
 import { usePrefs } from "../../store/prefs";
 import { Setup } from "./Setup";
@@ -43,6 +44,8 @@ const MOCK_PROVIDERS: ProviderInfo[] = [
     note: "Local models, running on this machine.",
   },
 ];
+const initialAgent = useAgent.getState();
+const initialPrefs = usePrefs.getState();
 
 beforeEach(() => {
   useAgent.setState({
@@ -63,10 +66,63 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  useAgent.setState(initialAgent, true);
+  usePrefs.setState(initialPrefs, true);
   vi.restoreAllMocks();
 });
 
 describe("Setup", () => {
+  it("uses only catalog providers and their names, without stale model labels", () => {
+    useAgent.setState({ providers: [{ ...MOCK_PROVIDERS[0]!, name: "Catalog Anthropic", default_model: "catalog-model" }] });
+    render(<Setup canGoBack={false} onDone={() => {}} />);
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["Catalog Anthropic"]);
+    expect(screen.getByText("catalog-model")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /OpenAI/ })).toBeNull();
+  });
+
+  it("does not save or activate after the setup closes during verification", async () => {
+    let resolve!: (value: { ok: boolean; message: string }) => void;
+    useAgent.setState({ verifyKey: vi.fn(() => new Promise<KeyCheck>((done) => { resolve = done; })) });
+    const update = vi.fn().mockResolvedValue(undefined);
+    usePrefs.setState({ update });
+    const done = vi.fn();
+    const view = render(<Setup canGoBack={false} onDone={done} />);
+    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verify & Connect" }));
+    view.unmount();
+    await act(async () => { resolve({ ok: true, message: "ok" }); });
+    expect(useAgent.getState().saveKey).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(done).not.toHaveBeenCalled();
+  });
+
+  it("reports activation failure instead of leaving a false connected state", async () => {
+    vi.spyOn(ipc, "prefsSet").mockRejectedValue(Error("Settings could not be saved"));
+    const done = vi.fn();
+    render(<Setup canGoBack={false} onDone={done} />);
+    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verify & Connect" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Settings could not be saved"));
+    expect(screen.queryByText("Connection verified! Loading agent…")).toBeNull();
+    expect(done).not.toHaveBeenCalled();
+  });
+
+  it("keeps setup busy until activation is saved and calls Done only after acknowledgment", async () => {
+    let saved!: () => void;
+    const update = vi.fn(() => new Promise<void>((resolve) => { saved = resolve; }));
+    usePrefs.setState({ update });
+    const done = vi.fn();
+    render(<Setup canGoBack={false} onDone={done} />);
+    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verify & Connect" }));
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ agent_provider: "anthropic" }), { rejectOnError: true });
+    expect((screen.getByLabelText("All Providers") as HTMLSelectElement).disabled).toBe(true);
+    expect(done).not.toHaveBeenCalled();
+    await act(async () => { saved(); });
+    expect(done).toHaveBeenCalledTimes(1);
+  });
+
   it("renders onboarding hero when no keys are configured", () => {
     render(<Setup canGoBack={false} onDone={() => {}} />);
     expect(screen.getByText("Connect Model Provider")).toBeTruthy();

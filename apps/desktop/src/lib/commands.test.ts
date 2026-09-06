@@ -69,16 +69,11 @@ describe("command dispatch", () => {
     expect(SHORTCUTS["mod+shift+delete"]).toBe("browsing-data.open");
   });
 
-  it("opens a fresh window in the current workspace", async () => {
-    const opened = tab("new");
-    const open = vi.spyOn(ipc, "tabOpen").mockResolvedValue(opened);
-    const detach = vi.spyOn(ipc, "tabDetach").mockResolvedValue(null);
-    useBrowser.setState({ activeWorkspace: "w" });
-
+  it("opens a fresh window using the engine's authoritative workspace", async () => {
+    const open = vi.spyOn(ipc, "windowOpen").mockResolvedValue(null);
+    useBrowser.setState({ activeWorkspace: null });
     await UI_COMMANDS["window.new"]!();
-
-    expect(open).toHaveBeenCalledWith("w", "about:blank");
-    expect(detach).toHaveBeenCalledWith("new", null);
+    expect(open).toHaveBeenCalledOnce();
   });
 
   it("routes browser library and tab-search commands to their exact surfaces", async () => {
@@ -115,11 +110,13 @@ describe("command dispatch", () => {
     expect(print).toHaveBeenCalledWith("a");
     expect(stop).toHaveBeenCalledWith("a");
     await UI_COMMANDS["library.open"]!();
+    expect(useBrowser.getState().open).toMatchObject({ library: true, shortcuts: false, settings: false });
     await UI_COMMANDS["shortcuts.open"]!();
+    expect(useBrowser.getState().open).toMatchObject({ library: false, shortcuts: true, settings: false });
     await UI_COMMANDS["settings.open"]!();
     const { open } = useBrowser.getState();
-    expect(open.library).toBe(true);
-    expect(open.shortcuts).toBe(true);
+    expect(open.library).toBe(false);
+    expect(open.shortcuts).toBe(false);
     expect(open.settings).toBe(true);
     useBrowser.setState({ open: { ...open, library: false, shortcuts: false, settings: false } });
   });

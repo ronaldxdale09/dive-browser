@@ -8,7 +8,8 @@
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
-    "check": "cargo fmt --all -- --check && pnpm typecheck && pnpm lint && pnpm test && pnpm --filter @dive/desktop exec vite build && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+    "test:probes": "python3 -m unittest discover -s scripts/tests -p 'test_*.py'",
+    "check": "pnpm test:probes && cargo fmt --all -- --check && pnpm typecheck && pnpm lint && pnpm test && pnpm --filter @dive/desktop exec vite build && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
     "release:next": "node scripts/release/resolve-release.mjs"
   },
   "pnpm": {

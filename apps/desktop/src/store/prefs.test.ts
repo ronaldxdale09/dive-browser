@@ -15,6 +15,35 @@ afterEach(() => {
 });
 
 describe("preference persistence", () => {
+  it("does not replay a rejected activation through a later unrelated preference write", async () => {
+    let rejectActivation!: (error: Error) => void;
+    let started!: () => void;
+    const firstStarted = new Promise<void>((resolve) => { started = resolve; });
+    const write = vi.spyOn(ipc, "prefsSet").mockImplementationOnce(() => {
+      started();
+      return new Promise((_, reject) => { rejectActivation = reject; });
+    }).mockImplementation(async (prefs) => prefs);
+    usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
+    const activation = usePrefs.getState().update({ agent_provider: "openai", agent_model: "fixture-model" }, { rejectOnError: true });
+    const rejected = expect(activation).rejects.toThrow("save failed");
+    await firstStarted;
+    const unrelated = usePrefs.getState().update({ do_not_track: true });
+    rejectActivation(Error("save failed"));
+    await rejected;
+    await unrelated;
+    expect(write.mock.calls[1]?.[0]).toMatchObject({ agent_provider: DEFAULT_PREFS.agent_provider, agent_model: DEFAULT_PREFS.agent_model, do_not_track: true });
+    expect(usePrefs.getState().prefs).toMatchObject({ agent_provider: DEFAULT_PREFS.agent_provider, agent_model: DEFAULT_PREFS.agent_model, do_not_track: true });
+  });
+
+  it("lets transactional callers observe a failed save without poisoning later writes", async () => {
+    vi.spyOn(ipc, "prefsSet").mockRejectedValueOnce(Error("disk full")).mockImplementation(async (prefs) => prefs);
+    usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
+    await expect(usePrefs.getState().update({ agent_provider: "openai" }, { rejectOnError: true })).rejects.toThrow("disk full");
+    expect(usePrefs.getState().prefs.agent_provider).toBe(DEFAULT_PREFS.agent_provider);
+    await usePrefs.getState().update({ agent_provider: "ollama" }, { rejectOnError: true });
+    expect(usePrefs.getState().prefs.agent_provider).toBe("ollama");
+  });
+
   it("serializes full snapshots so an older host apply finishes first", async () => {
     let finishFirst!: (prefs: typeof DEFAULT_PREFS) => void;
     let finishSecond!: (prefs: typeof DEFAULT_PREFS) => void;

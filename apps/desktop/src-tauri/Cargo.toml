@@ -20,6 +20,8 @@ dive-mcp = { path = "../../../crates/dive-mcp" }
 dive-agent = { path = "../../../crates/dive-agent" }
 keyring-core = "1"
 futures-util = "0.3"
+# Direct access to the same pinned native CEF types for safe discard.
+cef = { version = "=151.8.1", optional = true }
 async-trait = "0.1"
 tauri = { workspace = true, features = ["unstable", "devtools", "specta", "protocol-asset"] }
 tauri-specta = { workspace = true }
@@ -36,6 +38,7 @@ tauri-plugin-updater = "2"
 rfd = "0.16"
 anyhow = { workspace = true }
 thiserror = { workspace = true }
+tempfile = "3"
 url = { workspace = true }
 psl = "2"
 time = { workspace = true }
@@ -65,7 +68,7 @@ default = ["cef", "whisper"]
 # quick UI-only build that skips the native transcription toolchain.
 whisper = ["dep:whisper-rs"]
 # Chromium engine (the product). Requires cmake + ninja and the CEF CLI.
-cef = ["tauri/cef"]
+cef = ["tauri/cef", "dep:cef"]
 # System webview fallback for UI-only development without CEF.
 wry = ["tauri/wry"]
 

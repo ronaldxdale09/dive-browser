@@ -1,6 +1,6 @@
+import { AvatarImage } from "./AvatarImage";
 import { Check, ChevronDown, Pencil, Plus, Shield } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { profileAvatar } from "../lib/profileAvatar";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
@@ -53,7 +53,7 @@ export function ProfileChip() {
         onClick={() => setOpen((o) => !o)}
         className="flex h-7 max-w-44 items-center gap-1.5 rounded-full border border-line pr-1.5 pl-1 text-xs text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
       >
-        <img src={profileAvatar(current.avatar, current.color)} alt="" width={20} height={20} className="size-5 shrink-0 rounded-full" />
+        <AvatarImage kind="profile" seed={current.avatar} color={current.color} alt="" width={20} height={20} className="size-5 shrink-0 rounded-full" />
         <span className="truncate font-medium">{current.name}</span>
         <Icon icon={ChevronDown} size={12} className="shrink-0 text-ink-3" />
       </button>
@@ -74,7 +74,7 @@ export function ProfileChip() {
                 }}
                 className={`flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left text-xs transition-colors hover:bg-surface-2 ${isCurrent ? "bg-surface-2 text-ink" : "text-ink-2"}`}
               >
-                <img src={profileAvatar(p.avatar, p.color)} alt="" width={30} height={30} className="size-[30px] shrink-0 rounded-full" />
+                <AvatarImage kind="profile" seed={p.avatar} color={p.color} alt="" width={30} height={30} className="size-[30px] shrink-0 rounded-full" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{p.name}</span>
                   <span className="block truncate text-[10.5px] text-ink-3">{p.note || `${spacesOf(p.id)} ${spacesOf(p.id) === 1 ? "workspace" : "workspaces"} · ${tabsOf(p.id)} tabs`}</span>

@@ -1,5 +1,6 @@
-import { ArrowLeft, ArrowRight, Bug, Camera, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, X, Menu } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Bug, Camera, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, X, Menu } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { FOCUS_ADDRESS } from "../lib/commands";
 import { useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
@@ -9,15 +10,16 @@ import { DownloadsMenu } from "./DownloadsMenu";
 import { ProtectionMenu } from "./ProtectionMenu";
 import { MainMenu } from "./MainMenu";
 import { Tooltip } from "./Tooltip";
+import { useCoversContent } from "../lib/overlay";
+import { useFocusTrap } from "../lib/useFocusTrap";
 import { usePicker } from "../store/simulator";
+import { NavigationButtons } from "./NavigationButtons";
 
 /** Navigation row: nav icons, the omnibox pill and, as glyphs, the actions that act on the page. */
 export function Toolbar({ compact = false }: { compact?: boolean }) {
   const tabs = useBrowser((s) => s.tabs);
   const activeTab = useBrowser((s) => s.activeTab);
   const navigate = useBrowser((s) => s.navigate);
-  const back = useBrowser((s) => s.back);
-  const forward = useBrowser((s) => s.forward);
   const reload = useBrowser((s) => s.reload);
   const stop = useBrowser((s) => s.stop);
   const capture = useBrowser((s) => s.capture);
@@ -30,11 +32,13 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
   const loading = useBrowser((s) => (s.activeTab ? s.loading[s.activeTab] === true : false));
   const current = tabs.find((t) => t.id === activeTab);
   const url = current?.url ?? "";
-  // Reset the draft whenever the active tab's URL changes (adjust-state-during-render).
-  const [draft, setDraft] = useState({ url, value: url });
-  if (draft.url !== url) setDraft({ url, value: url });
-  const value = draft.value;
-  const setValue = (v: string) => setDraft({ url, value: v });
+  // A redirect must not overwrite text the person is editing. A tab switch
+  // does reset the draft, even when both tabs happen to have the same URL.
+  const [draft, setDraft] = useState({ tabId: activeTab, value: url });
+  const [editing, setEditing] = useState(false);
+  if (draft.tabId !== activeTab) setDraft({ tabId: activeTab, value: url });
+  const value = editing ? draft.value : url;
+  const setValue = (value: string) => setDraft({ tabId: activeTab, value });
   const secure = url.startsWith("https://");
   const display = pretty(url);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -53,15 +57,24 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
   };
   // Cmd+L, from the menu or the palette.
   useEffect(() => {
-    const focus = () => inputRef.current?.focus();
+    const focus = () => {
+      flushSync(() => inputRef.current?.focus());
+      inputRef.current?.select();
+    };
     window.addEventListener(FOCUS_ADDRESS, focus);
     return () => window.removeEventListener(FOCUS_ADDRESS, focus);
   }, []);
 
+  // Select after the full URL is committed, before the next input event.
+  // A delayed animation-frame selection could overwrite newly typed text.
+  useLayoutEffect(() => {
+    const input = inputRef.current;
+    if (editing && input && document.activeElement === input) input.select();
+  }, [editing]);
+
   return (
     <div className="relative flex h-full items-center gap-1 px-2">
-      <IconButton icon={ArrowLeft} label="Back" disabled={!current} onClick={() => void back()} />
-      <IconButton icon={ArrowRight} label="Forward" disabled={!current} onClick={() => void forward()} />
+      <NavigationButtons tabId={current?.id ?? null} url={url} loading={loading} />
       {/* While the page loads the same slot stops it, as in every browser. */}
       {loading ? (
         <IconButton icon={X} label="Stop loading" shortcut="Esc" disabled={!current} onClick={() => void stop()} size={14} />
@@ -72,20 +85,32 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
         className="mx-1 flex h-[calc(var(--row-h)-4px)] min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2"
         onSubmit={(e) => {
           e.preventDefault();
+          if (!value.trim()) return;
           void navigate(value);
+          setEditing(false);
+          inputRef.current?.blur();
         }}
       >
         <Icon icon={current ? (secure ? Lock : Search) : Search} size={13} className="shrink-0 text-ink-3" />
         <input
           ref={inputRef}
           aria-label="Address"
-          value={value === url ? display : value}
+          value={editing ? value : display}
           onChange={(e) => setValue(e.target.value)}
           onFocus={(e) => {
+            setEditing(true);
             setValue(url);
-            requestAnimationFrame(() => e.target.select());
+            e.currentTarget.select();
           }}
-          onBlur={() => setValue(url)}
+          onBlur={() => setEditing(false)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              setValue(url);
+              event.currentTarget.blur();
+            }
+          }}
           placeholder="Search or enter address"
           spellCheck={false}
           className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
@@ -127,24 +152,24 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
 function ToolbarMore({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  useCoversContent(open);
+  useFocusTrap(panel, { active: open, onEscape: () => setOpen(false) });
   useEffect(() => {
     if (!open) return;
     const close = (event: MouseEvent) => {
       if (!root.current?.contains(event.target as Node)) setOpen(false);
     };
-    const key = (event: KeyboardEvent) => event.key === "Escape" && setOpen(false);
     window.addEventListener("mousedown", close);
-    window.addEventListener("keydown", key);
     return () => {
       window.removeEventListener("mousedown", close);
-      window.removeEventListener("keydown", key);
     };
   }, [open]);
   return (
     <div ref={root} className="relative shrink-0">
       <IconButton icon={MoreHorizontal} label="More page actions" active={open} onClick={() => setOpen((value) => !value)} tooltipAlign="end" />
       {open && (
-        <div role="dialog" aria-label="Page actions" className="surface-enter absolute top-full right-0 z-50 mt-1 flex items-center gap-0.5 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl">
+        <div ref={panel} role="dialog" aria-label="Page actions" aria-modal="true" className="surface-enter absolute top-full right-0 z-50 mt-1 flex items-center gap-0.5 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl">
           {children}
         </div>
       )}

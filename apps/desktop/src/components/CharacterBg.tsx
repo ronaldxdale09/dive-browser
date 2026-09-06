@@ -21,6 +21,7 @@ interface ColorsValue {
 }
 
 interface CharacterBgProps {
+  animated?: boolean;
   speed?: number;
   reverse?: boolean;
   gap?: number;
@@ -79,6 +80,7 @@ function useInView(ref: RefObject<HTMLElement | null>) {
 
 /** Repeating characters animated by one shared CSS time value. */
 export function CharacterBg({
+  animated = true,
   speed = 75,
   reverse = true,
   gap = 10,
@@ -132,7 +134,7 @@ export function CharacterBg({
   }, [tileSize]);
 
   useEffect(() => {
-    if (!isInView || reducedMotion) return;
+    if (!animated || !isInView || reducedMotion) return;
     let animationFrame = 0;
     let time = 0;
     let lastFrameTime = 0;
@@ -150,7 +152,7 @@ export function CharacterBg({
     };
     animationFrame = requestAnimationFrame(updateTime);
     return () => cancelAnimationFrame(animationFrame);
-  }, [isInView, reducedMotion, reverse, speed]);
+  }, [animated, isInView, reducedMotion, reverse, speed]);
 
   const characters = gridText.length > 0 ? [...gridText] : ["D"];
   const styleContent = `

@@ -12,6 +12,10 @@ const FOCUSABLE = [
   "[contenteditable='true']",
 ].join(",");
 
+// Nested dialogs own their keys. An outer trap must not close the whole tray
+// or move focus a second time after a child popover handles the same event.
+const activeTraps = new WeakSet<HTMLElement>();
+
 const MENU_ITEM = "[role='menuitem'],[role='menuitemradio'],[role='menuitemcheckbox']";
 
 /** Every element inside `root` that Tab could reach, in document order. */
@@ -71,6 +75,7 @@ export function useFocusTrap<T extends HTMLElement>(ref: RefObject<T | null>, { 
     if (!active) return;
     const root = ref.current;
     if (!root) return;
+    activeTraps.add(root);
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     if (!root.contains(document.activeElement)) {
@@ -80,6 +85,9 @@ export function useFocusTrap<T extends HTMLElement>(ref: RefObject<T | null>, { 
     }
 
     const onKey = (e: KeyboardEvent) => {
+      for (let node = e.target instanceof HTMLElement ? e.target : null; node && node !== root; node = node.parentElement) {
+        if (activeTraps.has(node)) return;
+      }
       if (e.key === "Escape" && escape.current) {
         e.stopPropagation();
         escape.current();
@@ -116,6 +124,7 @@ export function useFocusTrap<T extends HTMLElement>(ref: RefObject<T | null>, { 
     root.addEventListener("keydown", onKey);
 
     return () => {
+      activeTraps.delete(root);
       root.removeEventListener("keydown", onKey);
       // Give focus back only if it is still ours to give: if the user has
       // already clicked somewhere else, that click wins.

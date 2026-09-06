@@ -11,6 +11,7 @@ import { outputSize, sourceTime } from "./math";
 import type { Segment } from "./math";
 import type { CursorSample, Project } from "./model";
 import { Renderer } from "./render";
+import { recordMediaProbe, setMediaProbePhase } from "./mediaProbe";
 
 export interface ExportProgress {
   phase: "preparing" | "rendering" | "uploading" | "finishing" | "done";
@@ -32,27 +33,102 @@ export interface ExportInput {
   video?: HTMLVideoElement | null;
 }
 
-/** Seek a video element and wait until the frame at that time is decoded. */
-function seekTo(video: HTMLVideoElement, ms: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const target = ms / 1000;
-    if (Math.abs(video.currentTime - target) < 0.0005 && video.readyState >= 2) return resolve();
-    const done = () => {
-      cleanup();
-      resolve();
-    };
-    const fail = () => {
-      cleanup();
-      reject(new Error("the video could not be read at that point"));
-    };
-    const cleanup = () => {
-      video.removeEventListener("seeked", done);
-      video.removeEventListener("error", fail);
-    };
-    video.addEventListener("seeked", done, { once: true });
-    video.addEventListener("error", fail, { once: true });
-    video.currentTime = target;
+function checkCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new Error("export cancelled");
+}
+
+/** Each wait owns and removes its timer/abort listener, including late rejection. */
+async function bounded<T>(operation: Promise<T>, phase: string, milliseconds: number, signal?: AbortSignal): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let abort: (() => void) | undefined;
+  const interruption = new Promise<never>((_, reject) => {
+    abort = () => reject(new Error("export cancelled"));
+    signal?.addEventListener("abort", abort, { once: true });
+    timer = setTimeout(() => reject(new Error(`${phase} timed out`)), milliseconds);
+    if (signal?.aborted) abort();
   });
+  try {
+    const result = await Promise.race([operation, interruption]);
+    checkCancelled(signal);
+    return result;
+  } finally {
+    clearTimeout(timer);
+    if (abort) signal?.removeEventListener("abort", abort);
+  }
+}
+
+async function ready(video: HTMLVideoElement, owned: boolean, signal?: AbortSignal): Promise<void> {
+  checkCancelled(signal);
+  if (video.readyState >= 2) return;
+  let active = true;
+  let nudge: ReturnType<typeof setTimeout> | undefined;
+  let done = () => {};
+  let fail = () => {};
+  try {
+    await bounded(new Promise<void>((resolve, reject) => {
+      done = () => { if (video.readyState >= 2) resolve(); };
+      fail = () => reject(new Error("the video could not be opened"));
+      video.addEventListener("loadeddata", done);
+      video.addEventListener("canplay", done);
+      video.addEventListener("error", fail);
+      if (owned) video.load();
+      nudge = setTimeout(() => {
+        if (active && !signal?.aborted && video.readyState < 2) {
+          void video.play().then(() => { if (active && !signal?.aborted) video.pause(); }).catch(() => undefined);
+        }
+      }, 400);
+    }), "opening video", 20_000, signal);
+  } finally {
+    active = false;
+    clearTimeout(nudge);
+    video.removeEventListener("loadeddata", done);
+    video.removeEventListener("canplay", done);
+    video.removeEventListener("error", fail);
+  }
+}
+
+/** Seek a video element and wait until the frame at that time is decoded. */
+async function seekTo(video: HTMLVideoElement, ms: number, signal?: AbortSignal): Promise<void> {
+  checkCancelled(signal);
+  const target = ms / 1000;
+  if (Math.abs(video.currentTime - target) < 0.0005 && video.readyState >= 2) return;
+  let done = () => {};
+  let fail = () => {};
+  try {
+    await bounded(new Promise<void>((resolve, reject) => {
+      done = resolve;
+      fail = () => reject(new Error("the video could not be read at that point"));
+      video.addEventListener("seeked", done);
+      video.addEventListener("error", fail);
+      video.currentTime = target;
+    }), "seeking video", 10_000, signal);
+  } catch (error) {
+    const event = signal?.aborted ? "export_seek_cancelled" : error instanceof Error && error.message === "seeking video timed out" ? "export_seek_timeout" : "export_seek_failed";
+    recordMediaProbe(video, event);
+    throw error;
+  } finally {
+    video.removeEventListener("seeked", done);
+    video.removeEventListener("error", fail);
+  }
+}
+
+async function drain(encoder: VideoEncoder, checkError: () => void, signal?: AbortSignal): Promise<void> {
+  checkCancelled(signal);
+  checkError();
+  if (encoder.encodeQueueSize <= 24) return;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  try {
+    await bounded(new Promise<void>((resolve, reject) => {
+      timer = setInterval(() => {
+        try {
+          checkError();
+          if (encoder.encodeQueueSize <= 24) resolve();
+        } catch (error) { reject(error); }
+      }, 4);
+    }), "draining video encoder", 10_000, signal);
+  } finally {
+    clearInterval(timer);
+  }
 }
 
 export async function exportProject(input: ExportInput): Promise<RecordingResult> {
@@ -70,114 +146,143 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
   // element never fetches its metadata under the embedded Chromium.
   const borrowed = input.video ?? null;
   const video = borrowed ?? document.createElement("video");
-  const release = () => {
-    if (borrowed) {
-      borrowed.pause();
-      return;
+  let released = false;
+  let encoder: VideoEncoder | undefined;
+  let jobId: string | null = null;
+  let completed = false;
+  let cancellation: Promise<{ ok: true } | { ok: false; error: unknown }> | null = null;
+  const cancelJob = () => {
+    if (jobId && !cancellation) {
+      cancellation = ipc.screenExportCancel(jobId).then(() => ({ ok: true as const }), (error: unknown) => ({ ok: false as const, error }));
     }
-    video.remove();
   };
-  if (!borrowed) {
-    video.muted = true;
-    video.playsInline = true;
-    video.preload = "auto";
-    video.style.cssText = "position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none";
-    document.body.appendChild(video);
-    video.src = playable;
-  } else {
+  const confirmCleanup = async () => {
+    if (!cancellation) return;
+    const receipt = await cancellation;
+    if (!receipt.ok) throw new Error("Export cleanup could not be confirmed. The job may still be stopping.", { cause: receipt.error });
+  };
+  signal?.addEventListener("abort", cancelJob);
+
+  const release = () => {
+    if (released) return;
+    released = true;
     video.pause();
-  }
+    if (!borrowed) {
+      video.removeAttribute("src");
+      video.load();
+      video.remove();
+    }
+  };
   try {
-    // Never `load()` an element that already has the clip: re-opening the
-    // decoder is exactly what fails.
-    if (video.readyState < 2) {
-      await new Promise<void>((resolve, reject) => {
-        const done = () => {
-          if (video.readyState >= 2) resolve();
-        };
-        video.addEventListener("loadeddata", done);
-        video.addEventListener("canplay", done);
-        video.addEventListener("error", () => reject(new Error("the video could not be opened")), { once: true });
-        if (!borrowed) video.load();
-        window.setTimeout(() => {
-          if (video.readyState < 2) void video.play().then(() => video.pause()).catch(() => undefined);
-        }, 400);
-        window.setTimeout(() => reject(new Error("the video took too long to open")), 20_000);
-      });
+    checkCancelled(signal);
+    setMediaProbePhase(video, "preparing");
+    recordMediaProbe(video, "export_begin");
+    if (!borrowed) {
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = "auto";
+      video.style.cssText = "position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none";
+      document.body.appendChild(video);
+      video.src = playable;
+    } else {
+      video.pause();
     }
-    await seekTo(video, 0);
+    // Never reload the Stage's existing decoder.
+    await ready(video, !borrowed, signal);
+    setMediaProbePhase(video, "seeking", 0, 0);
+    await seekTo(video, 0, signal);
     video.pause();
-  } catch (err) {
-    release();
-    throw err;
-  }
 
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d", { willReadFrequently: e.annotations.some((a) => a.type === "blur") });
-  if (!ctx) throw new Error("no canvas");
-  const renderer = new Renderer();
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: e.annotations.some((a) => a.type === "blur") });
+    if (!ctx) throw new Error("no canvas");
+    const renderer = new Renderer();
 
-  const codec = "vp09.00.10.08";
-  const support = await VideoEncoder.isConfigSupported({ codec, width, height, bitrate: bitrateFor(width, height, fps), framerate: fps });
-  if (!support.supported) throw new Error("this build cannot encode video");
-  const target = new ArrayBufferTarget();
-  const muxer = new Muxer({ target, video: { codec: "V_VP9", width, height, frameRate: fps }, firstTimestampBehavior: "offset" });
-  let encodeError: Error | null = null;
-  const encoder = new VideoEncoder({
-    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
-    error: (err) => (encodeError = err),
-  });
-  encoder.configure({ codec, width, height, bitrate: bitrateFor(width, height, fps), framerate: fps, latencyMode: "quality" });
+    const codec = "vp09.00.10.08";
+    const support = await bounded(VideoEncoder.isConfigSupported({ codec, width, height, bitrate: bitrateFor(width, height, fps), framerate: fps }), "configuring video encoder", 10_000, signal);
+    if (!support.supported) throw new Error("this build cannot encode video");
+    const target = new ArrayBufferTarget();
+    const muxer = new Muxer({ target, video: { codec: "V_VP9", width, height, frameRate: fps }, firstTimestampBehavior: "offset" });
+    let encodeError: Error | null = null;
+    encoder = new VideoEncoder({
+      output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+      error: (err) => (encodeError = err),
+    });
+    encoder.configure({ codec, width, height, bitrate: bitrateFor(width, height, fps), framerate: fps, latencyMode: "quality" });
 
-  renderer.snap();
-  for (let i = 0; i < frames; i++) {
-    if (signal?.aborted) {
-      encoder.close();
-      release();
-      throw new Error("export cancelled");
+    renderer.snap();
+    for (let i = 0; i < frames; i++) {
+      checkCancelled(signal);
+      if (encodeError) throw encodeError;
+      const outMs = (i / fps) * 1000;
+      const srcMs = sourceTime(segments, outMs) ?? project.media.durationMs;
+      setMediaProbePhase(video, "seeking", i + 1, srcMs);
+      await seekTo(video, srcMs, signal);
+      setMediaProbePhase(video, "draining", i + 1, srcMs);
+      await drain(encoder, () => { if (encodeError) throw encodeError; }, signal);
+      setMediaProbePhase(video, "rendering", i + 1, srcMs);
+      renderer.draw(ctx, project, video, srcMs, cursorSmooth, cursorRaw, { width, height, playing: true });
+      const frame = new VideoFrame(canvas, { timestamp: Math.round(outMs * 1000), duration: Math.round(1_000_000 / fps) });
+      try {
+        encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+      } finally {
+        frame.close();
+      }
+      if (i % 3 === 0) onProgress({ phase: "rendering", progress: (i + 1) / frames, frame: i + 1, frames });
     }
+    setMediaProbePhase(video, "flushing");
+    await bounded(encoder.flush(), "flushing video encoder", 10_000, signal);
     if (encodeError) throw encodeError;
-    const outMs = (i / fps) * 1000;
-    const srcMs = sourceTime(segments, outMs) ?? project.media.durationMs;
-    await seekTo(video, srcMs);
-    renderer.draw(ctx, project, video, srcMs, cursorSmooth, cursorRaw, { width, height, playing: true });
-    const frame = new VideoFrame(canvas, { timestamp: Math.round(outMs * 1000), duration: Math.round(1_000_000 / fps) });
-    // Back-pressure: let the encoder drain rather than piling frames up.
-    while (encoder.encodeQueueSize > 24) await new Promise((r) => setTimeout(r, 4));
-    encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
-    frame.close();
-    if (i % 3 === 0) onProgress({ phase: "rendering", progress: (i + 1) / frames, frame: i + 1, frames });
-  }
-  await encoder.flush();
-  encoder.close();
-  muxer.finalize();
-  release();
-  const webm = new Uint8Array(target.buffer);
+    encoder.close();
+    muxer.finalize();
+    release();
+    const webm = new Uint8Array(target.buffer);
 
-  onProgress({ phase: "uploading", progress: 0 });
-  const staged = await ipc.screenExportBegin();
-  const CHUNK = 6 * 1024 * 1024;
-  for (let offset = 0; offset < webm.length; offset += CHUNK) {
-    if (signal?.aborted) throw new Error("export cancelled");
-    const piece = webm.subarray(offset, Math.min(webm.length, offset + CHUNK));
-    await ipc.screenExportAppend(staged, toBase64(piece));
-    onProgress({ phase: "uploading", progress: Math.min(1, (offset + piece.length) / webm.length) });
-  }
+    checkCancelled(signal);
+    setMediaProbePhase(video, "uploading");
+    onProgress({ phase: "uploading", progress: 0 });
+    jobId = await ipc.screenExportBegin();
+    if (signal?.aborted) cancelJob();
+    const CHUNK = 6 * 1024 * 1024;
+    for (let offset = 0; offset < webm.length; offset += CHUNK) {
+      checkCancelled(signal);
+      const piece = webm.subarray(offset, Math.min(webm.length, offset + CHUNK));
+      await ipc.screenExportAppend(jobId, offset, toBase64(piece));
+      onProgress({ phase: "uploading", progress: Math.min(1, (offset + piece.length) / webm.length) });
+    }
 
-  onProgress({ phase: "finishing", progress: 0 });
-  const result = await ipc.screenExportFinish({
-    staged,
-    source: project.media.source,
-    format: gif ? "gif" : "mp4",
-    fps,
-    gif_fps: e.export.gifFps,
-    segments: segments.map((s) => ({ src_start_ms: s.srcStartMs, src_end_ms: s.srcEndMs, speed: s.speed })),
-    with_audio: !gif,
-  });
-  onProgress({ phase: "done", progress: 1 });
-  return result;
+    // Cancellation requests run beside finish; the native job acknowledges only
+    // after its child exits and private staging has been removed.
+    checkCancelled(signal);
+    setMediaProbePhase(video, "finishing");
+    onProgress({ phase: "finishing", progress: 0 });
+    const result = await ipc.screenExportFinish({
+      job_id: jobId,
+      source: project.media.source,
+      format: gif ? "gif" : "mp4",
+      fps,
+      gif_fps: e.export.gifFps,
+      segments: segments.map((s) => ({ src_start_ms: s.srcStartMs, src_end_ms: s.srcEndMs, speed: s.speed })),
+      with_audio: !gif,
+    });
+    completed = true;
+    await confirmCleanup();
+    setMediaProbePhase(video, "done");
+    onProgress({ phase: "done", progress: 1 });
+    return result;
+  } finally {
+    recordMediaProbe(video, "export_end");
+    try {
+      if (encoder && encoder.state !== "closed") encoder.close();
+    } finally {
+      release();
+      signal?.removeEventListener("abort", cancelJob);
+      if (jobId && !completed) cancelJob();
+      await confirmCleanup();
+    }
+  }
 }
 
 function bitrateFor(w: number, h: number, fps: number): number {

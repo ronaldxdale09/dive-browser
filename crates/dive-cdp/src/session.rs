@@ -1,11 +1,11 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::{broadcast, oneshot, watch};
 
 use crate::error::CdpError;
 
@@ -60,7 +60,49 @@ struct Inner {
     /// after that fails here instead of reaching the transport: the feeds
     /// answer events on their own schedule, and a message handed to a
     /// browser mid-teardown is how the engine's message loop trips a CHECK.
-    closed: AtomicBool,
+    closed: watch::Sender<bool>,
+}
+
+/// A session event subscription that ends when the session is explicitly closed,
+/// even while another feed still owns a clone of that session.
+#[derive(Debug)]
+pub struct CdpEventReceiver {
+    events: broadcast::Receiver<CdpEvent>,
+    closed: watch::Receiver<bool>,
+}
+
+impl CdpEventReceiver {
+    /// Receive the next event, or report lag/closure using broadcast semantics.
+    /// Cancellation is safe: a cancelled wait does not consume an event.
+    pub async fn recv(&mut self) -> Result<CdpEvent, broadcast::error::RecvError> {
+        if *self.closed.borrow() {
+            return Err(broadcast::error::RecvError::Closed);
+        }
+        tokio::select! {
+            biased;
+            _ = self.closed.changed() => Err(broadcast::error::RecvError::Closed),
+            event = self.events.recv() => {
+                if *self.closed.borrow() {
+                    Err(broadcast::error::RecvError::Closed)
+                } else {
+                    event
+                }
+            }
+        }
+    }
+
+    /// Receive without waiting. Closed sessions never deliver buffered events.
+    pub fn try_recv(&mut self) -> Result<CdpEvent, broadcast::error::TryRecvError> {
+        if *self.closed.borrow() {
+            return Err(broadcast::error::TryRecvError::Closed);
+        }
+        let event = self.events.try_recv();
+        if *self.closed.borrow() {
+            Err(broadcast::error::TryRecvError::Closed)
+        } else {
+            event
+        }
+    }
 }
 
 /// Removes an in-flight call when its future is timed out or cancelled.
@@ -93,13 +135,14 @@ impl CdpSession {
     /// Create a session over `transport`.
     pub fn new(transport: impl Transport) -> Self {
         let (events, _) = broadcast::channel(EVENT_BUFFER);
+        let (closed, _) = watch::channel(false);
         Self {
             inner: Arc::new(Inner {
                 transport: Box::new(transport),
                 next_id: AtomicU64::new(FIRST_ID),
                 pending: Mutex::new(HashMap::new()),
                 events,
-                closed: AtomicBool::new(false),
+                closed,
             }),
         }
     }
@@ -115,12 +158,20 @@ impl CdpSession {
         params: Value,
         timeout: Duration,
     ) -> Result<Value, CdpError> {
-        if self.inner.closed.load(Ordering::Acquire) {
+        if *self.inner.closed.borrow() {
             return Err(CdpError::Closed);
         }
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
-        self.pending().insert(id, tx);
+        {
+            let mut pending = self.pending();
+            // Pair registration with close's pending-table cleanup. Otherwise
+            // close can drain the table just before this call inserts into it.
+            if self.is_closed() {
+                return Err(CdpError::Closed);
+            }
+            pending.insert(id, tx);
+        }
         let _cleanup = PendingGuard {
             inner: Arc::clone(&self.inner),
             id,
@@ -145,9 +196,13 @@ impl CdpSession {
     /// Subscribe to every event the browser emits on this session.
     ///
     /// Slow subscribers that fall more than the buffer size behind receive a
-    /// `Lagged` error from the receiver and must resubscribe.
-    pub fn subscribe(&self) -> broadcast::Receiver<CdpEvent> {
-        self.inner.events.subscribe()
+    /// `Lagged` error and can continue receiving at the oldest retained event.
+    /// Explicit session closure discards buffered events and wakes subscribers.
+    pub fn subscribe(&self) -> CdpEventReceiver {
+        CdpEventReceiver {
+            events: self.inner.events.subscribe(),
+            closed: self.inner.closed.subscribe(),
+        }
     }
 
     /// Feed one raw message received from the browser.
@@ -155,7 +210,7 @@ impl CdpSession {
     /// Returns `Err` only when the payload is not valid protocol JSON;
     /// unknown ids and events without subscribers are ignored.
     pub fn handle_incoming(&self, raw: &str) -> Result<(), CdpError> {
-        if self.inner.closed.load(Ordering::Acquire) {
+        if *self.inner.closed.borrow() {
             // A closing browser still flushes a few events; nobody should
             // act on them, and acting is what breaks the teardown.
             return Ok(());
@@ -191,13 +246,13 @@ impl CdpSession {
     /// Fail every pending call, refuse new ones and ignore late incoming
     /// messages; use when the browser goes away.
     pub fn close(&self) {
-        self.inner.closed.store(true, Ordering::Release);
+        self.inner.closed.send_replace(true);
         self.pending().clear();
     }
 
     /// Whether [`close`](Self::close) has been called.
     pub fn is_closed(&self) -> bool {
-        self.inner.closed.load(Ordering::Acquire)
+        *self.inner.closed.borrow()
     }
 
     fn pending(
@@ -414,6 +469,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn closing_wakes_a_waiting_event_receiver() {
+        let session = CdpSession::new(FakeTransport::default());
+        let mut events = session.subscribe();
+        let waiting = tokio::spawn(async move { events.recv().await });
+        tokio::task::yield_now().await;
+        session.close();
+        let result = tokio::time::timeout(Duration::from_millis(100), waiting)
+            .await
+            .expect("close must wake an existing subscriber")
+            .unwrap();
+        assert!(matches!(result, Err(broadcast::error::RecvError::Closed)));
+    }
+
+    #[tokio::test]
+    async fn subscribing_after_repeated_close_is_immediately_closed() {
+        let session = CdpSession::new(FakeTransport::default());
+        session.close();
+        session.close();
+        let mut events = session.subscribe();
+        let result = tokio::time::timeout(Duration::from_millis(100), events.recv())
+            .await
+            .expect("a future subscriber must observe closure");
+        assert!(matches!(result, Err(broadcast::error::RecvError::Closed)));
+        assert!(matches!(
+            events.try_recv(),
+            Err(broadcast::error::TryRecvError::Closed)
+        ));
+    }
+
+    #[tokio::test]
+    async fn closing_discards_buffered_events() {
+        let session = CdpSession::new(FakeTransport::default());
+        let mut events = session.subscribe();
+        session
+            .handle_incoming(r#"{"method":"Page.loadEventFired"}"#)
+            .unwrap();
+        session.close();
+        assert!(matches!(
+            events.recv().await,
+            Err(broadcast::error::RecvError::Closed)
+        ));
+    }
+
+    #[tokio::test]
+    async fn lagged_subscribers_can_resume_without_resubscribing() {
+        let session = CdpSession::new(FakeTransport::default());
+        let mut events = session.subscribe();
+        for _ in 0..=EVENT_BUFFER {
+            session
+                .handle_incoming(r#"{"method":"Page.loadEventFired"}"#)
+                .unwrap();
+        }
+        assert!(matches!(
+            events.recv().await,
+            Err(broadcast::error::RecvError::Lagged(1))
+        ));
+        assert_eq!(events.recv().await.unwrap().method, "Page.loadEventFired");
+    }
+
+    #[tokio::test]
     async fn close_fails_pending_calls() {
         let session = CdpSession::new(FakeTransport::default());
         let pending = tokio::spawn({
@@ -422,6 +537,7 @@ mod tests {
         });
         tokio::task::yield_now().await;
         session.close();
+        assert!(session.pending().is_empty());
         assert!(matches!(pending.await.unwrap(), Err(CdpError::Closed)));
     }
 

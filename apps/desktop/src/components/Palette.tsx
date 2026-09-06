@@ -1,6 +1,6 @@
 import { Command } from "cmdk";
 import { ArrowUpRight, Search, Terminal, Server, History, Star } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { events, ipc } from "../lib/ipc";
 import { chromeCommands, formatChord, runCommand } from "../lib/commands";
 import type { Bookmark, Command as CommandDef, DevServer, HistoryEntry } from "../lib/ipc";
@@ -10,6 +10,7 @@ import { Favicon } from "./Favicon";
 import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
+import { tracePaletteLifecycle } from "../lib/inputTimingProbe";
 
 /**
  * How many history rows the palette offers. It is a launcher, not a history
@@ -27,6 +28,11 @@ export function Palette() {
   const toggle = useBrowser((s) => s.toggle);
   const root = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => {
+    const element = input.current;
+    tracePaletteLifecycle("palette-mounted", element);
+    return () => tracePaletteLifecycle("palette-unmounted", element);
+  }, []);
   useFocusTrap(root, { initialFocus: input });
   const openTab = useBrowser((s) => s.openTab);
   const tabs = useBrowser((s) => s.tabs);

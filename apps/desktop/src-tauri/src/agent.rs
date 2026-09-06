@@ -44,10 +44,25 @@ const API_KEY_CAP: usize = 16 * 1024;
 
 /// Install the OS credential store once at startup.
 pub fn init_keychain() {
-    #[cfg(target_os = "macos")]
-    match apple_native_keyring_store::keychain::Store::new() {
-        Ok(store) => keyring_core::set_default_store(store),
-        Err(e) => tracing::warn!("keychain unavailable: {e}"),
+    init_keychain_with(std::env::var_os("DIVE_USE_MOCK_KEYCHAIN").is_some(), || {
+        #[cfg(target_os = "macos")]
+        match apple_native_keyring_store::keychain::Store::new() {
+            Ok(store) => keyring_core::set_default_store(store),
+            Err(e) => tracing::warn!("keychain unavailable: {e}"),
+        }
+    });
+}
+
+fn init_keychain_with(use_mock: bool, native: impl FnOnce()) {
+    if use_mock {
+        // Match Chromium's explicit test switch. No OS store is even created,
+        // and no credential survives this disposable process.
+        let store =
+            keyring_core::mock::Store::new().expect("initialize disposable credential store");
+        keyring_core::set_default_store(store);
+        tracing::info!("agent credentials use an isolated in-memory test store");
+    } else {
+        native();
     }
 }
 
@@ -750,6 +765,27 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disposable_keychain_never_initializes_native_store() {
+        let previous = keyring_core::get_default_store();
+        init_keychain_with(true, || panic!("test must not initialize native keychain"));
+        let store = keyring_core::get_default_store().expect("mock store");
+        assert!(store.as_any().is::<keyring_core::mock::Store>());
+        assert!(agent_keys().is_empty());
+        agent_key_set("anthropic".into(), "disposable-fixture-key".into()).unwrap();
+        assert_eq!(agent_keys(), vec![Provider::Anthropic]);
+        assert!(agent_key_present("anthropic".into()).unwrap());
+        agent_key_set("anthropic".into(), String::new()).unwrap();
+        assert!(!agent_key_present("anthropic".into()).unwrap());
+        init_keychain_with(true, || panic!("restart must remain isolated"));
+        assert!(agent_keys().is_empty());
+        if let Some(store) = previous {
+            keyring_core::set_default_store(store);
+        } else {
+            keyring_core::unset_default_store();
+        }
+    }
 
     #[test]
     fn prompt_puts_stable_text_first_and_context_last() {
