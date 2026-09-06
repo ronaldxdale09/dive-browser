@@ -4,7 +4,7 @@ exclude = ["vendor/tauri-runtime-cef"]
 members = ["crates/*", "apps/desktop/src-tauri", "tests/e2e"]
 
 [workspace.package]
-version = "0.1.11"
+version = "0.1.12"
 edition = "2024"
 license = "MIT"
 rust-version = "1.98"
