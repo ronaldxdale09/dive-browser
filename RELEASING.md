@@ -25,6 +25,22 @@ A run that fails leaves nothing behind — no tag, no commit, no half-release.
 You can also give an exact version (`0.2.0`) in the *version* field, which
 overrides the bump.
 
+### From this machine
+
+```bash
+scripts/release/local-release.sh patch      # or minor, major, rc, or an exact version as the second argument
+```
+
+The same path as the workflow, run locally: resolve, preflight, stamp, build
+and sign, notarize, `latest.json`, publish (creating the tag), verify, then
+commit the bump to `main`. A failure before publishing restores the stamped
+files. It needs the updater keypair in `~/.tauri` (`dive.key`,
+`dive.key.password`, `dive.key.pub`), a Developer ID identity in the login
+keychain, and notarization credentials: `APPLE_ID`, `APPLE_PASSWORD` and
+`APPLE_TEAM_ID` in the environment, or a notarytool keychain profile named
+`dive` (`xcrun notarytool store-credentials dive`). Use it when GitHub-hosted
+macOS minutes are not available.
+
 ### From a tag
 
 ```bash
@@ -126,6 +142,7 @@ decisions can be exercised without cutting a release.
 | `verify-release-assets.mjs` | Checks the published release carries `latest.json`, the `.dmg`, the `.tar.gz` and its `.sig`, none of them empty. |
 | `prepare-bundle.sh` | Copies `crash_reporter.cfg` into the CEF framework of a built `.app`, with `ProductVersion` set to the bundled version. |
 | `setup-signing-secrets.sh` | Exports the Developer ID certificate and uploads the Apple secrets with `gh`. |
+| `local-release.sh` | The whole release path on a local Mac, publishing with `gh`. |
 
 ---
 
