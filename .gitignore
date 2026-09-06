@@ -26,3 +26,5 @@ packages/protocol/src/generated/
 /.agents
 /.superpowers
 /scratchpad
+# local release artifacts
+/out
