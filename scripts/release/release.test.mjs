@@ -1,236 +1,241 @@
-import { describe, expect, it, vi } from 'vitest'
+/**
+ * The release pipeline's logic, tested away from GitHub.
+ *
+ * These cover the decisions that used to live in shell inside the workflow,
+ * where they could only be exercised by cutting a real release. The cases
+ * worth having are the ones that previously failed silently: a manifest with
+ * no signature, a version that disagrees across platforms, and a tag that was
+ * already published.
+ */
+import { describe, expect, it } from 'vitest'
+
 import {
-  parseDesktopStableTag,
-  parseDesktopRcTag,
-  compareSemver,
-  semverGt,
-  bumpVersion,
-  latestStableDesktopReleaseTag,
-  highestRcForBase,
-  computeNextReleaseVersion
-} from './latest-stable-release.mjs'
-import { truncateReleaseBody, latestPreviousPublishedTag } from './create-draft-release.mjs'
-import { getRequiredAssetPatterns, verifyRequiredReleaseAssets } from './verify-release-required-assets.mjs'
-import { publishCompleteDraftReleases } from './publish-complete-draft-releases.mjs'
+  compareVersions,
+  highestRelease,
+  nextVersion,
+  parseTag,
+  resolveRelease
+} from './resolve-release.mjs'
+import { stampCargoToml, stampJsonVersion, VERSIONED_FILES } from './stamp-versions.mjs'
+import {
+  assertManifestComplete,
+  buildManifest,
+  mergeManifests,
+  PLATFORM_KEYS
+} from './update-manifest.mjs'
+import { missingAssetKinds, verifyRelease } from './verify-release-assets.mjs'
 
-describe('latest-stable-release', () => {
-  it('parses stable tags correctly', () => {
-    expect(parseDesktopStableTag('v0.1.0')).toMatchObject({
-      tag: 'v0.1.0',
-      major: 0,
-      minor: 1,
-      patch: 0
-    })
-    expect(parseDesktopStableTag('v1.2.3')).toMatchObject({
-      tag: 'v1.2.3',
-      major: 1,
-      minor: 2,
-      patch: 3
-    })
-    expect(parseDesktopStableTag('v0.1.0-rc.0')).toBeNull()
-    expect(parseDesktopStableTag('invalid-tag')).toBeNull()
+describe('resolve-release', () => {
+  it('reads stable and candidate tags, and rejects anything else', () => {
+    expect(parseTag('v1.2.3')).toMatchObject({ major: 1, minor: 2, patch: 3, rc: null })
+    expect(parseTag('v1.2.3-rc.4')).toMatchObject({ major: 1, minor: 2, patch: 3, rc: 4 })
+    expect(parseTag('1.2.3')).toMatchObject({ version: '1.2.3' })
+    expect(parseTag('v1.2')).toBeNull()
+    expect(parseTag('nightly-v1.2.3')).toBeNull()
+    expect(parseTag(undefined)).toBeNull()
   })
 
-  it('parses rc tags correctly', () => {
-    expect(parseDesktopRcTag('v0.2.0-rc.3')).toMatchObject({
-      tag: 'v0.2.0-rc.3',
-      major: 0,
-      minor: 2,
-      patch: 0,
-      rc: 3,
-      base: '0.2.0'
-    })
-    expect(parseDesktopRcTag('v0.1.0')).toBeNull()
+  it('sorts a candidate below its own stable release', () => {
+    expect(compareVersions(parseTag('v1.0.0-rc.1'), parseTag('v1.0.0'))).toBeLessThan(0)
+    expect(compareVersions(parseTag('v1.0.0-rc.1'), parseTag('v1.0.0-rc.2'))).toBeLessThan(0)
+    expect(compareVersions(parseTag('v0.9.9'), parseTag('v1.0.0-rc.1'))).toBeLessThan(0)
+    expect(highestRelease(['v0.1.3', 'v0.2.0-rc.0', 'v0.1.9'])).toMatchObject({ version: '0.2.0-rc.0' })
   })
 
-  it('compares semver correctly', () => {
-    expect(semverGt('0.2.0', '0.1.9')).toBe(true)
-    expect(semverGt('1.0.0', '0.9.9')).toBe(true)
-    expect(semverGt('0.1.0', '0.1.0')).toBe(false)
-    expect(semverGt('0.1.0', '0.1.1')).toBe(false)
+  it('ignores tags that are not releases when picking the next version', () => {
+    expect(nextVersion('patch', ['v0.1.3', 'not-a-tag', 'v0.1.2'])).toBe('0.1.4')
   })
 
-  it('bumps versions correctly', () => {
-    expect(bumpVersion('0.1.0', 'patch')).toBe('0.1.1')
-    expect(bumpVersion('0.1.0', 'minor')).toBe('0.2.0')
-    expect(bumpVersion('0.1.0', 'major')).toBe('1.0.0')
+  it('starts at 0.1.0 in a repository with no releases', () => {
+    expect(nextVersion('patch', [])).toBe('0.1.0')
+    expect(nextVersion('rc', [])).toBe('0.1.0-rc.0')
   })
 
-  it('identifies latest stable release from list', () => {
-    const releases = [
-      { tag_name: 'v0.1.0', draft: false },
-      { tag_name: 'v0.1.1', draft: false },
-      { tag_name: 'v0.2.0-rc.1', draft: false },
-      { tag_name: 'v0.2.0', draft: true } // draft ignored
-    ]
-    expect(latestStableDesktopReleaseTag(releases)).toBe('v0.1.1')
+  it('walks the candidate counter, then promotes it to its own stable', () => {
+    expect(nextVersion('rc', ['v0.1.3'])).toBe('0.1.4-rc.0')
+    expect(nextVersion('rc', ['v0.1.4-rc.0'])).toBe('0.1.4-rc.1')
+    // Promoting must not skip 0.1.4 and land on 0.1.5.
+    expect(nextVersion('patch', ['v0.1.3', 'v0.1.4-rc.1'])).toBe('0.1.4')
   })
 
-  it('finds highest RC for a base', () => {
-    const releases = [
-      { tag_name: 'v0.2.0-rc.0' },
-      { tag_name: 'v0.2.0-rc.2' },
-      { tag_name: 'v0.2.0-rc.1' },
-      { tag_name: 'v0.3.0-rc.0' }
-    ]
-    expect(highestRcForBase(releases, '0.2.0')).toBe(2)
-    expect(highestRcForBase(releases, '0.4.0')).toBeNull()
+  it('bumps minor and major from the highest release', () => {
+    expect(nextVersion('minor', ['v0.1.3'])).toBe('0.2.0')
+    expect(nextVersion('major', ['v0.1.3'])).toBe('1.0.0')
   })
 
-  it('computes next release versions and enforces floor safety', async () => {
-    const releases = [
-      { tag_name: 'v0.1.0', draft: false },
-      { tag_name: 'v0.2.0-rc.0', draft: false }
-    ]
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => releases
-    })
+  it('keeps a candidate out of the updater endpoint', () => {
+    const rc = resolveRelease({ ref: 'v0.2.0-rc.0', tags: ['v0.1.3'] })
+    expect(rc).toMatchObject({ isPrerelease: true, makeLatest: false, previousTag: 'v0.1.3' })
+    const stable = resolveRelease({ ref: 'v0.2.0', tags: ['v0.1.3'] })
+    expect(stable).toMatchObject({ isPrerelease: false, makeLatest: true })
+  })
 
-    // Next RC increments from 0.2.0-rc.0 -> 0.2.0-rc.1
-    const nextRc = await computeNextReleaseVersion({
-      repo: 'test/repo',
-      token: 'mock-token',
-      kind: 'rc',
-      fetchImpl: mockFetch
-    })
-    expect(nextRc).toBe('0.2.0-rc.1')
+  it('refuses to cut a version that was already published', () => {
+    expect(() => resolveRelease({ version: '0.1.3', tags: ['v0.1.3'] })).toThrow(/already exists/)
+    // A tag push is re-runnable: the tag existing is the trigger, not a clash.
+    expect(() => resolveRelease({ ref: 'v0.1.3', tags: ['v0.1.3'] })).not.toThrow()
+  })
 
-    // Next minor cuts 0.2.0
-    const nextMinor = await computeNextReleaseVersion({
-      repo: 'test/repo',
-      token: 'mock-token',
-      kind: 'minor',
-      fetchImpl: mockFetch
-    })
-    expect(nextMinor).toBe('0.2.0')
+  it('leaves previousTag empty for a first release, so notes are not generated against nothing', () => {
+    expect(resolveRelease({ ref: 'v0.1.0', tags: [] }).previousTag).toBe('')
+  })
 
-    // Regressive explicit version is rejected
-    await expect(
-      computeNextReleaseVersion({
-        repo: 'test/repo',
-        token: 'mock-token',
-        explicitVersion: '0.0.9',
-        fetchImpl: mockFetch
-      })
-    ).rejects.toThrow(/not greater than latest stable/)
+  it('rejects a ref or version that is not a release', () => {
+    expect(() => resolveRelease({ ref: 'main' })).toThrow(/Not a release tag/)
+    expect(() => resolveRelease({ version: 'latest' })).toThrow(/Not a valid version/)
   })
 })
 
-describe('create-draft-release', () => {
-  it('truncates release body when exceeding limit', () => {
-    const shortBody = 'Small changelog'
-    expect(truncateReleaseBody(shortBody, 100)).toBe(shortBody)
-
-    const longBody = 'A'.repeat(200)
-    const truncated = truncateReleaseBody(longBody, 100)
-    expect(truncated.length).toBeLessThanOrEqual(100)
-    expect(truncated).toContain('Release notes were truncated')
+describe('stamp-versions', () => {
+  it('replaces only the workspace version in Cargo.toml', () => {
+    const source = '[workspace]\nmembers = ["a"]\n\n[workspace.package]\nversion = "0.1.3"\nedition = "2024"\n'
+    const stamped = stampCargoToml(source, '0.2.0')
+    expect(stamped).toContain('version = "0.2.0"')
+    expect(stamped).toContain('edition = "2024"')
+    expect(stamped).toContain('members = ["a"]')
   })
 
-  it('finds latest previous published tag', () => {
-    const releases = [
-      { tag_name: 'v0.1.0', draft: false },
-      { tag_name: 'v0.1.1', draft: false },
-      { tag_name: 'v0.2.0-rc.0', draft: false }
-    ]
-    expect(latestPreviousPublishedTag(releases, 'v0.2.0-rc.1')).toBe('v0.2.0-rc.0')
-    expect(latestPreviousPublishedTag(releases, 'v0.2.0')).toBe('v0.1.1')
+  it('replaces the first top-level version in a JSON manifest without reformatting it', () => {
+    const source = '{\n  "productName": "Dive",\n  "version": "0.1.3",\n  "identifier": "app.dive"\n}\n'
+    expect(stampJsonVersion(source, '0.2.0', 'tauri.conf.json')).toBe(
+      '{\n  "productName": "Dive",\n  "version": "0.2.0",\n  "identifier": "app.dive"\n}\n'
+    )
+  })
+
+  it('fails loudly when a manifest has no version to stamp', () => {
+    expect(() => stampCargoToml('[workspace]\n', '1.0.0')).toThrow(/workspace.package/)
+    expect(() => stampJsonVersion('{}', '1.0.0', 'x.json')).toThrow(/version/)
+  })
+
+  it('names every manifest that carries the app version', () => {
+    expect(VERSIONED_FILES).toEqual([
+      'Cargo.toml',
+      'apps/desktop/package.json',
+      'apps/desktop/src-tauri/tauri.conf.json'
+    ])
   })
 })
 
-describe('verify-release-required-assets', () => {
-  const validAssets = [
-    { name: 'latest.json', size: 250 },
-    { name: 'Dive_0.2.0_universal.dmg', size: 85_000_000 },
-    { name: 'Dive.app.tar.gz', size: 80_000_000 },
-    { name: 'Dive.app.tar.gz.sig', size: 120 }
-  ]
-
-  const validManifest = {
-    version: '0.2.0',
-    platforms: {
-      'darwin-aarch64': {
-        signature: 'mock-sig',
-        url: 'https://github.com/ronaldxdale09/dive-browser/releases/download/v0.2.0/Dive.app.tar.gz'
-      }
-    }
+describe('update-manifest', () => {
+  const base = {
+    version: '0.1.4',
+    target: 'aarch64-apple-darwin',
+    archive: '/build/Dive.app.tar.gz',
+    signature: 'SIGNATURE',
+    baseUrl: 'https://github.com/o/r/releases/download/v0.1.4',
+    pubDate: '2026-01-01T00:00:00Z'
   }
 
-  it('validates complete assets and manifest', async () => {
-    const releaseData = { assets: validAssets }
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      text: async () => JSON.stringify(validManifest),
-      json: async () => validManifest
+  it('builds a manifest whose URL points at an actual file', () => {
+    const manifest = buildManifest(base)
+    expect(manifest.platforms['darwin-aarch64']).toEqual({
+      signature: 'SIGNATURE',
+      url: 'https://github.com/o/r/releases/download/v0.1.4/Dive.app.tar.gz'
     })
-
-    const result = await verifyRequiredReleaseAssets({
-      repo: 'test/repo',
-      tag: 'v0.2.0',
-      token: 'fake',
-      releaseData
-    })
-    expect(result.valid).toBe(true)
-    expect(result.assetCount).toBe(4)
+    expect(manifest.notes).toBe('Dive 0.1.4')
   })
 
-  it('rejects if an asset is missing or zero-sized', async () => {
-    const incompleteAssets = [
-      { name: 'latest.json', size: 250 },
-      { name: 'Dive.dmg', size: 0 } // empty file!
-    ]
-    await expect(
-      verifyRequiredReleaseAssets({
-        repo: 'test/repo',
-        tag: 'v0.2.0',
-        token: 'fake',
-        releaseData: { assets: incompleteAssets }
-      })
-    ).rejects.toThrow(/empty|missing/)
+  it('refuses the empty signature the old shell heredoc would have published', () => {
+    expect(() => buildManifest({ ...base, signature: '' })).toThrow(/signature/)
+    expect(() => buildManifest({ ...base, signature: '   \n' })).toThrow(/signature/)
   })
 
-  it('rejects if manifest version does not match tag', async () => {
-    const mismatchedManifest = { ...validManifest, version: '0.1.9' }
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      text: async () => JSON.stringify(mismatchedManifest),
-      json: async () => mismatchedManifest
-    })
+  it('refuses a missing archive rather than emitting a URL with no filename', () => {
+    expect(() => buildManifest({ ...base, archive: '' })).toThrow(/archive/)
+    expect(() => buildManifest({ ...base, archive: '/build/Dive.dmg' })).toThrow(/tar\.gz/)
+  })
 
-    await expect(
-      verifyRequiredReleaseAssets({
-        repo: 'test/repo',
-        tag: 'v0.2.0',
-        token: 'fake',
-        releaseData: { assets: validAssets }
-      })
-    ).rejects.toThrow(/version mismatch/)
+  it('rejects a target with no updater platform key', () => {
+    expect(() => buildManifest({ ...base, target: 'x86_64-pc-windows-msvc' })).toThrow(/platform key/)
+    expect(Object.values(PLATFORM_KEYS)).toEqual(['darwin-aarch64', 'darwin-x86_64'])
+  })
+
+  it('merges one platform per architecture into a single manifest', () => {
+    const arm = buildManifest(base)
+    const intel = buildManifest({
+      ...base,
+      target: 'x86_64-apple-darwin',
+      archive: '/build/Dive-x64.app.tar.gz',
+      signature: 'SIGNATURE-X64'
+    })
+    const merged = mergeManifests([arm, intel])
+    expect(Object.keys(merged.platforms)).toEqual(['darwin-aarch64', 'darwin-x86_64'])
+    expect(merged.version).toBe('0.1.4')
+  })
+
+  it('catches a matrix that built two versions, which would ship the wrong binary', () => {
+    const arm = buildManifest(base)
+    const stale = buildManifest({ ...base, version: '0.1.3', target: 'x86_64-apple-darwin' })
+    expect(() => mergeManifests([arm, stale])).toThrow(/disagree on the version/)
+  })
+
+  it('catches the same platform arriving twice, which would silently drop one', () => {
+    expect(() => mergeManifests([buildManifest(base), buildManifest(base)])).toThrow(/both describe/)
+  })
+
+  it('requires every platform the release promised', () => {
+    const merged = mergeManifests([buildManifest(base)])
+    expect(() => assertManifestComplete(merged, ['darwin-aarch64'])).not.toThrow()
+    expect(() => assertManifestComplete(merged, ['darwin-aarch64', 'darwin-x86_64'])).toThrow(
+      /missing darwin-x86_64/
+    )
+  })
+
+  it('rejects a manifest with no platforms at all', () => {
+    expect(() => assertManifestComplete({ platforms: {} })).toThrow(/no platforms/)
+    expect(() => mergeManifests([])).toThrow(/No update manifests/)
   })
 })
 
-describe('publish-complete-draft-releases', () => {
-  it('publishes verified drafts and skips incomplete ones', async () => {
-    const releases = [
-      { id: 101, tag_name: 'v0.2.0', draft: true, assets: [] }
-    ]
+describe('verify-release-assets', () => {
+  const complete = [
+    { name: 'latest.json', size: 300 },
+    { name: 'Dive_0.1.4_aarch64.dmg', size: 90_000_000 },
+    { name: 'Dive.app.tar.gz', size: 80_000_000 },
+    { name: 'Dive.app.tar.gz.sig', size: 200 }
+  ]
 
-    const mockVerify = vi.fn().mockResolvedValue({ valid: true })
-    const mockFetch = vi.fn().mockImplementation((url, opts) => {
-      if (opts?.method === 'PATCH') {
-        return Promise.resolve({ ok: true, json: async () => ({ draft: false }) })
-      }
-      return Promise.resolve({ ok: true, json: async () => releases })
+  it('accepts a release that carries everything an update needs', async () => {
+    const result = await verifyRelease({
+      tag: 'v0.1.4',
+      fetchRelease: async () => ({ assets: complete })
     })
+    expect(result.assets).toHaveLength(4)
+  })
 
-    const result = await publishCompleteDraftReleases({
-      repo: 'test/repo',
-      token: 'fake-token',
-      fetchImpl: mockFetch,
-      verifyReleaseAssets: mockVerify,
-      log: vi.fn()
-    })
+  it('names what is missing rather than failing generically', () => {
+    expect(missingAssetKinds(complete.filter((a) => a.name !== 'latest.json'))).toEqual([
+      'update manifest'
+    ])
+    expect(missingAssetKinds([])).toEqual([
+      'update manifest',
+      'DMG installer',
+      'updater archive',
+      'updater signature'
+    ])
+  })
 
-    expect(result.published).toContain('v0.2.0')
+  it('treats a .tar.gz.sig as a signature and not as the archive', () => {
+    // `.tar.gz.sig` ends with neither `.tar.gz` nor `.dmg`, so a release with
+    // only the signature must still report the archive as missing.
+    const signatureOnly = [{ name: 'latest.json', size: 1 }, { name: 'Dive.app.tar.gz.sig', size: 1 }]
+    expect(missingAssetKinds(signatureOnly)).toEqual(['DMG installer', 'updater archive'])
+  })
+
+  it('rejects a truncated upload, which reads as a corrupt download', async () => {
+    await expect(
+      verifyRelease({
+        tag: 'v0.1.4',
+        fetchRelease: async () => ({
+          assets: complete.map((a) => (a.name === 'latest.json' ? { ...a, size: 0 } : a))
+        })
+      })
+    ).rejects.toThrow(/empty assets: latest\.json/)
+  })
+
+  it('fails with the published asset list, so the cause is visible in the log', async () => {
+    await expect(
+      verifyRelease({ tag: 'v0.1.4', fetchRelease: async () => ({ assets: [] }) })
+    ).rejects.toThrow(/Published assets: \(none\)/)
   })
 })

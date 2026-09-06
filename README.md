@@ -82,7 +82,7 @@ Powered by a high-performance **Rust + Chromium Embedded Framework (CEF)** core 
 - **Isolated Workspaces**: Separate tabs, cookies, and mock rules across personal, work, and client projects with instant keyboard switching.
 
 ### 5. 🚀 Production Push Update & Release System
-- **One-Command Release**: Cut and publish updates with `pnpm release rc --push` or via GitHub Actions.
+- **Verified Release Pipeline**: One click or one tag. The tag is created by the publish step and the version bump is committed only after the release is published and its assets verified, so a failed run leaves nothing behind.
 - **Seamless In-App Updates**: Built-in cryptographic verification via Tauri updater with zero-disruption background update checks and one-click restart.
 
 ---
@@ -175,22 +175,18 @@ cargo clippy       # Strict Rust linter (-D warnings)
 
 ## 🚢 Releasing & Push Updates
 
-Dive makes releases effortless. You can cut and publish updates directly from your terminal or via GitHub Actions:
+A release is proven before the repository records it. The version is resolved in CI, the tag is created by the publish step, and the version bump lands on `main` only after the release exists and its assets have been verified — so a failed run leaves no tag and no commit behind.
+
+**Actions → `release` → Run workflow**, pick `patch`, `minor`, `major` or `rc`. Or push a tag:
 
 ```bash
-# Inspect next calculated semver release
-pnpm release:check rc       # e.g. 0.1.1-rc.0
-pnpm release:check patch    # e.g. 0.1.1
-pnpm release:check minor    # e.g. 0.2.0
+git tag v0.1.5 && git push origin v0.1.5
 
-# Preview changes with dry-run
-pnpm release rc --dry-run
-
-# Cut, commit, tag, and push release in one command
-pnpm release rc --push
+# Preview what the next version would be (read-only)
+pnpm release:next --kind patch
 ```
 
-Refer to [`RELEASING.md`](RELEASING.md) for full instructions on signing, notarization, and updater manifest distribution.
+Refer to [`RELEASING.md`](RELEASING.md) for the pipeline, the required signing secrets, and how to add a second architecture.
 
 ---
 

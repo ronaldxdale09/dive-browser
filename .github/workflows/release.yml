@@ -1,42 +1,98 @@
 name: release
 
+# Two ways in, one path through:
+#
+#   - Run this workflow and pick a bump. The version is computed from the tags
+#     that already exist and the tag is created *by the publish step*, so a run
+#     that fails leaves no tag, no commit and no half-release behind.
+#   - Push a `vX.Y.Z` tag yourself. The version is read from the ref.
+#
+# The version bump is committed to main by `finalize`, only after the release
+# is published and verified. The repository never records a release that does
+# not exist.
+
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       kind:
-        description: 'Release kind (rc, patch, minor, major)'
-        required: true
-        type: choice
-        options:
-          - rc
-          - patch
-          - minor
-          - major
-        default: rc
-      dry_run:
-        description: 'Dry run (validate without pushing tags or publishing release)'
+        description: "Version bump (ignored when an exact version is given)"
         required: false
-        type: boolean
-        default: false
+        type: choice
+        options: [patch, minor, major, rc]
+        default: patch
+      version:
+        description: "Exact version, e.g. 0.2.0 (overrides the bump)"
+        required: false
+        type: string
+
+# Releases are serialized. Cancelling a publish half way through is how a tag
+# ends up existing with no assets behind it.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
   CEF_PATH: ${{ github.workspace }}/.cef
 
 jobs:
-  build-and-release:
-    name: Build & Release (macOS)
-    runs-on: macos-15
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      name: ${{ steps.resolve.outputs.name }}
+      is_prerelease: ${{ steps.resolve.outputs.isPrerelease }}
+      make_latest: ${{ steps.resolve.outputs.makeLatest }}
     steps:
       - uses: actions/checkout@v4
         with:
+          # Every tag, so the next version is computed against all of them.
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - id: resolve
+        name: Resolve release version
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            node scripts/release/resolve-release.mjs --ref "${GITHUB_REF_NAME}" --github-output
+          else
+            node scripts/release/resolve-release.mjs \
+              --kind "${{ inputs.kind }}" \
+              ${{ inputs.version && format('--version {0}', inputs.version) || '' }} \
+              --github-output
+          fi
+
+      # The heavy Rust gate runs in ci.yml on every push to main, so this is
+      # the fast half: the parts that would make a release wrong rather than
+      # merely broken, plus the release scripts' own tests.
+      - name: Preflight checks
+        run: |
+          pnpm typecheck
+          pnpm lint
+          pnpm test
+
+  build:
+    name: Build macOS (aarch64)
+    needs: preflight
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -46,8 +102,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: brew install cmake ninja
 
@@ -57,56 +111,12 @@ jobs:
           path: .cef
           key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
 
-      # 1. If triggered by workflow_dispatch, cut and push the tag
-      - name: Cut release tag
-        if: github.event_name == 'workflow_dispatch'
-        id: cut
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+      # Stamped into this checkout only. Nothing is committed here; `finalize`
+      # commits the bump once the release exists.
+      - name: Stamp release version
+        run: node scripts/release/stamp-versions.mjs "${{ needs.preflight.outputs.version }}"
 
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            node scripts/release/release.mjs cut "${{ inputs.kind }}" --dry-run
-            echo "dry_run=true" >> "$GITHUB_OUTPUT"
-          else
-            node scripts/release/release.mjs cut "${{ inputs.kind }}" --push
-            VERSION=$(node scripts/release/release.mjs check "${{ inputs.kind }}")
-            echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
-            echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-            echo "dry_run=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      # 2. Determine active release tag and version
-      - name: Set Release Metadata
-        id: meta
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "${{ steps.cut.outputs.dry_run }}" = "true" ]; then
-              echo "skip=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            TAG="${{ steps.cut.outputs.tag }}"
-            VERSION="${{ steps.cut.outputs.version }}"
-          else
-            TAG="${GITHUB_REF_NAME}"
-            VERSION="${GITHUB_REF_NAME#v}"
-          fi
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "skip=false" >> "$GITHUB_OUTPUT"
-
-      # 3. Fast preflight check
-      - name: Preflight verification
-        if: steps.meta.outputs.skip != 'true'
-        run: |
-          pnpm typecheck
-          pnpm lint
-          pnpm test
-
-      # 4. Optional Apple Developer ID Certificate Import (if configured)
       - name: Import Apple signing certificate
-        if: steps.meta.outputs.skip != 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -114,7 +124,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${APPLE_CERTIFICATE:-}" ]; then
-            echo "No Apple signing certificate configured; skipping keychain import."
+            echo "No Apple signing certificate configured; the build will not be notarized."
             exit 0
           fi
           echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
@@ -125,9 +135,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
           rm certificate.p12
 
-      # 5. Build Desktop Application Bundle
-      - name: Build macOS application & updater bundle
-        if: steps.meta.outputs.skip != 'true'
+      - name: Build app and updater artifacts
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -138,67 +146,152 @@ jobs:
           DIVE_UPDATER_PUBKEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
         run: |
           set -euo pipefail
-          if [ -n "${DIVE_UPDATER_PUBKEY:-}" ]; then
-            pnpm --filter @dive/desktop exec tauri build \
-              --config "{\"plugins\":{\"updater\":{\"pubkey\":\"$DIVE_UPDATER_PUBKEY\"}}}"
-          else
-            pnpm --filter @dive/desktop exec tauri build
+          # An app built without the updater keypair cannot verify an update and
+          # produces no signature to publish. Shipping that is the failure this
+          # pipeline exists to prevent, so it is fatal rather than a warning.
+          if [ -z "${DIVE_UPDATER_PUBKEY:-}" ] || [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "::error::Updater signing keys are not configured." \
+                 "Set TAURI_SIGNING_PUBLIC_KEY and TAURI_SIGNING_PRIVATE_KEY" \
+                 "(see scripts/release/setup-signing-secrets.sh)."
+            exit 1
           fi
+          pnpm --filter @dive/desktop exec tauri build \
+            --config "{\"plugins\":{\"updater\":{\"pubkey\":\"$DIVE_UPDATER_PUBKEY\"}}}"
           scripts/release/prepare-bundle.sh target/release/bundle/macos/Dive.app
 
-      # 6. Package artifacts and updater manifest (latest.json)
-      - name: Package release artifacts
-        if: steps.meta.outputs.skip != 'true'
+      # Fails when the signature or the archive is missing, instead of writing
+      # a manifest with an empty field that only breaks on a user's machine.
+      - name: Build update manifest
         run: |
           set -euo pipefail
+          shopt -s nullglob
           mkdir -p out
-          cp target/release/bundle/dmg/*.dmg out/ 2>/dev/null || true
-          cp target/release/bundle/macos/*.tar.gz out/ 2>/dev/null || true
-          cp target/release/bundle/macos/*.tar.gz.sig out/ 2>/dev/null || true
+          cp target/release/bundle/dmg/*.dmg out/
+          cp target/release/bundle/macos/*.tar.gz out/
+          cp target/release/bundle/macos/*.tar.gz.sig out/
 
-          TAG="${{ steps.meta.outputs.tag }}"
-          VERSION="${{ steps.meta.outputs.version }}"
-          SIG=""
-          if compgen -G "out/*.tar.gz.sig" > /dev/null; then
-            SIG=$(cat out/*.tar.gz.sig | head -n 1)
+          # Exactly one of each: more than one archive means the bundle step
+          # produced something unexpected, and picking the first would decide
+          # at random which build users receive.
+          archives=(out/*.tar.gz)
+          signatures=(out/*.tar.gz.sig)
+          if [ "${#archives[@]}" -ne 1 ] || [ "${#signatures[@]}" -ne 1 ]; then
+            echo "::error::Expected one updater archive and one signature," \
+                 "found ${#archives[@]} and ${#signatures[@]}."
+            exit 1
           fi
-          ARCHIVE=""
-          if compgen -G "out/*.tar.gz" > /dev/null; then
-            ARCHIVE=$(basename $(ls out/*.tar.gz | head -n 1))
-          fi
 
-          cat > out/latest.json <<JSON
-          {
-            "version": "${VERSION}",
-            "notes": "Dive ${VERSION}",
-            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "platforms": {
-              "darwin-aarch64": {
-                "signature": "${SIG}",
-                "url": "https://github.com/${{ github.repository }}/releases/download/${TAG}/${ARCHIVE}"
-              }
-            }
-          }
-          JSON
-          ls -la out
+          node scripts/release/update-manifest.mjs build \
+            --version "${{ needs.preflight.outputs.version }}" \
+            --target aarch64-apple-darwin \
+            --archive "${archives[0]}" \
+            --signature-file "${signatures[0]}" \
+            --notes "${{ needs.preflight.outputs.name }}" \
+            --base-url "${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.preflight.outputs.tag }}" \
+            --out out/manifest-aarch64-apple-darwin.json
 
-      # 7. Publish GitHub Release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-aarch64
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [preflight, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macos-*
+          merge-multiple: true
+          path: assets
+
+      # One fragment per built platform, merged into the single manifest the
+      # updater reads. With one platform this is a completeness check; adding
+      # an architecture makes it a real merge without changing the publish.
+      - name: Merge update manifests
+        run: |
+          set -euo pipefail
+          node scripts/release/update-manifest.mjs merge assets/manifest-*.json \
+            --expect-platforms darwin-aarch64 \
+            --out assets/latest.json
+          rm -f assets/manifest-*.json
+
       - name: Publish to GitHub Releases
-        if: steps.meta.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          files: out/*
+          # On a manual run this is what creates the tag, so the tag never
+          # exists before the assets that justify it.
+          tag_name: ${{ needs.preflight.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ needs.preflight.outputs.name }}
           generate_release_notes: true
-          prerelease: ${{ contains(steps.meta.outputs.tag, '-rc.') }}
+          prerelease: ${{ needs.preflight.outputs.is_prerelease }}
+          make_latest: ${{ needs.preflight.outputs.make_latest }}
+          files: |
+            assets/latest.json
+            assets/*.dmg
+            assets/*.tar.gz
+            assets/*.tar.gz.sig
+          fail_on_unmatched_files: true
+
+      # Against the release as GitHub stored it: the only state users are
+      # served from, and the only place a truncated upload shows up.
+      - name: Verify published assets
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node scripts/release/verify-release-assets.mjs "${{ needs.preflight.outputs.tag }}"
+
+  finalize:
+    name: Record the version on main
+    needs: [preflight, release]
+    if: ${{ !failure() && !cancelled() && needs.release.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+          persist-credentials: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - id: stamp
+        run: node scripts/release/stamp-versions.mjs "${{ needs.preflight.outputs.version }}" --github-output
+
+      - name: Commit the version bump
+        if: steps.stamp.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json
+          git commit -m "chore(release): ${{ needs.preflight.outputs.tag }}"
+          git push origin HEAD:main
 
       - name: Summary
         run: |
-          echo "## Release Summary 🚀" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Event:** \`${{ github.event_name }}\`" >> "$GITHUB_STEP_SUMMARY"
-          if [ "${{ steps.meta.outputs.skip }}" = "true" ]; then
-            echo "- **Result:** Dry run completed successfully (no releases created)." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "- **Tag:** \`${{ steps.meta.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
-            echo "- **Release:** https://github.com/${{ github.repository }}/releases/tag/${{ steps.meta.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          {
+            echo "## ${{ needs.preflight.outputs.name }}"
+            echo
+            echo "- Tag: \`${{ needs.preflight.outputs.tag }}\`"
+            echo "- Release: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.preflight.outputs.tag }}"
+            echo "- Prerelease: \`${{ needs.preflight.outputs.is_prerelease }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
