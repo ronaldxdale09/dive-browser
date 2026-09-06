@@ -192,6 +192,7 @@ export function TabStrip() {
             void close(menu.id);
             setMenu(null);
           }}
+          onDismiss={() => setMenu(null)}
           onCloseOthers={() => {
             for (const t of tabs) if (t.id !== menu.id && t.tier !== "pinned") void close(t.id);
             setMenu(null);
@@ -404,15 +405,31 @@ function EssentialTab({ tab: t, active, loading, onActivate, onMenu }: { tab: Ta
   );
 }
 
-function TabMenu({ x, y, tier, detached, split, onPin, onEssential, onWindow, onSplit, onClose, onCloseOthers }: { x: number; y: number; tier: Tab["tier"]; detached: boolean; split: SplitAction | null; onPin: (v: boolean) => void; onEssential: (v: boolean) => void; onWindow: (out: boolean) => void; onSplit: (action: SplitAction) => void; onClose: () => void; onCloseOthers: () => void }) {
+function TabMenu({ x, y, tier, detached, split, onPin, onEssential, onWindow, onSplit, onClose, onCloseOthers, onDismiss }: { x: number; y: number; tier: Tab["tier"]; detached: boolean; split: SplitAction | null; onPin: (v: boolean) => void; onEssential: (v: boolean) => void; onWindow: (out: boolean) => void; onSplit: (action: SplitAction) => void; onClose: () => void; onCloseOthers: () => void; onDismiss: () => void }) {
   useCoversContent(true);
+  const ref = useRef<HTMLDivElement>(null);
+  // Like every other menu: a press anywhere else or Escape puts it away.
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onDismiss();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onDismiss();
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onDismiss]);
   const pinned = tier === "pinned";
   const essential = tier === "essential";
   const item = "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink";
   const rows = 4 + (essential ? 0 : 1) + (split ? 1 : 0);
   const position = clampFloatingPosition({ x, y, width: 208, height: 12 + rows * 30 + 2 * 9, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
   return (
-    <div role="menu" style={{ left: position.x, top: position.y }} className="surface-enter fixed z-50 w-52 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+    <div ref={ref} role="menu" style={{ left: position.x, top: position.y }} className="surface-enter fixed z-50 w-52 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
       {!essential && (
         <button type="button" role="menuitem" className={item} onClick={() => onPin(!pinned)}>
           <Icon icon={Pin} size={13} /> {pinned ? "Unpin tab" : "Pin tab"}

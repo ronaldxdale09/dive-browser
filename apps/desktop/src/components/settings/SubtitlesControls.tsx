@@ -160,6 +160,7 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
       </div>
 
       {!activeTab && <p className="text-[11px] text-ink-3">Open a tab with a playing video to turn subtitles on. You can still download models here.</p>}
+      {activeTab && !chosen?.downloaded && <p className="text-[11px] text-ink-3">Download the selected model to start.</p>}
 
       {error && (
         <p className="text-xs text-danger" role="alert">

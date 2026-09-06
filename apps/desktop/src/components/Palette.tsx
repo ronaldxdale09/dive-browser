@@ -1,6 +1,6 @@
 import { Command } from "cmdk";
 import { ArrowUpRight, Search, Terminal, Server, History, Star } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { events, ipc } from "../lib/ipc";
 import { chromeCommands, formatChord, runCommand } from "../lib/commands";
 import type { Bookmark, Command as CommandDef, DevServer, HistoryEntry } from "../lib/ipc";
@@ -40,7 +40,12 @@ export function Palette() {
   const [query, setQuery] = useState("");
   const [cmds, setCmds] = useState<CommandDef[]>([]);
   const [servers, setServers] = useState<DevServer[]>([]);
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [visited, setHistory] = useState<HistoryEntry[]>([]);
+  // A page that is open is offered as a tab, not again as history.
+  const history = useMemo(() => {
+    const open = new Set(tabs.map((t) => t.url));
+    return visited.filter((h) => !open.has(h.url));
+  }, [visited, tabs]);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   useEffect(() => {
     let alive = true;
@@ -121,13 +126,21 @@ export function Palette() {
               ))}
             </Command.Group>
           )}
-          {history.length > 0 && (
-            <Command.Group heading="History">
-              {history.map((h) => (
-                <Command.Item key={h.url} value={`history ${h.title} ${h.url}`} onSelect={() => void go(h.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
-                  <Favicon src={h.favicon} size={14} fallback={History} />
-                  <span className="truncate">{h.title || h.url}</span>
-                  <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(h.url)}</span>
+          {tabs.length > 0 && (
+            <Command.Group heading="Tabs">
+              {tabs.map((t) => (
+                <Command.Item
+                  key={t.id}
+                  value={`${t.title} ${t.url}`}
+                  onSelect={() => {
+                    close();
+                    void activateTab(t.id);
+                  }}
+                  className="flex items-center gap-2 rounded-lg px-3 py-2"
+                >
+                  <Favicon src={t.favicon} size={14} />
+                  <span className="truncate">{t.title || t.url}</span>
+                  <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(t.url)}</span>
                 </Command.Item>
               ))}
             </Command.Group>
@@ -144,21 +157,13 @@ export function Palette() {
               ))}
             </Command.Group>
           )}
-          {tabs.length > 0 && (
-            <Command.Group heading="Tabs">
-              {tabs.map((t) => (
-                <Command.Item
-                  key={t.id}
-                  value={`${t.title} ${t.url}`}
-                  onSelect={() => {
-                    close();
-                    void activateTab(t.id);
-                  }}
-                  className="flex items-center gap-2 rounded-lg px-3 py-2"
-                >
-                  <Favicon src={t.favicon} size={14} />
-                  <span className="truncate">{t.title || t.url}</span>
-                  <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(t.url)}</span>
+          {history.length > 0 && (
+            <Command.Group heading="History">
+              {history.map((h) => (
+                <Command.Item key={h.url} value={`history ${h.title} ${h.url}`} onSelect={() => void go(h.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
+                  <Favicon src={h.favicon} size={14} fallback={History} />
+                  <span className="truncate">{h.title || h.url}</span>
+                  <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(h.url)}</span>
                 </Command.Item>
               ))}
             </Command.Group>

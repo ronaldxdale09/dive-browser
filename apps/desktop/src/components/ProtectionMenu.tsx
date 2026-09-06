@@ -42,7 +42,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
   const youtubeActive = siteOn && youtubeSite && prefs.youtube_protection;
   const total = counts.ads + counts.trackers + counts.youtube;
   const headline = !globalOn ? "DivePrivacy is off" : !host ? "Protection unavailable here" : paused ? "Protection paused here" : "Protected on this site";
-  const summary = eventError ? "Activity unavailable" : total === 0 ? "Clean so far" : `${total} privacy actions so far`;
+  const summary = !globalOn ? "Turn it on to block ads and trackers" : eventError ? "Activity unavailable" : total === 0 ? "Clean so far" : `${total} privacy actions so far`;
 
   useEffect(() => {
     if (open && !info) void loadInfo().catch(() => undefined);

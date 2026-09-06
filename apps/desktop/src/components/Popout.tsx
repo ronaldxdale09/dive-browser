@@ -1,3 +1,4 @@
+import { prettyUrl } from "../lib/prettyUrl";
 import { ArrowLeft, ArrowRight, Lock, PanelsTopLeft, Plus, RotateCw, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -34,7 +35,8 @@ export function Popout({ tabId }: { tabId: string }) {
   const [draft, setDraft] = useState({ tabId, value: url });
   const [editing, setEditing] = useState(false);
   if (draft.tabId !== tabId) setDraft({ tabId, value: url });
-  const value = editing ? draft.value : url;
+  // At rest the popout shows the same trimmed address as the main window.
+  const value = editing ? draft.value : prettyUrl(url);
   const inputRef = useRef<HTMLInputElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const [menuReady, setMenuReady] = useState(false);

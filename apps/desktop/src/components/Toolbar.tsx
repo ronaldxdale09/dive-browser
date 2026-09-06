@@ -1,3 +1,4 @@
+import { prettyUrl } from "../lib/prettyUrl";
 import { Bug, Camera, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, X, Menu } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -40,7 +41,7 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
   const value = editing ? draft.value : url;
   const setValue = (value: string) => setDraft({ tabId: activeTab, value });
   const secure = url.startsWith("https://");
-  const display = pretty(url);
+  const display = prettyUrl(url);
   const inputRef = useRef<HTMLInputElement>(null);
   const toggleDock = () => {
     if (!compact) {
@@ -192,17 +193,6 @@ function LoadingLine() {
 }
 
 /** Hostname plus path, scheme dropped, for the resting omnibox. */
-function pretty(url: string) {
-  // Dive's own pages keep their scheme: "dive://screen" says what it is.
-  if (url.startsWith("dive://")) return url.split("?")[0] ?? url;
-  try {
-    const u = new URL(url);
-    const path = u.pathname === "/" && !u.search ? "" : u.pathname + u.search;
-    return u.host + path;
-  } catch {
-    return url;
-  }
-}
 
 /** Shows the active tab's zoom when it is not 100%; click resets. */
 function ZoomBadge() {

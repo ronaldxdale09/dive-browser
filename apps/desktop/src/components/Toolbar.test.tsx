@@ -308,7 +308,9 @@ describe("Toolbar", () => {
     expect(dialog.className).toContain("w-[360px]");
     expect(dialog.getAttribute("aria-modal")).toBe("true");
     expect(screen.getByText("DivePrivacy is off")).toBeTruthy();
-    expect(screen.getByText("Clean so far")).toBeTruthy();
+    // Off means nothing is being counted, so the line invites turning it on.
+    expect(screen.getByText("Turn it on to block ads and trackers")).toBeTruthy();
+    expect(screen.queryByText("Clean so far")).toBeNull();
     expect(screen.getByAltText("Dive Privacy guardian").getAttribute("src")).toMatch(/^data:image\/svg\+xml/);
     expect(screen.getByTestId("privacy-halo")).toBeTruthy();
     expect(screen.getByText("Ads blocked").nextSibling?.textContent).toBe("0");

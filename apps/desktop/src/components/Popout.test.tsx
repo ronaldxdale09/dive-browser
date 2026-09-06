@@ -1,3 +1,4 @@
+import { prettyUrl } from "../lib/prettyUrl";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
@@ -88,7 +89,7 @@ describe("detached page ownership and input", () => {
     useBrowser.setState({ tabs: [{ ...tab, id: "other", workspace_id: "other-workspace", title: "Other" }] });
     render(<Popout tabId="a" />);
     await waitFor(() => expect(screen.getByRole("tab", { name: "Example" })).toBeTruthy());
-    expect((screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement).value).toBe(tab.url);
+    expect((screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement).value).toBe(prettyUrl(tab.url));
     expect(ipc.tabInfo).toHaveBeenCalledWith("a");
   });
 
@@ -97,7 +98,7 @@ describe("detached page ownership and input", () => {
     await waitFor(() => expect(screen.getByRole("tab", { name: "Example" })).toBeTruthy());
     act(() => useBrowser.setState({ activeWorkspace: "elsewhere", tabs: [] }));
     expect(screen.getByRole("tab", { name: "Example" })).toBeTruthy();
-    expect((screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement).value).toBe(tab.url);
+    expect((screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement).value).toBe(prettyUrl(tab.url));
   });
 
   it("keeps an unsubmitted address through redirects and restores the current address on Escape", async () => {
@@ -111,7 +112,7 @@ describe("detached page ownership and input", () => {
     });
     expect(input.value).toBe("https://draft.test/path");
     fireEvent.keyDown(input, { key: "Escape" });
-    expect(input.value).toBe("https://redirect.test/");
+    expect(input.value).toBe("redirect.test");
     expect(document.activeElement).not.toBe(input);
   });
 
@@ -144,7 +145,7 @@ describe("detached page ownership and input", () => {
     act(() => stateEvent({ type: "tab_upserted", data: { ...tab, title: "Latest", url: "https://latest.test/" } }));
     await act(async () => finish(tab));
     expect(screen.getByRole("tab", { name: "Latest" })).toBeTruthy();
-    expect((screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement).value).toBe("https://latest.test/");
+    expect((screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement).value).toBe("latest.test");
   });
 
   it("opens a new tab in the main window without navigating the detached page", async () => {

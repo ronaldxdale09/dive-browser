@@ -186,8 +186,10 @@ fn history_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
 
 /// Build the menu and route its events to the chrome.
 pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
+    // "About" opens Dive's own About section rather than the stock panel,
+    // so the version, engine and update check are all in one place.
     let app_menu = SubmenuBuilder::new(app, "Dive")
-        .about(None)
+        .item(&MenuItemBuilder::with_id("about.open", "About Dive").build(app)?)
         .separator()
         .services()
         .separator()
