@@ -2,6 +2,7 @@ import { ArrowLeft, ChevronDown, ExternalLink, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Provider, ProviderInfo } from "../../lib/ipc";
 import { useAgent } from "../../store/agent";
+import { pickInstalledModel } from "../../lib/modelChoice";
 import { useBrowser } from "../../store/browser";
 import { usePrefs } from "../../store/prefs";
 import { Icon } from "../Icon";
@@ -54,11 +55,15 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
   /** Make `p` the active provider and return to conversation. */
   const activate = async (p: ProviderInfo, token: number) => {
     if (attempt.current !== token) return;
-    const models = useAgent.getState().models[p.id] ?? [];
+    // A local server only has the models it has pulled: ask it, so the first
+    // message does not fail on a default that is not installed.
+    const models = p.lists_models ? await useAgent.getState().loadModels(p.id) : (useAgent.getState().models[p.id] ?? []);
+    if (attempt.current !== token) return;
     const keep = prefs.agent_provider === p.id || models.some((m) => m.id === prefs.agent_model);
+    const wanted = keep ? prefs.agent_model : p.default_model;
     await update({
       agent_provider: p.id,
-      agent_model: keep ? prefs.agent_model : p.default_model,
+      agent_model: pickInstalledModel(models, wanted) ?? wanted,
       ...(p.id === "custom" ? { agent_custom_base_url: baseUrl.trim() } : {}),
     }, { rejectOnError: true });
     if (attempt.current === token) onDone();

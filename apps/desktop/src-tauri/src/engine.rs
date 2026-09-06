@@ -699,6 +699,12 @@ impl TabHost {
         dead
     }
 
+    /// Whether a chrome overlay (dialog, menu, popover) is hiding the pages
+    /// in the main window right now.
+    pub fn covered(&self) -> bool {
+        self.covered
+    }
+
     /// `DevTools` sessions whose views are about to be hidden by a chrome
     /// overlay. Popout views live in other windows and are deliberately left
     /// alone.

@@ -233,6 +233,17 @@ impl AppBrowser {
         if !self.on_screen(tab) {
             self.activate(tab).await?;
         }
+        // Input to a page hidden under a chrome dialog never arrives; say so
+        // now rather than after a 30 s round-trip timeout.
+        let covered = lock(&self.state().host)
+            .as_ref()
+            .is_some_and(|host| host.covered() && !host.is_detached(tab));
+        if covered {
+            return Err(BrowserError::NotAllowed {
+                operation: "page input".into(),
+                reason: "a dialog or menu is open over the page; close it and try again".into(),
+            });
+        }
         self.session(tab)
     }
 
