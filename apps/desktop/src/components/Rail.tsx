@@ -2,7 +2,7 @@ import { AvatarImage } from "./AvatarImage";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowRight, Check, Globe, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Settings2, Shield, SquarePlus, Trash2 } from "lucide-react";
+import { ArrowRight, Globe, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Settings2, Shield, SquarePlus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { useBrowser } from "../store/browser";
@@ -134,41 +134,35 @@ function DefaultBrowserButton({ expanded }: { expanded: boolean }) {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
-  if (!status?.supported) return null;
-  const isDefault = status.is_default;
-  const title = isDefault ? "Dive is your default browser" : "Make Dive the default browser";
-  // Until Dive is the default this is the one invitation on the rail: a
-  // hairline pill with a slow light sweep. Once it is, the sweep goes and
-  // the row settles into the same quiet weight as Settings below it.
-  const shape = expanded ? "flex h-[var(--row-h)] items-center gap-2.5 rounded-lg px-2" : "grid h-[var(--row-h)] w-9 place-items-center rounded-full";
-  const tone = isDefault ? "rail-cta is-default text-ink-3 hover:bg-surface-2 hover:text-ink" : "rail-cta text-ink-2 hover:text-ink";
+  // Once Dive is the default there is nothing to offer, so the row goes.
+  if (!status?.supported || status.is_default) return null;
+  const title = "Make Dive the default browser";
   return (
     <button
       type="button"
       aria-label={title}
       title={title}
-      data-default={isDefault || undefined}
       onClick={() => useBrowser.getState().toggle("defaultBrowser", true)}
-      className={`${shape} ${tone} relative shrink-0 overflow-hidden text-xs transition-colors`}
+      className={
+        expanded
+          ? "group flex h-11 shrink-0 items-center gap-2.5 rounded-xl border border-accent/25 bg-accent/8 px-2 text-left text-xs text-ink transition-colors hover:border-accent/45 hover:bg-accent/14"
+          : "group grid h-[var(--row-h)] w-9 shrink-0 place-items-center rounded-full text-accent transition-colors hover:bg-accent/14"
+      }
     >
-      <span className="relative grid size-7 shrink-0 place-items-center">
-        <Icon icon={Globe} />
-        {isDefault && (
-          <span data-testid="default-browser-badge" className="absolute right-0.5 bottom-0.5 grid size-3 place-items-center rounded-full bg-accent text-accent-ink" aria-hidden>
-            <Icon icon={Check} size={8} />
-          </span>
-        )}
+      <span className={expanded ? "grid size-7 shrink-0 place-items-center rounded-lg bg-accent/15 text-accent" : "relative grid size-7 place-items-center"}>
+        <Icon icon={Globe} size={14} />
+        {!expanded && <span className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-accent" aria-hidden />}
       </span>
       {expanded && (
-        <span className="relative flex min-w-0 flex-1 flex-col leading-tight">
-          <span className={isDefault ? "truncate" : "truncate font-medium text-ink"}>{isDefault ? "Default browser" : "Set as default browser"}</span>
-          {!isDefault && <span className="truncate text-[10px] text-ink-3">Links from other apps</span>}
-        </span>
-      )}
-      {expanded && !isDefault && (
-        <span className="grid size-5 shrink-0 place-items-center rounded-full bg-accent text-accent-ink" aria-hidden>
-          <Icon icon={ArrowRight} size={11} />
-        </span>
+        <>
+          <span className="flex min-w-0 flex-1 flex-col leading-tight">
+            <span className="truncate text-[12px] font-medium">Set as default</span>
+            <span className="truncate text-[10.5px] text-ink-3">Open links in Dive</span>
+          </span>
+          <span className="grid size-5 shrink-0 place-items-center rounded-full text-ink-3 transition-colors group-hover:bg-accent group-hover:text-accent-ink" aria-hidden>
+            <Icon icon={ArrowRight} size={11} />
+          </span>
+        </>
       )}
     </button>
   );

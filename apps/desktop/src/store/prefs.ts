@@ -72,10 +72,14 @@ interface PrefsState {
 interface PendingWrite {
   revision: number;
   patch: Partial<Prefs>;
+  /** Set once the engine answered; a failed write must never be replayed. */
+  outcome?: "ok" | "failed";
 }
 
 let confirmedPrefs = DEFAULT_PREFS;
 let pendingWrites: PendingWrite[] = [];
+/** Every write this session, so a load that finishes late can be reconciled. */
+const writesSinceBoot: PendingWrite[] = [];
 let nextWriteRevision = 0;
 let writeTail: Promise<void> = Promise.resolve();
 
@@ -89,15 +93,28 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   prefs: DEFAULT_PREFS,
   loaded: false,
   load: async () => {
-    const previous = get().prefs;
+    const startedAt = nextWriteRevision;
     try {
-      const prefs = complete(await ipc.prefsGet());
-      if (get().prefs === previous) {
-        confirmedPrefs = prefs;
-        set({ prefs, loaded: true });
-        applyAppearance(prefs);
-      } else {
-        set({ loaded: true });
+      const stored = complete(await ipc.prefsGet());
+      // A write that started while the load was in flight was built on the
+      // defaults, not the stored values. Replay those writes over what was
+      // stored so neither side is lost, and persist the reconciled result so
+      // the store stops carrying defaults for everything the writes did not
+      // touch.
+      const later = writesSinceBoot.filter((write) => write.revision > startedAt && write.outcome === "ok");
+      confirmedPrefs = later.reduce((prefs, write) => ({ ...prefs, ...write.patch }), stored);
+      const current = applyPending(confirmedPrefs);
+      set({ prefs: current, loaded: true });
+      applyAppearance(current);
+      if (later.length > 0 && pendingWrites.length === 0) {
+        const reconciled = confirmedPrefs;
+        writeTail = writeTail.then(async () => {
+          try {
+            confirmedPrefs = complete(await ipc.prefsSet(reconciled));
+          } catch (e) {
+            report(e);
+          }
+        });
       }
     } catch (e) {
       set({ loaded: true });
@@ -108,20 +125,23 @@ export const usePrefs = create<PrefsState>((set, get) => ({
     const previous = get().prefs;
     const next = { ...previous, ...patch };
     if (pendingWrites.length === 0) confirmedPrefs = previous;
-    const write = { revision: ++nextWriteRevision, patch: { ...patch } };
+    const write: PendingWrite = { revision: ++nextWriteRevision, patch: { ...patch } };
     pendingWrites.push(write);
+    writesSinceBoot.push(write);
     set({ prefs: next });
     applyAppearance(next);
     const persisted = writeTail.then(async () => {
       const snapshot = applyPending(confirmedPrefs, write.revision);
       try {
         const stored = complete(await ipc.prefsSet(snapshot));
+        write.outcome = "ok";
         confirmedPrefs = stored;
         pendingWrites = pendingWrites.filter((pending) => pending.revision > write.revision);
         const current = applyPending(confirmedPrefs);
         set({ prefs: current });
         applyAppearance(current);
       } catch (e) {
+        write.outcome = "failed";
         const hasLaterWrite = pendingWrites.some((pending) => pending.revision > write.revision);
         if (options?.rejectOnError) {
           // The caller was told this operation failed. A later unrelated

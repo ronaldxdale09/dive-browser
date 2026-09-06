@@ -59,11 +59,27 @@ pub struct ContentPreview {
     pub data_url: String,
 }
 
+/// Which build this is, for the title bar's build badge.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct BuildInfo {
+    /// `dev` for a debug build run from a checkout, `beta` for a release build.
+    pub channel: String,
+    /// Commits on the branch the build came from; grows with every commit.
+    pub number: String,
+    /// Short commit hash the build was made from.
+    pub commit: String,
+    /// When the binary was compiled, in seconds since the Unix epoch. A float
+    /// because the bindings cannot carry a u64.
+    pub built_at: f64,
+}
+
 /// Facts the Settings dialog shows.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct AppInfo {
     /// Package version.
     pub version: String,
+    /// Build identity.
+    pub build: BuildInfo,
     /// Application data directory.
     pub data_dir: String,
     /// MCP endpoint, empty when disabled.
@@ -96,6 +112,18 @@ pub(crate) fn app_info() -> AppInfo {
         .unwrap_or(7391);
     AppInfo {
         version: env!("CARGO_PKG_VERSION").to_owned(),
+        build: BuildInfo {
+            channel: if cfg!(debug_assertions) {
+                "dev"
+            } else {
+                "beta"
+            }
+            .to_owned(),
+            number: env!("DIVE_BUILD_NUMBER").to_owned(),
+            commit: env!("DIVE_BUILD_COMMIT").to_owned(),
+            #[allow(clippy::cast_precision_loss)]
+            built_at: env!("DIVE_BUILD_UNIX").parse::<u64>().unwrap_or(0) as f64,
+        },
         data_dir: crate::state::data_root().to_string_lossy().into_owned(),
         mcp_url: if port == 0 {
             String::new()

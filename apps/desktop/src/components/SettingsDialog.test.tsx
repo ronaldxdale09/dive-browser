@@ -12,6 +12,7 @@ beforeEach(() => {
   usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
   vi.spyOn(ipc, "appInfo").mockResolvedValue({
     version: "0.1.0",
+    build: { channel: "dev", number: "1", commit: "abc1234", built_at: 0 },
     data_dir: "/tmp/dive",
     mcp_url: "http://127.0.0.1:7391/mcp",
     mcp_token_path: "/tmp/dive/mcp-token",

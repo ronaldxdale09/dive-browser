@@ -404,63 +404,7 @@ button:not(:disabled):active,
 
 /* Reduced motion: nothing loops, nothing slides, and a state change is a
    cut. Spinners keep their glyph but stop turning; the pulsing dots that mark
-   "recording" or "downloading" stay lit instead of blinking. */
-/* The rail's one invitation: a hairline pill in the ink tone with a slow
-   light sweep. Neutral by design, so it reads as part of the chrome rather
-   than a marketing button; the sweep is the only thing that moves. */
-.rail-cta {
-  --cta-ink: var(--color-ink);
-  border: 1px solid color-mix(in srgb, var(--cta-ink) 14%, transparent);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--cta-ink) 7%, transparent), color-mix(in srgb, var(--cta-ink) 3%, transparent));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--cta-ink) 6%, transparent);
-  isolation: isolate;
-}
-.rail-cta:hover {
-  border-color: color-mix(in srgb, var(--cta-ink) 26%, transparent);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--cta-ink) 11%, transparent), color-mix(in srgb, var(--cta-ink) 5%, transparent));
-}
-.rail-cta > * {
-  position: relative;
-  z-index: 1;
-}
-.rail-cta::after {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  z-index: 0;
-  background: linear-gradient(
-    105deg,
-    transparent 25%,
-    color-mix(in srgb, var(--cta-ink) 16%, transparent) 42%,
-    color-mix(in srgb, var(--cta-ink) 55%, transparent) 50%,
-    color-mix(in srgb, var(--cta-ink) 16%, transparent) 58%,
-    transparent 75%
-  );
-  transform: translateX(-130%);
-  animation: rail-shimmer 4.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-  pointer-events: none;
-}
-.rail-cta.is-default {
-  border-color: transparent;
-  background: none;
-  box-shadow: none;
-}
-.rail-cta.is-default::after {
-  display: none;
-}
-@keyframes rail-shimmer {
-  0%,
-  60% {
-    transform: translateX(-130%);
-  }
-  100% {
-    transform: translateX(130%);
-  }
-}
-
-/* Reduced motion applies when the OS asks for it and the motion preference
+   "recording" or "downloading" stay lit instead of blinking. Reduced motion applies when the OS asks for it and the motion preference
    follows the system, or when the preference says reduce outright. A `full`
    preference opts out of the OS setting for the chrome alone. Both forms
    share one rule list via the `:root` prefix below. */
@@ -474,9 +418,6 @@ button:not(:disabled):active,
   }
   :root:not([data-motion="full"]) {
     --dialog-fade: 0ms;
-  }
-  :root:not([data-motion="full"]) .rail-cta::after {
-    display: none;
   }
   :root:not([data-motion="full"]) :is(
     .animate-agent-pulse,
@@ -516,9 +457,6 @@ button:not(:disabled):active,
 
 :root[data-motion="reduce"] {
   --dialog-fade: 0ms;
-}
-:root[data-motion="reduce"] .rail-cta::after {
-  display: none;
 }
 :root[data-motion="reduce"] :is(
   .animate-agent-pulse,

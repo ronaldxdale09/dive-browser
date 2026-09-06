@@ -102,6 +102,31 @@ describe("preference persistence", () => {
     expect(usePrefs.getState().prefs.block_trackers).toBe(true);
   });
 
+  it("keeps stored values and an early write when the load finishes late", async () => {
+    let finishLoad!: (prefs: typeof DEFAULT_PREFS) => void;
+    vi.spyOn(ipc, "prefsGet").mockImplementation(() => new Promise((resolve) => {
+      finishLoad = resolve;
+    }));
+    const write = vi.spyOn(ipc, "prefsSet").mockImplementation((prefs) => Promise.resolve(prefs));
+    usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: false });
+
+    const loading = usePrefs.getState().load();
+    // The rail is collapsed before the stored preferences have arrived.
+    await usePrefs.getState().update({ rail_expanded: false });
+    finishLoad({ ...DEFAULT_PREFS, accent: "#123456", block_trackers: true });
+    await loading;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const prefs = usePrefs.getState().prefs;
+    expect(prefs.rail_expanded).toBe(false);
+    expect(prefs.accent).toBe("#123456");
+    expect(prefs.block_trackers).toBe(true);
+    // The store is repaired: the reconciled snapshot is written back.
+    const last = write.mock.calls.at(-1)?.[0];
+    expect(last?.rail_expanded).toBe(false);
+    expect(last?.accent).toBe("#123456");
+  });
+
   it("rolls an optimistic update back when the host rejects it", async () => {
     vi.spyOn(ipc, "prefsSet").mockRejectedValue(new Error("preferences unavailable"));
     usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });

@@ -26,7 +26,7 @@ function NavigationDialogs({ palette: PaletteComponent = Palette }: { palette?: 
 beforeEach(() => {
   useBrowser.setState(useBrowser.getInitialState());
   usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
-  vi.spyOn(ipc, "appInfo").mockResolvedValue({ version: "0.1.0", data_dir: "/tmp/dive", mcp_url: "", mcp_token_path: "", simulate: null });
+  vi.spyOn(ipc, "appInfo").mockResolvedValue({ version: "0.1.0", build: { channel: "dev", number: "1", commit: "abc1234", built_at: 0 }, data_dir: "/tmp/dive", mcp_url: "", mcp_token_path: "", simulate: null });
   vi.spyOn(ipc, "prefsGet").mockResolvedValue(DEFAULT_PREFS);
   vi.spyOn(ipc, "prefsSet").mockImplementation(async (prefs) => prefs);
   vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);

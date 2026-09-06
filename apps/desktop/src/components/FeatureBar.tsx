@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import { useBrowser } from "../store/browser";
 import { useUpdates } from "../store/updates";
-import { selectErrorCount, useConsole } from "../store/console";
 import { elapsedSeconds, useRecording } from "../store/recording";
 import { recordingClock } from "../lib/recordingFormat";
+import { BuildBadge } from "./BuildBadge";
 import { DeviceMenu } from "./DeviceMenu";
 import { Icon, IconButton } from "./Icon";
 import { Tooltip } from "./Tooltip";
@@ -57,16 +57,7 @@ export function FeatureBar({ compact = false }: { compact?: boolean }) {
       <AgentAction compact={narrow} />
       <span className="mx-1.5 h-4 w-px bg-line-2" aria-hidden />
       <UpdatePill compact={narrow} />
-      {import.meta.env.DEV && (
-        <span
-          aria-label="Development environment"
-          title="Development environment"
-          className="flex h-5 shrink-0 items-center gap-1 rounded-full border border-danger/40 bg-danger/15 px-2 font-mono text-[10px] font-semibold tracking-[0.12em] text-danger"
-        >
-          <span className="size-1.5 rounded-full bg-danger" aria-hidden />
-          DEV
-        </span>
-      )}
+      <BuildBadge />
       <IconButton icon={ChevronDown} label="All tabs" onClick={() => toggle("palette", true)} size={14} tooltipAlign="end" tooltipSide="bottom" />
     </div>
   );
@@ -246,13 +237,11 @@ function useElapsed(ticking: boolean): number {
   return elapsedSeconds({ startedAt, pausedAt, pausedTotal }, ticking ? tick : (pausedAt ?? tick));
 }
 
-/** Opens the agent sidecar; carries the active tab's error count while it is closed. */
+/** Opens the agent sidecar. */
 function AgentAction({ compact }: { compact: boolean }) {
-  const activeTab = useBrowser((s) => s.activeTab);
   const open = useBrowser((s) => s.open.sidecar);
   const toggle = useBrowser((s) => s.toggle);
   const setPickerOpen = usePicker((s) => s.setOpen);
-  const errorCount = useConsole(selectErrorCount(activeTab));
   return (
     <Tooltip label="Agent" shortcut="⌘J" align="end" side="bottom">
       <button
@@ -276,14 +265,6 @@ function AgentAction({ compact }: { compact: boolean }) {
       >
         <AgentIcon size={compact ? 15 : 13} className={open ? "text-accent-ink" : "text-highlight"} />
         {!compact && "Agent"}
-        {errorCount > 0 && !open && (
-          <span
-            className={`rounded-full bg-danger px-1.5 py-px font-mono text-[10px] leading-4 text-white ${compact ? "absolute -top-1 -right-1.5" : "ml-0.5"}`}
-            aria-label={`${errorCount} errors`}
-          >
-            {errorCount > 99 ? "99+" : errorCount}
-          </span>
-        )}
       </button>
     </Tooltip>
   );

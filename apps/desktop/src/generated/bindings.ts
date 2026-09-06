@@ -442,6 +442,8 @@ export type AppError = {
 export type AppInfo = {
 	/**  Package version. */
 	version: string,
+	/**  Build identity. */
+	build: BuildInfo,
 	/**  Application data directory. */
 	data_dir: string,
 	/**  MCP endpoint, empty when disabled. */
@@ -478,6 +480,21 @@ export type Bounds = {
 	width: number | null,
 	/**  Height. */
 	height: number | null,
+};
+
+/**  Which build this is, for the title bar's build badge. */
+export type BuildInfo = {
+	/**  `dev` for a debug build run from a checkout, `beta` for a release build. */
+	channel: string,
+	/**  Commits on the branch the build came from; grows with every commit. */
+	number: string,
+	/**  Short commit hash the build was made from. */
+	commit: string,
+	/**
+	 *  When the binary was compiled, in seconds since the Unix epoch. A float
+	 *  because the bindings cannot carry a u64.
+	 */
+	built_at: number | null,
 };
 
 export type CancelResult = "cancelled" | "completed";
