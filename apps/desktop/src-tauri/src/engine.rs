@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use dive_cdp::CdpSession;
 use dive_core::{Container, CoreEvent, Tab, TabId};
@@ -1323,8 +1324,28 @@ impl WindowBounds {
     }
 }
 
+/// Store the main window's frame at most every half second, for the bursts
+/// of resize and move events a drag produces.
+pub fn remember_window_bounds_throttled(window: &Window<Runtime>) {
+    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+    let now = std::time::Instant::now();
+    {
+        let mut last = crate::state::lock(&LAST);
+        if last.is_some_and(|t| now.duration_since(t) < std::time::Duration::from_millis(500)) {
+            return;
+        }
+        *last = Some(now);
+    }
+    remember_window_bounds(window);
+}
+
 /// Store the main window's current frame so the next launch opens there.
+/// A full-screen frame is not one to come back to; the last windowed frame
+/// stays on record instead.
 pub fn remember_window_bounds(window: &Window<Runtime>) {
+    if window.is_fullscreen().unwrap_or(false) || window.is_minimized().unwrap_or(false) {
+        return;
+    }
     let scale = window.scale_factor().unwrap_or(1.0);
     let (Ok(pos), Ok(size)) = (window.outer_position(), window.inner_size()) else {
         return;

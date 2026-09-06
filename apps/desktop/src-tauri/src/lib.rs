@@ -218,12 +218,20 @@ pub fn run() {
             // any browser window does. The tab tears the window down itself,
             // so the request is cancelled here.
             use tauri::Manager;
-            if matches!(
-                event,
-                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Focused(false)
-            ) && window.label() == MAIN_WINDOW
-            {
-                engine::remember_window_bounds(window);
+            if window.label() == MAIN_WINDOW {
+                match event {
+                    tauri::WindowEvent::CloseRequested { .. }
+                    | tauri::WindowEvent::Focused(false) => {
+                        engine::remember_window_bounds(window);
+                    }
+                    // Resizes and moves arrive in bursts; a throttled save keeps
+                    // the frame current without a store write per pixel. The
+                    // final frame is caught by blur, close or quit.
+                    tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
+                        engine::remember_window_bounds_throttled(window);
+                    }
+                    _ => {}
+                }
             }
             // Closing the main window with popouts open would leave a headless
             // app: the tab host's window is gone but its views and the popouts
@@ -300,6 +308,11 @@ pub fn run() {
         tauri::RunEvent::ExitRequested { code, api, .. } => {
             use tauri::Manager as _;
             tracing::info!(?code, "exit requested");
+            // Quitting from the menu or Cmd+Q never sends the window a close
+            // request, so the frame is saved here as well.
+            if let Some(window) = app.get_window(MAIN_WINDOW) {
+                engine::remember_window_bounds(&window);
+            }
             let registry = app.state::<state::AppState>().screen_exports.clone();
             match registry.prepare_exit() {
                 screen::jobs::ExitAction::Immediate => {}
