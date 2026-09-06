@@ -61,7 +61,7 @@ Powered by a high-performance **Rust + Chromium Embedded Framework (CEF)** core 
 
 ### 1. 🧠 Built-In AI Agent & Native MCP Server
 - **Sidecar Agent**: Integrated AI assistant with Anthropic & OpenAI streaming providers, live tool loop, page context awareness, and error diagnosis.
-- **Model Context Protocol (MCP)**: Exposes browser capabilities (`page_state`, `page_click`, `page_type`, `network_list`, `console_tail`, `page_report`) over localhost HTTP with strict Bearer token authentication for Claude Desktop, Cursor, or custom agents.
+- **Model Context Protocol (MCP)**: Exposes browser capabilities (`page_state`, `page_markdown`, `page_click`, `page_type`, `network_list`, `console_tail`, `page_report`) over localhost HTTP with strict Bearer token authentication for Claude Desktop, Cursor, or custom agents.
 - **Playwright Test Export**: Records manual browsing interactions or agent actions and exports deterministic Playwright test scripts with locator recommendations.
 
 ### 2. 🛡️ Native DivePrivacy™ Engine
@@ -194,6 +194,15 @@ Refer to [`RELEASING.md`](RELEASING.md) for full instructions on signing, notari
 
 ---
 
+## 🤝 Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the development setup, the quality
+gate every change has to pass, and the repo conventions. Security problems go
+through [`SECURITY.md`](SECURITY.md), not the public issue tracker.
+
 ## 📄 License
 
 Dive Browser is licensed under the [MIT License](LICENSE).
+
+Dive redistributes third-party components under their own terms, notably the
+Chromium Embedded Framework (BSD-3-Clause) and Chromium itself.
