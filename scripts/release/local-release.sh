@@ -38,7 +38,10 @@ step "preconditions"
 [[ -f "${KEY}" && -f "${KEY}.pub" ]] || die "updater keypair not found at ${KEY} (see RELEASING.md)"
 [[ "$(git branch --show-current)" == "main" ]] || die "release from main"
 git diff --quiet && git diff --cached --quiet || die "working tree must be clean"
-git fetch -q origin main
+# Release tags are created on GitHub by the publish step, so the local list
+# is only complete after a fetch; resolving against a stale list would try
+# to cut the last version again.
+git fetch -q --tags origin main
 [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || die "main is not in sync with origin/main; push or pull first"
 gh auth status >/dev/null 2>&1 || die "gh is not logged in"
 REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
@@ -123,6 +126,7 @@ flags=(--target "${COMMIT}" --title "${NAME}" --generate-notes)
 [[ "${MAKE_LATEST}" == "true" ]] && flags+=(--latest) || flags+=(--latest=false)
 gh release create "${TAG}" "${flags[@]}" out/latest.json "${images[0]}" "${archives[0]}" "${signatures[0]}"
 PUBLISHED=1
+git fetch -q --tags origin
 
 step "verify what GitHub stored"
 GITHUB_REPOSITORY="${REPO}" GITHUB_TOKEN="$(gh auth token)" \
