@@ -8,12 +8,13 @@
  * published, which is the only time the bump is committed.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, globSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 /** The manifests that carry the app version, relative to the repo root. */
 export const VERSIONED_FILES = [
   'Cargo.toml',
+  'Cargo.lock',
   'apps/desktop/package.json',
   'apps/desktop/src-tauri/tauri.conf.json'
 ]
@@ -26,6 +27,58 @@ export function stampCargoToml(source, version) {
     throw new Error('Could not find a [workspace.package] version in Cargo.toml')
   }
   return source.replace(CARGO_VERSION, `$1${version}$2`)
+}
+
+/**
+ * The names of the workspace crates whose version comes from `[workspace.package]`.
+ *
+ * Resolved from `[workspace] members` and each member's own manifest rather than
+ * inferred from the lockfile: a vendored path dependency has no `source` line
+ * either, and stamping it would corrupt Cargo.lock. Only members that declare
+ * `version.workspace = true` change when the workspace version does.
+ */
+export function workspaceCrates(root) {
+  const workspace = readFileSync(resolve(root, 'Cargo.toml'), 'utf8')
+  const members = workspace.match(/^members\s*=\s*\[([^\]]*)\]/m)
+  if (!members) throw new Error('Could not find [workspace] members in Cargo.toml')
+  const patterns = [...members[1].matchAll(/"([^"]+)"/g)].map((m) => m[1])
+  const names = []
+  for (const pattern of patterns) {
+    for (const dir of globSync(pattern, { cwd: root })) {
+      const manifestPath = resolve(root, dir, 'Cargo.toml')
+      if (!existsSync(manifestPath)) continue
+      const manifest = readFileSync(manifestPath, 'utf8')
+      const name = manifest.match(/^name\s*=\s*"([^"]+)"/m)
+      if (name && /^version\.workspace\s*=\s*true/m.test(manifest)) names.push(name[1])
+    }
+  }
+  if (names.length === 0) throw new Error('No workspace crate inherits the workspace version')
+  return names.sort()
+}
+
+/**
+ * Replace the version of the named crates in Cargo.lock.
+ *
+ * The lockfile records each workspace member's version, so bumping Cargo.toml
+ * alone leaves `--locked` builds failing against main. Done textually because
+ * `finalize` runs where there is no cargo. Every named crate must be found:
+ * a missing one means the lockfile and the workspace have drifted.
+ */
+export function stampCargoLock(source, version, crateNames) {
+  const parts = source.split('\n[[package]]\n')
+  if (parts.length < 2) throw new Error('Cargo.lock has no [[package]] entries')
+  const wanted = new Set(crateNames)
+  const found = new Set()
+  const out = parts.map((block, index) => {
+    if (index === 0) return block
+    const name = block.match(/^name = "([^"]+)"$/m)?.[1]
+    if (!name || !wanted.has(name)) return block
+    found.add(name)
+    return block.replace(/^version = "[^"]*"$/m, `version = "${version}"`)
+  })
+  const missing = crateNames.filter((name) => !found.has(name))
+  if (missing.length > 0) throw new Error(`Cargo.lock has no entry for ${missing.join(', ')}`)
+  return out.join('\n[[package]]\n')
 }
 
 /**
@@ -49,9 +102,11 @@ export function stampVersions(root, version) {
   for (const file of VERSIONED_FILES) {
     const path = resolve(root, file)
     const before = readFileSync(path, 'utf8')
-    const after = file.endsWith('.toml')
-      ? stampCargoToml(before, version)
-      : stampJsonVersion(before, version, file)
+    const after = file === 'Cargo.lock'
+      ? stampCargoLock(before, version, workspaceCrates(root))
+      : file.endsWith('.toml')
+        ? stampCargoToml(before, version)
+        : stampJsonVersion(before, version, file)
     if (after !== before) {
       writeFileSync(path, after)
       changed.push(file)

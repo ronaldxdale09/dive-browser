@@ -95,7 +95,7 @@ decisions can be exercised without cutting a release.
 | Script | Does |
 |---|---|
 | `resolve-release.mjs` | Version from a tag or a bump; refuses a duplicate; decides prerelease and `make_latest`. |
-| `stamp-versions.mjs` | Writes the version into `Cargo.toml`, `apps/desktop/package.json` and `tauri.conf.json`, changing one line each. |
+| `stamp-versions.mjs` | Writes the version into `Cargo.toml`, `Cargo.lock` (workspace crates only), `apps/desktop/package.json` and `tauri.conf.json`. Textual, so `finalize` needs no cargo. |
 | `update-manifest.mjs` | Builds and merges `latest.json`. Every field is required; a missing signature is an error, not an empty string. |
 | `verify-release-assets.mjs` | Checks the published release carries `latest.json`, the `.dmg`, the `.tar.gz` and its `.sig`, none of them empty. |
 
