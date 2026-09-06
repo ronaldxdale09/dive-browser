@@ -86,6 +86,15 @@ describe("useSubtitles", () => {
     expect(useSubtitles.getState().models[0]?.id).toBe("base");
   });
 
+  it("remembers the chosen model and falls back to a downloaded one", async () => {
+    useSubtitles.getState().setModel("small");
+    expect(localStorage.getItem("dive.subtitles.model")).toBe("small");
+    vi.spyOn(ipc, "subtitleModels").mockResolvedValue(MODELS.map((m) => ({ ...m, downloaded: m.id === "medium" })));
+    await useSubtitles.getState().loadModels();
+    // "small" was never downloaded; the one on disk is ready to start.
+    expect(useSubtitles.getState().model).toBe("medium");
+  });
+
   it("records progress from the event and flips a model to downloaded on done", async () => {
     vi.spyOn(ipc, "subtitleModels").mockResolvedValue(MODELS);
     vi.spyOn(ipc, "subtitleModelDownload").mockResolvedValue(null);

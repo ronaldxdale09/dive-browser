@@ -479,8 +479,12 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<NetworkEvent> {
         "Network.loadingFailed" => Some(NetworkEvent::Failed {
             tab_id,
             request_id,
+            // A request the page itself abandoned (a media element dropping a
+            // byte range, a fetch aborted by navigation) is not a failure.
             error: if p["blockedReason"].is_string() {
                 format!("blocked: {}", text(&p["blockedReason"]))
+            } else if p["canceled"].as_bool() == Some(true) {
+                "canceled".to_owned()
             } else {
                 text(&p["errorText"])
             },
@@ -783,6 +787,8 @@ mod tests {
             }
         ));
 
+        let canceled = map_event(tab, &ev("Network.loadingFailed", json!({"requestId": "3", "timestamp": 2.0, "errorText": "net::ERR_ABORTED", "canceled": true}))).unwrap();
+        assert!(matches!(&canceled, NetworkEvent::Failed { error, .. } if error == "canceled"));
         let failed = map_event(tab, &ev("Network.loadingFailed", json!({"requestId": "2", "timestamp": 2.0, "errorText": "net::ERR_FAILED", "blockedReason": "csp"}))).unwrap();
         assert!(
             matches!(failed, NetworkEvent::Failed { ref error, .. } if error == "blocked: csp")

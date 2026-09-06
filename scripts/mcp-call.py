@@ -43,6 +43,20 @@ def rpc(url, token, sid, method, params):
     return sid, payload
 
 
+def notify(url, token, sid, method):
+    """A JSON-RPC notification: no id, so the server must not answer it."""
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "Origin": url.rsplit("/", 1)[0],
+        "Mcp-Session-Id": sid,
+    }
+    req = urllib.request.Request(url, data=json.dumps({"jsonrpc": "2.0", "method": method}).encode(), headers=headers)
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        resp.read()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", required=True)
@@ -58,7 +72,7 @@ def main():
         "clientInfo": {"name": "live-check", "version": "1"},
     })
     try:
-        rpc(url, token, sid, "notifications/initialized", {})
+        notify(url, token, sid, "notifications/initialized")
     except urllib.error.HTTPError:
         pass
     if a.verb == "list":

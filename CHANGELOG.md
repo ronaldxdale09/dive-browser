@@ -8,6 +8,35 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- Address bar suggestions: open tabs, bookmarks and history under the bar
+  while typing, with keyboard navigation.
+- Bookmark popover to rename or remove a bookmark; `bookmark_rename` command.
+- Tab menu shows shortcuts; pin (⌘⇧P) and move to window (⌘⌥N) bindings.
+- A DEV or BETA build badge in the title bar with version, build number and
+  build time.
+
+### Changed
+- The download folder setting lives under General; About says plainly
+  whether updates apply to this build; the Developer MCP command shows a
+  short token path.
+- Empty states share one component across the Library and popovers.
+- The default-browser offer is a compact card that hides once Dive is the
+  default; the console error count no longer sits on the Agent button.
+- Live subtitles remember the chosen model and select a downloaded one when
+  the remembered choice is not on disk.
+
+### Fixed
+- The tab context menu closes on Escape and on a press elsewhere.
+- The palette no longer lists open pages under History as well as Tabs.
+- "About Dive" opens Settings → About instead of the stock macOS panel.
+- Popout address bars show the same trimmed address as the main window.
+- Canceled requests show as canceled in the Network dock, not as failures.
+- Window frame is remembered on resize, move and quit; the rail's collapsed
+  state survives a click made before preferences finish loading.
+- Cursor controls in DiveScreen are greyed out for recordings without a
+  pointer track.
+
+### Added
 - DiveScreen can open any video file (MP4, MOV, WebM, MKV, M4V, AVI, GIF):
   "Open Video…" in the editor, the Library's Recordings tab and the main menu
   copies the file into the captures folder and makes the playable companion.

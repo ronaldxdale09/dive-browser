@@ -114,10 +114,13 @@ describe("Subtitles dialog", () => {
     vi.unstubAllGlobals();
   });
 
-  it("disables Start until a downloaded model is chosen", async () => {
+  it("selects a downloaded model on load and disables Start for one that is not", async () => {
     render(<Subtitles />);
     await screen.findByText("Base");
-    // Default model is "base", which is not downloaded.
+    // The default "base" is not downloaded, so the list settles on the model
+    // that is, and Start is ready at once.
+    await waitFor(() => expect((screen.getByRole("button", { name: "Start subtitles" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("radio", { name: "Use Base" }));
     expect((screen.getByRole("button", { name: "Start subtitles" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("radio", { name: "Use Small" }));
     expect((screen.getByRole("button", { name: "Start subtitles" }) as HTMLButtonElement).disabled).toBe(false);

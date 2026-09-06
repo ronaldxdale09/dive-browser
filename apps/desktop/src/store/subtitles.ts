@@ -35,24 +35,50 @@ interface SubtitlesState {
   stop: () => Promise<void>;
 }
 
+const MODEL_KEY = "dive.subtitles.model";
+
+/** The model chosen last time, so a download made once stays selected. */
+function rememberedModel(): string {
+  try {
+    return localStorage.getItem(MODEL_KEY) ?? "base";
+  } catch {
+    return "base";
+  }
+}
+
+function rememberModel(model: string) {
+  try {
+    localStorage.setItem(MODEL_KEY, model);
+  } catch {
+    // Storage can be unavailable; the session still works.
+  }
+}
+
 export const useSubtitles = create<SubtitlesState>((set, get) => ({
   active: false,
   starting: false,
   language: "en",
   translate: false,
-  model: "base",
+  model: rememberedModel(),
   models: [],
   downloading: {},
   lastCue: "",
   error: null,
   setLanguage: (language) => set({ language }),
   setTranslate: (translate) => set({ translate }),
-  setModel: (model) => set({ model }),
+  setModel: (model) => {
+    rememberModel(model);
+    set({ model });
+  },
 
   loadModels: async () => {
     try {
       const models = await ipc.subtitleModels();
-      set({ models, error: null });
+      // A selection that was never downloaded gives way to one that was, so
+      // Start is ready as soon as any model is on disk.
+      const chosen = models.find((m) => m.id === get().model);
+      const fallback = chosen?.downloaded ? null : models.find((m) => m.downloaded);
+      set({ models, error: null, ...(fallback ? { model: fallback.id } : {}) });
     } catch (e) {
       set({ error: errorMessage(e) });
     }

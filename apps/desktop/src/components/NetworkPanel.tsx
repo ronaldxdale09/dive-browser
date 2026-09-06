@@ -48,6 +48,7 @@ function size(n: number | null) {
 }
 
 function statusClass(r: RequestRow) {
+  if (r.error === "canceled") return "text-ink-3";
   if (r.error) return "text-danger";
   if (r.status === null) return "text-ink-3";
   if (r.status >= 400) return "text-danger";
@@ -79,7 +80,7 @@ const NetworkRow = memo(function NetworkRow({
     >
       <td className="max-w-[360px] truncate px-3 text-ink" title={r.url}>{name(r.url)}</td>
       <td className="px-2 text-ink-2">{r.method}</td>
-      <td className={`px-2 ${statusClass(r)}`}>{r.error ? "failed" : (r.status ?? "…")}{r.fromCache ? " (cache)" : ""}</td>
+      <td className={`px-2 ${statusClass(r)}`}>{r.error === "canceled" ? "canceled" : r.error ? "failed" : (r.status ?? "…")}{r.fromCache ? " (cache)" : ""}</td>
       <td className="px-2 text-ink-2">{r.resourceType.toLowerCase()}</td>
       <td className="px-2 text-right text-ink-2 tabular-nums">{size(r.size)}</td>
       <td className="px-3 text-right text-ink-2 tabular-nums">{r.durationMs === null ? "" : `${r.durationMs} ms`}</td>
