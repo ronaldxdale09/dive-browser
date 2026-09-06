@@ -415,6 +415,10 @@ impl Browser for TestFakeBrowser {
         Ok("hello from test page".to_string())
     }
 
+    async fn page_markdown(&self, _tab: TabId) -> Result<String, BrowserError> {
+        Ok("# hello from test page".to_string())
+    }
+
     async fn screenshot(&self, _tab: TabId, _full: bool) -> Result<Vec<u8>, BrowserError> {
         Ok(vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A])
     }

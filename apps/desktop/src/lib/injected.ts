@@ -18,6 +18,7 @@ import actionability from "../../src-tauri/src/inject/actionability.js?raw";
 import component from "../../src-tauri/src/inject/component.js?raw";
 import cssPath from "../../src-tauri/src/inject/css-path.js?raw";
 import locator from "../../src-tauri/src/inject/locator.js?raw";
+import markdown from "../../src-tauri/src/inject/markdown.js?raw";
 import picker from "../../src-tauri/src/inject/picker.js?raw";
 import reactContext from "../../src-tauri/src/inject/react-context.js?raw";
 import recorder from "../../src-tauri/src/inject/recorder.js?raw";
@@ -33,6 +34,7 @@ const FRAGMENTS: Record<string, string> = {
   "recorder.js": recorder,
   "picker.js": picker,
   "component.js": component,
+  "markdown.js": markdown,
 };
 
 const DIRECTIVE = "// @dive-include ";

@@ -517,6 +517,28 @@ impl Browser for AppBrowser {
         Ok(text)
     }
 
+    async fn page_markdown(&self, tab: TabId) -> Result<String, BrowserError> {
+        self.ensure_view(tab).await?;
+        let session = self.session(tab)?;
+        let script = crate::pagescript::build(
+            "markdown.js",
+            &[("__MARKDOWN_CAP__", PAGE_TEXT_CAP.to_string())],
+        );
+        let result = session
+            .call(
+                "Runtime.evaluate",
+                json!({ "expression": script, "returnByValue": true }),
+            )
+            .await
+            .map_err(other)?;
+        let value = &result["result"]["value"];
+        let mut markdown = value["markdown"].as_str().unwrap_or_default().to_owned();
+        if value["truncated"].as_bool() == Some(true) {
+            markdown.push_str("\n…(truncated)");
+        }
+        Ok(markdown)
+    }
+
     async fn screenshot(&self, tab: TabId, full_page: bool) -> Result<Vec<u8>, BrowserError> {
         let session = self.session_for(tab).await?;
         let png = if full_page {

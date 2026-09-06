@@ -25,6 +25,7 @@ const FRAGMENTS: &[(&str, &str)] = &[
     ("media-guard.js", include_str!("inject/media-guard.js")),
     ("fill-tab.js", include_str!("inject/fill-tab.js")),
     ("subtitles.js", include_str!("inject/subtitles.js")),
+    ("markdown.js", include_str!("inject/markdown.js")),
 ];
 
 /// Cap on include depth, so a cycle is a test failure rather than a hang.
@@ -128,6 +129,8 @@ mod tests {
                 ("__BINDING__", "__diveTest".into()),
                 ("__MAX_FIELD__", "10".into()),
                 ("__ROLE__", "\"button\"".into()),
+                ("__AUDIO_BINDING__", "__diveTestAudio".into()),
+                ("__MARKDOWN_CAP__", "1000".into()),
             ];
             let script = build(name, &values);
             assert!(script.starts_with("(function () {"), "{name} not wrapped");

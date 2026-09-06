@@ -135,6 +135,7 @@ describe("script composition", () => {
         __BINDING__: "__diveTest",
         __MAX_FIELD__: "10",
         __ROLE__: '"button"',
+        __MARKDOWN_CAP__: "1000",
       });
       expect(script.startsWith("(function () {"), name).toBe(true);
       expect(script.trimEnd().endsWith("})()"), name).toBe(true);

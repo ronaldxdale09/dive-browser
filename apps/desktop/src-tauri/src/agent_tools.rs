@@ -38,6 +38,7 @@ pub fn specs() -> Vec<ToolSpec> {
             obj(json!({"tab_id": tab}), &[]),
         ),
         spec("page_text", "Visible text of the page. Cheapest way to read it.".into(), obj(json!({"tab_id": tab}), &[])),
+        spec("page_markdown", "The page as Markdown: headings, absolute link targets, lists, tables and form state. Costs about what page_text costs but keeps the structure, so prefer it when deciding where to click or navigate next.".into(), obj(json!({"tab_id": tab}), &[])),
         spec(
             "page_state",
             "Accessibility tree as indented text. page_inspect is usually the better read; use this when you need the full tree.".into(),
@@ -257,6 +258,11 @@ async fn execute<B: Browser>(
         "page_inspect" => text(browser.page_inspect(tab()?).await.map_err(err)?),
         "page_text" => browser
             .page_text(tab()?)
+            .await
+            .map(Value::String)
+            .map_err(err),
+        "page_markdown" => browser
+            .page_markdown(tab()?)
             .await
             .map(Value::String)
             .map_err(err),
@@ -526,7 +532,13 @@ mod tests {
                 "{name} changes the page but is not labelled"
             );
         }
-        for name in ["page_text", "page_inspect", "page_locate", "page_devices"] {
+        for name in [
+            "page_text",
+            "page_markdown",
+            "page_inspect",
+            "page_locate",
+            "page_devices",
+        ] {
             assert!(!is_action(name), "{name} only reads");
         }
     }

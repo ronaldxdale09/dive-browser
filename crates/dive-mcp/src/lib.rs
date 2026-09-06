@@ -205,6 +205,8 @@ pub trait Browser: Send + Sync + 'static {
     async fn close(&self, tab: TabId) -> Result<(), BrowserError>;
     /// Visible text of the page (`document.body.innerText`).
     async fn page_text(&self, tab: TabId) -> Result<String, BrowserError>;
+    /// The page as Markdown, keeping headings, link targets, lists and tables.
+    async fn page_markdown(&self, tab: TabId) -> Result<String, BrowserError>;
     /// PNG screenshot of the viewport or the full document.
     async fn screenshot(&self, tab: TabId, full_page: bool) -> Result<Vec<u8>, BrowserError>;
     /// Evaluate JavaScript and return the JSON result.
@@ -734,6 +736,10 @@ impl Browser for NoBrowser {
         Err(BrowserError::Other("no browser behind the catalog".into()))
     }
 
+    async fn page_markdown(&self, _tab: TabId) -> Result<String, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
     async fn screenshot(&self, _tab: TabId, _full_page: bool) -> Result<Vec<u8>, BrowserError> {
         Err(BrowserError::Other("no browser behind the catalog".into()))
     }
@@ -1012,6 +1018,20 @@ impl<B: Browser> DiveServer<B> {
         let tab = self.resolve(p.tab_id).await?;
         let text = self.browser.page_text(tab).await?;
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+    }
+
+    /// Structured page text.
+    #[tool(
+        name = "page_markdown",
+        description = "The page as Markdown: headings, absolute link targets, lists, tables and form state. Costs about what page_text costs but keeps the structure, so prefer it when you need to decide where to click or navigate next."
+    )]
+    async fn page_markdown(
+        &self,
+        Parameters(p): Parameters<TabRef>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id).await?;
+        let markdown = self.browser.page_markdown(tab).await?;
+        Ok(CallToolResult::success(vec![ContentBlock::text(markdown)]))
     }
 
     /// Screenshot.
@@ -1570,6 +1590,9 @@ mod tests {
         }
         async fn page_text(&self, _tab: TabId) -> Result<String, BrowserError> {
             Ok("hello".into())
+        }
+        async fn page_markdown(&self, _tab: TabId) -> Result<String, BrowserError> {
+            Ok("# hello".into())
         }
         async fn screenshot(&self, _tab: TabId, _full: bool) -> Result<Vec<u8>, BrowserError> {
             Ok(vec![1, 2, 3])
