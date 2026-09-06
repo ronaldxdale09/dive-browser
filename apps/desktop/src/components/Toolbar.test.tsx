@@ -315,7 +315,7 @@ describe("Toolbar", () => {
     expect(screen.getByTestId("privacy-halo")).toBeTruthy();
     expect(screen.getByText("Ads blocked").nextSibling?.textContent).toBe("0");
     expect(screen.getByText("Trackers stopped").nextSibling?.textContent).toBe("0");
-    expect(screen.getByText("YouTube protection").nextSibling?.textContent).toBe("Unavailable here");
+    expect(screen.getByText("YouTube protection").nextSibling?.textContent).toBe("Applies on youtube.com");
     expect(screen.getByText("Rules 2026.09.04")).toBeTruthy();
     expect((screen.getByRole("switch", { name: "Protection on this site" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole("switch", { name: "DivePrivacy protection" }).getAttribute("aria-checked")).toBe("false");

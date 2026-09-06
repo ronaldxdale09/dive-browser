@@ -3,10 +3,22 @@ import { Group, Row, Select, Switch } from "../SettingsFields";
 import { CopyBlock } from "./CopyBlock";
 import { usePref } from "./usePref";
 
+/** The `claude mcp add` line for this build, with the token read from `tokenPath`. */
+export function mcpCommand(info: Pick<AppInfo, "mcp_url">, tokenPath: string): string {
+  return `claude mcp add --transport http dive ${info.mcp_url} --header "Authorization: Bearer $(cat '${tokenPath}')"`;
+}
+
+/** The token path as the block shows it: just the file, so the command fits on a line or two. */
+export function shortTokenPath(path: string): string {
+  const name = path.split("/").filter(Boolean).pop();
+  return name ? `…/${name}` : path;
+}
+
 /** Settings › Developer: DevTools, editor and the MCP hookup. */
 export function Developer({ info }: { info: AppInfo | null }) {
   const [prefs, set] = usePref();
-  const command = info ? `claude mcp add --transport http dive ${info.mcp_url} --header "Authorization: Bearer $(cat '${info.mcp_token_path}')"` : "";
+  const command = info ? mcpCommand(info, info.mcp_token_path) : "";
+  const shown = info ? mcpCommand(info, shortTokenPath(info.mcp_token_path)) : "";
   return (
     <>
       <Group title="Tabs">
@@ -40,7 +52,7 @@ export function Developer({ info }: { info: AppInfo | null }) {
 
       <Group title="Coding agents (MCP)" description="Claude Code, Cursor and Codex can read your tabs, console, network and screenshots. Run this once:">
         <div className="py-3">
-          <CopyBlock text={command} />
+          <CopyBlock text={command} display={info ? shown : undefined} />
           <p className="mt-2 text-[11px] leading-relaxed text-ink-3">
             Only processes on this Mac with the token file can connect. Page scripts are never run unless you start Dive with DIVE_MCP_ALLOW_EVAL=1.
           </p>

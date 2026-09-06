@@ -437,6 +437,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_fill_video,
             tab_set_tier,
             bookmark_remove,
+            bookmark_rename,
             permission_set,
             permission_reply,
             permissions_list,
@@ -1715,6 +1716,23 @@ pub(crate) fn tab_set_tier(
 #[specta::specta]
 pub(crate) fn bookmark_remove(state: State<'_, AppState>, url: String) -> AppResult<bool> {
     Ok(lock(&state.store).remove_bookmark(&url)?)
+}
+
+/// Give a bookmark a new title, keeping its URL and creation time. A blank
+/// title is refused rather than erasing the one on record.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn bookmark_rename(
+    state: State<'_, AppState>,
+    url: String,
+    title: String,
+) -> AppResult<()> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(AppError::new("a bookmark needs a title"));
+    }
+    lock(&state.store).add_bookmark(&url, title, dive_core::Timestamp::now())?;
+    Ok(())
 }
 
 /// Remember or forget a permission in the selected profile and real container.

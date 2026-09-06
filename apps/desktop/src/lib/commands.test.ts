@@ -69,6 +69,35 @@ describe("command dispatch", () => {
     expect(SHORTCUTS["mod+shift+delete"]).toBe("browsing-data.open");
   });
 
+  it("binds pinning and detaching the active tab, clear of the native menu's ⌘⇧N", async () => {
+    expect(SHORTCUTS["mod+shift+p"]).toBe("tab.pin");
+    expect(SHORTCUTS["mod+alt+n"]).toBe("tab.detach");
+    expect(SHORTCUTS["mod+shift+n"]).toBe("workspace.new");
+    expect(COMMAND_TITLES["tab.pin"]).toBeTypeOf("string");
+    expect(COMMAND_TITLES["tab.detach"]).toBeTypeOf("string");
+
+    const setPinned = vi.fn().mockResolvedValue(undefined);
+    const detachTab = vi.fn().mockResolvedValue(undefined);
+    const attachTab = vi.fn().mockResolvedValue(undefined);
+    useBrowser.setState({ tabs: [tab("a"), { ...tab("p"), tier: "pinned" }, { ...tab("e"), tier: "essential" }], activeTab: "a", detached: [], setPinned, detachTab, attachTab });
+    await UI_COMMANDS["tab.pin"]!();
+    expect(setPinned).toHaveBeenCalledWith("a", true);
+    useBrowser.setState({ activeTab: "p" });
+    await UI_COMMANDS["tab.pin"]!();
+    expect(setPinned).toHaveBeenCalledWith("p", false);
+    useBrowser.setState({ activeTab: "e" });
+    await UI_COMMANDS["tab.pin"]!();
+    expect(setPinned).toHaveBeenCalledTimes(2);
+
+    useBrowser.setState({ activeTab: "a" });
+    await UI_COMMANDS["tab.detach"]!();
+    expect(detachTab).toHaveBeenCalledWith("a", null);
+    useBrowser.setState({ detached: ["a"] });
+    await UI_COMMANDS["tab.detach"]!();
+    expect(attachTab).toHaveBeenCalledWith("a");
+    useBrowser.setState({ detached: [] });
+  });
+
   it("opens a fresh window using the engine's authoritative workspace", async () => {
     const open = vi.spyOn(ipc, "windowOpen").mockResolvedValue(null);
     useBrowser.setState({ activeWorkspace: null });

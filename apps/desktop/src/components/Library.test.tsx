@@ -81,6 +81,19 @@ describe("Library dialog", () => {
     await waitFor(() => expect(useBrowser.getState().open.library).toBe(false));
   });
 
+  it("shows a specific empty state for no bookmarks and another for a filter that matches nothing", async () => {
+    vi.spyOn(ipc, "bookmarksSearch").mockResolvedValue([]);
+    render(<Library />);
+    await waitFor(() => expect(screen.getByText("No bookmarks yet")).toBeTruthy());
+    expect(screen.getByText("Press ⌘D on a page to keep it here")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Downloads" }));
+    expect(screen.getByText("Nothing downloaded yet")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "History" }));
+    fireEvent.change(screen.getByLabelText("Filter history"), { target: { value: "zzz" } });
+    await waitFor(() => expect(screen.getByText("Nothing matches")).toBeTruthy());
+  });
+
   it("opens a bookmark in a new tab with the platform modifier and removes one", async () => {
     render(<Library />);
     await waitFor(() => expect(screen.getByText("Example docs")).toBeTruthy());

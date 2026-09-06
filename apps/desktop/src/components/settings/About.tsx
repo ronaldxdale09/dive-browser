@@ -25,13 +25,17 @@ export function About({ info }: { info: AppInfo | null }) {
           control={info?.mcp_url ? <CopyBlock text={info.mcp_url} label="Copy MCP URL" /> : <code className="block font-mono text-[11px] text-ink-2">disabled</code>}
         />
       </Group>
-      <Updates />
+      <Updates channel={info?.build.channel ?? null} />
     </>
   );
 }
 
-/** Check for a newer build and install it. */
-function Updates() {
+/**
+ * Check for a newer build and install it. A dev build has no updater to
+ * speak to, so it says where updates go instead of pretending to look.
+ */
+function Updates({ channel }: { channel: string | null }) {
+  const dev = channel === "dev";
   const status = useUpdates((s) => s.status);
   const update = useUpdates((s) => s.update);
   const error = useUpdates((s) => s.error);
@@ -45,8 +49,10 @@ function Updates() {
         hint={
           status === "available" ? (
             update?.notes ? <span className="block whitespace-pre-wrap">{update.notes}</span> : "Installing restarts Dive."
+          ) : dev ? (
+            "Updates are delivered to release builds."
           ) : status === "none" ? (
-            "You're up to date, or this build has no updater."
+            "You're up to date."
           ) : status === "error" ? (
             <span className="text-danger">{error}</span>
           ) : (
@@ -65,7 +71,7 @@ function Updates() {
           )
         }
       />
-      {status === "none" && (
+      {status === "none" && !dev && (
         <p role="status" className="flex items-center gap-1.5 py-2.5 text-[11px] text-ink-2">
           <Icon icon={CheckIcon} size={12} className="text-highlight" /> You're up to date
         </p>

@@ -1,12 +1,14 @@
 import { prettyUrl } from "../lib/prettyUrl";
 import { Bug, Camera, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, X, Menu } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FOCUS_ADDRESS } from "../lib/commands";
 import { useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
 import { SharePopover } from "./SharePopover";
 import { BookmarkButton } from "./BookmarkButton";
+import { AddressSuggestions, optionId, useAddressSuggestions } from "./AddressSuggestions";
+import type { Suggestion } from "../lib/omnibox";
 import { DownloadsMenu } from "./DownloadsMenu";
 import { ProtectionMenu } from "./ProtectionMenu";
 import { MainMenu } from "./MainMenu";
@@ -21,6 +23,7 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
   const tabs = useBrowser((s) => s.tabs);
   const activeTab = useBrowser((s) => s.activeTab);
   const navigate = useBrowser((s) => s.navigate);
+  const activateTab = useBrowser((s) => s.activateTab);
   const reload = useBrowser((s) => s.reload);
   const stop = useBrowser((s) => s.stop);
   const capture = useBrowser((s) => s.capture);
@@ -43,6 +46,21 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
   const secure = url.startsWith("https://");
   const display = prettyUrl(url);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Suggestions live only while the draft says something other than the
+  // address already shown -- focusing the bar selects the URL, and that alone
+  // is not a question. The list is a listbox the input drives, so the input
+  // never loses focus to it.
+  const listId = useId();
+  const { rows, highlight, setHighlight, move } = useAddressSuggestions(draft.value, editing && draft.value.trim() !== url, tabs);
+  const finishEditing = () => {
+    setEditing(false);
+    inputRef.current?.blur();
+  };
+  const pick = (row: Suggestion) => {
+    finishEditing();
+    if (row.kind === "tab") void activateTab(row.tabId);
+    else void navigate(row.url);
+  };
   const toggleDock = () => {
     if (!compact) {
       toggle("dock");
@@ -83,13 +101,17 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
         <IconButton icon={RotateCw} label="Reload" shortcut="⌘R" disabled={!current} onClick={() => void reload()} size={14} />
       )}
       <form
-        className="mx-1 flex h-[calc(var(--row-h)-4px)] min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2"
+        className="relative mx-1 flex h-[calc(var(--row-h)-4px)] min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2"
         onSubmit={(e) => {
           e.preventDefault();
           if (!value.trim()) return;
+          const row = rows[highlight];
+          if (row) {
+            pick(row);
+            return;
+          }
           void navigate(value);
-          setEditing(false);
-          inputRef.current?.blur();
+          finishEditing();
         }}
       >
         <Icon icon={current ? (secure ? Lock : Search) : Search} size={13} className="shrink-0 text-ink-3" />
@@ -110,12 +132,22 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
               event.stopPropagation();
               setValue(url);
               event.currentTarget.blur();
+              return;
+            }
+            if ((event.key === "ArrowDown" || event.key === "ArrowUp") && rows.length > 0) {
+              event.preventDefault();
+              move(event.key === "ArrowDown" ? 1 : -1);
             }
           }}
           placeholder="Search or enter address"
           spellCheck={false}
+          autoComplete="off"
+          aria-autocomplete="list"
+          aria-controls={rows.length > 0 ? listId : undefined}
+          aria-activedescendant={rows.length > 0 ? optionId(listId, highlight) : undefined}
           className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
         />
+        <AddressSuggestions id={listId} rows={rows} highlight={highlight} onHighlight={setHighlight} onPick={pick} />
       </form>
       {compact ? (
         <ToolbarMore>

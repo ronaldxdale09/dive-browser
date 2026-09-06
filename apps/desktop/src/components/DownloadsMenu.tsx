@@ -5,6 +5,7 @@ import { useBrowser } from "../store/browser";
 import { selectActive, useDownloads } from "../store/downloads";
 import type { Download as Item } from "../store/downloads";
 import { usePrefs } from "../store/prefs";
+import { EmptyState } from "./EmptyState";
 import { FeatureButton } from "./FeatureBar";
 import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
@@ -60,11 +61,7 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
             </span>
           </div>
           {items.length === 0 ? (
-            <p className="px-2 py-4 text-center text-[11px] leading-relaxed text-ink-3">
-              Nothing downloaded this session.
-              <br />
-              Files are saved to <span className="font-mono">{folder}</span>, never overwriting.
-            </p>
+            <EmptyState compact icon={Download} title="Nothing downloaded yet" hint={`Files save to ${folder}, never overwriting`} />
           ) : (
             <ul className="max-h-72 overflow-y-auto">
               {items.map((d) => (

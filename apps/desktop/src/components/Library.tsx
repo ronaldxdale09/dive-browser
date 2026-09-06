@@ -12,6 +12,7 @@ import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
 import { IMPORT_BUSY, useImportVideo } from "../screen/importVideo";
 import { OpenVideoButton } from "../screen/OpenVideoButton";
+import { EmptyState } from "./EmptyState";
 import { Favicon } from "./Favicon";
 import { Icon, IconButton } from "./Icon";
 
@@ -165,7 +166,7 @@ function Bookmarks({ query, onOpened }: { query: string; onOpened: () => void })
   });
 
   if (items === null) return <p className="p-3 text-xs text-ink-3">Loading…</p>;
-  if (shown.length === 0) return <Empty>{items.length === 0 ? "No bookmarks yet. Star a page from the address bar to keep it here." : "Nothing matches."}</Empty>;
+  if (shown.length === 0) return items.length === 0 ? <EmptyState icon={Star} title="No bookmarks yet" hint="Press ⌘D on a page to keep it here" /> : <NoMatch />;
 
   const virtualItems = virtualizer.getVirtualItems();
   const useVirtual = virtualItems.length > 0 && shown.length > 40;
@@ -261,7 +262,7 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
           Clear browsing data…
         </button>
       </div>
-      {items !== null && groups.length === 0 && <Empty>{items.length === 0 ? "No history yet." : "Nothing matches."}</Empty>}
+      {items !== null && groups.length === 0 && (items.length === 0 ? <EmptyState icon={History} title="No history yet" hint="Pages you visit show up here" /> : <NoMatch />)}
       {groups.map((g) => (
         <section key={g.day} aria-label={g.day} className="mb-2">
           <h4 className="px-2.5 py-1.5 text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">{g.day}</h4>
@@ -282,8 +283,9 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
   );
 }
 
-function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="p-3 text-xs text-ink-3">{children}</p>;
+/** The filter left nothing to show. */
+function NoMatch() {
+  return <EmptyState icon={Search} title="Nothing matches" hint="Try a shorter filter" />;
 }
 
 function host(url: string) {
@@ -298,7 +300,7 @@ function host(url: string) {
 function DownloadsList({ query }: { query: string }) {
   const items = useDownloads((s) => s.items);
   const shown = items.filter((d) => matches(query, d.name, d.url));
-  if (shown.length === 0) return <Empty>{items.length === 0 ? "Nothing downloaded in this session yet." : "Nothing matches."}</Empty>;
+  if (shown.length === 0) return items.length === 0 ? <EmptyState icon={Download} title="Nothing downloaded yet" hint="Files you save this session show up here" /> : <NoMatch />;
   const reveal = (path: string | null) => {
     void ipc.downloadsReveal(path).catch((err) => {
       useBrowser.setState({ error: err instanceof Error ? err.message : String(err) });
@@ -369,7 +371,7 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
     return (
       <>
         {header}
-        <Empty>{items.length === 0 ? "No recordings yet. Press Record in the title bar to make one, or open a video file." : "Nothing matches."}</Empty>
+        {items.length === 0 ? <EmptyState icon={Clapperboard} title="No recordings yet" hint="Press Record in the title bar, or open a video file" /> : <NoMatch />}
       </>
     );
   }

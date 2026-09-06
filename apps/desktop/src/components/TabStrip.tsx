@@ -8,6 +8,7 @@ import type { Tab } from "../lib/ipc";
 import { Favicon } from "./Favicon";
 import { Icon, IconButton } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
+import { chordsByCommand, formatChord } from "../lib/commands";
 import { clampFloatingPosition } from "../lib/floating";
 import { essentialTabs, orderTabs } from "../lib/tabOrder";
 
@@ -426,13 +427,15 @@ function TabMenu({ x, y, tier, detached, split, onPin, onEssential, onWindow, on
   const pinned = tier === "pinned";
   const essential = tier === "essential";
   const item = "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink";
+  const chords = chordsByCommand();
   const rows = 4 + (essential ? 0 : 1) + (split ? 1 : 0);
   const position = clampFloatingPosition({ x, y, width: 208, height: 12 + rows * 30 + 2 * 9, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
   return (
     <div ref={ref} role="menu" style={{ left: position.x, top: position.y }} className="surface-enter fixed z-50 w-52 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
       {!essential && (
-        <button type="button" role="menuitem" className={item} onClick={() => onPin(!pinned)}>
+        <button type="button" role="menuitem" className={item} aria-keyshortcuts={chords["tab.pin"]} onClick={() => onPin(!pinned)}>
           <Icon icon={Pin} size={13} /> {pinned ? "Unpin tab" : "Pin tab"}
+          <MenuChord chord={chords["tab.pin"]} />
         </button>
       )}
       <button type="button" role="menuitem" className={item} onClick={() => onEssential(!essential)}>
@@ -444,16 +447,31 @@ function TabMenu({ x, y, tier, detached, split, onPin, onEssential, onWindow, on
           <Icon icon={Columns2} size={13} /> <span className="truncate">{split.kind === "leave" ? "Remove from split view" : split.label}</span>
         </button>
       )}
-      <button type="button" role="menuitem" className={item} onClick={() => onWindow(!detached)}>
+      <button type="button" role="menuitem" className={item} aria-keyshortcuts={chords["tab.detach"]} onClick={() => onWindow(!detached)}>
         <Icon icon={AppWindow} size={13} /> {detached ? "Move back to this window" : "Open in new window"}
+        <MenuChord chord={chords["tab.detach"]} />
       </button>
       <div className="my-1 h-px bg-line" role="separator" />
-      <button type="button" role="menuitem" className={item} onClick={onClose}>
+      <button type="button" role="menuitem" className={item} aria-keyshortcuts={chords["tab.close"]} onClick={onClose}>
         <Icon icon={X} size={13} /> Close tab
+        <MenuChord chord={chords["tab.close"]} />
       </button>
       <button type="button" role="menuitem" className={item} onClick={onCloseOthers}>
         <Icon icon={X} size={13} /> Close other tabs
       </button>
     </div>
+  );
+}
+
+/**
+ * The chord on the right of a menu row, in the glyphs the main menu uses.
+ * Hidden from the accessible name: the button carries it as aria-keyshortcuts.
+ */
+function MenuChord({ chord }: { chord: string | undefined }) {
+  if (!chord) return null;
+  return (
+    <kbd aria-hidden="true" className="ml-auto pl-3 font-mono text-[11px] text-ink-3">
+      {formatChord(chord)}
+    </kbd>
   );
 }

@@ -83,6 +83,11 @@ export const commands = {
 	tabSetTier: (id: TabId, tier: TabTier) => typedError<null, AppError>(__TAURI_INVOKE("tab_set_tier", { id, tier })),
 	/**  Forget a bookmark by URL. */
 	bookmarkRemove: (url: string) => typedError<boolean, AppError>(__TAURI_INVOKE("bookmark_remove", { url })),
+	/**
+	 *  Give a bookmark a new title, keeping its URL and creation time. A blank
+	 *  title is refused rather than erasing the one on record.
+	 */
+	bookmarkRename: (url: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("bookmark_rename", { url, title })),
 	/**  Remember or forget a permission in the selected profile and real container. */
 	permissionSet: (scope: Scope, origin: string, kind: string, decision: Decision) => typedError<null, AppError>(__TAURI_INVOKE("permission_set", { scope, origin, kind, decision })),
 	/**  Resolve the original native request; its opaque ID carries trusted provenance. */

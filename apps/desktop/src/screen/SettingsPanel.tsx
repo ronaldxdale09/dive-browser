@@ -255,6 +255,8 @@ function CursorSettings({ project }: { project: Project }) {
   return (
     <>
       {!hasPointer && <p className="rounded-lg border border-line bg-surface-2/60 p-3 text-ink-3">This recording has no pointer track (window captures carry the pointer in the picture), so these settings do not apply to it.</p>}
+      {/* Controls that cannot take effect read as off, not merely explained. */}
+      <div className={hasPointer ? "contents" : "pointer-events-none opacity-40"} aria-disabled={!hasPointer || undefined}>
       <Card>
         <Switch label="Show Cursor" checked={e.cursor.show} onChange={(v) => cursor({ show: v })} />
         <Switch label="Clip to Canvas" checked={e.cursor.clipToCanvas} onChange={(v) => cursor({ clipToCanvas: v })} hint="Hide the pointer when it leaves the video" />
@@ -264,6 +266,7 @@ function CursorSettings({ project }: { project: Project }) {
         <Slider label="Size" value={e.cursor.size} min={0.5} max={10} step={0.1} format={(v) => v.toFixed(1)} onChange={(v) => cursor({ size: v }, false)} />
         <Slider label="Smoothing" value={e.cursor.smoothing} min={0} max={1} step={0.01} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => cursor({ smoothing: v }, false)} />
         <Slider label="Click Bounce" value={e.cursor.clickBounce} min={0} max={5} step={0.1} format={(v) => v.toFixed(1)} onChange={(v) => cursor({ clickBounce: v }, false)} />
+      </div>
       </div>
     </>
   );

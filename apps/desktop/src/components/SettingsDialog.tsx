@@ -1,6 +1,5 @@
 import {
   Captions,
-  Download,
   Info,
   Keyboard,
   Palette as PaletteIcon,
@@ -25,19 +24,22 @@ import { About } from "./settings/About";
 import { Agent } from "./settings/Agent";
 import { Appearance } from "./settings/Appearance";
 import { Developer } from "./settings/Developer";
-import { Downloads } from "./settings/Downloads";
 import { General } from "./settings/General";
 import { Privacy } from "./settings/Privacy";
 import { Shortcuts } from "./settings/Shortcuts";
 import { SubtitlesControls } from "./settings/SubtitlesControls";
 
-type SectionId = SettingsSection;
+/** The panels the dialog has. "downloads" stays a valid request and lands on General, which holds the download folder. */
+type SectionId = Exclude<SettingsSection, "downloads">;
+
+export function resolveSection(section: SettingsSection): SectionId {
+  return section === "downloads" ? "general" : section;
+}
 
 const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
   { id: "general", label: "General", icon: SlidersHorizontal },
   { id: "appearance", label: "Appearance", icon: PaletteIcon },
   { id: "privacy", label: "Privacy", icon: ShieldCheck },
-  { id: "downloads", label: "Downloads", icon: Download },
   { id: "developer", label: "Developer", icon: Plug },
   { id: "agent", label: "Agent", icon: AgentIcon as LucideIcon },
   { id: "subtitles", label: "Live subtitles", icon: Captions },
@@ -51,7 +53,7 @@ export function SettingsDialog() {
   const toggle = useBrowser((s) => s.toggle);
   // Opened on whichever panel the caller asked for (`openSettings("about")`).
   const initial = useBrowser((s) => s.settingsSection);
-  const [section, setSection] = useState<SectionId>(initial);
+  const [section, setSection] = useState<SectionId>(() => resolveSection(initial));
   const [info, setInfo] = useState<AppInfo | null>(null);
   const load = usePrefs((s) => s.load);
   useEffect(() => {
@@ -141,8 +143,6 @@ function Panel({ section, info }: { section: SectionId; info: AppInfo | null }) 
       return <Appearance />;
     case "privacy":
       return <Privacy />;
-    case "downloads":
-      return <Downloads />;
     case "developer":
       return <Developer info={info} />;
     case "agent":

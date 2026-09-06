@@ -165,6 +165,7 @@ export const ipc = {
   bookmarkToggle: async (id: string) => unwrap(await commands.bookmarkToggle(id)),
   bookmarkStatus: async (url: string) => unwrap(await commands.bookmarkStatus(url)),
   bookmarkRemove: async (url: string) => unwrap(await commands.bookmarkRemove(url)),
+  bookmarkRename: async (url: string, title: string) => unwrap(await commands.bookmarkRename(url, title)),
   bookmarksSearch: async (query: string, limit = 20) => unwrap(await commands.bookmarksSearch(query, limit)),
   permissionSet: async (scope: Scope, origin: string, kind: string, decision: Decision) => unwrap(await commands.permissionSet(scope, origin, kind, decision)),
   permissionReply: async (tabId: string, requestId: string, decision: Decision, duration: Duration) => unwrap(await commands.permissionReply(tabId, requestId, decision, duration)),

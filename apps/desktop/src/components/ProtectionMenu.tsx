@@ -132,14 +132,18 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
             <Layer
               icon={Play}
               label="YouTube protection"
-              value={!youtubeSite ? "Unavailable here" : youtubeActive ? "Active" : "Inactive"}
+              value={!youtubeSite ? "Applies on youtube.com" : youtubeActive ? "Active" : "Inactive"}
               control={
-                <Switch
-                  label="YouTube protection"
-                  checked={prefs.youtube_protection}
-                  disabled={!youtubeSite}
-                  onChange={(youtube_protection) => void update({ youtube_protection })}
-                />
+                // The preference keeps its value on every site; the switch only
+                // turns muted where it cannot change what the page sees.
+                <span aria-disabled={!youtubeSite || undefined} title={youtubeSite ? undefined : "Applies on youtube.com"}>
+                  <Switch
+                    label="YouTube protection"
+                    checked={prefs.youtube_protection}
+                    disabled={!youtubeSite}
+                    onChange={(youtube_protection) => void update({ youtube_protection })}
+                  />
+                </span>
               }
             />
           </section>

@@ -25,6 +25,16 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
     const { activeTab, closeTab } = useBrowser.getState();
     return activeTab ? closeTab(activeTab) : undefined;
   },
+  "tab.pin": () => {
+    const { tabs, activeTab, setPinned } = useBrowser.getState();
+    const tab = tabs.find((t) => t.id === activeTab);
+    return tab && tab.tier !== "essential" ? setPinned(tab.id, tab.tier !== "pinned") : undefined;
+  },
+  "tab.detach": () => {
+    const { activeTab, detached, detachTab, attachTab } = useBrowser.getState();
+    if (!activeTab) return;
+    return detached.includes(activeTab) ? attachTab(activeTab) : detachTab(activeTab, null);
+  },
   "tab.reload": () => useBrowser.getState().reload(),
   "tab.devtools": () => useBrowser.getState().devtools(),
   "report.compose": () => useBrowser.getState().bugReport(),
@@ -131,6 +141,9 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+n": "window.new",
   "mod+t": "tab.new",
   "mod+w": "tab.close",
+  "mod+shift+p": "tab.pin",
+  // ⌘⇧N is the native menu's "New workspace"; the tab takes the ⌥ variant.
+  "mod+alt+n": "tab.detach",
   "mod+r": "tab.reload",
   "mod+alt+i": "tab.devtools",
   "mod+shift+b": "report.compose",
@@ -177,6 +190,8 @@ export const COMMAND_TITLES: Record<string, string> = {
   "window.new": "New window",
   "tab.new": "New tab",
   "tab.close": "Close tab",
+  "tab.pin": "Pin or unpin tab",
+  "tab.detach": "Move tab to its own window",
   "tab.reload": "Reload",
   "tab.stop": "Stop loading",
   "tab.print": "Print…",

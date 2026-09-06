@@ -4,7 +4,7 @@ import { ipc } from "../lib/ipc";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { useBrowser } from "../store/browser";
 import { usePrivacy } from "../store/privacy";
-import { SettingsDialog } from "./SettingsDialog";
+import { SettingsDialog, resolveSection } from "./SettingsDialog";
 import { groupPermissions } from "./settings/Privacy";
 import { useUpdates } from "../store/updates";
 
@@ -59,6 +59,18 @@ describe("SettingsDialog", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Shortcuts" }));
     await waitFor(() => expect(screen.getByText("New tab")).toBeTruthy());
     expect(screen.getByText("⌘T")).toBeTruthy();
+  });
+
+  it("keeps the download folder under General and lands a downloads request there", () => {
+    expect(resolveSection("downloads")).toBe("general");
+    expect(resolveSection("about")).toBe("about");
+    useBrowser.getState().openSettings("downloads");
+    render(<SettingsDialog />);
+    expect(screen.getByRole("tab", { name: "General", selected: true })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "Downloads" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Downloads" })).toBeTruthy();
+    expect(screen.getByLabelText("Save files to")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Search" }).compareDocumentPosition(screen.getByRole("heading", { name: "Downloads" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("persists a toggled preference", async () => {
@@ -251,13 +263,48 @@ describe("About and updates", () => {
     expect(screen.getByRole("button", { name: "Copy MCP URL" })).toBeTruthy();
   });
 
-  it("reports being up to date when the channel has nothing", async () => {
+  it("reports being up to date when the release channel has nothing", async () => {
+    vi.mocked(ipc.appInfo).mockResolvedValue({
+      version: "0.1.0",
+      build: { channel: "beta", number: "1", commit: "abc1234", built_at: 0 },
+      data_dir: "/tmp/dive",
+      mcp_url: "http://127.0.0.1:7391/mcp",
+      mcp_token_path: "/tmp/dive/mcp-token",
+      simulate: null,
+    });
     useBrowser.getState().openSettings("about");
     render(<SettingsDialog />);
+    await waitFor(() => expect(screen.getByText("/tmp/dive")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain("You're up to date"));
+    expect(screen.getByText("You're up to date.")).toBeTruthy();
     expect(ipc.updateCheck).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
+    expect(screen.queryByText("Updates are delivered to release builds.")).toBeNull();
+  });
+
+  it("tells a dev build where updates go instead of claiming it is current", async () => {
+    useBrowser.getState().openSettings("about");
+    render(<SettingsDialog />);
+    await waitFor(() => expect(screen.getByText("Updates are delivered to release builds.")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+    await waitFor(() => expect(ipc.updateCheck).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText(/You're up to date/)).toBeNull();
+    expect(screen.getByText("Updates are delivered to release builds.")).toBeTruthy();
+  });
+
+  it("shows the MCP command with a short token path but copies the full one", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    useBrowser.getState().openSettings("developer");
+    render(<SettingsDialog />);
+    const shown = await screen.findByText(/claude mcp add/);
+    expect(shown.textContent).toContain("…/mcp-token");
+    expect(shown.textContent).not.toContain("/tmp/dive/mcp-token");
+    expect(shown.getAttribute("title")).toContain("/tmp/dive/mcp-token");
+    fireEvent.click(screen.getByRole("button", { name: "Copy command" }));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("$(cat '/tmp/dive/mcp-token')"));
   });
 
   it("offers to install an update it finds", async () => {
