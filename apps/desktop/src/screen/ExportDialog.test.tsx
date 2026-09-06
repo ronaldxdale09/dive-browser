@@ -57,3 +57,36 @@ describe("Export dialog keyboard ownership", () => {
     expect(close).not.toHaveBeenCalled();
   });
 });
+
+
+it("keeps the dialog owned while cancellation is acknowledged and then offers retry", async () => {
+  let reject!: (error: Error) => void;
+  let signal: AbortSignal | undefined;
+  vi.mocked(exportProject).mockImplementation((input) => {
+    signal = input.signal;
+    input.onProgress({ phase: "finishing", progress: 0 });
+    return new Promise((_, fail) => { reject = fail; });
+  });
+  const close = vi.fn();
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  render(<ExportDialog onClose={close} />);
+  fireEvent.click(screen.getByRole("button", { name: "Export" }));
+  const cancel = screen.getByRole("button", { name: "Cancel" });
+  fireEvent.click(cancel);
+  expect(signal?.aborted).toBe(true);
+  expect(screen.getByText("Stopping export…")).toBeTruthy();
+  expect(cancel.getAttribute("aria-disabled")).toBe("true");
+  expect(document.activeElement).toBe(cancel);
+  expect(screen.queryByRole("button", { name: "Export" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+  fireEvent.keyDown(cancel, { key: "Escape" });
+  expect(close).not.toHaveBeenCalled();
+  expect(useEditor.getState().exporting).toBe(true);
+  await act(async () => { reject(new Error("export cancelled")); });
+  expect(screen.getByRole("status").textContent).toBe("Export cancelled.");
+  expect(log).not.toHaveBeenCalled();
+  expect(useEditor.getState().exporting).toBe(false);
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" }));
+  expect(screen.getByRole("button", { name: "Export" })).toBeTruthy();
+  log.mockRestore();
+});

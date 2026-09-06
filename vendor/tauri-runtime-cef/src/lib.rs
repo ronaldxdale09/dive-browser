@@ -13,6 +13,7 @@ mod reserved_shortcut;
 mod reserved_shortcut_native;
 mod runtime;
 mod webview;
+mod webview_routing;
 mod window;
 mod window_builder;
 mod window_handle;

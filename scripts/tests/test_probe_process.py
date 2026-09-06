@@ -5,12 +5,25 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from probe_process import run_probe
 
 
 class ProbeProcessTests(unittest.TestCase):
+    def test_cleanup_error_preserves_original_probe_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fake = root / 'probe'
+            fake.write_text('#!/usr/bin/env python3\nraise SystemExit(2)\n')
+            fake.chmod(0o755)
+            with patch('probe_process.stop_group', side_effect=PermissionError('cleanup denied')):
+                with self.assertRaisesRegex(RuntimeError, 'probe exited 2') as failure:
+                    run_probe(fake, dict(os.environ), root / 'output.log', 3)
+            self.assertIsInstance(failure.exception.__cause__, PermissionError)
+            self.assertIn('cleanup denied', str(failure.exception.__cause__))
+
     def test_successful_parent_with_live_helper_fails_and_cleans_its_group(self):
         self.assert_leaked_helper_rejected(0)
 

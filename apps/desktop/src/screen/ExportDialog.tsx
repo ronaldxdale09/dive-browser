@@ -30,6 +30,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [result, setResult] = useState<RecordingResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const runOwner = useRef<ExportOwner | null>(null);
   const mounted = useRef(false);
@@ -66,6 +67,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     runOwner.current = owner;
     const current = () => mounted.current && runOwner.current === owner && exportOwner === owner && useEditor.getState().generation === owner.generation;
     setError(null);
+    setCancelling(false);
     setResult(null);
     abort.current = new AbortController();
     store.setPlaying(false);
@@ -75,9 +77,10 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       if (current()) setResult(r);
     } catch (e) {
       if (current()) {
-        console.error("[divescreen] export failed", e);
+        const message = e instanceof Error ? e.message : String(e);
+        if (message !== "export cancelled") console.error("[divescreen] export failed", e);
         setProgress(null);
-        setError(e instanceof Error ? e.message : String(e));
+        setError(message);
       }
     } finally {
       if (exportOwner === owner) {
@@ -88,7 +91,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const label = progress?.phase === "rendering" ? `Rendering frame ${progress.frame} of ${progress.frames}` : progress?.phase === "uploading" ? "Handing the frames to the engine" : progress?.phase === "finishing" ? "Encoding with the sound" : "Preparing";
+  const label = cancelling ? "Stopping export" : progress?.phase === "rendering" ? `Rendering frame ${progress.frame} of ${progress.frames}` : progress?.phase === "uploading" ? "Preparing your file" : progress?.phase === "finishing" ? "Finishing your file" : "Preparing";
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50" onMouseDown={() => !busy && onClose()}>
@@ -129,7 +132,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 </Row>
               </>
             )}
-            {error && <p className="text-danger">{error}</p>}
+            {error && <p role={error === "export cancelled" ? "status" : "alert"} className={error === "export cancelled" ? "text-ink-2" : "text-danger"}>{error === "export cancelled" ? "Export cancelled." : error}</p>}
             <button type="button" onClick={() => void run()} className="mt-1 h-9 rounded-lg bg-accent text-xs font-medium text-accent-ink hover:brightness-110">
               Export
             </button>
@@ -142,8 +145,12 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
             <div className="h-2 overflow-hidden rounded-full bg-surface-2">
               <div className="h-full bg-highlight transition-[width]" style={{ width: `${Math.round(progress.progress * 100)}%` }} />
             </div>
-            <button ref={cancelButton} type="button" onClick={() => abort.current?.abort()} className="h-8 self-end rounded-lg px-3 text-ink-2 hover:bg-surface-2 hover:text-ink">
-              Cancel
+            <button ref={cancelButton} type="button" aria-disabled={cancelling} onClick={() => {
+              if (!abort.current || abort.current.signal.aborted) return;
+              setCancelling(true);
+              abort.current.abort();
+            }} className="h-8 self-end rounded-lg px-3 text-ink-2 hover:bg-surface-2 hover:text-ink aria-disabled:cursor-wait aria-disabled:opacity-60">
+              {cancelling ? "Stopping…" : "Cancel"}
             </button>
           </div>
         )}

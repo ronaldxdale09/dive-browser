@@ -150,6 +150,10 @@ pub(crate) struct RuntimeContext<T: UserEvent> {
   next_webview_event_id: Arc<AtomicU32>,
   current_dispatch: Arc<MainThreadDispatchSlot<T>>,
   pub(crate) app_wide_theme: Arc<Mutex<Option<Theme>>>,
+  /// Last macOS accessibility request, shared with browsers created later.
+  /// None preserves CEF's default until an assistive client makes a request.
+  #[cfg(target_os = "macos")]
+  pub(crate) accessibility_enabled: Arc<Mutex<Option<bool>>>,
   pub(crate) cef_pump: CefExternalPump,
   /// Root cache path passed to [`cef::Settings::cache_path`] during
   /// [`cef::initialize`]. Per-webview `data_directory` profiles must resolve
@@ -465,6 +469,12 @@ pub(crate) struct AppState<T: UserEvent> {
   closing_windows: HashSet<WindowId>,
   exit_code: Arc<AtomicI32>,
   pub(crate) exiting: bool,
+}
+
+impl<T: UserEvent> AppState<T> {
+  pub(crate) fn is_window_closing(&self, window_id: WindowId) -> bool {
+    self.closing_windows.contains(&window_id)
+  }
 }
 
 pub(crate) struct WinitCefApp<T: UserEvent> {
@@ -934,6 +944,8 @@ impl<T: UserEvent> WinitCefApp<T> {
 
   #[cfg(target_os = "macos")]
   fn set_browsers_accessibility_state(&self, enabled: bool) {
+    log::debug!(target: "dive_native_accessibility", "request enabled={enabled} browsers={}", self.state.live_browsers);
+    *self.context.accessibility_enabled.lock().unwrap() = Some(enabled);
     let state = if enabled {
       State::ENABLED
     } else {
@@ -941,6 +953,7 @@ impl<T: UserEvent> WinitCefApp<T> {
     };
     for appwindow in self.state.windows.values() {
       for child in &appwindow.children {
+        log::debug!(target: "dive_native_accessibility", "apply webview={} enabled={enabled}", child.webview_id);
         child.host.set_accessibility_state(state);
       }
     }
@@ -1525,6 +1538,8 @@ impl<T: UserEvent> CefRuntime<T> {
       next_webview_event_id: Default::default(),
       current_dispatch: Default::default(),
       app_wide_theme: Default::default(),
+      #[cfg(target_os = "macos")]
+      accessibility_enabled: Default::default(),
       cef_pump,
       cache_path: Arc::new(cache_path.clone()),
     };

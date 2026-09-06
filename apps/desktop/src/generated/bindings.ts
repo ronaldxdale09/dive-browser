@@ -10,6 +10,14 @@ export const commands = {
 	keepSitesList: (profileId: ProfileId) => typedError<string[], AppError>(__TAURI_INVOKE("keep_sites_list", { profileId })),
 	keepSiteSet: (profileId: ProfileId, url: string, keep: boolean) => typedError<string[], AppError>(__TAURI_INVOKE("keep_site_set", { profileId, url, keep })),
 	snapshot: () => typedError<Snapshot, AppError>(__TAURI_INVOKE("snapshot")),
+	/**  A detached window reads its own page, independently of the main workspace. */
+	tabInfo: (id: TabId) => typedError<Tab, AppError>(__TAURI_INVOKE("tab_info", { id })),
+	/**  Fixed window commands from trusted detached chrome; never arbitrary script. */
+	windowCommand: (command: string) => typedError<null, AppError>(__TAURI_INVOKE("window_command", { command })),
+	/**  Create a blank detached window using the authoritative current workspace. */
+	windowOpen: () => typedError<null, AppError>(__TAURI_INVOKE("window_open")),
+	/**  Only the current registered popout chrome can acknowledge its readiness. */
+	popoutReady: (id: TabId) => typedError<boolean, AppError>(__TAURI_INVOKE("popout_ready", { id })),
 	workspaceActivate: (id: WorkspaceId) => typedError<null, AppError>(__TAURI_INVOKE("workspace_activate", { id })),
 	/**  Every profile, in switcher order. */
 	profilesList: () => typedError<Profile[], AppError>(__TAURI_INVOKE("profiles_list")),
@@ -158,15 +166,14 @@ export const commands = {
 	fileReadChunk: (path: string, offset: number | null, len: number | null) => typedError<string, AppError>(__TAURI_INVOKE("file_read_chunk", { path, offset, len })),
 	/**  Size of a recording or companion, for chunked reads. */
 	fileSize: (path: string) => typedError<number | null, AppError>(__TAURI_INVOKE("file_size", { path })),
-	/**  Open a staging file for the editor's rendered `WebM`; returns its path. */
+	/**  Create an owned export job; its ID never names a capture file. */
 	screenExportBegin: () => typedError<string, AppError>(__TAURI_INVOKE("screen_export_begin")),
-	/**  Append a base64 piece to the staging file. */
-	screenExportAppend: (path: string, base64: string) => typedError<null, AppError>(__TAURI_INVOKE("screen_export_append", { path, base64 })),
-	/**
-	 *  Encode the staged render into the final file, with the source's sound
-	 *  cut and sped the same way, and a preview companion beside it.
-	 */
+	/**  Append exactly the next bounded chunk of an owned upload. */
+	screenExportAppend: (jobId: string, offset: number, base64: string) => typedError<null, AppError>(__TAURI_INVOKE("screen_export_append", { jobId, offset, base64 })),
+	/**  Finish an owned job once. Every child is reaped before cleanup/receipt. */
 	screenExportFinish: (request: ExportRequest) => typedError<RecordingResult, AppError>(__TAURI_INVOKE("screen_export_finish", { request })),
+	/**  Cancel only this chrome's job and wait for owned child/file cleanup. */
+	screenExportCancel: (jobId: string) => typedError<CancelResult, AppError>(__TAURI_INVOKE("screen_export_cancel", { jobId })),
 	/**
 	 *  Screenshot a tab (viewport, or the whole document when `full_page`) to a
 	 *  PNG under the app data dir and return its path.
@@ -462,6 +469,8 @@ export type Bounds = {
 	height: number | null,
 };
 
+export type CancelResult = "cancelled" | "completed";
+
 /**  A streamed piece of the reply. */
 export type ChatDelta =
 /**  More text. */
@@ -699,8 +708,8 @@ export type Environment = {
 
 /**  What the editor asks for when it hands over its rendered frames. */
 export type ExportRequest = {
-	/**  The staged `WebM` the chrome rendered and uploaded. */
-	staged: string,
+	/**  Opaque job capability returned by export begin. */
+	job_id: string,
 	/**  The recording the project belongs to (for its sound). */
 	source: string,
 	/**  `mp4` or `gif`. */

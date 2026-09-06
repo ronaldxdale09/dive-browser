@@ -179,7 +179,9 @@ export function reduceEvent(state: Reduced, event: CoreEvent): Partial<Reduced> 
       return { workspaces: state.workspaces.filter((w) => w.id !== event.data) };
     case "workspace_activated": {
       const profile = state.workspaces.find((w) => w.id === event.data)?.profile_id ?? state.activeProfile;
-      return { activeWorkspace: event.data, activeProfile: profile };
+      const tabs = state.tabs.filter((tab) => tab.workspace_id === event.data || tab.tier === "essential");
+      const activeTab = tabs.some((tab) => tab.id === state.activeTab) ? state.activeTab : null;
+      return { activeWorkspace: event.data, activeProfile: profile, tabs, activeTab };
     }
     case "profile_upserted": {
       const others = state.profiles.filter((p) => p.id !== event.data.id);
@@ -190,6 +192,12 @@ export function reduceEvent(state: Reduced, event: CoreEvent): Partial<Reduced> 
     case "profile_activated":
       return { activeProfile: event.data };
     case "tab_upserted": {
+      // Events are global; mirror the active-workspace-plus-essentials snapshot.
+      // Detached windows subscribe to their own page independently.
+      if (event.data.workspace_id !== state.activeWorkspace && event.data.tier !== "essential") {
+        if (!state.tabs.some((tab) => tab.id === event.data.id)) return {};
+        return { tabs: state.tabs.filter((tab) => tab.id !== event.data.id), activeTab: state.activeTab === event.data.id ? null : state.activeTab };
+      }
       const idx = state.tabs.findIndex((t) => t.id === event.data.id);
       const tabs = idx === -1 ? [...state.tabs, event.data] : state.tabs.map((t, i) => (i === idx ? event.data : t));
       return { tabs };
@@ -204,7 +212,8 @@ export function reduceEvent(state: Reduced, event: CoreEvent): Partial<Reduced> 
       return { tabs, activeTab, recordingTab, detached };
     }
     case "tab_activated":
-      return { activeTab: event.data };
+      // Detachment arrives directly; an earlier queued activation can follow it.
+      return state.detached.includes(event.data) ? {} : { activeTab: event.data };
     default:
       return {};
   }
@@ -329,6 +338,10 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     usePrivacy.getState().drop(id);
   },
   activateTab: async (id) => {
+    if (get().detached.includes(id)) {
+      await run(set, () => ipc.tabActivate(id));
+      return;
+    }
     // Optimistic: the strip highlights the tab at once and `tab_activated`
     // merely confirms. A refusal puts the selection back where it was, unless
     // something else moved it in the meantime.
@@ -518,8 +531,8 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       set((s) => ({ loading: without(s.loading, id), navError: without(s.navError, id), crashedTabs: without(s.crashedTabs, id), permissionRequests: without(s.permissionRequests, id) }));
       usePrivacy.getState().drop(id);
     }
-    // Tabs of other workspaces never reach this store, so their badges come
-    // from the host. Coalesced: a page load can emit several tab updates.
+    // Foreign-workspace tab events refresh badges without entering this strip.
+    // Coalesced: a page load can emit several tab updates.
     if (event.type === "tab_upserted" || event.type === "tab_closed") scheduleCounts(get);
   },
 }));

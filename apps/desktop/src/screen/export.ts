@@ -148,6 +148,21 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
   const video = borrowed ?? document.createElement("video");
   let released = false;
   let encoder: VideoEncoder | undefined;
+  let jobId: string | null = null;
+  let completed = false;
+  let cancellation: Promise<{ ok: true } | { ok: false; error: unknown }> | null = null;
+  const cancelJob = () => {
+    if (jobId && !cancellation) {
+      cancellation = ipc.screenExportCancel(jobId).then(() => ({ ok: true as const }), (error: unknown) => ({ ok: false as const, error }));
+    }
+  };
+  const confirmCleanup = async () => {
+    if (!cancellation) return;
+    const receipt = await cancellation;
+    if (!receipt.ok) throw new Error("Export cleanup could not be confirmed. The job may still be stopping.", { cause: receipt.error });
+  };
+  signal?.addEventListener("abort", cancelJob);
+
   const release = () => {
     if (released) return;
     released = true;
@@ -228,22 +243,23 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
     checkCancelled(signal);
     setMediaProbePhase(video, "uploading");
     onProgress({ phase: "uploading", progress: 0 });
-    const staged = await ipc.screenExportBegin();
+    jobId = await ipc.screenExportBegin();
+    if (signal?.aborted) cancelJob();
     const CHUNK = 6 * 1024 * 1024;
     for (let offset = 0; offset < webm.length; offset += CHUNK) {
       checkCancelled(signal);
       const piece = webm.subarray(offset, Math.min(webm.length, offset + CHUNK));
-      await ipc.screenExportAppend(staged, toBase64(piece));
+      await ipc.screenExportAppend(jobId, offset, toBase64(piece));
       onProgress({ phase: "uploading", progress: Math.min(1, (offset + piece.length) / webm.length) });
     }
 
-    // IPC has no native cancellation contract yet. Do not race a write or ffmpeg
-    // against AbortSignal and imply that its native work has stopped.
+    // Cancellation requests run beside finish; the native job acknowledges only
+    // after its child exits and private staging has been removed.
     checkCancelled(signal);
     setMediaProbePhase(video, "finishing");
     onProgress({ phase: "finishing", progress: 0 });
     const result = await ipc.screenExportFinish({
-      staged,
+      job_id: jobId,
       source: project.media.source,
       format: gif ? "gif" : "mp4",
       fps,
@@ -251,6 +267,8 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
       segments: segments.map((s) => ({ src_start_ms: s.srcStartMs, src_end_ms: s.srcEndMs, speed: s.speed })),
       with_audio: !gif,
     });
+    completed = true;
+    await confirmCleanup();
     setMediaProbePhase(video, "done");
     onProgress({ phase: "done", progress: 1 });
     return result;
@@ -260,6 +278,9 @@ export async function exportProject(input: ExportInput): Promise<RecordingResult
       if (encoder && encoder.state !== "closed") encoder.close();
     } finally {
       release();
+      signal?.removeEventListener("abort", cancelJob);
+      if (jobId && !completed) cancelJob();
+      await confirmCleanup();
     }
   }
 }

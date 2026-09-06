@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { events, ipc } from "../lib/ipc";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
@@ -50,6 +50,48 @@ afterEach(() => {
 });
 
 describe("Welcome", () => {
+  it.each([
+    { motion: "system", osReduced: false, moves: true },
+    { motion: "system", osReduced: true, moves: false },
+    { motion: "reduce", osReduced: false, moves: false },
+    { motion: "full", osReduced: true, moves: true },
+  ])("globe motion follows $motion with OS reduced motion=$osReduced", ({ motion, osReduced, moves }) => {
+    // Exercise the real globe renderer; jsdom lacks Canvas 2D and a compositor.
+    const arcs: number[][] = [];
+    const context = {
+      setTransform() {}, clearRect() { arcs.length = 0; }, beginPath() {}, fill() {},
+      arc(x: number, y: number, radius: number) { arcs.push([x, y, radius]); },
+    };
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context as unknown as CanvasRenderingContext2D);
+    vi.spyOn(window, "matchMedia").mockImplementation((media) => ({
+      matches: media.includes("prefers-reduced-motion") && osReduced, media,
+      addEventListener() {}, removeEventListener() {},
+    }) as unknown as MediaQueryList);
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    let sequence = 0;
+    const frames = new Map<number, FrameRequestCallback>();
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.set(++sequence, callback);
+      return sequence;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => { frames.delete(id); });
+    const paint = (time: number) => act(() => {
+      const ready = [...frames.values()];
+      frames.clear();
+      ready.forEach((callback) => callback(time));
+    });
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, motion }, loaded: true });
+    const view = render(<Welcome />);
+    const start = performance.now();
+    paint(start + 20);
+    expect(arcs.length).toBeGreaterThan(0);
+    const initial = JSON.stringify(arcs);
+    paint(start + 60);
+    expect(JSON.stringify(arcs) !== initial).toBe(moves);
+    view.unmount();
+  });
+
   it("contains a broken tour while browsing controls remain usable", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     reelState.broken = true;

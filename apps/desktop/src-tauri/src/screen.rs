@@ -5,6 +5,9 @@
 #[path = "screen_project_file.rs"]
 mod project_file;
 
+#[path = "screen_export_jobs.rs"]
+pub(crate) mod jobs;
+
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -43,8 +46,8 @@ pub struct KeptSegment {
 /// What the editor asks for when it hands over its rendered frames.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct ExportRequest {
-    /// The staged `WebM` the chrome rendered and uploaded.
-    pub staged: String,
+    /// Opaque job capability returned by export begin.
+    pub job_id: String,
     /// The recording the project belongs to (for its sound).
     pub source: String,
     /// `mp4` or `gif`.
@@ -157,7 +160,15 @@ fn probe(path: &Path) -> AppResult<(f64, u32, u32, bool)> {
     let probe = ffmpeg_path()
         .ok_or_else(|| AppError::new("ffmpeg not found"))?
         .with_file_name("ffprobe");
-    let out = Command::new(probe)
+    let out = probe_command(&probe, path)
+        .output()
+        .map_err(AppError::new)?;
+    parse_probe(&out)
+}
+
+fn probe_command(binary: &Path, path: &Path) -> Command {
+    let mut command = Command::new(binary);
+    command
         .args([
             "-v",
             "error",
@@ -166,9 +177,18 @@ fn probe(path: &Path) -> AppResult<(f64, u32, u32, bool)> {
             "-of",
             "json",
         ])
-        .arg(path)
-        .output()
-        .map_err(AppError::new)?;
+        .arg(path);
+    command
+}
+
+fn probe_job(job: &jobs::Job, path: &Path) -> AppResult<(f64, u32, u32, bool)> {
+    let binary = ffmpeg_path()
+        .ok_or_else(|| AppError::new("ffmpeg not found"))?
+        .with_file_name("ffprobe");
+    parse_probe(&job.run(&mut probe_command(&binary, path))?)
+}
+
+fn parse_probe(out: &std::process::Output) -> AppResult<(f64, u32, u32, bool)> {
     if !out.status.success() {
         return Err(AppError::new(format!(
             "ffprobe could not read the recording: {}",
@@ -285,28 +305,37 @@ pub(crate) fn file_size(path: String) -> AppResult<f64> {
 
 #[tauri::command]
 #[specta::specta]
-/// Open a staging file for the editor's rendered `WebM`; returns its path.
-pub(crate) fn screen_export_begin() -> AppResult<String> {
-    let dir = crate::commands::captures_dir()?.join(".export");
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("render-{}.webm", dive_core::TabId::new()));
-    std::fs::File::create(&path)?;
-    Ok(path.to_string_lossy().into_owned())
+/// Create an owned export job; its ID never names a capture file.
+#[allow(clippy::needless_pass_by_value)] // Tauri supplies owned command arguments.
+pub(crate) fn screen_export_begin(
+    state: State<'_, AppState>,
+    view: tauri::Webview<crate::Runtime>,
+) -> AppResult<String> {
+    state
+        .screen_exports
+        .begin(&crate::commands::captures_dir()?, view.label())
 }
 
 #[tauri::command]
 #[specta::specta]
-/// Append a base64 piece to the staging file.
-pub(crate) async fn screen_export_append(path: String, base64: String) -> Result<(), AppError> {
-    use std::io::Write as _;
-    let file = captured(&path)?;
+/// Append exactly the next bounded chunk of an owned upload.
+pub(crate) async fn screen_export_append(
+    state: State<'_, AppState>,
+    view: tauri::Webview<crate::Runtime>,
+    job_id: String,
+    offset: u32,
+    base64: String,
+) -> Result<(), AppError> {
+    if base64.len() > jobs::CHUNK_LIMIT.div_ceil(3) * 4 {
+        return Err(AppError::new("export chunk exceeds limit"));
+    }
+    let registry = state.screen_exports.clone();
+    let owner = view.label().to_owned();
     tauri::async_runtime::spawn_blocking(move || {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(base64)
             .map_err(AppError::new)?;
-        let mut f = std::fs::OpenOptions::new().append(true).open(file)?;
-        f.write_all(&bytes)?;
-        Ok(())
+        registry.append(&owner, &job_id, u64::from(offset), &bytes)
     })
     .await
     .map_err(AppError::new)?
@@ -314,22 +343,38 @@ pub(crate) async fn screen_export_append(path: String, base64: String) -> Result
 
 #[tauri::command]
 #[specta::specta]
-/// Encode the staged render into the final file, with the source's sound
-/// cut and sped the same way, and a preview companion beside it.
+/// Finish an owned job once. Every child is reaped before cleanup/receipt.
 pub(crate) async fn screen_export_finish(
     state: State<'_, AppState>,
+    view: tauri::Webview<crate::Runtime>,
     request: ExportRequest,
 ) -> Result<RecordingResult, AppError> {
-    let _ = &state;
-    let staged = captured(&request.staged)?;
-    let source = captured(&request.source)?;
+    let job = state.screen_exports.claim(view.label(), &request.job_id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let result = finish(&staged, &source, &request);
-        let _ = std::fs::remove_file(&staged);
-        result
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let source = job.source(&request.source)?;
+            finish_job(&job, &source, &request)
+        }))
+        .unwrap_or_else(|_| Err(AppError::new("export worker failed")));
+        job.settle(result)
     })
     .await
     .map_err(AppError::new)?
+}
+
+#[tauri::command]
+#[specta::specta]
+/// Cancel only this chrome's job and wait for owned child/file cleanup.
+pub(crate) async fn screen_export_cancel(
+    state: State<'_, AppState>,
+    view: tauri::Webview<crate::Runtime>,
+    job_id: String,
+) -> Result<jobs::CancelResult, AppError> {
+    let registry = state.screen_exports.clone();
+    let owner = view.label().to_owned();
+    tauri::async_runtime::spawn_blocking(move || registry.cancel(&owner, &job_id))
+        .await
+        .map_err(AppError::new)?
 }
 
 /// The ffmpeg filter that cuts and speeds the source's sound to match
@@ -371,17 +416,24 @@ fn tempo_chain(speed: f64) -> String {
     out
 }
 
-#[allow(clippy::too_many_lines)] // The export command is intentionally one linear ffmpeg recipe.
-fn finish(staged: &Path, source: &Path, req: &ExportRequest) -> AppResult<RecordingResult> {
-    finish_in(&crate::commands::captures_dir()?, staged, source, req)
-}
-
+#[cfg(test)]
 fn finish_in(
     dir: &Path,
     staged: &Path,
     source: &Path,
     req: &ExportRequest,
 ) -> AppResult<RecordingResult> {
+    let registry = jobs::Registry::default();
+    let id = registry.begin(dir, "fixture")?;
+    let bytes = std::fs::read(staged)?;
+    for (index, bytes) in bytes.chunks(jobs::CHUNK_LIMIT).enumerate() {
+        registry.append("fixture", &id, (index * jobs::CHUNK_LIMIT) as u64, bytes)?;
+    }
+    let job = registry.claim("fixture", &id)?;
+    job.settle(finish_job(&job, source, req))
+}
+
+fn finish_job(job: &jobs::Job, source: &Path, req: &ExportRequest) -> AppResult<RecordingResult> {
     let ffmpeg = ffmpeg_path().ok_or_else(|| AppError::new("ffmpeg not found"))?;
     let stem = format!(
         "{}-edited-{}",
@@ -395,11 +447,17 @@ fn finish_in(
     let gif = req.format.eq_ignore_ascii_case("gif");
     // The editor requests audio preservation for MP4 even when the recording
     // was made with its microphone off. Only map a stream that actually exists.
-    let with_audio = req.with_audio && !gif && !req.segments.is_empty() && probe(source)?.3;
-    let path = dir.join(format!("{stem}.{}", if gif { "gif" } else { "mp4" }));
+    let with_audio =
+        req.with_audio && !gif && !req.segments.is_empty() && probe_job(job, source)?.3;
+    let name = format!(
+        "{stem}-{}.{}",
+        dive_core::TabId::new(),
+        if gif { "gif" } else { "mp4" }
+    );
+    let path = job.output(if gif { "finished.gif" } else { "finished.mp4" });
     let mut cmd = Command::new(&ffmpeg);
     cmd.args(["-hide_banner", "-loglevel", "error", "-y"]);
-    cmd.arg("-i").arg(staged);
+    cmd.arg("-i").arg(job.staged());
     if with_audio {
         cmd.arg("-i").arg(source);
         cmd.args(["-filter_complex", &audio_filter(&req.segments)]);
@@ -431,7 +489,7 @@ fn finish_in(
         }
     }
     cmd.arg(&path).stdin(Stdio::null());
-    let out = cmd.output().map_err(AppError::new)?;
+    let out = job.run(&mut cmd)?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         return Err(AppError::new(format!(
@@ -439,15 +497,28 @@ fn finish_in(
             err.lines().last().unwrap_or("unknown error")
         )));
     }
-    let (duration_ms, width, height, _) = probe(&path).unwrap_or((0.0, 0, 0, false));
+    let (duration_ms, width, height, _) = probe_job(job, &path)?;
+    if !duration_ms.is_finite() || duration_ms <= 0.0 || width == 0 || height == 0 {
+        return Err(AppError::new("export output is not valid video"));
+    }
     let preview = if gif {
         None
     } else {
-        let p = dir.join(PREVIEW_DIR).join(format!("{stem}.webm"));
-        crate::screencast::write_companion(&path, &p, 1280, with_audio)
+        let p = job.output("preview.webm");
+        write_export_companion(job, &path, &p, with_audio)?;
+        let (_, preview_width, preview_height, _) = probe_job(job, &p)?;
+        if preview_width == 0 || preview_height == 0 {
+            return Err(AppError::new("export preview is not valid video"));
+        }
+        Some(p)
     };
     #[allow(clippy::cast_precision_loss)]
     let bytes = std::fs::metadata(&path)?.len() as f64;
+    sync_media(&path)?;
+    if let Some(preview) = &preview {
+        sync_media(preview)?;
+    }
+    let (path, preview) = job.publish(&path, preview.as_deref(), &name)?;
     Ok(RecordingResult {
         path: path.to_string_lossy().into_owned(),
         duration_secs: duration_ms / 1000.0,
@@ -458,8 +529,60 @@ fn finish_in(
         frames: 0,
         has_audio: with_audio,
         events: None,
-        preview,
+        preview: preview.map(|path| path.to_string_lossy().into_owned()),
     })
+}
+
+fn sync_media(path: &Path) -> AppResult<()> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)?
+        .sync_all()?;
+    Ok(())
+}
+
+fn write_export_companion(
+    job: &jobs::Job,
+    source: &Path,
+    path: &Path,
+    with_audio: bool,
+) -> AppResult<()> {
+    let ffmpeg = ffmpeg_path().ok_or_else(|| AppError::new("ffmpeg not found"))?;
+    let mut cmd = Command::new(ffmpeg);
+    cmd.args(["-hide_banner", "-loglevel", "error", "-y"])
+        .arg("-i")
+        .arg(source)
+        .args([
+            "-vf",
+            "scale='min(1280,iw)':-2,format=yuv420p",
+            "-c:v",
+            "libvpx",
+            "-deadline",
+            "realtime",
+            "-cpu-used",
+            "8",
+            "-crf",
+            "10",
+            "-b:v",
+            "6M",
+            "-qmin",
+            "4",
+            "-qmax",
+            "40",
+            "-g",
+            "30",
+        ]);
+    if with_audio {
+        cmd.args(["-c:a", "libopus", "-b:a", "64k"]);
+    } else {
+        cmd.arg("-an");
+    }
+    cmd.arg(path);
+    let output = job.run(&mut cmd)?;
+    if !output.status.success() {
+        return Err(AppError::new("ffmpeg could not create export preview"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -530,7 +653,7 @@ mod tests {
             let staged = self.dir.join("staged.webm");
             let source = self.dir.join("source.mp4");
             let request = ExportRequest {
-                staged: staged.to_string_lossy().into_owned(),
+                job_id: "fixture".into(),
                 source: source.to_string_lossy().into_owned(),
                 format: format.into(),
                 fps: 10,
@@ -646,7 +769,7 @@ mod tests {
         let staged = fixture.dir.join("staged.webm");
         let request = ExportRequest {
             source: source.to_string_lossy().into_owned(),
-            staged: staged.to_string_lossy().into_owned(),
+            job_id: "fixture".into(),
             format: "mp4".into(),
             fps: 10,
             gif_fps: 10,

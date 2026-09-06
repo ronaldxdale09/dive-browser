@@ -3,15 +3,25 @@
  * import the generated file directly. Regenerate with `cargo test -p dive-desktop`.
  */
 import { Channel } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import type { EventCallback } from "@tauri-apps/api/event";
 import type { ChatDelta, SendOptions } from "../generated/bindings";
 import type { ExtensionInfo, ExtensionList } from "../generated/bindings";
-import { commands, events } from "../generated/bindings";
+import { commands, events as generatedEvents } from "../generated/bindings";
 import type { ClearRequest, Decision, Duration, Scope, ExportRequest, NetworkProfile, PaneBounds, Prefs, RecordOptions, Rule, TabTier } from "../generated/bindings";
 
 /** Shape tauri-specta returns for fallible commands. */
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
-export { events };
+/** Menu commands address one chrome. Tauri global listeners receive even
+ * emit_to events; using one here makes popouts echo main-window commands. */
+export const events = {
+  ...generatedEvents,
+  menuCommand: {
+    listen: (callback: EventCallback<string>) => generatedEvents.menuCommand(getCurrentWebview()).listen(callback),
+    once: (callback: EventCallback<string>) => generatedEvents.menuCommand(getCurrentWebview()).once(callback),
+  },
+};
 export type { NavigationEntry, NavigationHistory } from "../generated/bindings";
 export type { ExtensionInfo, ExtensionList };
 export type { Prefs, ClearRequest, Rule, RuleAction, PrivacyCategory, PrivacyEvent, PrivacyInfo, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, RecordOptions, RecordingResult, RecordingCapabilities, RecordingEvent, Microphone, MediaInfo, ExportRequest, KeptSegment, RecordingInfo, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions, SitePermission, PermissionList, Scope, Duration, PermissionDismissed, Decision, UpdateInfo, PermissionAsked, TabTier, DefaultBrowserStatus, Profile, ProfileId, ProfileDraft, SubtitleModel, SubtitleModelProgress, SubtitleCue, SubtitleState } from "../generated/bindings";
@@ -49,6 +59,10 @@ export const ipc = {
   keepSitesList: async (profile: string) => unwrap(await commands.keepSitesList(profile)),
   keepSiteSet: async (profile: string, url: string, keep: boolean) => unwrap(await commands.keepSiteSet(profile, url, keep)),
   snapshot: async () => unwrap(await commands.snapshot()),
+  tabInfo: async (id: string) => unwrap(await commands.tabInfo(id)),
+  windowOpen: async () => unwrap(await commands.windowOpen()),
+  popoutReady: async (id: string) => unwrap(await commands.popoutReady(id)),
+  windowCommand: async (command: "tab.new" | "window.new") => unwrap(await commands.windowCommand(command)),
   workspaceActivate: async (id: string) => unwrap(await commands.workspaceActivate(id)),
   profilesList: async () => unwrap(await commands.profilesList()),
   profileCreate: async (draft: ProfileDraftInput) => unwrap(await commands.profileCreate(draft)),
@@ -93,7 +107,8 @@ export const ipc = {
   fileSize: async (path: string) => unwrap(await commands.fileSize(path)),
   fileReadChunk: async (path: string, offset: number, len: number) => unwrap(await commands.fileReadChunk(path, offset, len)),
   screenExportBegin: async () => unwrap(await commands.screenExportBegin()),
-  screenExportAppend: async (path: string, base64: string) => unwrap(await commands.screenExportAppend(path, base64)),
+  screenExportAppend: async (jobId: string, offset: number, base64: string) => unwrap(await commands.screenExportAppend(jobId, offset, base64)),
+  screenExportCancel: async (jobId: string) => unwrap(await commands.screenExportCancel(jobId)),
   screenExportFinish: async (request: ExportRequest) => unwrap(await commands.screenExportFinish(request)),
   tabCapture: async (id: string, fullPage: boolean) => unwrap(await commands.tabCapture(id, fullPage)),
   captureRead: async (path: string) => unwrap(await commands.captureRead(path)),

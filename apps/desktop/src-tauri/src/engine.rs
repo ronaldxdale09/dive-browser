@@ -21,7 +21,7 @@ const GROUND: tauri::utils::config::Color = tauri::utils::config::Color(0x11, 0x
 use crate::state::{AppState, lock};
 use crate::{CHROME_LABEL, MAIN_WINDOW, Runtime};
 
-/// Popout chrome has no New Tab launcher; retain its existing menu behavior.
+/// Ordinary bindings stay within main; detach explicitly selects its cross-window route.
 #[cfg(any(all(feature = "cef", target_os = "macos"), test))]
 fn new_tab_chrome_label(window: &str) -> Option<&'static str> {
     (window == MAIN_WINDOW).then_some(CHROME_LABEL)
@@ -50,12 +50,62 @@ fn refresh_new_tab_shortcut(view: &Webview<Runtime>, window: &Window<Runtime>) {
     if let Err(error) = chrome.with_webview(move |native_chrome| {
         let target = native_chrome.new_tab_shortcut_target();
         if let Err(error) = page.with_webview(move |native_page| {
+            if !native_page.set_address_shortcut_target(target.clone()) {
+                tracing::warn!("main page Address route no longer matches native window");
+            }
             native_page.set_new_tab_shortcut_target(Some(target));
         }) {
             tracing::warn!(%error, "binding native New Tab target failed");
         }
     }) {
         tracing::warn!(%error, "reading native New Tab target failed");
+    }
+}
+
+/// The detached page and its chrome share an explicit source-window anchor.
+/// Configuration can be queued; native binding refuses a page that moved away
+/// before this callback, and all reparent epochs are checked again on key input.
+#[cfg(all(feature = "cef", target_os = "macos"))]
+fn bind_detached_new_tab_shortcuts(
+    page: &Webview<Runtime>,
+    popout_chrome: &Webview<Runtime>,
+    main: &Window<Runtime>,
+) {
+    let Some(chrome) = main
+        .webviews()
+        .into_iter()
+        .find(|view| view.label() == CHROME_LABEL)
+    else {
+        tracing::warn!("main chrome unavailable for detached New Tab target");
+        return;
+    };
+    let page = page.clone();
+    let popout = popout_chrome.clone();
+    if let Err(error) = chrome.with_webview(move |native_chrome| {
+        let target = native_chrome.new_tab_shortcut_target();
+        if let Err(error) = popout.with_webview(move |native_popout| {
+            let anchor = native_popout.new_tab_shortcut_target();
+            if !native_popout.set_address_shortcut_target(anchor.clone()) {
+                tracing::warn!("popout Address route no longer matches native window");
+            }
+            if !native_popout.set_detached_new_tab_shortcut_target(anchor.clone(), target.clone()) {
+                tracing::warn!("popout New Tab route no longer matches native windows");
+            }
+            if let Err(error) = page.with_webview(move |native_page| {
+                if !native_page.set_address_shortcut_target(anchor.clone()) {
+                    tracing::warn!("detached page Address route no longer matches native window");
+                }
+                if !native_page.set_detached_new_tab_shortcut_target(anchor, target) {
+                    tracing::warn!("detached page New Tab route no longer matches native windows");
+                }
+            }) {
+                tracing::warn!(%error, "binding detached page New Tab target failed");
+            }
+        }) {
+            tracing::warn!(%error, "binding popout chrome New Tab target failed");
+        }
+    }) {
+        tracing::warn!(%error, "reading detached New Tab target failed");
     }
 }
 
@@ -271,12 +321,36 @@ pub struct PaneBounds {
     pub bounds: Bounds,
 }
 
+#[derive(Default)]
+struct PopoutAddressFocus {
+    requested: bool,
+    applied: bool,
+}
+
+impl PopoutAddressFocus {
+    fn request(&mut self) {
+        self.requested = true;
+    }
+
+    fn ready<E>(&mut self, focus: impl FnOnce() -> Result<(), E>) -> Result<bool, E> {
+        if !self.requested {
+            return Ok(false);
+        }
+        if !self.applied {
+            focus()?;
+            self.applied = true;
+        }
+        Ok(true)
+    }
+}
+
 /// A tab living in its own window.
 struct Popout {
     window: Window<Runtime>,
     bounds: Bounds,
     /// Label of the chrome webview inside the window.
     chrome: String,
+    address_focus: PopoutAddressFocus,
 }
 
 /// Numbers popout windows so a tab torn off, brought back and torn off
@@ -801,7 +875,7 @@ impl TabHost {
             return Err(error);
         }
         #[cfg(all(feature = "cef", target_os = "macos"))]
-        refresh_new_tab_shortcut(&view, &window);
+        bind_detached_new_tab_shortcuts(&view, &chrome_view, &self.window);
         let bounds = popout_content_bounds(width, height);
         self.popouts.insert(
             id,
@@ -809,6 +883,7 @@ impl TabHost {
                 window,
                 bounds,
                 chrome,
+                address_focus: PopoutAddressFocus::default(),
             },
         );
         self.panes.retain(|p| p.tab != id);
@@ -866,6 +941,52 @@ impl TabHost {
     }
 
     /// Raise the window holding `id`.
+    /// Only the trusted new-window command grants this intent after detaching
+    /// its newly created about:blank tab. Ordinary detach never requests it.
+    pub fn request_popout_address_focus(&mut self, id: TabId) -> tauri::Result<()> {
+        let popout = self
+            .popouts
+            .get_mut(&id)
+            .ok_or(tauri::Error::WebviewNotFound)?;
+        popout.address_focus.request();
+        Ok(())
+    }
+
+    /// A receipt for this exact chrome generation. Successful focus is applied
+    /// once, while retries return the granted intent without stealing focus.
+    pub fn popout_ready(&mut self, id: TabId, caller_chrome: &str) -> tauri::Result<bool> {
+        let popout = self
+            .popouts
+            .get_mut(&id)
+            .ok_or(tauri::Error::WebviewNotFound)?;
+        if popout.chrome != caller_chrome {
+            return Err(tauri::Error::WebviewNotFound);
+        }
+        popout.address_focus.ready(|| {
+            let chrome = popout
+                .window
+                .webviews()
+                .into_iter()
+                .find(|view| view.label() == caller_chrome)
+                .ok_or(tauri::Error::WebviewNotFound)?;
+            popout.window.set_focus()?;
+            chrome.set_focus()
+        })
+    }
+
+    /// Focus the existing main launcher surface for menu/button fallbacks.
+    /// Callers propagate errors; detached page state is left in place.
+    pub fn focus_main_chrome(&self) -> tauri::Result<()> {
+        let chrome = self
+            .window
+            .webviews()
+            .into_iter()
+            .find(|view| view.label() == CHROME_LABEL)
+            .ok_or(tauri::Error::WebviewNotFound)?;
+        self.window.set_focus()?;
+        chrome.set_focus()
+    }
+
     pub fn focus_popout(&self, id: TabId) -> tauri::Result<()> {
         if let Some(p) = self.popouts.get(&id) {
             p.window.set_focus()?;
@@ -1283,6 +1404,12 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
     )?;
     #[cfg(feature = "cef")]
     crate::permissions::attach_chrome(&chrome)?;
+    #[cfg(all(feature = "cef", target_os = "macos"))]
+    chrome.with_webview(|native| {
+        if !native.set_address_shortcut_target(native.new_tab_shortcut_target()) {
+            tracing::warn!("main chrome Address route no longer matches native window");
+        }
+    })?;
     crate::titlebar::keep_drags_in_chrome_soon(&window);
 
     let state = app.state::<AppState>();
@@ -1352,7 +1479,43 @@ fn forward_events(app: AppHandle<Runtime>, mut rx: tokio::sync::broadcast::Recei
 #[cfg(test)]
 mod tests {
     #[test]
-    fn native_new_tab_target_is_main_only_across_detach_and_reattach() {
+    fn blank_popout_focus_receipts_are_stable_but_native_focus_happens_once() {
+        let mut intent = super::PopoutAddressFocus::default();
+        assert!(
+            !intent
+                .ready::<()>(|| panic!("ordinary detach must retain page focus"))
+                .unwrap()
+        );
+        intent.request();
+        let mut calls = 0;
+        assert!(
+            intent
+                .ready::<()>(|| {
+                    calls += 1;
+                    Ok(())
+                })
+                .unwrap()
+        );
+        // A StrictMode/remount receipt must remain usable without refocusing.
+        assert!(intent.ready::<()>(|| panic!("already applied")).unwrap());
+        intent.request();
+        assert!(intent.ready::<()>(|| panic!("duplicate intent")).unwrap());
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn blank_popout_focus_failure_preserves_intent_for_retry() {
+        let mut intent = super::PopoutAddressFocus::default();
+        intent.request();
+        assert_eq!(
+            intent.ready(|| Err("window unavailable")),
+            Err("window unavailable")
+        );
+        assert!(intent.ready::<()>(|| Ok(())).unwrap());
+    }
+
+    #[test]
+    fn ordinary_native_new_tab_target_remains_main_only() {
         assert_eq!(
             super::new_tab_chrome_label(crate::MAIN_WINDOW),
             Some(crate::CHROME_LABEL)

@@ -12,6 +12,9 @@ use tauri::Manager;
 
 use crate::{AppError, Runtime, commands, engine, permissions, state};
 
+#[path = "permission_webui_probe.rs"]
+mod webui;
+
 type Native = Arc<tauri::webview::PlatformWebview<Runtime>>;
 const ORIGIN: &str = "https://permission-probe.invalid";
 const SIBLING: &str = "https://permission-sibling.invalid";
@@ -204,6 +207,9 @@ fn settings_ask(app: &tauri::AppHandle<Runtime>, workspace: &Workspace) -> Resul
 }
 
 pub(crate) async fn verify(app: &tauri::AppHandle<Runtime>) -> Result<(), AppError> {
+    if std::env::var("DIVE_PERMISSION_WEBUI_PROBE").as_deref() == Ok("1") {
+        webui::verify(app).await?;
+    }
     let (first_scope, other_scope) = on_main(app, |app| {
         let state = app.state::<state::AppState>();
         let store = state::lock(&state.store);

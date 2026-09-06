@@ -59,12 +59,12 @@ it("does not release another stage's borrowed element or report errors for a new
   expect(useEditor.getState().videoEl).toBe(replacement);
 });
 
-it("logs bounded decoder facts and preserves the existing error UI for its current resource", () => {
+it("logs bounded media facts and reports a load failure for its current resource", () => {
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
   const view = render(<Stage />);
   const video = view.container.querySelector("video")!;
   Object.defineProperty(video, "error", { configurable: true, value: { code: 3, message: "decoder rejected frame" } });
   fireEvent.error(video);
-  expect(useEditor.getState().error).toBe("Dive could not decode this recording preview. The original file is still safe.");
+  expect(useEditor.getState().error).toBe("Dive could not load this recording preview. The original file is still safe.");
   expect(log).toHaveBeenCalledWith("[divescreen] preview media failed", { code: 3, readyState: 0, networkState: 0 });
 });

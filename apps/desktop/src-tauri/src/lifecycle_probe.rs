@@ -1,6 +1,10 @@
 //! Opt-in native lifecycle regression, run only against a disposable profile.
 //! Uses the same tab, detach, attach, and native window-close paths as the UI.
 
+#[cfg(feature = "cef")]
+#[path = "fetch_filter_probe.rs"]
+pub(crate) mod fetch_filter_probe;
+
 use std::time::Duration;
 
 use dive_core::TabId;
@@ -24,6 +28,24 @@ fn popout(app: &tauri::AppHandle<Runtime>, id: TabId) -> Option<tauri::Window<Ru
     app.windows()
         .into_values()
         .find(|window| engine::popout_tab(window.label()) == Some(id))
+}
+
+#[cfg(feature = "cef")]
+async fn verify_optional_probes(
+    app: &tauri::AppHandle<Runtime>,
+    tab: TabId,
+) -> Result<(), AppError> {
+    if std::env::var_os("DIVE_PERMISSION_CACHE_PROBE").is_some() {
+        crate::permission_probe::verify(app).await?;
+    }
+    if let Ok(url) = std::env::var("DIVE_NETWORK_CAPTURE_PROBE_URL") {
+        crate::network_probe::verify(app, tab, &url).await?;
+    }
+    fetch_filter_probe::verify(app, tab).await?;
+    if std::env::var_os("DIVE_CRASH_PROBE").is_some() {
+        crate::crash_probe::verify(app).await?;
+    }
+    Ok(())
 }
 
 async fn run(app: &tauri::AppHandle<Runtime>, mode: &str) -> Result<(), AppError> {
@@ -54,17 +76,7 @@ async fn run(app: &tauri::AppHandle<Runtime>, mode: &str) -> Result<(), AppError
     #[cfg(feature = "cef")]
     verify_ipc_boundary(app).await?;
     #[cfg(feature = "cef")]
-    if std::env::var_os("DIVE_PERMISSION_CACHE_PROBE").is_some() {
-        crate::permission_probe::verify(app).await?;
-    }
-    #[cfg(feature = "cef")]
-    if let Ok(url) = std::env::var("DIVE_NETWORK_CAPTURE_PROBE_URL") {
-        crate::network_probe::verify(app, ids[1], &url).await?;
-    }
-    #[cfg(feature = "cef")]
-    if std::env::var_os("DIVE_CRASH_PROBE").is_some() {
-        crate::crash_probe::verify(app).await?;
-    }
+    verify_optional_probes(app, ids[1]).await?;
     on_main(app, move |handle| {
         commands::tab_detach(handle.clone(), ids[0], None)?;
         popout(handle, ids[0])
@@ -92,19 +104,7 @@ async fn run(app: &tauri::AppHandle<Runtime>, mode: &str) -> Result<(), AppError
         return Err(AppError::new("popout close did not complete"));
     }
     assert_renderer_alive(app, ids[1]).await?;
-    on_main(app, move |handle| {
-        commands::tab_detach(handle.clone(), ids[1], None)?;
-        commands::tab_attach(handle.clone(), ids[1])?;
-        let state = handle.state::<state::AppState>();
-        if state::lock(&state.host)
-            .as_ref()
-            .is_none_or(|h| !h.has(ids[1]) || h.is_detached(ids[1]))
-        {
-            return Err(AppError::new("reattach did not restore main-window tab"));
-        }
-        Ok(())
-    })
-    .await?;
+    verify_cross_workspace_reattach(app, ids[1]).await?;
     assert_renderer_alive(app, ids[1]).await?;
     println!("DIVE_LIFECYCLE_PROBE: popout close and reattach verified");
     if mode == "quit" {
@@ -469,6 +469,71 @@ async fn wait_history_index(
     })
     .await
     .map_err(AppError::new)?
+}
+
+async fn verify_cross_workspace_reattach(
+    app: &tauri::AppHandle<Runtime>,
+    id: TabId,
+) -> Result<(), AppError> {
+    let session = state::lock(&app.state::<state::AppState>().host)
+        .as_ref()
+        .and_then(|host| host.cdp(id))
+        .ok_or_else(|| AppError::new("missing reattach session"))?;
+    read_probe_value(&session, "window.__diveReattachSentinel = { intact: true }").await?;
+    on_main(app, move |handle| {
+        commands::tab_detach(handle.clone(), id, None)?;
+        let state = handle.state::<state::AppState>();
+        let (owner, other) = {
+            let store = state::lock(&state.store);
+            let owner = store.workspace(
+                store
+                    .tab(id)?
+                    .workspace_id
+                    .ok_or_else(|| AppError::new("missing owner"))?,
+            )?;
+            let other = dive_core::Workspace::new(
+                "Reattach isolation",
+                owner.container_id,
+                owner.profile_id,
+                100,
+            );
+            store.upsert_workspace(&other)?;
+            (owner, other)
+        };
+        state
+            .bus
+            .publish(dive_core::CoreEvent::WorkspaceUpserted(other.clone()));
+        commands::workspace_activate(handle.clone(), handle.state(), other.id)?;
+        let main = engine::MainThread::here().ok_or_else(|| AppError::new("not main thread"))?;
+        commands::activate_tab(&main, handle, &state, id)?;
+        if *state::lock(&state.active_workspace) != Some(other.id) {
+            return Err(AppError::new(
+                "raising detached page changed main workspace",
+            ));
+        }
+        commands::tab_attach(handle.clone(), id)?;
+        let host = state::lock(&state.host);
+        let store = state::lock(&state.store);
+        if host
+            .as_ref()
+            .is_none_or(|h| !h.has(id) || h.is_detached(id) || h.active() != Some(id))
+            || *state::lock(&state.active_workspace) != Some(owner.id)
+            || store.setting(state::ACTIVE_WORKSPACE)? != Some(owner.id.to_string())
+            || store.setting(state::ACTIVE_TAB)? != Some(id.to_string())
+            || store.tab(id)?.workspace_id != Some(owner.id)
+        {
+            return Err(AppError::new(
+                "reattach did not restore owner workspace and active main page",
+            ));
+        }
+        Ok(())
+    })
+    .await?;
+    if read_probe_value(&session, "window.__diveReattachSentinel?.intact === true").await? != true {
+        return Err(AppError::new("reattach replaced the live page document"));
+    }
+    println!("DIVE_LIFECYCLE_PROBE: cross-workspace reattach and preserved page verified");
+    Ok(())
 }
 
 async fn assert_renderer_alive(app: &tauri::AppHandle<Runtime>, id: TabId) -> Result<(), AppError> {

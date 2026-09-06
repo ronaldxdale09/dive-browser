@@ -59,7 +59,12 @@ def run_probe(binary: Path, environment: dict, log: Path, timeout: float, observ
                 if time.monotonic() >= drain_deadline:
                     raise RuntimeError(f'probe left helper processes running; log: {log}')
                 time.sleep(0.02)
-        except BaseException:
-            stop_group(process)
+        except BaseException as failure:
+            try:
+                stop_group(process)
+            except Exception as cleanup_error:
+                # Keep the native crash/deadline as the primary failure while
+                # retaining cleanup diagnostics. Never turn either into success.
+                raise failure from cleanup_error
             raise
     return time.monotonic() - started

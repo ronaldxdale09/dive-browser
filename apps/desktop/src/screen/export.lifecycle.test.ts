@@ -3,8 +3,8 @@ import { exportProject } from "./export";
 import { newProject } from "./model";
 import { useEditor } from "./store";
 
-const mock = vi.hoisted(() => ({ begin: vi.fn(), append: vi.fn(), finish: vi.fn(), draw: vi.fn() }));
-vi.mock("../lib/ipc", () => ({ ipc: { screenExportBegin: mock.begin, screenExportAppend: mock.append, screenExportFinish: mock.finish } }));
+const mock = vi.hoisted(() => ({ begin: vi.fn(), append: vi.fn(), finish: vi.fn(), cancel: vi.fn(), draw: vi.fn() }));
+vi.mock("../lib/ipc", () => ({ ipc: { screenExportBegin: mock.begin, screenExportAppend: mock.append, screenExportFinish: mock.finish, screenExportCancel: mock.cancel } }));
 vi.mock("./render", () => ({ Renderer: class { draw = mock.draw; snap() {} } }));
 vi.mock("webm-muxer", () => ({
   ArrayBufferTarget: class { buffer = new ArrayBuffer(8); },
@@ -13,8 +13,9 @@ vi.mock("webm-muxer", () => ({
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 const encoders: FakeEncoder[] = [];
 let queue: number;
@@ -60,6 +61,7 @@ beforeEach(() => {
   vi.stubGlobal("VideoEncoder", FakeEncoder);
   vi.stubGlobal("VideoFrame", FakeFrame);
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as CanvasRenderingContext2D);
+  mock.cancel.mockResolvedValue("cancelled");
   mock.begin.mockResolvedValue("stage"); mock.append.mockResolvedValue(null); mock.finish.mockResolvedValue({ path: "output.mp4" });
 });
 afterEach(() => {
@@ -212,6 +214,61 @@ describe("export frontend ownership and bounded waits", () => {
     expect(owned.load).toHaveBeenCalledOnce();
     expect(encoders[0]?.close).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("cancels the owned native finish and waits for its cleanup acknowledgement", async () => {
+    const finish = deferred<{ path: string }>();
+    const receipt = deferred<string>();
+    mock.finish.mockReturnValue(finish.promise);
+    mock.cancel.mockImplementation(() => { finish.reject(new Error("export cancelled")); return receipt.promise; });
+    const controller = new AbortController();
+    let settled = false;
+    const pending = exportProject(input(video(), controller.signal)).then(() => null, (error: Error) => error).then((error) => { settled = true; return error; });
+    await vi.waitFor(() => expect(mock.finish).toHaveBeenCalledOnce());
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mock.cancel).toHaveBeenCalledExactlyOnceWith("stage");
+    expect(settled).toBe(false);
+    receipt.resolve("cancelled");
+    expect((await pending)?.message).toMatch(/cancelled/);
+  });
+
+  it("does not announce done before a concurrent cancellation receipt confirms completed", async () => {
+    const finish = deferred<{ path: string }>();
+    const receipt = deferred<string>();
+    mock.finish.mockReturnValue(finish.promise);
+    mock.cancel.mockReturnValue(receipt.promise);
+    const controller = new AbortController();
+    const request = input(video(), controller.signal);
+    const pending = exportProject(request);
+    await vi.waitFor(() => expect(mock.finish).toHaveBeenCalledOnce());
+    controller.abort();
+    finish.resolve({ path: "output.mp4" });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(request.onProgress.mock.calls.some(([progress]) => progress.phase === "done")).toBe(false);
+    receipt.resolve("completed");
+    expect((await pending).path).toBe("output.mp4");
+    expect(request.onProgress).toHaveBeenLastCalledWith({ phase: "done", progress: 1 });
+  });
+
+  it("cleans a job admitted after its renderer was already cancelled", async () => {
+    const begin = deferred<string>();
+    mock.begin.mockReturnValue(begin.promise);
+    const controller = new AbortController();
+    const pending = exportProject(input(video(), controller.signal));
+    const outcome = pending.then(() => null, (error: Error) => error);
+    await vi.waitFor(() => expect(mock.begin).toHaveBeenCalledOnce());
+    controller.abort();
+    begin.resolve("stage");
+    expect((await outcome)?.message).toMatch(/cancelled/);
+    expect(mock.cancel).toHaveBeenCalledExactlyOnceWith("stage");
+    expect(mock.append).not.toHaveBeenCalled();
+  });
+
+  it("cleans owned staging when append fails", async () => {
+    mock.append.mockRejectedValueOnce(new Error("write failed"));
+    await expect(exportProject(input(video()))).rejects.toThrow("write failed");
+    expect(mock.cancel).toHaveBeenCalledExactlyOnceWith("stage");
   });
 
   it("successfully exports without resetting or removing the borrowed preview", async () => {

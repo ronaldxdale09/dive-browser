@@ -9,6 +9,7 @@ import { useNetwork } from "../store/network";
 import { usePrivacy } from "../store/privacy";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { Toolbar } from "./Toolbar";
+import { useShortcuts } from "../lib/shortcuts";
 
 const tab: Tab = {
   id: "tab-1",
@@ -82,6 +83,20 @@ afterEach(() => {
 });
 
 describe("Toolbar", () => {
+  it("accepts the native address-focus handoff before immediate replacement typing", () => {
+    vi.spyOn(events.menuCommand, "listen").mockResolvedValue(() => undefined);
+    function NativeToolbar() { useShortcuts(); return <Toolbar />; }
+    render(<NativeToolbar />);
+    const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
+    act(() => window.dispatchEvent(new Event("dive-native-focus-address")));
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe(tab.url);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, tab.url.length]);
+    input.setRangeText("X", input.selectionStart!, input.selectionEnd!, "end");
+    fireEvent.input(input);
+    expect(input.value).toBe("X");
+  });
+
   it("disables Back and Forward when the native history has a single entry", async () => {
     vi.mocked(ipc.tabHistory).mockResolvedValue({ generation: "view-1", current_index: 0, entries: [{ id: 1, title: "Only page", url: tab.url }] });
     render(<Toolbar />);

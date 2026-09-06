@@ -64,11 +64,8 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
 
 /** Create a blank tab and move it into its own browser window. */
 async function openWindow() {
-  const workspace = useBrowser.getState().activeWorkspace;
-  if (!workspace) return;
   try {
-    const tab = await ipc.tabOpen(workspace, "about:blank");
-    await ipc.tabDetach(tab.id, null);
+    await ipc.windowOpen();
     useBrowser.setState({ error: null });
   } catch (error) {
     useBrowser.setState({ error: message(error) });

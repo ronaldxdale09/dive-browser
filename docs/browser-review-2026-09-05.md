@@ -2,7 +2,7 @@
 
 DIVE has a capable foundation and an unusually broad developer toolkit. The highest-value next phase is to make everyday navigation, long sessions, permissions, recovery, and releases predictable, while making the interface easier to learn. Preserve the workspace model, local developer tools, capture editor, and restrained visual style.
 
-This is an audit and proposed roadmap; no application fixes were made.
+This document records the initial audit and proposed roadmap. Implementation and native computer-use verification have since progressed in the isolated production-readiness worktree; see [the current progress record](production-readiness-progress.md) for fixes, exact build evidence, and remaining work. The browser is not yet certified production-ready.
 
 **Scope and evidence**
 
@@ -10,7 +10,7 @@ Reviewed the architecture from startup and persistence through React chrome, nat
 
 The existing release executable and installed executable had identical SHA-256: `ea9255a01663db622357f4b40b29bbf7d6cc04c1265c4d577a26f413f390fc78`. Runtime tests used that existing release bundle with disposable profiles. It was not rebuilt from a frozen audit snapshot. An unrelated subtitle-script edit appeared during the audit; it and the pre-existing untracked signing script were preserved.
 
-Native computer-use inspection timed out twice. Visual observations use the checked-in interface screenshot and current component/styles source; they are not current pixel-level verification. Real page/runtime tests used the application's MCP test harness.
+During the initial audit, native computer-use inspection timed out twice. Initial visual observations use the checked-in interface screenshot and current component/styles source; they are not current pixel-level verification. Real page/runtime tests used the application's MCP test harness.
 
 | Fresh check | Result and limit |
 | --- | --- |

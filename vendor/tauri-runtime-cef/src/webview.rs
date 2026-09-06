@@ -65,9 +65,41 @@ impl Webview {
   }
 
   /// Configure the macOS reserved Cmd+T target on the native UI thread.
-  /// Pass None for chrome controls or detached pages that use existing routing.
+  /// Pass None to clear routing; the default target must share the source window.
   pub fn set_new_tab_shortcut_target(&self, target: Option<NativeNewTabTarget>) {
-    self.shortcut_binding.bind(target.map(|target| target.0));
+    self
+      .shortcut_binding
+      .new_tab
+      .bind(target.map(|target| target.0));
+  }
+
+  /// Explicit detached-window route. This source must currently share the
+  /// anchor's window, distinct from the selected target chrome window.
+  /// Reparenting any participant invalidates the route; no native window is retained.
+  #[cfg(target_os = "macos")]
+  pub fn set_detached_new_tab_shortcut_target(
+    &self,
+    source_anchor: NativeNewTabTarget,
+    target: NativeNewTabTarget,
+  ) -> bool {
+    crate::reserved_shortcut_native::bind_cross_window(
+      &self.shortcut_binding,
+      self.shortcut_target.clone(),
+      source_anchor,
+      target,
+    )
+  }
+
+  /// Reserve Cmd+L for the explicitly selected chrome in this native window.
+  /// Self-targeting is allowed for chrome; page targets must be sibling views.
+  /// Captured owner epochs invalidate both routes after reparenting.
+  #[cfg(target_os = "macos")]
+  pub fn set_address_shortcut_target(&self, target: NativeNewTabTarget) -> bool {
+    crate::reserved_shortcut_native::bind_address(
+      &self.shortcut_binding,
+      self.shortcut_target.clone(),
+      target,
+    )
   }
 
   /// Install policy on this native view. Requests default to denial before installation.
@@ -229,6 +261,51 @@ pub(crate) enum WebviewMessage {
   OnDevToolsProtocol(Arc<DevToolsProtocolHandler>, Sender<Result<()>>),
 }
 
+impl WebviewMessage {
+  /// Page work belongs to the exact browser even if it moved after enqueue.
+  /// Native-window work retains its original owner so an old layout/focus
+  /// update cannot change the new window. Keep this exhaustive for new APIs.
+  fn follows_browser(&self) -> bool {
+    match self {
+      Self::AddEventListener(..)
+      | Self::EvaluateScript(..)
+      | Self::EvaluateScriptWithCallback(..)
+      | Self::Navigate(..)
+      | Self::Reload
+      | Self::GoBack
+      | Self::CanGoBack(..)
+      | Self::GoForward
+      | Self::CanGoForward(..)
+      | Self::Print
+      | Self::Close
+      | Self::SetZoom(..)
+      | Self::ClearAllBrowsingData
+      | Self::Url(..)
+      | Self::CookiesForUrl(..)
+      | Self::Cookies(..)
+      | Self::SetCookie(..)
+      | Self::DeleteCookie(..)
+      | Self::SendDevToolsMessage(..)
+      | Self::OnDevToolsProtocol(..) => true,
+      #[cfg(any(debug_assertions, feature = "devtools"))]
+      Self::OpenDevTools | Self::CloseDevTools | Self::IsDevToolsOpen(..) => true,
+      Self::Show
+      | Self::Hide
+      | Self::SetPosition(..)
+      | Self::SetSize(..)
+      | Self::SetBounds(..)
+      | Self::SetFocus
+      | Self::Reparent(..)
+      | Self::SetAutoResize(..)
+      | Self::SetBackgroundColor(..)
+      | Self::Bounds(..)
+      | Self::Position(..)
+      | Self::Size(..)
+      | Self::WithWebview(..) => false,
+    }
+  }
+}
+
 /// A webview's bounds expressed as a fraction of its parent window, used to
 /// reposition/resize auto-resize webviews when the parent window changes size.
 #[derive(Clone, Copy)]
@@ -259,6 +336,8 @@ pub(crate) struct AppWebview {
   pub(crate) browser: cef::Browser,
   pub(crate) browser_id: i32,
   pub(crate) host: cef::BrowserHost,
+  #[cfg(target_os = "macos")]
+  accessibility_enabled: Arc<Mutex<Option<bool>>>,
   pub(crate) uri_scheme_protocols: Arc<HashMap<String, Arc<Box<UriSchemeProtocolHandler>>>>,
   pub(crate) devtools_protocol_handlers: Arc<Mutex<Vec<Arc<DevToolsProtocolHandler>>>>,
   /// Keeps the DevTools message observer registered. Dropping this unregisters the observer.
@@ -296,6 +375,28 @@ impl AppWebview {
   pub(crate) fn set_visible(&self, visible: bool) {
     self.host.was_hidden(if visible { 0 } else { 1 });
     self.apply_visible(visible);
+    // Chromium's OnWebContentsRevealed recomputes mode from its scoped
+    // accessibility clients, overwriting CEF's direct SetAccessibilityMode.
+    // Restore the embedder's request after reveal, without disabling hidden
+    // pages or resetting an already enabled tree.
+    #[cfg(target_os = "macos")]
+    if visible {
+      self.apply_requested_accessibility();
+    }
+  }
+
+  #[cfg(target_os = "macos")]
+  fn apply_requested_accessibility(&self) {
+    // Release the mutex before calling CEF, which can invoke callbacks.
+    let enabled = *self.accessibility_enabled.lock().unwrap();
+    if let Some(enabled) = enabled {
+      log::debug!(target: "dive_native_accessibility", "restore webview={} enabled={enabled}", self.webview_id);
+      self.host.set_accessibility_state(if enabled {
+        cef::State::ENABLED
+      } else {
+        cef::State::DISABLED
+      });
+    }
   }
 
   pub fn url(&self) -> Option<String> {
@@ -375,6 +476,12 @@ impl<T: UserEvent> WinitCefApp<T> {
     // and bury an overlay webview under the one that fills the window.
     #[cfg(windows)]
     child.raise_to_top();
+
+    // AXEnhancedUserInterface / enableAccessibility can arrive before this
+    // browser exists. Reapply the latest request after deferred creation so
+    // new windows, tabs, and revived renderers participate in accessibility.
+    #[cfg(target_os = "macos")]
+    child.apply_requested_accessibility();
 
     *live_browsers += 1;
     appwindow.children.push(child);
@@ -508,6 +615,8 @@ impl<T: UserEvent> WinitCefApp<T> {
       let custom_scheme_domain_names = custom_scheme_domain_names.clone();
       let label = pending.label.clone();
       let permissions = permissions.clone();
+      #[cfg(target_os = "macos")]
+      let accessibility_enabled = context.accessibility_enabled.clone();
       move |mut request_context| {
         let reset = request_context
           .as_ref()
@@ -582,6 +691,8 @@ impl<T: UserEvent> WinitCefApp<T> {
             browser,
             browser_id,
             host,
+            #[cfg(target_os = "macos")]
+            accessibility_enabled,
             uri_scheme_protocols,
             devtools_protocol_handlers,
             devtools_observer_registration,
@@ -620,6 +731,24 @@ impl<T: UserEvent> WinitCefApp<T> {
     if self.state.exiting {
       return;
     }
+
+    // The dispatcher updates future sends after reparent succeeds, but work
+    // already in the queue still carries the old window ID. Resolve only
+    // browser-owned work by the runtime's unique webview ID; never by label,
+    // active tab, or whichever child occupies the former slot.
+    let Some(window_id) = crate::webview_routing::resolve_owner(
+      window_id,
+      message.follows_browser(),
+      |owner| self.state.windows.get(&owner).is_some_and(|window| {
+        window.children.iter().any(|child| child.webview_id == webview_id)
+      }),
+      || self.state.windows.iter().find_map(|(owner, window)| {
+        window.children.iter().any(|child| child.webview_id == webview_id).then_some(*owner)
+      }),
+      |owner| self.state.is_window_closing(owner),
+    ) else {
+      return;
+    };
 
     let Some(appwindow) = self.state.windows.get_mut(&window_id) else {
       return;
@@ -855,6 +984,9 @@ impl<T: UserEvent> WinitCefApp<T> {
           position: PhysicalPosition::new(0, 0).into(),
           size: target_appwindow.window.surface_size().into(),
         });
+        // Invalidate cross-window shortcuts before changing native ownership,
+        // including a later move back to the very same NSWindow address.
+        child.shortcut_target.invalidate_parent();
         child.reparent(target_appwindow);
         child.set_bounds(
           target_appwindow.window.surface_size(),

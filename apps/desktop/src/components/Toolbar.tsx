@@ -1,5 +1,6 @@
 import { Bug, Camera, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, X, Menu } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { FOCUS_ADDRESS } from "../lib/commands";
 import { useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
@@ -57,12 +58,19 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
   // Cmd+L, from the menu or the palette.
   useEffect(() => {
     const focus = () => {
-      inputRef.current?.focus();
+      flushSync(() => inputRef.current?.focus());
       inputRef.current?.select();
     };
     window.addEventListener(FOCUS_ADDRESS, focus);
     return () => window.removeEventListener(FOCUS_ADDRESS, focus);
   }, []);
+
+  // Select after the full URL is committed, before the next input event.
+  // A delayed animation-frame selection could overwrite newly typed text.
+  useLayoutEffect(() => {
+    const input = inputRef.current;
+    if (editing && input && document.activeElement === input) input.select();
+  }, [editing]);
 
   return (
     <div className="relative flex h-full items-center gap-1 px-2">
@@ -92,10 +100,7 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
           onFocus={(e) => {
             setEditing(true);
             setValue(url);
-            const input = e.currentTarget;
-            requestAnimationFrame(() => {
-              if (document.activeElement === input) input.select();
-            });
+            e.currentTarget.select();
           }}
           onBlur={() => setEditing(false)}
           onKeyDown={(event) => {

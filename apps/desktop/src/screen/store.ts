@@ -191,11 +191,15 @@ export const useEditor = create<EditorState>((set, get) => ({
       const raw = cursorSamples(track);
       const playableFile = info.playable;
       if (!playableFile) throw new Error("This recording has no playable copy to edit. Record again with the video format.");
-      const url = captureMediaUrl(playableFile);
+      // Chromium can reuse its separate media buffer cache for the same URL
+      // despite no-store. A reopened/repaired companion needs a new cache key;
+      // the revision belongs only to this preview lease, never the saved path.
+      const url = new URL(captureMediaUrl(playableFile), window.location.href);
+      url.searchParams.set("dive-screen-revision", String(generation));
       const derived = derive(project, project.editor.cursor.smoothing, raw);
       activeRevision = draft?.revision ?? ++nextRevision;
       if (draft) drafts.set(source, { ...draft, project });
-      set({ project, playable: url, cursorRaw: raw, ...derived, loading: null, playhead: 0, past: [], future: [], saved: Boolean(saved), dirty: Boolean(draft), saveError: draft?.error ?? null });
+      set({ project, playable: url.href, cursorRaw: raw, ...derived, loading: null, playhead: 0, past: [], future: [], saved: Boolean(saved), dirty: Boolean(draft), saveError: draft?.error ?? null });
       if (!saved && !draft && project.editor.autoZoom && raw.length) get().autoZoom();
     } catch (e) {
       if (current()) set({ loading: null, error: e instanceof Error ? e.message : String(e) });

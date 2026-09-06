@@ -15,6 +15,39 @@ const ws = (id: string, name: string, position: number): Workspace => ({
 });
 
 describe("reduceEvent", () => {
+  it("keeps background workspace updates out of the main tab strip while retaining essentials", () => {
+    const base = { workspaces: [], tabs: [tab("a")], activeTab: "a", activeWorkspace: "w", recordingTab: null, detached: [], profiles: [], activeProfile: null };
+    const foreign = { ...tab("background"), workspace_id: "other" };
+    expect(reduceEvent(base, { type: "tab_upserted", data: foreign })).toEqual({});
+    const essential = { ...foreign, tier: "essential" as const };
+    expect(reduceEvent(base, { type: "tab_upserted", data: essential }).tabs).toEqual([tab("a"), essential]);
+    const moved = { ...tab("a"), workspace_id: "other" };
+    expect(reduceEvent(base, { type: "tab_upserted", data: moved })).toEqual({ tabs: [], activeTab: null });
+  });
+
+  it("replaces foreign strip entries before receiving the reattached workspace tabs", () => {
+    const essential = { ...tab("essential"), tier: "essential" as const, workspace_id: null };
+    const base = { workspaces: [ws("owner", "Home", 0)], tabs: [tab("foreign"), essential], activeTab: "foreign", activeWorkspace: "w", recordingTab: null, detached: ["returned"], profiles: [], activeProfile: "old" };
+    const switched = { ...base, ...reduceEvent(base, { type: "workspace_activated", data: "owner" }) };
+    expect(switched.tabs).toEqual([essential]);
+    expect(switched.activeTab).toBeNull();
+    expect(switched.activeProfile).toBe("p1");
+    const returned = { ...tab("returned"), workspace_id: "owner" };
+    const populated = { ...switched, ...reduceEvent(switched, { type: "tab_upserted", data: returned }) };
+    expect(populated.tabs).toEqual([essential, returned]);
+    const attached = { ...populated, ...reduceWindowChange(populated, returned.id, false) };
+    expect(reduceEvent(attached, { type: "tab_activated", data: returned.id }).activeTab).toBe(returned.id);
+  });
+
+  it.each([null, "a"])("ignores a delayed activation of a detached page with main selection %s", (activeTab) => {
+    const base = { workspaces: [], tabs: [tab("a")], activeTab, activeWorkspace: "w", recordingTab: null, detached: [], profiles: [], activeProfile: null };
+    const detached = { ...base, ...reduceWindowChange(base, "b", true) };
+    const upserted = { ...detached, ...reduceEvent(detached, { type: "tab_upserted", data: tab("b") }) };
+    const late = { ...upserted, ...reduceEvent(upserted, { type: "tab_activated", data: "b" }) };
+    expect(late.activeTab).toBe(activeTab);
+    expect(late.detached).toEqual(["b"]);
+  });
+
   it("upserts tabs in place", () => {
     const base = { workspaces: [], tabs: [tab("a"), tab("b")], activeTab: "a", activeWorkspace: "w", recordingTab: null, detached: [], profiles: [], activeProfile: null };
     const out = reduceEvent(base, { type: "tab_upserted", data: tab("a", "https://y") });
@@ -123,6 +156,18 @@ describe("optimistic switching", () => {
   afterEach(() => {
     useBrowser.setState(initial, true);
     vi.restoreAllMocks();
+  });
+
+  it("raises a detached page without changing the main selection", async () => {
+    let finish!: () => void;
+    vi.spyOn(ipc, "tabActivate").mockReturnValue(new Promise<null>((resolve) => { finish = () => resolve(null); }));
+    useBrowser.setState({ tabs: [tab("a"), tab("b")], activeTab: "a", detached: ["b"] });
+    const raised = useBrowser.getState().activateTab("b");
+    expect(useBrowser.getState().activeTab).toBe("a");
+    expect(ipc.tabActivate).toHaveBeenCalledWith("b");
+    finish();
+    await raised;
+    expect(useBrowser.getState().activeTab).toBe("a");
   });
 
   it("highlights the tab before the engine answers and keeps it when it agrees", async () => {

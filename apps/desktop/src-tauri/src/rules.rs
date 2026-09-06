@@ -351,28 +351,23 @@ pub fn decide_paused_request(
     }
 }
 
-/// Every CDP resource type except `Media`. Streaming video and audio fire a
-/// rapid series of byte-range requests; pausing each one for the CDP
-/// round-trip adds latency that makes the player abort segments and stall
-/// (`YouTube` in particular). `DivePrivacy` never blocks media, so when only
-/// it needs interception those requests are left off the pause pipeline.
+/// Resource filters accepted by the pinned Chromium Fetch backend, excluding
+/// `Media`. `Network.ResourceType` has additional values which Fetch rejects,
+/// aborting the entire enable before any patterns are installed. See Chromium
+/// 52a94675, `content/browser/devtools/protocol/network_handler.cc`,
+/// `NetworkHandler::AddInterceptedResourceType` (not the Network domain schema).
+/// Privacy never blocks media, so leave streaming byte ranges off this pause
+/// pipeline. Explicit workspace rules still use an unrestricted URL pattern.
 const NON_MEDIA_RESOURCE_TYPES: &[&str] = &[
     "Document",
     "Stylesheet",
     "Image",
     "Font",
     "Script",
-    "TextTrack",
     "XHR",
     "Fetch",
-    "Prefetch",
-    "EventSource",
-    "WebSocket",
-    "Manifest",
-    "SignedExchange",
-    "Ping",
     "CSPViolationReport",
-    "Preflight",
+    "Ping",
     "Other",
 ];
 
@@ -877,6 +872,36 @@ mod tests {
     enum Reply {
         Ok,
         ProtocolError,
+        PinnedFetchContract,
+    }
+
+    // Chromium 52a94675, NetworkHandler::AddInterceptedResourceType. This
+    // deliberately differs from the broader Network.ResourceType schema.
+    const PINNED_FETCH_TYPES: &[&str] = &[
+        "Document",
+        "Stylesheet",
+        "Image",
+        "Media",
+        "Font",
+        "Script",
+        "XHR",
+        "Fetch",
+        "CSPViolationReport",
+        "Ping",
+        "Other",
+    ];
+
+    fn pinned_fetch_rejection(message: &Value) -> Option<&str> {
+        if message["method"] != "Fetch.enable" {
+            return None;
+        }
+        message["params"]["patterns"]
+            .as_array()?
+            .iter()
+            .find_map(|pattern| {
+                let kind = pattern["resourceType"].as_str()?;
+                (!kind.is_empty() && !PINNED_FETCH_TYPES.contains(&kind)).then_some(kind)
+            })
     }
 
     #[derive(Clone)]
@@ -893,7 +918,7 @@ mod tests {
             self.sent
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(value);
+                .push(value.clone());
             let reply = self
                 .replies
                 .lock()
@@ -901,6 +926,11 @@ mod tests {
                 .pop_front()
                 .unwrap_or(Reply::Ok);
             let incoming = match reply {
+                Reply::PinnedFetchContract => match pinned_fetch_rejection(&value) {
+                    Some(kind) => json!({"id": id, "error": {"code": -32602,
+                        "message": format!("Unknown resource type in fetch filter: '{kind}'")}}),
+                    None => json!({"id": id, "result": {}}),
+                },
                 Reply::Ok => json!({"id": id, "result": {}}),
                 Reply::ProtocolError => {
                     json!({"id": id, "error": {"code": -32000, "message": "injected"}})
@@ -981,6 +1011,89 @@ mod tests {
             .map(|message| message["method"].as_str().unwrap().to_owned())
             .collect::<Vec<_>>();
         assert_eq!(methods, vec!["Fetch.disable", "Fetch.enable"]);
+    }
+
+    #[tokio::test]
+    async fn privacy_apply_is_accepted_by_pinned_fetch_and_can_block_a_tracker() {
+        let (session, sent) = scripted_session(vec![Reply::PinnedFetchContract, Reply::Ok]);
+        apply(&session, &[], &enabled_prefs())
+            .await
+            .expect("privacy filters must enable on the shipping Fetch backend");
+        let action = decide_paused_request(&[], &privacy(), &enabled_prefs(), &paused_ad());
+        assert!(matches!(action, InterceptAction::PrivacyBlock { .. }));
+        assert!(
+            execute_action(&session, "tracker", &json!({}), &action)
+                .await
+                .is_some()
+        );
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[0]["method"], "Fetch.enable");
+        assert_eq!(sent[1]["method"], "Fetch.failRequest");
+        assert_eq!(sent[1]["params"]["errorReason"], "BlockedByClient");
+        let actual: std::collections::BTreeSet<_> = sent[0]["params"]["patterns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["resourceType"].as_str().unwrap())
+            .collect();
+        let expected = PINNED_FETCH_TYPES
+            .iter()
+            .copied()
+            .filter(|kind| *kind != "Media")
+            .collect();
+        assert_eq!(
+            actual, expected,
+            "all supported non-media filters, without a wildcard"
+        );
+    }
+
+    #[tokio::test]
+    async fn disabling_workspace_rule_restores_valid_privacy_filters_then_disables_fetch() {
+        let (session, sent) = scripted_session(vec![Reply::PinnedFetchContract; 3]);
+        let mut workspace_rule = rule("*://media.example/*", RuleAction::Block);
+        apply(&session, &[workspace_rule.clone()], &enabled_prefs())
+            .await
+            .unwrap();
+        workspace_rule.enabled = false;
+        apply(&session, &[workspace_rule], &enabled_prefs())
+            .await
+            .unwrap();
+        apply(&session, &[], &Prefs::default()).await.unwrap();
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 3);
+        assert_eq!(sent[0]["params"]["patterns"], json!([{"urlPattern":"*"}]));
+        assert!(
+            sent[1]["params"]["patterns"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|p| p["resourceType"]
+                    .as_str()
+                    .is_some_and(|kind| kind != "Media"))
+        );
+        assert_eq!(sent[2]["method"], "Fetch.disable");
+    }
+
+    #[tokio::test]
+    async fn pinned_fetch_fixture_rejects_network_only_resource_types() {
+        for kind in [
+            "TextTrack",
+            "Prefetch",
+            "EventSource",
+            "WebSocket",
+            "Manifest",
+            "SignedExchange",
+            "Preflight",
+        ] {
+            let (session, _) = scripted_session(vec![Reply::PinnedFetchContract]);
+            let error = session
+                .call("Fetch.enable", json!({"patterns":[{"resourceType":kind}]}))
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("-32602"));
+            assert!(error.to_string().contains(kind));
+        }
     }
 
     #[test]

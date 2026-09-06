@@ -38,7 +38,9 @@ export function Welcome() {
         />
       )}
       <div className="relative z-10 mx-auto flex min-h-full w-full max-w-[1040px] flex-col items-center px-4 pt-4 pb-10 sm:px-8 sm:pt-6">
-        {background === "orbs" ? <OrbBurst animated={animateBackground} pointer={{ drag: 0 }} width={190} height={190} className="-mb-4" /> : <div className="h-10" aria-hidden />}
+        {/* The small globe follows effective motion (System/Reduce/Full).
+            Only the large character field above requires an explicit Full opt-in. */}
+        {background === "orbs" ? <OrbBurst pointer={{ drag: 0 }} width={190} height={190} className="-mb-4" /> : <div className="h-10" aria-hidden />}
         <p className="text-[10px] font-medium tracking-[0.18em] text-highlight uppercase">Dive</p>
         <h1 className="mt-2 max-w-full text-center text-[clamp(26px,4vw,34px)] leading-tight font-semibold tracking-[-0.025em] text-balance">
           The browser built for developers

@@ -166,7 +166,7 @@ export function Stage() {
           readyState: v.readyState,
           networkState: v.networkState,
         });
-        useEditor.setState({ playing: false, error: "Dive could not decode this recording preview. The original file is still safe." });
+        useEditor.setState({ playing: false, error: "Dive could not load this recording preview. The original file is still safe." });
       },
     });
     return () => {

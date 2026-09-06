@@ -25,9 +25,12 @@ export function useShortcuts() {
       // code submits this fixed event before transferring keyboard focus here.
       flushSync(() => runCommand("tab.new", "native-menu"));
     };
+    const onNativeFocusAddress = () => runCommand("address.focus", "native-menu");
+    window.addEventListener("dive-native-focus-address", onNativeFocusAddress);
     window.addEventListener("keydown", onKey);
     window.addEventListener("dive-native-new-tab", onNativeNewTab);
     return () => {
+      window.removeEventListener("dive-native-focus-address", onNativeFocusAddress);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("dive-native-new-tab", onNativeNewTab);
     };

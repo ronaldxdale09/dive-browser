@@ -8,7 +8,10 @@ vi.mock("../lib/ipc", () => ({ ipc: {
   fileSize: mocks.size, fileReadChunk: mocks.chunk,
 } }));
 vi.mock("../store/browser", () => ({ useBrowser: { setState: mocks.report } }));
-vi.mock("../lib/mediaUrl", () => ({ captureMediaUrl: (path: string) => `asset:${path}` }));
+vi.mock("@tauri-apps/api/core", () => ({
+  isTauri: () => true,
+  convertFileSrc: (path: string) => `asset://localhost/${encodeURIComponent(path)}`,
+}));
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -33,6 +36,44 @@ beforeEach(async () => {
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 
 describe("recording editor persistence lifecycle", () => {
+  it("uses a fresh complete preview URL when retrying the same recording after a media failure", async () => {
+    await store.getState().open("A");
+    const first = store.getState().playable;
+    store.setState({ error: "The preview could not be loaded" });
+    await store.getState().open("A");
+    const retry = store.getState().playable;
+    expect(retry).not.toBe(first);
+    expect(new URL(retry!).pathname).toBe(new URL(first!).pathname);
+    expect(store.getState().error).toBeNull();
+  });
+
+  it("keeps one preview URL through playback, edits and a save in the same editor lease", async () => {
+    await store.getState().open("A");
+    const first = store.getState().playable;
+    store.getState().seek(1000);
+    store.getState().setPlaying(true);
+    edit(43);
+    await store.getState().save();
+    expect(store.getState().playable).toBe(first);
+  });
+
+  it("preserves encoded filenames and raw persisted media identity across reopen", async () => {
+    const source = "/captures/a #?% ü.mp4";
+    await store.getState().open(source);
+    const first = store.getState().playable;
+    await store.getState().open(source);
+    const retry = new URL(store.getState().playable!);
+    expect(retry.href).not.toBe(first);
+    expect(retry.pathname).toBe("/%2Fcaptures%2Fa%20%23%3F%25%20%C3%BC.mp4.webm");
+    expect(retry.hash).toBe("");
+    edit(49);
+    await store.getState().save();
+    const [savedSource, json] = mocks.write.mock.calls[0]!;
+    expect(savedSource).toBe(source);
+    expect(JSON.parse(json as string).media).toMatchObject({ source, playable: `${source}.webm` });
+    expect(store.getState().source).toBe(source);
+  });
+
   it("does not let a delayed A load replace recording B", async () => {
     const a = deferred<ReturnType<typeof media>>();
     mocks.info.mockImplementation((source: string) => source === "A" ? a.promise : Promise.resolve(media(source)));
@@ -42,7 +83,7 @@ describe("recording editor persistence lifecycle", () => {
     await openingA;
     expect(store.getState().source).toBe("B");
     expect(store.getState().project?.media.source).toBe("B");
-    expect(store.getState().playable).toBe("asset:B.webm");
+    expect(new URL(store.getState().playable!).pathname).toBe("/B.webm");
   });
 
   it("ignores an old project-read failure after switching recordings", async () => {

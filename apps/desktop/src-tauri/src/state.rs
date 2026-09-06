@@ -43,6 +43,8 @@ pub struct AppState {
     pub agent_models: crate::agent::ModelCache,
     /// Tab screen recordings in progress.
     pub screencast: crate::screencast::Registry,
+    /// Opaque recording export jobs and their owned subprocesses.
+    pub(crate) screen_exports: crate::screen::jobs::Registry,
     /// Mock and rewrite rules per workspace.
     pub rules: crate::rules::Registry,
     /// User preferences, cached from the settings table.
@@ -113,6 +115,7 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
         agent_runs: Mutex::new(std::collections::HashMap::new()),
         agent_models: Mutex::new(std::collections::HashMap::new()),
         screencast: crate::screencast::Registry::default(),
+        screen_exports: crate::screen::jobs::Registry::default(),
         rules: crate::rules::Registry::default(),
         prefs: crate::prefs::Registry::default(),
         privacy: crate::privacy::DivePrivacy::new(),

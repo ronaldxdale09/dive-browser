@@ -118,6 +118,33 @@ fn handle_startup_invoke(invoke: tauri::ipc::Invoke<Runtime>) -> bool {
     true
 }
 
+/// Keep CEF responsive while owned export children stop; only reissue Quit
+/// after background cleanup confirms they have exited.
+fn drain_export_exit(app: tauri::AppHandle<Runtime>, registry: screen::jobs::Registry, code: i32) {
+    tauri::async_runtime::spawn(async move {
+        let worker = registry.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            worker.drain_shutdown(std::time::Duration::from_secs(15))
+        })
+        .await
+        .map_err(AppError::new)
+        .and_then(std::convert::identity);
+        match result {
+            Ok(()) => {
+                registry.finish_exit(true);
+                app.exit(code);
+            }
+            Err(error) => {
+                tracing::error!(%error, "export cleanup prevented application exit");
+                rfd::AsyncMessageDialog::new().set_title("Dive could not finish quitting")
+                    .set_description("An export has not stopped yet. Dive is still open to protect your files. Try Quit again after closing this message.")
+                    .set_level(rfd::MessageLevel::Error).set_buttons(rfd::MessageButtons::Ok).show().await;
+                registry.finish_exit(false);
+            }
+        }
+    });
+}
+
 /// Start the application. Under CEF this also serves as the sub-process
 /// entry point.
 #[cfg_attr(feature = "cef", tauri::cef_entry_point)]
@@ -139,12 +166,21 @@ pub fn run() {
     let mut builder = tauri::Builder::<Runtime>::new();
     #[cfg(feature = "cef")]
     {
+        let mut chromium_args = startup::build_chromium_args(None);
+        match lifecycle_probe::fetch_filter_probe::chromium_args() {
+            Ok(probe_args) => chromium_args.extend(probe_args),
+            Err(error) => {
+                tracing::error!(%error, "Fetch probe admission rejected before native launch");
+                drop(log_guard);
+                std::process::exit(2);
+            }
+        }
         builder = builder
             .root_cache_path(state::profiles_root())
             // Leading dashes are load-bearing for valueless switches in the
             // CEF adapter. Normal launches use the operating system keychain;
             // isolated automation may explicitly opt into its mock backend.
-            .command_line_args(startup::build_chromium_args(None));
+            .command_line_args(chromium_args);
     }
 
     #[cfg(target_os = "macos")]
@@ -244,8 +280,18 @@ pub fn run() {
     let exit_code = app.run_return(|app, event| match event {
         // Why the process is going away is the first question after an
         // unexpected exit; say so in the log.
-        tauri::RunEvent::ExitRequested { code, .. } => {
+        tauri::RunEvent::ExitRequested { code, api, .. } => {
+            use tauri::Manager as _;
             tracing::info!(?code, "exit requested");
+            let registry = app.state::<state::AppState>().screen_exports.clone();
+            match registry.prepare_exit() {
+                screen::jobs::ExitAction::Immediate => {}
+                screen::jobs::ExitAction::InProgress => api.prevent_exit(),
+                screen::jobs::ExitAction::Drain => {
+                    api.prevent_exit();
+                    drain_export_exit(app.clone(), registry, code.unwrap_or(0));
+                }
+            }
         }
         tauri::RunEvent::Exit => tracing::info!("event loop exited"),
         // Links the system hands us once Dive is the default browser (or a

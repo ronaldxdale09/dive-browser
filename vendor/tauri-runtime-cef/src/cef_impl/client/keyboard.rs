@@ -45,13 +45,13 @@ fn trace_key(stage: Stage, browser: Option<&Browser>, event: Option<&KeyEvent>) 
 }
 
 #[cfg(target_os = "macos")]
-fn dispatch_reserved_new_tab(
+fn dispatch_reserved_shortcut(
   binding: &crate::reserved_shortcut_native::NativeShortcutBinding,
   browser: Option<&Browser>,
   event: Option<&KeyEvent>,
   os_event: CefOsEvent<'_>,
 ) -> bool {
-  use crate::reserved_shortcut::{ShortcutKey, dispatch_new_tab};
+  use crate::reserved_shortcut::{ShortcutKey, dispatch_shortcut};
   use cef::sys::{cef_event_flags_t as Flags, cef_key_event_type_t};
   use objc2::MainThreadMarker;
   use objc2_app_kit::{NSEvent, NSEventType};
@@ -59,7 +59,7 @@ fn dispatch_reserved_new_tab(
   let Some(event) = event else { return false };
   let Some(browser) = browser else { return false };
   let modifiers = event.modifiers;
-  dispatch_new_tab(
+  dispatch_shortcut(
     true,
     ShortcutKey {
       raw_key_down: event.type_ == cef_key_event_type_t::KEYEVENT_RAWKEYDOWN.into(),
@@ -70,7 +70,7 @@ fn dispatch_reserved_new_tab(
       shift: modifiers & Flags::EVENTFLAG_SHIFT_DOWN.0 != 0,
     },
     !os_event.is_null(),
-    || {
+    |action| {
       let Some(_mtm) = MainThreadMarker::new() else {
         return false;
       };
@@ -80,7 +80,7 @@ fn dispatch_reserved_new_tab(
         return false;
       };
       event.r#type() == NSEventType::KeyDown
-        && crate::reserved_shortcut_native::dispatch(binding, browser)
+        && crate::reserved_shortcut_native::dispatch(binding, browser, action)
     },
   )
 }
@@ -100,10 +100,10 @@ wrap_keyboard_handler! {
       _is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>,
     ) -> ::std::os::raw::c_int {
       trace_key(Stage::PreKey, _browser.as_deref(), event);
-      // Bound main-window pages submit directly to chrome. Chrome itself and
-      // unbound/detached pages retain their existing DOM/native-menu route.
+      // Bound reserved chords submit directly to the selected chrome before
+      // subsequent native input. Unbound chords retain DOM/menu fallback.
       #[cfg(target_os = "macos")]
-      if dispatch_reserved_new_tab(&self.shortcut_binding, _browser.as_deref(), event, _os_event) {
+      if dispatch_reserved_shortcut(&self.shortcut_binding, _browser.as_deref(), event, _os_event) {
         return 1;
       }
       // If devtools is disabled, block devtools keyboard shortcuts.
