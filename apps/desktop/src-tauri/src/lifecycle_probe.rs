@@ -290,8 +290,8 @@ async fn verify_avatars(app: &tauri::AppHandle<Runtime>, expected: &str) -> Resu
     chrome.close();
     let expected_worker = match expected {
         "cold" => 1,
-        "warm" => 0,
-        _ => return Err(AppError::new("avatar probe requires cold or warm")),
+        "warm" | "bundled" => 0,
+        _ => return Err(AppError::new("avatar probe requires cold, warm or bundled")),
     };
     if observed["worker"] != expected_worker {
         return Err(AppError::new(format!(

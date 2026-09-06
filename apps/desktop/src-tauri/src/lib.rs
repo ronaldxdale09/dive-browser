@@ -856,14 +856,24 @@ mod tests {
     #[test]
     fn test_chromium_switches_configuration() {
         let args = crate::startup::build_chromium_args(None);
-        assert_eq!(args.len(), 3);
+        assert_eq!(args.len(), 4);
         assert_eq!(args[0], ("--process-per-site", None));
         assert_eq!(args[1], ("renderer-process-limit", Some("6".to_string())));
         assert_eq!(
             args[2],
             (
                 "disable-features",
-                Some("ImmersiveReadAnything".to_string())
+                Some("ImmersiveReadAnything,SpareRendererForSitePerProcess".to_string())
+            )
+        );
+        assert_eq!(
+            args[3],
+            (
+                "js-flags",
+                Some(
+                    "--gc-memory-reducer-start-delay-ms=1000 --memory-reducer-delay-ms=1000"
+                        .to_string()
+                )
             )
         );
         assert!(crate::startup::validate_switch_syntax(&args).is_ok());

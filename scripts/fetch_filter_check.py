@@ -99,7 +99,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def validate_counts(counts):
     for phase in PHASES:
-        expected = {'/control.js': True, '/tracker.js': phase == 'off', '/fixture.wav': phase != 'workspace'}
+        expected = {'/control.js': phase != 'workspace', '/tracker.js': phase == 'off', '/fixture.wav': True}
         for path, reaches_server in expected.items():
             actual = counts.get(phase + ':' + path, 0)
             if (actual > 0) != reaches_server:
@@ -112,6 +112,11 @@ def validate_receipts(content):
     rows = [json.loads(line.split('DIVE_FETCH_FILTER_PHASE: ', 1)[1]) for line in content.splitlines() if 'DIVE_FETCH_FILTER_PHASE: ' in line]
     if [row['phase'] for row in rows] != list(PHASES):
         raise RuntimeError('missing, repeated or reordered Fetch phase receipts')
+    documents = [json.loads(line.split('DIVE_FETCH_DOCUMENT: ', 1)[1]) for line in content.splitlines() if 'DIVE_FETCH_DOCUMENT: ' in line]
+    if [row['phase'] for row in documents] != ['privacy', 'mock', 'disabled'] or any(
+        row.get('requested', 0) < 1 or row.get('paused') != int(row['phase'] == 'mock') for row in documents
+    ):
+        raise RuntimeError('document bypass, mock or disabled-rule receipt failed')
     return rows
 
 

@@ -21,23 +21,27 @@ class FetchFilterHarnessTests(unittest.TestCase):
     def test_counts_require_positive_controls_and_media_delivery_and_no_blocked_hits(self):
         expected = {}
         for phase in probe.PHASES:
-            expected[phase + ':/control.js'] = 1
+            if phase != 'workspace':
+                expected[phase + ':/control.js'] = 1
             if phase == 'off':
                 expected[phase + ':/tracker.js'] = 1
-            if phase != 'workspace':
-                expected[phase + ':/fixture.wav'] = 1
+            expected[phase + ':/fixture.wav'] = 1
         probe.validate_counts(expected)
-        for changed in ({}, {**expected, 'privacy:/tracker.js': 1}, {**expected, 'workspace:/fixture.wav': 1},
+        for changed in ({}, {**expected, 'privacy:/tracker.js': 1}, {**expected, 'workspace:/control.js': 1},
                         {**expected, 'off:/tracker.js': 0}, {**expected, 'restored:/control.js': 0}):
             with self.assertRaises(RuntimeError):
                 probe.validate_counts(changed)
 
     def test_missing_reordered_and_duplicate_receipts_fail(self):
         rows = ['DIVE_FETCH_FILTER_PHASE: ' + json.dumps({'phase': phase}) for phase in probe.PHASES]
-        footer = '\n' + probe.MARKER + '\nevent loop exited'
+        documents = '\n'.join('DIVE_FETCH_DOCUMENT: ' + json.dumps({'phase': phase, 'requested': 1, 'paused': int(phase == 'mock')}) for phase in ['privacy', 'mock', 'disabled'])
+        footer = '\n' + documents + '\n' + probe.MARKER + '\nevent loop exited'
         self.assertEqual(len(probe.validate_receipts('\n'.join(rows) + footer)), 4)
         for text in ('', '\n'.join(rows[:-1]) + footer, '\n'.join(reversed(rows)) + footer,
-                     '\n'.join(rows + rows[:1]) + footer, '\n'.join(rows)):
+                     '\n'.join(rows + rows[:1]) + footer, '\n'.join(rows),
+                     '\n'.join(rows) + footer.replace(documents, ''),
+                     '\n'.join(rows) + footer.replace('"paused": 0', '"paused": 1'),
+                     '\n'.join(rows) + footer.replace('"requested": 1', '"requested": 0')):
             with self.assertRaises(RuntimeError):
                 probe.validate_receipts(text)
 

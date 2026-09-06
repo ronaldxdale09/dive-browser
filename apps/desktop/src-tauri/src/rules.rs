@@ -395,14 +395,16 @@ const NON_MEDIA_RESOURCE_TYPES: &[&str] = &[
     "Other",
 ];
 
-/// The `Fetch.enable` patterns for the current rules and prefs: one filter
-/// per supported non-media resource type, whether interception is there for
-/// privacy or for a workspace rule. A bare `"*"` would include `Media` and
-/// stall streaming playback, so it is never sent.
-fn interception_patterns(_rules: &[Rule]) -> serde_json::Value {
+/// Privacy always allows documents, so do not pause navigation unless an
+/// enabled workspace rule might block, mock or rewrite it. Document context
+/// still advances through Network/Page events before early subresources.
+/// A bare `"*"` would also include `Media` and stall streaming playback.
+fn interception_patterns(rules: &[Rule]) -> serde_json::Value {
+    let documents = rules.iter().any(|rule| rule.enabled);
     json!(
         NON_MEDIA_RESOURCE_TYPES
             .iter()
+            .filter(|resource_type| documents || **resource_type != "Document")
             .map(|t| json!({"urlPattern": "*", "resourceType": t}))
             .collect::<Vec<_>>()
     )
@@ -1077,11 +1079,11 @@ mod tests {
         let expected = PINNED_FETCH_TYPES
             .iter()
             .copied()
-            .filter(|kind| *kind != "Media")
+            .filter(|kind| !matches!(*kind, "Media" | "Document"))
             .collect();
         assert_eq!(
             actual, expected,
-            "all supported non-media filters, without a wildcard"
+            "all supported privacy subresource filters, without a wildcard"
         );
     }
 
@@ -1142,7 +1144,7 @@ mod tests {
     }
 
     #[test]
-    fn privacy_only_interception_leaves_media_alone() {
+    fn privacy_only_interception_leaves_documents_and_media_alone() {
         let patterns = interception_patterns(&[]);
         let arr = patterns.as_array().unwrap();
         let types: Vec<&str> = arr
@@ -1153,7 +1155,11 @@ mod tests {
             !types.contains(&"Media"),
             "media must not be intercepted for privacy"
         );
-        assert!(types.contains(&"Document") && types.contains(&"Script"));
+        assert!(
+            !types.contains(&"Document"),
+            "privacy always allows documents"
+        );
+        assert!(types.contains(&"Script"));
         assert!(arr.iter().all(|p| p["urlPattern"] == "*"));
     }
 
@@ -1176,7 +1182,51 @@ mod tests {
             .map(|p| p["resourceType"].as_str().unwrap())
             .collect();
         assert!(!types.contains(&"Media"));
-        assert_eq!(patterns, interception_patterns(&[]));
+        assert!(
+            types.contains(&"Document"),
+            "workspace rules can rewrite documents"
+        );
+    }
+
+    #[test]
+    fn disabled_workspace_rules_do_not_pause_documents() {
+        let mut disabled = rule("*", RuleAction::Block);
+        disabled.enabled = false;
+        assert_eq!(
+            interception_patterns(&[disabled]),
+            interception_patterns(&[])
+        );
+    }
+
+    #[tokio::test]
+    async fn enabling_and_disabling_a_document_rule_updates_the_fetch_filters() {
+        let (session, sent) = scripted_session(vec![Reply::PinnedFetchContract; 3]);
+        let prefs = enabled_prefs();
+        let mut document_rule = rule(
+            "*://example.test/*",
+            RuleAction::Header {
+                name: "X-Workspace".into(),
+                value: "present".into(),
+            },
+        );
+        apply(&session, &[], &prefs).await.unwrap();
+        apply(&session, &[document_rule.clone()], &prefs)
+            .await
+            .unwrap();
+        document_rule.enabled = false;
+        apply(&session, &[document_rule], &prefs).await.unwrap();
+        let sent = sent.lock().unwrap();
+        let documents: Vec<bool> = sent
+            .iter()
+            .map(|message| {
+                message["params"]["patterns"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|pattern| pattern["resourceType"] == "Document")
+            })
+            .collect();
+        assert_eq!(documents, [false, true, false]);
     }
 
     #[tokio::test]

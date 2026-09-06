@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { generateAvatar } from "./avatarGenerator";
+import defaults from "./defaultAvatars.json";
 
 describe("saved avatar compatibility", () => {
+  it("ships exactly the current generator output for both standard default icons", () => {
+    expect(defaults.map(({ input }) => input)).toEqual([
+      { kind: "profile", seed: "personal", color: "#7FD8C8" },
+      { kind: "workspace", seed: "layers", color: "#0F6E75" },
+    ]);
+    for (const { input, url } of defaults) {
+      const kind = input.kind === "profile" ? "profile" : "workspace";
+      expect(url).toBe(generateAvatar({ ...input, kind }));
+    }
+  });
   // Captured from the shipping synchronous generators before moving them to a worker.
   it.each([
     ["profile", "ada", "#7FD8C8", "4c044281a1f88e9abaf08163d38cda1fa8f5c49883c4353cbc8dff9c07ef2e61"],

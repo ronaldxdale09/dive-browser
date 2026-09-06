@@ -1,3 +1,5 @@
+import defaultAvatars from "./defaultAvatars.json";
+
 export interface AvatarInput { kind: "profile" | "workspace"; seed: string; color: string }
 interface AvatarWorker {
   onmessage: ((event: MessageEvent) => void) | null;
@@ -13,6 +15,12 @@ const MAX_BYTES = 256 * 1024;
 const MAX_ENTRIES = 128;
 const validUrl = (value: unknown): value is string => typeof value === "string" && value.startsWith("data:image/svg+xml;") && value.length <= MAX_URL;
 export const avatarKey = (input: AvatarInput): string => JSON.stringify([input.kind, input.seed, input.color]);
+// Exact worker output for the standard initial profile/workspace. Keep custom
+// seeds and colors on the existing bounded worker path. Regenerate with
+// scripts/generate-default-avatars.mjs; the compatibility test detects drift.
+const bundled = new Map(defaultAvatars.map(({ input, url }) => [
+  JSON.stringify([input.kind, input.seed, input.color]), url,
+]));
 
 /** Artwork is an expendable, bounded cache. Seeds/colors remain in the browser store.
  * No generator or worker is loaded by get(); misses run after paint in one worker. */
@@ -30,7 +38,7 @@ export class AvatarCache {
 
   get(input: AvatarInput): string | undefined {
     const key = avatarKey(input);
-    const hit = this.memory.get(key);
+    const hit = this.memory.get(key) ?? bundled.get(key);
     if (hit) return hit;
     if (!this.hydrated) {
       this.hydrated = true;

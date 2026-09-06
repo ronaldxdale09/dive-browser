@@ -35,6 +35,15 @@ fail() { echo "!! $*" >&2; plain_log | tail -30 >&2; exit 1; }
 plain_log() { sed -e $'s/\x1b\[[0-9;]*m//g' "${LOG}"; }
 mcp() { python3 "${MCP}" --data-dir "${DATA_DIR}" --port "${PORT}" "$@"; }
 step() { echo ">> $*"; }
+tab_state() {
+    # Read the disposable profile without waking a discarded renderer.
+    python3 - "${DATA_DIR}/dive.db" "$1" <<'PY'
+import sqlite3, sys
+with sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True) as db:
+    row = db.execute("SELECT state FROM tabs WHERE id = ?", (sys.argv[2],)).fetchone()
+    print(row[0] if row else "missing")
+PY
+}
 
 # Two pages on a local server, so nothing here depends on the network.
 cat >"${SITE_DIR}/a.html" <<'HTML'
@@ -103,6 +112,11 @@ done
 SITE="http://localhost:${SITE_PORT}"
 
 cleanup() {
+    if [[ -n "${TOOL_WAIT:-}" ]]; then
+        kill "${TOOL_WAIT}" 2>/dev/null || true
+        wait "${TOOL_WAIT}" 2>/dev/null || true
+        TOOL_WAIT=""
+    fi
     if [[ -n "${APP:-}" ]]; then
         kill "${APP}" 2>/dev/null || true
         for _ in $(seq 1 20); do
@@ -146,6 +160,7 @@ step "tab opens and reads back"
 TABS=$(mcp call tabs_list)
 A_ID=$(python3 -c 'import json,sys; t=[x for x in json.load(sys.stdin) if x["url"].endswith("a.html")]; print(t[0]["id"] if t else "")' <<<"${TABS}")
 [[ -n "${A_ID}" ]] || fail "startup tab for a.html is missing: ${TABS}"
+mcp call page_wait_for "{\"tab_id\": \"${A_ID}\", \"text\": \"alpha content\", \"timeout_ms\": 15000}" >/dev/null || fail "startup page A never loaded"
 B=$(mcp call tab_open "{\"url\": \"${SITE}/b.html\"}")
 B_ID=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"${B}")
 mcp call tab_activate "{\"tab_id\": \"${B_ID}\"}" >/dev/null || fail "page B could not be activated"
@@ -163,6 +178,11 @@ for _ in $(seq 1 20); do
     sleep 0.25
 done
 python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("image_bytes",0) > 1000, d' <<<"${SHOT}" || fail "screenshot too small after first-frame wait: ${SHOT}"
+
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    step "macOS confirms every owned renderer has entered its sandbox"
+    python3 "${REPO_ROOT}/scripts/browser_sandbox.py" "${APP}" || fail "renderer sandbox verification failed"
+fi
 
 step "page popup opens as a real tab"
 mcp call page_click "{\"tab_id\": \"${B_ID}\", \"locator\": \"role=link[name=\\\"Open popup\\\"]\"}" >/dev/null || fail "popup link could not be clicked"
@@ -214,18 +234,46 @@ if [[ "${LIVE_SKIP_YOUTUBE:-0}" != "1" ]]; then
     YOUTUBE_ID=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"${YOUTUBE}")
     mcp call tab_activate "{\"tab_id\": \"${YOUTUBE_ID}\"}" >/dev/null || fail "YouTube tab could not be activated"
     mcp call page_wait_for "{\"tab_id\": \"${YOUTUBE_ID}\", \"locator\": \"video\", \"load\": true, \"timeout_ms\": 45000}" >/dev/null || fail "YouTube video element did not load"
-    PLAYBACK=$(mcp call page_evaluate "{\"tab_id\": \"${YOUTUBE_ID}\", \"expression\": \"(async()=>{const v=document.querySelector('video');if(!v)throw new Error('video missing');const start=v.currentTime;v.muted=true;v.play().catch(()=>{});const end=performance.now()+10000;while(performance.now()<end){if(v.currentTime>start+0.2&&v.readyState>=2)return {advanced:true,currentTime:v.currentTime,readyState:v.readyState};await new Promise(r=>setTimeout(r,100))}return {advanced:false,currentTime:v.currentTime,readyState:v.readyState}})()\"}") || fail "YouTube playback evaluation failed"
-    python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["advanced"] and v["readyState"] >= 2, v' <<<"${PLAYBACK}" || fail "YouTube did not advance playback: ${PLAYBACK}"
+    # Use the persistent transport control: the large aria-label="Play" overlay
+    # can disappear between discovery and click during player initialization.
+    # A script-level play() during YouTube initialization can be immediately
+    # cancelled by the player. Exercise its visible control and require actual
+    # sustained playback; a fraction of a second before pausing is not success.
+    mcp call page_wait_for "{\"tab_id\": \"${YOUTUBE_ID}\", \"locator\": \"css=.ytp-play-button\", \"timeout_ms\": 15000}" >/dev/null || fail "YouTube Play control did not become available"
+    mcp call page_evaluate "{\"tab_id\": \"${YOUTUBE_ID}\", \"expression\": \"document.querySelector('video').muted=true\"}" >/dev/null || fail "could not mute the test video"
+    mcp call page_click "{\"tab_id\": \"${YOUTUBE_ID}\", \"locator\": \"css=.ytp-play-button\"}" >/dev/null || fail "YouTube Play control could not be clicked"
+    PLAYBACK=$(mcp call page_evaluate "{\"tab_id\": \"${YOUTUBE_ID}\", \"expression\": \"(async()=>{const v=document.querySelector('video');if(!v)throw new Error('video missing');const start=v.currentTime;const end=performance.now()+10000;while(performance.now()<end){if(document.querySelector('video')!==v)throw new Error('player replaced video during verification');if(v.currentTime>start+1.5&&v.readyState>=2&&!v.paused)return {advanced:true,currentTime:v.currentTime,readyState:v.readyState,paused:v.paused};await new Promise(r=>setTimeout(r,100))}return {advanced:false,currentTime:v.currentTime,readyState:v.readyState,paused:v.paused,error:v.error?.message}})()\"}") || fail "YouTube playback evaluation failed"
+    python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["advanced"] and v["readyState"] >= 2 and not v["paused"], v' <<<"${PLAYBACK}" || fail "YouTube did not sustain playback: ${PLAYBACK}"
+    echo "   ${PLAYBACK}"
     mcp call tab_close "{\"tab_id\": \"${YOUTUBE_ID}\"}" >/dev/null
     mcp call tab_activate "{\"tab_id\": \"${B_ID}\"}" >/dev/null
 fi
 
-step "background tab is discarded, then wakes on activation"
-mcp call page_wait_for "{\"tab_id\": \"${A_ID}\", \"text\": \"alpha content\", \"timeout_ms\": 15000}" >/dev/null || fail "page A never loaded"
-for _ in $(seq 1 30); do
-    plain_log | grep -q "discarded idle tabs" && break; sleep 0.5
+step "an in-flight tool protects its background tab until completion"
+mcp call tab_activate "{\"tab_id\": \"${A_ID}\"}" >/dev/null || fail "could not prepare tab A for tool protection probe"
+mcp call page_wait_for "{\"tab_id\": \"${A_ID}\", \"text\": \"alpha content\", \"timeout_ms\": 15000}" >/dev/null || fail "tool protection page did not load"
+mcp call page_evaluate "{\"tab_id\": \"${A_ID}\", \"expression\": \"new Promise(resolve => { window.__diveLeaseProbeStarted = true; setTimeout(() => resolve('lease complete'), 12000); })\"}" >"${DATA_DIR}/tool-wait.json" 2>&1 &
+TOOL_WAIT=$!
+STARTED="false"
+for _ in $(seq 1 20); do
+    STARTED=$(mcp call page_evaluate "{\"tab_id\": \"${A_ID}\", \"expression\": \"window.__diveLeaseProbeStarted === true\"}") || fail "tool protection handshake failed"
+    [[ "${STARTED}" == "true" ]] && break
+    sleep 0.1
 done
-plain_log | grep -q "discarded idle tabs" || fail "sweep never discarded the background tab"
+[[ "${STARTED}" == "true" ]] || fail "long-running tool did not start"
+mcp call tab_activate "{\"tab_id\": \"${B_ID}\"}" >/dev/null || fail "could not background the protected tab"
+sleep 3
+kill -0 "${TOOL_WAIT}" 2>/dev/null || fail "tool completed before its protection could be checked"
+[[ "$(tab_state "${A_ID}")" == "active" ]] || fail "in-flight tool's renderer was discarded"
+wait "${TOOL_WAIT}" || fail "protected tool did not finish: $(cat "${DATA_DIR}/tool-wait.json")"
+TOOL_WAIT=""
+python3 -c 'import json,sys; assert json.load(open(sys.argv[1])) == "lease complete"' "${DATA_DIR}/tool-wait.json" || fail "protected tool returned an unexpected result"
+
+step "background tab is discarded after the tool, then wakes on activation"
+for _ in $(seq 1 30); do
+    [[ "$(tab_state "${A_ID}")" == "discarded" ]] && break; sleep 0.5
+done
+[[ "$(tab_state "${A_ID}")" == "discarded" ]] || fail "sweep never discarded background tab A"
 mcp call tab_activate "{\"tab_id\": \"${A_ID}\"}" >/dev/null || fail "waking tab A failed"
 mcp call page_wait_for "{\"tab_id\": \"${A_ID}\", \"text\": \"alpha content\", \"timeout_ms\": 15000}" >/dev/null || fail "tab A did not come back with its page"
 
