@@ -1,264 +1,123 @@
 <p align="center">
-  <img src="assets/screenshots/dive-logo.png" alt="Dive Browser Logo" width="180" />
+  <img src="assets/screenshots/dive-logo.png" alt="Dive" width="140" />
 </p>
 
-<h1 align="center">Dive Browser</h1>
+<h1 align="center">Dive</h1>
 
 <p align="center">
-  <strong>The developer-first desktop browser engineered for speed, AI autonomy, and distraction-free privacy.</strong>
+  <strong>A Chromium browser built for people who build the web.</strong><br />
+  DevTools you can drive from a chat, an AI agent that sees the page, privacy that ships in the engine, and a screen studio for the demo you owe someone.
 </p>
 
 <p align="center">
-  <a href="https://github.com/ronaldxdale09/dive-browser/actions/workflows/ci.yml"><img src="https://github.com/ronaldxdale09/dive-browser/actions/workflows/ci.yml/badge.svg" alt="CI Status" /></a>
-  <a href="https://tauri.app"><img src="https://img.shields.io/badge/Tauri-v2.11-24C8DB?style=flat-square&logo=tauri&logoColor=white" alt="Tauri v2" /></a>
-  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/Rust-2024%20Edition-DEA584?style=flat-square&logo=rust&logoColor=black" alt="Rust 2024" /></a>
-  <a href="https://react.dev"><img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React 19" /></a>
-  <a href="https://bitbucket.org/chromiumembedded/cef"><img src="https://img.shields.io/badge/Engine-Chromium%20(CEF)-4285F4?style=flat-square&logo=googlechrome&logoColor=white" alt="CEF" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="License: MIT" /></a>
+  <a href="https://github.com/ronaldxdale09/dive-browser/releases/latest"><img src="https://img.shields.io/github/v/release/ronaldxdale09/dive-browser?style=flat-square&label=Download&color=0f8f7e" alt="Latest release" /></a>
+  <a href="https://github.com/ronaldxdale09/dive-browser/actions/workflows/ci.yml"><img src="https://github.com/ronaldxdale09/dive-browser/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://bitbucket.org/chromiumembedded/cef"><img src="https://img.shields.io/badge/Engine-Chromium%20151-4285F4?style=flat-square&logo=googlechrome&logoColor=white" alt="Chromium 151" /></a>
+  <a href="https://tauri.app"><img src="https://img.shields.io/badge/Tauri-v2-24C8DB?style=flat-square&logo=tauri&logoColor=white" alt="Tauri v2" /></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/Rust-2024-DEA584?style=flat-square&logo=rust&logoColor=black" alt="Rust" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT" /></a>
 </p>
 
----
-
-## 🌟 Overview
-
-**Dive** is a native, keyboard-driven desktop browser built from the ground up for modern software engineers, technical founders, and designers.
-
-Powered by a high-performance **Rust + Chromium Embedded Framework (CEF)** core and an ultra-responsive **React 19 + Tailwind CSS** chrome, Dive bridges the gap between everyday web browsing and deep developer workflows. It embeds an in-process Chrome DevTools Protocol (CDP) engine, a native Model Context Protocol (MCP) server for local AI agents, automated Playwright recording, an OpenAPI schema generator, and built-in privacy protections with zero extension overhead.
-
----
-
-## 📸 Visual Showcase
-
-### Primary Interface & Dark Theme
 <p align="center">
-  <img src="assets/screenshots/dark-normal-protected.png" alt="Dive Browser Interface (Dark Theme)" width="100%" />
+  <img src="assets/screenshots/hero-dark.png" alt="Dive with the Network dock open on a GitHub repository" width="100%" />
 </p>
 
-### Built-in DivePrivacy™ & Distraction-Free YouTube
-<p align="center">
-  <img src="assets/screenshots/dark-youtube-active.png" alt="Dive Distraction-Free YouTube Player" width="100%" />
-</p>
+Dive is a native macOS browser on the Chromium Embedded Framework with a Rust core and a React chrome. It is fast, keyboard-first and private by default, and it turns the browser into a tool an engineer, a designer or an AI agent can operate.
 
-### Workspace Rule Precedence & Request Interception
-<p align="center">
-  <img src="assets/screenshots/dark-custom-rule-precedence.png" alt="Custom Mock & Rewrite Rules" width="100%" />
-</p>
+## Why Dive
 
-### Appearance & Privacy Settings
-<p align="center">
-  <img src="assets/screenshots/dark-privacy-settings.png" alt="Settings Dialog and Privacy Controls" width="100%" />
-</p>
+- **An agent that works the page.** Ask in the side panel and the agent reads the tab, clicks, types, inspects requests and reports back. Bring your own key for Anthropic, OpenAI, Google, OpenRouter, Groq, Mistral, DeepSeek, xAI and more, or run fully local with Ollama or LM Studio.
+- **MCP built in.** Every tab is available to Claude Code, Cursor or any Model Context Protocol client over localhost with a bearer token: `page_state`, `page_markdown`, `page_click`, `page_type`, `page_screenshot`, `network_list`, `console_tail`, `tab_open` and more.
+- **A developer dock, not a bolt-on.** Network with request bodies, SSE and WebSocket frames and HAR export. Console, storage, request rules, accessibility audits with axe-core, Core Web Vitals, page meta, and an OpenAPI 3.1 spec inferred from the JSON traffic you just watched. Full Chrome DevTools one shortcut away.
+- **Device simulator.** Real phone and tablet frames, user agents, pixel ratios, touch, and Offline, Slow 3G and Fast 3G throttling.
+- **DivePrivacy in the engine.** Ads, trackers and fingerprinting scripts are blocked in the Rust request pipeline with no extension. Per-site controls and a distraction-free video mode that keeps audio running in the background.
+- **DiveScreen.** Record any tab as video or GIF, or import a recording, then crop, zoom, add cursor effects and export a clip that looks like a product demo.
+- **Live subtitles.** On-device captions for any tab with whisper.cpp. Nothing leaves the machine.
+- **Workspaces and profiles.** Separate cookies, tabs and mock rules per client or project, switchable with a keystroke. Profiles keep whole identities apart.
+- **Mock and rewrite rules.** Intercept requests per workspace: mock a response, rewrite a host, or fail a call to see how the UI copes.
+- **Light on memory.** Tabs idle for an hour drop their Chromium process and keep their chip, favicon, scroll position and history. Everything restores on click.
+- **Bug reports with proof.** One shortcut captures a screenshot, the console problems and the failed requests into a Markdown report you can hand to a teammate.
+- **Signed, notarized, self-updating.** Releases are notarized by Apple and verified in-app with a signed updater manifest.
 
-### Light Theme & Compact Navigation
-<p align="center">
-  <img src="assets/screenshots/light-normal-protected.png" alt="Dive Browser Interface (Light Theme)" width="49%" />
-  <img src="assets/screenshots/dark-compact-protected.png" alt="Compact Navigation Rail" width="49%" />
-</p>
+## Screenshots
 
----
+<table>
+  <tr>
+    <td width="50%"><img src="assets/screenshots/agent.png" alt="Agent panel answering a question about the open repository" /><br /><sub><b>Agent</b> reads the page and answers, here through a local Ollama model.</sub></td>
+    <td width="50%"><img src="assets/screenshots/divescreen.png" alt="DiveScreen editor with a zoom region on a recording" /><br /><sub><b>DiveScreen</b> turns a tab recording into a demo with zooms and cursor effects.</sub></td>
+  </tr>
+  <tr>
+    <td><img src="assets/screenshots/simulator.png" alt="Device simulator showing an iPhone frame" /><br /><sub><b>Device simulator</b> with real frames, user agents and throttling.</sub></td>
+    <td><img src="assets/screenshots/privacy.png" alt="DivePrivacy popover on a news site" /><br /><sub><b>DivePrivacy</b> blocking ads and trackers per site, in the engine.</sub></td>
+  </tr>
+  <tr>
+    <td><img src="assets/screenshots/palette.png" alt="Command palette listing tabs and commands" /><br /><sub><b>Command palette</b> for tabs, history, bookmarks and every command.</sub></td>
+    <td><img src="assets/screenshots/light.png" alt="Paper theme on MDN" /><br /><sub><b>Themes</b> from Graphite to Paper, or your own palette.</sub></td>
+  </tr>
+</table>
 
-## ⚡ Key Features
+## Shortcuts
 
-### 1. 🧠 Built-In AI Agent & Native MCP Server
-- **Sidecar Agent**: Integrated AI assistant with Anthropic & OpenAI streaming providers, live tool loop, page context awareness, and error diagnosis.
-- **Model Context Protocol (MCP)**: Exposes browser capabilities (`page_state`, `page_markdown`, `page_click`, `page_type`, `network_list`, `console_tail`, `page_report`) over localhost HTTP with strict Bearer token authentication for Claude Desktop, Cursor, or custom agents.
-- **Playwright Test Export**: Records manual browsing interactions or agent actions and exports deterministic Playwright test scripts with locator recommendations.
-
-### 2. 🛡️ Native DivePrivacy™ Engine
-- **Zero Extension Overhead**: Kernel-level network request filtering compiled directly into the Rust request pipeline.
-- **Anti-Adblock & Tracker Shield**: Blocks surveillance beacons, fingerprinting scripts, and telemetry without breaking sites.
-- **Distraction-Free Video**: Embedded container mode for video platforms stripping pre-roll ads, banners, and algorithmic feeds while preserving audio playback in background tabs.
-
-### 3. 🛠️ Deep Developer Tooling
-- **In-Process CDP Engine**: Direct Chromium DevTools Protocol client with sub-5ms p95 dispatch latency.
-- **Network Panel & Traffic Analysis**: Capture full request lifecycles, inspect headers, view SSE/WebSocket frames, and export sessions as **HAR 1.2**.
-- **Automated OpenAPI 3.1 Spec Generation**: Analyzes intercepted JSON API traffic and infers JSON Schema specifications for backend development.
-- **Device Simulator**: Honest mobile and tablet viewports, customizable user agents, device pixel ratios, and network throttling presets (Offline, Slow 3G, Fast 3G).
-- **Accessibility & Web Vitals**: Built-in **axe-core** accessibility auditor and Core Web Vitals (LCP, FID, CLS, INP) performance inspector.
-
-### 4. 🗂️ Memory Saver & Workspace Management
-- **Intelligent 30-Minute Idle Sweeping**: Automatically tears down native CEF webview processes for inactive tabs while keeping their tab chip, favicon, and session state.
-- **State & Scroll Restoration**: Reactivating a sleeping tab immediately restores exact scroll position, viewport state, and navigation history from local SQLite.
-- **Isolated Workspaces**: Separate tabs, cookies, and mock rules across personal, work, and client projects with instant keyboard switching.
-
-### 5. 🚀 Production Push Update & Release System
-- **Verified Release Pipeline**: One click or one tag. The tag is created by the publish step and the version bump is committed only after the release is published and its assets verified, so a failed run leaves nothing behind.
-- **Seamless In-App Updates**: Built-in cryptographic verification via Tauri updater with zero-disruption background update checks and one-click restart.
-
----
-
-## 🏗️ Architecture
-
-```
-dive-browser/
-├── apps/
-│   └── desktop/                  # Desktop application shell
-│       ├── src/                  # React 19 UI Chrome (Tailwind, Zustand)
-│       └── src-tauri/            # Tauri v2 Desktop Host & CEF Lifecycles (Rust)
-├── crates/
-│   ├── dive-agent/               # AI Agent runner, dialect parsing, tool dispatch
-│   ├── dive-cdp/                 # High-speed in-process CDP client & transport
-│   ├── dive-core/                # SQLite WAL database, migrations & event bus
-│   └── dive-mcp/                 # Model Context Protocol HTTP Server
-├── tests/
-│   └── e2e/                      # `dive-integration`: multi-tier integration & stress suites
-├── vendor/
-│   └── tauri-runtime-cef/        # Patched fork of Tauri's CEF runtime (see its UPSTREAM.md)
-├── docs/                         # Architecture plan and design notes
-├── scripts/                      # Live qualification probes, benchmarks, release tooling
-└── .github/
-    └── workflows/                # CI & Release GitHub Actions
-```
-
-`vendor/tauri-runtime-cef` is Tauri's `feat/cef` runtime with local patches for
-graceful CEF window teardown, native permission enforcement and IPC caller
-provenance; `vendor/tauri-runtime-cef/UPSTREAM.md` records the pinned revision
-and every divergence.
-
----
-
-## ⌨️ Essential Keyboard Shortcuts
-
-| Shortcut (macOS) | Action |
+| Shortcut | Action |
 |---|---|
-| `⌘ T` | Open New Tab |
-| `⌘ W` | Close Active Tab |
-| `⌘ ⇧ T` | Restore Last Closed Tab |
-| `⌘ 1` – `⌘ 9` | Switch to Tab 1–9 |
-| `⌘ K` or `⌘ L` | Open Command Palette / Omnibar |
-| `⌘ ⇧ R` | Start / Stop Video & GIF Tab Recording |
-| `⌘ ⌥ I` | Toggle Developer Dock |
-| `⌘ ⌥ A` | Toggle AI Sidecar Agent |
-| `⌘ ⌥ M` | Toggle Device Simulator |
-| `⌘ F` | Find in Page |
-| `⌘ +` / `⌘ -` / `⌘ 0` | Per-Tab Zoom In / Out / Reset |
+| `⌘ K` | Command palette |
+| `⌘ L` | Address bar |
+| `⌘ T` / `⌘ W` / `⌘ ⇧ T` | New, close, reopen tab |
+| `⌘ N` / `⌘ ⌥ N` | New window, move tab to its own window |
+| `⌘ 1` – `⌘ 9` | Switch workspace |
+| `⌘ J` | Agent |
+| `⌘ ⇧ D` | Developer dock |
+| `⌘ ⌥ I` | Chrome DevTools |
+| `⌘ ⇧ M` | Device simulator |
+| `⌘ ⇧ R` | Record tab |
+| `⌘ ⇧ S` | Capture full page |
+| `⌘ ⇧ U` | Live subtitles |
+| `⌘ ⇧ B` | Bug report |
+| `⌘ ⇧ N` | New workspace |
+| `⌘ /` | Every shortcut, all editable in Settings |
 
----
+## Install
 
-## 🚀 Getting Started
+Download the DMG from the [latest release](https://github.com/ronaldxdale09/dive-browser/releases/latest). macOS 13 or newer on Apple Silicon. Dive checks for updates and installs them in the background.
 
-### Prerequisites
-- **macOS** 13+ (Apple Silicon or Intel)
-- **Node.js** $\ge$ 20 & **pnpm** $\ge$ 10.33.0
-- **Rust** 1.98+ (2024 edition, matching `rust-version` in `Cargo.toml`)
-- **CMake** & **Ninja** (required to build the native CEF bindings and whisper.cpp)
+## Connect an agent
 
-```bash
-# macOS dependencies via Homebrew
-brew install cmake ninja pnpm
-```
-
-### Installation & Development
-
-```bash
-# 1. Clone repository
-git clone https://github.com/ronaldxdale09/dive-browser.git
-cd dive-browser
-
-# 2. Install workspace dependencies
-pnpm install
-
-# 3. Choose where the Chromium Embedded Framework lives (one-time download, ~500 MB unpacked)
-export CEF_PATH="$HOME/.local/share/cef"
-
-# 4. Start local development (Vite + Tauri dev mode)
-pnpm dev
-```
-
-The first build compiles `libcef_dll_wrapper` with CMake + Ninja and
-downloads the pinned CEF binary distribution into `CEF_PATH` (CI uses `.cef/`
-in the checkout). Leave `CEF_PATH` set for every later build so it is reused
-rather than re-downloaded into `target/`.
-
-#### Lighter builds
-
-```bash
-# UI-only build on the system webview, no CEF toolchain needed
-cargo run -p dive-desktop --no-default-features --features wry
-
-# Skip the whisper.cpp toolchain (live subtitles become unavailable)
-cargo build -p dive-desktop --no-default-features --features cef
-```
-
-### Where data lives
-
-Dive keeps everything under `~/Library/Application Support/app.dive.browser/`:
-the SQLite store, per-workspace Chromium profiles (`profiles/`), the MCP bearer
-token (`mcp-token`, user-readable only) and downloaded speech models
-(`models/`). Live subtitles fetch whisper.cpp models from Hugging Face on first
-use and verify their pinned SHA-256: `tiny` (75 MB), `base` (141 MB),
-`small` (465 MB) or `medium` (1.4 GB).
-
-| Variable | Effect |
-|---|---|
-| `DIVE_DATA_DIR` | Use another data directory (a private profile for tests) |
-| `DIVE_MCP_PORT` | MCP server port; default `7391`, `0` disables the server |
-| `DIVE_USE_MOCK_KEYCHAIN=1` | Skip the macOS keychain for throwaway instances (no Safe Storage prompt) |
-| `DIVE_OPEN_URL` | Open this URL (or several, whitespace-separated) at launch, like passing them as arguments |
-
-### Connecting an agent over MCP
-
-The server listens on `127.0.0.1:7391` and requires the bearer token from the
-data directory. Register it with Claude Code:
+Dive serves MCP on `127.0.0.1:7391` and requires the token written to its data directory.
 
 ```bash
 claude mcp add --transport http dive http://127.0.0.1:7391/mcp \
   --header "Authorization: Bearer $(cat ~/Library/Application\ Support/app.dive.browser/mcp-token)"
 ```
 
-Cursor and other clients take the same URL and `Authorization` header in their
-MCP server settings.
+Cursor and other clients take the same URL and header. Settings → Developer shows the token path and the current port.
 
----
+## Build from source
 
-## 🧪 Quality Gates & Testing
-
-Dive Browser enforces strict zero-tolerance quality gates across all Rust and TypeScript layers:
+Needs Node 20+, pnpm 10, Rust 1.98+, CMake and Ninja.
 
 ```bash
-# Run complete verification suite (Fmt, Typecheck, Lint, Vitest, Vite Build, Clippy, Cargo Tests)
-pnpm check
-
-# Run individual test suites
-pnpm test                       # Vitest (React chrome)
-pnpm typecheck                  # TypeScript strict compilation
-cargo test --workspace          # Rust unit tests in every crate
-cargo test -p dive-integration  # Multi-tier integration suites in tests/e2e
-cargo clippy --workspace --all-targets -- -D warnings
+brew install cmake ninja pnpm
+git clone https://github.com/ronaldxdale09/dive-browser.git && cd dive-browser
+pnpm install
+export CEF_PATH="$HOME/.local/share/cef"   # CEF is downloaded here once (~500 MB)
+pnpm dev
 ```
 
-The live qualification probes (real bundle driven through its own MCP server,
-memory and startup benchmarks) are documented in
-[`scripts/README.md`](scripts/README.md).
+`pnpm check` runs the full gate: format, typecheck, lint, Vitest, Vite build, Clippy with warnings denied, and every Rust test. Build variants and the environment knobs (`DIVE_DATA_DIR`, `DIVE_MCP_PORT`, `DIVE_USE_MOCK_KEYCHAIN`, `DIVE_OPEN_URL`) are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
----
+## Under the hood
 
-## 🚢 Releasing & Push Updates
-
-A release is proven before the repository records it. The version is resolved in CI, the tag is created by the publish step, and the version bump lands on `main` only after the release exists and its assets have been verified — so a failed run leaves no tag and no commit behind.
-
-**Actions → `release` → Run workflow**, pick `patch`, `minor`, `major` or `rc`. Or push a tag:
-
-```bash
-git tag v0.1.5 && git push origin v0.1.5
-
-# Preview what the next version would be (read-only)
-pnpm release:next --kind patch
+```
+apps/desktop/          React 19 + Tailwind chrome, Tauri v2 host (Rust)
+crates/dive-core       SQLite store, migrations, event bus
+crates/dive-cdp        In-process Chrome DevTools Protocol client
+crates/dive-mcp        Model Context Protocol server
+crates/dive-agent      Agent runner and provider streaming
+vendor/tauri-runtime-cef   Tauri's CEF runtime with local patches (see UPSTREAM.md)
 ```
 
-Refer to [`RELEASING.md`](RELEASING.md) for the pipeline, the required signing secrets, and how to add a second architecture.
+Data lives in `~/Library/Application Support/app.dive.browser/`. Releases are cut with the script in `scripts/release/` and documented in [RELEASING.md](RELEASING.md).
 
----
+## Contributing and license
 
-## 🤝 Contributing
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the development setup, the quality
-gate every change has to pass, and the repo conventions. Security problems go
-through [`SECURITY.md`](SECURITY.md), not the public issue tracker.
-
-## 📄 License
-
-Dive Browser is licensed under the [MIT License](LICENSE).
-
-Dive redistributes third-party components under their own terms, notably the
-Chromium Embedded Framework (BSD-3-Clause) and Chromium itself.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and conventions, and [SECURITY.md](SECURITY.md) for reporting vulnerabilities. Dive is MIT licensed and redistributes the Chromium Embedded Framework under its BSD-3-Clause license.

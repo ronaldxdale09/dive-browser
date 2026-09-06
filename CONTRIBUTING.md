@@ -21,6 +21,28 @@ The first build downloads and compiles against CEF, which takes a while. CI
 caches it under `.cef` keyed on `Cargo.lock`; locally, set `CEF_PATH` to reuse
 a copy you already have.
 
+Lighter builds when you do not need the whole engine:
+
+```bash
+# UI-only build on the system webview, no CEF toolchain needed
+cargo run -p dive-desktop --no-default-features --features wry
+
+# Skip the whisper.cpp toolchain (live subtitles become unavailable)
+cargo build -p dive-desktop --no-default-features --features cef
+```
+
+Dive keeps its data under `~/Library/Application Support/app.dive.browser/`:
+the SQLite store, per-workspace Chromium profiles (`profiles/`), the MCP bearer
+token (`mcp-token`, user-readable only) and downloaded speech models
+(`models/`). These variables point a throwaway instance elsewhere:
+
+| Variable | Effect |
+|---|---|
+| `DIVE_DATA_DIR` | Use another data directory (a private profile for tests) |
+| `DIVE_MCP_PORT` | MCP server port; default `7391`, `0` disables the server |
+| `DIVE_USE_MOCK_KEYCHAIN=1` | Skip the macOS keychain for throwaway instances (no Safe Storage prompt) |
+| `DIVE_OPEN_URL` | Open this URL (or several, whitespace-separated) at launch, like passing them as arguments |
+
 ## The check that has to pass
 
 One command runs everything CI runs, in the same order:
