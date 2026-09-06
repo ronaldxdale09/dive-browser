@@ -234,12 +234,14 @@ if [[ "${LIVE_SKIP_YOUTUBE:-0}" != "1" ]]; then
     YOUTUBE_ID=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"${YOUTUBE}")
     mcp call tab_activate "{\"tab_id\": \"${YOUTUBE_ID}\"}" >/dev/null || fail "YouTube tab could not be activated"
     mcp call page_wait_for "{\"tab_id\": \"${YOUTUBE_ID}\", \"locator\": \"video\", \"load\": true, \"timeout_ms\": 45000}" >/dev/null || fail "YouTube video element did not load"
+    # Use the persistent transport control: the large aria-label="Play" overlay
+    # can disappear between discovery and click during player initialization.
     # A script-level play() during YouTube initialization can be immediately
     # cancelled by the player. Exercise its visible control and require actual
     # sustained playback; a fraction of a second before pausing is not success.
-    mcp call page_wait_for "{\"tab_id\": \"${YOUTUBE_ID}\", \"locator\": \"role=button[name=\\\"Play\\\"]\", \"timeout_ms\": 15000}" >/dev/null || fail "YouTube Play control did not become available"
+    mcp call page_wait_for "{\"tab_id\": \"${YOUTUBE_ID}\", \"locator\": \"css=.ytp-play-button\", \"timeout_ms\": 15000}" >/dev/null || fail "YouTube Play control did not become available"
     mcp call page_evaluate "{\"tab_id\": \"${YOUTUBE_ID}\", \"expression\": \"document.querySelector('video').muted=true\"}" >/dev/null || fail "could not mute the test video"
-    mcp call page_click "{\"tab_id\": \"${YOUTUBE_ID}\", \"locator\": \"role=button[name=\\\"Play\\\"]\"}" >/dev/null || fail "YouTube Play control could not be clicked"
+    mcp call page_click "{\"tab_id\": \"${YOUTUBE_ID}\", \"locator\": \"css=.ytp-play-button\"}" >/dev/null || fail "YouTube Play control could not be clicked"
     PLAYBACK=$(mcp call page_evaluate "{\"tab_id\": \"${YOUTUBE_ID}\", \"expression\": \"(async()=>{const v=document.querySelector('video');if(!v)throw new Error('video missing');const start=v.currentTime;const end=performance.now()+10000;while(performance.now()<end){if(document.querySelector('video')!==v)throw new Error('player replaced video during verification');if(v.currentTime>start+1.5&&v.readyState>=2&&!v.paused)return {advanced:true,currentTime:v.currentTime,readyState:v.readyState,paused:v.paused};await new Promise(r=>setTimeout(r,100))}return {advanced:false,currentTime:v.currentTime,readyState:v.readyState,paused:v.paused,error:v.error?.message}})()\"}") || fail "YouTube playback evaluation failed"
     python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["advanced"] and v["readyState"] >= 2 and not v["paused"], v' <<<"${PLAYBACK}" || fail "YouTube did not sustain playback: ${PLAYBACK}"
     echo "   ${PLAYBACK}"
