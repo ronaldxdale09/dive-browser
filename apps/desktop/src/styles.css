@@ -29,6 +29,9 @@
   --color-link: #8ab4f8;
   --color-danger: #f0715e;
   --color-danger-ink: #111111;
+  /* Status colours for metrics, log levels and audit impact. */
+  --color-good: #6cc493;
+  --color-warn: #f0b35e;
   --font-sans: "Geist Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
   --radius-pill: 999px;
@@ -58,6 +61,9 @@
   --color-highlight-ink: #ffffff;
   --color-highlight-soft: #d8f1ec;
   --color-link: #1a0dab;
+  --color-danger: #c2361f;
+  --color-good: #1b7f4f;
+  --color-warn: #9a5b00;
   --color-danger-ink: #111111;
 }
 
@@ -78,6 +84,9 @@
     --color-highlight-ink: #ffffff;
     --color-highlight-soft: #d8f1ec;
   --color-link: #1a0dab;
+  --color-danger: #c2361f;
+  --color-good: #1b7f4f;
+  --color-warn: #9a5b00;
     --color-danger-ink: #111111;
   }
 }

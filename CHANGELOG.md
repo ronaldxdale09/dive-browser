@@ -50,6 +50,11 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- The light theme draws status colours for light: Web Vitals ratings,
+  console warnings, audit impact, response statuses and errors were the
+  dark palette's pale green, amber and coral on white. Console entries
+  for errors, dates and maps keep their description rather than a
+  property dump.
 - Onboarding's profile step no longer greys out Continue while the name
   field shows the profile's own name as a placeholder; leaving it empty
   keeps that name.

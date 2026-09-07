@@ -9,8 +9,8 @@ import { InternalPageNote, isInternalPage } from "./InternalPageNote";
 
 const IMPACT: Record<string, string> = {
   critical: "text-danger",
-  serious: "text-[#f0715e]",
-  moderate: "text-[#f0b35e]",
+  serious: "text-danger",
+  moderate: "text-warn",
   minor: "text-ink-2",
 };
 

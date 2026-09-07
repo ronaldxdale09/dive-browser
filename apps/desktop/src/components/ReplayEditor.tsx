@@ -85,7 +85,7 @@ export function ReplayEditor({ tabId, requestId, onClose }: { tabId: string; req
               <input type="checkbox" checked={draft.with_cookies} onChange={(e) => setDraft({ ...draft, with_cookies: e.target.checked })} className="accent-highlight" />
               Send this tab's cookies
             </label>
-            {draft.with_cookies && !draft.url.includes(`//${draft.captured_host}`) && <span className="text-[11px] text-[#f0b35e]">cookies only go to {draft.captured_host}</span>}
+            {draft.with_cookies && !draft.url.includes(`//${draft.captured_host}`) && <span className="text-[11px] text-warn">cookies only go to {draft.captured_host}</span>}
             <span className="flex-1" />
             <button type="button" disabled={busy} onClick={() => void send()} className="flex h-7 items-center gap-1.5 rounded-full bg-accent px-3 text-[11px] font-medium text-accent-ink disabled:opacity-40">
               <Icon icon={Play} size={11} /> {busy ? "Sending…" : "Send"}
@@ -96,7 +96,7 @@ export function ReplayEditor({ tabId, requestId, onClose }: { tabId: string; req
       {response && (
         <div className="rounded-lg border border-line bg-surface p-2">
           <div className="mb-1 flex items-center gap-3 font-mono text-[11px]">
-            <span className={response.status >= 400 ? "text-danger" : response.status >= 300 ? "text-[#f0b35e]" : "text-[#6cc493]"}>{response.status}</span>
+            <span className={response.status >= 400 ? "text-danger" : response.status >= 300 ? "text-warn" : "text-good"}>{response.status}</span>
             <span className="text-ink-3">{response.elapsed_ms} ms</span>
           </div>
           <details className="mb-1">

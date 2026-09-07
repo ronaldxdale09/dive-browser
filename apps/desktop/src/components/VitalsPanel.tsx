@@ -17,7 +17,7 @@ export function rate(metric: keyof Vitals, value: number | null | undefined): Ra
   return value <= th[0] ? "good" : value <= th[1] ? "needs-improvement" : "poor";
 }
 
-const COLOR: Record<Rating, string> = { good: "text-[#6cc493]", "needs-improvement": "text-[#f0b35e]", poor: "text-danger", unknown: "text-ink-3" };
+const COLOR: Record<Rating, string> = { good: "text-good", "needs-improvement": "text-warn", poor: "text-danger", unknown: "text-ink-3" };
 
 function fmt(metric: keyof Vitals, v: number | null | undefined) {
   if (v === null || v === undefined) return "—";

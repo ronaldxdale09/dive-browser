@@ -54,7 +54,7 @@ function statusClass(r: RequestRow) {
   if (r.error) return "text-danger";
   if (r.status === null) return "text-ink-3";
   if (r.status >= 400) return "text-danger";
-  if (r.status >= 300) return "text-[#f0b35e]";
+  if (r.status >= 300) return "text-warn";
   return "text-ink-2";
 }
 

@@ -111,7 +111,8 @@ export const MIX = {
   light: { surface2: 3, surface3: 7, line: 7, line2: 14, ink2: 65, ink3: 58, accent: 100, soft: 22 },
 } as const;
 
-const DANGER = "#f0715e";
+/** Errors read on both grounds: a coral on dark, a deeper red on light. */
+const DANGER: Record<Scheme, string> = { dark: "#f0715e", light: "#c2361f" };
 
 /** Graphite's stylesheet literals, kept exact rather than derived. */
 const GRAPHITE: Record<Scheme, Palette> = {
@@ -130,7 +131,7 @@ const GRAPHITE: Record<Scheme, Palette> = {
     highlight: "#7fd8c8",
     highlightInk: "#111111",
     highlightSoft: "#163430",
-    danger: DANGER,
+    danger: DANGER.dark,
     dangerInk: "#111111",
   },
   light: {
@@ -148,7 +149,7 @@ const GRAPHITE: Record<Scheme, Palette> = {
     highlight: "#0f8f7e",
     highlightInk: "#ffffff",
     highlightSoft: "#d8f1ec",
-    danger: DANGER,
+    danger: DANGER.light,
     dangerInk: "#111111",
   },
 };
@@ -175,7 +176,7 @@ export function derivePalette(seeds: Seeds, scheme: Scheme): Palette {
     highlight,
     highlightInk: accentInk(highlight),
     highlightSoft: mix(highlight, m.soft, ground),
-    danger: DANGER,
+    danger: DANGER[scheme],
     dangerInk: "#111111",
   };
   const surface = scheme === "dark" ? mix(ground, 100 - MIX.dark.surface, ink) : mix(ground, 20, "#ffffff");

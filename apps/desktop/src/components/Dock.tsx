@@ -83,7 +83,7 @@ function ConsoleTools() {
 const LEVEL_STYLE: Record<Level, string> = {
   debug: "text-ink-3",
   info: "text-ink",
-  warn: "text-[#f0b35e]",
+  warn: "text-warn",
   error: "text-danger",
 };
 

@@ -186,7 +186,10 @@ fn remote_object_text(obj: &Value) -> String {
 fn preview_text(preview: &Value) -> Option<String> {
     let properties = preview.get("properties")?.as_array()?;
     let subtype = preview["subtype"].as_str().unwrap_or("");
-    if matches!(subtype, "map" | "set" | "weakmap" | "weakset") {
+    // Only plain objects and arrays read better as their properties. An
+    // error is its message and stack, a date its text, a map its size: the
+    // engine's description already says so.
+    if !subtype.is_empty() && subtype != "array" {
         return preview["description"].as_str().map(str::to_owned);
     }
     let array = subtype == "array";
@@ -236,6 +239,11 @@ mod tests {
         assert_eq!(remote_object_text(&arr), "[4, 5, …]");
         let map = json!({"type":"object","subtype":"map","description":"Map(1)","preview":{"type":"object","subtype":"map","description":"Map(1)","overflow":false,"properties":[]}});
         assert_eq!(remote_object_text(&map), "Map(1)");
+        // An error keeps its message and stack rather than {stack: …, message: …}.
+        let error = json!({"type":"object","subtype":"error","className":"Error","description":"Error: boom\n    at a.js:1",
+            "preview":{"type":"object","subtype":"error","description":"Error: boom\n    at a.js:1","overflow":false,
+            "properties":[{"name":"stack","type":"string","value":"Error: boom\n    at a.js:1"},{"name":"message","type":"string","value":"boom"}]}});
+        assert_eq!(remote_object_text(&error), "Error: boom\n    at a.js:1");
         // No preview (a buffered message replayed later): the description still stands.
         assert_eq!(
             remote_object_text(&json!({"type":"object","description":"Object"})),
