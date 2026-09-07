@@ -4,7 +4,7 @@ import { ipc } from "../lib/ipc";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { useBrowser } from "../store/browser";
 import { usePrivacy } from "../store/privacy";
-import { SettingsDialog, resolveSection } from "./SettingsDialog";
+import { SettingsDialog, resolveSection, visibleSections } from "./SettingsDialog";
 import { groupPermissions } from "./settings/Privacy";
 import { useUpdates } from "../store/updates";
 
@@ -250,6 +250,22 @@ describe("Site permissions", () => {
 
     finish();
     await waitFor(() => expect(select.disabled).toBe(false));
+  });
+});
+
+describe("private window", () => {
+  it("lists only the sections private mode can use, and no import", async () => {
+    expect(visibleSections(true).map((s) => s.id)).toEqual(["general", "appearance", "privacy", "developer", "shortcuts", "about"]);
+    expect(visibleSections(false)).toHaveLength(8);
+    (window as Window & { __DIVE_PRIVATE__?: boolean }).__DIVE_PRIVATE__ = true;
+    try {
+      render(<SettingsDialog />);
+      expect(screen.queryByRole("tab", { name: "Agent" })).toBeNull();
+      expect(screen.queryByRole("tab", { name: "Live subtitles" })).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Import" })).toBeNull();
+    } finally {
+      delete (window as Window & { __DIVE_PRIVATE__?: boolean }).__DIVE_PRIVATE__;
+    }
   });
 });
 

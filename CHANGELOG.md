@@ -47,6 +47,8 @@ bump may change behaviour.
 - HAR exports, OpenAPI specs and bug reports are named after the page and
   the time ("github.com requests 2026-09-07 18.19.30.har") instead of a
   timestamp with a random suffix.
+- Private windows' Settings no longer list the Agent and Live subtitles
+  sections or the import group, none of which can work there.
 - Bringing a tab back from its own window no longer deletes it: the popout
   window's close, raised by the reattach itself, was treated as closing the
   tab.

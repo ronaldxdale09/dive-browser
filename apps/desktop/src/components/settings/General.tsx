@@ -1,5 +1,6 @@
 import { Button, Group, Row, Segmented, Select, Switch, TextInput } from "../SettingsFields";
 import { useBrowser } from "../../store/browser";
+import { isPrivateWindow } from "../../lib/privateMode";
 import { KeepSitesActive } from "./KeepSitesActive";
 import { usePref } from "./usePref";
 
@@ -91,6 +92,7 @@ export function General() {
         )}
       </Group>
 
+      {!isPrivateWindow() && (
       <Group title="Import">
         <Row
           label="From another browser"
@@ -98,6 +100,7 @@ export function General() {
           control={<Button onClick={() => toggle("import", true)}>Import…</Button>}
         />
       </Group>
+      )}
       <Group title="Downloads">
         <Row
           label="Save files to"

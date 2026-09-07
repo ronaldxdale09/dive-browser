@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { isPrivateWindow } from "../lib/privateMode";
 import type { LucideIcon } from "lucide-react";
 import { ipc } from "../lib/ipc";
 import type { AppInfo } from "../lib/ipc";
@@ -47,6 +48,15 @@ const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
   { id: "about", label: "About", icon: Info },
 ];
 
+/**
+ * The sections a window can use. A private window has no agent and no
+ * subtitle models (both need what private mode withholds), so it does not
+ * list them.
+ */
+export function visibleSections(privateWindow: boolean = isPrivateWindow()): typeof SECTIONS {
+  return privateWindow ? SECTIONS.filter((s) => s.id !== "agent" && s.id !== "subtitles") : SECTIONS;
+}
+
 /** Settings: a section list on the left, one panel of settings on the right. */
 export function SettingsDialog() {
   useCoversContent(true);
@@ -72,8 +82,9 @@ export function SettingsDialog() {
   const onNavKey = (e: React.KeyboardEvent) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
-    const at = SECTIONS.findIndex((s) => s.id === section);
-    const next = SECTIONS[(at + (e.key === "ArrowDown" ? 1 : SECTIONS.length - 1)) % SECTIONS.length];
+    const sections = visibleSections();
+    const at = sections.findIndex((s) => s.id === section);
+    const next = sections[(at + (e.key === "ArrowDown" ? 1 : sections.length - 1)) % sections.length];
     if (next) setSection(next.id);
   };
 
@@ -95,7 +106,7 @@ export function SettingsDialog() {
           className="flex w-[188px] shrink-0 flex-col border-r border-line bg-ground p-2.5"
         >
           <h2 className="px-2 pt-1 pb-2.5 text-sm font-semibold">Settings</h2>
-          {SECTIONS.map((s) => (
+          {visibleSections().map((s) => (
             <button
               key={s.id}
               type="button"
@@ -117,7 +128,7 @@ export function SettingsDialog() {
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-12 shrink-0 items-center border-b border-line px-5">
-            <h3 className="text-sm font-semibold">{SECTIONS.find((s) => s.id === section)?.label}</h3>
+            <h3 className="text-sm font-semibold">{visibleSections().find((s) => s.id === section)?.label}</h3>
             <span className="flex-1" />
             <IconButton icon={X} label="Close settings" onClick={close} />
           </header>
