@@ -25,6 +25,8 @@
   --color-highlight: #7fd8c8;
   --color-highlight-ink: #111111;
   --color-highlight-soft: #163430;
+  /* A link as a search engine would draw it, for result previews. */
+  --color-link: #8ab4f8;
   --color-danger: #f0715e;
   --color-danger-ink: #111111;
   --font-sans: "Geist Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -55,6 +57,7 @@
   --color-highlight: #0f8f7e;
   --color-highlight-ink: #ffffff;
   --color-highlight-soft: #d8f1ec;
+  --color-link: #1a0dab;
   --color-danger-ink: #111111;
 }
 
@@ -74,6 +77,7 @@
     --color-highlight: #0f8f7e;
     --color-highlight-ink: #ffffff;
     --color-highlight-soft: #d8f1ec;
+  --color-link: #1a0dab;
     --color-danger-ink: #111111;
   }
 }

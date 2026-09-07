@@ -42,6 +42,14 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- The developer dock is capped by the window height, so a dock sized on a
+  tall window leaves at least a readable strip of page on a short one; the
+  resize handle stops at the same ceiling.
+- Vitals shows DOMContentLoaded and Load as pending instead of "0 ms"
+  while a page is still loading, and reads them again when it finishes.
+- The Meta panel's social card loads the page's `og:image` (relative paths
+  resolve against the page) and draws the search-result title in a link
+  colour that reads in both themes.
 - DiveScreen exports are named "clip (edited).mp4", counting up on a clash,
   instead of carrying a timestamp and a job id.
 - HAR exports, OpenAPI specs and bug reports are named after the page and

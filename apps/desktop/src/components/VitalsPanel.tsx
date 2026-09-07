@@ -40,12 +40,15 @@ const TILES: { key: keyof Vitals; label: string; hint: string }[] = [
 export function VitalsPanel() {
   const activeTab = useBrowser((s) => s.activeTab);
   const url = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.url);
-  const { data, error, refresh } = useTabData(activeTab, url, ipc.tabVitals, 600);
+  // Load-event timings only exist once the page has finished loading, so
+  // read again when the spinner stops instead of leaving them blank.
+  const loading = useBrowser((s) => Boolean(s.activeTab && s.loading[s.activeTab]));
+  const { data, error, refresh } = useTabData(activeTab, url, ipc.tabVitals, 600, loading);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-2 px-2 pb-1 text-[11px] text-ink-3">
-        <span>{data?.lcp_element ? `LCP element: ${data.lcp_element}` : "Reload the page to measure a fresh navigation."}</span>
+        <span>{loading ? "Measuring while the page loads…" : data?.lcp_element ? `LCP element: ${data.lcp_element}` : "Reload the page to measure a fresh navigation."}</span>
         <span className="flex-1" />
         <IconButton icon={RefreshCw} label="Re-read vitals" size={12} disabled={!activeTab} onClick={refresh} />
       </div>

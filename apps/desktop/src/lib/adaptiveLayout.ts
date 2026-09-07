@@ -32,3 +32,23 @@ export function useChromeLayout(): ChromeLayout {
   }, []);
   return layout;
 }
+
+/** The window's inner size, re-read on every resize (coalesced to a frame). */
+export function useViewportSize(): { width: number; height: number } {
+  const [size, setSize] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  useEffect(() => {
+    let frame = 0;
+    const update = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        setSize((current) => (current.width === window.innerWidth && current.height === window.innerHeight ? current : { width: window.innerWidth, height: window.innerHeight }));
+      });
+    };
+    window.addEventListener("resize", update, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+  return size;
+}

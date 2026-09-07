@@ -11,6 +11,21 @@ export interface SizeLimits {
 export const DOCK_LIMITS: SizeLimits = { min: 160, max: 600 };
 export const SIDECAR_LIMITS: SizeLimits = { min: 280, max: 720 };
 
+/** Chrome above the page: title bar and toolbar rows in `App`. */
+const CHROME_ABOVE_PAGE = 84;
+/** The least page height a resized panel must leave behind. */
+const PAGE_MIN_HEIGHT = 220;
+
+/**
+ * Dock limits for a window `innerHeight` px tall: a dock remembered from a
+ * tall window must not swallow the page on a short one, so its ceiling
+ * follows the window while the page keeps at least a readable strip.
+ */
+export function dockLimitsFor(innerHeight: number): SizeLimits {
+  const ceiling = Math.max(DOCK_LIMITS.min, innerHeight - CHROME_ABOVE_PAGE - PAGE_MIN_HEIGHT);
+  return { min: DOCK_LIMITS.min, max: Math.min(DOCK_LIMITS.max, ceiling) };
+}
+
 export function clampSize(value: number, { min, max }: SizeLimits): number {
   if (!Number.isFinite(value)) return min;
   return Math.round(Math.min(max, Math.max(min, value)));

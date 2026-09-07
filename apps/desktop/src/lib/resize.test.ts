@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DOCK_LIMITS, SIDECAR_LIMITS, clampSize, dragSize, nudgeSize } from "./resize";
+import { DOCK_LIMITS, SIDECAR_LIMITS, clampSize, dockLimitsFor, dragSize, nudgeSize } from "./resize";
 
 describe("clampSize", () => {
   it("keeps a size inside its limits and rounds to whole pixels", () => {
@@ -30,5 +30,16 @@ describe("nudgeSize", () => {
     expect(nudgeSize(240, -1, DOCK_LIMITS)).toBe(224);
     expect(nudgeSize(598, 1, DOCK_LIMITS)).toBe(600);
     expect(nudgeSize(300, 1, SIDECAR_LIMITS, 50)).toBe(350);
+  });
+});
+
+describe("dockLimitsFor", () => {
+  it("follows the window height so the page keeps a readable strip", () => {
+    expect(dockLimitsFor(1000)).toEqual(DOCK_LIMITS);
+    // 653 px tall: 84 px of chrome and 220 px of page leave 349 px for the dock.
+    expect(dockLimitsFor(653)).toEqual({ min: 160, max: 349 });
+    expect(clampSize(470, dockLimitsFor(653))).toBe(349);
+    // Never below the minimum, however short the window.
+    expect(dockLimitsFor(200).max).toBe(DOCK_LIMITS.min);
   });
 });

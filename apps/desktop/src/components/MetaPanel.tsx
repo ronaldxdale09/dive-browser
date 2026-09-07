@@ -4,6 +4,17 @@ import { useTabData } from "../lib/useTabData";
 import { useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
 
+/** An `og:image` as a crawler would fetch it: relative paths resolve against the page. */
+export function resolveImage(image: string | undefined, pageUrl: string): string | undefined {
+  if (!image) return undefined;
+  try {
+    const u = new URL(image, pageUrl);
+    return u.protocol === "https:" || u.protocol === "http:" ? u.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Head metadata with a search-result and a social-card preview. */
 export function MetaPanel() {
   const activeTab = useBrowser((s) => s.activeTab);
@@ -16,7 +27,7 @@ export function MetaPanel() {
 
   const ogTitle = meta.og["title"] ?? meta.title;
   const ogDesc = meta.og["description"] ?? meta.description ?? "";
-  const ogImage = meta.og["image"] ?? meta.twitter["image"];
+  const ogImage = resolveImage(meta.og["image"] ?? meta.twitter["image"], url);
   const host = (() => {
     try {
       return new URL(url).host;
@@ -57,7 +68,7 @@ export function MetaPanel() {
           <div className="mb-1 text-[10px] tracking-wider text-ink-3 uppercase">Search result</div>
           <div className="rounded-lg border border-line bg-surface-2 p-3">
             <div className="truncate text-[11px] text-ink-3">{host}</div>
-            <div className="truncate text-sm text-[#8ab4f8]">{meta.title || "(no title)"}</div>
+            <div className="truncate text-sm text-link">{meta.title || "(no title)"}</div>
             <div className="line-clamp-2 text-xs text-ink-2">{meta.description ?? "No description. Search engines will pick text from the page."}</div>
           </div>
         </div>

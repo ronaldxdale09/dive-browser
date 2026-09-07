@@ -48,8 +48,8 @@ const SCRIPT: &str = r"(function(){
     lcp: lcp ? lcp.startTime : null,
     cls: shifts.length ? cls : (lcps.length || fcp ? 0 : null),
     inp,
-    dcl: nav ? nav.domContentLoadedEventEnd : null,
-    load: nav ? nav.loadEventEnd : null,
+    dcl: nav && nav.domContentLoadedEventEnd ? nav.domContentLoadedEventEnd : null,
+    load: nav && nav.loadEventEnd ? nav.loadEventEnd : null,
     transfer_size: nav ? nav.transferSize : null,
     lcp_element: lcp ? desc(lcp.element) : null,
   });
@@ -69,16 +69,19 @@ pub async fn read(session: &CdpSession) -> AppResult<Vitals> {
 }
 
 /// Map the script's JSON to the struct, treating non-numbers as unknown.
+/// A navigation timing that has not happened yet reads as `0`, so a zero
+/// `DOMContentLoaded` or load time is "not yet", not a measurement.
 pub fn parse(v: &Value) -> Vitals {
     let num = |k: &str| v[k].as_f64();
+    let pending = |k: &str| num(k).filter(|ms| *ms > 0.0);
     Vitals {
         ttfb: num("ttfb"),
         fcp: num("fcp"),
         lcp: num("lcp"),
         cls: num("cls"),
         inp: num("inp"),
-        dcl: num("dcl"),
-        load: num("load"),
+        dcl: pending("dcl"),
+        load: pending("load"),
         transfer_size: num("transfer_size"),
         lcp_element: v["lcp_element"].as_str().map(str::to_owned),
     }
@@ -98,6 +101,17 @@ mod tests {
         assert_eq!(v.inp, None);
         assert_eq!(v.fcp, None);
         assert_eq!(v.lcp_element.as_deref(), Some("img#hero"));
+    }
+
+    #[test]
+    fn unfired_load_events_are_unknown_not_zero() {
+        let v = parse(&json!({"dcl": 0, "load": 0, "ttfb": 0}));
+        assert_eq!(v.dcl, None);
+        assert_eq!(v.load, None);
+        // TTFB of zero is a real (cached) answer.
+        assert_eq!(v.ttfb, Some(0.0));
+        let v = parse(&json!({"dcl": 549.0, "load": 1200.0}));
+        assert_eq!(v.load, Some(1200.0));
         assert_eq!(parse(&json!({})), Vitals::default());
     }
 }

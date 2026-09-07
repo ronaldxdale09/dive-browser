@@ -4,9 +4,10 @@ import { errorMessage } from "./errors";
 /**
  * Fetch something about the active tab whenever the tab or its URL changes,
  * with a manual refresh and stale-response protection. Shared by the dock
- * panels that read page state on demand.
+ * panels that read page state on demand. `revision` is any extra value
+ * whose change should re-read too, such as the tab finishing a load.
  */
-export function useTabData<T>(tabId: string | null, url: string | undefined, fetcher: (tabId: string) => Promise<T>, delayMs = 0) {
+export function useTabData<T>(tabId: string | null, url: string | undefined, fetcher: (tabId: string) => Promise<T>, delayMs = 0, revision: unknown = null) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -28,6 +29,6 @@ export function useTabData<T>(tabId: string | null, url: string | undefined, fet
     };
     // fetcher is expected to be a stable module-level function.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabId, url, tick, delayMs]);
+  }, [tabId, url, tick, delayMs, revision]);
   return { data, error, refresh: () => setTick((n) => n + 1) };
 }

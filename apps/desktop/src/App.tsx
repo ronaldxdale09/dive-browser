@@ -13,14 +13,14 @@ import { Splash } from "./components/Splash";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { IsolatedPanel } from "./components/IsolatedPanel";
 import { UpdateDialog } from "./components/UpdateDialog";
-import { DOCK_LIMITS, SIDECAR_LIMITS } from "./lib/resize";
+import { SIDECAR_LIMITS, clampSize, dockLimitsFor } from "./lib/resize";
 import { useBrowser } from "./store/browser";
 import { useLayout } from "./store/layout";
 import { usePrefs, watchReducedMotion, watchSystemTheme } from "./store/prefs";
 import { useShortcuts } from "./lib/shortcuts";
 import { useCoversContent } from "./lib/overlay";
 import { Palette } from "./components/Palette";
-import { useChromeLayout } from "./lib/adaptiveLayout";
+import { useChromeLayout, useViewportSize } from "./lib/adaptiveLayout";
 import { PanelSkeleton, ToastViewport } from "./components/ChromeFeedback";
 import { usePicker } from "./store/simulator";
 import { scheduleBootCheck } from "./store/updates";
@@ -55,6 +55,7 @@ export function App() {
   const loadPrefs = usePrefs((s) => s.load);
   const railExpanded = usePrefs((s) => s.prefs.rail_expanded);
   const responsive = useChromeLayout();
+  const viewport = useViewportSize();
   const pickerOpen = usePicker((s) => s.open);
   const recordingPhase = useRecording((s) => s.phase);
   const recorderOpen = useRecorder((s) => s.isOpen);
@@ -100,7 +101,11 @@ export function App() {
   // agent wins while explicitly open; the dock preference is left intact and
   // returns when the sidecar closes.
   const showDock = open.dock && !(responsive.singleAuxPanel && (showSidecar || pickerOpen));
-  const shownSidecarWidth = Math.min(live.sidecar ?? sidecarWidth, Math.max(280, window.innerWidth - railWidth - 360));
+  const shownSidecarWidth = Math.min(live.sidecar ?? sidecarWidth, Math.max(280, viewport.width - railWidth - 360));
+  // The remembered dock height is kept as a preference; what shows is capped
+  // by the window, so a short window still has page to look at.
+  const dockLimits = dockLimitsFor(viewport.height);
+  const shownDockHeight = clampSize(live.dock ?? dockHeight, dockLimits);
 
   return (
     <TabDnd>
@@ -135,7 +140,7 @@ export function App() {
       <main className="col-start-2 row-start-3 grid min-h-0 min-w-0 bg-line" style={{ gridTemplateColumns: showSidecar ? `minmax(0,1fr) auto ${shownSidecarWidth}px` : "minmax(0,1fr)" }}>
         <div
           className="relative grid min-h-0 bg-line"
-          style={{ gridTemplateRows: `${open.find ? "44px " : ""}minmax(0,1fr)${showDock ? ` auto ${live.dock ?? dockHeight}px` : ""}` }}
+          style={{ gridTemplateRows: `${open.find ? "44px " : ""}minmax(0,1fr)${showDock ? ` auto ${shownDockHeight}px` : ""}` }}
         >
           {open.find && (
             <div className="min-h-0 border-b border-line">
@@ -147,8 +152,8 @@ export function App() {
             <ResizeHandle
               orientation="horizontal"
               label="Resize dock"
-              value={live.dock ?? dockHeight}
-              limits={DOCK_LIMITS}
+              value={shownDockHeight}
+              limits={dockLimits}
               onResize={(px) => setLive((l) => ({ ...l, dock: px }))}
               onCommit={(px) => {
                 setLive((l) => ({ ...l, dock: null }));
