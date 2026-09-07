@@ -10,6 +10,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
+import { isPrivateWindow } from "../lib/privateMode";
 import { IMPORT_BUSY, useImportVideo } from "../screen/importVideo";
 import { OpenVideoButton } from "../screen/OpenVideoButton";
 import { EmptyState } from "./EmptyState";
@@ -36,7 +37,9 @@ export function Library() {
   const { close, className } = useFadeClose(() => toggle("library", false));
   useFocusTrap(root, { initialFocus: input, onEscape: close });
   const initial = useBrowser((s) => s.libraryTab);
-  const [tab, setTab] = useState<LibraryTab>(initial);
+  // A private window keeps no bookmarks or history; its library is files.
+  const tabs = isPrivateWindow() ? TABS.filter((t) => t.id === "downloads" || t.id === "recordings") : TABS;
+  const [tab, setTab] = useState<LibraryTab>(() => (tabs.some((t) => t.id === initial) ? initial : tabs[0]!.id));
   const [query, setQuery] = useState("");
 
   return (
@@ -50,7 +53,7 @@ export function Library() {
       >
         <header className="flex h-12 shrink-0 items-center gap-1 border-b border-line px-3">
           <div role="tablist" aria-label="Library sections" className="flex items-center gap-0.5">
-            {TABS.map(({ id, label, icon }) => (
+            {tabs.map(({ id, label, icon }) => (
               <button
                 key={id}
                 type="button"

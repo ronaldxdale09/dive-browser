@@ -65,6 +65,19 @@ describe("Library helpers", () => {
 });
 
 describe("Library dialog", () => {
+  it("offers only files in a private window and opens on Downloads", () => {
+    Object.defineProperty(window, "__DIVE_PRIVATE__", { value: true, configurable: true });
+    try {
+      useBrowser.getState().openLibrary("bookmarks");
+      render(<Library />);
+      expect(screen.queryByRole("tab", { name: "Bookmarks" })).toBeNull();
+      expect(screen.queryByRole("tab", { name: "History" })).toBeNull();
+      expect(screen.getByRole("tab", { name: "Downloads", selected: true })).toBeTruthy();
+    } finally {
+      Reflect.deleteProperty(window, "__DIVE_PRIVATE__");
+    }
+  });
+
   it("covers the page, lists bookmarks, filters them, and opens one in the current tab", async () => {
     render(<Library />);
     expect(screen.getByRole("dialog", { name: "Library" })).toBeTruthy();

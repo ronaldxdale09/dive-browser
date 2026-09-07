@@ -36,6 +36,9 @@ describe("MainMenu", () => {
       expect(labels.some((l) => l.startsWith("Live subtitles"))).toBe(false);
       expect(labels.some((l) => l.startsWith("Agent"))).toBe(false);
       expect(labels.some((l) => l.startsWith("New workspace"))).toBe(false);
+      expect(labels.some((l) => l.startsWith("Bookmarks"))).toBe(false);
+      expect(labels.some((l) => l.startsWith("History"))).toBe(false);
+      expect(labels.some((l) => l.startsWith("Downloads"))).toBe(true);
       expect(labels.some((l) => l.startsWith("Developer dock"))).toBe(true);
     } finally {
       Reflect.deleteProperty(window, "__DIVE_PRIVATE__");

@@ -145,7 +145,7 @@ function stepTab(delta: number) {
 }
 
 /** Commands a private window refuses; the menu and palette hide them too. */
-const PRIVATE_REFUSED = ["sidecar.toggle", "extensions.open", "workspace.new", "bookmark.toggle", "subtitles.open"];
+const PRIVATE_REFUSED = ["sidecar.toggle", "extensions.open", "workspace.new", "bookmark.toggle", "subtitles.open", "bookmarks.open", "history.open"];
 
 export function runCommand(id: string, source: "keyboard" | "native-menu" | "command" = "command"): void {
   traceInputCommand(id, source);

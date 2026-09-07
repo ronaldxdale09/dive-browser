@@ -50,6 +50,10 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- A private window's menu, palette and Library no longer offer Bookmarks
+  and History, which it keeps neither of; its Library opens on Downloads
+  and Recordings. The empty states had invited ⌘D, which a private window
+  refuses.
 - With the rail expanded and the agent open, the page and dock grew past
   their column and the page's native view covered the left edge of the
   agent panel; the column now shrinks to its track. A console entry whose

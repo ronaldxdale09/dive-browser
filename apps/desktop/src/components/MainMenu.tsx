@@ -76,7 +76,8 @@ interface Group {
  * credentials, workspaces persist, and live subtitles need a model download
  * the private process refuses.
  */
-const PRIVATE_HIDDEN = ["agent", "workspace.new", "subtitles"];
+/* Bookmarks and history stay in normal windows: a private window keeps neither. */
+const PRIVATE_HIDDEN = ["agent", "workspace.new", "subtitles", "bookmarks", "history"];
 
 export function MainMenu() {
   useCoversContent(true);
