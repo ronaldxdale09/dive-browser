@@ -3,6 +3,7 @@ import { useCoversContent } from "../../lib/overlay";
 import { useBrowser } from "../../store/browser";
 import { shouldOnboard, useOnboarding } from "../../store/onboarding";
 import { usePrefs } from "../../store/prefs";
+import { isPrivateWindow } from "../../lib/privateMode";
 import { Shell } from "./Shell";
 import { StartScreen } from "./StartScreen";
 import { ProfileStep } from "./ProfileStep";
@@ -29,7 +30,7 @@ export function Onboarding() {
   useCoversContent(stage !== null);
 
   useEffect(() => {
-    if (stage === null && shouldOnboard(loaded, onboarded, ready)) begin();
+    if (stage === null && shouldOnboard(loaded, onboarded, ready, isPrivateWindow())) begin();
   }, [stage, loaded, onboarded, ready, begin]);
 
   if (stage === null) return null;

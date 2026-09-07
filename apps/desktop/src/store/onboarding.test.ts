@@ -15,6 +15,8 @@ describe("onboarding flow", () => {
     expect(shouldOnboard(true, false, false)).toBe(false);
     expect(shouldOnboard(true, true, true)).toBe(false);
     expect(shouldOnboard(true, false, true)).toBe(true);
+    // A private window has a fresh in-memory profile every time; it never onboards.
+    expect(shouldOnboard(true, false, true, true)).toBe(false);
   });
 
   it("walks intro, start, profile, import, workspace, features, then records itself done", async () => {

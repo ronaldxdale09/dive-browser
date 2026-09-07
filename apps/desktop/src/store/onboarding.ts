@@ -57,8 +57,10 @@ export const useOnboarding = create<OnboardingState>((set, get) => ({
 
 /**
  * Whether the flow should open on its own: the preferences have loaded and
- * say it was never completed. Pure, so the gate is testable.
+ * say it was never completed, and this is not a private window (whose
+ * in-memory profile is always fresh, and which must never ask anyone to
+ * set up a profile). Pure, so the gate is testable.
  */
-export function shouldOnboard(loaded: boolean, onboarded: boolean, ready: boolean): boolean {
-  return loaded && ready && !onboarded;
+export function shouldOnboard(loaded: boolean, onboarded: boolean, ready: boolean, privateWindow = false): boolean {
+  return loaded && ready && !onboarded && !privateWindow;
 }
