@@ -1267,6 +1267,13 @@ export type Prefs = {
 	 *  leaving the window.
 	 */
 	video_fill_tab?: boolean,
+	/**
+	 *  Whether the first-run intro and onboarding have been completed.
+	 *  False only on a fresh install: a stored file that predates the field
+	 *  belongs to someone who has been using Dive already, so
+	 *  [`parse_stored`] treats its absence as done.
+	 */
+	onboarded?: boolean,
 };
 
 /**  A named device, as the chrome's simulator and `page_resize` both see it. */

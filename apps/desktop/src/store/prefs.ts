@@ -54,6 +54,7 @@ export const DEFAULT_PREFS: Prefs = {
   motion: "system",
   welcome_background: "orbs",
   video_fill_tab: true,
+  onboarded: false,
 };
 
 /** The appearance fields at their defaults, for "Reset appearance". */

@@ -118,6 +118,12 @@ pub struct Prefs {
     /// leaving the window.
     #[serde(default = "default_true")]
     pub video_fill_tab: bool,
+    /// Whether the first-run intro and onboarding have been completed.
+    /// False only on a fresh install: a stored file that predates the field
+    /// belongs to someone who has been using Dive already, so
+    /// [`parse_stored`] treats its absence as done.
+    #[serde(default = "default_true")]
+    pub onboarded: bool,
 }
 
 fn default_true() -> bool {
@@ -216,6 +222,7 @@ impl Default for Prefs {
             motion: default_motion(),
             welcome_background: default_welcome_background(),
             video_fill_tab: true,
+            onboarded: false,
         }
     }
 }
@@ -520,6 +527,11 @@ fn parse_stored(json: &str) -> Prefs {
     let Ok(Value::Object(mut merged)) = serde_json::to_value(Prefs::default()) else {
         return Prefs::default();
     };
+    // A preferences file exists, so this is not a first launch: someone who
+    // upgraded past the onboarding must not be walked through it.
+    if !incoming.contains_key("onboarded") {
+        merged.insert("onboarded".into(), Value::Bool(true));
+    }
     let mut prefs = Prefs::default();
     for (key, value) in incoming {
         if !merged.contains_key(key) {
@@ -1047,6 +1059,14 @@ mod tests {
         );
         prefs.search_template = "https://s.dev/find?q={query}".into();
         assert_eq!(prefs.search_template(), "https://s.dev/find?q={query}");
+    }
+
+    #[test]
+    fn onboarding_is_pending_only_on_a_fresh_install() {
+        assert!(!Prefs::default().onboarded);
+        assert!(parse_stored(r#"{"theme":"dark"}"#).onboarded);
+        assert!(!parse_stored(r#"{"onboarded":false}"#).onboarded);
+        assert!(parse_stored(r#"{"onboarded":true}"#).onboarded);
     }
 
     #[test]

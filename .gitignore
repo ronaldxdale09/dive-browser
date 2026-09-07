@@ -28,3 +28,6 @@ packages/protocol/src/generated/
 /scratchpad
 # local release artifacts
 /out
+
+# Claude Code project state and locally installed agent skills (see CONTRIBUTING.md)
+/.claude/

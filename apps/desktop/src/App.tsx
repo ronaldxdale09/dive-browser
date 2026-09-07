@@ -38,6 +38,7 @@ const RecorderModal = lazy(() => import("./components/RecorderModal").then(({ Re
 const RecordDialog = lazy(() => import("./components/record/RecordDialog").then(({ RecordDialog }) => ({ default: RecordDialog })));
 const DefaultBrowserDialog = lazy(() => import("./components/DefaultBrowserDialog").then(({ DefaultBrowserDialog }) => ({ default: DefaultBrowserDialog })));
 const Subtitles = lazy(() => import("./components/Subtitles").then(({ Subtitles }) => ({ default: Subtitles })));
+const Onboarding = lazy(() => import("./components/onboarding/Onboarding").then(({ Onboarding }) => ({ default: Onboarding })));
 const RecordingDoneDialog = lazy(() => import("./components/record/RecordingDoneDialog").then(({ RecordingDoneDialog }) => ({ default: RecordingDoneDialog })));
 
 export function App() {
@@ -194,6 +195,9 @@ export function App() {
         onDismissError={() => useBrowser.setState({ error: null })}
       />
       <UpdateDialog />
+      <Suspense fallback={null}>
+        <Onboarding />
+      </Suspense>
     </div>
     </TabDnd>
   );

@@ -1,5 +1,8 @@
-import { ArrowDownToLine, Check as CheckIcon } from "lucide-react";
+import { ArrowDownToLine, Check as CheckIcon, RotateCcw } from "lucide-react";
+import { useState } from "react";
 import type { AppInfo } from "../../lib/ipc";
+import { useBrowser } from "../../store/browser";
+import { useOnboarding } from "../../store/onboarding";
 import { useUpdates } from "../../store/updates";
 import { Icon } from "../Icon";
 import { Button, Group, Row } from "../SettingsFields";
@@ -26,7 +29,50 @@ export function About({ info }: { info: AppInfo | null }) {
         />
       </Group>
       <Updates channel={info?.build.channel ?? null} />
+      <StartOver />
     </>
+  );
+}
+
+/**
+ * Back to the first launch: the intro plays and the setup steps run again.
+ * Nothing is deleted; the steps edit the profile and workspace already here.
+ */
+function StartOver() {
+  const replay = useOnboarding((s) => s.replay);
+  const toggle = useBrowser((s) => s.toggle);
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <Group title="Start over">
+      <Row
+        label="Reset Dive"
+        hint="Play the intro and walk through setup again. Your tabs, history, profiles and workspaces stay."
+        control={
+          confirming ? (
+            <span className="flex items-center gap-2">
+              <Button variant="quiet" onClick={() => setConfirming(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  toggle("settings", false);
+                  void replay();
+                }}
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <Icon icon={RotateCcw} size={12} /> Reset and replay
+                </span>
+              </Button>
+            </span>
+          ) : (
+            <Button variant="quiet" onClick={() => setConfirming(true)}>
+              Reset Dive…
+            </Button>
+          )
+        }
+      />
+    </Group>
   );
 }
 

@@ -110,6 +110,18 @@ has to hop with `run_on_main_thread` first. This is the single most common
 source of intermittent crashes in this codebase — if you are adding a command
 that reaches the engine, follow an existing one exactly.
 
+## Agent skills for the animations
+
+The first-run intro (`apps/desktop/src/video/Intro.tsx`) and the feature reel
+are Remotion compositions written to the Remotion and HyperFrames motion
+guidance. Those skills install locally into `.claude/skills/` (ignored by git)
+so Claude Code picks them up when editing the animations:
+
+```bash
+npx skills add remotion-dev/skills
+npx skills add heygen-com/hyperframes
+```
+
 ## Commits and pull requests
 
 - Write the subject as what the change does for the user: `Subtitles: fix

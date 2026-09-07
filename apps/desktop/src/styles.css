@@ -492,3 +492,73 @@ button:not(:disabled):active,
   transition-delay: 0ms !important;
   scroll-behavior: auto !important;
 }
+
+/* First-run onboarding. The start button's border is a conic sweep on a
+   registered custom property, so it turns without repainting the face; the
+   motion stops under reduced motion and the border stays lit. */
+@property --start-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes start-sweep {
+  to { --start-angle: 360deg; }
+}
+.start-button {
+  --start-angle: 0deg;
+  position: relative;
+  border-radius: 999px;
+  padding: 2px;
+  background:
+    conic-gradient(from var(--start-angle), transparent 0 55%, var(--color-highlight) 78%, color-mix(in srgb, var(--color-highlight) 35%, transparent) 90%, transparent 100%),
+    color-mix(in srgb, var(--color-line-2) 80%, transparent);
+  animation: start-sweep 2.8s linear infinite;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-highlight) 18%, transparent), 0 18px 60px -24px color-mix(in srgb, var(--color-highlight) 70%, transparent);
+}
+.start-button:hover {
+  animation-duration: 1.4s;
+}
+.start-button-face {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  padding: 0 30px;
+  border-radius: 999px;
+  background: var(--color-highlight);
+  color: var(--color-highlight-ink);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+@keyframes onboarding-in {
+  from { opacity: 0; transform: translateY(12px) scale(.985); }
+  to { opacity: 1; transform: none; }
+}
+.onboarding-enter {
+  animation: onboarding-in 420ms cubic-bezier(.16, 1, .3, 1) both;
+}
+.onboarding-glow {
+  background: radial-gradient(ellipse 60% 45% at 50% 30%, var(--color-highlight-soft), transparent 70%);
+  opacity: .8;
+}
+.onboarding-step { color: var(--color-ink-3); }
+.onboarding-step-dot { border-color: var(--color-line-2); }
+.onboarding-step[data-state="current"] { color: var(--color-ink); }
+.onboarding-step[data-state="current"] .onboarding-step-dot { border-color: var(--color-highlight); color: var(--color-highlight); }
+.onboarding-step[data-state="done"] .onboarding-step-dot { background: var(--color-highlight); border-color: var(--color-highlight); color: var(--color-highlight-ink); }
+@keyframes feature-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.feature-card {
+  animation: feature-in 480ms cubic-bezier(.16, 1, .3, 1) both;
+  animation-delay: calc(var(--i) * 45ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .start-button { animation: none; --start-angle: 300deg; }
+  .onboarding-enter, .feature-card { animation: none; }
+}
+:root[data-motion="reduce"] .start-button { animation: none; --start-angle: 300deg; }
+:root[data-motion="reduce"] .onboarding-enter,
+:root[data-motion="reduce"] .feature-card { animation: none; }

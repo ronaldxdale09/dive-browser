@@ -8,6 +8,10 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- First-run onboarding: a five-second Remotion intro, a Start Dive screen,
+  then profile, workspace and a look at the features with DivePrivacy and
+  default-browser choices; a new `onboarded` preference records it, and
+  Settings › About › Reset Dive plays it again.
 - Address bar suggestions: open tabs, bookmarks and history under the bar
   while typing, with keyboard navigation.
 - Bookmark popover to rename or remove a bookmark; `bookmark_rename` command.

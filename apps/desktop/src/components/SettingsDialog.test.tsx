@@ -283,6 +283,20 @@ describe("About and updates", () => {
     expect(screen.queryByText("Updates are delivered to release builds.")).toBeNull();
   });
 
+  it("offers to reset Dive back to the intro after a confirmation", async () => {
+    const { useOnboarding } = await import("../store/onboarding");
+    useOnboarding.setState({ stage: null });
+    useBrowser.getState().openSettings("about");
+    render(<SettingsDialog />);
+    await waitFor(() => expect(screen.getByText("/tmp/dive")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Reset Dive…" }));
+    expect(useOnboarding.getState().stage).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Reset and replay/ }));
+    await waitFor(() => expect(useOnboarding.getState().stage).toBe("intro"));
+    expect(usePrefs.getState().prefs.onboarded).toBe(false);
+    expect(useBrowser.getState().open.settings).toBe(false);
+  });
+
   it("tells a dev build where updates go instead of claiming it is current", async () => {
     useBrowser.getState().openSettings("about");
     render(<SettingsDialog />);
