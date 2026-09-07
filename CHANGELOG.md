@@ -50,6 +50,9 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Onboarding's profile step no longer greys out Continue while the name
+  field shows the profile's own name as a placeholder; leaving it empty
+  keeps that name.
 - With enough tabs open the strip spilled over the Record, Mobile and
   Agent buttons; past the point where every tab is a bare favicon it now
   scrolls. Opening Replay on a request grows a short dock so the editor's

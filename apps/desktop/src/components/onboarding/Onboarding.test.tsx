@@ -69,7 +69,9 @@ describe("Onboarding", () => {
 
     // Profile: naming the install's own profile rather than creating one.
     expect(await screen.findByRole("heading", { name: "Who's diving?" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Continue" })).toHaveProperty("disabled", true);
+    // The field shows the profile's current name as its placeholder, so
+    // Continue is live before anything is typed.
+    expect(screen.getByRole("button", { name: "Continue" })).toHaveProperty("disabled", false);
     fireEvent.change(screen.getByLabelText("Your name"), { target: { value: "Ada" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(updateProfile).toHaveBeenCalledWith("p1", expect.objectContaining({ name: "Ada", avatar: "ada" })));

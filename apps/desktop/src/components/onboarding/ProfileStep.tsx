@@ -26,11 +26,14 @@ export function ProfileStep() {
   const avatar = seed || seedFromProfileName(name || profile?.name || "");
   const seeds = [seedFromProfileName(name), ...PROFILE_SEEDS.filter((s) => s !== seedFromProfileName(name))].slice(0, 8);
 
+  // The field shows the profile's current name as its placeholder, so leaving
+  // it empty keeps that name; Continue is never dead on a fresh install.
+  const chosenName = name.trim() || profile?.name || "Personal";
   const submit = async () => {
-    if (!profile || !name.trim()) return;
+    if (!profile) return;
     setSaving(true);
     try {
-      await update(profile.id, { name: name.trim(), color, avatar, note: profile.note });
+      await update(profile.id, { name: chosenName, color, avatar, note: profile.note });
       next();
     } finally {
       setSaving(false);
@@ -83,7 +86,7 @@ export function ProfileStep() {
           </div>
         </div>
       </div>
-      <StepActions primary={saving ? "Saving…" : "Continue"} disabled={!name.trim() || saving} onPrimary={() => void submit()} skip={next} />
+      <StepActions primary={saving ? "Saving…" : "Continue"} disabled={!profile || saving} onPrimary={() => void submit()} skip={next} />
     </form>
   );
 }
