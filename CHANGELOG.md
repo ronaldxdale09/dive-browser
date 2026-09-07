@@ -42,6 +42,10 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Downloading a subtitles model selects it when the chosen one is not on
+  disk, so Start lights up for the model just fetched; while subtitles run,
+  a Captions button in the toolbar says so and reopens the dialog to stop
+  them.
 - A second private window opens blank instead of reading "about:blank"
   in its tab and address bar; Live subtitles, which need a model download
   the private process refuses, are out of a private window's menu, palette

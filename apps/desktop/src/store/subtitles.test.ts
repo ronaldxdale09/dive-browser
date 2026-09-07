@@ -113,6 +113,20 @@ describe("useSubtitles", () => {
     expect(useSubtitles.getState().models.find((m) => m.id === "base")?.downloaded).toBe(true);
   });
 
+  it("selects a model when it is downloaded while the chosen one is not on disk", async () => {
+    const tiny = { id: "tiny", label: "Tiny", detail: "", size_mb: 78, downloaded: false };
+    const base = { id: "base", label: "Base", detail: "", size_mb: 148, downloaded: false };
+    const small = { id: "small", label: "Small", detail: "", size_mb: 488, downloaded: true };
+    vi.spyOn(ipc, "subtitleModelDownload").mockResolvedValue(null);
+    useSubtitles.setState({ models: [tiny, base, small], model: "base", downloading: {} });
+    await useSubtitles.getState().download("tiny");
+    expect(useSubtitles.getState().model).toBe("tiny");
+    // A choice that is already usable is left alone.
+    useSubtitles.setState({ model: "small", downloading: {} });
+    await useSubtitles.getState().download("base");
+    expect(useSubtitles.getState().model).toBe("small");
+  });
+
   it("surfaces a download error and drops the in-flight entry", async () => {
     vi.spyOn(ipc, "subtitleModels").mockResolvedValue(MODELS);
     vi.spyOn(ipc, "subtitleModelDownload").mockResolvedValue(null);

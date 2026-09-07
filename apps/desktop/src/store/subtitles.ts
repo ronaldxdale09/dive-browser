@@ -86,6 +86,10 @@ export const useSubtitles = create<SubtitlesState>((set, get) => ({
 
   download: async (modelId) => {
     if (get().downloading[modelId]) return;
+    // Fetching a model is choosing it: someone who downloads Tiny while Base
+    // is selected expects Start to light up for Tiny, not stay grey for Base.
+    const chosen = get().models.find((m) => m.id === get().model);
+    if (!chosen?.downloaded && get().model !== modelId) get().setModel(modelId);
     set((s) => ({ downloading: { ...s.downloading, [modelId]: { received: 0, total: null } }, error: null }));
     try {
       await ipc.subtitleModelDownload(modelId);

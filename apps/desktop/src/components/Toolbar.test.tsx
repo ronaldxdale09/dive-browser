@@ -8,6 +8,7 @@ import { useEmulation } from "../store/emulation";
 import { useNetwork } from "../store/network";
 import { usePrivacy } from "../store/privacy";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
+import { useSubtitles } from "../store/subtitles";
 import { Toolbar } from "./Toolbar";
 import { useShortcuts } from "../lib/shortcuts";
 
@@ -291,6 +292,16 @@ describe("Toolbar", () => {
 
     await act(async () => finish("/tmp/capture.png"));
     await waitFor(() => expect(screen.getByRole("button", { name: "Capture full page" })).toBeTruthy());
+  });
+
+  it("shows that live subtitles are running and reopens their dialog", () => {
+    render(<Toolbar />);
+    expect(screen.queryByRole("button", { name: "Live subtitles on" })).toBeNull();
+    act(() => useSubtitles.setState({ active: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Live subtitles on" }));
+    expect(useBrowser.getState().open.subtitles).toBe(true);
+    act(() => useSubtitles.setState({ active: false }));
+    expect(screen.queryByRole("button", { name: "Live subtitles on" })).toBeNull();
   });
 
   it("opens the share dialog and the developer dock", () => {

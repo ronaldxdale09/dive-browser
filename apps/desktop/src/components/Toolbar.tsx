@@ -1,6 +1,6 @@
 import { isPrivateWindow } from "../lib/privateMode";
 import { prettyUrl } from "../lib/prettyUrl";
-import { Bug, Camera, House, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, X, Menu } from "lucide-react";
+import { Bug, Camera, Captions, House, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, X, Menu } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FOCUS_ADDRESS } from "../lib/commands";
@@ -17,6 +17,7 @@ import { Tooltip } from "./Tooltip";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { usePicker } from "../store/simulator";
+import { useSubtitles } from "../store/subtitles";
 import { NavigationButtons } from "./NavigationButtons";
 
 /** Navigation row: nav icons, the omnibox pill and, as glyphs, the actions that act on the page. */
@@ -161,6 +162,7 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
           <ZoomBadge />
           {!isPrivateWindow() && <BookmarkButton />}
           <SharePopover />
+          <SubtitlesIndicator />
           {!isPrivateWindow() && <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />}
           <span className={capturing ? "animate-spin motion-reduce:animate-none" : undefined}><IconButton icon={capturing ? LoaderCircle : Camera} label={capturing ? "Capturing full page" : "Capture full page"} shortcut="⌘⇧S" disabled={!current || capturing} onClick={() => void capture(true)} /></span>
           <IconButton icon={Bug} label="Open DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
@@ -173,6 +175,7 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
           {!isPrivateWindow() && <BookmarkButton />}
           <SharePopover />
           <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />
+          <SubtitlesIndicator />
           {!isPrivateWindow() && <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />}
           <span className={capturing ? "animate-spin motion-reduce:animate-none" : undefined}><IconButton icon={capturing ? LoaderCircle : Camera} label={capturing ? "Capturing full page" : "Capture full page"} shortcut="⌘⇧S" disabled={!current || capturing} onClick={() => void capture(true)} /></span>
           <IconButton icon={Bug} label="Open DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
@@ -251,4 +254,17 @@ function ZoomBadge() {
       </button>
     </Tooltip>
   );
+}
+
+/**
+ * Shown only while live subtitles run on the current tab. The dialog closes
+ * itself once a session starts, so without this there is nothing in the
+ * chrome to say captions are on or to stop them; a click reopens the dialog.
+ */
+function SubtitlesIndicator() {
+  const active = useSubtitles((s) => s.active || s.starting);
+  const open = useBrowser((s) => s.open.subtitles);
+  const toggle = useBrowser((s) => s.toggle);
+  if (!active) return null;
+  return <IconButton icon={Captions} label="Live subtitles on" shortcut="⌘⇧U" active={!open} onClick={() => toggle("subtitles", true)} />;
 }
