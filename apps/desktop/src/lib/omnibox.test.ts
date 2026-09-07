@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Bookmark, HistoryEntry, Tab } from "./ipc";
-import { buildSuggestions, looksLikeUrl, stepHighlight } from "./omnibox";
+import { buildSuggestions, hostOf, looksLikeUrl, stepHighlight } from "./omnibox";
 
 const tab = (id: string, url: string, title: string): Tab => ({
   id,
@@ -15,6 +15,14 @@ const tab = (id: string, url: string, title: string): Tab => ({
 });
 const bookmark = (url: string, title: string): Bookmark => ({ url, title, created_at: "2026-09-06T00:00:00Z", favicon: null });
 const visit = (url: string, title: string): HistoryEntry => ({ url, title, last_visited_at: "2026-09-06T00:00:00Z", visits: 1, favicon: null });
+
+describe("hostOf", () => {
+  it("names a site by its host and one of Dive's own pages by its whole address", () => {
+    expect(hostOf("https://www.wikipedia.org/wiki/Main_Page")).toBe("www.wikipedia.org");
+    expect(hostOf("dive://capture")).toBe("dive://capture");
+    expect(hostOf("not a url")).toBe("");
+  });
+});
 
 describe("looksLikeUrl", () => {
   it.each(["example.com", "https://x.test/a b", "localhost:3000", "127.0.0.1", "dive://screen", "docs.rs/serde"])("treats %s as an address", (input) => {

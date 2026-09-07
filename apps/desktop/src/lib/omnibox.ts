@@ -25,10 +25,15 @@ export function looksLikeUrl(input: string): boolean {
   return trimmed.includes(".") || trimmed.startsWith("localhost") || trimmed.startsWith("127.");
 }
 
-/** Host of `url`, or the empty string for anything that is not one. */
+/**
+ * Host of `url`, or the empty string for anything that is not one. Dive's
+ * own pages have no host worth showing, so they keep their whole address
+ * ("dive://capture", not "capture").
+ */
 export function hostOf(url: string): string {
   try {
-    return new URL(url).host;
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.host : url;
   } catch {
     return "";
   }

@@ -1437,11 +1437,23 @@ pub fn update_tab(app: &AppHandle<Runtime>, id: TabId, f: impl FnOnce(&mut Tab))
     }
     if tab.url.starts_with("http")
         && !crate::private_session::is_private()
-        && let Err(e) = store.record_visit(&tab.url, &tab.title, dive_core::Timestamp::now())
+        && let Err(e) = store.record_visit(
+            &tab.url,
+            visit_title(tab.url != was, &tab.title),
+            dive_core::Timestamp::now(),
+        )
     {
         tracing::debug!("history write failed: {e}");
     }
     state.bus.publish(CoreEvent::TabUpserted(tab));
+}
+
+/// The title to file a visit under. When the address just changed, the
+/// tab's title still belongs to the page it left (or is "about:blank" for a
+/// fresh tab), so the visit starts untitled and the real title fills it in
+/// when it arrives; a redirect's source address is never wrongly titled.
+fn visit_title(url_changed: bool, title: &str) -> &str {
+    if url_changed { "" } else { title }
 }
 
 /// Settings key holding the main window's last position and size.
@@ -1715,6 +1727,13 @@ fn private_chrome(builder: WebviewBuilder<Runtime>) -> WebviewBuilder<Runtime> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_visit_recorded_on_an_address_change_starts_untitled() {
+        assert_eq!(super::visit_title(true, "about:blank"), "");
+        assert_eq!(super::visit_title(true, "The Verge"), "");
+        assert_eq!(super::visit_title(false, "Wikipedia"), "Wikipedia");
+    }
+
     #[test]
     fn blank_popout_focus_receipts_are_stable_but_native_focus_happens_once() {
         let mut intent = super::PopoutAddressFocus::default();

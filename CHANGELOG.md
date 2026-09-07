@@ -45,6 +45,10 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- A visit recorded as the address changes no longer carries the previous
+  page's title (or "about:blank" for a new tab); the title fills in when
+  it arrives, so a redirect's source address is never wrongly titled.
+  Address suggestions show Dive's own pages by their whole address.
 - "Delete browsing data…" lands on that group inside Settings › Privacy
   instead of the top of the panel. A rejected agent key reads "Anthropic
   rejected the key: API key is invalid (HTTP 401)." rather than "api 401:".
