@@ -42,6 +42,9 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- A tab opened only to fetch a file closes itself once the download
+  starts, instead of staying behind empty with the file's address; a page
+  you were reading when you clicked a download link stays open.
 - Recordings are named like every other capture, "example.com recording
   2026-09-08 04.03.23.mp4", instead of a "dive-…Z" timestamp.
 - A tooltip parked past the window's edge could let the whole chrome slide

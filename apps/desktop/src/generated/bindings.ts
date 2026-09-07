@@ -747,6 +747,8 @@ export type Device = {
 
 /**  A download started or finished; shown as a toast. */
 export type DownloadNotice = {
+	/**  The tab the download came from, when a page asked for it. */
+	tab: TabId | null,
 	/**  Source URL. */
 	url: string,
 	/**  Where the file is (or will be) written. */

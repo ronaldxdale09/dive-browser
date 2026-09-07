@@ -113,6 +113,8 @@ fn bind_detached_new_tab_shortcuts(
 /// A download started or finished; shown as a toast.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct DownloadNotice {
+    /// The tab the download came from, when a page asked for it.
+    pub tab: Option<TabId>,
     /// Source URL.
     pub url: String,
     /// Where the file is (or will be) written.
@@ -164,6 +166,7 @@ fn handle_download(
                 Err(error) => {
                     tracing::warn!(%error, "preparing download destination failed");
                     let _ = DownloadNotice {
+                        tab: source.map(|(tab, _)| tab),
                         url: url.to_string(),
                         path: String::new(),
                         status: "failed".into(),
@@ -176,6 +179,7 @@ fn handle_download(
                 state.activity.download(tab, nonce, url.as_str(), true);
             }
             DownloadNotice {
+                tab: source.map(|(tab, _)| tab),
                 url: url.to_string(),
                 path: destination.to_string_lossy().into_owned(),
                 status: "started".into(),
@@ -188,6 +192,7 @@ fn handle_download(
                     .download(tab, nonce, url.as_str(), false);
             }
             DownloadNotice {
+                tab: source.map(|(tab, _)| tab),
                 url: url.to_string(),
                 path: path
                     .map(|p| p.to_string_lossy().into_owned())

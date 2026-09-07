@@ -4,7 +4,7 @@ import { listenConsole, useConsole } from "./console";
 import { listenNetwork, useNetwork } from "./network";
 import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
 import { useDownloads } from "./downloads";
-import type { CoreEvent, Decision, Duration, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
+import type { CoreEvent, Decision, Duration, NavigationHistory, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
 
 export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser" | "subtitles" | "import";
@@ -65,6 +65,8 @@ interface BrowserState {
   boot: () => Promise<void>;
   openTab: (url: string) => Promise<void>;
   closeTab: (id: string) => Promise<void>;
+  /** A tab opened just to fetch a file has nothing to show once the download starts; close it. */
+  closeIfOnlyDownload: (id: string, url: string) => Promise<void>;
   activateTab: (id: string) => Promise<void>;
   navigate: (url: string) => Promise<void>;
   /** Show the welcome screen; every tab stays open and comes back when clicked. */
@@ -248,6 +250,16 @@ let booting: Promise<void> | null = null;
 /** The one toast timer: a newer notice cancels the older one's clearing. */
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
+/**
+ * True when the tab has no page of its own: nothing in its history, or only
+ * a blank page or the download's own address. A page the person was reading
+ * before clicking a download link stays open.
+ */
+export function tabHoldsOnly(history: NavigationHistory, url: string): boolean {
+  const pages = history.entries.filter((entry) => entry.url !== "about:blank" && entry.url !== url);
+  return pages.length === 0;
+}
+
 export const useBrowser = create<BrowserState>((set, get) => ({
   ready: false,
   workspaces: [],
@@ -331,6 +343,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
           useDownloads.getState().apply(d);
           const name = d.path.split("/").pop() ?? d.url;
           get().notify(d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : `Download failed: ${name}`, 5000);
+          if (d.status === "started" && d.tab) void get().closeIfOnlyDownload(d.tab, d.url);
         });
         await Promise.all([listenConsole(), listenNetwork(), listenPrivacy(), usePrivacy.getState().loadInfo()]);
         set({ ...fromSnapshot(await ipc.snapshot()), ready: true, error: null });
@@ -356,6 +369,17 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   },
   detachTab: async (id, at) => run(set, () => ipc.tabDetach(id, at)),
   attachTab: async (id) => run(set, () => ipc.tabAttach(id)),
+  closeIfOnlyDownload: async (id, url) => {
+    let history: NavigationHistory | null = null;
+    try {
+      history = await ipc.tabHistory(id);
+    } catch {
+      return;
+    }
+    if (!tabHoldsOnly(history, url)) return;
+    if (!get().tabs.some((t) => t.id === id)) return;
+    await get().closeTab(id);
+  },
   closeTab: async (id) => {
     await run(set, () => ipc.tabClose(id));
     useConsole.getState().drop(id);

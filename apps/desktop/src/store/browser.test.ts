@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@tauri-apps/api/event";
-import { reduceCrash, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, useBrowser, withoutRequest } from "./browser";
+import { reduceCrash, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, tabHoldsOnly, useBrowser, withoutRequest } from "./browser";
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
 import type { PermissionAsked, PermissionDismissed, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
@@ -294,6 +294,29 @@ describe("boot", () => {
 
     useBrowser.setState(initial, true);
     vi.restoreAllMocks();
+  });
+});
+
+describe("a tab that only holds a download", () => {
+  const history = (urls: string[]) => ({ generation: "g", current_index: Math.max(0, urls.length - 1), entries: urls.map((url, id) => ({ id, url, title: "" })) });
+  it("is told apart from a page the person was reading", () => {
+    const zip = "https://files.example.com/big.zip";
+    expect(tabHoldsOnly(history([]), zip)).toBe(true);
+    expect(tabHoldsOnly(history(["about:blank"]), zip)).toBe(true);
+    expect(tabHoldsOnly(history([zip]), zip)).toBe(true);
+    expect(tabHoldsOnly(history(["https://example.com/downloads"]), zip)).toBe(false);
+  });
+  it("closes once the download starts, and only then", async () => {
+    const tab = { id: "t1", workspace_id: "w", url: "https://files.example.com/big.zip", title: "", favicon: null, pinned: false, created_at: "", last_active_at: "", closed_at: null, position: 0 } as unknown as Tab;
+    useBrowser.setState({ tabs: [tab], activeTab: "t1" });
+    vi.spyOn(ipc, "tabHistory").mockResolvedValue(history([]));
+    const close = vi.spyOn(ipc, "tabClose").mockResolvedValue(null);
+    await useBrowser.getState().closeIfOnlyDownload("t1", tab.url);
+    expect(close).toHaveBeenCalledWith("t1");
+    close.mockClear();
+    vi.spyOn(ipc, "tabHistory").mockResolvedValue(history(["https://example.com/downloads"]));
+    await useBrowser.getState().closeIfOnlyDownload("t1", tab.url);
+    expect(close).not.toHaveBeenCalled();
   });
 });
 
