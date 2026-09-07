@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { essentialTabs, orderTabs, roveTab, splitAction, TabStrip } from "./TabStrip";
+import { essentialTabs, orderTabs, roveTab, splitAction, tabLabel, TabStrip } from "./TabStrip";
 import type { Tab } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { ipc } from "../lib/ipc";
@@ -237,5 +237,13 @@ describe("splitAction", () => {
     const e = t("e", "today", 4);
     const full = { tabs: ["a", "b", "c", "d"], sizes: [0.25, 0.25, 0.25, 0.25] };
     expect(splitAction(e, "a", full, [...tabs, d, e], [])).toBeNull();
+  });
+});
+
+describe("tabLabel", () => {
+  it("names a loading tab after its host instead of the view's about:blank title", () => {
+    expect(tabLabel({ ...t("a", "today", 0), title: "about:blank", url: "http://nonexistent.invalid/" })).toBe("nonexistent.invalid");
+    expect(tabLabel({ ...t("a", "today", 0), title: "about:blank", url: "about:blank" })).toBe("about:blank");
+    expect(tabLabel({ ...t("a", "today", 0), title: "Docs", url: "https://x" })).toBe("Docs");
   });
 });

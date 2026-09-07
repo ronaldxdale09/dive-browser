@@ -237,12 +237,12 @@ function useMenu(close: () => void): Group[] {
     {
       id: "new",
       items: [
-        { id: "window.new", label: "New Window", icon: AppWindow, shortcut: "⌘N", run: done(() => runCommand("window.new")) },
-        { id: "tab.new", label: "New Tab", icon: SquarePlus, shortcut: "⌘T", run: done(() => runCommand("tab.new")) },
-        { id: "workspace.new", label: "New Workspace", icon: LayoutGrid, keywords: "container profile", run: done(() => runCommand("workspace.new")) },
+        { id: "window.new", label: "New window", icon: AppWindow, shortcut: "⌘N", run: done(() => runCommand("window.new")) },
+        { id: "tab.new", label: "New tab", icon: SquarePlus, shortcut: "⌘T", run: done(() => runCommand("tab.new")) },
+        { id: "workspace.new", label: "New workspace", icon: LayoutGrid, keywords: "container profile", run: done(() => runCommand("workspace.new")) },
         {
           id: "tab.detach",
-          label: active && detached.includes(active) ? "Bring Tab Back to This Window" : "Move Tab to New Window",
+          label: active && detached.includes(active) ? "Bring tab back to this window" : "Move tab to new window",
           icon: AppWindow,
           disabled: !active,
           keywords: "popout window",
@@ -253,16 +253,16 @@ function useMenu(close: () => void): Group[] {
     {
       id: "dive",
       items: [
-        { id: "record", label: "Record a Video", icon: Video, shortcut: "⌘⇧R", keywords: "screen recording gif capture loom", disabled: !active, run: done(() => useRecording.getState().openSetup()) },
-        { id: "divescreen", label: "Edit Latest Recording in DiveScreen", icon: Clapperboard, keywords: "editor zoom trim video", disabled: !latest, run: done(() => (latest ? b().openTab(screenUrl(latest)) : undefined)) },
-        { id: "divescreen.open", label: "Open a Video in DiveScreen", icon: Film, keywords: "import mp4 mov webm mkv gif file editor", run: done(() => useImportVideo.getState().open().then(() => undefined)) },
-        { id: "simulator", label: "Device Simulator", icon: Smartphone, shortcut: "⌘⇧M", keywords: "mobile phone responsive emulate", disabled: !active, run: done(() => usePicker.getState().toggle()) },
+        { id: "record", label: "Record a video", icon: Video, shortcut: "⌘⇧R", keywords: "screen recording gif capture loom", disabled: !active, run: done(() => useRecording.getState().openSetup()) },
+        { id: "divescreen", label: "Edit latest recording in DiveScreen", icon: Clapperboard, keywords: "editor zoom trim video", disabled: !latest, run: done(() => (latest ? b().openTab(screenUrl(latest)) : undefined)) },
+        { id: "divescreen.open", label: "Open a video in DiveScreen", icon: Film, keywords: "import mp4 mov webm mkv gif file editor", run: done(() => useImportVideo.getState().open().then(() => undefined)) },
+        { id: "simulator", label: "Device simulator", icon: Smartphone, shortcut: "⌘⇧M", keywords: "mobile phone responsive emulate", disabled: !active, run: done(() => usePicker.getState().toggle()) },
         { id: "agent", label: "Agent", glyph: <AgentIcon size={15} className="text-highlight" />, shortcut: "⌘J", keywords: "ai assistant sidecar chat", run: done(() => b().toggle("sidecar")) },
-        { id: "dock", label: "Developer Dock", icon: PanelBottom, shortcut: "⌘⇧D", keywords: "console network vitals storage", run: done(() => b().toggle("dock")) },
+        { id: "dock", label: "Developer dock", icon: PanelBottom, shortcut: "⌘⇧D", keywords: "console network vitals storage", run: done(() => b().toggle("dock")) },
         { id: "subtitles", label: "Live subtitles", icon: Captions, shortcut: "⌘⇧U", keywords: "captions transcribe video translate", disabled: !active, run: done(() => runCommand("subtitles.open")) },
         { id: "devtools", label: "DevTools", icon: Bug, shortcut: "⌘⌥I", disabled: !active, run: done(() => runCommand("tab.devtools")) },
-        { id: "capture", label: "Capture Full Page", icon: Camera, shortcut: "⌘⇧S", keywords: "screenshot annotate", disabled: !active, run: done(() => runCommand("capture.fullpage")) },
-        { id: "report", label: "Report a Bug…", icon: Wand2, shortcut: "⌘⇧B", keywords: "issue compose", disabled: !active, run: done(() => runCommand("report.compose")) },
+        { id: "capture", label: "Capture full page", icon: Camera, shortcut: "⌘⇧S", keywords: "screenshot annotate", disabled: !active, run: done(() => runCommand("capture.fullpage")) },
+        { id: "report", label: "Report a bug…", icon: Wand2, shortcut: "⌘⇧B", keywords: "issue compose", disabled: !active, run: done(() => runCommand("report.compose")) },
       ],
     },
     {
@@ -272,7 +272,7 @@ function useMenu(close: () => void): Group[] {
         { id: "history", label: "History", icon: History, shortcut: "⌘Y", more: true, keywords: "visited recent", run: () => b().openLibrary("history") },
         { id: "downloads", label: "Downloads", icon: Download, shortcut: "⌘⇧J", more: true, keywords: "files saved", run: () => b().openLibrary("downloads") },
         { id: "recordings", label: "Recordings", icon: Clapperboard, more: true, keywords: "videos gifs captures", run: () => b().openLibrary("recordings") },
-        { id: "clear", label: "Delete Browsing Data…", icon: Trash2, keywords: "cookies cache privacy clear", run: done(() => b().openSettings("privacy")) },
+        { id: "clear", label: "Delete browsing data…", icon: Trash2, keywords: "cookies cache privacy clear", run: done(() => b().openSettings("privacy")) },
       ],
     },
     { id: "zoom", items: [{ id: "zoom", label: "Zoom", keywords: "bigger smaller full screen", run: () => undefined }] },
@@ -280,14 +280,14 @@ function useMenu(close: () => void): Group[] {
       id: "page",
       items: [
         { id: "print", label: "Print…", icon: Printer, shortcut: "⌘P", disabled: !active, run: done(() => runCommand("tab.print")) },
-        { id: "find", label: "Find in Page", icon: TextSearch, shortcut: "⌘F", disabled: !active, run: done(() => b().toggle("find", true)) },
-        { id: "palette", label: "Command Palette", icon: Search, shortcut: "⌘K", keywords: "search everything", run: done(() => b().toggle("palette", true)) },
+        { id: "find", label: "Find in page", icon: TextSearch, shortcut: "⌘F", disabled: !active, run: done(() => b().toggle("find", true)) },
+        { id: "palette", label: "Command palette", icon: Search, shortcut: "⌘K", keywords: "search everything", run: done(() => b().toggle("palette", true)) },
       ],
     },
     {
       id: "app",
       items: [
-        { id: "shortcuts", label: "Keyboard Shortcuts", icon: Keyboard, shortcut: "⌘/", more: true, run: done(() => b().toggle("shortcuts", true)) },
+        { id: "shortcuts", label: "Keyboard shortcuts", icon: Keyboard, shortcut: "⌘/", more: true, run: done(() => b().toggle("shortcuts", true)) },
         { id: "help", label: "About Dive", icon: Bug, keywords: "help version", run: done(() => b().openSettings("about")) },
         { id: "settings", label: "Settings", icon: Settings2, shortcut: "⌘,", active: open.settings, run: done(() => b().openSettings()) } as Item & { active?: boolean },
       ],

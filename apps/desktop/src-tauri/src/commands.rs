@@ -587,7 +587,7 @@ pub fn register_builtin(registry: &dive_core::CommandRegistry) {
         ),
         (
             "screencast.toggle",
-            "Record tab as GIF / stop",
+            "Record tab",
             Some("mod+shift+r"),
             CommandScope::Tab,
         ),
@@ -602,13 +602,13 @@ pub fn register_builtin(registry: &dive_core::CommandRegistry) {
         ),
         (
             "sidecar.toggle",
-            "Toggle agent sidecar",
+            "Agent",
             Some("mod+j"),
             CommandScope::Global,
         ),
         (
             "dock.toggle",
-            "Toggle dev dock",
+            "Developer dock",
             Some("mod+shift+d"),
             CommandScope::Global,
         ),
@@ -620,7 +620,7 @@ pub fn register_builtin(registry: &dive_core::CommandRegistry) {
         ),
         (
             "simulator.toggle",
-            "Toggle device simulator",
+            "Device simulator",
             Some("mod+shift+m"),
             CommandScope::Tab,
         ),

@@ -79,7 +79,12 @@ export function useFocusTrap<T extends HTMLElement>(ref: RefObject<T | null>, { 
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     if (!root.contains(document.activeElement)) {
-      const target = initialFocus?.current ?? (menu ? menuItems(root)[0] : undefined) ?? focusables(root)[0] ?? root;
+      // A disabled control cannot take focus; a dialog whose primary button is
+      // disabled at open (nothing downloaded yet, nothing to submit) would leave
+      // focus on the body, and Escape would never reach the trap.
+      const wanted = initialFocus?.current;
+      const usable = wanted && !(wanted as HTMLButtonElement).disabled && wanted.getAttribute("aria-disabled") !== "true" ? wanted : undefined;
+      const target = usable ?? (menu ? menuItems(root)[0] : undefined) ?? focusables(root)[0] ?? root;
       if (target === root && !root.hasAttribute("tabindex")) root.setAttribute("tabindex", "-1");
       target.focus({ preventScroll: true });
     }

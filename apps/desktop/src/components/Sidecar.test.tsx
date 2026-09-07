@@ -83,7 +83,7 @@ describe("Sidecar", () => {
     useAgent.setState({ loaded: true, initError: "Credential discovery timed out" });
     render(<Sidecar />);
     expect(screen.getByRole("alert").textContent).toContain("timed out");
-    expect(screen.queryByText("Connect Model Provider")).toBeNull();
+    expect(screen.queryByText("Connect a model provider")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Retry loading agent" }));
     expect(useAgent.getState().init).toHaveBeenCalledTimes(2);
     fireEvent.click(screen.getByRole("button", { name: "Close agent" }));
@@ -112,7 +112,7 @@ describe("Sidecar", () => {
     expect(screen.getByRole("heading", { name: "Agent" })).toBeTruthy();
     expect(screen.getByText("Anthropic")).toBeTruthy();
     expect(screen.getByPlaceholderText("Ask, or direct the agent on this page…")).toBeTruthy();
-    expect(screen.queryByText("Connect Model Provider")).toBeNull();
+    expect(screen.queryByText("Connect a model provider")).toBeNull();
   });
 
   it("renders the seeded conversation", () => {
@@ -151,7 +151,7 @@ describe("Sidecar", () => {
   it("shows setup instead of the thread when the chosen provider has no key", () => {
     useAgent.setState({ keyed: [] });
     render(<Sidecar />);
-    expect(screen.getByText("Connect Model Provider")).toBeTruthy();
+    expect(screen.getByText("Connect a model provider")).toBeTruthy();
     expect(screen.queryByPlaceholderText("Ask, or direct the agent on this page…")).toBeNull();
   });
 
@@ -159,6 +159,6 @@ describe("Sidecar", () => {
     useAgent.setState({ loaded: false });
     render(<Sidecar />);
     expect(screen.queryByPlaceholderText("Ask, or direct the agent on this page…")).toBeNull();
-    expect(screen.queryByText("Connect Model Provider")).toBeNull();
+    expect(screen.queryByText("Connect a model provider")).toBeNull();
   });
 });

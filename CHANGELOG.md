@@ -28,6 +28,19 @@ bump may change behaviour.
 ### Fixed
 - DiveScreen exports are named "clip (edited).mp4", counting up on a clash,
   instead of carrying a timestamp and a job id.
+- The Live subtitles dialog closes on Escape before any model is downloaded;
+  a dialog whose primary button is disabled no longer leaves focus outside
+  its trap.
+- After a failed load the address bar shows the address that failed, so it
+  can be corrected in place, and a new tab is named after its host while the
+  first page loads instead of "about:blank".
+- The update card uses the theme's colours; it had referenced tokens that do
+  not exist and rendered without a background.
+- A failed agent reply offers "Change model or key" inline.
+- The feature tour scrolls to the top of the page when opened.
+- The main menu, agent setup and DiveScreen cursor controls use sentence
+  case like the rest of the chrome; palette commands are named after the
+  surface they open ("Developer dock", not "Toggle dev dock").
 - MCP and agent page input fail at once with a reason while a dialog covers
   the page, instead of timing out; local providers (Ollama, LM Studio) select
   an installed model when the configured default is missing.

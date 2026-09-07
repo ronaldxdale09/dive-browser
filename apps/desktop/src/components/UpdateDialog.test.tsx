@@ -39,10 +39,10 @@ describe("UpdateDialog", () => {
 
     render(<UpdateDialog />);
     expect(screen.getByRole("dialog")).toBeTruthy();
-    expect(screen.getByText("Update Available")).toBeTruthy();
+    expect(screen.getByText("Update available")).toBeTruthy();
     expect(screen.getByText("v0.1.1-rc.0")).toBeTruthy();
     expect(screen.getByText("Major performance upgrade and bug fixes.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /install & restart/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /install and restart/i })).toBeTruthy();
   });
 
   it("dismisses when clicking later or close", () => {
@@ -63,7 +63,7 @@ describe("UpdateDialog", () => {
     expect(useUpdates.getState().dismissed).toBe(true);
   });
 
-  it("triggers install when clicking Install & Restart", async () => {
+  it("triggers install when clicking Install and restart", async () => {
     const installSpy = vi.fn().mockResolvedValue(undefined);
     useUpdates.setState({
       status: "available",
@@ -76,7 +76,7 @@ describe("UpdateDialog", () => {
     });
 
     render(<UpdateDialog />);
-    const installBtn = screen.getByRole("button", { name: /install & restart/i });
+    const installBtn = screen.getByRole("button", { name: /install and restart/i });
     fireEvent.click(installBtn);
     expect(installSpy).toHaveBeenCalledTimes(1);
   });

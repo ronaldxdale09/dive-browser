@@ -62,6 +62,16 @@ describe("Subtitles dialog", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Start subtitles" })).toHaveProperty("disabled", false);
   });
+  it("closes on Escape while Start is still disabled", async () => {
+    vi.mocked(ipc.subtitleModels).mockResolvedValue(MODELS.map((m) => ({ ...m, downloaded: false })));
+    useSubtitles.setState({ model: "base" });
+    render(<Subtitles />);
+    await screen.findByText("Base");
+    expect(screen.getByRole("button", { name: "Start subtitles" })).toHaveProperty("disabled", true);
+    fireEvent.keyDown(document.activeElement ?? screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(useBrowser.getState().open.subtitles).toBe(false));
+  });
+
   it("lists the models with sizes and download state", async () => {
     render(<Subtitles />);
     expect(await screen.findByText("Base")).toBeTruthy();

@@ -34,7 +34,7 @@ describe("RecorderModal", () => {
     render(<RecorderModal />);
 
     act(() => useRecorder.setState({ isOpen: true, steps: [] }));
-    expect(screen.getByRole("dialog", { name: "Recorded Test" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Recorded test" })).toBeTruthy();
     expect(contentCoverDepth()).toBe(1);
     await waitFor(() => expect(ipc.setContentCovered).toHaveBeenLastCalledWith(true));
 

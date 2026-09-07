@@ -143,6 +143,15 @@ describe("Toolbar", () => {
     });
   });
 
+  it("shows the address that failed to load, not the last one that worked", () => {
+    useBrowser.setState({ navError: { [tab.id]: { url: "http://nonexistent.invalid/", error: "net::ERR_NAME_NOT_RESOLVED" } } });
+    render(<Toolbar />);
+    const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
+    expect(input.value).toBe("nonexistent.invalid");
+    act(() => useBrowser.setState({ navError: {} }));
+    expect(input.value).toBe("example.com/docs");
+  });
+
   it("keeps typed text during a page redirect and Escape restores the current address", () => {
     render(<Toolbar />);
     const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;

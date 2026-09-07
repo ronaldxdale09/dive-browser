@@ -29,7 +29,7 @@ afterEach(() => {
 describe("MainMenu", () => {
   it("lists the browser's pages and features with their shortcuts", () => {
     render(<MainMenu />);
-    for (const name of ["New Tab", "Bookmarks", "History", "Downloads", "Recordings", "Settings", "Device Simulator", "Record a Video", "Live subtitles", "Print…"]) {
+    for (const name of ["New tab", "Bookmarks", "History", "Downloads", "Recordings", "Settings", "Device simulator", "Record a video", "Live subtitles", "Print…"]) {
       expect(screen.getByRole("menuitem", { name: new RegExp(name.replace("…", "")) })).toBeTruthy();
     }
     expect(screen.getByText("⌘T")).toBeTruthy();
@@ -50,7 +50,7 @@ describe("MainMenu", () => {
 
   it("opens settings sections and closes itself", () => {
     render(<MainMenu />);
-    fireEvent.click(screen.getByRole("menuitem", { name: /Delete Browsing Data/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Delete browsing data/ }));
     expect(useBrowser.getState().open.settings).toBe(true);
     expect(useBrowser.getState().settingsSection).toBe("privacy");
   });

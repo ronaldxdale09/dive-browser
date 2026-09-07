@@ -48,7 +48,8 @@ describe("BookmarkButton", () => {
     expect(ipc.bookmarkToggle).toHaveBeenCalledWith(tab.id);
     const title = screen.getByRole("textbox", { name: "Bookmark title" }) as HTMLInputElement;
     expect(title.value).toBe("Example docs");
-    expect(document.activeElement).toBe(title);
+    // Focus moves in an effect after the popover commits, so it can land a tick later.
+    await waitFor(() => expect(document.activeElement).toBe(title));
     expect(dialog.textContent).toContain("example.com");
     expect(screen.getByRole("button", { name: "Edit bookmark" }).getAttribute("aria-pressed")).toBe("true");
     expect(contentCoverDepth()).toBe(1);

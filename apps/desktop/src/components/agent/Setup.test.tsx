@@ -87,8 +87,8 @@ describe("Setup", () => {
     usePrefs.setState({ update });
     const done = vi.fn();
     const view = render(<Setup canGoBack={false} onDone={done} />);
-    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "fixture" } });
-    fireEvent.click(screen.getByRole("button", { name: "Verify & Connect" }));
+    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verify and connect" }));
     view.unmount();
     await act(async () => { resolve({ ok: true, message: "ok" }); });
     expect(useAgent.getState().saveKey).not.toHaveBeenCalled();
@@ -100,8 +100,8 @@ describe("Setup", () => {
     vi.spyOn(ipc, "prefsSet").mockRejectedValue(Error("Settings could not be saved"));
     const done = vi.fn();
     render(<Setup canGoBack={false} onDone={done} />);
-    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "fixture" } });
-    fireEvent.click(screen.getByRole("button", { name: "Verify & Connect" }));
+    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verify and connect" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Settings could not be saved"));
     expect(screen.queryByText("Connection verified! Loading agent…")).toBeNull();
     expect(done).not.toHaveBeenCalled();
@@ -113,11 +113,11 @@ describe("Setup", () => {
     usePrefs.setState({ update });
     const done = vi.fn();
     render(<Setup canGoBack={false} onDone={done} />);
-    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "fixture" } });
-    fireEvent.click(screen.getByRole("button", { name: "Verify & Connect" }));
+    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verify and connect" }));
     await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ agent_provider: "anthropic" }), { rejectOnError: true });
-    expect((screen.getByLabelText("All Providers") as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByLabelText("All providers") as HTMLSelectElement).disabled).toBe(true);
     expect(done).not.toHaveBeenCalled();
     await act(async () => { saved(); });
     expect(done).toHaveBeenCalledTimes(1);
@@ -125,7 +125,7 @@ describe("Setup", () => {
 
   it("renders onboarding hero when no keys are configured", () => {
     render(<Setup canGoBack={false} onDone={() => {}} />);
-    expect(screen.getByText("Connect Model Provider")).toBeTruthy();
+    expect(screen.getByText("Connect a model provider")).toBeTruthy();
     expect(screen.getByText(/inspect DOM elements/)).toBeTruthy();
     expect(screen.getByText(/stored in macOS Keychain/)).toBeTruthy();
   });

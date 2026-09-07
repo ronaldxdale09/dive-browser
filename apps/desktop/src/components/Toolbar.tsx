@@ -35,7 +35,11 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
   const setPickerOpen = usePicker((s) => s.setOpen);
   const loading = useBrowser((s) => (s.activeTab ? s.loading[s.activeTab] === true : false));
   const current = tabs.find((t) => t.id === activeTab);
-  const url = current?.url ?? "";
+  const failedUrl = useBrowser((s) => (s.activeTab ? s.navError[s.activeTab]?.url : undefined));
+  // A load that failed leaves the bar on the address that failed, as every
+  // browser does, so it can be corrected in place; the store still holds the
+  // last committed URL for everything else.
+  const url = failedUrl || current?.url || "";
   // A redirect must not overwrite text the person is editing. A tab switch
   // does reset the draft, even when both tabs happen to have the same URL.
   const [draft, setDraft] = useState({ tabId: activeTab, value: url });

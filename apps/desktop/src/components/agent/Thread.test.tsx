@@ -99,6 +99,10 @@ describe("Thread", () => {
     expect(screen.getByText("bold")).toBeTruthy();
     expect(screen.getByText("stopped")).toBeTruthy();
     expect(screen.getByText("Rate limited.")).toBeTruthy();
+    const openSettings = vi.spyOn(useBrowser.getState(), "openSettings").mockImplementation(() => undefined);
+    useBrowser.setState({ openSettings });
+    fireEvent.click(screen.getByRole("button", { name: "Change model or key" }));
+    expect(openSettings).toHaveBeenCalledWith("agent");
     expect(screen.getByText("Thinking…")).toBeTruthy();
     expect(screen.queryByText("Quick Actions")).toBeNull();
   });

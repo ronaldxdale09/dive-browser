@@ -152,7 +152,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
         {/* Onboarding Overview (shown on initial setup) */}
         {!canGoBack && keyed.length === 0 && (
           <div className="space-y-1 rounded-xl border border-line bg-surface-2/40 p-3">
-            <h3 className="text-xs font-semibold text-ink">Connect Model Provider</h3>
+            <h3 className="text-xs font-semibold text-ink">Connect a model provider</h3>
             <p className="text-[11px] leading-relaxed text-ink-2">
               Select an AI model provider to inspect DOM elements, analyze network traffic, and automate page tasks.
             </p>
@@ -163,7 +163,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[10.5px] font-medium text-ink-3 uppercase tracking-wider">
-              API Provider
+              Provider
             </span>
             {hasKey && (
               <span className="text-[10.5px] text-highlight font-medium">
@@ -201,7 +201,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
           <div className="relative">
             <select
               id="agent-provider-select"
-              aria-label="All Providers"
+              aria-label="All providers"
               value={selected}
               disabled={busy}
               onChange={(e) => choose(e.target.value as Provider)}
@@ -236,7 +236,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
                   className="flex items-center gap-1 text-[11px] text-ink-3 hover:text-ink hover:underline transition-colors"
                   title={info.key_url}
                 >
-                  <span>Get API Key</span>
+                  <span>Get an API key</span>
                   <Icon icon={ExternalLink} size={10} />
                 </button>
               )}
@@ -264,7 +264,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
             {info.needs_key || info.id === "custom" ? (
               <div>
                 <label htmlFor="agent-api-key" className="block text-[11px] font-medium text-ink-2 mb-1">
-                  API Key
+                  API key
                 </label>
                 <div className="relative flex items-center">
                   <input
@@ -366,7 +366,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
                   hasKey && !key.trim() ? (
                     "Use Provider"
                   ) : (
-                    "Verify & Connect"
+                    "Verify and connect"
                   )
                 ) : (
                   "Connect Provider"

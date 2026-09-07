@@ -14,9 +14,13 @@ import { essentialTabs, orderTabs } from "../lib/tabOrder";
 
 export { essentialTabs, orderTabs };
 
-/** What a tab is called in the strip: its title, else its host. */
+/**
+ * What a tab is called in the strip: its title, else its host. A new view
+ * reports "about:blank" as its title until the first real page commits, so
+ * that stands in only while the address is blank too.
+ */
 export function tabLabel(t: Tab) {
-  if (t.title) return t.title;
+  if (t.title && (t.title !== "about:blank" || t.url === "about:blank")) return t.title;
   try {
     return new URL(t.url).host || t.url;
   } catch {

@@ -19,8 +19,8 @@ export function Subtitles() {
   useCoversContent(open);
   const root = useRef<HTMLDivElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
-  useFocusTrap(root, { active: open, initialFocus: primary });
   const { close, className } = useFadeClose(() => toggle("subtitles", false));
+  useFocusTrap(root, { active: open, initialFocus: primary, onEscape: close });
 
   if (!open) return null;
 
@@ -31,7 +31,6 @@ export function Subtitles() {
         role="dialog"
         aria-modal="true"
         aria-label="Live subtitles"
-        onKeyDown={(e) => e.key === "Escape" && close()}
         className="mx-auto mt-24 max-h-[calc(100dvh-8rem)] w-[420px] overflow-y-auto rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
       >
         <div className="mb-3 flex items-center gap-2.5">

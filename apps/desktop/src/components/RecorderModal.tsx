@@ -62,7 +62,7 @@ export function RecorderModal() {
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Recorded Test"
+        aria-label="Recorded test"
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.key === "Escape" && close()}
         className="flex h-[min(560px,85vh)] w-[720px] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"

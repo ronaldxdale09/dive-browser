@@ -21,6 +21,20 @@ function Dialog({ active = true, onEscape, initial = false }: { active?: boolean
   );
 }
 
+function DisabledPrimary({ onEscape }: { onEscape: () => void }) {
+  const root = useRef<HTMLDivElement>(null);
+  const primary = useRef<HTMLButtonElement>(null);
+  useFocusTrap(root, { initialFocus: primary, onEscape });
+  return (
+    <div ref={root} role="dialog" aria-label="Disabled primary">
+      <button type="button">option</button>
+      <button type="button" ref={primary} disabled>
+        start
+      </button>
+    </div>
+  );
+}
+
 function Menu({ onClose }: { onClose?: () => void }) {
   const root = useRef<HTMLDivElement>(null);
   useFocusTrap(root, { menu: true, onEscape: onClose });
@@ -77,6 +91,14 @@ describe("useFocusTrap", () => {
     cleanup();
     render(<Dialog initial />);
     expect(document.activeElement).toBe(screen.getByText("second"));
+  });
+
+  it("falls back from a disabled initialFocus so Escape still reaches the trap", () => {
+    const onEscape = vi.fn();
+    render(<DisabledPrimary onEscape={onEscape} />);
+    expect(document.activeElement).toBe(screen.getByText("option"));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(onEscape).toHaveBeenCalledTimes(1);
   });
 
   it("cycles Tab and Shift+Tab inside the container, skipping disabled controls", () => {

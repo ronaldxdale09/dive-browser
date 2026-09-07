@@ -248,8 +248,15 @@ const AssistantMessage = memo(function AssistantMessage({
         </span>
       )}
       {m.error && (
-        <div className="mt-1.5 rounded-xl border border-danger/40 bg-danger/10 px-3 py-2 text-[11px] text-danger">
-          {m.error}
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-danger/40 bg-danger/10 px-3 py-2 text-[11px] text-danger">
+          <span className="min-w-0 flex-1">{m.error}</span>
+          <button
+            type="button"
+            onClick={() => useBrowser.getState().openSettings("agent")}
+            className="shrink-0 rounded-full border border-danger/40 px-2 py-0.5 text-[10.5px] font-medium text-ink hover:bg-danger/15"
+          >
+            Change model or key
+          </button>
         </div>
       )}
       {(m.stopped || (m.usage && !m.pending)) && (
