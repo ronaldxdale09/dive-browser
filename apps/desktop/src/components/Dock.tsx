@@ -192,7 +192,7 @@ const Row = memo(function Row({
           type="button"
           onClick={() => void handleClick()}
           title={`Open in ${editorLabel(preferredEditor)} (${entry.url})`}
-          className="group flex shrink-0 items-center gap-1 rounded px-1 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink focus:outline-none"
+          className="group flex shrink-0 items-center gap-1 rounded px-1 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-highlight"
         >
           <span>{loc}</span>
           <ExternalLink size={10} className="opacity-0 transition-opacity group-hover:opacity-100" />

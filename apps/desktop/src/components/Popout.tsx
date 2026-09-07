@@ -195,7 +195,7 @@ export function Popout({ tabId }: { tabId: string }) {
               data-tab-drag-handle
               data-tauri-drag-region="false"
               onMouseDown={(e) => e.stopPropagation()}
-              className="flex h-full min-w-0 flex-1 items-center gap-2 bg-transparent px-2.5 outline-none"
+              className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-lg bg-transparent px-2.5 outline-none focus-visible:ring-2 focus-visible:ring-highlight focus-visible:ring-inset"
             >
               <Favicon src={tab?.favicon ?? null} size={14} />
               <span className="truncate">{title}</span>

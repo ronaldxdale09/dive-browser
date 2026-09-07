@@ -50,6 +50,9 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Keyboard focus is visible on tabs, the popout's tab and console source
+  links, which had removed the outline without drawing anything in its
+  place.
 - The light theme draws status colours for light: Web Vitals ratings,
   console warnings, audit impact, response statuses and errors were the
   dark palette's pale green, amber and coral on white. Console entries
