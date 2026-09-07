@@ -1,3 +1,4 @@
+import { isPrivateWindow } from "../lib/privateMode";
 import { prettyUrl } from "../lib/prettyUrl";
 import { Bug, Camera, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, X, Menu } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
@@ -152,9 +153,9 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
       {compact ? (
         <ToolbarMore>
           <ZoomBadge />
-          <BookmarkButton />
+          {!isPrivateWindow() && <BookmarkButton />}
           <SharePopover />
-          <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />
+          {!isPrivateWindow() && <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />}
           <span className={capturing ? "animate-spin motion-reduce:animate-none" : undefined}><IconButton icon={capturing ? LoaderCircle : Camera} label={capturing ? "Capturing full page" : "Capture full page"} shortcut="⌘⇧S" disabled={!current || capturing} onClick={() => void capture(true)} /></span>
           <IconButton icon={Bug} label="Open DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
           <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={open.dock && !open.sidecar} onClick={toggleDock} />
@@ -163,10 +164,10 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
       ) : (
         <>
           <ZoomBadge />
-          <BookmarkButton />
+          {!isPrivateWindow() && <BookmarkButton />}
           <SharePopover />
           <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />
-          <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />
+          {!isPrivateWindow() && <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />}
           <span className={capturing ? "animate-spin motion-reduce:animate-none" : undefined}><IconButton icon={capturing ? LoaderCircle : Camera} label={capturing ? "Capturing full page" : "Capture full page"} shortcut="⌘⇧S" disabled={!current || capturing} onClick={() => void capture(true)} /></span>
           <IconButton icon={Bug} label="Open DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
           <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={open.dock} onClick={toggleDock} />

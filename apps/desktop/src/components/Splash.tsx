@@ -60,7 +60,7 @@ export function Splash() {
   if (gone || (ready && !visible)) return null;
 
   return (
-    <div
+    <div data-native-overlay
       aria-hidden
       className="fixed inset-0 z-50 grid place-items-center bg-ground transition-opacity duration-150 ease-out"
       style={{ opacity: visible && !leaving ? 1 : 0, pointerEvents: visible && !leaving ? "auto" : "none" }}

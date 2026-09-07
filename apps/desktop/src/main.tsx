@@ -4,6 +4,9 @@ import { ChromeRoot } from "./components/ChromeRoot";
 import { ChromeErrorBoundary } from "./components/ChromeErrorBoundary";
 import { startStartupTelemetry } from "./lib/startup";
 import "./styles.css";
+import { isPrivateWindow } from "./lib/privateMode";
+
+if (isPrivateWindow()) document.documentElement.dataset.private = "true";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");

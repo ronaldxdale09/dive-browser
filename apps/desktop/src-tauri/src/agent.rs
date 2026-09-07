@@ -44,13 +44,17 @@ const API_KEY_CAP: usize = 16 * 1024;
 
 /// Install the OS credential store once at startup.
 pub fn init_keychain() {
-    init_keychain_with(std::env::var_os("DIVE_USE_MOCK_KEYCHAIN").is_some(), || {
-        #[cfg(target_os = "macos")]
-        match apple_native_keyring_store::keychain::Store::new() {
-            Ok(store) => keyring_core::set_default_store(store),
-            Err(e) => tracing::warn!("keychain unavailable: {e}"),
-        }
-    });
+    init_keychain_with(
+        crate::private_session::is_private()
+            || std::env::var_os("DIVE_USE_MOCK_KEYCHAIN").is_some(),
+        || {
+            #[cfg(target_os = "macos")]
+            match apple_native_keyring_store::keychain::Store::new() {
+                Ok(store) => keyring_core::set_default_store(store),
+                Err(e) => tracing::warn!("keychain unavailable: {e}"),
+            }
+        },
+    );
 }
 
 fn init_keychain_with(use_mock: bool, native: impl FnOnce()) {

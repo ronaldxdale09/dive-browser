@@ -1,3 +1,6 @@
+import { isPrivateWindow } from "../lib/privateMode";
+import { PrivateBadge, PrivateWelcome } from "./PrivateMode";
+import { useCoversContent } from "../lib/overlay";
 import { prettyUrl } from "../lib/prettyUrl";
 import { ArrowLeft, ArrowRight, Lock, PanelsTopLeft, Plus, RotateCw, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -153,6 +156,7 @@ export function Popout({ tabId }: { tabId: string }) {
         case "tab.reload": run(ipc.tabReload(tabId)); break;
         case "tab.new":
         case "window.new": run(ipc.windowCommand(command)); break;
+        case "window.private": run(ipc.windowPrivate()); break;
         default: return;
       }
       e.preventDefault();
@@ -170,6 +174,8 @@ export function Popout({ tabId }: { tabId: string }) {
     return () => window.removeEventListener("dive-native-focus-address", focusAddress);
   }, []);
 
+  const privateStart = isPrivateWindow() && url === "about:blank";
+  useCoversContent(privateStart);
   const secure = url.startsWith("https://");
   const title = tab ? tabLabel(tab) : "Opening tab";
   return (
@@ -204,6 +210,7 @@ export function Popout({ tabId }: { tabId: string }) {
         </div>
         <IconButton icon={Plus} label="New tab in main window" shortcut="⌘T" onClick={() => run(ipc.windowCommand("tab.new"))} />
         <div className="min-w-8 flex-1 self-stretch" data-tauri-drag-region="true" />
+        {isPrivateWindow() && <PrivateBadge />}
       </header>
       <nav aria-label="Browser controls" className="flex min-w-0 items-center gap-1 border-b border-line px-2">
         <IconButton icon={ArrowLeft} label="Back" disabled={!canBack} onClick={() => run(ipc.tabBack(tabId))} />
@@ -243,7 +250,7 @@ export function Popout({ tabId }: { tabId: string }) {
           <button type="button" aria-label="Dismiss error" onClick={() => useBrowser.setState({ error: null })} className="grid size-5 shrink-0 place-items-center rounded hover:bg-surface-2"><Icon icon={X} size={13} /></button>
         </div>}
       </div>
-      <div ref={body} className="min-h-0 flex-1 bg-surface" />
+      <div ref={body} className="relative min-h-0 flex-1 bg-surface">{privateStart && <PrivateWelcome onBrowse={() => { inputRef.current?.focus(); inputRef.current?.select(); }} />}</div>
     </div>
   );
 }

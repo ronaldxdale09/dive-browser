@@ -492,3 +492,29 @@ button:not(:disabled):active,
   transition-delay: 0ms !important;
   scroll-behavior: auto !important;
 }
+
+/* Private chrome is intentionally quiet. Text + shield accompany the palette.
+   Override preference accents as well: a private window must stay identifiable. */
+:root[data-private="true"] {
+  color-scheme: dark;
+  --color-ground: #141219 !important;
+  --color-surface: #1b1821 !important;
+  --color-surface-2: #24202c !important;
+  --color-surface-3: #302a39 !important;
+  --color-line: #2d2736 !important;
+  --color-line-2: #42394e !important;
+  --color-ink: #eeeaf3 !important;
+  --color-ink-2: #b7afc2 !important;
+  --color-ink-3: #a297af !important;
+  --color-accent: #e2d9ef !important;
+  --color-accent-ink: #1b1622 !important;
+  --color-highlight: #bca5db !important;
+  --color-highlight-ink: #19141f !important;
+  --color-highlight-soft: #33273f !important;
+}
+.private-badge, .private-emblem {
+  color: #cbb8e4;
+  background: #282030;
+  border-color: #51405f;
+}
+.private-badge:hover { background: #352940; }

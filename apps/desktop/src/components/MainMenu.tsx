@@ -1,6 +1,8 @@
+import { isPrivateWindow } from "../lib/privateMode";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   AppWindow,
+  Shield,
   Bug,
   Camera,
   Captions,
@@ -76,7 +78,11 @@ export function MainMenu() {
   useFocusTrap(root, { initialFocus: input, onEscape: close });
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
-  const groups = useMenu(close);
+  const allGroups = useMenu(close);
+  const groups = isPrivateWindow() ? [
+    { id: "private-session", items: [{ id: "private.exit", label: "Exit Private Mode", icon: X, keywords: "close all private windows incognito", run: () => runCommand("private.exit") }] },
+    ...allGroups.map((group) => ({ ...group, items: group.items.filter((item) => !["agent", "workspace.new"].includes(item.id)) })),
+  ] : allGroups;
   const q = query.trim().toLowerCase();
   const filtered = useMemo(() => {
     if (!q) return groups;
@@ -237,6 +243,7 @@ function useMenu(close: () => void): Group[] {
     {
       id: "new",
       items: [
+        { id: "window.private", label: "New Private Window", icon: Shield, shortcut: "⇧⌘N", keywords: "incognito private browsing", run: done(() => runCommand("window.private")) },
         { id: "window.new", label: "New Window", icon: AppWindow, shortcut: "⌘N", run: done(() => runCommand("window.new")) },
         { id: "tab.new", label: "New Tab", icon: SquarePlus, shortcut: "⌘T", run: done(() => runCommand("tab.new")) },
         { id: "workspace.new", label: "New Workspace", icon: LayoutGrid, keywords: "container profile", run: done(() => runCommand("workspace.new")) },

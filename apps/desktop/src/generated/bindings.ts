@@ -14,8 +14,13 @@ export const commands = {
 	tabInfo: (id: TabId) => typedError<Tab, AppError>(__TAURI_INVOKE("tab_info", { id })),
 	/**  Fixed window commands from trusted detached chrome; never arbitrary script. */
 	windowCommand: (command: string) => typedError<null, AppError>(__TAURI_INVOKE("window_command", { command })),
-	/**  Create a blank detached window using the authoritative current workspace. */
 	windowOpen: () => typedError<null, AppError>(__TAURI_INVOKE("window_open")),
+	/**  Create a blank detached window using the authoritative current workspace. */
+	windowPrivate: () => typedError<null, AppError>(__TAURI_INVOKE("window_private")),
+	/**  End the whole off-the-record session, including any hidden host window. */
+	windowExitPrivate: () => typedError<null, AppError>(__TAURI_INVOKE("window_exit_private")),
+	/**  Close the requesting chrome's own window, including an empty private home. */
+	windowClose: () => typedError<null, AppError>(__TAURI_INVOKE("window_close")),
 	/**  Only the current registered popout chrome can acknowledge its readiness. */
 	popoutReady: (id: TabId) => typedError<boolean, AppError>(__TAURI_INVOKE("popout_ready", { id })),
 	workspaceActivate: (id: WorkspaceId) => typedError<null, AppError>(__TAURI_INVOKE("workspace_activate", { id })),
@@ -306,6 +311,8 @@ export const commands = {
 	 *  is on screen, since child webviews always paint above the main webview.
 	 */
 	layoutSetContentCovered: (covered: boolean) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_covered", { covered })),
+	/**  Regions belong to trusted chrome and use CSS logical pixels. */
+	layoutSetOverlayRegions: (regions: Bounds[], active: boolean) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_overlay_regions", { regions, active })),
 	/**
 	 *  Show these tabs side by side at these rectangles; an empty list returns
 	 *  to a single page. Sleeping tabs are woken so every pane has a page.

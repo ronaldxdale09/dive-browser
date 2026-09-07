@@ -1,3 +1,5 @@
+import { isPrivateWindow } from "../lib/privateMode";
+import { PrivateWelcome } from "./PrivateMode";
 import { AlertTriangle, Check, RotateCw, ShieldQuestion, WifiOff, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
@@ -183,7 +185,7 @@ function NavErrorPanel({ url, error }: { url: string; error: string }) {
   const text = describeNavError(error, url);
   const offline = /ERR_INTERNET_DISCONNECTED/.test(error);
   return (
-    <div role="alert" aria-labelledby="nav-error-title" className="absolute inset-0 z-10 grid place-items-center bg-surface p-6">
+    <div data-native-overlay role="alert" aria-labelledby="nav-error-title" className="absolute inset-0 z-10 grid place-items-center bg-surface p-6">
       <div className="flex w-full max-w-md flex-col items-start gap-3">
         <Icon icon={offline ? WifiOff : AlertTriangle} size={28} className="text-ink-3" />
         <h2 id="nav-error-title" className="text-lg font-semibold text-ink">
@@ -234,7 +236,7 @@ function FullPage() {
           the artwork then wastes a canvas and its startup work on restored tabs. */}
       {ready && !activeTab && (
         <Suspense fallback={<div className="absolute inset-0 bg-ground" aria-label="Loading start page" />}>
-          <Welcome />
+          {isPrivateWindow() ? <PrivateWelcome /> : <Welcome />}
         </Suspense>
       )}
       {preview && <img aria-hidden src={preview} className="pointer-events-none absolute inset-0 size-full object-fill" />}

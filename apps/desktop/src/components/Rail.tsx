@@ -1,3 +1,4 @@
+import { isPrivateWindow } from "../lib/privateMode";
 import { AvatarImage } from "./AvatarImage";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -52,7 +53,7 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
 
   return (
     <nav aria-label="Workspaces" className={`flex h-full flex-col gap-1 px-2 pt-2 pb-2 ${expanded ? "" : "items-center"}`}>
-      {expanded && <AiShortcuts />}
+      {expanded && !isPrivateWindow() && <AiShortcuts />}
       {expanded && (
         <div className="flex h-6 items-center gap-1 pr-0.5 pl-2">
           <span className="text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">Workspaces</span>
@@ -80,10 +81,10 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
             ))}
           </SortableContext>
         </DndContext>
-        <button
+        {!isPrivateWindow() && <button
           type="button"
           aria-label="New workspace"
-          title="New workspace (⌘⇧N)"
+          title="New workspace (⌥⇧⌘N)"
           onClick={() => setEditing({ id: null })}
           className={
             expanded
@@ -95,10 +96,10 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
             <Icon icon={Plus} size={14} />
           </span>
           {expanded && "New workspace"}
-        </button>
+        </button>}
       </div>
       {!expanded && !forceCollapsed && <RailButton icon={PanelLeftOpen} label="Expand workspaces" onClick={() => void update({ rail_expanded: true })} />}
-      <DefaultBrowserButton expanded={expanded} />
+      {!isPrivateWindow() && <DefaultBrowserButton expanded={expanded} />}
       <button
         type="button"
         aria-label="Settings"

@@ -133,8 +133,7 @@ export function TabDnd({ children }: { children: ReactNode }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const dragging = useTabDrag((s) => s.dragging);
   const tabs = useBrowser((s) => s.tabs);
-  // The page is a native view above the chrome, so the drop zones drawn
-  // over it can only be seen while it is hidden.
+  // Raise chrome so drop targets and the drag ghost remain above native pages.
   useCoversContent(dragging !== null);
   const ghost = dragging ? tabs.find((t) => t.id === dragging) : undefined;
 
@@ -160,7 +159,7 @@ export function TabDnd({ children }: { children: ReactNode }) {
       {children}
       <DragOverlay dropAnimation={null}>
         {ghost && (
-          <div className="tab-drag-ghost pointer-events-none flex h-8 max-w-56 cursor-grabbing items-center gap-2 rounded-lg border border-line-2 bg-surface-2 px-2.5 text-xs text-ink shadow-2xl ring-1 ring-black/15">
+          <div data-native-overlay className="tab-drag-ghost pointer-events-none flex h-8 max-w-56 cursor-grabbing items-center gap-2 rounded-lg border border-line-2 bg-surface-2 px-2.5 text-xs text-ink shadow-2xl ring-1 ring-black/15">
             <Favicon src={ghost.favicon} size={14} />
             <span className="truncate">{tabLabel(ghost)}</span>
           </div>

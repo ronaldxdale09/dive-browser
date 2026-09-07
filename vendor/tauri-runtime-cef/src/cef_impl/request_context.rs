@@ -307,6 +307,7 @@ pub(crate) fn request_context_from_webview_attributes<'a>(
   custom_protocol_scheme: &str,
   scheme_registry: request_handler::SchemeRegistry,
   on_initialized: RequestContextInitContinuation,
+  mut shared_incognito: Option<RequestContext>,
 ) -> Option<RequestContext> {
   let cache_path = if webview_attributes.incognito {
     CefStringUtf16::from("")
@@ -353,7 +354,13 @@ pub(crate) fn request_context_from_webview_attributes<'a>(
   });
 
   let mut handler = WebviewRequestContextHandler::new(Arc::new(Mutex::new(Some(wrapped_callback))));
-  let request_context = request_context_create_context(Some(&settings), Some(&mut handler));
+  let request_context = if let Some(other) = shared_incognito.as_mut() {
+    // CEF shares the underlying in-memory storage while each view retains its
+    // own handler and asynchronous initialization continuation.
+    request_context_cef_create_context_shared(Some(other), Some(&mut handler))
+  } else {
+    request_context_create_context(Some(&settings), Some(&mut handler))
+  };
   *rc_holder.lock().unwrap() = request_context.clone();
 
   if let Some(request_context) = request_context.as_ref() {

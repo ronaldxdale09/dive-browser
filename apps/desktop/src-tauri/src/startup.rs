@@ -370,14 +370,27 @@ pub fn observe_renderer_milestone(
 /// - Valued switches have no leading `--` prefix so the runtime does not double-dash them.
 #[must_use]
 pub fn build_chromium_args(renderer_limit: Option<&str>) -> Vec<(&'static str, Option<String>)> {
-    let extension_paths = crate::extensions::startup_paths();
+    let extension_paths = if crate::private_session::is_private() {
+        Vec::new()
+    } else {
+        crate::extensions::startup_paths()
+    };
     crate::extensions::mark_started(&extension_paths);
-    build_chromium_args_with(
+    let mut args = build_chromium_args_with(
         renderer_limit,
         &std::env::var("DIVE_CHROMIUM_FLAGS").unwrap_or_default(),
         std::env::var_os("DIVE_USE_MOCK_KEYCHAIN").is_some(),
         &extension_paths,
-    )
+    );
+    if crate::private_session::is_private() {
+        args.extend([
+            ("--disable-extensions", None),
+            ("--disable-logging", None),
+            ("--disable-breakpad", None),
+            ("--disable-crash-reporter", None),
+        ]);
+    }
+    args
 }
 
 fn build_chromium_args_with(

@@ -19,6 +19,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   useBrowser.setState({ tabs: [], activeTab: null });
   platform("");
+  Reflect.deleteProperty(window, "__DIVE_PRIVATE__");
 });
 
 const key = (init: KeyboardEventInit & { target?: HTMLElement }) => {
@@ -33,6 +34,23 @@ const key = (init: KeyboardEventInit & { target?: HTMLElement }) => {
 };
 
 describe("command dispatch", () => {
+  it("closes an empty private window with the close-tab command", async () => {
+    Object.defineProperty(window, "__DIVE_PRIVATE__", {value:true, configurable:true});
+    const close = vi.spyOn(ipc, "windowClose").mockResolvedValue(null);
+    useBrowser.setState({activeTab:null, tabs:[]});
+    await UI_COMMANDS["tab.close"]!();
+    expect(close).toHaveBeenCalledOnce();
+  });
+  it("sends New Window and New Private Window to separate native commands", async () => {
+    Object.defineProperty(window, "__DIVE_PRIVATE__", {value:true, configurable:true});
+    const normal = vi.spyOn(ipc, "windowOpen").mockResolvedValue(null);
+    const privateWindow = vi.spyOn(ipc, "windowPrivate").mockResolvedValue(null);
+    await UI_COMMANDS["window.new"]!();
+    expect(normal).toHaveBeenCalledOnce();
+    expect(privateWindow).not.toHaveBeenCalled();
+    await UI_COMMANDS["window.private"]!();
+    expect(privateWindow).toHaveBeenCalledOnce();
+  });
   it("every shortcut points at a chrome-side handler", () => {
     for (const id of Object.values(SHORTCUTS)) expect(UI_COMMANDS[id], id).toBeTypeOf("function");
   });
@@ -72,7 +90,8 @@ describe("command dispatch", () => {
   it("binds pinning and detaching the active tab, clear of the native menu's ⌘⇧N", async () => {
     expect(SHORTCUTS["mod+shift+p"]).toBe("tab.pin");
     expect(SHORTCUTS["mod+alt+n"]).toBe("tab.detach");
-    expect(SHORTCUTS["mod+shift+n"]).toBe("workspace.new");
+    expect(SHORTCUTS["mod+shift+n"]).toBe("window.private");
+    expect(SHORTCUTS["mod+alt+shift+n"]).toBe("workspace.new");
     expect(COMMAND_TITLES["tab.pin"]).toBeTypeOf("string");
     expect(COMMAND_TITLES["tab.detach"]).toBeTypeOf("string");
 
