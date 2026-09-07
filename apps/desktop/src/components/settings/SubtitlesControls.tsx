@@ -29,6 +29,11 @@ function mb(bytes: number): string {
   return `${(bytes / 1_000_000).toFixed(1)} MB`;
 }
 
+/** A model's download size the way a person says it: "148 MB", "1.5 GB". */
+export function modelSize(sizeMb: number): string {
+  return sizeMb >= 1000 ? `${(sizeMb / 1000).toFixed(1)} GB` : `${Math.round(sizeMb)} MB`;
+}
+
 /**
  * The model / language / translate / start-stop controls for live subtitles,
  * shared by the burger-menu dialog and the Settings section so the two stay
@@ -73,7 +78,7 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-ink-2">Transcribes the video playing on this page. It runs on your device — nothing is sent to the cloud.</p>
+      <p className="text-xs text-ink-2">Transcribes the video playing in the current tab. It runs on your device — nothing is sent to the cloud.</p>
 
       {/* Model */}
       <div>
@@ -115,7 +120,7 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
                       className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-line-2 px-2.5 text-[11px] text-ink-2 hover:bg-surface-2"
                     >
                       <Icon icon={Download} size={12} />
-                      Download ({Math.round(m.size_mb)} MB)
+                      Download ({modelSize(m.size_mb)})
                     </button>
                   )}
                 </div>

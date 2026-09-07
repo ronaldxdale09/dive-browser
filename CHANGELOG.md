@@ -50,6 +50,8 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- The agent composer shows an "Acts without asking" chip when that setting is on, not only for the session-only "Allow all"; clicking it opens the Agent settings.
+- Live subtitles settings: the Medium model's download reads "1.5 GB" rather than "1533 MB", and the intro says the current tab rather than "this page".
 - The agent panel's "Agent settings" button opens the Agent section of Settings instead of General. Its model note says "1 model listed", not "1 models".
 - An agent step waiting for approval, still running, denied or failed reads in the present ("Click …", "Open …") instead of claiming it already happened. When nobody answers an approval request within 2 minutes the model is told the action was skipped for lack of an answer rather than that the user refused it.
 - The model picker's provider chips wrap instead of scrolling out of sight, so "Add" (a custom provider) is always visible; "Search 1 models" reads "Search 1 model".

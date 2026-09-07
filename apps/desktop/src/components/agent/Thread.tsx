@@ -55,6 +55,8 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
   const sessionAutoApprove = useAgent((s) => s.sessionAutoApprove);
   const setSessionAutoApprove = useAgent((s) => s.setSessionAutoApprove);
   const includePage = usePrefs((s) => s.prefs.agent_include_page);
+  // The setting approves everything until it is turned off; say so here too.
+  const alwaysAutoApprove = usePrefs((s) => s.prefs.agent_auto_approve);
   const update = usePrefs((s) => s.update);
   const activeTab = useBrowser((s) => s.activeTab);
   const current = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
@@ -151,14 +153,14 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
             </button>
           )}
 
-          {sessionAutoApprove && (
+          {(sessionAutoApprove || alwaysAutoApprove) && (
             <button
               type="button"
-              onClick={() => setSessionAutoApprove(false)}
+              onClick={() => (alwaysAutoApprove ? useBrowser.getState().openSettings("agent") : setSessionAutoApprove(false))}
               className="flex h-6 items-center gap-1 rounded-full bg-highlight-soft px-2 text-[10.5px] text-highlight ring-1 ring-highlight/20"
-              title="Every action is being approved for this session. Click to require confirmation."
+              title={alwaysAutoApprove ? "Act without asking is on in Settings. Click to change it." : "Every action is being approved for this session. Click to require confirmation."}
             >
-              <Icon icon={ShieldOff} size={10} /> Auto-approve on
+              <Icon icon={ShieldOff} size={10} /> {alwaysAutoApprove ? "Acts without asking" : "Auto-approve on"}
             </button>
           )}
         </div>

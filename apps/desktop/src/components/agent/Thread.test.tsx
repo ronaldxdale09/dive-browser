@@ -162,4 +162,14 @@ describe("Thread", () => {
     fireEvent.click(screen.getByRole("button", { name: /Auto-approve on/ }));
     expect(useAgent.getState().setSessionAutoApprove).toHaveBeenCalledWith(false);
   });
+
+  it("says when the setting approves everything, and sends the user to change it in Settings", () => {
+    usePrefs.setState({ prefs: { ...usePrefs.getState().prefs, agent_auto_approve: true } });
+    const openSettings = vi.fn();
+    useBrowser.setState({ openSettings });
+    render(<Thread onAddProvider={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Acts without asking/ }));
+    expect(openSettings).toHaveBeenCalledWith("agent");
+    expect(useAgent.getState().setSessionAutoApprove).not.toHaveBeenCalled();
+  });
 });
