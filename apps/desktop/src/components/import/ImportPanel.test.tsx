@@ -34,17 +34,17 @@ describe("ImportPanel", () => {
     expect((await screen.findByRole("status")).textContent).toContain("Brought in 1 bookmark and 2,500 pages of history from Chrome");
   });
 
-  it("explains a protected folder and offers both ways in", async () => {
-    vi.spyOn(ipc, "browserImportSources").mockResolvedValue([brave]);
-    const grant = vi.spyOn(ipc, "browserImportGrant").mockResolvedValue({ ...brave, access: "ok" });
+  it("explains a protected folder, sends to System Settings and looks again", async () => {
+    const sources = vi.spyOn(ipc, "browserImportSources").mockResolvedValue([brave]);
     const privacy = vi.spyOn(ipc, "browserImportOpenPrivacy").mockResolvedValue(null);
     render(<ImportPanel />);
     expect(await screen.findByText(/keeps Brave’s files private/)).toBeTruthy();
     expect((screen.getByRole("button", { name: "Import from Brave" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Open Privacy settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Allow access in System Settings…" }));
     expect(privacy).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Allow access…" }));
-    await waitFor(() => expect(grant).toHaveBeenCalledWith("brave:Default"));
+    // Back from System Settings with access granted: the row unlocks on focus.
+    sources.mockResolvedValue([{ ...brave, access: "ok" }]);
+    fireEvent(window, new Event("focus"));
     await waitFor(() => expect((screen.getByRole("button", { name: "Import from Brave" }) as HTMLButtonElement).disabled).toBe(false));
     expect(screen.queryByText(/keeps Brave’s files private/)).toBeNull();
   });

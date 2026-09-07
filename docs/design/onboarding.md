@@ -27,8 +27,9 @@ What a person sees the first time Dive opens, and how to bring it back.
    `~/Library/Safari`; it copies each database out from under the running
    browser before reading it, and folds the rows into the store without
    touching anything already there. macOS protects several of those folders:
-   a source reports `access: denied`, and the panel offers the system folder
-   picker (choosing the folder is consent) or Full Disk Access. The same panel
+   a source reports `access: denied`, and the panel sends the person to
+   System Settings › Privacy & Security › Full Disk Access, then looks again
+   on its own when Dive comes back to the front. The same panel
    backs `ImportDialog.tsx`, reachable from the default-browser dialog
    (preselecting the browser being replaced), Settings › General and the
    palette. Passwords, cookies and extensions are never read.

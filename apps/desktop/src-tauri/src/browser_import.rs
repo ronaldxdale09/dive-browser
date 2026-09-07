@@ -9,8 +9,8 @@
 //!
 //! macOS protects some of those folders. Reading one without consent fails
 //! with "Operation not permitted", so a source reports its `access` and the
-//! chrome offers two ways in: a folder picker at the profile (choosing it in
-//! the system panel is consent for that folder) or Full Disk Access.
+//! chrome sends the person to Full Disk Access in System Settings, then
+//! looks again.
 //!
 //! A live browser holds its databases open, so each one is copied to a
 //! temporary folder before it is read.

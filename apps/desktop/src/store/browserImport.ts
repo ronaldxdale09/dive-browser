@@ -27,8 +27,6 @@ interface BrowserImportState {
   select: (id: string) => void;
   setBookmarks: (v: boolean) => void;
   setHistory: (v: boolean) => void;
-  /** Ask macOS for the folder; the source comes back with its access re-checked. */
-  grant: (id: string) => Promise<void>;
   openPrivacySettings: () => Promise<void>;
   run: () => Promise<void>;
   reset: () => void;
@@ -98,16 +96,6 @@ export const useBrowserImport = create<BrowserImportState>((set, get) => ({
   select: (selected) => set({ selected, outcome: null, error: null }),
   setBookmarks: (bookmarks) => set({ bookmarks }),
   setHistory: (history) => set({ history }),
-  grant: async (id) => {
-    set({ error: null });
-    try {
-      const updated = await ipc.browserImportGrant(id);
-      if (!updated) return;
-      set((s) => ({ sources: (s.sources ?? []).map((x) => (x.id === updated.id ? updated : x)), selected: updated.id }));
-    } catch (e) {
-      set({ error: errorMessage(e) });
-    }
-  },
   openPrivacySettings: async () => {
     try {
       await ipc.browserImportOpenPrivacy();

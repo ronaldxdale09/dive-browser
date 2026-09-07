@@ -425,7 +425,6 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_activate,
             tab_deactivate,
             browser_import_sources,
-            browser_import_grant,
             browser_import_run,
             browser_import_open_privacy,
             tab_navigate,
@@ -1300,28 +1299,6 @@ pub(crate) async fn browser_import_sources() -> AppResult<Vec<crate::browser_imp
     tauri::async_runtime::spawn_blocking(crate::browser_import::sources)
         .await
         .map_err(AppError::new)
-}
-
-/// Ask for the profile folder in the system panel: choosing it there is the
-/// consent macOS wants before a protected folder can be read. Returns the
-/// source with its access re-checked, or `None` when the panel was dismissed.
-#[tauri::command]
-#[specta::specta]
-pub(crate) async fn browser_import_grant(
-    id: String,
-) -> AppResult<Option<crate::browser_import::ImportSource>> {
-    let source = crate::browser_import::find(&id)?;
-    let picked = rfd::AsyncFileDialog::new()
-        .set_title(format!("Allow Dive to read {}'s data", source.name))
-        .set_directory(&source.dir)
-        .pick_folder()
-        .await;
-    if picked.is_none() {
-        return Ok(None);
-    }
-    tauri::async_runtime::spawn_blocking(move || crate::browser_import::find(&id).map(Some))
-        .await
-        .map_err(AppError::new)?
 }
 
 /// Bring bookmarks and/or history in from one source.

@@ -38,18 +38,14 @@ describe("browser import", () => {
     expect(useBrowserImport.getState().outcome).toEqual({ source: chrome, summary: { bookmarks: 12, history: 340 } });
   });
 
-  it("does not run for a source macOS has not allowed, and updates it once allowed", async () => {
+  it("starts on a protected source without running anything", async () => {
     vi.spyOn(ipc, "browserImportSources").mockResolvedValue([brave]);
     const run = vi.spyOn(ipc, "browserImportRun");
-    vi.spyOn(ipc, "browserImportGrant").mockResolvedValue({ ...brave, access: "ok" });
     await useBrowserImport.getState().load();
-    await useBrowserImport.getState().run();
-    // The store leaves the gate to the panel; the panel disables Import while
-    // access is denied, so a run with the source still denied is the host's
-    // call to refuse. Here it simply proceeds once access is granted.
-    await useBrowserImport.getState().grant("brave:Default");
-    expect(useBrowserImport.getState().sources?.[0]?.access).toBe("ok");
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(useBrowserImport.getState().selected).toBe("brave:Default");
+    // The panel disables Import while access is denied, and the host refuses
+    // a protected folder; nothing runs on its own.
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("keeps a failure readable", async () => {

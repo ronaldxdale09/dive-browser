@@ -46,12 +46,19 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
   const select = useBrowserImport((s) => s.select);
   const setBookmarks = useBrowserImport((s) => s.setBookmarks);
   const setHistory = useBrowserImport((s) => s.setHistory);
-  const grant = useBrowserImport((s) => s.grant);
   const openPrivacySettings = useBrowserImport((s) => s.openPrivacySettings);
   const run = useBrowserImport((s) => s.run);
 
   useEffect(() => {
     void load(prefer ?? undefined);
+  }, [load, prefer]);
+
+  // Full Disk Access is granted in System Settings; when the person comes
+  // back, look again so the row unlocks without a click.
+  useEffect(() => {
+    const again = () => void load(prefer ?? undefined);
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
   }, [load, prefer]);
 
   const current = sources?.find((s) => s.id === selected) ?? null;
@@ -88,17 +95,18 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
           <p className="flex items-start gap-2 text-[11px] leading-snug text-ink-2">
             <Icon icon={FolderLock} size={13} className="mt-0.5 shrink-0 text-ink-3" />
             <span>
-              macOS keeps {current.name}&rsquo;s files private. Choose its folder in the panel that opens, or give Dive Full Disk Access in System Settings.
+              macOS keeps {current.name}&rsquo;s files private. Switch Dive on under System Settings › Privacy &amp; Security › Full Disk Access, then come back here.
             </span>
           </p>
           <div className="mt-2 flex flex-wrap gap-2 pl-5">
-            <button type="button" onClick={() => void grant(current.id)} className="pressable h-7 rounded-full bg-accent px-3 text-[11px] font-medium text-accent-ink hover:brightness-110">
-              Allow access…
+            <button type="button" onClick={() => void openPrivacySettings()} className="pressable h-7 rounded-full bg-accent px-3 text-[11px] font-medium text-accent-ink hover:brightness-110">
+              Allow access in System Settings…
             </button>
-            <button type="button" onClick={() => void openPrivacySettings()} className="pressable h-7 rounded-full border border-line-2 px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
-              Open Privacy settings
+            <button type="button" disabled={loading} onClick={() => void load(prefer ?? undefined)} className="pressable h-7 rounded-full border border-line-2 px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40">
+              {loading ? "Checking…" : "Check again"}
             </button>
           </div>
+          <p className="mt-2 pl-5 text-[10.5px] text-ink-3">If it still says so after switching Dive on, quit and reopen Dive once.</p>
         </div>
       )}
 
