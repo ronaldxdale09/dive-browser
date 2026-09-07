@@ -50,6 +50,9 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Settings › Privacy › Site permissions no longer tells a fresh profile
+  that "permissions from earlier versions must be approved again"; the
+  note appears only when some were in fact set aside.
 - Failed loads on a blocked port, an empty response, a closed connection,
   a network change, a failed proxy, a missing file or an invalid address
   read as a sentence with something to try, not a bare error code; an

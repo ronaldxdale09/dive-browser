@@ -84,6 +84,17 @@ describe("SettingsDialog", () => {
     expect(screen.getByRole("heading", { name: "Search" }).compareDocumentPosition(screen.getByRole("heading", { name: "Downloads" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("mentions permissions from earlier versions only when some were set aside", async () => {
+    useBrowser.getState().openSettings("privacy");
+    const { unmount } = render(<SettingsDialog />);
+    expect(await screen.findByText(/Permissions from earlier versions/)).toBeTruthy();
+    unmount();
+    vi.spyOn(ipc, "permissionsList").mockResolvedValue({ scope: { profile_id: "p1", container_id: "c1" }, profile_name: "Personal", container_name: "Shared", legacy_ignored: false, permissions: [{ scope: { profile_id: "p1", container_id: "c1" }, origin: "https://a.dev", kind: "geolocation", decision: "allow" }] as never });
+    render(<SettingsDialog />);
+    expect(await screen.findByText("https://a.dev")).toBeTruthy();
+    expect(screen.queryByText(/Permissions from earlier versions/)).toBeNull();
+  });
+
   it("persists a toggled preference", async () => {
     render(<SettingsDialog />);
     fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
