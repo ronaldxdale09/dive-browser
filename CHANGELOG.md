@@ -42,6 +42,8 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- The Vitals panel no longer keeps the last page's numbers on display
+  when the welcome screen shows; it asks for a tab instead.
 - The command palette matches rows that contain what you typed; it no
   longer offers "Developer dock" for "verge" through scattered letters.
   Settings › About names the Chromium version behind CEF.

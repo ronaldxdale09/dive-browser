@@ -48,6 +48,7 @@ export function VitalsPanel() {
   const { data, error, refresh } = useTabData(internal ? null : activeTab, url, ipc.tabVitals, 600, loading);
 
   if (internal) return <InternalPageNote what="Web Vitals" />;
+  if (!activeTab) return <div className="px-3 py-2 text-xs text-ink-3">Open a tab to measure its Web Vitals.</div>;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-2 px-2 pb-1 text-[11px] text-ink-3">
