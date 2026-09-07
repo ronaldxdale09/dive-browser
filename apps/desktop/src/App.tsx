@@ -139,7 +139,7 @@ export function App() {
       </nav>
       <main className="col-start-2 row-start-3 grid min-h-0 min-w-0 bg-line" style={{ gridTemplateColumns: showSidecar ? `minmax(0,1fr) auto ${shownSidecarWidth}px` : "minmax(0,1fr)" }}>
         <div
-          className="relative grid min-h-0 bg-line"
+          className="relative grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] bg-line"
           style={{ gridTemplateRows: `${open.find ? "44px " : ""}minmax(0,1fr)${showDock ? ` auto ${shownDockHeight}px` : ""}` }}
         >
           {open.find && (

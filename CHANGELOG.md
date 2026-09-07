@@ -50,6 +50,11 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- With the rail expanded and the agent open, the page and dock grew past
+  their column and the page's native view covered the left edge of the
+  agent panel; the column now shrinks to its track. A console entry whose
+  source is a very long URL no longer squeezes its message to one letter
+  per line: the source name truncates and shows whole on hover.
 - Keyboard focus is visible on tabs, the popout's tab and console source
   links, which had removed the outline without drawing anything in its
   place.

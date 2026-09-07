@@ -192,9 +192,10 @@ const Row = memo(function Row({
           type="button"
           onClick={() => void handleClick()}
           title={`Open in ${editorLabel(preferredEditor)} (${entry.url})`}
-          className="group flex shrink-0 items-center gap-1 rounded px-1 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-highlight"
+          // A source can be a long URL; it yields to the message and shows whole on hover.
+          className="group flex min-w-0 max-w-[40%] shrink items-center gap-1 rounded px-1 text-ink-3 transition-colors hover:bg-surface-3 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-highlight"
         >
-          <span>{loc}</span>
+          <span className="truncate">{loc}</span>
           <ExternalLink size={10} className="opacity-0 transition-opacity group-hover:opacity-100" />
         </button>
       )}
