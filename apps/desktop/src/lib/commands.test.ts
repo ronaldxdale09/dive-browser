@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import menuSource from "../../src-tauri/src/menu.rs?raw";
 import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor } from "./commands";
-import { ipc } from "./ipc";
+import { events, ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "./ipc";
 
@@ -66,6 +66,22 @@ describe("command dispatch", () => {
       Reflect.deleteProperty(window, "__DIVE_PRIVATE__");
     }
     expect(chromeCommands().some((c) => c.id === "subtitles.open")).toBe(true);
+  });
+  it("records steps in the active tab and stops into the spec on the second call", async () => {
+    const { useRecorder } = await import("../store/recorder");
+    vi.spyOn(events.recorderEvent, "listen").mockResolvedValue(() => undefined);
+    const start = vi.spyOn(ipc, "tabRecordStart").mockResolvedValue(null);
+    const stop = vi.spyOn(ipc, "tabRecordStop").mockResolvedValue([{ kind: "click", locator: "role=button[name='Go']", value: null, url: "https://a.dev/", at: 1 }] as never);
+    useBrowser.setState({ activeTab: "t1", tabs: [{ id: "t1", url: "https://example.com/", title: "Example Domain" } as unknown as Tab] });
+    await UI_COMMANDS["recorder.toggle"]!();
+    expect(start).toHaveBeenCalledWith("t1");
+    expect(useRecorder.getState().recordingTab).toBe("t1");
+    expect(useRecorder.getState().startUrl).toBe("https://example.com/");
+    await UI_COMMANDS["recorder.toggle"]!();
+    expect(stop).toHaveBeenCalledWith("t1");
+    expect(useRecorder.getState().recordingTab).toBeNull();
+    expect(useRecorder.getState().isOpen).toBe(true);
+    useRecorder.getState().clear();
   });
   it("every shortcut points at a chrome-side handler", () => {
     for (const id of Object.values(SHORTCUTS)) expect(UI_COMMANDS[id], id).toBeTypeOf("function");

@@ -48,9 +48,15 @@ export function playwrightLocator(role: string, name: string): string {
   return `getByRole('${r}', { name: '${escaped}' })`;
 }
 
-/** Recorded interactions in the same shape as agent steps. */
+/**
+ * Recorded interactions in the same shape as agent steps. A navigation that
+ * directly follows a click or typing is what that action caused (a link, a
+ * submitted form), so it is not replayed as a `goto` of its own; a typed
+ * address or the first step still is.
+ */
 export function recordedToSteps(recorded: RecordedStep[]): Step[] {
-  return recorded.map((r, i) => {
+  const own = recorded.filter((r, i) => !(r.kind === "navigate" && i > 0 && recorded[i - 1]!.kind !== "navigate"));
+  return own.map((r, i) => {
     const locator = r.role ? playwrightLocator(r.role, r.name) : null;
     if (r.kind === "navigate") return { id: `r${i}`, name: "tab_navigate", input: JSON.stringify({ url: r.value }), action: true, locator: null };
     if (r.kind === "type") return { id: `r${i}`, name: "page_type", input: JSON.stringify({ text: r.value }), action: true, locator };

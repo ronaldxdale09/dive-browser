@@ -19,6 +19,7 @@ import {
   Plus,
   Printer,
   Search,
+  ScrollText,
   Settings2,
   Smartphone,
   SquarePlus,
@@ -40,6 +41,7 @@ import { screenUrl } from "./internal/InternalPage";
 import { useImportVideo } from "../screen/importVideo";
 import { useBrowser } from "../store/browser";
 import { useRecording } from "../store/recording";
+import { useRecorder } from "../store/recorder";
 import { usePicker } from "../store/simulator";
 import { AgentIcon } from "./agent/AgentIcon";
 import { Icon } from "./Icon";
@@ -237,6 +239,7 @@ function useMenu(close: () => void): Group[] {
   const active = useBrowser((s) => s.activeTab);
   const open = useBrowser((s) => s.open);
   const detached = useBrowser((s) => s.detached);
+  const recordingSteps = useRecorder((s) => s.recordingTab !== null);
   const [latest, setLatest] = useState<string | null>(null);
   useEffect(() => {
     void ipc
@@ -271,6 +274,7 @@ function useMenu(close: () => void): Group[] {
       id: "dive",
       items: [
         { id: "record", label: "Record a video", icon: Video, shortcut: "⌘⇧R", keywords: "screen recording gif capture loom", disabled: !active, run: done(() => useRecording.getState().openSetup()) },
+        { id: "recorder", label: recordingSteps ? "Stop recording steps" : "Record steps as a Playwright test", icon: ScrollText, keywords: "playwright test spec e2e steps macro", disabled: !active && !recordingSteps, run: done(() => runCommand("recorder.toggle")) },
         { id: "divescreen", label: "Edit latest recording in DiveScreen", icon: Clapperboard, keywords: "editor zoom trim video", disabled: !latest, run: done(() => (latest ? b().openTab(screenUrl(latest)) : undefined)) },
         { id: "divescreen.open", label: "Open a video in DiveScreen", icon: Film, keywords: "import mp4 mov webm mkv gif file editor", run: done(() => useImportVideo.getState().open().then(() => undefined)) },
         { id: "simulator", label: "Device simulator", icon: Smartphone, shortcut: "⌘⇧M", keywords: "mobile phone responsive emulate", disabled: !active, run: done(() => usePicker.getState().toggle()) },

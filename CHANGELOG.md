@@ -8,6 +8,11 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- The Playwright recorder is reachable from the chrome: "Record steps as a
+  Playwright test" in the browser menu and palette starts recording the
+  current tab, a toolbar button shows it is on, and stopping opens the spec
+  to copy or download. The spec opens on the page the recording began on,
+  and a navigation a click caused is not replayed as a `goto` of its own.
 - Selecting a request in the Network panel shows what was sent and what
   came back: both header sets, the request body, and the response body the
   engine kept (JSON within the buffer budget) or why it was not.

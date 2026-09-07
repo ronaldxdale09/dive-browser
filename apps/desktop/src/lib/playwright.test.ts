@@ -36,4 +36,14 @@ describe("recorded steps", () => {
     const spec = toPlaywrightSpec(steps, undefined, "recorded");
     expect(spec).toContain("fill(\"dive\")");
   });
+
+  it("does not replay the navigation a click caused as a goto of its own", () => {
+    const steps = recordedToSteps([
+      { kind: "click", role: "link", name: "Learn more", value: "", at: 1 },
+      { kind: "navigate", role: "", name: "", value: "https://www.iana.org/help/example-domains", at: 2 },
+      { kind: "navigate", role: "", name: "", value: "https://b.dev/typed", at: 3 },
+    ]);
+    expect(steps.map((s) => s.name)).toEqual(["page_click", "tab_navigate"]);
+    expect(steps[1]?.input).toContain("b.dev/typed");
+  });
 });

@@ -9,6 +9,7 @@ import { useNetwork } from "../store/network";
 import { usePrivacy } from "../store/privacy";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { useSubtitles } from "../store/subtitles";
+import { useRecorder } from "../store/recorder";
 import { Toolbar } from "./Toolbar";
 import { useShortcuts } from "../lib/shortcuts";
 
@@ -292,6 +293,16 @@ describe("Toolbar", () => {
 
     await act(async () => finish("/tmp/capture.png"));
     await waitFor(() => expect(screen.getByRole("button", { name: "Capture full page" })).toBeTruthy());
+  });
+
+  it("shows that steps are being recorded and stops on a click", async () => {
+    const stop = vi.spyOn(ipc, "tabRecordStop").mockResolvedValue([]);
+    render(<Toolbar />);
+    expect(screen.queryByRole("button", { name: "Stop recording steps" })).toBeNull();
+    act(() => useRecorder.setState({ recordingTab: "t1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop recording steps" }));
+    await waitFor(() => expect(stop).toHaveBeenCalledWith("t1"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Stop recording steps" })).toBeNull());
   });
 
   it("shows that live subtitles are running and reopens their dialog", () => {

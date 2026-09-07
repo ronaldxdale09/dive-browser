@@ -6,6 +6,9 @@ import { errorMessage } from "../lib/errors";
 
 interface RecorderState {
   recordingTab: string | null;
+  /** The page the recording began on: the spec's opening `goto`. */
+  startUrl: string | null;
+  startTitle: string | null;
   steps: RecordedStep[];
   isOpen: boolean;
   setOpen: (open: boolean) => void;
@@ -18,6 +21,8 @@ let listening: Promise<() => void> | null = null;
 
 export const useRecorder = create<RecorderState>((set, get) => ({
   recordingTab: null,
+  startUrl: null,
+  startTitle: null,
   steps: [],
   isOpen: false,
   setOpen: (isOpen) => set({ isOpen }),
@@ -28,7 +33,8 @@ export const useRecorder = create<RecorderState>((set, get) => ({
     await listening;
     try {
       await ipc.tabRecordStart(tabId);
-      set({ recordingTab: tabId, steps: [], isOpen: false });
+      const tab = useBrowser.getState().tabs.find((t) => t.id === tabId);
+      set({ recordingTab: tabId, startUrl: tab?.url ?? null, startTitle: tab?.title ?? null, steps: [], isOpen: false });
     } catch (e) {
       useBrowser.setState({ error: errorMessage(e) });
     }

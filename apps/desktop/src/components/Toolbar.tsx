@@ -1,6 +1,6 @@
 import { isPrivateWindow } from "../lib/privateMode";
 import { prettyUrl } from "../lib/prettyUrl";
-import { Bug, Camera, Captions, House, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, X, Menu } from "lucide-react";
+import { Bug, Camera, Captions, House, ScrollText, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, X, Menu } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FOCUS_ADDRESS } from "../lib/commands";
@@ -18,6 +18,8 @@ import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { usePicker } from "../store/simulator";
 import { useSubtitles } from "../store/subtitles";
+import { useRecorder } from "../store/recorder";
+import { runCommand } from "../lib/commands";
 import { NavigationButtons } from "./NavigationButtons";
 
 /** Navigation row: nav icons, the omnibox pill and, as glyphs, the actions that act on the page. */
@@ -163,6 +165,7 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
           {!isPrivateWindow() && <BookmarkButton />}
           <SharePopover />
           <SubtitlesIndicator />
+          <RecorderIndicator />
           {!isPrivateWindow() && <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />}
           <span className={capturing ? "animate-spin motion-reduce:animate-none" : undefined}><IconButton icon={capturing ? LoaderCircle : Camera} label={capturing ? "Capturing full page" : "Capture full page"} shortcut="⌘⇧S" disabled={!current || capturing} onClick={() => void capture(true)} /></span>
           <IconButton icon={Bug} label="Open DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
@@ -176,6 +179,7 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
           <SharePopover />
           <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />
           <SubtitlesIndicator />
+          <RecorderIndicator />
           {!isPrivateWindow() && <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />}
           <span className={capturing ? "animate-spin motion-reduce:animate-none" : undefined}><IconButton icon={capturing ? LoaderCircle : Camera} label={capturing ? "Capturing full page" : "Capture full page"} shortcut="⌘⇧S" disabled={!current || capturing} onClick={() => void capture(true)} /></span>
           <IconButton icon={Bug} label="Open DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
@@ -267,4 +271,11 @@ function SubtitlesIndicator() {
   const toggle = useBrowser((s) => s.toggle);
   if (!active) return null;
   return <IconButton icon={Captions} label="Live subtitles on" shortcut="⌘⇧U" active={!open} onClick={() => toggle("subtitles", true)} />;
+}
+
+/** Shown while steps are being recorded in the current tab; a click stops and opens the spec. */
+function RecorderIndicator() {
+  const recording = useRecorder((s) => s.recordingTab !== null);
+  if (!recording) return null;
+  return <IconButton icon={ScrollText} label="Stop recording steps" active onClick={() => runCommand("recorder.toggle")} />;
 }

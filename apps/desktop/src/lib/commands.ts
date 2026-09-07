@@ -2,6 +2,7 @@ import { isPrivateWindow } from "./privateMode";
 import { ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
 import { useRecording } from "../store/recording";
+import { useRecorder } from "../store/recorder";
 import { usePicker } from "../store/simulator";
 import type { Command } from "./ipc";
 import { traceInputCommand } from "./inputTimingProbe";
@@ -50,6 +51,22 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "dock.toggle": () => useBrowser.getState().toggle("dock"),
   "simulator.toggle": () => usePicker.getState().toggle(),
   "subtitles.open": () => useBrowser.getState().toggle("subtitles", true),
+  // Records clicks and typing in the current tab as Playwright steps; the
+  // second call stops and opens the spec.
+  "recorder.toggle": async () => {
+    const recorder = useRecorder.getState();
+    if (recorder.recordingTab) {
+      await recorder.stop();
+      return;
+    }
+    const tab = useBrowser.getState().activeTab;
+    if (!tab) {
+      useBrowser.getState().notify("Open a tab to record steps in.");
+      return;
+    }
+    await recorder.start(tab);
+    if (useRecorder.getState().recordingTab === tab) useBrowser.getState().notify("Recording steps. Use the page, then choose Stop recording steps.", 5000);
+  },
   "import.open": () => useBrowser.getState().toggle("import", true),
   "capture.fullpage": () => useBrowser.getState().capture(true),
   "find.open": () => useBrowser.getState().toggle("find", true),
@@ -223,6 +240,7 @@ export const COMMAND_TITLES: Record<string, string> = {
   "dock.toggle": "Developer dock",
   "simulator.toggle": "Device simulator",
   "subtitles.open": "Live subtitles",
+  "recorder.toggle": "Record steps as a Playwright test",
   "import.open": "Import bookmarks and history from another browser…",
   "capture.fullpage": "Capture full page",
   "find.open": "Find in page",
