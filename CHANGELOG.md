@@ -50,6 +50,10 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- With enough tabs open the strip spilled over the Record, Mobile and
+  Agent buttons; past the point where every tab is a bare favicon it now
+  scrolls. Opening Replay on a request grows a short dock so the editor's
+  headers, body, Send and response are in view.
 - A visit recorded as the address changes no longer carries the previous
   page's title (or "about:blank" for a new tab); the title fills in when
   it arrives, so a redirect's source address is never wrongly titled.

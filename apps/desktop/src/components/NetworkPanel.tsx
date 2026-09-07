@@ -6,6 +6,7 @@ import { useBrowser } from "../store/browser";
 import { isReady, useAgent } from "../store/agent";
 import { usePrefs } from "../store/prefs";
 import { selectFrames, selectRequests, useNetwork } from "../store/network";
+import { useLayout } from "../store/layout";
 import type { RequestRow } from "../store/network";
 import type { RequestDetail } from "../lib/ipc";
 import { Icon, IconButton } from "./Icon";
@@ -93,6 +94,9 @@ const NetworkRow = memo(function NetworkRow({
 const ROW_HEIGHT = 21;
 
 /** Request table for the active tab with a detail strip for the selected row. Only the rows in view are mounted. */
+/** Dock height that shows a replay editor whole, within the window's own ceiling. */
+const REPLAY_DOCK_HEIGHT = 440;
+
 export function NetworkPanel() {
   const activeTab = useBrowser((s) => s.activeTab);
   const rows = useNetwork(selectRequests(activeTab));
@@ -120,6 +124,13 @@ export function NetworkPanel() {
   const detail = useMemo(() => rows.find((r) => r.id === selected), [rows, selected]);
   const frames = useNetwork(selectFrames(activeTab, selected));
   const select = useCallback((id: string) => setSelected((cur) => (cur === id ? null : id)), []);
+  // The editor holds method, URL, headers, body, Send and a response; at the
+  // default dock height only the first line shows, so the dock grows to fit.
+  const openReplay = useCallback((id: string) => {
+    const layout = useLayout.getState();
+    if (layout.dockHeight < REPLAY_DOCK_HEIGHT) layout.setDockHeight(REPLAY_DOCK_HEIGHT);
+    setReplaying(id);
+  }, []);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   // The React Compiler is not in use here; the virtualizer's mutable instance is intended.
@@ -195,7 +206,7 @@ export function NetworkPanel() {
             {detail.mimeType && <span className="ml-3 text-ink-3">{detail.mimeType}</span>}
             {detail.error && <span className="ml-3 text-danger">{detail.error}</span>}
           </span>
-          <button type="button" onClick={() => setReplaying(detail.id)} className="flex h-6 shrink-0 items-center gap-1 rounded-full border border-line px-2 font-sans text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
+          <button type="button" onClick={() => { openReplay(detail.id); }} className="flex h-6 shrink-0 items-center gap-1 rounded-full border border-line px-2 font-sans text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
             <Icon icon={Repeat} size={11} /> Replay
           </button>
           <button

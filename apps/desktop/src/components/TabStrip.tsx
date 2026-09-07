@@ -130,7 +130,9 @@ export function TabStrip() {
             a favicon alone. The list itself shrinks with them, so whatever
             they leave is the window's drag area. */}
         <div
-          className="flex min-w-0 shrink items-center gap-1"
+          // Past the point where every tab is a bare favicon the list
+          // scrolls; it must never spill over the feature bar beside it.
+          className="scroll-hidden flex min-w-0 shrink items-center gap-1 overflow-x-auto"
           role="tablist"
           ref={tablistRef}
           aria-label="Tabs"

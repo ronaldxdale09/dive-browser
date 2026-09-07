@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { useNetwork } from "../store/network";
+import { useLayout } from "../store/layout";
 import type { RequestRow } from "../store/network";
 import { NetworkPanel } from "./NetworkPanel";
 
@@ -102,6 +103,18 @@ describe("NetworkPanel", () => {
     expect(await screen.findByText("accept:")).toBeTruthy();
     expect(screen.getByText("content-type:")).toBeTruthy();
     expect(screen.getByText('{"ok":true}')).toBeTruthy();
+  });
+
+  it("grows a short dock so the replay editor shows whole", () => {
+    useNetwork.setState({ byTab: { "tab-1": rows(1) } });
+    useLayout.setState({ dockHeight: 240 });
+    vi.spyOn(ipc, "requestCaptured").mockResolvedValue({ method: "GET", url: "https://a.dev/api/item-0", headers: {}, body: null, with_cookies: true, captured_host: "a.dev" });
+    vi.spyOn(ipc, "requestDetail").mockResolvedValue({ method: "GET", url: "https://a.dev/api/item-0", status: 200, mime_type: "", request_headers: {}, request_body: null, response_headers: {}, response_body: null, response_body_note: null });
+    render(<NetworkPanel />);
+    fireEvent.click(screen.getByText("item-0").closest("tr")!);
+    fireEvent.click(screen.getByRole("button", { name: /Replay/ }));
+    expect(useLayout.getState().dockHeight).toBe(440);
+    useLayout.setState({ dockHeight: 240 });
   });
 
   it("filters rows by URL", () => {
