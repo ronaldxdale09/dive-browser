@@ -1,6 +1,6 @@
 import { Check, ChevronRight, Loader2, ShieldAlert, X } from "lucide-react";
 import { useState } from "react";
-import { describeStep } from "../../lib/agentSteps";
+import { describeStep, pendingLabel } from "../../lib/agentSteps";
 import type { Step } from "../../store/agent";
 import { useAgent } from "../../store/agent";
 import { Icon } from "../Icon";
@@ -26,9 +26,11 @@ function StepRow({ step }: { step: Step }) {
   const [open, setOpen] = useState(false);
   const approve = useAgent((s) => s.approve);
   const setSessionAutoApprove = useAgent((s) => s.setSessionAutoApprove);
-  const { label, icon } = describeStep(step);
+  const { label: done, icon } = describeStep(step);
   const running = step.summary === undefined && !step.error && !step.awaiting;
   const status = step.awaiting ? "awaiting" : step.error ? "failed" : running ? "running" : "ok";
+  // Only a step that ran is in the past; a denied or failed one never happened.
+  const label = status === "ok" ? done : pendingLabel(done);
   const tone = status === "failed" ? "text-danger" : status === "awaiting" ? "text-highlight" : step.action ? "text-ink" : "text-ink-2";
   return (
     <li className={`rounded-lg ${status === "awaiting" ? "bg-highlight-soft/40 ring-1 ring-highlight/40" : ""}`}>

@@ -359,6 +359,15 @@ pub(crate) fn agent_approve(state: State<'_, AppState>, id: String, allow: bool)
     }
 }
 
+/// What came of asking the person about an action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Approval {
+    Allowed,
+    Denied,
+    /// Nobody answered within [`APPROVAL_TIMEOUT`]; the action was skipped.
+    Unanswered,
+}
+
 /// Ask the chrome whether an action may run; page content can steer the
 /// model, so the person decides before anything touches the page. A stopped
 /// run counts as a denial.
@@ -367,7 +376,7 @@ async fn approved(
     run: &Run,
     on_delta: &Channel<ChatDelta>,
     step: &ToolStep,
-) -> bool {
+) -> Approval {
     let (tx, rx) = tokio::sync::oneshot::channel();
     lock(&state.approvals).insert(step.id.clone(), tx);
     if on_delta
@@ -375,14 +384,18 @@ async fn approved(
         .is_err()
     {
         lock(&state.approvals).remove(&step.id);
-        return false;
+        return Approval::Denied;
     }
     let decision = tokio::select! {
-        () = run.notify.notified() => None,
-        answer = tokio::time::timeout(APPROVAL_TIMEOUT, rx) => answer.ok().and_then(Result::ok),
+        () = run.notify.notified() => Approval::Denied,
+        answer = tokio::time::timeout(APPROVAL_TIMEOUT, rx) => match answer {
+            Ok(Ok(true)) => Approval::Allowed,
+            Ok(_) => Approval::Denied,
+            Err(_) => Approval::Unanswered,
+        },
     };
     lock(&state.approvals).remove(&step.id);
-    decision.unwrap_or(false)
+    decision
 }
 
 /// Send a conversation to the model; deltas stream back over `on_delta`.
@@ -601,14 +614,22 @@ async fn run_calls(
             content: serde_json::Value::String(why.into()),
             is_error: true,
         };
-        let result = if run.is_cancelled() {
-            denied("The user stopped the run before this ran.")
-        } else if step.action && !auto_approve && !approved(state, run, on_delta, &step).await {
-            denied(
-                "The user did not allow this action. Do not retry it; explain what you wanted to do instead.",
-            )
+        let approval = if run.is_cancelled() {
+            Approval::Denied
+        } else if step.action && !auto_approve {
+            approved(state, run, on_delta, &step).await
         } else {
-            crate::agent_tools::run(browser, tab_id, call).await
+            Approval::Allowed
+        };
+        let result = match approval {
+            _ if run.is_cancelled() => denied("The user stopped the run before this ran."),
+            Approval::Allowed => crate::agent_tools::run(browser, tab_id, call).await,
+            Approval::Denied => denied(
+                "The user did not allow this action. Do not retry it; explain what you wanted to do instead.",
+            ),
+            Approval::Unanswered => denied(
+                "Nobody answered the approval request within 2 minutes, so this action was skipped. Do not retry it; say what you wanted to do so the user can allow it next time.",
+            ),
         };
         let summary = match &result.content {
             serde_json::Value::String(s) => s

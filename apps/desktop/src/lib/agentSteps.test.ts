@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { compactNumber, describeStep, formatCost, shortModel } from "./agentSteps";
+import { compactNumber, describeStep, formatCost, pendingLabel, shortModel } from "./agentSteps";
 import type { Step } from "../store/agent";
 
 const step = (name: string, input: Record<string, unknown>, over: Partial<Step> = {}): Step => ({ id: "s", name, input: JSON.stringify(input), action: false, ...over });
+
+describe("pendingLabel", () => {
+  it("words a step that has not run yet in the present", () => {
+    expect(pendingLabel('Clicked role=button[name="Save"]')).toBe('Click role=button[name="Save"]');
+    expect(pendingLabel("Typed “hi” into label=Search")).toBe("Type “hi” into label=Search");
+    expect(pendingLabel("Opened www.youtube.com")).toBe("Open www.youtube.com");
+    expect(pendingLabel("Read the page text")).toBe("Read the page text");
+    expect(pendingLabel("rules set")).toBe("rules set");
+  });
+});
 
 describe("describeStep", () => {
   it("says what the agent did in plain words", () => {

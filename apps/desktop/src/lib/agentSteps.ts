@@ -137,6 +137,40 @@ export function describeStep(step: Step): StepView {
   }
 }
 
+const PRESENT: Record<string, string> = {
+  Inspected: "Inspect",
+  Read: "Read",
+  Took: "Take",
+  Clicked: "Click",
+  Typed: "Type",
+  Cleared: "Clear",
+  Pressed: "Press",
+  Scrolled: "Scroll",
+  Waited: "Wait",
+  Looked: "Look",
+  Opened: "Open",
+  Listed: "List",
+  Built: "Build",
+  Resized: "Resize",
+  Emulated: "Emulate",
+  Changed: "Change",
+  Throttled: "Throttle",
+  Found: "Find",
+  Snapshotted: "Snapshot",
+  Compared: "Compare",
+};
+
+/**
+ * A step that has not happened yet, worded so: "Click the link", not
+ * "Clicked the link", while it waits for approval or is still running.
+ */
+export function pendingLabel(label: string): string {
+  const space = label.indexOf(" ");
+  const verb = space < 0 ? label : label.slice(0, space);
+  const now = PRESENT[verb];
+  return now ? now + label.slice(verb.length) : label;
+}
+
 /** `3.2k` for 3200, `812` for 812, `1.1M` for 1_100_000. */
 export function compactNumber(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`;
