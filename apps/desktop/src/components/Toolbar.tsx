@@ -1,5 +1,5 @@
 import { prettyUrl } from "../lib/prettyUrl";
-import { Bug, Camera, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, X, Menu } from "lucide-react";
+import { Bug, Camera, House, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, X, Menu } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FOCUS_ADDRESS } from "../lib/commands";
@@ -26,6 +26,7 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
   const activateTab = useBrowser((s) => s.activateTab);
   const reload = useBrowser((s) => s.reload);
   const stop = useBrowser((s) => s.stop);
+  const showHome = useBrowser((s) => s.showHome);
   const capture = useBrowser((s) => s.capture);
   const capturing = useBrowser((s) => s.capturing);
   const devtools = useBrowser((s) => s.devtools);
@@ -104,6 +105,7 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
       ) : (
         <IconButton icon={RotateCw} label="Reload" shortcut="⌘R" disabled={!current} onClick={() => void reload()} size={14} />
       )}
+      <IconButton icon={House} label="Home" shortcut="⌘⇧H" disabled={!current} onClick={() => void showHome()} size={14} />
       <form
         className="relative mx-1 flex h-[calc(var(--row-h)-4px)] min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2"
         onSubmit={(e) => {

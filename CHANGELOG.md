@@ -12,6 +12,8 @@ bump may change behaviour.
   then profile, workspace and a look at the features with DivePrivacy and
   default-browser choices; a new `onboarded` preference records it, and
   Settings › About › Reset Dive plays it again.
+- A Home button beside Reload (⌘⇧H) shows the welcome screen without
+  closing any tab; clicking a tab brings its page back.
 - Address bar suggestions: open tabs, bookmarks and history under the bar
   while typing, with keyboard navigation.
 - Bookmark popover to rename or remove a bookmark; `bookmark_rename` command.

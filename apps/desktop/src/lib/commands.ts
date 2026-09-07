@@ -36,6 +36,7 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
     return detached.includes(activeTab) ? attachTab(activeTab) : detachTab(activeTab, null);
   },
   "tab.reload": () => useBrowser.getState().reload(),
+  "tab.home": () => useBrowser.getState().showHome(),
   "tab.devtools": () => useBrowser.getState().devtools(),
   "report.compose": () => useBrowser.getState().bugReport(),
   "screencast.toggle": () => useRecording.getState().toggle(),
@@ -145,6 +146,7 @@ export const SHORTCUTS: Record<string, string> = {
   // ⌘⇧N is the native menu's "New workspace"; the tab takes the ⌥ variant.
   "mod+alt+n": "tab.detach",
   "mod+r": "tab.reload",
+  "mod+shift+h": "tab.home",
   "mod+alt+i": "tab.devtools",
   "mod+shift+b": "report.compose",
   "mod+shift+r": "screencast.toggle",
@@ -193,6 +195,7 @@ export const COMMAND_TITLES: Record<string, string> = {
   "tab.pin": "Pin or unpin tab",
   "tab.detach": "Move tab to its own window",
   "tab.reload": "Reload",
+  "tab.home": "Home",
   "tab.stop": "Stop loading",
   "tab.print": "Print…",
   "tab.fillVideo": "Fill tab with video",

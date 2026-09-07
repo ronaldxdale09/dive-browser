@@ -4,7 +4,7 @@ import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 
 /**
- * "Open Video…": ask for a file, let the engine copy it into the captures
+ * "Open video…": ask for a file, let the engine copy it into the captures
  * directory and make its playable companion, then open it in a DiveScreen
  * tab. One import runs at a time; every entry point shares the busy state.
  */

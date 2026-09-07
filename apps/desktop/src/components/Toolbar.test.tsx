@@ -143,6 +143,16 @@ describe("Toolbar", () => {
     });
   });
 
+  it("goes home: hides the page without closing the tab", async () => {
+    const deactivate = vi.spyOn(ipc, "tabDeactivate").mockResolvedValue(null);
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    await waitFor(() => expect(deactivate).toHaveBeenCalledTimes(1));
+    expect(useBrowser.getState().activeTab).toBeNull();
+    expect(useBrowser.getState().tabs).toHaveLength(1);
+    expect((screen.getByRole("button", { name: "Home" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("shows the address that failed to load, not the last one that worked", () => {
     useBrowser.setState({ navError: { [tab.id]: { url: "http://nonexistent.invalid/", error: "net::ERR_NAME_NOT_RESOLVED" } } });
     render(<Toolbar />);

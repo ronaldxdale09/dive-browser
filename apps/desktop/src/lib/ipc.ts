@@ -78,6 +78,7 @@ export const ipc = {
   tabOpen: async (workspaceId: string, url: string) => unwrap(await commands.tabOpen(workspaceId, url)),
   tabClose: async (id: string) => unwrap(await commands.tabClose(id)),
   tabActivate: async (id: string) => unwrap(await commands.tabActivate(id)),
+  tabDeactivate: async () => unwrap(await commands.tabDeactivate()),
   tabNavigate: async (id: string, url: string) => unwrap(await commands.tabNavigate(id, url)),
   tabReorder: async (workspaceId: string, ordered: string[]) => unwrap(await commands.tabReorder(workspaceId, ordered)),
   tabSetPinned: async (id: string, pinned: boolean) => unwrap(await commands.tabSetPinned(id, pinned)),

@@ -17,7 +17,7 @@ type SectionId = "background" | "effects" | "layout" | "cursor";
 
 const SECTIONS: { id: SectionId; icon: LucideIcon; label: string }[] = [
   { id: "background", icon: Palette, label: "Background" },
-  { id: "effects", icon: SlidersHorizontal, label: "Video Effects" },
+  { id: "effects", icon: SlidersHorizontal, label: "Video effects" },
   { id: "layout", icon: LayoutTemplate, label: "Layout" },
   { id: "cursor", icon: MousePointer2, label: "Cursor" },
 ];
@@ -201,7 +201,7 @@ function EffectsSettings({ project }: { project: Project }) {
       <Slider label="Roundness" value={e.roundness} min={0} max={64} step={0.5} onChange={(v) => set({ roundness: v }, false)} />
       <Slider label="Shadow" value={e.shadow} min={0} max={1} step={0.01} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => set({ shadow: v }, false)} />
       <Card className="flex items-center">
-        <Switch label="Blur BG" checked={e.blurBackground} onChange={(v) => set({ blurBackground: v })} hint="Softens an uploaded picture behind the video" />
+        <Switch label="Blur background" checked={e.blurBackground} onChange={(v) => set({ blurBackground: v })} hint="Softens an uploaded picture behind the video" />
       </Card>
     </div>
   );

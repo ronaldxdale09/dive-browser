@@ -423,6 +423,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_open,
             tab_close,
             tab_activate,
+            tab_deactivate,
             tab_navigate,
             tab_reorder,
             tab_set_pinned,
@@ -573,6 +574,7 @@ pub fn register_builtin(registry: &dive_core::CommandRegistry) {
         ("tab.new", "New tab", Some("mod+t"), CommandScope::Workspace),
         ("tab.close", "Close tab", Some("mod+w"), CommandScope::Tab),
         ("tab.reload", "Reload", Some("mod+r"), CommandScope::Tab),
+        ("tab.home", "Home", Some("mod+shift+h"), CommandScope::Tab),
         (
             "tab.devtools",
             "Open DevTools",
@@ -1283,6 +1285,20 @@ pub fn close_tab(
 pub(crate) fn tab_activate(app: AppHandle<Runtime>, id: TabId) -> AppResult<()> {
     on_main(&app, move |main, app, state| {
         activate_tab(main, app, state, id)
+    })
+}
+
+/// Show the workspace's welcome screen: hide every tab view without closing
+/// or forgetting any tab. The next snapshot reports no active tab, and
+/// clicking a tab brings its page back.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_deactivate(app: AppHandle<Runtime>) -> AppResult<()> {
+    on_main(&app, move |_, _, state| {
+        if let Some(host) = lock(&state.host).as_mut() {
+            host.deactivate_all()?;
+        }
+        Ok(())
     })
 }
 

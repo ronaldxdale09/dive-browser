@@ -67,6 +67,8 @@ interface BrowserState {
   closeTab: (id: string) => Promise<void>;
   activateTab: (id: string) => Promise<void>;
   navigate: (url: string) => Promise<void>;
+  /** Show the welcome screen; every tab stays open and comes back when clicked. */
+  showHome: () => Promise<void>;
   back: () => Promise<void>;
   forward: () => Promise<void>;
   reload: () => Promise<void>;
@@ -346,6 +348,11 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     const ws = get().activeWorkspace;
     if (!ws) return;
     await run(set, () => ipc.tabOpen(ws, url));
+  },
+  showHome: async () => {
+    if (get().activeTab === null) return;
+    await run(set, () => ipc.tabDeactivate());
+    set({ activeTab: null });
   },
   detachTab: async (id, at) => run(set, () => ipc.tabDetach(id, at)),
   attachTab: async (id) => run(set, () => ipc.tabAttach(id)),

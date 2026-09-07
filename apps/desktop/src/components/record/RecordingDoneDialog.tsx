@@ -85,7 +85,7 @@ export function RecordingDoneDialog() {
         </div>
         {limitHit && <p className="mx-5 mt-2 text-[11px] text-ink-3">The recording reached its length limit and stopped on its own.</p>}
 
-        <footer className="flex items-center gap-2 px-5 py-4">
+        <footer className="flex items-center gap-1.5 px-5 py-4">
           <Action icon={ExternalLink} label="Open" onClick={() => ipc.recordingOpen(result.path).catch(fail)} />
           <Action icon={FolderOpen} label="Show in Finder" onClick={() => ipc.downloadsReveal(result.path).catch(fail)} />
           <Action
@@ -175,11 +175,15 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * A secondary action as an icon with its name in the tooltip and for
+ * assistive tech. Seven actions with labels did not fit the footer; the
+ * three that matter most keep their words.
+ */
 function Action({ icon, label, onClick, tone = "quiet" }: { icon: typeof Copy; label: string; onClick: () => void; tone?: "quiet" | "danger" }) {
   return (
-    <button type="button" onClick={onClick} className={`flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs whitespace-nowrap transition-colors hover:bg-surface-2 ${tone === "danger" ? "text-ink-3 hover:text-danger" : "text-ink-2 hover:text-ink"}`}>
-      <Icon icon={icon} size={13} />
-      {label}
+    <button type="button" aria-label={label} title={label} onClick={onClick} className={`grid size-8 shrink-0 place-items-center rounded-lg transition-colors hover:bg-surface-2 ${tone === "danger" ? "text-ink-3 hover:text-danger" : "text-ink-2 hover:text-ink"}`}>
+      <Icon icon={icon} size={14} />
     </button>
   );
 }

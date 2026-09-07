@@ -55,6 +55,12 @@ export const commands = {
 	tabOpen: (workspaceId: WorkspaceId, url: string) => typedError<Tab, AppError>(__TAURI_INVOKE("tab_open", { workspaceId, url })),
 	tabClose: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_close", { id })),
 	tabActivate: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_activate", { id })),
+	/**
+	 *  Show the workspace's welcome screen: hide every tab view without closing
+	 *  or forgetting any tab. The next snapshot reports no active tab, and
+	 *  clicking a tab brings its page back.
+	 */
+	tabDeactivate: () => typedError<null, AppError>(__TAURI_INVOKE("tab_deactivate")),
 	tabNavigate: (id: TabId, url: string) => typedError<null, AppError>(__TAURI_INVOKE("tab_navigate", { id, url })),
 	/**
 	 *  Persist a new order for the tabs of `workspace_id`. Ids not listed keep

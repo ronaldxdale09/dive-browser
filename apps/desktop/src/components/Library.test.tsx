@@ -144,14 +144,14 @@ describe("Library dialog", () => {
 });
 
 describe("Library recordings import", () => {
-  it("offers Open Video even with no recordings, imports through the engine, and opens the editor tab", async () => {
+  it("offers Open video even with no recordings, imports through the engine, and opens the editor tab", async () => {
     vi.spyOn(ipc, "recordingsList").mockResolvedValue([]);
     let finish!: (path: string) => void;
     vi.spyOn(ipc, "screenImportVideo").mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     render(<Library />);
     fireEvent.click(screen.getByRole("tab", { name: "Recordings" }));
     await waitFor(() => expect(screen.getByText(/No recordings yet/)).toBeTruthy());
-    const button = screen.getByRole("button", { name: /Open Video/ });
+    const button = screen.getByRole("button", { name: /Open video/ });
     fireEvent.click(button);
     expect(ipc.screenImportVideo).toHaveBeenCalledOnce();
     await waitFor(() => expect(screen.getByRole("button", { name: /Importing video/ })).toBeTruthy());
@@ -173,7 +173,7 @@ describe("Library recordings import", () => {
     expect(screen.getByText(/MOV ·/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit clip.mov in DiveScreen" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Edit raw.mkv in DiveScreen" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Open Video/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Open video/ }));
     await waitFor(() => expect(useBrowser.getState().error).toContain("ffmpeg could not make a playable copy"));
     expect(ipc.tabOpen).not.toHaveBeenCalled();
     expect(useBrowser.getState().open.library).toBe(true);

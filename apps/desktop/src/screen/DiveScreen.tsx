@@ -104,7 +104,7 @@ function TopBar({ onExport }: { onExport: () => void }) {
   return (
     <div className="flex h-12 shrink-0 items-center gap-1 px-4">
       <span className="mr-3 text-[13px] font-semibold tracking-tight">DiveScreen</span>
-      <Bar icon={Video} label="Return to Recorder" onClick={() => openSetup()} />
+      <Bar icon={Video} label="Return to recorder" onClick={() => openSetup()} />
       <Bar icon={FolderOpen} label="Show in Finder" onClick={() => source && void ipc.downloadsReveal(source).catch(() => undefined)} />
       <OpenVideoButton />
       <Bar icon={Save} label={dirty ? "Save Project" : "Saved"} onClick={() => void save()} />
