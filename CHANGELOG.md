@@ -50,6 +50,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- The model picker's provider chips wrap instead of scrolling out of sight, so "Add" (a custom provider) is always visible; "Search 1 models" reads "Search 1 model".
 - The agent's Ollama model list comes from Ollama's own listing: embedding-only models (bge, nomic-embed) no longer appear as chat choices, each model shows its context window, and a model whose id is its name is no longer printed twice.
 - Meta, Storage and Vitals panels no longer show a raw `cdp error -32000: Inspected target navigated or closed` when a read races a navigation: the read is tried once more, the panels re-read when the page finishes loading, and a remaining failure reads "The page was still loading when it was read." with a Try again button.
 - An unpacked extension with `<all_urls>` ran its content scripts inside
