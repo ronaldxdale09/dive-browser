@@ -7,7 +7,7 @@ import { useDownloads } from "./downloads";
 import type { CoreEvent, Decision, Duration, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
 
-export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser" | "subtitles";
+export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser" | "subtitles" | "import";
 /** The sections of the library dialog. */
 export type LibraryTab = "bookmarks" | "history" | "downloads" | "recordings";
 
@@ -37,7 +37,7 @@ interface BrowserState {
   detached: string[];
   detachTab: (id: string, at: { x: number; y: number } | null) => Promise<void>;
   attachTab: (id: string) => Promise<void>;
-  open: Record<Exclude<UiPanel, "extensions">, boolean> & { extensions?: boolean };
+  open: Record<Exclude<UiPanel, "extensions" | "import">, boolean> & { extensions?: boolean; import?: boolean };
   error: string | null;
   /** Tabs whose main frame is loading right now. */
   loading: Record<string, boolean>;

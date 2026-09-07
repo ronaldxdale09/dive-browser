@@ -1,4 +1,5 @@
-import { Group, Row, Segmented, Select, Switch, TextInput } from "../SettingsFields";
+import { Button, Group, Row, Segmented, Select, Switch, TextInput } from "../SettingsFields";
+import { useBrowser } from "../../store/browser";
 import { KeepSitesActive } from "./KeepSitesActive";
 import { usePref } from "./usePref";
 
@@ -17,6 +18,7 @@ const ZOOMS = [50, 67, 75, 90, 100, 110, 125, 150, 175, 200].map((z) => ({ value
 /** Settings › General: startup, search and page defaults. */
 export function General() {
   const [prefs, set] = usePref();
+  const toggle = useBrowser((s) => s.toggle);
   return (
     <>
       <Group title="Startup">
@@ -89,6 +91,13 @@ export function General() {
         )}
       </Group>
 
+      <Group title="Import">
+        <Row
+          label="From another browser"
+          hint="Bookmarks and history from Chrome, Brave, Edge, Arc, Vivaldi, Opera, Firefox or Safari. Passwords stay where they are."
+          control={<Button onClick={() => toggle("import", true)}>Import…</Button>}
+        />
+      </Group>
       <Group title="Downloads">
         <Row
           label="Save files to"

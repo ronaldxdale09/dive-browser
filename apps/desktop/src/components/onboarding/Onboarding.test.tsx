@@ -35,6 +35,7 @@ beforeEach(() => {
   useDefaultBrowser.setState({ status: { supported: true, is_default: false, current: "com.brave.browser" }, phase: "idle", error: null });
   vi.spyOn(ipc, "defaultBrowserStatus").mockResolvedValue({ supported: true, is_default: false, current: "com.brave.browser" });
   vi.spyOn(ipc, "prefsSet").mockImplementation(async (p) => p);
+  vi.spyOn(ipc, "browserImportSources").mockResolvedValue([]);
   vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
   useOnboarding.setState({ stage: null });
@@ -73,6 +74,12 @@ describe("Onboarding", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(updateProfile).toHaveBeenCalledWith("p1", expect.objectContaining({ name: "Ada", avatar: "ada" })));
 
+    // Import: nothing on this Mac to import from, so it only offers Continue.
+    expect(await screen.findByRole("heading", { name: "Bring your bookmarks and history" })).toBeTruthy();
+    expect(await screen.findByText("No other browsers with data were found")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Skip" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
     // Workspace: a suggestion fills the name; the Home workspace is renamed.
     expect(await screen.findByRole("heading", { name: "Your first workspace" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Side project" }));
@@ -95,7 +102,7 @@ describe("Onboarding", () => {
     act(() => useOnboarding.setState({ stage: "profile" }));
     render(<Onboarding />);
     fireEvent.click(screen.getByRole("button", { name: "Skip" }));
-    expect(await screen.findByRole("heading", { name: "Your first workspace" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Bring your bookmarks and history" })).toBeTruthy();
     expect(updateProfile).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(await screen.findByRole("heading", { name: "Who's diving?" })).toBeTruthy();

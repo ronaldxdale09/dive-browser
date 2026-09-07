@@ -3,7 +3,7 @@ import { AVATAR_SEEDS, seedFromName } from "../../lib/workspaceAvatar";
 import { useBrowser } from "../../store/browser";
 import { useOnboarding } from "../../store/onboarding";
 import { AvatarImage } from "../AvatarImage";
-import { StepActions } from "./Shell";
+import { StepActions, stepLabel } from "./Shell";
 
 const SWATCHES = ["#7FD8C8", "#F0B35E", "#E58C8C", "#8FB8F0", "#B79CF0", "#9ED67B", "#E9E9E9"];
 /** Names people reach for first; one click fills the field. */
@@ -51,7 +51,7 @@ export function WorkspaceStep() {
       <div className="flex items-center gap-4">
         <AvatarImage kind="workspace" seed={icon} color={color} alt="" width={56} height={56} className="size-14 shrink-0 rounded-2xl" />
         <div className="min-w-0">
-          <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">Step 2 of 3</p>
+          <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">{stepLabel("workspace")}</p>
           <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em]">Your first workspace</h2>
           <p className="mt-0.5 text-xs text-ink-3">A workspace is a set of tabs for one thing you do. Switch between them with ⌘1 to ⌘9.</p>
         </div>

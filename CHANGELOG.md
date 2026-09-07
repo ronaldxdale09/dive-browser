@@ -12,6 +12,11 @@ bump may change behaviour.
   then profile, workspace and a look at the features with DivePrivacy and
   default-browser choices; a new `onboarded` preference records it, and
   Settings › About › Reset Dive plays it again.
+- Import bookmarks and history from Chrome, Brave, Edge, Arc, Vivaldi,
+  Opera, Firefox and Safari: a step in onboarding, an offer on the
+  default-browser dialog, Settings › General › Import, and a palette
+  command. Folders macOS protects can be allowed through the system folder
+  panel or Full Disk Access; passwords and cookies are not read.
 - A Home button beside Reload (⌘⇧H) shows the welcome screen without
   closing any tab; clicking a tab brings its page back.
 - Address bar suggestions: open tabs, bookmarks and history under the bar

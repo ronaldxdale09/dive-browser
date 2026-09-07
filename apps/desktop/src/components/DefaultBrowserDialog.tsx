@@ -2,6 +2,7 @@ import { Check, Globe } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useBrowser } from "../store/browser";
 import { useDefaultBrowser } from "../store/defaultBrowser";
+import { browserForBundle, useBrowserImport } from "../store/browserImport";
 import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
@@ -77,6 +78,22 @@ export function DefaultBrowserDialog() {
   const alreadyDefault = phase === "idle" && Boolean(status?.is_default);
   const done = phase === "done";
   const current = status?.current && !isDive(status.current) ? prettyBundleId(status.current) : null;
+  const importable = browserForBundle(status?.current);
+  // The browser being replaced is the one worth importing from; the offer
+  // sits here because this is the moment someone is leaving it.
+  const openImport = () => {
+    useBrowserImport.getState().setPreferBrowser(importable);
+    close();
+    toggle("import", true);
+  };
+  const importRow = current && (
+    <p className="mt-2.5 flex items-center gap-2 border-t border-line pt-2.5 text-[11px] text-ink-3">
+      <span className="min-w-0 flex-1">Bring your bookmarks and history from {current} too.</span>
+      <button type="button" onClick={openImport} className="pressable h-7 shrink-0 rounded-full border border-line-2 px-2.5 text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink">
+        Import…
+      </button>
+    </p>
+  );
   const title = alreadyDefault ? "Dive is your default browser" : done ? "Dive is now your default browser" : "Make Dive your default browser";
 
   const start = () => {
@@ -97,7 +114,12 @@ export function DefaultBrowserDialog() {
       </button>
     );
   } else if (done) {
-    body = <p className="text-xs text-ink-2">Links from other apps will open in Dive from now on.</p>;
+    body = (
+      <>
+        <p className="text-xs text-ink-2">Links from other apps will open in Dive from now on.</p>
+        {importRow}
+      </>
+    );
     actions = (
       <button ref={primary} type="button" onClick={close} className={primaryClass}>
         Done
@@ -151,6 +173,7 @@ export function DefaultBrowserDialog() {
       <>
         <p className="text-xs text-ink-2">Links from other apps will open in Dive. macOS will ask you to confirm.</p>
         {current && <p className="mt-1.5 text-[11px] text-ink-3">Currently: {current}</p>}
+        {importRow}
       </>
     );
     actions = (

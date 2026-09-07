@@ -424,6 +424,10 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_close,
             tab_activate,
             tab_deactivate,
+            browser_import_sources,
+            browser_import_grant,
+            browser_import_run,
+            browser_import_open_privacy,
             tab_navigate,
             tab_reorder,
             tab_set_pinned,
@@ -1286,6 +1290,73 @@ pub(crate) fn tab_activate(app: AppHandle<Runtime>, id: TabId) -> AppResult<()> 
     on_main(&app, move |main, app, state| {
         activate_tab(main, app, state, id)
     })
+}
+
+/// Browsers on this Mac whose bookmarks and history can be brought in.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn browser_import_sources() -> AppResult<Vec<crate::browser_import::ImportSource>>
+{
+    tauri::async_runtime::spawn_blocking(crate::browser_import::sources)
+        .await
+        .map_err(AppError::new)
+}
+
+/// Ask for the profile folder in the system panel: choosing it there is the
+/// consent macOS wants before a protected folder can be read. Returns the
+/// source with its access re-checked, or `None` when the panel was dismissed.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn browser_import_grant(
+    id: String,
+) -> AppResult<Option<crate::browser_import::ImportSource>> {
+    let source = crate::browser_import::find(&id)?;
+    let picked = rfd::AsyncFileDialog::new()
+        .set_title(format!("Allow Dive to read {}'s data", source.name))
+        .set_directory(&source.dir)
+        .pick_folder()
+        .await;
+    if picked.is_none() {
+        return Ok(None);
+    }
+    tauri::async_runtime::spawn_blocking(move || crate::browser_import::find(&id).map(Some))
+        .await
+        .map_err(AppError::new)?
+}
+
+/// Bring bookmarks and/or history in from one source.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn browser_import_run(
+    state: State<'_, AppState>,
+    id: String,
+    bookmarks: bool,
+    history: bool,
+) -> AppResult<crate::browser_import::ImportSummary> {
+    let source = crate::browser_import::find(&id)?;
+    let harvest = tauri::async_runtime::spawn_blocking(move || {
+        crate::browser_import::harvest(&source, bookmarks, history)
+    })
+    .await
+    .map_err(AppError::new)??;
+    let store = lock(&state.store);
+    let added_bookmarks = store.import_bookmarks(&harvest.bookmarks)?;
+    let added_history = store.import_history(&harvest.history)?;
+    Ok(crate::browser_import::ImportSummary {
+        bookmarks: u32::try_from(added_bookmarks).unwrap_or(u32::MAX),
+        history: u32::try_from(added_history).unwrap_or(u32::MAX),
+    })
+}
+
+/// Open System Settings on the Full Disk Access list, the other way in.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn browser_import_open_privacy() -> AppResult<()> {
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+        .status()
+        .map_err(AppError::new)?;
+    Ok(())
 }
 
 /// Show the workspace's welcome screen: hide every tab view without closing

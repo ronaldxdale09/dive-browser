@@ -19,9 +19,22 @@ What a person sees the first time Dive opens, and how to bring it back.
 3. **Profile** (`ProfileStep.tsx`). Names, colours and picks a face for the
    install's own profile through `updateProfile`; nothing is created. Skip keeps
    "Personal".
-4. **Workspace** (`WorkspaceStep.tsx`). Renames and colours the Home workspace
+4. **Import** (`ImportStep.tsx`, panel in `components/import/ImportPanel.tsx`).
+   Bookmarks and history from the browsers on this Mac. The host
+   (`src-tauri/src/browser_import.rs`) finds Chrome, Brave, Edge, Arc,
+   Vivaldi, Opera and Chromium profiles under `~/Library/Application
+   Support`, Firefox under `Firefox/Profiles`, and Safari under
+   `~/Library/Safari`; it copies each database out from under the running
+   browser before reading it, and folds the rows into the store without
+   touching anything already there. macOS protects several of those folders:
+   a source reports `access: denied`, and the panel offers the system folder
+   picker (choosing the folder is consent) or Full Disk Access. The same panel
+   backs `ImportDialog.tsx`, reachable from the default-browser dialog
+   (preselecting the browser being replaced), Settings › General and the
+   palette. Passwords, cookies and extensions are never read.
+5. **Workspace** (`WorkspaceStep.tsx`). Renames and colours the Home workspace
    through `updateWorkspace`, with a few one-click names. Skip keeps "Home".
-5. **Features** (`FeaturesStep.tsx`). Eight cards, the one-minute tour on
+6. **Features** (`FeaturesStep.tsx`). Four lines, the one-minute tour on
    request, and two choices worth making now: DivePrivacy (preselected on, so
    protection is an explicit opt-in that the flow makes easy) and the default
    browser. "Start browsing" writes the choices and finishes.

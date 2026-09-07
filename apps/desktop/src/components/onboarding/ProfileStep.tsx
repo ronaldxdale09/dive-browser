@@ -3,7 +3,7 @@ import { PROFILE_COLORS, PROFILE_SEEDS, seedFromProfileName } from "../../lib/pr
 import { useBrowser } from "../../store/browser";
 import { useOnboarding } from "../../store/onboarding";
 import { AvatarImage } from "../AvatarImage";
-import { StepActions } from "./Shell";
+import { StepActions, stepLabel } from "./Shell";
 
 /**
  * Who is diving. A fresh install already has one profile, so this step
@@ -47,7 +47,7 @@ export function ProfileStep() {
       <div className="flex items-center gap-4">
         <AvatarImage kind="profile" seed={avatar} color={color} alt="" width={56} height={56} className="size-14 shrink-0 rounded-full" />
         <div className="min-w-0">
-          <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">Step 1 of 3</p>
+          <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">{stepLabel("profile")}</p>
           <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em]">Who's diving?</h2>
           <p className="mt-0.5 text-xs text-ink-3">A profile keeps its own cookies, logins and workspaces. Add more later for work and clients.</p>
         </div>

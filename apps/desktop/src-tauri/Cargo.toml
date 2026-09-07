@@ -40,6 +40,8 @@ tracing-subscriber = { workspace = true }
 tracing-appender = "0.2"
 tauri-plugin-updater = "2"
 rfd = "0.16"
+rusqlite = { workspace = true }
+plist = "1"
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tempfile = "3"

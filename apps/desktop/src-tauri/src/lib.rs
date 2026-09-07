@@ -7,6 +7,7 @@ mod agent;
 mod agent_tools;
 mod automation;
 mod ax;
+mod browser_import;
 mod buffers;
 mod capture_scope;
 mod cdp_feed;

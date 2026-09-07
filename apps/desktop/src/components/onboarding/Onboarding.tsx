@@ -6,6 +6,7 @@ import { usePrefs } from "../../store/prefs";
 import { Shell } from "./Shell";
 import { StartScreen } from "./StartScreen";
 import { ProfileStep } from "./ProfileStep";
+import { ImportStep } from "./ImportStep";
 import { WorkspaceStep } from "./WorkspaceStep";
 import { FeaturesStep } from "./FeaturesStep";
 
@@ -14,7 +15,7 @@ const IntroScene = lazy(() => import("./IntroScene").then(({ IntroScene }) => ({
 
 /**
  * The first-run flow: a five-second intro, a start screen, then profile,
- * workspace and a look at the features. It opens on its own when the
+ * import, workspace and a look at the features. It opens on its own when the
  * preferences say it never completed, and again from Settings › About.
  * Nothing underneath is reachable while it is up: it covers the whole
  * window, chrome included, so the person meets Dive one thing at a time.
@@ -50,6 +51,7 @@ export function Onboarding() {
   return (
     <Shell>
       {stage === "profile" && <ProfileStep />}
+      {stage === "import" && <ImportStep />}
       {stage === "workspace" && <WorkspaceStep />}
       {stage === "features" && <FeaturesStep />}
     </Shell>

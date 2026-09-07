@@ -3,14 +3,14 @@ import { usePrefs } from "./prefs";
 
 /**
  * The first-run flow, in order. `intro` is the five-second brand sting,
- * `start` the screen with the one button, then three setup steps, then the
+ * `start` the screen with the one button, then four setup steps, then the
  * welcome screen takes over. `null` means the flow is not showing.
  */
-export const STAGES = ["intro", "start", "profile", "workspace", "features"] as const;
+export const STAGES = ["intro", "start", "profile", "import", "workspace", "features"] as const;
 export type Stage = (typeof STAGES)[number];
 
 /** The setup steps a person can move back and forth between. */
-export const STEPS = ["profile", "workspace", "features"] as const satisfies readonly Stage[];
+export const STEPS = ["profile", "import", "workspace", "features"] as const satisfies readonly Stage[];
 
 interface OnboardingState {
   stage: Stage | null;

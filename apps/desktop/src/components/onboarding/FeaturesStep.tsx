@@ -6,7 +6,7 @@ import { useOnboarding } from "../../store/onboarding";
 import { usePrefs } from "../../store/prefs";
 import { Icon } from "../Icon";
 import { Switch } from "../SettingsFields";
-import { StepActions } from "./Shell";
+import { StepActions, stepLabel } from "./Shell";
 
 const FeatureReel = lazy(() => import("../FeatureReel").then(({ FeatureReel }) => ({ default: FeatureReel })));
 
@@ -47,7 +47,7 @@ export function FeaturesStep() {
 
   return (
     <div>
-      <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">Step 3 of 3</p>
+      <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">{stepLabel("features")}</p>
       <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em]">What's inside</h2>
       <p className="mt-0.5 text-xs text-ink-3">Everything is a keystroke away, and ⌘K finds the rest.</p>
       <ul className="mt-4 divide-y divide-line" aria-label="Features">

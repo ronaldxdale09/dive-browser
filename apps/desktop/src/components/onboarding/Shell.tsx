@@ -4,9 +4,15 @@ import { Backdrop } from "./Backdrop";
 
 const TITLES: Record<(typeof STEPS)[number], string> = {
   profile: "Profile",
+  import: "Import",
   workspace: "Workspace",
   features: "What's inside",
 };
+
+/** "Step 2 of 4", from the step order, so a new step never miscounts the others. */
+export function stepLabel(step: (typeof STEPS)[number]): string {
+  return `Step ${STEPS.indexOf(step) + 1} of ${STEPS.length}`;
+}
 
 /**
  * The frame every setup step sits in: the welcome ground behind, a step

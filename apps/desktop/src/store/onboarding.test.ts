@@ -17,7 +17,7 @@ describe("onboarding flow", () => {
     expect(shouldOnboard(true, false, true)).toBe(true);
   });
 
-  it("walks intro, start, profile, workspace, features, then records itself done", async () => {
+  it("walks intro, start, profile, import, workspace, features, then records itself done", async () => {
     const write = vi.spyOn(ipc, "prefsSet").mockImplementation(async (p) => p);
     usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
     const { begin, next, skipIntro, back } = useOnboarding.getState();
@@ -35,9 +35,12 @@ describe("onboarding flow", () => {
     back();
     expect(useOnboarding.getState().stage).toBe("workspace");
     back();
+    expect(useOnboarding.getState().stage).toBe("import");
+    back();
     expect(useOnboarding.getState().stage).toBe("profile");
     back();
     expect(useOnboarding.getState().stage).toBe("profile");
+    next();
     next();
     next();
     next();

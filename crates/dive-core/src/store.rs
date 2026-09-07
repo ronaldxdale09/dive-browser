@@ -153,6 +153,17 @@ fn display_key(entry: &HistoryEntry) -> String {
     }
 }
 
+/// A bookmark or visit brought in from another browser.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedEntry {
+    /// The page.
+    pub url: String,
+    /// Its title, or empty.
+    pub title: String,
+    /// When it was saved or visited.
+    pub at: Timestamp,
+}
+
 /// A saved page.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct Bookmark {
@@ -683,6 +694,43 @@ impl Store {
             b.favicon = self.site_favicon(&b.url);
         }
         Ok(found)
+    }
+
+    /// Bring bookmarks in from another browser. A URL already bookmarked
+    /// keeps its own row; returns how many were new.
+    pub fn import_bookmarks(&self, items: &[ImportedEntry]) -> Result<usize> {
+        let tx = self.conn.unchecked_transaction()?;
+        let mut added = 0;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT OR IGNORE INTO bookmarks (url, title, created_at) VALUES (?1, ?2, ?3)",
+            )?;
+            for item in items {
+                added += stmt.execute(params![item.url, item.title, item.at.to_rfc3339()])?;
+            }
+        }
+        tx.commit()?;
+        Ok(added)
+    }
+
+    /// Bring visits in from another browser. A visit to the same URL at the
+    /// same time is already here (a second import, say) and is skipped;
+    /// returns how many were new.
+    pub fn import_history(&self, items: &[ImportedEntry]) -> Result<usize> {
+        let tx = self.conn.unchecked_transaction()?;
+        let mut added = 0;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO history (url, title, visited_at)
+                 SELECT ?1, ?2, ?3
+                 WHERE NOT EXISTS (SELECT 1 FROM history WHERE url = ?1 AND visited_at = ?3)",
+            )?;
+            for item in items {
+                added += stmt.execute(params![item.url, item.title, item.at.to_rfc3339()])?;
+            }
+        }
+        tx.commit()?;
+        Ok(added)
     }
 
     // ----- history -----
@@ -1965,5 +2013,31 @@ mod tests {
         store.set_setting("a_b", "1").unwrap();
         store.set_setting("axb", "2").unwrap();
         assert_eq!(store.settings_with_prefix("a_").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn imports_skip_what_is_already_here() {
+        let store = Store::in_memory().unwrap();
+        let at = Timestamp::parse("2026-09-01T10:00:00Z").unwrap();
+        store.add_bookmark("https://a.test/", "Mine", at).unwrap();
+        let items = vec![
+            ImportedEntry {
+                url: "https://a.test/".into(),
+                title: "Theirs".into(),
+                at,
+            },
+            ImportedEntry {
+                url: "https://b.test/".into(),
+                title: "New".into(),
+                at,
+            },
+        ];
+        assert_eq!(store.import_bookmarks(&items).unwrap(), 1);
+        let found = store.search_bookmarks("a.test", 5).unwrap();
+        assert_eq!(found[0].title, "Mine");
+        assert_eq!(store.import_history(&items).unwrap(), 2);
+        // The same import again adds nothing.
+        assert_eq!(store.import_history(&items).unwrap(), 0);
+        assert_eq!(store.search_history("test", 10).unwrap().len(), 2);
     }
 }

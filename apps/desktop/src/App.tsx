@@ -38,6 +38,7 @@ const RecorderModal = lazy(() => import("./components/RecorderModal").then(({ Re
 const RecordDialog = lazy(() => import("./components/record/RecordDialog").then(({ RecordDialog }) => ({ default: RecordDialog })));
 const DefaultBrowserDialog = lazy(() => import("./components/DefaultBrowserDialog").then(({ DefaultBrowserDialog }) => ({ default: DefaultBrowserDialog })));
 const Subtitles = lazy(() => import("./components/Subtitles").then(({ Subtitles }) => ({ default: Subtitles })));
+const ImportDialog = lazy(() => import("./components/ImportDialog").then(({ ImportDialog }) => ({ default: ImportDialog })));
 const Onboarding = lazy(() => import("./components/onboarding/Onboarding").then(({ Onboarding }) => ({ default: Onboarding })));
 const RecordingDoneDialog = lazy(() => import("./components/record/RecordingDoneDialog").then(({ RecordingDoneDialog }) => ({ default: RecordingDoneDialog })));
 
@@ -171,13 +172,14 @@ export function App() {
         )}
         {showSidecar && <IsolatedPanel label="Agent" onClose={() => toggle("sidecar", false)}><Suspense fallback={<PanelSkeleton label="agent" />}><Sidecar /></Suspense></IsolatedPanel>}
       </main>
-      <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || open.subtitles) ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
+      <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || open.subtitles || open.import) ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
         {open.palette && <Palette />}
         {open.settings && <SettingsDialog />}
         {open.library && <Library />}
         {open.shortcuts && <Shortcuts />}
         {open.defaultBrowser && <DefaultBrowserDialog />}
         {open.subtitles && <Subtitles />}
+        {open.import && <ImportDialog />}
       </Suspense>
       {open.extensions && <IsolatedPanel label="Extensions" modal onClose={() => toggle("extensions", false)}><Suspense fallback={<div className="fixed inset-0 z-50 bg-ground/75 backdrop-blur-sm" aria-label="Loading extensions" />}><Extensions /></Suspense></IsolatedPanel>}
       <Splash />

@@ -61,6 +61,36 @@ export const commands = {
 	 *  clicking a tab brings its page back.
 	 */
 	tabDeactivate: () => typedError<null, AppError>(__TAURI_INVOKE("tab_deactivate")),
+	/**  Browsers on this Mac whose bookmarks and history can be brought in. */
+	browserImportSources: () => typedError<ImportSource[], AppError>(__TAURI_INVOKE("browser_import_sources")),
+	/**
+	 *  Ask for the profile folder in the system panel: choosing it there is the
+	 *  consent macOS wants before a protected folder can be read. Returns the
+	 *  source with its access re-checked, or `None` when the panel was dismissed.
+	 */
+	browserImportGrant: (id: string) => typedError<{
+	/**  `browser:profile-folder`, stable across calls. */
+	id: string,
+	/**  `chrome`, `brave`, `edge`, `arc`, `vivaldi`, `opera`, `chromium`, `firefox`, `safari`. */
+	browser: string,
+	/**  Display name of the browser. */
+	name: string,
+	family: Family,
+	/**  The profile's own name when the browser has several; `None` for the only one. */
+	profile: string | null,
+	/**  Folder the files are read from. */
+	dir: string,
+	access: Access,
+	/**
+	 *  The browser's own icon from its app bundle, as a PNG data URL; `None`
+	 *  when the app itself is not installed (its data can outlive it).
+	 */
+	icon: string | null,
+} | null, AppError>(__TAURI_INVOKE("browser_import_grant", { id })),
+	/**  Bring bookmarks and/or history in from one source. */
+	browserImportRun: (id: string, bookmarks: boolean, history: boolean) => typedError<ImportSummary, AppError>(__TAURI_INVOKE("browser_import_run", { id, bookmarks, history })),
+	/**  Open System Settings on the Full Disk Access list, the other way in. */
+	browserImportOpenPrivacy: () => typedError<null, AppError>(__TAURI_INVOKE("browser_import_open_privacy")),
 	tabNavigate: (id: TabId, url: string) => typedError<null, AppError>(__TAURI_INVOKE("tab_navigate", { id, url })),
 	/**
 	 *  Persist a new order for the tabs of `workspace_id`. Ids not listed keep
@@ -424,6 +454,15 @@ export type A11yReport = {
 	/**  Number of rules needing manual review. */
 	incomplete: number,
 };
+
+/**  Whether the profile folder can be read right now. */
+export type Access =
+/**  Files open; the import can run. */
+"ok" |
+/**  macOS refused ("Operation not permitted"); the person has to allow it. */
+"denied" |
+/**  The folder exists but holds neither bookmarks nor history. */
+"empty";
 
 /**
  *  Where an agent is about to act, so the chrome can draw a cursor there.
@@ -791,6 +830,9 @@ export type ExtensionList = {
 	restart_required: boolean,
 };
 
+/**  Which family a browser belongs to, which decides the files and formats. */
+export type Family = "chromium" | "firefox" | "safari";
+
 /**  Result of a find step. */
 export type FindResult = {
 	/**  Total matches in the document. */
@@ -836,6 +878,33 @@ export type HistoryEntry = {
 	visits: number,
 	/**  The site's remembered icon as a `data:` URL, when one is known. */
 	favicon: string | null,
+};
+
+/**  One browser profile the import can read. */
+export type ImportSource = {
+	/**  `browser:profile-folder`, stable across calls. */
+	id: string,
+	/**  `chrome`, `brave`, `edge`, `arc`, `vivaldi`, `opera`, `chromium`, `firefox`, `safari`. */
+	browser: string,
+	/**  Display name of the browser. */
+	name: string,
+	family: Family,
+	/**  The profile's own name when the browser has several; `None` for the only one. */
+	profile: string | null,
+	/**  Folder the files are read from. */
+	dir: string,
+	access: Access,
+	/**
+	 *  The browser's own icon from its app bundle, as a PNG data URL; `None`
+	 *  when the app itself is not installed (its data can outlive it).
+	 */
+	icon: string | null,
+};
+
+/**  What an import brought in. */
+export type ImportSummary = {
+	bookmarks: number,
+	history: number,
 };
 
 /**  Insets in CSS pixels. */

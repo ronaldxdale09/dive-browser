@@ -24,7 +24,7 @@ export const events = {
 };
 export type { NavigationEntry, NavigationHistory } from "../generated/bindings";
 export type { ExtensionInfo, ExtensionList };
-export type { Prefs, ClearRequest, Rule, RuleAction, PrivacyCategory, PrivacyEvent, PrivacyInfo, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, RecordOptions, RecordingResult, RecordingCapabilities, RecordingEvent, Microphone, MediaInfo, ExportRequest, KeptSegment, RecordingInfo, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions, SitePermission, PermissionList, Scope, Duration, PermissionDismissed, Decision, UpdateInfo, PermissionAsked, TabTier, DefaultBrowserStatus, Profile, ProfileId, ProfileDraft, SubtitleModel, SubtitleModelProgress, SubtitleCue, SubtitleState } from "../generated/bindings";
+export type { Prefs, ClearRequest, Rule, RuleAction, PrivacyCategory, PrivacyEvent, PrivacyInfo, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, RecordOptions, RecordingResult, RecordingCapabilities, RecordingEvent, Microphone, MediaInfo, ExportRequest, KeptSegment, RecordingInfo, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions, SitePermission, PermissionList, Scope, Duration, PermissionDismissed, Decision, UpdateInfo, PermissionAsked, TabTier, DefaultBrowserStatus, Profile, ProfileId, ProfileDraft, SubtitleModel, SubtitleModelProgress, SubtitleCue, SubtitleState, ImportSource, ImportSummary } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
 export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
@@ -181,6 +181,10 @@ export const ipc = {
   updateCheck: async () => unwrap(await commands.updateCheck()),
   defaultBrowserStatus: () => commands.defaultBrowserStatus(),
   defaultBrowserSet: async () => unwrap(await commands.defaultBrowserSet()),
+  browserImportSources: async () => unwrap(await commands.browserImportSources()),
+  browserImportGrant: async (id: string) => unwrap(await commands.browserImportGrant(id)),
+  browserImportRun: async (id: string, bookmarks: boolean, history: boolean) => unwrap(await commands.browserImportRun(id, bookmarks, history)),
+  browserImportOpenPrivacy: async () => unwrap(await commands.browserImportOpenPrivacy()),
   updateInstall: async () => unwrap(await commands.updateInstall()),
   historySearch: async (query: string, limit = 20) => unwrap(await commands.historySearch(query, limit)),
   shareUrl: async (url: string) => unwrap(await commands.shareUrl(url)),
