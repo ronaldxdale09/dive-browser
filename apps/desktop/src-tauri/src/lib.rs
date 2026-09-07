@@ -264,6 +264,17 @@ pub fn run() {
                         return;
                     };
                     let state = app.state::<state::AppState>();
+                    // Bringing a tab back destroys its popout window, and
+                    // that destroy arrives here as a close request too. By
+                    // then the tab is the main window's again; closing it
+                    // would delete the very tab that was just brought back.
+                    let still_detached = state::lock(&state.host)
+                        .as_ref()
+                        .is_some_and(|host| host.is_detached(tab));
+                    if !still_detached {
+                        tracing::debug!(%tab, "popout window closing after reattach; tab stays");
+                        return;
+                    }
                     if let Err(e) = commands::close_tab(&main, &app, &state, tab) {
                         tracing::warn!(%tab, "closing popout failed: {e}");
                     }
