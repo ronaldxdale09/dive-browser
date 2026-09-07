@@ -5,6 +5,7 @@ import type { Vitals } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
 import { InternalPageNote, isInternalPage } from "./InternalPageNote";
+import { ReadError } from "./ReadError";
 
 type Rating = "good" | "needs-improvement" | "poor" | "unknown";
 
@@ -56,7 +57,7 @@ export function VitalsPanel() {
         <span className="flex-1" />
         <IconButton icon={RefreshCw} label="Re-read vitals" size={12} disabled={!activeTab} onClick={refresh} tooltipAlign="end" />
       </div>
-      {error && <div className="px-3 py-2 text-xs text-danger">{error}</div>}
+      {error && <ReadError message={error} onRetry={refresh} />}
       <div className="grid grid-cols-4 gap-2 overflow-auto px-3 py-2">
         {TILES.map(({ key, label, hint }) => {
           const value = data?.[key];

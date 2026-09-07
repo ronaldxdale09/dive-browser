@@ -4,6 +4,7 @@ import { useTabData } from "../lib/useTabData";
 import { useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
 import { InternalPageNote, isInternalPage } from "./InternalPageNote";
+import { ReadError } from "./ReadError";
 
 /** An `og:image` as a crawler would fetch it: relative paths resolve against the page. */
 export function resolveImage(image: string | undefined, pageUrl: string): string | undefined {
@@ -20,12 +21,14 @@ export function resolveImage(image: string | undefined, pageUrl: string): string
 export function MetaPanel() {
   const activeTab = useBrowser((s) => s.activeTab);
   const url = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.url ?? "");
+  // Head tags settle when the document has loaded; read again then.
+  const loading = useBrowser((s) => Boolean(s.activeTab && s.loading[s.activeTab]));
   const internal = isInternalPage(url);
-  const { data: meta, error, refresh } = useTabData(internal ? null : activeTab, url, ipc.tabMeta);
+  const { data: meta, error, refresh } = useTabData(internal ? null : activeTab, url, ipc.tabMeta, 0, loading);
 
   if (internal) return <InternalPageNote what="head metadata and previews" />;
   if (!activeTab) return <div className="px-3 py-2 text-xs text-ink-3">Open a tab to inspect its metadata.</div>;
-  if (error) return <div className="px-3 py-2 text-xs text-danger">{error}</div>;
+  if (error) return <ReadError message={error} onRetry={refresh} />;
   if (!meta) return <div className="px-3 py-2 text-xs text-ink-3">Reading…</div>;
 
   const ogTitle = meta.og["title"] ?? meta.title;

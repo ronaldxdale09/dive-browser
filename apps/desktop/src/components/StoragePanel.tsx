@@ -4,12 +4,15 @@ import { ipc } from "../lib/ipc";
 import { useTabData } from "../lib/useTabData";
 import { useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
+import { ReadError } from "./ReadError";
 
 /** Cookies, localStorage and sessionStorage for the active tab. */
 export function StoragePanel() {
   const activeTab = useBrowser((s) => s.activeTab);
   const url = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.url);
-  const { data, error, refresh } = useTabData(activeTab, url, ipc.tabStorage);
+  // Cookies and storage are written as the page runs; read again once it has loaded.
+  const loading = useBrowser((s) => Boolean(s.activeTab && s.loading[s.activeTab]));
+  const { data, error, refresh } = useTabData(activeTab, url, ipc.tabStorage, 0, loading);
   const [section, setSection] = useState<"cookies" | "local" | "session">("cookies");
 
   const rows: [string, string, string][] =
@@ -35,7 +38,7 @@ export function StoragePanel() {
         <IconButton icon={RefreshCw} label="Refresh storage" size={12} disabled={!activeTab} onClick={refresh} />
       </div>
       <div className="min-h-0 flex-1 select-text overflow-auto font-mono text-[11.5px] leading-5">
-        {error && <div className="px-3 py-2 text-danger">{error}</div>}
+        {error && <ReadError message={error} onRetry={refresh} />}
         {!error && rows.length === 0 && <div className="px-3 py-2 text-ink-3">{activeTab ? "Nothing stored." : "Open a tab to inspect its storage."}</div>}
         {rows.map(([k, v, meta]) => (
           <div key={k + meta} className="flex gap-3 border-b border-line/60 px-3 py-0.5">
