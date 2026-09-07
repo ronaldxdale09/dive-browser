@@ -5,7 +5,7 @@ import { ipc } from "../../lib/ipc";
 import { resetContentCover } from "../../lib/overlay";
 import { useAgent } from "../../store/agent";
 import { usePrefs } from "../../store/prefs";
-import { ModelPicker } from "./ModelPicker";
+import { ModelPicker, modelDetail } from "./ModelPicker";
 
 const provider: ProviderInfo = {
   id: "anthropic",
@@ -59,6 +59,15 @@ afterEach(() => {
   useAgent.setState(initialAgent, true);
   usePrefs.setState(initialPrefs, true);
   vi.restoreAllMocks();
+});
+
+describe("modelDetail", () => {
+  it("does not repeat an id that is the name, and says what is known", () => {
+    const base = { id: "qwen2.5:0.5b", name: "qwen2.5:0.5b", context_length: null, tools: null, reasoning: null, input_per_mtok: null, output_per_mtok: null };
+    expect(modelDetail(base)).toBe("");
+    expect(modelDetail({ ...base, context_length: 32768 })).toBe("32.8k ctx");
+    expect(modelDetail({ ...base, id: "anthropic/claude-opus-5", name: "Claude Opus 5", context_length: 200000, reasoning: true, input_per_mtok: 5, output_per_mtok: 25 })).toBe("anthropic/claude-opus-5 · 200k ctx · $5.0 / $25 per M · thinks");
+  });
 });
 
 describe("ModelPicker", () => {

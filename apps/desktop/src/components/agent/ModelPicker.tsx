@@ -154,21 +154,28 @@ export function ModelPicker({ onAddProvider }: { onAddProvider: () => void }) {
 }
 
 function ModelRow({ model, selected, onPick }: { model: ModelInfo; selected: boolean; onPick: () => void }) {
-  const price = model.input_per_mtok != null && model.output_per_mtok != null ? `$${trim(model.input_per_mtok)} / $${trim(model.output_per_mtok)}` : null;
+  const detail = modelDetail(model);
   return (
     <button type="button" onClick={onPick} aria-pressed={selected} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-surface-2 aria-pressed:bg-surface-3">
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs text-ink">{model.name}</span>
-        <span className="block truncate font-mono text-[10px] text-ink-3">
-          {model.id}
-          {model.context_length ? ` · ${compactNumber(model.context_length)} ctx` : ""}
-          {price ? ` · ${price} per M` : ""}
-          {model.reasoning ? " · thinks" : ""}
-        </span>
+        {detail && <span className="block truncate font-mono text-[10px] text-ink-3">{detail}</span>}
       </span>
       {selected && <Icon icon={Check} size={12} className="shrink-0 text-highlight" />}
     </button>
   );
+}
+
+/** The second line of a model row: the id when it differs from the name, then what is known about it. Empty when nothing is. */
+export function modelDetail(model: ModelInfo): string {
+  const price = model.input_per_mtok != null && model.output_per_mtok != null ? `$${trim(model.input_per_mtok)} / $${trim(model.output_per_mtok)}` : null;
+  const parts = [
+    model.id === model.name ? null : model.id,
+    model.context_length ? `${compactNumber(model.context_length)} ctx` : null,
+    price ? `${price} per M` : null,
+    model.reasoning ? "thinks" : null,
+  ].filter((p): p is string => p !== null);
+  return parts.join(" · ");
 }
 
 function trim(n: number): string {

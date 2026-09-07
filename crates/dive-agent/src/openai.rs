@@ -248,6 +248,49 @@ pub fn parse_models(body: &Value, provider: Provider) -> Vec<ModelInfo> {
         .collect()
 }
 
+/// Models from Ollama's own `GET /api/tags`, which says what its
+/// OpenAI-compatible `/v1/models` does not: the family (so embedding-only
+/// models such as bge or nomic-embed stay out of a chat picker) and the
+/// context window.
+pub fn parse_tags(body: &Value) -> Vec<ModelInfo> {
+    let Some(models) = body["models"].as_array() else {
+        return Vec::new();
+    };
+    models
+        .iter()
+        .filter_map(|m| {
+            let id = m["name"]
+                .as_str()
+                .or_else(|| m["model"].as_str())?
+                .to_owned();
+            let details = &m["details"];
+            let families: Vec<String> = details["families"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_lowercase)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let family = details["family"].as_str().unwrap_or("").to_lowercase();
+            let embedding = |f: &str| f == "bert" || f == "nomic-bert" || f.contains("embed");
+            if embedding(&family) || families.iter().any(|f| embedding(f)) {
+                return None;
+            }
+            Some(ModelInfo {
+                name: id.clone(),
+                context_length: u32_of(&details["context_length"]),
+                tools: None,
+                reasoning: None,
+                input_per_mtok: None,
+                output_per_mtok: None,
+                id,
+            })
+        })
+        .collect()
+}
+
 /// `OpenAI`'s `/models` lists embeddings, speech and image models alongside
 /// the chat ones, with nothing but the id to tell them apart.
 fn looks_like_chat_model(id: &str) -> bool {
@@ -791,5 +834,21 @@ mod tests {
             parse_models(&groq, Provider::Groq)[0].context_length,
             Some(131_072)
         );
+    }
+
+    #[test]
+    fn ollama_tags_keep_chat_models_and_their_context() {
+        let tags = json!({"models": [
+            {"name": "qwen2.5:0.5b", "details": {"family": "qwen2", "families": ["qwen2"], "context_length": 32768}},
+            {"name": "bge-m3:latest", "details": {"family": "bert", "families": ["bert"], "context_length": 8192}},
+            {"name": "nomic-embed-text:latest", "details": {"family": "nomic-bert"}},
+            {"name": "llama3.2:latest", "details": {"family": "llama"}}
+        ]});
+        let models = parse_tags(&tags);
+        let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["qwen2.5:0.5b", "llama3.2:latest"]);
+        assert_eq!(models[0].context_length, Some(32768));
+        assert_eq!(models[1].context_length, None);
+        assert!(parse_tags(&json!({})).is_empty());
     }
 }

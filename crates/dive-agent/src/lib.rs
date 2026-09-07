@@ -481,14 +481,22 @@ impl Client {
     /// The models this provider offers, most useful first.
     pub async fn models(&self) -> Result<Vec<ModelInfo>, AgentError> {
         self.check_ready()?;
-        let url = match self.provider.info().wire {
-            Wire::Anthropic => format!("{}/v1/models?limit=1000", self.base_url),
-            Wire::OpenAi => format!("{}/models", self.base_url),
+        // Ollama's own listing knows each model's family and context window;
+        // its OpenAI-compatible one has only ids.
+        let ollama_tags = (self.provider == Provider::Ollama)
+            .then(|| self.base_url.strip_suffix("/v1"))
+            .flatten()
+            .map(|root| format!("{root}/api/tags"));
+        let url = match (&ollama_tags, self.provider.info().wire) {
+            (Some(tags), _) => tags.clone(),
+            (None, Wire::Anthropic) => format!("{}/v1/models?limit=1000", self.base_url),
+            (None, Wire::OpenAi) => format!("{}/models", self.base_url),
         };
         let body = self.get_json(&url).await?;
-        let mut models = match self.provider.info().wire {
-            Wire::Anthropic => anthropic::parse_models(&body),
-            Wire::OpenAi => openai::parse_models(&body, self.provider),
+        let mut models = match (&ollama_tags, self.provider.info().wire) {
+            (Some(_), _) => openai::parse_tags(&body),
+            (None, Wire::Anthropic) => anthropic::parse_models(&body),
+            (None, Wire::OpenAi) => openai::parse_models(&body, self.provider),
         };
         models.sort_by_key(|model| model.name.to_lowercase());
         Ok(models)
