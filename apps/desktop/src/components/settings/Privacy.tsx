@@ -270,7 +270,7 @@ function ClearData() {
       .finally(() => setBusy(false));
   };
   return (
-    <Group title="Clear browsing data" description="Open profiles clear immediately. Restart Dive after clearing cookies, cache, or site data to finish closed profiles and every stored origin.">
+    <Group id="clear-browsing-data" title="Clear browsing data" description="Open profiles clear immediately. Restart Dive after clearing cookies, cache, or site data to finish closed profiles and every stored origin.">
       <div className="flex flex-col gap-2 py-3">
         <Check label="Browsing history" checked={what.history} onChange={(history) => setWhat({ ...what, history })} />
         <Check label="Cookies and logins" checked={what.cookies} onChange={(cookies) => setWhat({ ...what, cookies })} />

@@ -289,7 +289,7 @@ function useMenu(close: () => void): Group[] {
         { id: "history", label: "History", icon: History, shortcut: "⌘Y", more: true, keywords: "visited recent", run: () => b().openLibrary("history") },
         { id: "downloads", label: "Downloads", icon: Download, shortcut: "⌘⇧J", more: true, keywords: "files saved", run: () => b().openLibrary("downloads") },
         { id: "recordings", label: "Recordings", icon: Clapperboard, more: true, keywords: "videos gifs captures", run: () => b().openLibrary("recordings") },
-        { id: "clear", label: "Delete browsing data…", icon: Trash2, keywords: "cookies cache privacy clear", run: done(() => b().openSettings("privacy")) },
+        { id: "clear", label: "Delete browsing data…", icon: Trash2, keywords: "cookies cache privacy clear", run: done(() => b().openSettings("privacy", "clear-browsing-data")) },
       ],
     },
     { id: "zoom", items: [{ id: "zoom", label: "Zoom", keywords: "bigger smaller full screen", run: () => undefined }] },

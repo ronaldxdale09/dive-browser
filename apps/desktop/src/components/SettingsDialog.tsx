@@ -64,6 +64,14 @@ export function SettingsDialog() {
   // Opened on whichever panel the caller asked for (`openSettings("about")`).
   const initial = useBrowser((s) => s.settingsSection);
   const [section, setSection] = useState<SectionId>(() => resolveSection(initial));
+  // "Delete browsing data…" lands on its group, not the top of Privacy.
+  const anchor = useBrowser((s) => s.settingsAnchor);
+  useEffect(() => {
+    if (!anchor) return;
+    const target = document.getElementById(anchor);
+    target?.scrollIntoView({ block: "start" });
+    useBrowser.setState({ settingsAnchor: null });
+  }, [anchor, section]);
   const [info, setInfo] = useState<AppInfo | null>(null);
   const load = usePrefs((s) => s.load);
   useEffect(() => {

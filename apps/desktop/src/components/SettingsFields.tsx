@@ -10,9 +10,9 @@ import { Icon } from "./Icon";
  */
 
 /** A titled block of rows. */
-export function Group({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+export function Group({ title, description, children, id }: { title: string; description?: string; children: ReactNode; id?: string }) {
   return (
-    <section className="mb-6">
+    <section className="mb-6" id={id}>
       <h4 className="text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">{title}</h4>
       {description && <p className="mt-1 text-xs text-ink-2">{description}</p>}
       <div className="mt-2 rounded-xl border border-line bg-surface-2/40 px-3.5">{children}</div>

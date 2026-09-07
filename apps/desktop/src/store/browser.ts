@@ -61,7 +61,9 @@ interface BrowserState {
   setTier: (id: string, tier: TabTier) => Promise<void>;
   /** Which settings panel opens next; `openSettings` sets it and the dialog reads it once. */
   settingsSection: SettingsSection;
-  openSettings: (section?: SettingsSection) => void;
+  /** A group id inside that panel to scroll to, read once by the dialog. */
+  settingsAnchor: string | null;
+  openSettings: (section?: SettingsSection, anchor?: string) => void;
   boot: () => Promise<void>;
   openTab: (url: string) => Promise<void>;
   closeTab: (id: string) => Promise<void>;
@@ -295,7 +297,8 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   libraryTab: "bookmarks",
   openLibrary: (libraryTab) => set((s) => ({ libraryTab, open: togglePanel(s.open, "library", true) })),
   settingsSection: "general",
-  openSettings: (section = "general") => set((s) => ({ settingsSection: section, open: togglePanel(s.open, "settings", true) })),
+  settingsAnchor: null,
+  openSettings: (section = "general", anchor) => set((s) => ({ settingsSection: section, settingsAnchor: anchor ?? null, open: togglePanel(s.open, "settings", true) })),
   permissionRequests: {},
   applyPermissionAsked: (asked) => set((s) => ({ permissionRequests: reducePermissionAsked(s.permissionRequests, asked) })),
   decidePermission: async (tabId, request, decision, duration) => {

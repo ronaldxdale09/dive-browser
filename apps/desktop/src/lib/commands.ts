@@ -57,7 +57,7 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "bookmarks.open": () => useBrowser.getState().openLibrary("bookmarks"),
   "history.open": () => useBrowser.getState().openLibrary("history"),
   "downloads.open": () => useBrowser.getState().openLibrary("downloads"),
-  "browsing-data.open": () => useBrowser.getState().openSettings("privacy"),
+  "browsing-data.open": () => useBrowser.getState().openSettings("privacy", "clear-browsing-data"),
   "bookmark.toggle": () => toggleBookmark(),
   "shortcuts.open": () => useBrowser.getState().toggle("shortcuts", true),
   "settings.open": () => useBrowser.getState().openSettings(),

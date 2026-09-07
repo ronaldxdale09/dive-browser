@@ -291,7 +291,7 @@ pub(crate) async fn agent_key_verify(
         },
         Err(e) if e.is_unauthorized() => KeyCheck {
             ok: false,
-            message: format!("{} rejected the key: {e}", provider.info().name),
+            message: rejection_text(&provider.info().name, &e),
         },
         Err(dive_agent::AgentError::MissingKey) => KeyCheck {
             ok: false,
@@ -790,9 +790,33 @@ fn truncate(s: &str, max: usize) -> String {
     format!("{cut}…")
 }
 
+/// "Anthropic rejected the key: API key is invalid (HTTP 401)." rather than
+/// the raw "api 401: …" the client formats for logs.
+fn rejection_text(provider: &str, error: &dive_agent::AgentError) -> String {
+    match error {
+        dive_agent::AgentError::Api { status, message } => {
+            let message = message.trim().trim_end_matches('.');
+            format!("{provider} rejected the key: {message} (HTTP {status}).")
+        }
+        other => format!("{provider} rejected the key: {other}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn key_rejections_read_as_a_sentence() {
+        let e = dive_agent::AgentError::Api {
+            status: 401,
+            message: "API key is invalid.".into(),
+        };
+        assert_eq!(
+            rejection_text("Anthropic", &e),
+            "Anthropic rejected the key: API key is invalid (HTTP 401)."
+        );
+    }
 
     #[test]
     fn disposable_keychain_never_initializes_native_store() {

@@ -61,6 +61,17 @@ describe("SettingsDialog", () => {
     expect(screen.getByText("⌘T")).toBeTruthy();
   });
 
+  it("lands a Delete browsing data request on its group inside Privacy", () => {
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    useBrowser.getState().openSettings("privacy", "clear-browsing-data");
+    render(<SettingsDialog />);
+    expect(screen.getByRole("tab", { name: "Privacy", selected: true })).toBeTruthy();
+    expect(scrolled).toHaveBeenCalledTimes(1);
+    expect((scrolled.mock.instances[0] as HTMLElement).id).toBe("clear-browsing-data");
+    expect(useBrowser.getState().settingsAnchor).toBeNull();
+  });
+
   it("keeps the download folder under General and lands a downloads request there", () => {
     expect(resolveSection("downloads")).toBe("general");
     expect(resolveSection("about")).toBe("about");

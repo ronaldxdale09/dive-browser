@@ -45,6 +45,9 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- "Delete browsing data…" lands on that group inside Settings › Privacy
+  instead of the top of the panel. A rejected agent key reads "Anthropic
+  rejected the key: API key is invalid (HTTP 401)." rather than "api 401:".
 - Console entries show objects the way DevTools does when collapsed,
   `{a: 1, b: Array(3), s: "x"}` and `[4, 5]`, instead of the word "Object".
 - Tabs squeezed down to their favicon, and pinned tabs, name themselves
