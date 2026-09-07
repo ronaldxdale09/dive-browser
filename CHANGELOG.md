@@ -42,6 +42,10 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- A second private window opens blank instead of reading "about:blank"
+  in its tab and address bar; Live subtitles, which need a model download
+  the private process refuses, are out of a private window's menu, palette
+  and shortcut.
 - The developer dock is capped by the window height, so a dock sized on a
   tall window leaves at least a readable strip of page on a short one; the
   resize handle stops at the same ceiling.

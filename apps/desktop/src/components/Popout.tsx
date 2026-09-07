@@ -34,12 +34,16 @@ export function Popout({ tabId }: { tabId: string }) {
   const error = useBrowser((state) => state.error);
   const loadPrefs = usePrefs((s) => s.load);
   const url = tab?.url ?? "";
+  // A window that has not gone anywhere yet is blank, not "about:blank":
+  // the address bar shows its placeholder and the tab reads as new.
+  const blank = url === "about:blank";
+  const shownUrl = blank ? "" : url;
   const { canBack, canForward } = useTabHistory(tab?.id ?? null, url, loading);
-  const [draft, setDraft] = useState({ tabId, value: url });
+  const [draft, setDraft] = useState({ tabId, value: shownUrl });
   const [editing, setEditing] = useState(false);
-  if (draft.tabId !== tabId) setDraft({ tabId, value: url });
+  if (draft.tabId !== tabId) setDraft({ tabId, value: shownUrl });
   // At rest the popout shows the same trimmed address as the main window.
-  const value = editing ? draft.value : prettyUrl(url);
+  const value = editing ? draft.value : prettyUrl(shownUrl);
   const inputRef = useRef<HTMLInputElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const [menuReady, setMenuReady] = useState(false);
@@ -177,7 +181,7 @@ export function Popout({ tabId }: { tabId: string }) {
   const privateStart = isPrivateWindow() && url === "about:blank";
   useCoversContent(privateStart);
   const secure = url.startsWith("https://");
-  const title = tab ? tabLabel(tab) : "Opening tab";
+  const title = tab ? (blank ? "New tab" : tabLabel(tab)) : "Opening tab";
   return (
     <div className="grid h-full grid-rows-[40px_44px_auto_minmax(0,1fr)] bg-ground text-ink">
       <header className="flex min-w-0 items-center gap-1.5 border-b border-line/70 pr-2 pl-[84px]">
@@ -235,7 +239,7 @@ export function Popout({ tabId }: { tabId: string }) {
           <Icon icon={secure ? Lock : Search} size={13} className="shrink-0 text-ink-3" />
           <input ref={inputRef} aria-label="Address" value={value}
             onChange={(e) => setDraft({ tabId, value: e.target.value })}
-            onFocus={(e) => { setEditing(true); setDraft({ tabId, value: url }); e.currentTarget.select(); }}
+            onFocus={(e) => { setEditing(true); setDraft({ tabId, value: shownUrl }); e.currentTarget.select(); }}
             onBlur={() => setEditing(false)}
             onKeyDown={(e) => {
               if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setEditing(false); e.currentTarget.blur(); }

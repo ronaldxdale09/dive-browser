@@ -174,8 +174,10 @@ describe("new window address readiness", () => {
     render(<Popout tabId="a" />);
     const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
     await waitFor(() => expect(document.activeElement).toBe(input));
-    expect(input.value).toBe("about:blank");
-    expect([input.selectionStart, input.selectionEnd]).toEqual([0, input.value.length]);
+    // Blank means blank: the placeholder shows and the tab reads as new.
+    expect(input.value).toBe("");
+    expect(input.placeholder).toBe("Search or enter address");
+    expect(screen.getByRole("tab", { name: "New tab" })).toBeTruthy();
   });
 
   it("does not overwrite selection when the ready receipt arrives after user input", async () => {

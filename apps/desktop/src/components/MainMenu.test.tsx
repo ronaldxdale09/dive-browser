@@ -27,6 +27,21 @@ afterEach(() => {
 });
 
 describe("MainMenu", () => {
+  it("drops what a private window cannot do and leads with the way out", () => {
+    Object.defineProperty(window, "__DIVE_PRIVATE__", { value: true, configurable: true });
+    try {
+      render(<MainMenu />);
+      const labels = screen.getAllByRole("menuitem").map((item) => item.textContent ?? "");
+      expect(labels[0]).toContain("Exit private mode");
+      expect(labels.some((l) => l.startsWith("Live subtitles"))).toBe(false);
+      expect(labels.some((l) => l.startsWith("Agent"))).toBe(false);
+      expect(labels.some((l) => l.startsWith("New workspace"))).toBe(false);
+      expect(labels.some((l) => l.startsWith("Developer dock"))).toBe(true);
+    } finally {
+      Reflect.deleteProperty(window, "__DIVE_PRIVATE__");
+    }
+  });
+
   it("lists the browser's pages and features with their shortcuts", () => {
     render(<MainMenu />);
     for (const name of ["New tab", "Bookmarks", "History", "Downloads", "Recordings", "Settings", "Device simulator", "Record a video", "Live subtitles", "Print…"]) {

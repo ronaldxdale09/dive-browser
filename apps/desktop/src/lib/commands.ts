@@ -127,9 +127,12 @@ function stepTab(delta: number) {
   return next ? activateTab(next.id) : undefined;
 }
 
+/** Commands a private window refuses; the menu and palette hide them too. */
+const PRIVATE_REFUSED = ["sidecar.toggle", "extensions.open", "workspace.new", "bookmark.toggle", "subtitles.open"];
+
 export function runCommand(id: string, source: "keyboard" | "native-menu" | "command" = "command"): void {
   traceInputCommand(id, source);
-  if (isPrivateWindow() && ["sidecar.toggle", "extensions.open", "workspace.new", "bookmark.toggle"].includes(id)) {
+  if (isPrivateWindow() && PRIVATE_REFUSED.includes(id)) {
     useBrowser.getState().notify("Use a normal window for this action.");
     return;
   }
@@ -258,7 +261,7 @@ export function chromeCommands(known: Command[] = []): Command[] {
   const seen = new Set(known.map((c) => c.id));
   const chords = chordsByCommand();
   return Object.keys(UI_COMMANDS)
-    .filter((id) => !seen.has(id) && id in COMMAND_TITLES && !id.startsWith("workspace.jump.") && (id !== "private.exit" || isPrivateWindow()))
+    .filter((id) => !seen.has(id) && id in COMMAND_TITLES && !id.startsWith("workspace.jump.") && (id !== "private.exit" || isPrivateWindow()) && !(isPrivateWindow() && PRIVATE_REFUSED.includes(id)))
     .map((id) => ({ id, title: COMMAND_TITLES[id]!, keybinding: chords[id] ?? null, scope: "global" as const }));
 }
 

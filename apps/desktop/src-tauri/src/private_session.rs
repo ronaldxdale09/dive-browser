@@ -136,6 +136,9 @@ fn spawn_session() -> AppResult<Session> {
         "-ApplePersistence",
         "-1",
     ]);
+    if let Some(flag) = child_debug_port(std::env::args().skip(1)) {
+        command.arg(flag);
+    }
     let mut child = command.spawn().map_err(AppError::new)?;
     let input = child
         .stdin
@@ -291,9 +294,36 @@ pub fn window_destroyed(app: &AppHandle<Runtime>) {
     }
 }
 
+/// A developer who launched Dive with `--remote-debugging-port=P` gets the
+/// private process on `P + 1`, so both chromes can be inspected. A normal
+/// launch has no such flag and the private process gets none either.
+fn child_debug_port(args: impl IntoIterator<Item = String>) -> Option<String> {
+    args.into_iter()
+        .find_map(|arg| {
+            arg.strip_prefix("--remote-debugging-port=")
+                .and_then(|port| port.parse::<u16>().ok())
+        })
+        .and_then(|port| port.checked_add(1))
+        .map(|port| format!("--remote-debugging-port={port}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_process_debugs_on_the_next_port_only_when_the_parent_does() {
+        let args = |list: &[&str]| list.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            child_debug_port(args(&["--remote-debugging-port=9345"])),
+            Some("--remote-debugging-port=9346".to_owned())
+        );
+        assert_eq!(child_debug_port(args(&["https://example.com"])), None);
+        assert_eq!(
+            child_debug_port(args(&["--remote-debugging-port=65535"])),
+            None
+        );
+    }
     #[test]
     fn private_policy_blocks_persistent_and_credential_actions() {
         for command in [

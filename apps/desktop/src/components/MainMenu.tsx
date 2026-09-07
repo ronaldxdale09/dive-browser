@@ -69,6 +69,13 @@ interface Group {
   items: Item[];
 }
 
+/**
+ * Menu items a private window drops: the agent and extensions keep
+ * credentials, workspaces persist, and live subtitles need a model download
+ * the private process refuses.
+ */
+const PRIVATE_HIDDEN = ["agent", "workspace.new", "subtitles"];
+
 export function MainMenu() {
   useCoversContent(true);
   const toggle = useBrowser((s) => s.toggle);
@@ -85,7 +92,7 @@ export function MainMenu() {
     const groups = isPrivateWindow()
       ? [
           { id: "private-session", items: [{ id: "private.exit", label: "Exit private mode", icon: X, keywords: "close all private windows incognito", run: () => runCommand("private.exit") }] },
-          ...allGroups.map((group) => ({ ...group, items: group.items.filter((item) => !["agent", "workspace.new"].includes(item.id)) })),
+          ...allGroups.map((group) => ({ ...group, items: group.items.filter((item) => !PRIVATE_HIDDEN.includes(item.id)) })),
         ]
       : allGroups;
     if (!q) return groups;

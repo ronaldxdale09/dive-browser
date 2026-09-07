@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import menuSource from "../../src-tauri/src/menu.rs?raw";
-import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, shortcutFor } from "./commands";
+import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor } from "./commands";
 import { ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "./ipc";
@@ -50,6 +50,22 @@ describe("command dispatch", () => {
     expect(privateWindow).not.toHaveBeenCalled();
     await UI_COMMANDS["window.private"]!();
     expect(privateWindow).toHaveBeenCalledOnce();
+  });
+  it("keeps live subtitles out of a private window", () => {
+    Object.defineProperty(window, "__DIVE_PRIVATE__", {value:true, configurable:true});
+    const notify = vi.spyOn(useBrowser.getState(), "notify").mockImplementation(() => undefined);
+    useBrowser.setState({ notify, open: { ...useBrowser.getState().open, subtitles: false } });
+    try {
+      runCommand("subtitles.open");
+      expect(notify).toHaveBeenCalledWith("Use a normal window for this action.");
+      expect(useBrowser.getState().open.subtitles).toBe(false);
+      expect(chromeCommands().some((c) => c.id === "subtitles.open")).toBe(false);
+    } finally {
+      notify.mockRestore();
+      useBrowser.setState({ notify: useBrowser.getInitialState().notify });
+      Reflect.deleteProperty(window, "__DIVE_PRIVATE__");
+    }
+    expect(chromeCommands().some((c) => c.id === "subtitles.open")).toBe(true);
   });
   it("every shortcut points at a chrome-side handler", () => {
     for (const id of Object.values(SHORTCUTS)) expect(UI_COMMANDS[id], id).toBeTypeOf("function");
