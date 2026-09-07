@@ -105,3 +105,53 @@ impl AppWebview {
     nsview.setFrame(frame);
   }
 }
+
+/// A live overlay clips chrome, not the page. The page never receives WasHidden,
+/// and chrome owns clicks outside its visible mask so the DOM scrim can dismiss
+/// a menu or keep a modal's focus trap. Closing restores the normal view order.
+impl crate::webview::Webview {
+  pub fn set_chrome_overlay_mask(&self, holes: &[[f64; 4]], active: bool) -> bool {
+    use cef::ImplBrowser;
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSWindowOrderingMode;
+    use objc2_core_graphics::CGMutablePath;
+    use objc2_quartz_core::{CAShapeLayer, CATransaction, kCAFillRuleEvenOdd};
+    if MainThreadMarker::new().is_none() { return false; }
+    let Some(host) = self.browser().host() else { return false; };
+    // SAFETY: the live BrowserHost owns this NSView; all operations are on the
+    // AppKit main thread and the retained handle spans this synchronous call.
+    let Some(view) = (unsafe { Retained::<NSView>::retain(host.window_handle().cast()) }) else { return false; };
+    let Some(parent) = (unsafe { view.superview() }) else { return false; };
+    view.setWantsLayer(true);
+    let Some(layer) = view.layer() else { return false; };
+    CATransaction::begin();
+    CATransaction::setDisableActions(true);
+    if active {
+      let bounds = layer.bounds();
+      let path = CGMutablePath::new();
+      // SAFETY: null transform is the identity; each rectangle is validated by
+      // the chrome command and expressed in this view's logical coordinate space.
+      unsafe { CGMutablePath::add_rect(Some(&path), std::ptr::null(), bounds); }
+      for [x, y, width, height] in holes {
+        // The new CAShapeLayer has its own unflipped Core Graphics path space,
+        // regardless of the host layer's isGeometryFlipped value. Convert from
+        // chrome's top-left coordinates exactly once for this mask.
+        let rect = NSRect::new(NSPoint::new(*x, bounds.size.height - y - height), NSSize::new(*width, *height));
+        unsafe { CGMutablePath::add_rect(Some(&path), std::ptr::null(), rect); }
+      }
+      let mask = CAShapeLayer::layer();
+      mask.setFrame(bounds);
+      mask.setPath(Some(&path));
+      mask.setFillRule(unsafe { kCAFillRuleEvenOdd });
+      // SAFETY: the fresh mask has no superlayer, so this cannot form a cycle.
+      unsafe { layer.setMask(Some(&mask)); }
+      parent.addSubview_positioned_relativeTo(&view, NSWindowOrderingMode::Above, None);
+    } else {
+      // SAFETY: removing a mask cannot introduce a layer ownership cycle.
+      unsafe { layer.setMask(None); }
+      parent.addSubview_positioned_relativeTo(&view, NSWindowOrderingMode::Below, None);
+    }
+    CATransaction::commit();
+    true
+  }
+}

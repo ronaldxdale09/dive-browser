@@ -2,10 +2,11 @@ import { useEffect, useSyncExternalStore } from "react";
 import { ipc } from "./ipc";
 
 /**
- * The page is a native child webview and those always paint above the chrome
- * webview, so any DOM overlay drawn over the content area would be buried
- * behind it. Overlays declare themselves here and the engine hides the page
- * while at least one of them is on screen.
+ * On macOS a native mask lets chrome overlap live content without hiding it.
+ * Other runtimes retain the screenshot fallback below.
+ * Native page views normally paint above chrome. Overlays register here so
+ * the host can raise only their surfaces above live content. The reference
+ * count keeps nested overlays covered until the last surface closes.
  *
  * `active` is required rather than defaulting to `true`. A component that
  * renders `null` when it is closed still runs its hooks, so a bare
@@ -17,6 +18,9 @@ import { ipc } from "./ipc";
 let depth = 0;
 let covered = false;
 let generation = 0;
+let stopLive: (() => void) | null = null;
+let liveQueue = Promise.resolve();
+let liveRevision = 0;
 let previews: Readonly<Record<string, string>> = {};
 const listeners = new Set<() => void>();
 
@@ -53,16 +57,57 @@ async function cover(token: number) {
   await ipc.setContentCovered(true).catch(() => undefined);
 }
 
+/** macOS uses a native chrome mask; CEF keeps rendering the page beneath it. */
+function liveOverlaysAvailable() {
+  return (window as Window & { __DIVE_LIVE_OVERLAYS__?: boolean }).__DIVE_LIVE_OVERLAYS__ === true;
+}
+
+export function visibleOverlayRegions() {
+  const selector = '[role="dialog"], [role="menu"], [role="listbox"], [data-native-overlay]';
+  return Array.from(document.querySelectorAll<HTMLElement>(selector))
+    .filter((element) => !element.parentElement?.closest(selector))
+    .filter((element) => getComputedStyle(element).visibility !== "hidden" && getComputedStyle(element).display !== "none")
+    .map((element) => { const { x, y, width, height } = element.getBoundingClientRect(); return { x, y, width, height }; })
+    .filter((rect) => rect.width > 0 && rect.height > 0).slice(0, 64);
+}
+
+function sendLive(regions: ReturnType<typeof visibleOverlayRegions>, active: boolean) {
+  const revision = ++liveRevision;
+  liveQueue = liveQueue.catch(() => undefined).then(async () => {
+    if (revision !== liveRevision) return;
+    await ipc.setOverlayRegions(regions, active);
+  });
+  // A closed native window may reject an already queued frame.
+  void liveQueue.catch(() => undefined);
+}
+
+function beginLive() {
+  let frame = 0;
+  let last = "";
+  let stopped = false;
+  const update = () => {
+    if (stopped) return;
+    const regions = visibleOverlayRegions();
+    const key = JSON.stringify([window.innerWidth, window.innerHeight, regions]);
+    if (key !== last) { last = key; sendLive(regions, true); }
+    frame = requestAnimationFrame(update);
+  };
+  update();
+  return () => { stopped = true; cancelAnimationFrame(frame); sendLive([], false); };
+}
+
 function acquire() {
   depth += 1;
   if (depth !== 1) return;
   generation += 1;
+  if (liveOverlaysAvailable()) { stopLive = beginLive(); return; }
   void cover(generation);
 }
 
 function release() {
   depth = Math.max(0, depth - 1);
   if (depth !== 0) return;
+  if (stopLive) { stopLive(); stopLive = null; publish({}); return; }
   generation += 1;
   const token = generation;
   if (covered) {
@@ -79,7 +124,7 @@ function release() {
   }
 }
 
-/** Hide the page for as long as this component is mounted with `active`. */
+/** Keep chrome overlays above native pages while `active`. */
 export function useCoversContent(active: boolean) {
   useEffect(() => {
     if (!active) return;
@@ -98,7 +143,7 @@ export function useContentPreview(tabId: string | null): string | null {
 }
 
 /**
- * How many overlays are holding the page hidden.
+ * How many overlays currently require chrome above the page.
  *
  * The invariant is that this is zero whenever nothing is on screen over the
  * content area; a non-zero count with no visible overlay is the bug described
@@ -110,6 +155,8 @@ export function contentCoverDepth() {
 
 /** Reset the shared counter; tests only. */
 export function resetContentCover() {
+  stopLive?.();
+  stopLive = null;
   generation += 1;
   depth = 0;
   covered = false;

@@ -1,6 +1,8 @@
+import { isPrivateWindow } from "../lib/privateMode";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   AppWindow,
+  Shield,
   Bug,
   Camera,
   Captions,
@@ -76,12 +78,19 @@ export function MainMenu() {
   useFocusTrap(root, { initialFocus: input, onEscape: close });
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
-  const groups = useMenu(close);
+  const allGroups = useMenu(close);
   const q = query.trim().toLowerCase();
   const filtered = useMemo(() => {
+    // A private window leads with the way out and drops what it cannot do.
+    const groups = isPrivateWindow()
+      ? [
+          { id: "private-session", items: [{ id: "private.exit", label: "Exit private mode", icon: X, keywords: "close all private windows incognito", run: () => runCommand("private.exit") }] },
+          ...allGroups.map((group) => ({ ...group, items: group.items.filter((item) => !["agent", "workspace.new"].includes(item.id)) })),
+        ]
+      : allGroups;
     if (!q) return groups;
     return groups.map((g) => ({ ...g, items: g.items.filter((i) => `${i.label} ${i.keywords ?? ""}`.toLowerCase().includes(q)) })).filter((g) => g.items.length > 0);
-  }, [groups, q]);
+  }, [allGroups, q]);
   const flat = filtered.flatMap((g) => g.items);
 
   const onKey = (e: React.KeyboardEvent) => {
@@ -237,6 +246,7 @@ function useMenu(close: () => void): Group[] {
     {
       id: "new",
       items: [
+        { id: "window.private", label: "New private window", icon: Shield, shortcut: "⇧⌘N", keywords: "incognito private browsing", run: done(() => runCommand("window.private")) },
         { id: "window.new", label: "New window", icon: AppWindow, shortcut: "⌘N", run: done(() => runCommand("window.new")) },
         { id: "tab.new", label: "New tab", icon: SquarePlus, shortcut: "⌘T", run: done(() => runCommand("tab.new")) },
         { id: "workspace.new", label: "New workspace", icon: LayoutGrid, keywords: "container profile", run: done(() => runCommand("workspace.new")) },

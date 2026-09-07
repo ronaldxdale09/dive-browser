@@ -56,11 +56,15 @@ export type GeolocationInput = { latitude: number; longitude: number; accuracy: 
 export type EnvironmentInput = { geolocation: GeolocationInput | null; timezone: string | null; locale: string | null };
 
 export const ipc = {
+  setOverlayRegions: async (regions: { x: number; y: number; width: number; height: number }[], active: boolean) => unwrap(await commands.layoutSetOverlayRegions(regions, active)),
   keepSitesList: async (profile: string) => unwrap(await commands.keepSitesList(profile)),
   keepSiteSet: async (profile: string, url: string, keep: boolean) => unwrap(await commands.keepSiteSet(profile, url, keep)),
   snapshot: async () => unwrap(await commands.snapshot()),
   tabInfo: async (id: string) => unwrap(await commands.tabInfo(id)),
   windowOpen: async () => unwrap(await commands.windowOpen()),
+  windowExitPrivate: async () => unwrap(await commands.windowExitPrivate()),
+  windowClose: async () => unwrap(await commands.windowClose()),
+  windowPrivate: async () => unwrap(await commands.windowPrivate()),
   popoutReady: async (id: string) => unwrap(await commands.popoutReady(id)),
   windowCommand: async (command: "tab.new" | "window.new") => unwrap(await commands.windowCommand(command)),
   workspaceActivate: async (id: string) => unwrap(await commands.workspaceActivate(id)),

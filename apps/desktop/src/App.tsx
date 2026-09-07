@@ -1,3 +1,4 @@
+import { isPrivateWindow } from "./lib/privateMode";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Rail, RAIL_WIDTH } from "./components/Rail";
 import { TabStrip } from "./components/TabStrip";
@@ -66,7 +67,7 @@ export function App() {
   const [live, setLive] = useState<{ dock: number | null; sidecar: number | null }>({ dock: null, sidecar: null });
   useEffect(() => void boot(), [boot]);
   // One look at the release channel, well after startup has settled.
-  useEffect(() => scheduleBootCheck(), []);
+  useEffect(() => { if (!isPrivateWindow()) return scheduleBootCheck(); }, []);
   // Subscribe once to the live-subtitles events.
   useEffect(() => void bootSubtitles(), []);
   // Which panels were open last time is remembered here rather than in the
@@ -110,7 +111,7 @@ export function App() {
       {/* Title-bar row: the workspace you are in, then its tabs, beside the
           traffic lights (overlay title bar). */}
       <header className="col-span-2 row-start-1 flex items-center gap-2 pl-[84px]">
-        <ProfileChip />
+        {isPrivateWindow() ? <span className="px-2 font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span> : <ProfileChip />}
         <div className="h-full min-w-0 flex-1">
           <TabStrip />
         </div>

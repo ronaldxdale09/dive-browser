@@ -1,3 +1,5 @@
+import { isPrivateWindow } from "../lib/privateMode";
+import { PrivateBadge } from "./PrivateMode";
 import { AlertTriangle, ArrowDownToLine, ChevronDown, Loader2, Pause, Play, Square, Video, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -54,10 +56,10 @@ export function FeatureBar({ compact = false }: { compact?: boolean }) {
     <div ref={ref} data-narrow={narrow || undefined} className="flex h-full shrink-0 items-center gap-0.5 pr-2">
       <RecordAction compact={narrow} />
       {narrow ? <DeviceMenu /> : <DeviceMenu label="Mobile" />}
-      <AgentAction compact={narrow} />
+      {!isPrivateWindow() && <AgentAction compact={narrow} />}
       <span className="mx-1.5 h-4 w-px bg-line-2" aria-hidden />
-      <UpdatePill compact={narrow} />
-      <BuildBadge />
+      {!isPrivateWindow() && <UpdatePill compact={narrow} />}
+      {isPrivateWindow() ? <PrivateBadge /> : <BuildBadge />}
       <IconButton icon={ChevronDown} label="All tabs" onClick={() => toggle("palette", true)} size={14} tooltipAlign="end" tooltipSide="bottom" />
     </div>
   );

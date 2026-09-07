@@ -77,31 +77,49 @@ pub fn profiles_root() -> PathBuf {
 /// Computed without an app handle because the CEF runtime needs the root
 /// cache path before the app is built.
 pub fn data_root() -> PathBuf {
-    let base = std::env::var_os("DIVE_DATA_DIR").map_or_else(
-        || {
-            let home = std::env::var_os("HOME").map_or_else(std::env::temp_dir, PathBuf::from);
-            #[cfg(target_os = "macos")]
-            let dir = home.join("Library/Application Support/app.dive.browser");
-            #[cfg(target_os = "linux")]
-            let dir = home.join(".local/share/dive");
-            #[cfg(target_os = "windows")]
-            let dir = std::env::var_os("APPDATA")
-                .map(PathBuf::from)
-                .unwrap_or(home)
-                .join("dive");
-            dir
-        },
-        PathBuf::from,
-    );
+    if crate::private_session::is_private() {
+        return crate::private_session::data_root();
+    }
+    let base = std::env::var_os("DIVE_DATA_DIR").map_or_else(default_data_root, PathBuf::from);
     let _ = std::fs::create_dir_all(&base);
     base
+}
+
+/// The normal profile location, without private or automation overrides.
+pub(crate) fn default_data_root() -> PathBuf {
+    let home = std::env::var_os("HOME").map_or_else(std::env::temp_dir, PathBuf::from);
+    #[cfg(target_os = "macos")]
+    {
+        home.join("Library/Application Support/app.dive.browser")
+    }
+    #[cfg(target_os = "linux")]
+    {
+        home.join(".local/share/dive")
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .unwrap_or(home)
+            .join("dive")
+    }
 }
 
 /// Open the store, seed defaults, and register state with the app.
 pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
     let root = data_root();
-    let store = Store::open(root.join("dive.db"))?;
+    let store = if crate::private_session::is_private() {
+        Store::in_memory()?
+    } else {
+        Store::open(root.join("dive.db"))?
+    };
     let active = seed_defaults(&store)?;
+    if crate::private_session::is_private() {
+        for mut container in store.containers()? {
+            container.persist_cookies = false;
+            store.upsert_container(&container)?;
+        }
+    }
 
     let state = AppState {
         store: Mutex::new(store),

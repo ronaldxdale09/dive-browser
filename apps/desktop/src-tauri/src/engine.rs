@@ -299,6 +299,7 @@ pub struct TabHost {
     /// always paint above the main webview, so the active view is hidden for
     /// as long as one is up, otherwise the overlay is buried behind the page.
     covered: bool,
+    live_overlays: HashMap<String, Vec<Bounds>>,
     /// Split view: tabs shown side by side, each at its own rectangle. Empty
     /// means the active tab alone fills the content area.
     panes: Vec<PaneBounds>,
@@ -352,6 +353,7 @@ struct Popout {
     /// Label of the chrome webview inside the window.
     chrome: String,
     address_focus: PopoutAddressFocus,
+    covered: bool,
 }
 
 /// Numbers popout windows so a tab torn off, brought back and torn off
@@ -431,6 +433,7 @@ impl TabHost {
             active: None,
             profiles_root,
             covered: false,
+            live_overlays: HashMap::new(),
             panes: Vec::new(),
             popouts: HashMap::new(),
             internal: std::collections::HashSet::new(),
@@ -471,11 +474,15 @@ impl TabHost {
         let title_nonce = activity_nonce.clone();
         #[allow(unused_mut)]
         let mut builder = WebviewBuilder::new(label_for(tab_id), WebviewUrl::External(blank))
-            .data_directory(self.profiles_root.join(&container.cache_dir))
+            .data_directory(if crate::private_session::is_private() {
+                self.profiles_root.join("private-session")
+            } else {
+                self.profiles_root.join(&container.cache_dir)
+            })
             // A container that does not keep cookies is a private session:
             // the engine holds its storage in memory and drops it with the
             // last view.
-            .incognito(!container.persist_cookies)
+            .incognito(crate::private_session::is_private() || !container.persist_cookies)
             .on_document_title_changed(move |_, title| {
                 if title == PLACEHOLDER_TITLE {
                     return;
@@ -728,6 +735,104 @@ impl TabHost {
             .collect()
     }
 
+    /// Overlay scope follows the requesting chrome, never the active main tab.
+    pub fn covered_sessions_for_chrome(&self, chrome: &str) -> Vec<(TabId, CdpSession)> {
+        if chrome == CHROME_LABEL {
+            return self.covered_sessions();
+        }
+        self.popouts
+            .iter()
+            .filter(|(_, popout)| popout.chrome == chrome)
+            .filter_map(|(id, _)| self.cdp(*id).map(|session| (*id, session)))
+            .collect()
+    }
+
+    pub fn set_chrome_covered(&mut self, chrome: &str, covered: bool) -> tauri::Result<()> {
+        if chrome == CHROME_LABEL {
+            return self.set_covered(covered);
+        }
+        let Some((id, popout)) = self
+            .popouts
+            .iter_mut()
+            .find(|(_, popout)| popout.chrome == chrome)
+        else {
+            return Ok(());
+        };
+        popout.covered = covered;
+        if let Some(view) = self.views.get(id) {
+            if covered {
+                view.hide()?;
+            } else {
+                view.show()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Keep web content rendered while native chrome is masked above it.
+    pub fn set_live_overlay(
+        &mut self,
+        chrome: &str,
+        regions: Vec<Bounds>,
+        active: bool,
+    ) -> tauri::Result<()> {
+        if active {
+            self.live_overlays.insert(chrome.to_owned(), regions);
+        } else {
+            self.live_overlays.remove(chrome);
+        }
+        if chrome == CHROME_LABEL {
+            self.covered = active;
+        }
+        self.update_overlay_mask(chrome, active)?;
+        if chrome == CHROME_LABEL {
+            self.apply_visibility()?;
+        }
+        Ok(())
+    }
+
+    fn update_overlay_mask(&self, chrome: &str, active: bool) -> tauri::Result<()> {
+        #[cfg(all(feature = "cef", target_os = "macos"))]
+        {
+            let page_ids = if chrome == CHROME_LABEL {
+                self.on_screen()
+                    .into_iter()
+                    .filter(|id| !self.popouts.contains_key(id))
+                    .collect::<Vec<_>>()
+            } else {
+                self.popouts
+                    .iter()
+                    .filter(|(_, popout)| popout.chrome == chrome)
+                    .map(|(id, _)| *id)
+                    .collect()
+            };
+            let pages = page_ids
+                .iter()
+                .filter(|id| self.views.contains_key(id))
+                .map(|id| {
+                    let b = self.rect_for(*id);
+                    [b.x, b.y, b.width, b.height]
+                })
+                .collect::<Vec<_>>();
+            let overlays = self
+                .live_overlays
+                .get(chrome)
+                .into_iter()
+                .flatten()
+                .map(|b| [b.x, b.y, b.width, b.height])
+                .collect::<Vec<_>>();
+            let holes = crate::overlay_geometry::uncovered(&pages, &overlays);
+            if let Some(view) = self.window.app_handle().get_webview(chrome) {
+                view.with_webview(move |native| {
+                    native.set_chrome_overlay_mask(&holes, active);
+                })?;
+            }
+        }
+        #[cfg(not(all(feature = "cef", target_os = "macos")))]
+        let _ = (chrome, active);
+        Ok(())
+    }
+
     /// Run `f` against the view for `id`.
     pub fn with_view<T>(
         &self,
@@ -764,9 +869,11 @@ impl TabHost {
             if self.popouts.contains_key(tab) {
                 continue;
             }
-            if showing.contains(tab) && !self.covered {
+            if showing.contains(tab)
+                && (!self.covered || self.live_overlays.contains_key(CHROME_LABEL))
+            {
                 view.show()?;
-                if Some(*tab) == self.active {
+                if Some(*tab) == self.active && !self.covered {
                     let _ = view.set_focus();
                 }
             } else {
@@ -775,6 +882,9 @@ impl TabHost {
         }
         if self.covered {
             self.focus_chrome();
+        }
+        for chrome in self.live_overlays.keys() {
+            self.update_overlay_mask(chrome, true)?;
         }
         Ok(())
     }
@@ -827,6 +937,9 @@ impl TabHost {
 
     /// Move and resize every view to where the layout says it belongs.
     fn layout(&self) -> tauri::Result<()> {
+        for chrome in self.live_overlays.keys() {
+            self.update_overlay_mask(chrome, true)?;
+        }
         for (tab, view) in &self.views {
             let b = self.rect_for(*tab);
             view.set_bounds(tauri::Rect {
@@ -860,7 +973,13 @@ impl TabHost {
         let seq = POPOUT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let chrome = popout_chrome_label(seq, id);
         let mut builder = tauri::window::WindowBuilder::new(app, popout_label(seq, id))
-            .title(if title.is_empty() { "Dive" } else { title })
+            .title(if crate::private_session::is_private() {
+                "Dive — Private Window"
+            } else if title.is_empty() {
+                "Dive"
+            } else {
+                title
+            })
             .title_bar_style(tauri::TitleBarStyle::Overlay)
             .hidden_title(true)
             .background_color(GROUND)
@@ -892,10 +1011,10 @@ impl TabHost {
         let chrome_popup_app = app.clone();
         let chrome_download_app = app.clone();
         let chrome_view = window.add_child(
-            WebviewBuilder::new(
+            private_chrome(WebviewBuilder::new(
                 chrome.clone(),
                 WebviewUrl::App(format!("index.html?popout={id}").into()),
-            )
+            ))
             .on_navigation(move |url| {
                 crate::ipc_security::allowed_chrome_navigation(url, chrome_dev_url.as_ref())
             })
@@ -927,6 +1046,7 @@ impl TabHost {
                 bounds,
                 chrome,
                 address_focus: PopoutAddressFocus::default(),
+                covered: false,
             },
         );
         self.panes.retain(|p| p.tab != id);
@@ -959,6 +1079,8 @@ impl TabHost {
         let Some(popout) = self.popouts.remove(&id) else {
             return Ok(());
         };
+        self.live_overlays.remove(&popout.chrome);
+        crate::private_session::reveal_main(&self.window)?;
         let _ = popout.window.destroy();
         let _ = self.window.set_focus();
         self.layout()
@@ -974,6 +1096,11 @@ impl TabHost {
                 position: bounds.position().into(),
                 size: bounds.size().into(),
             })?;
+        }
+        if let Some(popout) = self.popouts.get(&id)
+            && self.live_overlays.contains_key(&popout.chrome)
+        {
+            self.update_overlay_mask(&popout.chrome, true)?;
         }
         Ok(())
     }
@@ -1031,6 +1158,7 @@ impl TabHost {
             .into_iter()
             .find(|view| view.label() == CHROME_LABEL)
             .ok_or(tauri::Error::WebviewNotFound)?;
+        crate::private_session::reveal_main(&self.window)?;
         self.window.set_focus()?;
         chrome.set_focus()
     }
@@ -1083,9 +1211,13 @@ impl TabHost {
     /// Keep a popout's title in step with its page.
     pub fn retitle_popout(&self, id: TabId, title: &str) {
         if let Some(p) = self.popouts.get(&id) {
-            let _ = p
-                .window
-                .set_title(if title.is_empty() { "Dive" } else { title });
+            let _ = p.window.set_title(if crate::private_session::is_private() {
+                "Dive — Private Window"
+            } else if title.is_empty() {
+                "Dive"
+            } else {
+                title
+            });
         }
     }
 
@@ -1138,6 +1270,7 @@ impl TabHost {
         }
         self.views.remove(&id);
         if let Some(popout) = self.popouts.remove(&id) {
+            self.live_overlays.remove(&popout.chrome);
             let _ = popout.window.destroy();
         }
         self.internal.remove(&id);
@@ -1298,6 +1431,7 @@ pub fn update_tab(app: &AppHandle<Runtime>, id: TabId, f: impl FnOnce(&mut Tab))
         return;
     }
     if tab.url.starts_with("http")
+        && !crate::private_session::is_private()
         && let Err(e) = store.record_visit(&tab.url, &tab.title, dive_core::Timestamp::now())
     {
         tracing::debug!("history write failed: {e}");
@@ -1425,7 +1559,9 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
     };
     let (width, height) = remembered.map_or((1280.0, 820.0), |b| (b.width, b.height));
     let mut builder = tauri::window::WindowBuilder::new(app, MAIN_WINDOW)
-        .title(if cfg!(debug_assertions) {
+        .title(if crate::private_session::is_private() {
+            "Dive — Private Window"
+        } else if cfg!(debug_assertions) {
             "Dive Dev"
         } else {
             "Dive"
@@ -1459,14 +1595,17 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
     let chrome_popup_app = app.handle().clone();
     let chrome_download_app = app.handle().clone();
     let chrome = window.add_child(
-        WebviewBuilder::new(CHROME_LABEL, WebviewUrl::App("index.html".into()))
-            .on_navigation(move |url| {
-                crate::ipc_security::allowed_chrome_navigation(url, chrome_dev_url.as_ref())
-            })
-            .on_new_window(move |url, _| open_chrome_link(&chrome_popup_app, None, url))
-            .on_download(move |_, event| handle_download(&chrome_download_app, event, None))
-            .background_color(GROUND)
-            .auto_resize(),
+        private_chrome(WebviewBuilder::new(
+            CHROME_LABEL,
+            WebviewUrl::App("index.html".into()),
+        ))
+        .on_navigation(move |url| {
+            crate::ipc_security::allowed_chrome_navigation(url, chrome_dev_url.as_ref())
+        })
+        .on_new_window(move |url, _| open_chrome_link(&chrome_popup_app, None, url))
+        .on_download(move |_, event| handle_download(&chrome_download_app, event, None))
+        .background_color(GROUND)
+        .auto_resize(),
         LogicalPosition::new(0.0, 0.0),
         LogicalSize::new(width, height),
     )?;
@@ -1550,6 +1689,23 @@ fn forward_events(app: AppHandle<Runtime>, mut rx: tokio::sync::broadcast::Recei
             }
         }
     });
+}
+
+/// Trusted chrome joins the same off-the-record context to keep the private
+/// session alive even when every page tab is closed. Scheme/IPC routing still
+/// uses the exact browser identity; pages never become trusted chrome.
+fn private_chrome(builder: WebviewBuilder<Runtime>) -> WebviewBuilder<Runtime> {
+    #[cfg(all(feature = "cef", target_os = "macos"))]
+    let builder = builder.initialization_script(
+        "Object.defineProperty(window, '__DIVE_LIVE_OVERLAYS__', {value:true});",
+    );
+    if crate::private_session::is_private() {
+        builder.incognito(true)
+            .data_directory(crate::state::profiles_root().join("private-session"))
+            .initialization_script("Object.defineProperty(window, '__DIVE_PRIVATE__', {value:true, writable:false, configurable:false});")
+    } else {
+        builder
+    }
 }
 
 #[cfg(test)]

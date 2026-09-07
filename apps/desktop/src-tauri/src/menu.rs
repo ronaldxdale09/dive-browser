@@ -55,10 +55,46 @@ fn item(app: &App<Runtime>, id: &str, text: &str, accel: &str) -> tauri::Result<
         .build(app)
 }
 
+fn open_window_from_menu(app: tauri::AppHandle<Runtime>, private: bool) {
+    tauri::async_runtime::spawn(async move {
+        let result = if private {
+            crate::commands::window_private(app).await
+        } else {
+            tauri::async_runtime::spawn_blocking(move || crate::commands::window_open(app))
+                .await
+                .map_err(crate::AppError::new)
+                .and_then(std::convert::identity)
+        };
+        if let Err(error) = result {
+            rfd::AsyncMessageDialog::new()
+                .set_title(if private {
+                    "Private Window"
+                } else {
+                    "New Window"
+                })
+                .set_description(error.to_string())
+                .set_buttons(rfd::MessageButtons::Ok)
+                .show()
+                .await;
+        }
+    });
+}
+
 /// The File menu: the tab and chrome commands people reach for first.
 fn file_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
-    SubmenuBuilder::new(app, "File")
-        .item(&item(app, "window.new", "New Window", "CmdOrCtrl+N")?)
+    let mut file = SubmenuBuilder::new(app, "File");
+    if crate::private_session::is_private() {
+        file = file
+            .item(&MenuItemBuilder::with_id("private.exit", "Exit Private Mode").build(app)?)
+            .separator();
+    }
+    file.item(&item(app, "window.new", "New Window", "CmdOrCtrl+N")?)
+        .item(&item(
+            app,
+            "window.private",
+            "New Private Window",
+            "CmdOrCtrl+Shift+N",
+        )?)
         .item(&item(app, "tab.new", "New Tab", "CmdOrCtrl+T")?)
         .item(&item(app, "tab.close", "Close Tab", "CmdOrCtrl+W")?)
         .separator()
@@ -112,7 +148,7 @@ fn workspaces_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
             app,
             "workspace.new",
             "New Workspace…",
-            "CmdOrCtrl+Shift+N",
+            "CmdOrCtrl+Alt+Shift+N",
         )?)
         .item(&item(
             app,
@@ -258,6 +294,14 @@ pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
     app.on_menu_event(|app, event| {
         let id = event.id().0.clone();
         native_input_receipt("menu-received", &id);
+        if matches!(id.as_str(), "window.private" | "window.new") {
+            open_window_from_menu(app.clone(), id == "window.private");
+            return;
+        }
+        if id == "private.exit" {
+            let _ = crate::commands::window_exit_private(app.clone());
+            return;
+        }
         // A tab in its own window has its own chrome; while that window is
         // focused the shortcut is about it, not the main window's page.
         let target = {

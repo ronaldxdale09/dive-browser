@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "./ipc";
-import { contentCoverDepth, resetContentCover, useContentPreview, useCoversContent } from "./overlay";
+import { contentCoverDepth, resetContentCover, useContentPreview, useCoversContent, visibleOverlayRegions } from "./overlay";
 
 function Overlay({ active = true }: { active?: boolean }) {
   useCoversContent(active);
@@ -16,6 +16,7 @@ function Preview() {
 afterEach(() => {
   cleanup();
   resetContentCover();
+  Reflect.deleteProperty(window, "__DIVE_LIVE_OVERLAYS__");
   vi.restoreAllMocks();
 });
 
@@ -121,5 +122,45 @@ describe("useCoversContent", () => {
     view.unmount();
 
     expect(covered).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("live native overlays", () => {
+  it("keeps the renderer visible and sends live geometry without taking a screenshot", async () => {
+    Object.defineProperty(window, "__DIVE_LIVE_OVERLAYS__", {value:true, configurable:true});
+    const geometry = vi.spyOn(ipc, "setOverlayRegions").mockResolvedValue(null);
+    const capture = vi.spyOn(ipc, "prepareContentCover");
+    const hide = vi.spyOn(ipc, "setContentCovered");
+    const view = render(<Overlay />);
+    await waitFor(() => expect(geometry).toHaveBeenCalledWith([], true));
+    expect(capture).not.toHaveBeenCalled();
+    expect(hide).not.toHaveBeenCalled();
+    view.unmount();
+    await waitFor(() => expect(geometry).toHaveBeenLastCalledWith([], false));
+    Reflect.deleteProperty(window, "__DIVE_LIVE_OVERLAYS__");
+  });
+  it("keeps nested overlays raised and serializes rapid close/reopen", async () => {
+    Object.defineProperty(window, "__DIVE_LIVE_OVERLAYS__", {value:true, configurable:true});
+    let finish!: (value: null) => void;
+    const geometry = vi.spyOn(ipc, "setOverlayRegions").mockImplementationOnce(() => new Promise<null>((resolve) => { finish = resolve; })).mockResolvedValue(null);
+    const first = render(<Overlay />);
+    await waitFor(() => expect(geometry).toHaveBeenCalledTimes(1));
+    const nested = render(<Overlay />);
+    first.unmount();
+    expect(contentCoverDepth()).toBe(1);
+    nested.unmount();
+    const reopened = render(<Overlay />);
+    await act(async () => finish(null));
+    await waitFor(() => expect(geometry.mock.calls).toEqual([[[], true], [[], true]]));
+    reopened.unmount();
+    await waitFor(() => expect(geometry).toHaveBeenLastCalledWith([], false));
+    expect(contentCoverDepth()).toBe(0);
+  });
+  it("uses the dialog surface once, not its nested menus or full-window scrim", () => {
+    const {container} = render(<div><div role="dialog"><div role="menu" /></div></div>);
+    const dialog = container.querySelector('[role="dialog"]')!;
+    vi.spyOn(dialog, "getBoundingClientRect").mockReturnValue({x:100,y:90,width:340,height:500} as DOMRect);
+    expect(visibleOverlayRegions()).toEqual([{x:100,y:90,width:340,height:500}]);
   });
 });

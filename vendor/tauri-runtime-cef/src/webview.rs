@@ -31,6 +31,11 @@ use crate::window::AppWindow;
 pub use crate::reserved_shortcut_native::NativeNewTabTarget;
 pub use browser_client::permission::{NativePermissionRequest, PermissionContext};
 
+// Weak ownership: the context is released with the last live webview, before
+// CEF shutdown. A data directory is only a grouping key for incognito views;
+// it is never passed to CEF as their cache path.
+static INCOGNITO_CONTEXTS: std::sync::LazyLock<Mutex<HashMap<std::path::PathBuf, Vec<std::sync::Weak<RequestContext>>>>> = std::sync::LazyLock::new(Default::default);
+
 /// A handle to the native CEF browser backing a Tauri webview.
 ///
 /// This is the runtime-specific webview object exposed through
@@ -335,6 +340,7 @@ pub(crate) struct AppWebview {
   pub(crate) label: String,
   pub(crate) browser: cef::Browser,
   pub(crate) browser_id: i32,
+  incognito_context: Option<Arc<RequestContext>>,
   pub(crate) host: cef::BrowserHost,
   #[cfg(target_os = "macos")]
   accessibility_enabled: Arc<Mutex<Option<bool>>>,
@@ -720,6 +726,7 @@ impl<T: UserEvent> WinitCefApp<T> {
             label,
             browser,
             browser_id,
+            incognito_context: None,
             host,
             #[cfg(target_os = "macos")]
             accessibility_enabled,
@@ -734,6 +741,12 @@ impl<T: UserEvent> WinitCefApp<T> {
           .expect("failed to send initialized CEF browser");
       }
     });
+    let incognito_key = pending.webview_attributes.incognito.then(|| pending.webview_attributes.data_directory.clone()).flatten();
+    let shared = incognito_key.as_ref().and_then(|key| {
+      let mut contexts = INCOGNITO_CONTEXTS.lock().unwrap();
+      contexts.retain(|_, contexts| { contexts.retain(|context| context.strong_count() > 0); !contexts.is_empty() });
+      contexts.get(key).and_then(|contexts| contexts.iter().find_map(std::sync::Weak::upgrade)).map(|context| (*context).clone())
+    });
     let request_context = request_context::request_context_from_webview_attributes(
       &context.cache_path,
       &pending.webview_attributes,
@@ -741,6 +754,7 @@ impl<T: UserEvent> WinitCefApp<T> {
       &custom_protocol_scheme,
       scheme_registry.clone(),
       on_initialized,
+      shared,
     );
     if request_context.is_none() {
       init_done.store(true, Ordering::SeqCst);
@@ -750,7 +764,13 @@ impl<T: UserEvent> WinitCefApp<T> {
     // `None` here means browser creation failed (or the request context never
     // initialized); the continuation logs the reason. Soft-fail instead of
     // taking down the whole process.
-    browser_rx.recv().ok()
+    let mut webview = browser_rx.recv().ok()?;
+    if let (Some(key), Some(context)) = (incognito_key, request_context) {
+      let owned = Arc::new(context);
+      INCOGNITO_CONTEXTS.lock().unwrap().entry(key).or_default().push(Arc::downgrade(&owned));
+      webview.incognito_context = Some(owned);
+    }
+    Some(webview)
   }
 
   pub(crate) fn handle_webview_message(

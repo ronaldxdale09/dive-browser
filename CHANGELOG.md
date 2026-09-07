@@ -8,6 +8,11 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- Private windows (⇧⌘N, File menu, browser menu and palette): a separate
+  off-the-record process with an in-memory database and no logging, MCP,
+  extensions, agent credentials or update checks; muted violet chrome with a
+  Private badge, Exit private mode, and a normal-profile lock so window
+  requests land in the right process. New workspace moves to ⌃⌥⇧N.
 - First-run onboarding: a five-second Remotion intro, a Start Dive screen,
   then profile, workspace and a look at the features with DivePrivacy and
   default-browser choices; a new `onboarded` preference records it, and

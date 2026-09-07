@@ -408,6 +408,9 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_info,
             window_command,
             window_open,
+            window_private,
+            window_exit_private,
+            window_close,
             popout_ready,
             workspace_activate,
             profiles_list,
@@ -512,6 +515,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             layout_set_content_bounds,
             layout_prepare_content_cover,
             layout_set_content_covered,
+            layout_set_overlay_regions,
             layout_set_panes,
             tab_detach,
             tab_attach,
@@ -685,7 +689,23 @@ pub(crate) fn tab_info(state: State<'_, AppState>, id: TabId) -> AppResult<Tab> 
 /// Create a blank detached window using the authoritative current workspace.
 #[tauri::command]
 #[specta::specta]
+pub(crate) async fn window_private(app: AppHandle<Runtime>) -> AppResult<()> {
+    tauri::async_runtime::spawn_blocking(move || crate::private_session::open(&app))
+        .await
+        .map_err(AppError::new)?
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) fn window_open(app: AppHandle<Runtime>) -> AppResult<()> {
+    if crate::private_session::is_private() {
+        return crate::normal_window::open();
+    }
+    window_open_local(app)
+}
+
+/// Create a window in this process, retaining its current privacy boundary.
+pub(crate) fn window_open_local(app: AppHandle<Runtime>) -> AppResult<()> {
     on_main(&app, move |main, app, state| {
         let workspace =
             (*lock(&state.active_workspace)).ok_or_else(|| AppError::new("no active workspace"))?;
@@ -697,6 +717,24 @@ pub(crate) fn window_open(app: AppHandle<Runtime>) -> AppResult<()> {
             .request_popout_address_focus(tab.id)?;
         Ok(())
     })
+}
+
+/// End the whole off-the-record session, including any hidden host window.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn window_exit_private(app: AppHandle<Runtime>) -> AppResult<()> {
+    if !crate::private_session::is_private() {
+        return Err(AppError::new("This is not a private session"));
+    }
+    app.exit(0);
+    Ok(())
+}
+
+/// Close the requesting chrome's own window, including an empty private home.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn window_close(webview: tauri::Webview<Runtime>) -> AppResult<()> {
+    webview.window().close().map_err(AppError::new)
 }
 
 /// Only the current registered popout chrome can acknowledge its readiness.
@@ -719,6 +757,9 @@ pub(crate) fn popout_ready(
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn window_command(app: AppHandle<Runtime>, command: String) -> AppResult<()> {
+    if command == "window.new" {
+        return window_open(app);
+    }
     if !crate::menu::main_window_command(&command) {
         return Err(AppError::new("unsupported window command"));
     }
@@ -1235,8 +1276,29 @@ pub fn open_tab(
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn tab_close(app: AppHandle<Runtime>, id: TabId) -> AppResult<()> {
+    use tauri::Manager as _;
     on_main(&app, move |main, app, state| {
-        close_tab(main, app, state, id)
+        let was_detached = lock(&state.host)
+            .as_ref()
+            .is_some_and(|host| host.is_detached(id));
+        close_tab(main, app, state, id)?;
+        if crate::private_session::is_private() && !was_detached {
+            let detached = lock(&state.host)
+                .as_ref()
+                .map_or_else(Vec::new, crate::engine::TabHost::detached);
+            let has_attached = {
+                let store = lock(&state.store);
+                store.workspaces()?.iter().any(|workspace| {
+                    store
+                        .tabs_for_workspace(workspace.id)
+                        .is_ok_and(|tabs| tabs.iter().any(|tab| !detached.contains(&tab.id)))
+                })
+            };
+            if !has_attached && let Some(window) = app.get_window(crate::MAIN_WINDOW) {
+                window.close()?;
+            }
+        }
+        Ok(())
     })
 }
 
@@ -2530,14 +2592,15 @@ pub(crate) fn layout_set_content_bounds(app: AppHandle<Runtime>, bounds: Bounds)
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn layout_prepare_content_cover(
+    webview: tauri::Webview<Runtime>,
     state: State<'_, AppState>,
 ) -> AppResult<Vec<ContentPreview>> {
     use base64::Engine as _;
     use futures_util::future::join_all;
 
-    let sessions = lock(&state.host)
-        .as_ref()
-        .map_or_else(Vec::new, crate::engine::TabHost::covered_sessions);
+    let sessions = lock(&state.host).as_ref().map_or_else(Vec::new, |host| {
+        host.covered_sessions_for_chrome(webview.label())
+    });
     let captures = join_all(sessions.into_iter().map(|(tab_id, session)| async move {
         let result = dive_cdp::page::capture_screenshot(
             &session,
@@ -2574,10 +2637,40 @@ pub(crate) async fn layout_prepare_content_cover(
 #[specta::specta]
 /// Hide the native content view while a DOM overlay (dialog, menu, popover)
 /// is on screen, since child webviews always paint above the main webview.
-pub(crate) fn layout_set_content_covered(app: AppHandle<Runtime>, covered: bool) -> AppResult<()> {
+pub(crate) fn layout_set_content_covered(
+    app: AppHandle<Runtime>,
+    webview: tauri::Webview<Runtime>,
+    covered: bool,
+) -> AppResult<()> {
     on_main(&app, move |_, _, state| {
         if let Some(host) = lock(&state.host).as_mut() {
-            host.set_covered(covered)?;
+            host.set_chrome_covered(webview.label(), covered)?;
+        }
+        Ok(())
+    })
+}
+
+/// Regions belong to trusted chrome and use CSS logical pixels.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn layout_set_overlay_regions(
+    app: AppHandle<Runtime>,
+    webview: tauri::Webview<Runtime>,
+    regions: Vec<Bounds>,
+    active: bool,
+) -> AppResult<()> {
+    if regions.len() > 64
+        || regions.iter().any(|b| {
+            [b.x, b.y, b.width, b.height].iter().any(|n| !n.is_finite())
+                || b.width < 0.0
+                || b.height < 0.0
+        })
+    {
+        return Err(AppError::new("invalid overlay geometry"));
+    }
+    on_main(&app, move |_, _, state| {
+        if let Some(host) = lock(&state.host).as_mut() {
+            host.set_live_overlay(webview.label(), regions, active)?;
         }
         Ok(())
     })

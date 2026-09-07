@@ -142,7 +142,7 @@ function PaneAndDivider({ tab, active, last, onActivate, onClose, onResize, regi
 /**
  * Where a dragged tab can land on the page: the left or right half of each
  * pane (or of the single page), each standing for the slot on that side.
- * Drawn only while a tab is dragged, over the hidden page.
+ * Drawn only while a tab is dragged, above its native page.
  */
 export function DropZones({ dragging, split, activeTab }: { dragging: string; split: Split | null; activeTab: string | null }) {
   const panes = split?.tabs ?? (activeTab ? [activeTab] : []);
@@ -153,7 +153,7 @@ export function DropZones({ dragging, split, activeTab }: { dragging: string; sp
   if (!split && dragging === activeTab) return null;
   if (!inSplit && panes.length >= MAX_PANES) return null;
   return (
-    <div aria-hidden className="pointer-events-auto absolute inset-0 z-10 grid p-1" style={{ gridTemplateColumns: columns(sizes) }}>
+    <div data-native-overlay aria-hidden className="pointer-events-auto absolute inset-0 z-10 grid bg-ground p-1" style={{ gridTemplateColumns: columns(sizes) }}>
       {panes.map((tab, i) => (
         <div key={tab} className="grid grid-cols-2" style={{ gridColumn: i === 0 ? 1 : 2 * i + 1 }}>
           <Zone index={i} keyName={`${tab}:l`} side="left" />

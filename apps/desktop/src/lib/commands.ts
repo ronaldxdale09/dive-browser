@@ -1,3 +1,4 @@
+import { isPrivateWindow } from "./privateMode";
 import { ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
 import { useRecording } from "../store/recording";
@@ -21,9 +22,11 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "tabs.search": () => useBrowser.getState().toggle("palette", true),
   "tab.new": () => useBrowser.getState().toggle("palette", true),
   "window.new": () => openWindow(),
+  "private.exit": () => ipc.windowExitPrivate().then(() => undefined).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) })),
+  "window.private": () => ipc.windowPrivate().then(() => undefined).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) })),
   "tab.close": () => {
     const { activeTab, closeTab } = useBrowser.getState();
-    return activeTab ? closeTab(activeTab) : undefined;
+    return activeTab ? closeTab(activeTab) : (isPrivateWindow() ? ipc.windowClose().then(() => undefined) : undefined);
   },
   "tab.pin": () => {
     const { tabs, activeTab, setPinned } = useBrowser.getState();
@@ -126,6 +129,10 @@ function stepTab(delta: number) {
 
 export function runCommand(id: string, source: "keyboard" | "native-menu" | "command" = "command"): void {
   traceInputCommand(id, source);
+  if (isPrivateWindow() && ["sidecar.toggle", "extensions.open", "workspace.new", "bookmark.toggle"].includes(id)) {
+    useBrowser.getState().notify("Use a normal window for this action.");
+    return;
+  }
   const handler = UI_COMMANDS[id];
   if (handler) {
     void handler();
@@ -144,7 +151,7 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+t": "tab.new",
   "mod+w": "tab.close",
   "mod+shift+p": "tab.pin",
-  // ⌘⇧N is the native menu's "New workspace"; the tab takes the ⌥ variant.
+  // ⇧⌘N opens a private window; detaching a tab keeps the ⌥ variant.
   "mod+alt+n": "tab.detach",
   "mod+r": "tab.reload",
   "mod+shift+h": "tab.home",
@@ -177,7 +184,8 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+shift+]": "tab.next",
   "ctrl+tab": "tab.next",
   "ctrl+shift+tab": "tab.prev",
-  "mod+shift+n": "workspace.new",
+  "mod+shift+n": "window.private",
+  "mod+alt+shift+n": "workspace.new",
   "mod+shift+e": "workspace.edit",
   ...Object.fromEntries(WORKSPACE_SLOTS.map((n) => [`mod+${n}`, `workspace.jump.${n}`])),
 };
@@ -191,6 +199,8 @@ export const COMMAND_TITLES: Record<string, string> = {
   "palette.open": "Command palette",
   "tabs.search": "Search tabs",
   "window.new": "New window",
+  "window.private": "New private window",
+  "private.exit": "Exit private mode",
   "tab.new": "New tab",
   "tab.close": "Close tab",
   "tab.pin": "Pin or unpin tab",
@@ -248,7 +258,7 @@ export function chromeCommands(known: Command[] = []): Command[] {
   const seen = new Set(known.map((c) => c.id));
   const chords = chordsByCommand();
   return Object.keys(UI_COMMANDS)
-    .filter((id) => !seen.has(id) && id in COMMAND_TITLES && !id.startsWith("workspace.jump."))
+    .filter((id) => !seen.has(id) && id in COMMAND_TITLES && !id.startsWith("workspace.jump.") && (id !== "private.exit" || isPrivateWindow()))
     .map((id) => ({ id, title: COMMAND_TITLES[id]!, keybinding: chords[id] ?? null, scope: "global" as const }));
 }
 

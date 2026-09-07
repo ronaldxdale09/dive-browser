@@ -40,7 +40,9 @@ mod navigation;
 mod network;
 #[cfg(feature = "cef")]
 mod network_probe;
+mod normal_window;
 mod openapi;
+mod overlay_geometry;
 mod pagescript;
 #[cfg(feature = "cef")]
 mod permission_probe;
@@ -48,6 +50,9 @@ mod permissions;
 mod prefs;
 /// Dive-owned network privacy matching.
 pub mod privacy;
+#[cfg(feature = "cef")]
+mod private_probe;
+mod private_session;
 mod recorder;
 mod replay;
 mod report;
@@ -150,6 +155,34 @@ fn drain_export_exit(app: tauri::AppHandle<Runtime>, registry: screen::jobs::Reg
 /// entry point.
 #[cfg_attr(feature = "cef", tauri::cef_entry_point)]
 pub fn run() {
+    // Claim the normal profile before logging, SQLite, or CEF touches it.
+    let normal_broker = if private_session::is_private() {
+        None
+    } else {
+        let root = state::data_root();
+        match normal_window::claim(&root) {
+            Ok(Some(broker)) => Some(broker),
+            Ok(None) => {
+                let urls = startup_urls(
+                    std::env::args().skip(1),
+                    &std::env::var("DIVE_OPEN_URL").unwrap_or_default(),
+                );
+                let id = dive_core::TabId::new().to_string();
+                if let Err(error) = normal_window::request(&root, &id, &urls) {
+                    eprintln!(
+                        "Dive is already running but did not accept this window request: {error}"
+                    );
+                }
+                return;
+            }
+            Err(error) => {
+                eprintln!("Could not claim the normal Dive profile: {error}");
+                return;
+            }
+        }
+    };
+    let normal_broker = std::sync::Arc::new(normal_broker);
+    let setup_broker = normal_broker.clone();
     startup::record_launch();
 
     let log_guard = init_logging();
@@ -208,6 +241,10 @@ pub fn run() {
                     .reject("application commands are only available to Dive chrome");
                 return true;
             }
+            if private_session::is_private() && !private_session::allows_command(invoke.message.command()) {
+                invoke.resolver.reject("This action is available in a normal window. Private Mode keeps this session separate.");
+                return true;
+            }
             if invoke.message.command() == "report_startup_milestone" {
                 handle_startup_invoke(invoke)
             } else {
@@ -219,6 +256,11 @@ pub fn run() {
             // any browser window does. The tab tears the window down itself,
             // so the request is cancelled here.
             use tauri::Manager;
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                && private_session::close_main(window) {
+                api.prevent_close();
+                return;
+            }
             if window.label() == MAIN_WINDOW {
                 match event {
                     tauri::WindowEvent::CloseRequested { .. }
@@ -283,16 +325,25 @@ pub fn run() {
         })
         .setup(move |app| {
             specta.mount_events(app);
+            #[cfg(feature = "cef")]
+            if private_session::is_private() && cef::crash_reporting_enabled() != 0 {
+                return Err("Private Mode requires native crash reporting to be disabled".into());
+            }
             state::init(app)?;
             capture_scope::install(app)?;
             startup::record_milestone("state_init");
             engine::create_main_window(app)?;
             startup::record_milestone("window_created");
             menu::install(app)?;
-            restore_session(app);
-            open_startup_urls(app);
+            if std::env::var_os("DIVE_NORMAL_FRESH_WINDOW").is_none() {
+                restore_session(app);
+                open_startup_urls(app);
+            }
+            if let Some(broker) = setup_broker.as_ref() { broker.start(app.handle().clone())?; }
             open_startup_panels(app.handle().clone());
-            mcp::start(app.handle().clone());
+            if !private_session::is_private() { mcp::start(app.handle().clone()); }
+            private_session::start_window_channel(app.handle().clone());
+            private_session::ready();
             housekeeping::start(app.handle().clone());
             devservers::start(app.handle().clone());
             smoke_test(app.handle().clone());
@@ -301,6 +352,8 @@ pub fn run() {
             startup::record_milestone("setup_complete");
             startup::on_setup_completed(app.handle().clone());
             lifecycle_probe::start(app.handle().clone());
+            #[cfg(feature = "cef")]
+            private_probe::start(app.handle().clone());
             #[cfg(feature = "cef")]
             ui_probe::start(app.handle().clone());
             Ok(())
@@ -347,7 +400,10 @@ pub fn run() {
             label,
             event: tauri::WindowEvent::Destroyed,
             ..
-        } => tracing::info!(%label, "window destroyed"),
+        } => {
+            tracing::info!(%label, "window destroyed");
+            private_session::window_destroyed(app);
+        }
         tauri::RunEvent::WindowEvent {
             label,
             event: tauri::WindowEvent::CloseRequested { .. },
@@ -358,6 +414,7 @@ pub fn run() {
     // Flush the asynchronous file logger after CEF and the app have drained,
     // then preserve the exit status for launchers and runtime probes.
     drop(log_guard);
+    private_session::cleanup();
     if exit_code != 0 {
         std::process::exit(exit_code);
     }
@@ -366,7 +423,10 @@ pub fn run() {
 fn startup_urls(mut args: impl Iterator<Item = String>, from_env: &str) -> Vec<String> {
     let mut urls = Vec::new();
     while let Some(arg) = args.next() {
-        if arg == "-ApplePersistenceIgnoreState" {
+        if matches!(
+            arg.as_str(),
+            "-ApplePersistenceIgnoreState" | "-ApplePersistence"
+        ) {
             // AppKit's per-launch preference consumes its own value. Neither
             // token is a destination handed to the browser.
             let _ = args.next();
@@ -434,6 +494,9 @@ fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
     use tracing_subscriber::Layer as _;
     use tracing_subscriber::layer::SubscriberExt as _;
     use tracing_subscriber::util::SubscriberInitExt as _;
+    if private_session::is_private() {
+        return None;
+    }
     let filter = || {
         tracing_subscriber::EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| "info,dive=debug".into())
@@ -469,6 +532,9 @@ fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
 /// Write every panic in the browser process to `crashes/` in the data
 /// directory with the build version, then carry on to the default hook.
 fn install_panic_hook() {
+    if private_session::is_private() {
+        return;
+    }
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let dir = state::data_root().join("crashes");
@@ -816,6 +882,8 @@ mod tests {
         let args = [
             "-ApplePersistenceIgnoreState",
             "YES",
+            "-ApplePersistence",
+            "NO",
             "https://first.test/",
             "-psn_0_42",
             "--disable-gpu",
