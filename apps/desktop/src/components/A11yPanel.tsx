@@ -5,6 +5,7 @@ import type { A11yReport } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { errorMessage } from "../lib/errors";
+import { InternalPageNote, isInternalPage } from "./InternalPageNote";
 
 const IMPACT: Record<string, string> = {
   critical: "text-danger",
@@ -16,6 +17,7 @@ const IMPACT: Record<string, string> = {
 /** Runs axe-core in the page on demand and lists violations. */
 export function A11yPanel() {
   const activeTab = useBrowser((s) => s.activeTab);
+  const url = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.url);
   const [report, setReport] = useState<A11yReport | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +36,7 @@ export function A11yPanel() {
     }
   };
 
+  if (isInternalPage(url)) return <InternalPageNote what="accessibility audits" />;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-3 px-2 pb-1 text-[11px] text-ink-3">

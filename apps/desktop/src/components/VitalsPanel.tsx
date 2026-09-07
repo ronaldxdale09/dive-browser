@@ -4,6 +4,7 @@ import { useTabData } from "../lib/useTabData";
 import type { Vitals } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
+import { InternalPageNote, isInternalPage } from "./InternalPageNote";
 
 type Rating = "good" | "needs-improvement" | "poor" | "unknown";
 
@@ -43,14 +44,16 @@ export function VitalsPanel() {
   // Load-event timings only exist once the page has finished loading, so
   // read again when the spinner stops instead of leaving them blank.
   const loading = useBrowser((s) => Boolean(s.activeTab && s.loading[s.activeTab]));
-  const { data, error, refresh } = useTabData(activeTab, url, ipc.tabVitals, 600, loading);
+  const internal = isInternalPage(url);
+  const { data, error, refresh } = useTabData(internal ? null : activeTab, url, ipc.tabVitals, 600, loading);
 
+  if (internal) return <InternalPageNote what="Web Vitals" />;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-2 px-2 pb-1 text-[11px] text-ink-3">
         <span>{loading ? "Measuring while the page loads…" : data?.lcp_element ? `LCP element: ${data.lcp_element}` : "Reload the page to measure a fresh navigation."}</span>
         <span className="flex-1" />
-        <IconButton icon={RefreshCw} label="Re-read vitals" size={12} disabled={!activeTab} onClick={refresh} />
+        <IconButton icon={RefreshCw} label="Re-read vitals" size={12} disabled={!activeTab} onClick={refresh} tooltipAlign="end" />
       </div>
       {error && <div className="px-3 py-2 text-xs text-danger">{error}</div>}
       <div className="grid grid-cols-4 gap-2 overflow-auto px-3 py-2">

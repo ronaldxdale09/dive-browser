@@ -1,0 +1,31 @@
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ipc } from "../lib/ipc";
+import { useBrowser } from "../store/browser";
+import { isInternalPage } from "./InternalPageNote";
+import { MetaPanel } from "./MetaPanel";
+import { VitalsPanel } from "./VitalsPanel";
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+describe("dock panels on Dive's own pages", () => {
+  it("knows an internal page", () => {
+    expect(isInternalPage("dive://screen")).toBe(true);
+    expect(isInternalPage("https://example.com/")).toBe(false);
+    expect(isInternalPage(undefined)).toBe(false);
+  });
+
+  it("say so instead of asking the page for metrics or metadata", () => {
+    const vitals = vi.spyOn(ipc, "tabVitals");
+    const meta = vi.spyOn(ipc, "tabMeta");
+    const tab = { id: "t1", workspace_id: "w", url: "dive://screen", title: "DiveScreen", favicon: null, pinned: false, created_at: "", last_active_at: "", closed_at: null, position: 0 } as never;
+    useBrowser.setState({ tabs: [tab], activeTab: "t1" });
+    render(<><VitalsPanel /><MetaPanel /></>);
+    expect(screen.getAllByText(/one of Dive’s own pages/).length).toBe(2);
+    expect(vitals).not.toHaveBeenCalled();
+    expect(meta).not.toHaveBeenCalled();
+  });
+});

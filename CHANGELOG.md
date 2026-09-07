@@ -42,6 +42,12 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Recordings are named like every other capture, "example.com recording
+  2026-09-08 04.03.23.mp4", instead of a "dive-…Z" timestamp.
+- A tooltip parked past the window's edge could let the whole chrome slide
+  sideways; the chrome no longer scrolls. On Dive's own pages (DiveScreen,
+  the welcome screen) the Vitals, Meta and A11y panels say there is no
+  website to measure instead of showing a red error over stale numbers.
 - Downloading a subtitles model selects it when the chosen one is not on
   disk, so Start lights up for the model just fetched; while subtitles run,
   a Captions button in the toolbar says so and reopens the dialog to stop

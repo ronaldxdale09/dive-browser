@@ -792,6 +792,7 @@ async fn smoke_gif(
             session.clone(),
             screencast::RecordOptions::default(),
             None,
+            "about:blank",
         )
         .await?;
     for step in 0..6 {

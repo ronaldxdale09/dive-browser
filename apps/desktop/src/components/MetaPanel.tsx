@@ -3,6 +3,7 @@ import { ipc } from "../lib/ipc";
 import { useTabData } from "../lib/useTabData";
 import { useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
+import { InternalPageNote, isInternalPage } from "./InternalPageNote";
 
 /** An `og:image` as a crawler would fetch it: relative paths resolve against the page. */
 export function resolveImage(image: string | undefined, pageUrl: string): string | undefined {
@@ -19,8 +20,10 @@ export function resolveImage(image: string | undefined, pageUrl: string): string
 export function MetaPanel() {
   const activeTab = useBrowser((s) => s.activeTab);
   const url = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.url ?? "");
-  const { data: meta, error, refresh } = useTabData(activeTab, url, ipc.tabMeta);
+  const internal = isInternalPage(url);
+  const { data: meta, error, refresh } = useTabData(internal ? null : activeTab, url, ipc.tabMeta);
 
+  if (internal) return <InternalPageNote what="head metadata and previews" />;
   if (!activeTab) return <div className="px-3 py-2 text-xs text-ink-3">Open a tab to inspect its metadata.</div>;
   if (error) return <div className="px-3 py-2 text-xs text-danger">{error}</div>;
   if (!meta) return <div className="px-3 py-2 text-xs text-ink-3">Reading…</div>;
@@ -52,7 +55,7 @@ export function MetaPanel() {
         <div className="mb-1 flex items-center">
           <span className="text-[10px] tracking-wider text-ink-3 uppercase">Head</span>
           <span className="flex-1" />
-          <IconButton icon={RefreshCw} label="Re-read metadata" size={12} onClick={refresh} />
+          <IconButton icon={RefreshCw} label="Re-read metadata" size={12} onClick={refresh} tooltipAlign="end" />
         </div>
         <div className="font-mono text-[11.5px] leading-5">
           {rows.map(([k, v]) => (

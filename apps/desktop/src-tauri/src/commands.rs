@@ -1607,9 +1607,14 @@ pub(crate) async fn tab_screencast_start(
     let _pending = state.activity.pending(id);
     let session = cdp_for(&state, id)?;
     let window = window_rect(&app);
+    // Named after the page, like every other capture: "example.com recording …".
+    let page_url = lock(&state.store)
+        .tab(id)
+        .map(|tab| tab.url)
+        .unwrap_or_default();
     state
         .screencast
-        .start(app, id, session, options, window)
+        .start(app, id, session, options, window, &page_url)
         .await
 }
 
@@ -2486,6 +2491,11 @@ pub(crate) fn capture_name(
     ext: &str,
     at: dive_core::Timestamp,
 ) -> String {
+    format!("{}.{ext}", capture_stem(page_url, kind, at))
+}
+
+/// The name without its extension; recordings add theirs once encoded.
+pub(crate) fn capture_stem(page_url: &str, kind: &str, at: dive_core::Timestamp) -> String {
     let host = url::Url::parse(page_url)
         .ok()
         .and_then(|u| {
@@ -2499,8 +2509,8 @@ pub(crate) fn capture_name(
         ))
         .unwrap_or_default();
     match host {
-        Some(host) => format!("{host} {kind} {stamp}.{ext}"),
-        None => format!("{kind} {stamp}.{ext}"),
+        Some(host) => format!("{host} {kind} {stamp}"),
+        None => format!("{kind} {stamp}"),
     }
 }
 

@@ -84,7 +84,9 @@
 
 @layer base {
 
-html, body, #root { height: 100%; margin: 0; }
+/* The chrome is a fixed frame, never a scrolling document: a tooltip
+   parked past the window's edge must not let the whole chrome slide. */
+html, body, #root { height: 100%; margin: 0; overflow: hidden; }
 :root { --dialog-fade: 120ms; }
 body {
   background: var(--color-ground);

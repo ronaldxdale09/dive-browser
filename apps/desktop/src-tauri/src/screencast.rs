@@ -234,6 +234,8 @@ struct Audio {
 struct Recording {
     dir: PathBuf,
     options: RecordOptions,
+    /// File name without extension: "example.com recording 2026-09-08 04.03.23".
+    stem: String,
     frames: Mutex<Vec<Frame>>,
     stopped: AtomicBool,
     paused: AtomicBool,
@@ -258,15 +260,16 @@ impl Recording {
         tab: TabId,
         options: RecordOptions,
         window: Option<WindowRect>,
+        page_url: &str,
     ) -> AppResult<Self> {
-        let stamp = dive_core::Timestamp::now()
-            .to_rfc3339()
-            .replace([':', '.'], "-");
+        let now = dive_core::Timestamp::now();
+        let stamp = now.to_rfc3339().replace([':', '.'], "-");
         let dir = crate::commands::captures_dir()?.join(format!(".recording-{stamp}"));
         std::fs::create_dir_all(&dir)?;
         Ok(Self {
             dir,
             options,
+            stem: crate::commands::capture_stem(page_url, "recording", now),
             frames: Mutex::new(Vec::new()),
             stopped: AtomicBool::new(false),
             paused: AtomicBool::new(false),
@@ -468,6 +471,7 @@ impl Registry {
         session: CdpSession,
         options: RecordOptions,
         window: Option<WindowRect>,
+        page_url: &str,
     ) -> AppResult<()> {
         if (!options.is_gif() || options.is_window()) && ffmpeg_path().is_none() {
             return Err(AppError::new(
@@ -477,7 +481,7 @@ impl Registry {
         if options.is_window() && window.is_none() {
             return Err(AppError::new("the window could not be located on screen"));
         }
-        let rec = Arc::new(Recording::new(app, tab, options, window)?);
+        let rec = Arc::new(Recording::new(app, tab, options, window, page_url)?);
         {
             let mut active = self.active();
             if active.contains_key(&tab) {
@@ -694,8 +698,9 @@ impl Registry {
                 rec.stop_screen_segment();
                 let segments = std::mem::take(&mut lock(&rec.screen).segments);
                 let dir = crate::commands::captures_dir();
-                let result =
-                    dir.and_then(|dir| finish_window(&segments, &rec.options, &dir, duration));
+                let result = dir.and_then(|dir| {
+                    finish_window(&segments, &rec.options, &dir, duration, &rec.stem)
+                });
                 rec.remove_dir();
                 return result;
             }
@@ -708,11 +713,11 @@ impl Registry {
                 let end = duration.max(frames.last().map_or(0.0, |f| f.at) + 0.1);
                 let encoded = if rec.options.is_gif() {
                     match ffmpeg_path() {
-                        Some(_) => encode_gif_ffmpeg(&frames, &dir, end),
-                        None => encode_gif(&frames, &dir, end),
+                        Some(_) => encode_gif_ffmpeg(&frames, &dir, end, &rec.stem),
+                        None => encode_gif(&frames, &dir, end, &rec.stem),
                     }
                 } else {
-                    encode_video(&frames, &audio, &rec.options, &dir, end)
+                    encode_video(&frames, &audio, &rec.options, &dir, end, &rec.stem)
                 };
                 encoded.map(|mut r| {
                     let tracked = std::mem::take(&mut *lock(&rec.tracked));
@@ -1092,6 +1097,7 @@ fn finish_window(
     options: &RecordOptions,
     dir: &Path,
     duration: f64,
+    stem: &str,
 ) -> AppResult<RecordingResult> {
     if segments.is_empty() {
         return Err(AppError::new("nothing was captured"));
@@ -1106,7 +1112,6 @@ fn finish_window(
         let _ = writeln!(text, "file '{}'", seg.display());
     }
     std::fs::write(&list, text)?;
-    let stem = file_stem();
     let joined = work.join("joined.mp4");
     run_ffmpeg(&ffmpeg, |cmd| {
         cmd.args(["-f", "concat", "-safe", "0", "-i"])
@@ -1274,6 +1279,7 @@ fn encode_video(
     options: &RecordOptions,
     dir: &Path,
     end: f64,
+    stem: &str,
 ) -> AppResult<RecordingResult> {
     let ffmpeg = ffmpeg_path().ok_or_else(|| AppError::new("ffmpeg not found"))?;
     let work = frames[0]
@@ -1292,7 +1298,6 @@ fn encode_video(
         }
         std::fs::write(&audio_list, out)?;
     }
-    let stem = file_stem();
     let path = dir.join(format!("{stem}.mp4"));
     let preview_dir = dir.join(PREVIEW_DIR);
     std::fs::create_dir_all(&preview_dir)?;
@@ -1363,13 +1368,6 @@ fn probe_size(path: &Path) -> Option<(u32, u32)> {
     Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
 }
 
-fn file_stem() -> String {
-    let stamp = dive_core::Timestamp::now()
-        .to_rfc3339()
-        .replace([':', '.'], "-");
-    format!("dive-{stamp}")
-}
-
 fn finish(
     path: &Path,
     format: &str,
@@ -1401,7 +1399,12 @@ const GIF_FPS: u32 = 12;
 /// Encode frames as a looping GIF with ffmpeg: a palette computed from the
 /// whole clip, then dithered. Seconds of work where the pure-Rust encoder
 /// below takes minutes on a 30 fps capture.
-fn encode_gif_ffmpeg(frames: &[Frame], dir: &Path, end: f64) -> AppResult<RecordingResult> {
+fn encode_gif_ffmpeg(
+    frames: &[Frame],
+    dir: &Path,
+    end: f64,
+    stem: &str,
+) -> AppResult<RecordingResult> {
     let ffmpeg = ffmpeg_path().ok_or_else(|| AppError::new("ffmpeg not found"))?;
     let work = frames[0]
         .path
@@ -1409,7 +1412,7 @@ fn encode_gif_ffmpeg(frames: &[Frame], dir: &Path, end: f64) -> AppResult<Record
         .ok_or_else(|| AppError::new("frame directory vanished"))?;
     let playlist = work.join("frames.ffconcat");
     write_playlist(frames, end, GIF_FPS, &playlist)?;
-    let path = dir.join(format!("{}.gif", file_stem()));
+    let path = dir.join(format!("{stem}.gif"));
     let filter = format!(
         "scale='min({GIF_WIDTH},iw)':-2:flags=lanczos,split[a][b];[a]palettegen=max_colors=200:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle"
     );
@@ -1462,7 +1465,7 @@ fn sample(frames: &[Frame], fps: u32) -> Vec<&Frame> {
 /// without ffmpeg. Slow per frame, so the capture is thinned first.
 // Every float here is rounded and clamped into range before the cast.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn encode_gif(frames: &[Frame], dir: &Path, end: f64) -> AppResult<RecordingResult> {
+fn encode_gif(frames: &[Frame], dir: &Path, end: f64, stem: &str) -> AppResult<RecordingResult> {
     let total = frames.len();
     let frames = sample(frames, GIF_FPS);
     let first = decode(&std::fs::read(&frames[0].path)?)?;
@@ -1474,7 +1477,7 @@ fn encode_gif(frames: &[Frame], dir: &Path, end: f64) -> AppResult<RecordingResu
         u16::try_from(height).map_err(AppError::new)?,
     );
 
-    let path = dir.join(format!("{}.gif", file_stem()));
+    let path = dir.join(format!("{stem}.gif"));
     let file = std::io::BufWriter::new(std::fs::File::create(&path)?);
     let mut encoder = gif::Encoder::new(file, w16, h16, &[]).map_err(AppError::new)?;
     encoder
