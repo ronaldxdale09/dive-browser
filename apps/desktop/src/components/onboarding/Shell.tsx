@@ -20,7 +20,7 @@ export function Shell({ children }: { children: ReactNode }) {
     <div role="dialog" aria-label="Set up Dive" className="fixed inset-0 z-[60] bg-ground text-ink">
       <Backdrop />
       <div className="relative z-10 flex h-full flex-col">
-        <ol aria-label="Setup steps" className="flex items-center justify-center gap-6 pt-9">
+        <ol aria-label="Setup steps" className="flex shrink-0 items-center justify-center gap-6 pt-7">
           {STEPS.map((step, i) => {
             const state = i < at ? "done" : i === at ? "current" : "todo";
             return (
@@ -31,8 +31,10 @@ export function Shell({ children }: { children: ReactNode }) {
             );
           })}
         </ol>
-        <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-8">
-          <div key={stage} className="onboarding-enter w-[560px] max-w-full rounded-3xl border border-line-2 bg-surface/85 p-7 shadow-2xl backdrop-blur-xl">
+        {/* The card centres when it fits and scrolls when the window is short:
+            `my-auto` inside a scrolling column does both without measuring. */}
+        <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-6 py-6">
+          <div key={stage} className="onboarding-enter my-auto w-[560px] max-w-full shrink-0 rounded-3xl border border-line-2 bg-surface/85 p-6 shadow-2xl backdrop-blur-xl sm:p-7">
             {children}
           </div>
         </div>
