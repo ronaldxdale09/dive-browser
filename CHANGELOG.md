@@ -45,6 +45,8 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Console entries show objects the way DevTools does when collapsed,
+  `{a: 1, b: Array(3), s: "x"}` and `[4, 5]`, instead of the word "Object".
 - Tabs squeezed down to their favicon, and pinned tabs, name themselves
   on hover.
 - A request a rule blocked no longer shows the engine's error page as

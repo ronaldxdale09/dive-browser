@@ -170,6 +170,9 @@ fn remote_object_text(obj: &Value) -> String {
     if let Some(s) = obj["unserializableValue"].as_str() {
         return s.to_owned();
     }
+    if let Some(text) = preview_text(&obj["preview"]) {
+        return text;
+    }
     obj["description"]
         .as_str()
         .or_else(|| obj["type"].as_str())
@@ -177,9 +180,68 @@ fn remote_object_text(obj: &Value) -> String {
         .to_owned()
 }
 
+/// The one-line form the inspector shows for a collapsed object: `{a: 1, b: Array(3)}`
+/// or `[4, 5]`, from the `ObjectPreview` the engine attaches to console
+/// arguments. Maps and sets keep their description; a missing preview is `None`.
+fn preview_text(preview: &Value) -> Option<String> {
+    let properties = preview.get("properties")?.as_array()?;
+    let subtype = preview["subtype"].as_str().unwrap_or("");
+    if matches!(subtype, "map" | "set" | "weakmap" | "weakset") {
+        return preview["description"].as_str().map(str::to_owned);
+    }
+    let array = subtype == "array";
+    let items: Vec<String> = properties
+        .iter()
+        .map(|p| {
+            let value = match (p["type"].as_str(), p["value"].as_str()) {
+                (Some("string"), Some(v)) => format!("{v:?}"),
+                (Some("object"), Some("Object")) => "{…}".to_owned(),
+                (_, Some(v)) => v.to_owned(),
+                _ => p["type"].as_str().unwrap_or("?").to_owned(),
+            };
+            if array {
+                value
+            } else {
+                format!("{}: {value}", p["name"].as_str().unwrap_or("?"))
+            }
+        })
+        .collect();
+    let overflow = preview["overflow"].as_bool().unwrap_or(false);
+    let mut body = items.join(", ");
+    if overflow {
+        body.push_str(if body.is_empty() { "…" } else { ", …" });
+    }
+    Some(if array {
+        format!("[{body}]")
+    } else {
+        format!("{{{body}}}")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn objects_render_as_their_preview_not_as_the_word_object() {
+        let obj = json!({"type":"object","description":"Object","preview":{"type":"object","overflow":false,
+            "properties":[{"name":"a","type":"number","value":"1"},{"name":"b","type":"object","value":"Array(3)","subtype":"array"},
+                          {"name":"s","type":"string","value":"x"},{"name":"n","type":"object","value":"Object"}]}});
+        assert_eq!(
+            remote_object_text(&obj),
+            "{a: 1, b: Array(3), s: \"x\", n: {…}}"
+        );
+        let arr = json!({"type":"object","subtype":"array","description":"Array(2)","preview":{"type":"object","subtype":"array","overflow":true,
+            "properties":[{"name":"0","type":"number","value":"4"},{"name":"1","type":"number","value":"5"}]}});
+        assert_eq!(remote_object_text(&arr), "[4, 5, …]");
+        let map = json!({"type":"object","subtype":"map","description":"Map(1)","preview":{"type":"object","subtype":"map","description":"Map(1)","overflow":false,"properties":[]}});
+        assert_eq!(remote_object_text(&map), "Map(1)");
+        // No preview (a buffered message replayed later): the description still stands.
+        assert_eq!(
+            remote_object_text(&json!({"type":"object","description":"Object"})),
+            "Object"
+        );
+    }
     use serde_json::json;
 
     fn ev(method: &str, params: Value) -> CdpEvent {
