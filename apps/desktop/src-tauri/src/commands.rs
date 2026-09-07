@@ -501,6 +501,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_vitals,
             resolve_frame,
             request_captured,
+            request_detail,
             request_replay,
             tab_openapi,
             tab_har,
@@ -2401,6 +2402,47 @@ pub(crate) fn request_captured(
         body: r.post_data,
         with_cookies: true,
         captured_host,
+    })
+}
+
+/// What was sent and what came back, for reading rather than editing.
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+pub struct RequestDetail {
+    pub method: String,
+    pub url: String,
+    pub status: Option<u16>,
+    pub mime_type: String,
+    pub request_headers: std::collections::BTreeMap<String, String>,
+    pub request_body: Option<String>,
+    pub response_headers: std::collections::BTreeMap<String, String>,
+    /// The body when it was captured (JSON within the budget).
+    pub response_body: Option<String>,
+    /// Why the body is absent, when it is.
+    pub response_body_note: Option<String>,
+}
+
+/// The captured request and response for the Network panel's detail pane.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn request_detail(
+    state: State<'_, AppState>,
+    tab_id: TabId,
+    request_id: String,
+) -> AppResult<RequestDetail> {
+    let r = state
+        .buffers
+        .request(tab_id, &request_id)
+        .ok_or_else(|| AppError::new("request no longer in the buffer"))?;
+    Ok(RequestDetail {
+        method: r.method,
+        url: r.url,
+        status: r.status,
+        mime_type: r.mime_type,
+        request_headers: r.headers,
+        request_body: r.post_data,
+        response_headers: r.response_headers,
+        response_body: r.response_body,
+        response_body_note: r.response_body_note,
     })
 }
 

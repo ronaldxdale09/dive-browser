@@ -8,6 +8,9 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- Selecting a request in the Network panel shows what was sent and what
+  came back: both header sets, the request body, and the response body the
+  engine kept (JSON within the buffer budget) or why it was not.
 - Private windows (⇧⌘N, File menu, browser menu and palette): a separate
   off-the-record process with an in-memory database and no logging, MCP,
   extensions, agent credentials or update checks; muted violet chrome with a

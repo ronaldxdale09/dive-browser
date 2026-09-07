@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { useNetwork } from "../store/network";
 import type { RequestRow } from "../store/network";
@@ -44,6 +45,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   if (original.height) Object.defineProperty(HTMLElement.prototype, "offsetHeight", original.height);
   if (original.width) Object.defineProperty(HTMLElement.prototype, "offsetWidth", original.width);
@@ -86,6 +88,20 @@ describe("NetworkPanel", () => {
 
     fireEvent.click(screen.getByText("item-1").closest("tr")!);
     expect(screen.queryByRole("button", { name: /Replay/ })).toBeNull();
+  });
+
+  it("shows what the selected request sent and what came back", async () => {
+    useNetwork.setState({ byTab: { "tab-1": rows(2) } });
+    vi.spyOn(ipc, "requestDetail").mockResolvedValue({
+      method: "GET", url: "https://a.dev/api/item-1", status: 200, mime_type: "application/json",
+      request_headers: { accept: "application/json" }, request_body: null,
+      response_headers: { "content-type": "application/json" }, response_body: '{"ok":true}', response_body_note: null,
+    });
+    render(<NetworkPanel />);
+    fireEvent.click(screen.getByText("item-1").closest("tr")!);
+    expect(await screen.findByText("accept:")).toBeTruthy();
+    expect(screen.getByText("content-type:")).toBeTruthy();
+    expect(screen.getByText('{"ok":true}')).toBeTruthy();
   });
 
   it("filters rows by URL", () => {

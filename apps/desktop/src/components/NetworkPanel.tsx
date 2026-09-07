@@ -1,12 +1,13 @@
 import { ArrowDownLeft, ArrowUpRight, Ban, FileDown, FileJson, Repeat } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { isReady, useAgent } from "../store/agent";
 import { usePrefs } from "../store/prefs";
 import { selectFrames, selectRequests, useNetwork } from "../store/network";
 import type { RequestRow } from "../store/network";
+import type { RequestDetail } from "../lib/ipc";
 import { Icon, IconButton } from "./Icon";
 import { ReplayEditor } from "./ReplayEditor";
 import { AgentIcon } from "./agent/AgentIcon";
@@ -148,7 +149,7 @@ export function NetworkPanel() {
         <span>{rows.length} requests</span>
         <span>{size(transferred)} transferred</span>
       </div>
-      <div ref={scrollRef} data-testid="network-scroll" className="min-h-0 flex-1 overflow-auto font-mono text-[11.5px] leading-5">
+      <div ref={scrollRef} data-testid="network-scroll" className="min-h-16 flex-1 overflow-auto font-mono text-[11.5px] leading-5">
         <table className="w-full border-collapse">
           <thead className="sticky top-0 bg-surface text-left text-[10px] tracking-wider text-ink-3 uppercase">
             <tr>
@@ -186,6 +187,7 @@ export function NetworkPanel() {
           ))}
         </div>
       )}
+      {detail && replaying !== detail.id && activeTab && frames.length === 0 && <DetailPane tabId={activeTab} requestId={detail.id} />}
       {detail && replaying !== detail.id && (
         <div className="flex items-center gap-3 border-t border-line bg-surface-2 px-3 py-1.5 font-mono text-[11px] text-ink-2 select-text">
           <span className="min-w-0 flex-1 truncate">
@@ -209,5 +211,62 @@ export function NetworkPanel() {
       )}
       {detail && replaying === detail.id && activeTab && <ReplayEditor tabId={activeTab} requestId={detail.id} onClose={() => setReplaying(null)} />}
     </div>
+  );
+}
+
+/**
+ * What the selected request sent and what came back: both header sets and
+ * the bodies the engine kept. Read-only; Replay opens the editor.
+ */
+function DetailPane({ tabId, requestId }: { tabId: string; requestId: string }) {
+  const [detail, setDetail] = useState<RequestDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    ipc
+      .requestDetail(tabId, requestId)
+      .then((d) => alive && setDetail(d))
+      .catch((e: unknown) => alive && setError(errorMessage(e)));
+    return () => {
+      alive = false;
+    };
+  }, [tabId, requestId]);
+  if (error) return <div className="border-t border-line px-3 py-2 font-mono text-[11px] text-ink-3">{error}</div>;
+  if (!detail) return null;
+  const body = detail.response_body ?? detail.response_body_note ?? (detail.status === null ? "No response yet." : "Body not kept: only JSON responses within the buffer budget are.");
+  return (
+    <div className="grid max-h-[50%] shrink-0 grid-cols-2 gap-x-4 overflow-auto border-t border-line px-3 py-2 font-mono text-[11px] leading-5 select-text" data-testid="request-detail">
+      <section aria-label="Request">
+        <h4 className="text-[10px] tracking-wider text-ink-3 uppercase">Request headers</h4>
+        <Headers headers={detail.request_headers} />
+        {detail.request_body && (
+          <>
+            <h4 className="mt-2 text-[10px] tracking-wider text-ink-3 uppercase">Request body</h4>
+            <pre className="whitespace-pre-wrap break-all text-ink-2">{detail.request_body}</pre>
+          </>
+        )}
+      </section>
+      <section aria-label="Response">
+        <h4 className="text-[10px] tracking-wider text-ink-3 uppercase">Response headers</h4>
+        <Headers headers={detail.response_headers} />
+        <h4 className="mt-2 text-[10px] tracking-wider text-ink-3 uppercase">Response body</h4>
+        <pre className={`whitespace-pre-wrap break-all ${detail.response_body ? "text-ink-2" : "text-ink-3"}`}>{body}</pre>
+      </section>
+    </div>
+  );
+}
+
+function Headers({ headers }: { headers: Record<string, string> }) {
+  const entries = Object.entries(headers);
+  if (entries.length === 0) return <p className="text-ink-3">None recorded.</p>;
+  return (
+    <dl>
+      {entries.map(([name, value]) => (
+        <div key={name} className="flex gap-2">
+          <dt className="shrink-0 text-ink-3">{name}:</dt>
+          <dd className="min-w-0 break-all text-ink-2">{value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }

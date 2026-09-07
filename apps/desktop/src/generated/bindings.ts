@@ -282,6 +282,8 @@ export const commands = {
 } | null, AppError>(__TAURI_INVOKE("resolve_frame", { tabId, url, line, column })),
 	/**  The captured request as an editable replay draft. */
 	requestCaptured: (tabId: TabId, requestId: string) => typedError<ReplayRequest, AppError>(__TAURI_INVOKE("request_captured", { tabId, requestId })),
+	/**  The captured request and response for the Network panel's detail pane. */
+	requestDetail: (tabId: TabId, requestId: string) => typedError<RequestDetail, AppError>(__TAURI_INVOKE("request_detail", { tabId, requestId })),
 	/**  Replay a (possibly edited) request, optionally with the tab's cookies. */
 	requestReplay: (tabId: TabId, request: ReplayRequest) => typedError<ReplayResponse, AppError>(__TAURI_INVOKE("request_replay", { tabId, request })),
 	/**
@@ -1617,6 +1619,21 @@ export type ReplayResponse = {
 	body: string,
 	/**  Round-trip time. */
 	elapsed_ms: number,
+};
+
+/**  What was sent and what came back, for reading rather than editing. */
+export type RequestDetail = {
+	method: string,
+	url: string,
+	status: number | null,
+	mime_type: string,
+	request_headers: { [key in string]: string },
+	request_body: string | null,
+	response_headers: { [key in string]: string },
+	/**  The body when it was captured (JSON within the budget). */
+	response_body: string | null,
+	/**  Why the body is absent, when it is. */
+	response_body_note: string | null,
 };
 
 /**  One rule; the first enabled match wins. */
