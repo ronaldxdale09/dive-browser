@@ -134,6 +134,7 @@ describe("Library dialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear browsing data…" }));
     expect(useBrowser.getState().open.settings).toBe(true);
     expect(useBrowser.getState().settingsSection).toBe("privacy");
+    expect(useBrowser.getState().settingsAnchor).toBe("clear-browsing-data");
   });
 
   it("closes on Escape and releases the page", async () => {

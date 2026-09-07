@@ -255,7 +255,7 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
           type="button"
           onClick={() => {
             onOpened();
-            openSettings("privacy");
+            openSettings("privacy", "clear-browsing-data");
           }}
           className="h-7 rounded-full border border-line px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink"
         >

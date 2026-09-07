@@ -74,8 +74,9 @@ bump may change behaviour.
   page's title (or "about:blank" for a new tab); the title fills in when
   it arrives, so a redirect's source address is never wrongly titled.
   Address suggestions show Dive's own pages by their whole address.
-- "Delete browsing data…" lands on that group inside Settings › Privacy
-  instead of the top of the panel. A rejected agent key reads "Anthropic
+- "Delete browsing data…" in the menu and the History view's "Clear
+  browsing data…" land on that group inside Settings › Privacy instead of
+  the top of the panel. A rejected agent key reads "Anthropic
   rejected the key: API key is invalid (HTTP 401)." rather than "api 401:".
 - Console entries show objects the way DevTools does when collapsed,
   `{a: 1, b: Array(3), s: "x"}` and `[4, 5]`, instead of the word "Object".
