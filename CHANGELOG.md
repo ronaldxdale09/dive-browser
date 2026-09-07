@@ -42,6 +42,9 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- The command palette matches rows that contain what you typed; it no
+  longer offers "Developer dock" for "verge" through scattered letters.
+  Settings › About names the Chromium version behind CEF.
 - A tab opened only to fetch a file closes itself once the download
   starts, instead of staying behind empty with the file's address; a page
   you were reading when you clicked a download link stays open.

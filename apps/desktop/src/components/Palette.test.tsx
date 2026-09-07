@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { events, ipc } from "../lib/ipc";
-import { Palette } from "./Palette";
+import { Palette, paletteFilter } from "./Palette";
 
 class ResizeObserverStub {
   observe() {}
@@ -17,6 +17,13 @@ afterEach(() => {
 });
 
 describe("Palette", () => {
+  it("offers rows that contain what was typed, not scattered-letter matches", () => {
+    expect(paletteFilter("Developer dock dock.toggle", "verge")).toBe(0);
+    expect(paletteFilter("The Verge https://www.theverge.com/", "verge")).toBe(1);
+    expect(paletteFilter("Developer dock dock.toggle", "dev dock")).toBe(1);
+    expect(paletteFilter("Device simulator simulator.toggle", "SIM")).toBe(1);
+  });
+
   it("is an accessible new-tab dialog with a URL field and recent history", async () => {
     vi.spyOn(ipc, "commandsList").mockResolvedValue([]);
     vi.spyOn(ipc, "devServersWatch").mockResolvedValue([]);

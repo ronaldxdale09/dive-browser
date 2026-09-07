@@ -21,6 +21,17 @@ import { tracePaletteLifecycle } from "../lib/inputTimingProbe";
 const HISTORY_LIMIT = 5;
 
 /** Omnibox-style palette: type a URL or search, or pick a tab or command. */
+/**
+ * Rows match when every word typed appears somewhere in them. The library's
+ * default is a scattered-letter match, which offered "Developer dock" for
+ * "verge" because those letters occur in that order across the row.
+ */
+export function paletteFilter(value: string, search: string): number {
+  const haystack = value.toLowerCase();
+  const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
+  return terms.every((term) => haystack.includes(term)) ? 1 : 0;
+}
+
 export function Palette() {
   // The cover goes on synchronously with the mount -- a late cover leaves the
   // page painting over the palette -- and comes off when the fade-out ends.
@@ -93,6 +104,7 @@ export function Palette() {
         aria-label="New tab"
         aria-modal="true"
         shouldFilter={!!query}
+        filter={paletteFilter}
         className="mx-auto mt-[min(12vh,96px)] w-[min(600px,calc(100vw-24px))] overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.key === "Escape" && close()}

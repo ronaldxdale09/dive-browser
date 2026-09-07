@@ -8,13 +8,19 @@ import { Icon } from "../Icon";
 import { Button, Group, Row } from "../SettingsFields";
 import { CopyBlock } from "./CopyBlock";
 
+/** "Chromium 151 · CEF" from the chrome's own user agent; the engine is what runs this very page. */
+export function engineLabel(userAgent: string = navigator.userAgent): string {
+  const major = /Chrome\/(\d+)/.exec(userAgent)?.[1];
+  return major ? `Chromium ${major} · CEF` : "CEF";
+}
+
 /** Settings › About: build facts and the updater. */
 export function About({ info }: { info: AppInfo | null }) {
   return (
     <>
       <Group title="This build">
         <Row label="Version" control={<span className="font-mono text-[11px] text-ink-2 select-text">{info?.version ?? "…"}</span>} />
-        <Row label="Engine" hint="Chromium through CEF, one process tree per container." control={<span className="font-mono text-[11px] text-ink-2">CEF</span>} />
+        <Row label="Engine" hint="Chromium through CEF, one process tree per container." control={<span className="font-mono text-[11px] text-ink-2 select-text">{engineLabel()}</span>} />
         <Row
           stacked
           label="Data folder"
