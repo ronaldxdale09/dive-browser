@@ -369,7 +369,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
                     "Verify and connect"
                   )
                 ) : (
-                  "Connect Provider"
+                  "Connect provider"
                 )}
               </button>
             </div>

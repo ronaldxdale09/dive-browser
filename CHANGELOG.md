@@ -39,6 +39,9 @@ bump may change behaviour.
 ### Fixed
 - DiveScreen exports are named "clip (edited).mp4", counting up on a clash,
   instead of carrying a timestamp and a job id.
+- HAR exports, OpenAPI specs and bug reports are named after the page and
+  the time ("github.com requests 2026-09-07 18.19.30.har") instead of a
+  timestamp with a random suffix.
 - The Live subtitles dialog closes on Escape before any model is downloaded;
   a dialog whose primary button is disabled no longer leaves focus outside
   its trap.

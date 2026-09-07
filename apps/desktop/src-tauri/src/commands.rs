@@ -2036,6 +2036,7 @@ pub async fn capture_tab(
     id: TabId,
     full_page: bool,
 ) -> AppResult<std::path::PathBuf> {
+    let page_url = lock(&state.store).tab(id)?.url;
     let session = cdp_for(state, id)?;
     let png = if full_page {
         dive_cdp::page::capture_full_page(&session, dive_cdp::page::ImageFormat::Png).await
@@ -2045,17 +2046,23 @@ pub async fn capture_tab(
     }
     .map_err(AppError::new)?;
 
-    save_capture(&png, "")
+    save_capture(
+        &png,
+        &page_url,
+        if full_page { "full page" } else { "capture" },
+    )
 }
 
-/// Write `png` to `<data>/captures/dive-<timestamp><suffix>.png` and copy
-/// it to the clipboard.
-fn save_capture(png: &[u8], suffix: &str) -> AppResult<std::path::PathBuf> {
+/// Write `png` under captures, named after the page (see [`capture_name`]),
+/// and copy it to the clipboard.
+fn save_capture(png: &[u8], page_url: &str, kind: &str) -> AppResult<std::path::PathBuf> {
     let dir = captures_dir()?;
-    let stamp = dive_core::Timestamp::now()
-        .to_rfc3339()
-        .replace([':', '.'], "-");
-    let path = dir.join(format!("dive-{stamp}{suffix}.png"));
+    let path = dir.join(capture_name(
+        page_url,
+        kind,
+        "png",
+        dive_core::Timestamp::now(),
+    ));
     std::fs::write(&path, png)?;
     if let Err(e) = copy_png_to_clipboard(png) {
         tracing::warn!("capture saved but clipboard copy failed: {e}");
@@ -2087,13 +2094,24 @@ pub(crate) fn capture_read(path: String) -> AppResult<String> {
 /// to the clipboard; returns the new path.
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn capture_save(png_base64: String) -> AppResult<String> {
+pub(crate) fn capture_save(state: State<'_, AppState>, png_base64: String) -> AppResult<String> {
     use base64::Engine as _;
     let png = base64::engine::general_purpose::STANDARD
         .decode(png_base64)
         .map_err(AppError::new)?;
     image::load_from_memory_with_format(&png, image::ImageFormat::Png).map_err(AppError::new)?;
-    let path = save_capture(&png, "-annotated")?;
+    // The annotated picture belongs to whatever page is up now, which is the
+    // page it was taken from unless the tab moved on meanwhile.
+    let page_url = {
+        let host = lock(&state.host);
+        let active = host.as_ref().and_then(crate::engine::TabHost::active);
+        drop(host);
+        active
+            .and_then(|id| lock(&state.store).tab(id).ok())
+            .map(|t| t.url)
+            .unwrap_or_default()
+    };
+    let path = save_capture(&png, &page_url, "annotated")?;
     Ok(path.to_string_lossy().into_owned())
 }
 
@@ -2368,7 +2386,7 @@ pub(crate) fn tab_openapi(state: State<'_, AppState>, id: TabId) -> AppResult<St
     let requests = state.buffers.requests(id, 1000);
     let spec = crate::openapi::from_requests(&page_url, &requests);
     let text = serde_json::to_string_pretty(&spec).map_err(AppError::new)?;
-    let path = stamped_capture("openapi", "json")?;
+    let path = stamped_capture(&page_url, "openapi", "json")?;
     std::fs::write(&path, &text)?;
     if let Ok(mut cb) = arboard::Clipboard::new() {
         let _ = cb.set_text(text);
@@ -2383,7 +2401,7 @@ pub(crate) fn tab_har(state: State<'_, AppState>, id: TabId) -> AppResult<String
     let tab = lock(&state.store).tab(id)?;
     let requests = state.buffers.requests(id, 1000);
     let har = crate::har::from_requests(&tab.url, &tab.title, &requests);
-    let path = stamped_capture("dive", "har")?;
+    let path = stamped_capture(&tab.url, "requests", "har")?;
     std::fs::write(
         &path,
         serde_json::to_vec_pretty(&har).map_err(AppError::new)?,
@@ -2402,7 +2420,7 @@ pub(crate) async fn tab_bug_report(state: State<'_, AppState>, id: TabId) -> App
     let console = state.buffers.console_tail(id, 500);
     let requests = state.buffers.requests(id, 1000);
     let text = crate::report::compose(&tab, &console, &requests, shot.as_deref());
-    let path = stamped_capture("bug", "md")?;
+    let path = stamped_capture(&tab.url, "bug report", "md")?;
     std::fs::write(&path, &text)?;
     if let Ok(mut cb) = arboard::Clipboard::new() {
         let _ = cb.set_text(text);
@@ -2411,11 +2429,40 @@ pub(crate) async fn tab_bug_report(state: State<'_, AppState>, id: TabId) -> App
 }
 
 /// `<captures>/<prefix>-<timestamp>.<ext>`.
-fn stamped_capture(prefix: &str, ext: &str) -> AppResult<std::path::PathBuf> {
-    let stamp = dive_core::Timestamp::now()
-        .to_rfc3339()
-        .replace([':', '.'], "-");
-    Ok(captures_dir()?.join(format!("{prefix}-{stamp}.{ext}")))
+fn stamped_capture(page_url: &str, kind: &str, ext: &str) -> AppResult<std::path::PathBuf> {
+    Ok(captures_dir()?.join(capture_name(
+        page_url,
+        kind,
+        ext,
+        dive_core::Timestamp::now(),
+    )))
+}
+
+/// A file name someone can read in Finder: the page's host, what the file
+/// is, and a local-looking time, as in `github.com bug report 2026-09-07
+/// 18.19.30.md`. Without a host (a blank tab) the kind stands alone.
+pub(crate) fn capture_name(
+    page_url: &str,
+    kind: &str,
+    ext: &str,
+    at: dive_core::Timestamp,
+) -> String {
+    let host = url::Url::parse(page_url)
+        .ok()
+        .and_then(|u| {
+            u.host_str()
+                .map(|h| h.trim_start_matches("www.").to_owned())
+        })
+        .filter(|h| !h.is_empty());
+    let stamp =
+        at.0.format(time::macros::format_description!(
+            "[year]-[month]-[day] [hour].[minute].[second]"
+        ))
+        .unwrap_or_default();
+    match host {
+        Some(host) => format!("{host} {kind} {stamp}.{ext}"),
+        None => format!("{kind} {stamp}.{ext}"),
+    }
 }
 
 /// Start recording the person's interactions in a tab.
@@ -2811,6 +2858,24 @@ pub fn normalize_url_with(input: &str, template: &str) -> AppResult<url::Url> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn capture_names_read_as_host_kind_and_time() {
+        let at = dive_core::Timestamp::parse("2026-09-07T18:19:30Z").unwrap();
+        assert_eq!(
+            capture_name(
+                "https://www.github.com/tauri-apps/tauri",
+                "requests",
+                "har",
+                at
+            ),
+            "github.com requests 2026-09-07 18.19.30.har"
+        );
+        assert_eq!(
+            capture_name("about:blank", "bug report", "md", at),
+            "bug report 2026-09-07 18.19.30.md"
+        );
+    }
+
     use super::*;
 
     #[test]
