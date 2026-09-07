@@ -50,6 +50,11 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- An unpacked extension with `<all_urls>` ran its content scripts inside
+  Dive's own interface as well as in pages. Every chrome webview now runs
+  off-the-record, where extensions are not enabled; the chrome keeps its
+  panel sizes, chosen subtitles model and avatar artwork in the profile
+  store instead of web storage, so nothing is lost across launches.
 - Settings › Privacy › Site permissions no longer tells a fresh profile
   that "permissions from earlier versions must be approved again"; the
   note appears only when some were in fact set aside.

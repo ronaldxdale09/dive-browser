@@ -1711,6 +1711,11 @@ fn forward_events(app: AppHandle<Runtime>, mut rx: tokio::sync::broadcast::Recei
 /// Trusted chrome joins the same off-the-record context to keep the private
 /// session alive even when every page tab is closed. Scheme/IPC routing still
 /// uses the exact browser identity; pages never become trusted chrome.
+/// Every chrome webview runs off-the-record. Extensions arrive through
+/// `--load-extension`, which every profile honours, and a content script
+/// with `<all_urls>` would otherwise run inside Dive's own interface;
+/// off-the-record profiles do not enable extensions. The chrome keeps its
+/// own state through the `ui_state_*` commands instead of web storage.
 fn private_chrome(builder: WebviewBuilder<Runtime>) -> WebviewBuilder<Runtime> {
     #[cfg(all(feature = "cef", target_os = "macos"))]
     let builder = builder.initialization_script(
@@ -1722,6 +1727,8 @@ fn private_chrome(builder: WebviewBuilder<Runtime>) -> WebviewBuilder<Runtime> {
             .initialization_script("Object.defineProperty(window, '__DIVE_PRIVATE__', {value:true, writable:false, configurable:false});")
     } else {
         builder
+            .incognito(true)
+            .data_directory(crate::state::profiles_root().join("chrome-ui"))
     }
 }
 

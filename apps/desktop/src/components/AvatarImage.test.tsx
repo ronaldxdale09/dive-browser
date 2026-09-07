@@ -1,3 +1,4 @@
+import { uiStorage } from "../lib/uiStorage";
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { AvatarImage } from "./AvatarImage";
@@ -16,7 +17,7 @@ class WorkerStub {
     this.onmessage?.({ data: { key, url } } as MessageEvent);
   }
 }
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); localStorage.clear(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); localStorage.clear(); uiStorage.clear(); });
 
 it("keeps dimensions while loading and cannot show a previous profile after a late result", async () => {
   vi.useFakeTimers();

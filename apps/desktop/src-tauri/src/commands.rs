@@ -427,6 +427,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_close,
             tab_activate,
             tab_deactivate,
+            ui_state_load,
+            ui_state_set,
             browser_import_sources,
             browser_import_run,
             browser_import_open_privacy,
@@ -1411,6 +1413,45 @@ pub(crate) fn tab_deactivate(app: AppHandle<Runtime>) -> AppResult<()> {
         }
         Ok(())
     })
+}
+
+/// Settings keys for chrome-side state.
+const UI_PREFIX: &str = "ui.";
+
+/// Chrome-side state (panel sizes, the chosen subtitles model, avatar
+/// artwork) lives in the profile store rather than the chrome's own web
+/// storage: the chrome webview runs off-the-record so extensions cannot
+/// reach it, which leaves it no storage of its own.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn ui_state_load(state: State<'_, AppState>) -> AppResult<Vec<(String, String)>> {
+    Ok(lock(&state.store)
+        .settings_with_prefix(UI_PREFIX)?
+        .into_iter()
+        .map(|(key, value)| (key[UI_PREFIX.len()..].to_owned(), value))
+        .collect())
+}
+
+/// Write one chrome-side value, or remove it with `None`.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn ui_state_set(
+    state: State<'_, AppState>,
+    key: String,
+    value: Option<String>,
+) -> AppResult<()> {
+    if key.is_empty() || key.len() > 128 || key.chars().any(char::is_whitespace) {
+        return Err(AppError::new("ui state keys are short and have no spaces"));
+    }
+    let full = format!("{UI_PREFIX}{key}");
+    let store = lock(&state.store);
+    match value {
+        Some(value) => store.set_setting(&full, &value)?,
+        None => {
+            store.remove_setting(&full)?;
+        }
+    }
+    Ok(())
 }
 
 /// Run `f` on the main thread and wait for its result.

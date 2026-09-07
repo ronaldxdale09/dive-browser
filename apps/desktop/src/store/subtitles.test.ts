@@ -1,3 +1,4 @@
+import { uiStorage } from "../lib/uiStorage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { events, ipc } from "../lib/ipc";
 import type { SubtitleCue, SubtitleModel, SubtitleModelProgress, SubtitleState } from "../lib/ipc";
@@ -88,7 +89,7 @@ describe("useSubtitles", () => {
 
   it("remembers the chosen model and falls back to a downloaded one", async () => {
     useSubtitles.getState().setModel("small");
-    expect(localStorage.getItem("dive.subtitles.model")).toBe("small");
+    expect(uiStorage.getItem("dive.subtitles.model")).toBe("small");
     vi.spyOn(ipc, "subtitleModels").mockResolvedValue(MODELS.map((m) => ({ ...m, downloaded: m.id === "medium" })));
     await useSubtitles.getState().loadModels();
     // "small" was never downloaded; the one on disk is ready to start.

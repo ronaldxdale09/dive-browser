@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { uiStorage } from "../lib/uiStorage";
 import { events, ipc } from "../lib/ipc";
 import type { RecordingCapabilities, RecordingResult } from "../lib/ipc";
 import { useBrowser } from "./browser";
@@ -226,6 +227,7 @@ export const useRecording = create<RecordingState>()(
     }),
     {
       name: "dive.recording",
+      storage: createJSONStorage(() => uiStorage),
       version: 2,
       partialize: (s) => ({ settings: s.settings }),
       merge: (persisted, current) => ({ ...current, settings: { ...DEFAULT_SETTINGS, ...((persisted as Partial<RecordingState> | undefined)?.settings ?? {}) } }),

@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { uiStorage } from "../lib/uiStorage";
 import type { Tab } from "../lib/ipc";
 import { DOCK_LIMITS, SIDECAR_LIMITS, clampSize } from "../lib/resize";
 
@@ -104,6 +105,7 @@ export const useLayout = create<LayoutState>()(
     }),
     {
       name: "dive.layout",
+      storage: createJSONStorage(() => uiStorage),
       version: 1,
       // Sizes from an older build, or a hand-edited store, are clamped on the
       // way in so a stray value cannot leave a panel unreachable.

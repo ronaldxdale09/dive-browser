@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { uiStorage } from "../lib/uiStorage";
 import { ipc, events } from "../lib/ipc";
 import type { SubtitleModel } from "../lib/ipc";
 import { useBrowser } from "./browser";
@@ -38,9 +39,9 @@ interface SubtitlesState {
 const MODEL_KEY = "dive.subtitles.model";
 
 /** The model chosen last time, so a download made once stays selected. */
-function rememberedModel(): string {
+export function rememberedModel(): string {
   try {
-    return localStorage.getItem(MODEL_KEY) ?? "base";
+    return uiStorage.getItem(MODEL_KEY) ?? "base";
   } catch {
     return "base";
   }
@@ -48,7 +49,7 @@ function rememberedModel(): string {
 
 function rememberModel(model: string) {
   try {
-    localStorage.setItem(MODEL_KEY, model);
+    uiStorage.setItem(MODEL_KEY, model);
   } catch {
     // Storage can be unavailable; the session still works.
   }

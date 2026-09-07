@@ -1,3 +1,4 @@
+import { uiStorage } from "../lib/uiStorage";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { DEFAULT_DOCK_HEIGHT, DEFAULT_SIDECAR_WIDTH, insertPane, useLayout, visibleSplit } from "./layout";
@@ -42,11 +43,11 @@ describe("visibleSplit", () => {
 
 describe("panel layout persistence", () => {
   beforeEach(() => {
-    localStorage.clear();
+    uiStorage.clear();
     useLayout.setState({ dockHeight: DEFAULT_DOCK_HEIGHT, sidecarWidth: DEFAULT_SIDECAR_WIDTH, dockPanel: "console", openPanels: { sidecar: false, dock: false } });
   });
 
-  const stored = () => JSON.parse(localStorage.getItem("dive.layout") ?? "{}").state;
+  const stored = () => JSON.parse(uiStorage.getItem("dive.layout") ?? "{}").state;
 
   it("keeps the dock and sidecar sizes within their limits", () => {
     useLayout.getState().setDockHeight(300);
@@ -72,7 +73,7 @@ describe("panel layout persistence", () => {
   });
 
   it("clamps sizes read back from storage", () => {
-    localStorage.setItem("dive.layout", JSON.stringify({ state: { splits: {}, dockHeight: 5, sidecarWidth: 9999, dockPanel: "meta" }, version: 1 }));
+    uiStorage.setItem("dive.layout", JSON.stringify({ state: { splits: {}, dockHeight: 5, sidecarWidth: 9999, dockPanel: "meta" }, version: 1 }));
     useLayout.persist.rehydrate();
     expect(useLayout.getState().dockHeight).toBe(160);
     expect(useLayout.getState().sidecarWidth).toBe(720);

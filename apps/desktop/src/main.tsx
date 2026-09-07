@@ -5,6 +5,10 @@ import { ChromeErrorBoundary } from "./components/ChromeErrorBoundary";
 import { startStartupTelemetry } from "./lib/startup";
 import "./styles.css";
 import { isPrivateWindow } from "./lib/privateMode";
+import { loadUiStorage } from "./lib/uiStorage";
+import { useLayout } from "./store/layout";
+import { useRecording } from "./store/recording";
+import { rememberedModel, useSubtitles } from "./store/subtitles";
 
 if (isPrivateWindow()) document.documentElement.dataset.private = "true";
 
@@ -18,10 +22,18 @@ if (!popout) {
   import.meta.hot?.dispose(stopStartupTelemetry);
 }
 
-createRoot(root).render(
-  <StrictMode>
-    <ChromeErrorBoundary>
-      <ChromeRoot tabId={popout} />
-    </ChromeErrorBoundary>
-  </StrictMode>,
-);
+// The chrome's own state comes from the profile store (see `uiStorage`);
+// the persisted stores hydrate from it before the first paint.
+void loadUiStorage()
+  .then(() => Promise.all([useLayout.persist.rehydrate(), useRecording.persist.rehydrate()]))
+  .then(() => useSubtitles.setState({ model: rememberedModel() }))
+  .catch(() => undefined)
+  .finally(() => {
+    createRoot(root).render(
+      <StrictMode>
+        <ChromeErrorBoundary>
+          <ChromeRoot tabId={popout} />
+        </ChromeErrorBoundary>
+      </StrictMode>,
+    );
+  });

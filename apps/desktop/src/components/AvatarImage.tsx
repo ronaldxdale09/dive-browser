@@ -1,3 +1,4 @@
+import { uiStorage } from "../lib/uiStorage";
 import { useEffect, useState } from "react";
 import type { ImgHTMLAttributes } from "react";
 import { AvatarCache, avatarKey } from "../lib/avatarCache";
@@ -11,7 +12,7 @@ const cache = new AvatarCache(
     if (!performance.getEntriesByName("dive:avatar-worker-start").length) performance.mark("dive:avatar-worker-start");
     return worker;
   },
-  () => window.localStorage,
+  () => uiStorage,
   (run) => {
     const idle = () => {
       if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 1500 });

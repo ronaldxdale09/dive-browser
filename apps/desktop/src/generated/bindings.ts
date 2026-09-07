@@ -66,6 +66,15 @@ export const commands = {
 	 *  clicking a tab brings its page back.
 	 */
 	tabDeactivate: () => typedError<null, AppError>(__TAURI_INVOKE("tab_deactivate")),
+	/**
+	 *  Chrome-side state (panel sizes, the chosen subtitles model, avatar
+	 *  artwork) lives in the profile store rather than the chrome's own web
+	 *  storage: the chrome webview runs off-the-record so extensions cannot
+	 *  reach it, which leaves it no storage of its own.
+	 */
+	uiStateLoad: () => typedError<([string, string])[], AppError>(__TAURI_INVOKE("ui_state_load")),
+	/**  Write one chrome-side value, or remove it with `None`. */
+	uiStateSet: (key: string, value: string | null) => typedError<null, AppError>(__TAURI_INVOKE("ui_state_set", { key, value })),
 	/**  Browsers on this Mac whose bookmarks and history can be brought in. */
 	browserImportSources: () => typedError<ImportSource[], AppError>(__TAURI_INVOKE("browser_import_sources")),
 	/**  Bring bookmarks and/or history in from one source. */
