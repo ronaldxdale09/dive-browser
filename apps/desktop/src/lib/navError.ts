@@ -30,6 +30,24 @@ export function describeNavError(error: string, url: string): NavErrorText {
       return { title: "Address unreachable", detail: "There is no route to that address from this machine." };
     case "ERR_TOO_MANY_REDIRECTS":
       return { title: "Too many redirects", detail: "The page redirected in a loop." };
+    case "ERR_UNSAFE_PORT":
+      return { title: "That port is off limits", detail: port ? `Browsers refuse port ${port}: it belongs to another kind of service.` : "Browsers refuse this port: it belongs to another kind of service.", hint: "Run the server on a port above 1024, such as 3000 or 8080." };
+    case "ERR_EMPTY_RESPONSE":
+      return { title: "Empty response", detail: "The server accepted the connection but sent nothing back.", hint: "If this is your dev server, look at its terminal for a crash." };
+    case "ERR_CONNECTION_CLOSED":
+      return { title: "Connection closed", detail: "The server hung up before the page finished loading." };
+    case "ERR_NETWORK_CHANGED":
+      return { title: "Network changed", detail: "The connection changed while the page was loading.", hint: "Retry now that it has settled." };
+    case "ERR_PROXY_CONNECTION_FAILED":
+      return { title: "Proxy unreachable", detail: "The configured proxy did not answer.", hint: "Check the proxy in System Settings › Network." };
+    case "ERR_FILE_NOT_FOUND":
+      return { title: "File not found", detail: "There is no file at that path." };
+    case "ERR_INVALID_URL":
+      return { title: "That is not a valid address", detail: "The address could not be parsed.", hint: "Check for stray characters or a missing scheme." };
+    case "ERR_CERT_DATE_INVALID":
+      return { title: "Certificate expired", detail: "The site's certificate is past its dates, or not yet valid.", hint: "If the site is fine elsewhere, check this Mac's date and time." };
+    case "ERR_CERT_COMMON_NAME_INVALID":
+      return { title: "Certificate is for another site", detail: "The certificate the server sent does not name this host.", hint: "A dev server answering on a different hostname than its certificate does this." };
     case "ERR_BLOCKED_BY_CLIENT":
       return { title: "Blocked by Dive", detail: "A request rule in this workspace, or DivePrivacy, stopped this page from loading.", hint: "Check the Rules panel in the developer dock, or pause protection for this site." };
     default:

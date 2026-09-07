@@ -160,8 +160,10 @@ describe("Toolbar", () => {
     render(<Toolbar />);
     const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
     expect(input.value).toBe("nonexistent.invalid");
+    expect(document.querySelector("[data-security]")?.getAttribute("data-security")).toBe("failed");
     act(() => useBrowser.setState({ navError: {} }));
     expect(input.value).toBe("example.com/docs");
+    expect(document.querySelector("[data-security]")?.getAttribute("data-security")).toBe("secure");
   });
 
   it("keeps typed text during a page redirect and Escape restores the current address", () => {

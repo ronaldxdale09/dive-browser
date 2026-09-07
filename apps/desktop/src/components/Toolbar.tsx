@@ -1,6 +1,6 @@
 import { isPrivateWindow } from "../lib/privateMode";
 import { prettyUrl } from "../lib/prettyUrl";
-import { Bug, Camera, Captions, House, ScrollText, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, X, Menu } from "lucide-react";
+import { Bug, Camera, Captions, House, ScrollText, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, TriangleAlert, X, Menu } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FOCUS_ADDRESS } from "../lib/commands";
@@ -52,7 +52,11 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
   if (draft.tabId !== activeTab) setDraft({ tabId: activeTab, value: url });
   const value = editing ? draft.value : url;
   const setValue = (value: string) => setDraft({ tabId: activeTab, value });
-  const secure = url.startsWith("https://");
+  // A load that failed is not secure whatever its scheme says; the bar
+  // shows a warning instead of a lock so a certificate error is not
+  // dressed up as a safe page.
+  const failed = Boolean(failedUrl);
+  const secure = url.startsWith("https://") && !failed;
   const display = prettyUrl(url);
   const inputRef = useRef<HTMLInputElement>(null);
   // Suggestions live only while the draft says something other than the
@@ -124,7 +128,9 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
           finishEditing();
         }}
       >
-        <Icon icon={current ? (secure ? Lock : Search) : Search} size={13} className="shrink-0 text-ink-3" />
+        <span data-security={!current ? "none" : failed ? "failed" : secure ? "secure" : "none"} className="grid shrink-0 place-items-center">
+          <Icon icon={current ? (failed ? TriangleAlert : secure ? Lock : Search) : Search} size={13} className={failed ? "text-warn" : "text-ink-3"} />
+        </span>
         <input
           ref={inputRef}
           aria-label="Address"

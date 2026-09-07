@@ -50,6 +50,12 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Failed loads on a blocked port, an empty response, a closed connection,
+  a network change, a failed proxy, a missing file or an invalid address
+  read as a sentence with something to try, not a bare error code; an
+  expired or mismatched certificate says so rather than suggesting a
+  self-signed dev server, and the address bar shows a warning instead of
+  a lock beside a load that failed.
 - A private window's menu, palette and Library no longer offer Bookmarks
   and History, which it keeps neither of; its Library opens on Downloads
   and Recordings. The empty states had invited ⌘D, which a private window

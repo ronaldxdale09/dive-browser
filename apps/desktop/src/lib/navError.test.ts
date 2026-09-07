@@ -8,6 +8,11 @@ describe("describeNavError", () => {
     expect(describeNavError("net::ERR_CERT_AUTHORITY_INVALID", "https://x").title).toBe("Certificate problem");
     expect(describeNavError("net::ERR_SSL_PROTOCOL_ERROR", "https://x").title).toBe("Certificate problem");
     expect(describeNavError("net::ERR_SOMETHING_ODD", "https://x")).toEqual({ title: "The page could not be loaded", detail: "ERR_SOMETHING_ODD" });
+    expect(describeNavError("net::ERR_UNSAFE_PORT", "http://127.0.0.1:9/")).toMatchObject({ title: "That port is off limits", detail: expect.stringContaining("port 9") });
+    expect(describeNavError("net::ERR_EMPTY_RESPONSE", "http://localhost:3000/").title).toBe("Empty response");
+    expect(describeNavError("net::ERR_INVALID_URL", "nope").title).toBe("That is not a valid address");
+    expect(describeNavError("net::ERR_CERT_DATE_INVALID", "https://expired.badssl.com/").title).toBe("Certificate expired");
+    expect(describeNavError("net::ERR_CERT_COMMON_NAME_INVALID", "https://x").title).toBe("Certificate is for another site");
   });
 
   it("points a refused connection at the port in the URL", () => {
