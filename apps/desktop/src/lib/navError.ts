@@ -30,6 +30,8 @@ export function describeNavError(error: string, url: string): NavErrorText {
       return { title: "Address unreachable", detail: "There is no route to that address from this machine." };
     case "ERR_TOO_MANY_REDIRECTS":
       return { title: "Too many redirects", detail: "The page redirected in a loop." };
+    case "ERR_BLOCKED_BY_CLIENT":
+      return { title: "Blocked by Dive", detail: "A request rule in this workspace, or DivePrivacy, stopped this page from loading.", hint: "Check the Rules panel in the developer dock, or pause protection for this site." };
     default:
       if (code.startsWith("ERR_CERT_") || code.startsWith("ERR_SSL_")) {
         return { title: "Certificate problem", detail: `The site's security certificate could not be verified (${code}).`, hint: "A dev server with a self-signed certificate does this; trust the certificate or use http://." };

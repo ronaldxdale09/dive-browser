@@ -49,6 +49,14 @@ describe("ImportPanel", () => {
     expect(screen.queryByText(/keeps Brave’s files private/)).toBeNull();
   });
 
+  it("says when a second import finds nothing new", async () => {
+    vi.spyOn(ipc, "browserImportSources").mockResolvedValue([chrome]);
+    vi.spyOn(ipc, "browserImportRun").mockResolvedValue({ bookmarks: 0, history: 0 });
+    render(<ImportPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "Import from Chrome" }));
+    expect((await screen.findByRole("status")).textContent).toContain("Nothing new from Chrome");
+  });
+
   it("phrases the outcome for what was asked", () => {
     expect(describeOutcome(3, 0, true, false)).toBe("3 bookmarks");
     expect(describeOutcome(1, 1, true, true)).toBe("1 bookmark and 1 page of history");

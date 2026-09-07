@@ -15,4 +15,8 @@ describe("describeNavError", () => {
     expect(describeNavError("net::ERR_CONNECTION_REFUSED", "https://example.com/").hint).toContain("port 443");
     expect(describeNavError("net::ERR_CONNECTION_REFUSED", "not a url").hint).toContain("that port");
   });
+
+  it("explains a block as Dive's own doing", () => {
+    expect(describeNavError("net::ERR_BLOCKED_BY_CLIENT", "https://httpbin.org/api/ping").title).toBe("Blocked by Dive");
+  });
 });

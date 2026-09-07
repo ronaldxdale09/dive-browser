@@ -124,7 +124,9 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
       {outcome && (
         <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-ink-2">
           <Icon icon={Check} size={12} className="text-highlight" />
-          Brought in {describeOutcome(outcome.summary.bookmarks, outcome.summary.history, bookmarks, history)} from {outcome.source.name}. Anything already here was kept.
+          {outcome.summary.bookmarks + outcome.summary.history === 0
+            ? `Nothing new from ${outcome.source.name}: everything there was already here.`
+            : `Brought in ${describeOutcome(outcome.summary.bookmarks, outcome.summary.history, bookmarks, history)} from ${outcome.source.name}. Anything already here was kept.`}
         </p>
       )}
       {error && (
