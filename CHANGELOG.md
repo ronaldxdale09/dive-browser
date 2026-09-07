@@ -50,6 +50,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- The agent panel's "Agent settings" button opens the Agent section of Settings instead of General. Its model note says "1 model listed", not "1 models".
 - An agent step waiting for approval, still running, denied or failed reads in the present ("Click …", "Open …") instead of claiming it already happened. When nobody answers an approval request within 2 minutes the model is told the action was skipped for lack of an answer rather than that the user refused it.
 - The model picker's provider chips wrap instead of scrolling out of sight, so "Add" (a custom provider) is always visible; "Search 1 models" reads "Search 1 model".
 - The agent's Ollama model list comes from Ollama's own listing: embedding-only models (bge, nomic-embed) no longer appear as chat choices, each model shows its context window, and a model whose id is its name is no longer printed twice.

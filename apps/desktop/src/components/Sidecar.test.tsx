@@ -65,7 +65,7 @@ beforeEach(() => {
     clear: vi.fn(),
   });
   usePrefs.setState({ prefs: { ...usePrefs.getState().prefs, agent_provider: "anthropic", agent_model: "claude-opus-5" } });
-  useBrowser.setState({ tabs: [tab], activeTab: tab.id, open: { ...useBrowser.getState().open, settings: false }, toggle: vi.fn() });
+  useBrowser.setState({ tabs: [tab], activeTab: tab.id, open: { ...useBrowser.getState().open, settings: false }, toggle: vi.fn(), openSettings: vi.fn() });
 });
 
 afterEach(() => {
@@ -145,7 +145,7 @@ describe("Sidecar", () => {
     fireEvent.click(screen.getByRole("button", { name: "New conversation" }));
     expect(useAgent.getState().clear).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Agent settings" }));
-    expect(useBrowser.getState().toggle).toHaveBeenCalledWith("settings", true);
+    expect(useBrowser.getState().openSettings).toHaveBeenCalledWith("agent");
   });
 
   it("shows setup instead of the thread when the chosen provider has no key", () => {

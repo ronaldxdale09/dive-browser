@@ -29,6 +29,7 @@ export function Sidecar() {
   const providerId = usePrefs((s) => s.prefs.agent_provider);
   const settingsOpen = useBrowser((s) => s.open.settings);
   const toggle = useBrowser((s) => s.toggle);
+  const openSettings = useBrowser((s) => s.openSettings);
   // The user may want to change or configure a provider even while ready
   const [wantsSetup, setWantsSetup] = useState(false);
   const previousSettings = useRef(settingsOpen);
@@ -72,7 +73,7 @@ export function Sidecar() {
                 icon={Settings2}
                 label="Agent settings"
                 size={14}
-                onClick={() => toggle("settings", true)}
+                onClick={() => openSettings("agent")}
               />
             </>
           )}

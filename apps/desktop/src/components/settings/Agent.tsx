@@ -76,7 +76,7 @@ export function Agent() {
             modelsError
               ? modelsError
               : list.length
-                ? `${list.length} models listed by ${provider?.name ?? "the provider"}${loading ? ", refreshing…" : "."}`
+                ? `${list.length} ${list.length === 1 ? "model" : "models"} listed by ${provider?.name ?? "the provider"}${loading ? ", refreshing…" : "."}`
                 : provider && !ready
                   ? "Models are listed once a key is saved."
                   : "Type the id exactly as the provider names it."
