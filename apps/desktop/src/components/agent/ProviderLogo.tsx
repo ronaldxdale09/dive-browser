@@ -1,4 +1,6 @@
 import type { Provider } from "../../lib/ipc";
+import { brandLogo } from "../../lib/brandLogos";
+import { BrandLogo } from "../BrandLogo";
 
 interface ProviderLogoProps {
   id: Provider;
@@ -11,6 +13,9 @@ interface ProviderLogoProps {
  * Designed with Anthropic and OpenAI aesthetic fidelity, styled for Dive chrome.
  */
 export function ProviderLogo({ id, size = 18, className = "" }: ProviderLogoProps) {
+  // The official mark where one ships (svgl.app); the drawings below stand
+  // in for the providers without one.
+  if (brandLogo(id)) return <BrandLogo id={id} size={size} className={className} />;
   switch (id) {
     case "anthropic":
       return (

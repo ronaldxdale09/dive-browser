@@ -45,6 +45,9 @@ bump may change behaviour.
 - Bringing a tab back from its own window no longer deletes it: the popout
   window's close, raised by the reattach itself, was treated as closing the
   tab.
+- Browser, AI provider and assistant marks are the official logos from
+  svgl.app, with light and dark drawings where the brand has them, in the
+  import step, the agent setup and the rail's AI shortcuts.
 - The Live subtitles dialog closes on Escape before any model is downloaded;
   a dialog whose primary button is disabled no longer leaves focus outside
   its trap.

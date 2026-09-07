@@ -562,3 +562,10 @@ button:not(:disabled):active,
 :root[data-motion="reduce"] .start-button { animation: none; --start-angle: 300deg; }
 :root[data-motion="reduce"] .onboarding-enter,
 :root[data-motion="reduce"] .feature-card { animation: none; }
+
+/* Brand marks that ship in a light and a dark drawing: the theme picks one.
+   The root always carries `data-theme` once preferences load, so a media
+   query is not needed; before that the light drawing shows. */
+.brand-logo img[data-variant="dark"] { display: none; }
+:root[data-theme="dark"] .brand-logo img[data-variant="light"] { display: none; }
+:root[data-theme="dark"] .brand-logo img[data-variant="dark"] { display: block; }

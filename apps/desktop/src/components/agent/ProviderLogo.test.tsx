@@ -24,9 +24,10 @@ describe("ProviderLogo", () => {
   ALL_PROVIDERS.forEach((id) => {
     it(`renders logo for ${id}`, () => {
       const { container } = render(<ProviderLogo id={id} size={20} />);
-      const svg = container.querySelector("svg");
-      expect(svg).toBeTruthy();
-      expect(svg?.getAttribute("width")).toBe("20");
+      // Official marks are images from svgl.app; the rest are drawn inline.
+      const mark = container.querySelector("img, svg");
+      expect(mark).toBeTruthy();
+      expect(mark?.getAttribute("width")).toBe("20");
     });
 
     it(`provides valid badge styles for ${id}`, () => {

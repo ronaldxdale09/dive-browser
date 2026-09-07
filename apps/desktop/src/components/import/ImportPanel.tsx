@@ -4,8 +4,10 @@ import type { ImportSource } from "../../lib/ipc";
 import { useBrowserImport } from "../../store/browserImport";
 import { Icon } from "../Icon";
 import { Switch } from "../SettingsFields";
+import { BrandLogo } from "../BrandLogo";
+import { brandLogo } from "../../lib/brandLogos";
 
-/** The browser's own icon comes from its app bundle; these letter tiles stand in only when the app is not installed. */
+/** Marks come from svgl.app, then the installed app's own icon; these letter tiles are the last resort. */
 const MARKS: Record<string, { text: string; color: string }> = {
   chrome: { text: "C", color: "#4285F4" },
   brave: { text: "B", color: "#FB542B" },
@@ -151,7 +153,9 @@ function SourceRow({ source, checked, onPick }: { source: ImportSource; checked:
       onClick={onPick}
       className={`flex w-full items-center gap-2.5 rounded-xl border px-2.5 py-2 text-left transition-colors ${checked ? "border-highlight bg-highlight-soft/40" : "border-line bg-surface-2/50 hover:bg-surface-2"}`}
     >
-      {source.icon ? (
+      {brandLogo(source.browser) ? (
+        <BrandLogo id={source.browser} size={26} className="mx-px" />
+      ) : source.icon ? (
         <img src={source.icon} alt="" width={28} height={28} className="size-7 shrink-0" />
       ) : (
         <span className="grid size-7 shrink-0 place-items-center rounded-lg text-[11px] font-semibold text-white" style={{ background: mark.color }} aria-hidden>

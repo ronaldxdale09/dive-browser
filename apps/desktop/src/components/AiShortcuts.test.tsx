@@ -20,9 +20,9 @@ describe("AiShortcuts", () => {
   it("draws a brand glyph for every site", () => {
     for (const site of AI_SITES) {
       const { container, unmount } = render(<AiLogo id={site.id} size={20} />);
-      const svg = container.querySelector("svg");
-      expect(svg?.getAttribute("width")).toBe("20");
-      expect(svg?.querySelector("path")).toBeTruthy();
+      const img = container.querySelector("img");
+      expect(img?.getAttribute("width")).toBe("20");
+      expect(img?.getAttribute("src")).toMatch(/svg/);
       unmount();
     }
   });
