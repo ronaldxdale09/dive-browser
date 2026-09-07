@@ -25,6 +25,13 @@ describe("network fold", () => {
     expect(fold(rows, { type: "finished", data: { tab_id: "t", request_id: "nope", encoded_length: 1, timestamp: 2 } })).toBe(rows);
   });
 
+  it("shows no size for a blocked request even if the engine reported its error page's bytes", () => {
+    let rows = fold(undefined, sent("1", "https://a.dev/api", 1));
+    rows = fold(rows, { type: "finished", data: { tab_id: "t", request_id: "1", encoded_length: 179_500, timestamp: 1.2 } });
+    rows = fold(rows, { type: "failed", data: { tab_id: "t", request_id: "1", error: "net::ERR_BLOCKED_BY_CLIENT", timestamp: 1.3 } });
+    expect(rows[0]).toMatchObject({ error: "net::ERR_BLOCKED_BY_CLIENT", size: null });
+  });
+
   it("lists sockets as rows and ignores frames in the row list", () => {
     let rows = fold(undefined, { type: "socket", data: { tab_id: "t", request_id: "s", url: "wss://a.dev/ws", timestamp: 1 } });
     rows = fold(rows, { type: "frame", data: { tab_id: "t", request_id: "s", direction: "received", payload: "hi", timestamp: 1.2 } });

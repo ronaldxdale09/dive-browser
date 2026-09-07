@@ -1005,7 +1005,13 @@ mod tests {
             input.clone(),
         );
         session.close();
-        tokio::time::sleep(Duration::from_millis(600)).await;
+        // The route notices the closed session on its own tick; a loaded test
+        // machine can take a while to get there, so wait for it rather than
+        // for a fixed moment.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !input.lock().unwrap().ended && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
         assert!(
             input.lock().unwrap().ended,
             "closed tabs must release even paused models"

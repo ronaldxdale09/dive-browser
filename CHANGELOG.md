@@ -45,6 +45,10 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Tabs squeezed down to their favicon, and pinned tabs, name themselves
+  on hover.
+- A request a rule blocked no longer shows the engine's error page as
+  "179.5 kB" transferred in the Network panel.
 - The Vitals panel no longer keeps the last page's numbers on display
   when the welcome screen shows; it asks for a tab instead.
 - The command palette matches rows that contain what you typed; it no

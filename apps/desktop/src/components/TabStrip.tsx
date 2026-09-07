@@ -321,6 +321,8 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
         data-sleeping={sleeping || undefined}
         data-detached={detached || undefined}
         data-pinned={pinned || undefined}
+        // Icon-only tabs still answer "which one is this?" on hover.
+        title={pinned || narrow.title ? label(t) : undefined}
         className={`flex h-full min-w-0 flex-1 items-center gap-2 bg-transparent outline-none ${pinned || narrow.title ? "justify-center px-0" : "px-2.5"}`}
       >
         {/* A pinned tab is icon-only, so the site's own mark is the only thing

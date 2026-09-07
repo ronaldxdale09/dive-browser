@@ -52,7 +52,9 @@ function updateRow(row: RequestRow | undefined, event: NetworkEvent): RequestRow
   switch (event.type) {
     case "response": return { ...row, status: event.data.status, mimeType: event.data.mime_type, fromCache: event.data.from_cache };
     case "finished": return { ...row, size: event.data.encoded_length ?? 0, durationMs };
-    case "failed": return { ...row, error: event.data.error, durationMs };
+    // A blocked or failed request transferred nothing the person can use; an
+    // engine-side error page must not read as 180 kB of response.
+    case "failed": return { ...row, error: event.data.error, durationMs, size: null };
   }
 }
 
