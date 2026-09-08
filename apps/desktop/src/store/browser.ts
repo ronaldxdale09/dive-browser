@@ -120,14 +120,29 @@ interface BrowserState {
 }
 
 export type NavError = { url: string; error: string };
-export type ClosedTab = { url: string; title: string; workspace_id: string | null };
+export type ClosedTab = { url: string; title: string; workspace_id: string | null; index: number };
 /** Most closed tabs remembered for reopening. */
 export const CLOSED_TABS_LIMIT = 25;
 
+/** Where `id` sits in its workspace's strip, for putting a reopened tab back. */
+export function stripIndex(tabs: readonly Tab[], id: string): number {
+  const tab = tabs.find((t) => t.id === id);
+  if (!tab) return -1;
+  return tabs.filter((t) => t.workspace_id === tab.workspace_id).findIndex((t) => t.id === id);
+}
+
+/** The order of a workspace's strip with `id` moved to `index`, for the engine to apply. */
+export function orderWithAt(tabs: readonly Tab[], workspaceId: string, id: string, index: number): string[] {
+  const ids = tabs.filter((t) => t.workspace_id === workspaceId && t.id !== id).map((t) => t.id);
+  const at = Math.max(0, Math.min(index, ids.length));
+  ids.splice(at, 0, id);
+  return ids;
+}
+
 /** The closed-tab stack after `tab` went, or unchanged when there was nothing worth reopening. */
-export function rememberClosed(stack: ClosedTab[], tab: Pick<Tab, "url" | "title" | "workspace_id"> | undefined): ClosedTab[] {
+export function rememberClosed(stack: ClosedTab[], tab: Pick<Tab, "url" | "title" | "workspace_id"> | undefined, index = -1): ClosedTab[] {
   if (!tab || !tab.url || tab.url === "about:blank") return stack;
-  const next = [...stack, { url: tab.url, title: tab.title, workspace_id: tab.workspace_id }];
+  const next = [...stack, { url: tab.url, title: tab.title, workspace_id: tab.workspace_id, index }];
   return next.length > CLOSED_TABS_LIMIT ? next.slice(next.length - CLOSED_TABS_LIMIT) : next;
 }
 export type CrashState = { attempt: number; recovering: boolean };
@@ -326,7 +341,12 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     }
     const ws = get().activeWorkspace;
     if (!ws) return;
-    await run(set, () => ipc.tabOpen(ws, last.url));
+    const opened = await run(set, () => ipc.tabOpen(ws, last.url));
+    // Back where it was, not at the end of the strip.
+    if (opened?.id && last.index >= 0 && last.workspace_id === ws) {
+      const ordered = orderWithAt(get().tabs, ws, opened.id, last.index);
+      if (ordered.includes(opened.id)) await ipc.tabReorder(ws, ordered).catch(() => undefined);
+    }
   },
   open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false },
   libraryTab: "bookmarks",
@@ -412,8 +432,12 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     await run(set, () => ipc.tabDeactivate());
     set({ activeTab: null });
   },
-  detachTab: async (id, at) => run(set, () => ipc.tabDetach(id, at)),
-  attachTab: async (id) => run(set, () => ipc.tabAttach(id)),
+  detachTab: async (id, at) => {
+    await run(set, () => ipc.tabDetach(id, at));
+  },
+  attachTab: async (id) => {
+    await run(set, () => ipc.tabAttach(id));
+  },
   closeIfOnlyDownload: async (id, url) => {
     let history: NavigationHistory | null = null;
     try {
@@ -501,7 +525,9 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     const id = get().activeTab;
     if (id) await run(set, () => ipc.tabPrint(id));
   },
-  setTier: async (id, tier) => run(set, () => ipc.tabSetTier(id, tier)),
+  setTier: async (id, tier) => {
+    await run(set, () => ipc.tabSetTier(id, tier));
+  },
   // The recorder lives in its own store; this stays for callers that only
   // know the browser store. `recordingTab` mirrors it for the strip and the
   // idle sweep.
@@ -571,7 +597,9 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       set({ tabs: prevTabs, error: errorMessage(e) });
     }
   },
-  setPinned: async (id, pinned) => run(set, () => ipc.tabSetPinned(id, pinned)),
+  setPinned: async (id, pinned) => {
+    await run(set, () => ipc.tabSetPinned(id, pinned));
+  },
   activateWorkspace: async (id) => {
     // The rail moves at once. The engine only announces `workspace_activated`
     // and the tab it focuses, never the workspace's tab list, so the snapshot
@@ -626,10 +654,11 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   applyEvent: (event) => {
     // Remembered before the reducer forgets the tab.
     const gone = event.type === "tab_closed" ? get().tabs.find((t) => t.id === event.data) : undefined;
+    const goneIndex = event.type === "tab_closed" ? stripIndex(get().tabs, event.data) : -1;
     set((s) => reduceEvent(s, event));
     if (event.type === "tab_closed") {
       const id = event.data;
-      set((s) => ({ closedTabs: rememberClosed(s.closedTabs, gone) }));
+      set((s) => ({ closedTabs: rememberClosed(s.closedTabs, gone, goneIndex) }));
       set((s) => ({ loading: without(s.loading, id), navError: without(s.navError, id), crashedTabs: without(s.crashedTabs, id), permissionRequests: without(s.permissionRequests, id) }));
       usePrivacy.getState().drop(id);
     }
@@ -650,12 +679,14 @@ function scheduleCounts(get: () => BrowserState) {
   }, 300);
 }
 
-async function run(set: (p: Partial<BrowserState>) => void, f: () => Promise<unknown>) {
+async function run<T>(set: (p: Partial<BrowserState>) => void, f: () => Promise<T>): Promise<T | undefined> {
   try {
-    await f();
+    const result = await f();
     set({ error: null });
+    return result;
   } catch (e) {
     set({ error: errorMessage(e) });
+    return undefined;
   }
 }
 

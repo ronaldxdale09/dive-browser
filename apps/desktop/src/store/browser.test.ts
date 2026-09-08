@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@tauri-apps/api/event";
-import { CLOSED_TABS_LIMIT, reduceCrash, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, useBrowser, withoutRequest } from "./browser";
+import { CLOSED_TABS_LIMIT, orderWithAt, reduceCrash, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, useBrowser, withoutRequest } from "./browser";
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
 import type { PermissionAsked, PermissionDismissed, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
@@ -401,7 +401,7 @@ describe("reopening closed tabs", () => {
     expect(rememberClosed([], t("a", ""))).toEqual([]);
     expect(rememberClosed([], undefined)).toEqual([]);
     const one = rememberClosed([], t("a", "https://a.test/"));
-    expect(one).toEqual([{ url: "https://a.test/", title: "A", workspace_id: "w1" }]);
+    expect(one).toEqual([{ url: "https://a.test/", title: "A", workspace_id: "w1", index: -1 }]);
     let stack = one;
     for (let i = 0; i < CLOSED_TABS_LIMIT + 5; i++) stack = rememberClosed(stack, t(`x${i}`, `https://x${i}.test/`));
     expect(stack).toHaveLength(CLOSED_TABS_LIMIT);
@@ -418,11 +418,30 @@ describe("reopening closed tabs", () => {
       workspaces: [{ id: "w1" }, { id: "w2" }] as unknown as Workspace[],
     });
     useBrowser.getState().applyEvent({ type: "tab_closed", data: "b" });
-    expect(useBrowser.getState().closedTabs).toEqual([{ url: "https://b.test/", title: "B", workspace_id: "w2" }]);
+    expect(useBrowser.getState().closedTabs).toEqual([{ url: "https://b.test/", title: "B", workspace_id: "w2", index: 0 }]);
     await useBrowser.getState().reopenClosedTab();
     expect(activate).toHaveBeenCalledWith("w2");
     expect(open).toHaveBeenCalledWith(expect.anything(), "https://b.test/");
     expect(useBrowser.getState().closedTabs).toEqual([]);
+  });
+
+  it("puts a reopened tab back where it was in the strip", async () => {
+    const open = vi.spyOn(ipc, "tabOpen").mockResolvedValue({ id: "b2" } as never);
+    const reorder = vi.spyOn(ipc, "tabReorder").mockResolvedValue(null as never);
+    useBrowser.setState({
+      tabs: [t("a", "https://a.test/"), t("b", "https://b.test/"), t("c", "https://c.test/")],
+      activeTab: "a",
+      activeWorkspace: "w1",
+      workspaces: [{ id: "w1" }] as unknown as Workspace[],
+    });
+    useBrowser.getState().applyEvent({ type: "tab_closed", data: "b" });
+    expect(useBrowser.getState().closedTabs[0]?.index).toBe(1);
+    // The engine's `tab_opened` puts the new tab at the end before the reorder.
+    useBrowser.setState({ tabs: [t("a", "https://a.test/"), t("c", "https://c.test/"), t("b2", "https://b.test/")] });
+    await useBrowser.getState().reopenClosedTab();
+    expect(open).toHaveBeenCalledWith("w1", "https://b.test/");
+    expect(reorder).toHaveBeenCalledWith("w1", ["a", "b2", "c"]);
+    expect(orderWithAt([t("a", "https://a.test/"), t("b", "https://b.test/")], "w1", "b", 99)).toEqual(["a", "b"]);
   });
 
   it("says when there is nothing to reopen", async () => {
