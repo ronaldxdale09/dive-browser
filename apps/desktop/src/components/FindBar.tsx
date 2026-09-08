@@ -57,7 +57,9 @@ export function FindBar() {
           placeholder="Find in page"
           className="h-7 w-52 bg-transparent px-2 text-xs outline-none placeholder:text-ink-3"
         />
-        <span className="w-14 text-center font-mono text-[11px] text-ink-3 tabular-nums">{query ? `${result.current}/${result.total}` : ""}</span>
+        <span role="status" aria-live="polite" aria-label={query ? (result.total ? `Match ${result.current} of ${result.total}` : "No matches") : undefined} className="w-14 text-center font-mono text-[11px] text-ink-3 tabular-nums">
+          {query ? `${result.current}/${result.total}` : ""}
+        </span>
         <IconButton icon={ChevronUp} label="Previous match" size={13} disabled={!result.total} onClick={() => setIndex((i) => i - 1)} />
         <IconButton icon={ChevronDown} label="Next match" size={13} disabled={!result.total} onClick={() => setIndex((i) => i + 1)} />
         <IconButton icon={X} label="Close find" size={13} onClick={close} />

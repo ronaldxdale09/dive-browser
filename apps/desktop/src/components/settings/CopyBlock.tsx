@@ -14,9 +14,13 @@ export function CopyBlock({ text, label = "Copy command", display }: { text: str
       <code title={display ? text : undefined} className="min-w-0 flex-1 font-mono text-[11px] break-all text-ink select-text">
         {display ?? (text || "…")}
       </code>
+      <span role="status" className="sr-only">
+        {copied ? "Copied to the clipboard" : ""}
+      </span>
       <button
         type="button"
-        aria-label={label}
+        aria-label={copied ? "Copied" : label}
+        title={copied ? "Copied" : label}
         disabled={!text}
         onClick={() => {
           void navigator.clipboard.writeText(text).then(() => {
