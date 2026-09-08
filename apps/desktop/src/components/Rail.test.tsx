@@ -46,6 +46,17 @@ describe("Rail", () => {
     expect(screen.getByRole("button", { name: /^Client — 1 tab, own cookies \(⌘2\)/ })).toBeTruthy();
   });
 
+  it("switches workspace from the keyboard with Enter or Space", () => {
+    const activate = vi.fn().mockResolvedValue(undefined);
+    useBrowser.setState({ activateWorkspace: activate });
+    render(<Rail />);
+    const row = screen.getByRole("button", { name: /^Client/ });
+    fireEvent.keyDown(row, { key: " " });
+    expect(activate).toHaveBeenCalledWith(client.id);
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(activate).toHaveBeenCalledTimes(2);
+  });
+
   it("switches workspace on click", () => {
     const activate = vi.fn().mockResolvedValue(undefined);
     useBrowser.setState({ activateWorkspace: activate });

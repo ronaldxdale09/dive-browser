@@ -222,7 +222,12 @@ function WorkspaceRow({
       title={summary}
       aria-label={summary}
       onClick={onActivate}
-      onKeyDown={(e) => e.key === "Enter" && onActivate()}
+      onKeyDown={(e) => {
+        // A button answers Space as well as Enter; Space must not scroll the rail.
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        onActivate();
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         onMenu(e.clientX, e.clientY);
