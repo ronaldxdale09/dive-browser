@@ -78,7 +78,7 @@ function ProfileForm({ id }: { id: string | null }) {
         <p className="mt-4 text-[11px] text-ink-2">Face</p>
         <div role="radiogroup" aria-label="Face" className="mt-1.5 grid grid-cols-6 gap-2">
           {seeds.map((s) => (
-            <button key={s} type="button" role="radio" aria-checked={avatar === s} aria-label={`Face ${s}`} onClick={() => setSeed(s)} className={`aspect-square rounded-full ring-offset-2 ring-offset-surface transition ${avatar === s ? "ring-2 ring-highlight" : "opacity-80 hover:opacity-100"}`}>
+            <button key={s} type="button" role="radio" aria-checked={avatar === s} aria-label={s === seedFromProfileName(name) ? "Face from the name" : `Face ${s}`} title={s === seedFromProfileName(name) ? "Face from the name" : s} onClick={() => setSeed(s)} className={`aspect-square rounded-full ring-offset-2 ring-offset-surface transition ${avatar === s ? "ring-2 ring-highlight" : "opacity-80 hover:opacity-100"}`}>
               <AvatarImage kind="profile" seed={s} color={color} alt="" className="size-full rounded-full" />
             </button>
           ))}

@@ -105,8 +105,8 @@ export function WorkspaceDialog() {
               type="button"
               role="radio"
               aria-checked={s === icon}
-              aria-label={s.replace(/-/g, " ")}
-              title={s.replace(/-/g, " ")}
+              aria-label={s === named && s !== existing?.icon ? "Mark from the name" : s.replace(/-/g, " ")}
+              title={s === named && s !== existing?.icon ? "Mark from the name" : s.replace(/-/g, " ")}
               onClick={() => setSeed(s)}
               // The ring alone marks the choice: the marks are already colored,
               // so tinting the cell as well would just add noise.
