@@ -149,12 +149,18 @@ export type CrashState = { attempt: number; recovering: boolean };
 
 const NAVIGATION_DIALOGS = new Set<UiPanel>(["palette", "settings", "library", "shortcuts"]);
 
-/** Navigation dialogs replace each other; panels and editing workflows keep their state. */
-function togglePanel(open: BrowserState["open"], panel: UiPanel, value?: boolean): BrowserState["open"] {
+/**
+ * Navigation dialogs replace each other; panels and editing workflows keep
+ * their state. The main menu is a passing popover: whatever else opens
+ * (find, the dock, a dialog) closes it, so a shortcut never leaves two
+ * things fighting for the keyboard.
+ */
+export function togglePanel(open: BrowserState["open"], panel: UiPanel, value?: boolean): BrowserState["open"] {
   const shown = value ?? !open[panel];
   if (shown && NAVIGATION_DIALOGS.has(panel)) {
     return { ...open, palette: false, settings: false, library: false, shortcuts: false, menu: false, [panel]: true };
   }
+  if (shown && panel !== "menu") return { ...open, menu: false, [panel]: shown };
   return { ...open, [panel]: shown };
 }
 

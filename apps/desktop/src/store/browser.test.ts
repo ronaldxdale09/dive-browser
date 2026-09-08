@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@tauri-apps/api/event";
-import { CLOSED_TABS_LIMIT, orderWithAt, reduceCrash, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, useBrowser, withoutRequest } from "./browser";
+import { CLOSED_TABS_LIMIT, orderWithAt, reduceCrash, togglePanel, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, useBrowser, withoutRequest } from "./browser";
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
 import type { PermissionAsked, PermissionDismissed, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
@@ -451,5 +451,22 @@ describe("reopening closed tabs", () => {
     await useBrowser.getState().reopenClosedTab();
     expect(notify).toHaveBeenCalledWith("No closed tab to reopen.");
     expect(open).not.toHaveBeenCalled();
+  });
+});
+
+describe("togglePanel", () => {
+  const closed = { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false };
+  it("closes the main menu when anything else opens, and leaves panels alone otherwise", () => {
+    const menu = togglePanel(closed, "menu");
+    expect(menu.menu).toBe(true);
+    const find = togglePanel(menu, "find", true);
+    expect(find.find).toBe(true);
+    expect(find.menu).toBe(false);
+    const dock = togglePanel({ ...find, menu: true }, "dock");
+    expect(dock).toMatchObject({ dock: true, find: true, menu: false });
+    // Closing something does not touch the menu.
+    expect(togglePanel({ ...closed, menu: true, dock: true }, "dock", false).menu).toBe(true);
+    // Navigation dialogs still replace each other.
+    expect(togglePanel({ ...closed, palette: true, dock: true }, "settings", true)).toMatchObject({ palette: false, settings: true, dock: true });
   });
 });
