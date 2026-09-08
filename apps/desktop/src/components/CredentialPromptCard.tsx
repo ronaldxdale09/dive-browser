@@ -44,10 +44,12 @@ export function CredentialPromptCard({ tabId }: { tabId: string | null }) {
         <div className="min-w-0 flex-1">
           <h2 className="text-[13px] font-semibold text-ink">{heading}</h2>
           {prompt.kind !== "pick" && (
-            <p className="mt-0.5 truncate text-[11px] text-ink-3" title={prompt.username}>
-              {prompt.username || "No username"}
-              <span className="mx-1">·</span>kept in the Keychain for this profile
-            </p>
+            <>
+              <p className="mt-0.5 truncate text-[11px] text-ink-2" title={prompt.username}>
+                {prompt.username || "No username"}
+              </p>
+              <p className="text-[11px] text-ink-3">Kept in the Keychain for this profile.</p>
+            </>
           )}
         </div>
         <button type="button" aria-label="Close" onClick={() => dismiss(prompt.tab_id)} className="grid size-6 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-ink">
