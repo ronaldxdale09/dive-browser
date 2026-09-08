@@ -231,6 +231,13 @@ export function dayLabel(iso: string, now: Date = new Date()): string {
   return d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}) });
 }
 
+/** The time of day a page was last visited, as the row shows it ("4:21 PM"); empty for an unreadable time. */
+export function timeLabel(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
 /** History rows in the order given, bucketed by day; days keep first-seen order. */
 export function groupByDay(entries: HistoryEntry[], now: Date = new Date()): { day: string; entries: HistoryEntry[] }[] {
   const groups: { day: string; entries: HistoryEntry[] }[] = [];
@@ -294,6 +301,9 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
                   <Favicon src={h.favicon} size={14} fallback={History} />
                   <span className="truncate text-ink">{titleOf(h)}</span>
                   <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(h.url)}</span>
+                  <span className="w-16 shrink-0 text-right font-mono text-[10.5px] text-ink-3 tabular-nums" aria-label={`at ${timeLabel(h.last_visited_at)}`}>
+                    {timeLabel(h.last_visited_at)}
+                  </span>
                 </button>
                 <button
                   type="button"

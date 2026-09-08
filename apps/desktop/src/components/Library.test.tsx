@@ -5,7 +5,7 @@ import { contentCoverDepth, resetContentCover } from "../lib/overlay";
 import { useImportVideo } from "../screen/importVideo";
 import { useBrowser } from "../store/browser";
 import { screenUrl } from "./internal/InternalPage";
-import { Library, dayLabel, groupByDay, matches } from "./Library";
+import { Library, dayLabel, groupByDay, matches, timeLabel } from "./Library";
 
 const initial = useBrowser.getState();
 // Local-time dates: day boundaries depend on the machine's zone.
@@ -49,6 +49,9 @@ describe("Library helpers", () => {
     expect(dayLabel(at(2026, 9, 4, 3), now)).toBe("Today");
     expect(dayLabel(at(2026, 9, 3, 23), now)).toBe("Yesterday");
     expect(dayLabel("nonsense", now)).toBe("Earlier");
+    // Each row also says when, in the person's locale; an unreadable time says nothing.
+    expect(timeLabel(new Date(2026, 8, 4, 15, 21).toISOString())).toMatch(/3:21|15:21/);
+    expect(timeLabel("nonsense")).toBe("");
     expect(dayLabel(at(2026, 8, 20), now)).not.toMatch(/Today|Yesterday/);
     const groups = groupByDay(
       [
