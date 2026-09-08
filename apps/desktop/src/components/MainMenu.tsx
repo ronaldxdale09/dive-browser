@@ -30,6 +30,7 @@ import {
   Video,
   Wand2,
   X,
+  Import,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -298,6 +299,7 @@ function useMenu(close: () => void): Group[] {
         { id: "history", label: "History", icon: History, shortcut: "⌘Y", more: true, keywords: "visited recent", run: () => b().openLibrary("history") },
         { id: "downloads", label: "Downloads", icon: Download, shortcut: "⌘⇧J", more: true, keywords: "files saved", run: () => b().openLibrary("downloads") },
         { id: "recordings", label: "Recordings", icon: Clapperboard, more: true, keywords: "videos gifs captures", run: () => b().openLibrary("recordings") },
+        { id: "import", label: "Import from another browser…", icon: Import, keywords: "chrome brave safari firefox bookmarks passwords migrate", run: done(() => runCommand("import.open")) },
         { id: "clear", label: "Clear browsing data…", icon: Trash2, keywords: "cookies cache privacy clear delete", run: done(() => b().openSettings("privacy", "clear-browsing-data")) },
       ],
     },

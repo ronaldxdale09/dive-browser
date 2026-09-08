@@ -66,6 +66,12 @@ describe("MainMenu", () => {
     expect(open.menu).toBe(false);
   });
 
+  it("offers the import dialog from the library group", () => {
+    render(<MainMenu />);
+    fireEvent.click(screen.getByRole("menuitem", { name: /Import from another browser/ }));
+    expect(useBrowser.getState().open.import).toBe(true);
+  });
+
   it("opens settings sections and closes itself", () => {
     render(<MainMenu />);
     fireEvent.click(screen.getByRole("menuitem", { name: /Clear browsing data/ }));

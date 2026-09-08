@@ -9,6 +9,7 @@ bump may change behaviour.
 
 ### Added
 - Import from another browser now brings saved passwords too, from Chrome, Brave, Edge, Arc, Vivaldi, Opera and Chromium: a Passwords switch beside Bookmarks and History, decrypted with the browser's own key after macOS asks once to allow it, and stored in this profile's Keychain. Logins Dive already has are left alone.
+- The menu has "Import from another browser…" beside Bookmarks and History; the import dialog was reachable only from Settings › General and the Library.
 - Saved logins: Settings › Passwords lists the logins kept in this profile, shows or copies a password on request, adds one by hand and forgets one. Passwords live in the macOS Keychain, never in Dive's own files. Signing in to a site offers to save the login (or update a changed password) in a small card over the page; a site with one saved login is filled as soon as its form appears, and one with several asks which to use when a login field is focused.
 - The page's corners are slightly rounded where it meets the rail and toolbar, following the Appearance corner setting (square under Sharp). The window behind the chrome is painted in the chrome's ground colour, so nothing black shows through corners or during a resize.
 
