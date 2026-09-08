@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveImage } from "./MetaPanel";
+import { absentLabel, resolveImage } from "./MetaPanel";
 
 describe("social card image", () => {
   it("resolves relative og:image paths against the page and drops what a crawler could not fetch", () => {
@@ -8,5 +8,12 @@ describe("social card image", () => {
     expect(resolveImage("data:image/png;base64,AA", "https://example.com/")).toBeUndefined();
     expect(resolveImage(undefined, "https://example.com/")).toBeUndefined();
     expect(resolveImage("card.png", "not a url")).toBeUndefined();
+  });
+});
+
+describe("absentLabel", () => {
+  it("treats a missing robots tag as the default, and anything else as missing", () => {
+    expect(absentLabel("robots")).toEqual({ text: "not set · index, follow", warn: false });
+    expect(absentLabel("canonical")).toEqual({ text: "missing", warn: true });
   });
 });

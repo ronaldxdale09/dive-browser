@@ -1,4 +1,5 @@
 import { RefreshCw } from "lucide-react";
+import { useState } from "react";
 import { ipc } from "../lib/ipc";
 import { useTabData } from "../lib/useTabData";
 import { useBrowser } from "../store/browser";
@@ -15,6 +16,28 @@ export function resolveImage(image: string | undefined, pageUrl: string): string
   } catch {
     return undefined;
   }
+}
+
+/**
+ * What an absent tag means. Most are worth a red "missing"; robots absent
+ * is the normal case and means "index, follow", so it is not an alarm.
+ */
+export function absentLabel(key: string): { text: string; warn: boolean } {
+  return key === "robots" ? { text: "not set · index, follow", warn: false } : { text: "missing", warn: true };
+}
+
+/** The og:image, or a note when there is none or it did not load. */
+function CardImage({ src }: { src: string | undefined }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  if (!src) return <div className="grid aspect-[1.91/1] place-items-center text-xs text-ink-3">no og:image</div>;
+  if (failed === src) {
+    return (
+      <div className="grid aspect-[1.91/1] place-items-center px-3 text-center text-xs text-danger" title={src}>
+        og:image did not load
+      </div>
+    );
+  }
+  return <img src={src} alt="" onError={() => setFailed(src)} className="aspect-[1.91/1] w-full object-cover" />;
 }
 
 /** Head metadata with a search-result and a social-card preview. */
@@ -64,7 +87,7 @@ export function MetaPanel() {
           {rows.map(([k, v]) => (
             <div key={k} className="flex gap-3 border-b border-line/60 py-0.5">
               <span className="w-32 shrink-0 text-ink-3">{k}</span>
-              <span className={`min-w-0 flex-1 break-words ${v ? "text-ink" : "text-danger"}`}>{v ?? "missing"}</span>
+              <span className={`min-w-0 flex-1 break-words ${v ? "text-ink" : absentLabel(k).warn ? "text-danger" : "text-ink-3"}`}>{v ?? absentLabel(k).text}</span>
             </div>
           ))}
         </div>
@@ -81,11 +104,7 @@ export function MetaPanel() {
         <div>
           <div className="mb-1 text-[10px] tracking-wider text-ink-3 uppercase">Social card</div>
           <div className="overflow-hidden rounded-lg border border-line bg-surface-2">
-            {ogImage ? (
-              <img src={ogImage} alt="" className="aspect-[1.91/1] w-full object-cover" />
-            ) : (
-              <div className="grid aspect-[1.91/1] place-items-center text-xs text-ink-3">no og:image</div>
-            )}
+            <CardImage src={ogImage} />
             <div className="p-2.5">
               <div className="truncate text-[11px] text-ink-3">{host}</div>
               <div className="truncate text-xs font-medium text-ink">{ogTitle || "(no title)"}</div>
