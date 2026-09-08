@@ -60,14 +60,19 @@ export function SharePopover() {
         <div ref={panel} role="dialog" aria-label="Share" className="absolute right-0 z-40 mt-1 w-64 rounded-xl border border-line-2 bg-surface p-3 text-xs shadow-2xl">
           <div className="mb-2 text-[10px] tracking-wider text-ink-3 uppercase">Open on your phone</div>
           {error && <p role="alert" className="text-danger">{error}</p>}
+          {!info && !error && (
+            <p role="status" className="text-[11px] text-ink-3">
+              Finding this Mac's address…
+            </p>
+          )}
           {info && (
             <>
-              <div className="grid place-items-center rounded-lg bg-white p-2 [&_svg]:h-40 [&_svg]:w-40" dangerouslySetInnerHTML={{ __html: info.qr_svg }} />
+              <div role="img" aria-label={`QR code for ${info.lan_url}`} className="grid place-items-center rounded-lg bg-white p-2 [&_svg]:h-40 [&_svg]:w-40" dangerouslySetInnerHTML={{ __html: info.qr_svg }} />
               <div className="mt-2 flex items-center gap-2">
                 <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink select-text" title={info.lan_url}>{info.lan_url}</code>
                 <button
                   type="button"
-                  aria-label="Copy link"
+                  aria-label={copied ? "Copied" : "Copy link"}
                   disabled={copying}
                   onClick={() => {
                     setError(null);
@@ -85,6 +90,9 @@ export function SharePopover() {
                 >
                   <Icon icon={copied ? Check : Copy} size={12} />
                 </button>
+                <span role="status" aria-live="polite" className="sr-only">
+                  {copied ? "Link copied" : ""}
+                </span>
               </div>
               <p className="mt-2 text-[11px] text-ink-3">Same Wi-Fi required. Localhost is rewritten to this Mac's LAN address.</p>
             </>

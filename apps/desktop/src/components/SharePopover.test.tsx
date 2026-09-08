@@ -31,6 +31,22 @@ afterEach(() => {
 });
 
 describe("SharePopover", () => {
+  it("names the QR code, says while the address is found, and announces a copy", async () => {
+    let resolve!: (v: { lan_url: string; qr_svg: string }) => void;
+    vi.mocked(ipc.shareUrl).mockReturnValue(new Promise((r) => (resolve = r)));
+    const write = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: write }, configurable: true });
+    render(<SharePopover />);
+    fireEvent.click(screen.getByRole("button", { name: "Share to another device" }));
+    expect(screen.getByRole("status").textContent).toContain("Finding this Mac's address");
+    resolve({ lan_url: "http://192.168.1.2:3000/docs", qr_svg: "<svg></svg>" });
+    expect(await screen.findByRole("img", { name: "QR code for http://192.168.1.2:3000/docs" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
+    await waitFor(() => expect(write).toHaveBeenCalledWith("http://192.168.1.2:3000/docs"));
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+    expect(screen.getByText("Link copied")).toBeTruthy();
+  });
+
   it("shows a clipboard failure and leaves copy available for retry", async () => {
     const writeText = vi.fn().mockRejectedValue(new Error("clipboard unavailable"));
     Object.defineProperty(navigator, "clipboard", {
