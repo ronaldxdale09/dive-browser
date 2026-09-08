@@ -385,9 +385,14 @@ describe("Toolbar", () => {
     expect(screen.queryByText("Clean so far")).toBeNull();
     expect(screen.getByAltText("Dive Privacy guardian").getAttribute("src")).toMatch(/^data:image\/svg\+xml/);
     expect(screen.getByTestId("privacy-halo")).toBeTruthy();
-    expect(screen.getByText("Ads blocked").nextSibling?.textContent).toBe("0");
-    expect(screen.getByText("Trackers stopped").nextSibling?.textContent).toBe("0");
+    expect(screen.getByText("Ads blocked").parentElement?.nextSibling?.textContent).toBe("0");
+    expect(screen.getByText("Trackers stopped").parentElement?.nextSibling?.textContent).toBe("0");
     expect(screen.getByText("YouTube protection").nextSibling?.textContent).toBe("Applies on youtube.com");
+    // The toolbar button announces its popover rather than a pressed state.
+    const trigger = screen.getByRole("button", { name: "Protection" });
+    expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(trigger.getAttribute("aria-pressed")).toBeNull();
     expect(screen.getByText("Rules 2026.09.04")).toBeTruthy();
     expect((screen.getByRole("switch", { name: "Protection on this site" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole("switch", { name: "DivePrivacy protection" }).getAttribute("aria-checked")).toBe("false");
@@ -403,8 +408,8 @@ describe("Toolbar", () => {
     expect(screen.getByText("Protected on this site")).toBeTruthy();
     expect(screen.getByText("4 privacy actions so far")).toBeTruthy();
     expect(screen.getByTestId("privacy-halo").className).toContain("privacy-halo");
-    expect(screen.getByText("Ads blocked").nextSibling?.textContent).toBe("2");
-    expect(screen.getByText("Trackers stopped").nextSibling?.textContent).toBe("1");
+    expect(screen.getByText("Ads blocked").parentElement?.nextSibling?.textContent).toBe("2");
+    expect(screen.getByText("Trackers stopped").parentElement?.nextSibling?.textContent).toBe("1");
     expect(screen.getByLabelText("4 privacy actions on this page")).toBeTruthy();
   });
 
@@ -484,13 +489,13 @@ describe("Toolbar", () => {
 
     render(<Toolbar />);
     fireEvent.click(screen.getByRole("button", { name: "Protection" }));
-    expect(screen.getByText("YouTube protection").nextSibling?.textContent).toBe("Active");
+    expect(screen.getByText("YouTube protection").parentElement?.nextSibling?.textContent).toBe("Active");
     const youtube = screen.getByRole("switch", { name: "YouTube protection" });
     expect(youtube.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(youtube);
 
     await waitFor(() => expect(ipc.prefsSet).toHaveBeenCalledWith({ ...DEFAULT_PREFS, block_trackers: true, youtube_protection: false }));
-    expect(screen.getByText("YouTube protection").nextSibling?.textContent).toBe("Inactive");
+    expect(screen.getByText("YouTube protection").parentElement?.nextSibling?.textContent).toBe("Inactive");
   });
 
   it.each(["dive://screen", "not a valid URL"])("disables host-specific controls for %s", (url) => {

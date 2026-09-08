@@ -88,6 +88,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
         iconOnly={compact}
         tone={siteOn ? "hi" : "quiet"}
         active={open}
+        hasPopup="dialog"
         onClick={() => setOpen((value) => !value)}
         tooltipAlign="end"
       >
@@ -135,7 +136,8 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
             <Layer
               icon={Play}
               label="YouTube protection"
-              value={!youtubeSite ? "Applies on youtube.com" : youtubeActive ? "Active" : "Inactive"}
+              value={!youtubeSite ? "" : youtubeActive ? "Active" : "Inactive"}
+              note={youtubeSite ? undefined : "Applies on youtube.com"}
               control={
                 // The preference keeps its value on every site; the switch only
                 // turns muted where it cannot change what the page sees.
@@ -199,12 +201,15 @@ function Layer({
   icon,
   label,
   value,
+  note,
   countKey,
   control,
 }: {
   icon: LucideIcon;
   label: string;
   value: string;
+  /** A line under the label, for a layer that does not apply here. */
+  note?: string | undefined;
   countKey?: number;
   control?: ReactNode;
 }) {
@@ -213,7 +218,10 @@ function Layer({
       <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-surface-2 text-ink-2">
         <Icon icon={icon} size={13} />
       </span>
-      <span className="min-w-0 flex-1 text-ink-2">{label}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-ink-2">{label}</span>
+        {note && <span className="block text-[10.5px] text-ink-3">{note}</span>}
+      </span>
       <span key={countKey} className={`privacy-motion text-[11px] ${countKey === undefined ? "text-ink-3" : "privacy-count font-mono tabular-nums text-ink"}`}>
         {value}
       </span>

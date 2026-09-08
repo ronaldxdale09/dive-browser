@@ -101,6 +101,7 @@ export function FeatureButton({
   tone = "quiet",
   iconOnly = false,
   tooltipAlign,
+  hasPopup,
   children,
 }: {
   icon: LucideIcon;
@@ -115,21 +116,24 @@ export function FeatureButton({
   /** Round glyph-only button for the address row; the label becomes the tooltip. */
   iconOnly?: boolean;
   tooltipAlign?: "start" | "center" | "end";
+  /** The button opens a popover: `active` then means expanded, not pressed. */
+  hasPopup?: "menu" | "dialog";
   children?: ReactNode;
 }) {
   const color = tone === "danger" ? "text-danger" : tone === "hi" ? "text-highlight" : "text-ink-2";
+  const state = hasPopup ? { "aria-haspopup": hasPopup, "aria-expanded": active } : { "aria-pressed": active };
   return (
     <Tooltip label={tip ?? label} shortcut={shortcut} side="bottom" align={tooltipAlign}>
       <button
         type="button"
         aria-label={tip ?? label}
-        aria-pressed={active}
+        {...state}
         disabled={disabled}
         onClick={onClick}
         className={
           iconOnly
-            ? `pressable relative grid size-7 place-items-center rounded-full transition-[color,background-color,transform] duration-150 hover:bg-surface-3 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink ${color}`
-            : `pressable flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11.5px] transition-[color,background-color,transform] duration-150 hover:bg-surface-2 hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink ${color}`
+            ? `pressable relative grid size-7 place-items-center rounded-full transition-[color,background-color,transform] duration-150 hover:bg-surface-3 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink aria-expanded:bg-surface-3 aria-expanded:text-ink ${color}`
+            : `pressable flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11.5px] transition-[color,background-color,transform] duration-150 hover:bg-surface-2 hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink aria-expanded:bg-surface-3 aria-expanded:text-ink ${color}`
         }
       >
         <Icon icon={icon} size={iconOnly ? 15 : 13} />

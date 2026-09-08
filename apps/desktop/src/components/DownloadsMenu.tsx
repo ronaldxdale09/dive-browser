@@ -44,7 +44,7 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
 
   return (
     <div ref={ref} className="relative">
-      <FeatureButton icon={Download} label="Downloads" iconOnly={compact} active={open} onClick={() => setOpen((o) => !o)}>
+      <FeatureButton icon={Download} label="Downloads" iconOnly={compact} active={open} hasPopup="dialog" onClick={() => setOpen((o) => !o)}>
         {active > 0 && (
           <span className="ml-0.5 rounded-full bg-highlight px-1.5 py-px font-mono text-[10px] leading-4 text-highlight-ink" aria-label={`${active} in progress`}>
             {active}
