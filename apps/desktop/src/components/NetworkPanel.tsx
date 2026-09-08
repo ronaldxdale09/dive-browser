@@ -36,7 +36,8 @@ function name(url: string) {
   try {
     const u = new URL(url);
     const last = u.pathname.split("/").filter(Boolean).pop();
-    return (last ?? u.host) + (u.search ? "?" : "");
+    // The query is part of the name, as in Chrome; the cell truncates it.
+    return (last ?? u.host) + u.search;
   } catch {
     return url;
   }

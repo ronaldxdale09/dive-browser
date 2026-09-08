@@ -21,6 +21,9 @@ pub struct Violation {
     pub help_url: String,
     /// CSS selectors of offending nodes (first 20).
     pub targets: Vec<String>,
+    /// axe's explanation for each of `targets`, in the same order; empty
+    /// strings where it gave none.
+    pub notes: Vec<String>,
     /// Total offending nodes.
     pub count: u32,
 }
@@ -75,18 +78,26 @@ pub fn parse_report(v: &Value) -> A11yReport {
             list.iter()
                 .map(|r| {
                     let nodes = r["nodes"].as_array().cloned().unwrap_or_default();
+                    let shown: Vec<(String, String)> = nodes
+                        .iter()
+                        .take(20)
+                        .filter_map(|n| {
+                            let target = n["target"].as_array()?.first()?.as_str()?.to_owned();
+                            let note = n["failureSummary"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .trim()
+                                .to_owned();
+                            Some((target, note))
+                        })
+                        .collect();
                     Violation {
                         id: r["id"].as_str().unwrap_or_default().to_owned(),
                         impact: r["impact"].as_str().unwrap_or("minor").to_owned(),
                         help: r["help"].as_str().unwrap_or_default().to_owned(),
                         help_url: r["helpUrl"].as_str().unwrap_or_default().to_owned(),
-                        targets: nodes
-                            .iter()
-                            .take(20)
-                            .filter_map(|n| {
-                                n["target"].as_array()?.first()?.as_str().map(str::to_owned)
-                            })
-                            .collect(),
+                        targets: shown.iter().map(|(t, _)| t.clone()).collect(),
+                        notes: shown.iter().map(|(_, n)| n.clone()).collect(),
                         count: u32::try_from(nodes.len()).unwrap_or(u32::MAX),
                     }
                 })
@@ -110,7 +121,7 @@ mod tests {
         let v = json!({
             "violations": [
                 {"id": "region", "impact": "moderate", "help": "Landmarks", "helpUrl": "u1", "nodes": [{"target": ["body"]}]},
-                {"id": "color-contrast", "impact": "serious", "help": "Contrast", "helpUrl": "u2", "nodes": [{"target": ["p.a"]}, {"target": ["p.b"]}]}
+                {"id": "color-contrast", "impact": "serious", "help": "Contrast", "helpUrl": "u2", "nodes": [{"target": ["p.a"], "failureSummary": "Fix any of the following:\n  Element has insufficient color contrast of 1.5"}, {"target": ["p.b"]}]}
             ],
             "passes": 40, "incomplete": 2
         });
@@ -124,6 +135,13 @@ mod tests {
         );
         assert_eq!(r.violations[0].count, 2);
         assert_eq!(r.violations[0].targets, ["p.a", "p.b"]);
+        assert_eq!(
+            r.violations[0].notes,
+            [
+                "Fix any of the following:\n  Element has insufficient color contrast of 1.5",
+                ""
+            ]
+        );
         assert_eq!((r.passes, r.incomplete), (40, 2));
         assert_eq!(parse_report(&json!({})), A11yReport::default());
     }

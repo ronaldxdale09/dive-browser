@@ -1965,6 +1965,11 @@ export type Violation = {
 	help_url: string,
 	/**  CSS selectors of offending nodes (first 20). */
 	targets: string[],
+	/**
+	 *  axe's explanation for each of `targets`, in the same order; empty
+	 *  strings where it gave none.
+	 */
+	notes: string[],
 	/**  Total offending nodes. */
 	count: number,
 };

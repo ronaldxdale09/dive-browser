@@ -69,9 +69,12 @@ export function A11yPanel() {
                 <Icon icon={ExternalLink} size={11} />
               </a>
             </summary>
-            <ul className="mt-1 ml-[88px] font-mono text-[11px] text-ink-2">
-              {v.targets.map((t) => (
-                <li key={t} className="truncate" title={t}>{t}</li>
+            <ul className="mt-1 ml-[88px] text-[11px] text-ink-2">
+              {v.targets.map((t, i) => (
+                <li key={t} className="py-0.5">
+                  <div className="truncate font-mono" title={t}>{t}</div>
+                  {v.notes[i] && <p className="mt-0.5 whitespace-pre-line text-[10.5px] leading-snug text-ink-3">{v.notes[i]}</p>}
+                </li>
               ))}
             </ul>
           </details>
