@@ -7,7 +7,8 @@ use dive_core::TabId;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolResult, ContentBlock, ErrorData, Implementation, ServerCapabilities, ServerInfo,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorData,
+    Implementation, JsonObject, ServerCapabilities, ServerInfo,
 };
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use serde::Serialize;
@@ -562,8 +563,65 @@ impl<B: Browser> DiveServer<B> {
     }
 }
 
+/// Argument names a tool does not declare. A client that misspells one
+/// (`id` for `tab_id`) must hear about it: serde would drop the key, the call
+/// would fall back to the active tab and answer "ok" for the wrong page.
+pub(crate) fn unknown_arguments(
+    schema: &JsonObject,
+    arguments: Option<&JsonObject>,
+) -> Vec<String> {
+    let Some(arguments) = arguments else {
+        return Vec::new();
+    };
+    let known = schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object);
+    arguments
+        .keys()
+        .filter(|key| !known.is_some_and(|k| k.contains_key(key.as_str())))
+        .cloned()
+        .collect()
+}
+
+/// The names a tool declares, for the error that lists them.
+fn declared_arguments(schema: &JsonObject) -> Vec<String> {
+    schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
 #[tool_handler(router = self.tool_router)]
 impl<B: Browser> ServerHandler for DiveServer<B> {
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        if let Some(tool) = self.tool_router.get(&request.name) {
+            let unknown = unknown_arguments(&tool.input_schema, request.arguments.as_ref());
+            if !unknown.is_empty() {
+                let declared = declared_arguments(&tool.input_schema);
+                let takes = if declared.is_empty() {
+                    "no arguments".to_owned()
+                } else {
+                    declared.join(", ")
+                };
+                return Err(ErrorData::invalid_params(
+                    format!(
+                        "{} does not take {}; it takes {takes}",
+                        request.name,
+                        unknown.join(", ")
+                    ),
+                    None,
+                ));
+            }
+        }
+        let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        self.tool_router.call(tcc).await
+    }
+
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("dive", env!("CARGO_PKG_VERSION")))

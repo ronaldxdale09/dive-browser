@@ -8,6 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- An MCP call with an argument the tool does not declare (`id` for `tab_id`, `selector` for `locator`) is refused with the accepted names, instead of being dropped so the call quietly acts on the active tab.
 - The Vitals panel says each rating in words beside the number, explains a missing INP ("no input yet"), and the LCP element line scrolls the page to that element and flashes it.
 - In the A11y panel each failing element is a button that scrolls the page to it and flashes an outline, and a rule's docs link opens as a Dive tab; a report now stays with the tab it was run on instead of following you to the next tab.
 - The Storage panel can delete a cookie or a local or session storage key from its row; the page sees the change at once.

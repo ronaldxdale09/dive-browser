@@ -1,3 +1,4 @@
+use serde_json::json;
 #[test]
 fn the_catalog_lists_every_tool_once_with_a_schema() {
     let catalog = tool_catalog();
@@ -15,6 +16,47 @@ fn the_catalog_lists_every_tool_once_with_a_schema() {
     }
     assert!(names.contains(&"page_click"));
     assert!(names.contains(&"tab_open"));
+}
+
+#[test]
+fn an_argument_the_tool_does_not_declare_is_named_in_the_error() {
+    let catalog = tool_catalog();
+    let schema = |name: &str| {
+        let entry = catalog
+            .iter()
+            .find(|e| e.name == name)
+            .unwrap_or_else(|| panic!("{name} in catalog"));
+        entry.input_schema.as_object().cloned().unwrap_or_default()
+    };
+    let args = |v: serde_json::Value| v.as_object().cloned();
+    // `id` is the classic slip for `tab_id`; it must not fall back to the active tab.
+    assert_eq!(
+        super::unknown_arguments(&schema("tab_activate"), args(json!({"id": "x"})).as_ref()),
+        vec!["id".to_owned()]
+    );
+    assert!(
+        super::unknown_arguments(
+            &schema("tab_activate"),
+            args(json!({"tab_id": "x"})).as_ref()
+        )
+        .is_empty()
+    );
+    assert!(super::unknown_arguments(&schema("tab_activate"), None).is_empty());
+    // Flattened locator fields count as declared.
+    assert!(
+        super::unknown_arguments(
+            &schema("page_click"),
+            args(json!({"tab_id": "x", "locator": "text=Go", "x": 1})).as_ref()
+        )
+        .is_empty()
+    );
+    assert_eq!(
+        super::unknown_arguments(
+            &schema("page_click"),
+            args(json!({"selector": ".a"})).as_ref()
+        ),
+        vec!["selector".to_owned()]
+    );
 }
 
 use std::sync::Mutex;
