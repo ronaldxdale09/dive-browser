@@ -922,6 +922,7 @@ impl<T: UserEvent> WinitCefApp<T> {
     let label = appwindow.label.clone();
     let listeners = appwindow.listeners.clone();
     drop(appwindow);
+    log::debug!(target: "dive_native_close", "stage=window_dropped label={label}");
     // Winit's later Destroyed event can no longer resolve the removed native
     // id. Notify Tauri here so it releases its own window/webview registry.
     self.run_callback(RunEvent::WindowEvent {
