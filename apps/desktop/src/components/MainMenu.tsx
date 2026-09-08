@@ -192,7 +192,7 @@ export function MainMenu() {
 /** − 100% + and a fullscreen toggle, as one row like a browser menu's. */
 function ZoomRow() {
   const active = useBrowser((s) => s.activeTab);
-  const zoom = useBrowser((s) => (s.activeTab ? (s.zoom[s.activeTab] ?? 1) : 1));
+  const zoom = useBrowser((s) => (s.activeTab ? (s.zoom[s.activeTab] ?? s.defaultZoom) : s.defaultZoom));
   const zoomStep = useBrowser((s) => s.zoomStep);
   const [full, setFull] = useState(false);
   useEffect(() => {

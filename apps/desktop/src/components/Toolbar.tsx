@@ -20,6 +20,7 @@ import { usePicker } from "../store/simulator";
 import { useSubtitles } from "../store/subtitles";
 import { useRecorder } from "../store/recorder";
 import { runCommand } from "../lib/commands";
+import { usePrefs } from "../store/prefs";
 import { NavigationButtons } from "./NavigationButtons";
 
 /** Navigation row: nav icons, the omnibox pill and, as glyphs, the actions that act on the page. */
@@ -35,7 +36,7 @@ export function Toolbar({ compact = false, singleAuxPanel = compact }: { compact
   const activateTab = useBrowser((s) => s.activateTab);
   const reload = useBrowser((s) => s.reload);
   const stop = useBrowser((s) => s.stop);
-  const showHome = useBrowser((s) => s.showHome);
+  const homepage = usePrefs((s) => s.prefs.homepage.trim());
   const capture = useBrowser((s) => s.capture);
   const capturing = useBrowser((s) => s.capturing);
   const devtools = useBrowser((s) => s.devtools);
@@ -119,7 +120,7 @@ export function Toolbar({ compact = false, singleAuxPanel = compact }: { compact
       ) : (
         <IconButton icon={RotateCw} label="Reload" shortcut="⌘R" disabled={!current} onClick={() => void reload()} size={14} />
       )}
-      <IconButton icon={House} label="Home" shortcut="⌘⇧H" disabled={!current} onClick={() => void showHome()} size={14} />
+      <IconButton icon={House} label="Home" shortcut="⌘⇧H" disabled={!current && !homepage} onClick={() => void runCommand("tab.home")} size={14} />
       <form
         className="relative mx-1 flex h-[calc(var(--row-h)-4px)] min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2"
         onSubmit={(e) => {
@@ -258,9 +259,10 @@ function LoadingLine() {
 /** Shows the active tab's zoom when it is not 100%; click resets. */
 function ZoomBadge() {
   const active = useBrowser((s) => s.activeTab);
-  const zoom = useBrowser((s) => (active ? s.zoom[active] : undefined) ?? 1);
+  const zoom = useBrowser((s) => (active ? (s.zoom[active] ?? s.defaultZoom) : s.defaultZoom));
+  const defaultZoom = useBrowser((s) => s.defaultZoom);
   const zoomStep = useBrowser((s) => s.zoomStep);
-  if (Math.abs(zoom - 1) < 0.001) return null;
+  if (Math.abs(zoom - defaultZoom) < 0.001) return null;
   return (
     <Tooltip label="Reset zoom" shortcut="⌘0">
       <button

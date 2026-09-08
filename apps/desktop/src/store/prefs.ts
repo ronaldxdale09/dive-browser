@@ -252,3 +252,9 @@ export function watchReducedMotion(): () => void {
   query.addEventListener("change", onChange);
   return () => query.removeEventListener("change", onChange);
 }
+
+// The engine opens new tabs at the default zoom; the browser store needs the
+// same number so the badge and ⌘+/⌘− start from what is on screen.
+usePrefs.subscribe((s) => {
+  if (useBrowser.getState().defaultZoom !== s.prefs.default_zoom) useBrowser.setState({ defaultZoom: s.prefs.default_zoom });
+});

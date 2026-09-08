@@ -155,6 +155,23 @@ describe("Toolbar", () => {
     expect((screen.getByRole("button", { name: "Home" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("goes to the configured home page instead of the welcome screen", async () => {
+    usePrefs.setState({ prefs: { ...usePrefs.getState().prefs, homepage: "https://home.test/" } });
+    const navigate = vi.spyOn(ipc, "tabNavigate").mockResolvedValue(null);
+    const deactivate = vi.spyOn(ipc, "tabDeactivate").mockResolvedValue(null);
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith(expect.anything(), "https://home.test/"));
+    expect(deactivate).not.toHaveBeenCalled();
+  });
+
+  it("shows the zoom badge for a tab opened at the default zoom, and hides it at that default", () => {
+    useBrowser.setState({ defaultZoom: 1.25 });
+    render(<Toolbar />);
+    expect(screen.queryByRole("button", { name: "Reset zoom" })).toBeNull();
+    useBrowser.setState({ defaultZoom: 1 });
+  });
+
   it("shows the address that failed to load, not the last one that worked", () => {
     useBrowser.setState({ navError: { [tab.id]: { url: "http://nonexistent.invalid/", error: "net::ERR_NAME_NOT_RESOLVED" } } });
     render(<Toolbar />);

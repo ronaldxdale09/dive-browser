@@ -1,6 +1,7 @@
 import { isPrivateWindow } from "./privateMode";
 import { ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
+import { usePrefs } from "../store/prefs";
 import { useRecording } from "../store/recording";
 import { useRecorder } from "../store/recorder";
 import { usePicker } from "../store/simulator";
@@ -41,7 +42,13 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
     return detached.includes(activeTab) ? attachTab(activeTab) : detachTab(activeTab, null);
   },
   "tab.reload": () => useBrowser.getState().reload(),
-  "tab.home": () => useBrowser.getState().showHome(),
+  "tab.home": () => {
+    // A configured home page is where Home goes; without one, the welcome screen.
+    const homepage = usePrefs.getState().prefs.homepage.trim();
+    const { activeTab, navigate, openTab, showHome } = useBrowser.getState();
+    if (!homepage) return showHome();
+    return activeTab ? navigate(homepage) : openTab(homepage);
+  },
   "tab.devtools": () => useBrowser.getState().devtools(),
   "report.compose": () => useBrowser.getState().bugReport(),
   "screencast.toggle": () => useRecording.getState().toggle(),

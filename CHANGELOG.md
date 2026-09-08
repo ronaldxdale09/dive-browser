@@ -54,6 +54,8 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- With a Default zoom other than 100%, new tabs opened at that zoom but the chrome assumed 100%: no zoom badge, and the first ⌘+ shrank the page. The badge and the steps now start from the default; ⌘0 returns to it.
+- The Home button and ⌘⇧H open the configured Home page when there is one, instead of always showing the welcome screen.
 - Edit workspace says whether the workspace keeps its own cookies and logins, since that choice is made at creation and the dialog otherwise left it out.
 - Choosing "Not now" in the default-browser dialog rests the "Set as default" card in the workspace rail for the rest of the session instead of leaving it there to ask again immediately.
 - "All tabs" in the tab strip and Search tabs (⌘⇧A) open the palette with the open tabs listed first, not after the bookmarks.

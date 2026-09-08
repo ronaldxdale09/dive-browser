@@ -84,7 +84,11 @@ interface BrowserState {
   capturing: boolean;
   /** Zoom factor per tab; absent means 1. */
   zoom: Record<string, number>;
+  /** The zoom new tabs open at (the Default zoom preference), mirrored here so the badge and the steps agree with the engine. */
+  defaultZoom: number;
   zoomStep: (direction: 1 | -1 | 0) => Promise<void>;
+  /** The active tab's zoom as the engine has it: an explicit step, else the default new tabs open at. */
+  zoomOf: (id: string | null) => number;
   devtools: () => Promise<void>;
   bugReport: () => Promise<void>;
   /** Tab whose screen is being recorded, if any. */
@@ -351,6 +355,8 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   },
   capturing: false,
   zoom: {},
+  defaultZoom: 1,
+  zoomOf: (id) => (id ? (get().zoom[id] ?? get().defaultZoom) : get().defaultZoom),
   loading: {},
   navError: {},
   crashedTabs: {},
@@ -518,8 +524,8 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   zoomStep: async (direction) => {
     const id = get().activeTab;
     if (!id) return;
-    const current = get().zoom[id] ?? 1;
-    const next = direction === 0 ? 1 : nextZoom(current, direction);
+    const current = get().zoomOf(id);
+    const next = direction === 0 ? get().defaultZoom : nextZoom(current, direction);
     if (next === current) return;
     // Shown at once so a held key or a double click steps twice, not once
     // from the same stale level; put back if the engine refuses.

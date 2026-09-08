@@ -188,6 +188,16 @@ describe("optimistic switching", () => {
     expect(useBrowser.getState().error).toBe("no such tab");
   });
 
+  it("starts stepping from the default zoom new tabs open at, and resets to it", async () => {
+    const zoom = vi.spyOn(ipc, "tabZoom").mockResolvedValue(null);
+    useBrowser.setState({ tabs: [tab("a")], activeTab: "a", zoom: {}, defaultZoom: 1.25 });
+    expect(useBrowser.getState().zoomOf("a")).toBe(1.25);
+    await useBrowser.getState().zoomStep(1);
+    expect(zoom).toHaveBeenLastCalledWith("a", 1.5);
+    await useBrowser.getState().zoomStep(0);
+    expect(zoom).toHaveBeenLastCalledWith("a", 1.25);
+  });
+
   it("highlights the tab before the engine answers and keeps it when it agrees", async () => {
     let done!: () => void;
     vi.spyOn(ipc, "tabActivate").mockReturnValue(new Promise<null>((r) => (done = () => r(null))));
