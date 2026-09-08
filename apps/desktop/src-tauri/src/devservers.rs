@@ -98,6 +98,30 @@ pub struct Listener {
     pub command: Option<String>,
 }
 
+/// Whether a listener belongs to Dive itself: this process, or another
+/// Dive process such as a private window's, which `lsof` names by the
+/// executable (truncated to nine characters, so the match is a prefix).
+/// The remote-debugging and MCP ports are not anyone's dev server.
+pub fn is_own(listener: &Listener, own_pid: u32, own_command: &str) -> bool {
+    if listener.pid == Some(own_pid) {
+        return true;
+    }
+    match listener.command.as_deref() {
+        Some(command) if !command.is_empty() && !own_command.is_empty() => {
+            own_command.starts_with(command)
+        }
+        _ => false,
+    }
+}
+
+/// The executable's file name, as the OS would report it.
+fn own_command() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_default()
+}
+
 /// Whether a bound address is reachable on loopback.
 ///
 /// `*` and `0.0.0.0` mean every interface, which includes loopback; a socket
@@ -345,17 +369,21 @@ async fn scan_with(registry: &Registry) -> Vec<DevServer> {
     let Some(client) = probe_client() else {
         return Vec::new();
     };
-    let probes = candidates.into_iter().map(|listener| {
-        let client = client.clone();
-        async move {
-            if registry.cached(listener.port, listener.pid) == Some(false) {
-                return None;
+    let (own_pid, own) = (std::process::id(), own_command());
+    let probes = candidates
+        .into_iter()
+        .filter(|l| !is_own(l, own_pid, &own))
+        .map(|listener| {
+            let client = client.clone();
+            async move {
+                if registry.cached(listener.port, listener.pid) == Some(false) {
+                    return None;
+                }
+                let server = probe(&client, &listener).await;
+                registry.remember(listener.port, listener.pid, server.is_some());
+                server
             }
-            let server = probe(&client, &listener).await;
-            registry.remember(listener.port, listener.pid, server.is_some());
-            server
-        }
-    });
+        });
     let mut found: Vec<DevServer> = futures_util::stream::iter(probes)
         .buffer_unordered(PROBE_CONCURRENCY)
         .filter_map(|r| async move { r })
@@ -556,6 +584,38 @@ mod tests {
         assert_eq!(s.lan_url, "https://example.com/path?x=1");
         assert!(s.qr_svg.starts_with("<svg") || s.qr_svg.starts_with("<?xml"));
         assert!(share("not a url").is_err());
+    }
+
+    #[test]
+    fn the_browsers_own_listeners_are_not_dev_servers() {
+        let mine = Listener {
+            port: 9345,
+            pid: Some(42),
+            command: Some("dive-desk".into()),
+        };
+        let sibling = Listener {
+            port: 9346,
+            pid: Some(43),
+            command: Some("dive-desk".into()),
+        };
+        let node = Listener {
+            port: 5173,
+            pid: Some(7),
+            command: Some("node".into()),
+        };
+        let unknown = Listener {
+            port: 3000,
+            pid: None,
+            command: None,
+        };
+        assert!(is_own(&mine, 42, "dive-desktop"));
+        assert!(
+            is_own(&sibling, 42, "dive-desktop"),
+            "a private window's process is Dive too"
+        );
+        assert!(!is_own(&node, 42, "dive-desktop"));
+        assert!(!is_own(&unknown, 42, "dive-desktop"));
+        assert!(!is_own(&unknown, 42, ""), "no names, no match");
     }
 
     #[test]
