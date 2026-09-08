@@ -135,7 +135,7 @@ export function App() {
         />
       </div>
       <nav aria-label="Browser controls" className="col-start-2 row-start-2 min-w-0">
-        <Toolbar compact={responsive.compactToolbar} />
+        <Toolbar compact={responsive.compactToolbar} singleAuxPanel={responsive.singleAuxPanel} />
       </nav>
       <main className="col-start-2 row-start-3 grid min-h-0 min-w-0 bg-line" style={{ gridTemplateColumns: showSidecar ? `minmax(0,1fr) auto ${shownSidecarWidth}px` : "minmax(0,1fr)" }}>
         <div

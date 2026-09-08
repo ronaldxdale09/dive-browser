@@ -23,7 +23,12 @@ import { runCommand } from "../lib/commands";
 import { NavigationButtons } from "./NavigationButtons";
 
 /** Navigation row: nav icons, the omnibox pill and, as glyphs, the actions that act on the page. */
-export function Toolbar({ compact = false }: { compact?: boolean }) {
+/**
+ * `singleAuxPanel` is the window's rule that only one of the dock, the agent
+ * and the picker shows at a time; the dock button then swaps them rather
+ * than toggling a dock nobody can see.
+ */
+export function Toolbar({ compact = false, singleAuxPanel = compact }: { compact?: boolean; singleAuxPanel?: boolean }) {
   const tabs = useBrowser((s) => s.tabs);
   const activeTab = useBrowser((s) => s.activeTab);
   const navigate = useBrowser((s) => s.navigate);
@@ -74,8 +79,9 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
     if (row.kind === "tab") void activateTab(row.tabId);
     else void navigate(row.url);
   };
+  const dockShown = open.dock && !(singleAuxPanel && (open.sidecar || pickerOpen));
   const toggleDock = () => {
-    if (!compact) {
+    if (!singleAuxPanel) {
       toggle("dock");
       return;
     }
@@ -175,7 +181,7 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
           {!isPrivateWindow() && <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />}
           <span className={capturing ? "animate-spin motion-reduce:animate-none" : undefined}><IconButton icon={capturing ? LoaderCircle : Camera} label={capturing ? "Capturing full page" : "Capture full page"} shortcut="⌘⇧S" disabled={!current || capturing} onClick={() => void capture(true)} /></span>
           <IconButton icon={Bug} label="Open DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
-          <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={open.dock && !open.sidecar} onClick={toggleDock} />
+          <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={dockShown} onClick={toggleDock} />
           <DownloadsMenu compact />
         </ToolbarMore>
       ) : (
@@ -189,7 +195,7 @@ export function Toolbar({ compact = false }: { compact?: boolean }) {
           {!isPrivateWindow() && <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />}
           <span className={capturing ? "animate-spin motion-reduce:animate-none" : undefined}><IconButton icon={capturing ? LoaderCircle : Camera} label={capturing ? "Capturing full page" : "Capture full page"} shortcut="⌘⇧S" disabled={!current || capturing} onClick={() => void capture(true)} /></span>
           <IconButton icon={Bug} label="Open DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
-          <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={open.dock} onClick={toggleDock} />
+          <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={dockShown} onClick={toggleDock} />
           <DownloadsMenu compact />
         </>
       )}

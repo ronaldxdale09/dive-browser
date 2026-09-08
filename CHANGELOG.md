@@ -50,6 +50,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- In windows narrower than 960 px, where only one of the dock, agent and picker shows at a time, the Developer dock button no longer lights up for a dock hidden behind the agent, and pressing it swaps the agent for the dock instead of doing nothing visible.
 - The agent composer shows an "Acts without asking" chip when that setting is on, not only for the session-only "Allow all"; clicking it opens the Agent settings.
 - Live subtitles settings: the Medium model's download reads "1.5 GB" rather than "1533 MB", and the intro says the current tab rather than "this page".
 - The agent panel's "Agent settings" button opens the Agent section of Settings instead of General. Its model note says "1 model listed", not "1 models".

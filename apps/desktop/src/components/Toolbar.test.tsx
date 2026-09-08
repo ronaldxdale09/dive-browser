@@ -325,6 +325,18 @@ describe("Toolbar", () => {
     expect(useBrowser.getState().open.dock).toBe(true);
   });
 
+  it("swaps the agent for the dock when the window shows one panel at a time", () => {
+    useBrowser.setState({ open: { ...useBrowser.getState().open, dock: true, sidecar: true } });
+    render(<Toolbar singleAuxPanel />);
+    // The dock is open but hidden behind the agent: the button is not lit.
+    const dock = screen.getByRole("button", { name: "Developer dock" });
+    expect(dock.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(dock);
+    expect(useBrowser.getState().open.sidecar).toBe(false);
+    expect(useBrowser.getState().open.dock).toBe(true);
+    expect(screen.getByRole("button", { name: "Developer dock" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("lists downloads and reveals a finished one", () => {
     useDownloads.setState({
       items: [
