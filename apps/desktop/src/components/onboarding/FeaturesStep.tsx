@@ -1,6 +1,6 @@
 import { Bot, Clapperboard, Globe, LayoutGrid, PanelBottom, ShieldCheck } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState, useRef } from "react";
 import { useDefaultBrowser } from "../../store/defaultBrowser";
 import { useOnboarding } from "../../store/onboarding";
 import { usePrefs } from "../../store/prefs";
@@ -24,6 +24,12 @@ export const FEATURES: { icon: LucideIcon; title: string; text: string; keys: st
  * hands over to the welcome screen.
  */
 export function FeaturesStep() {
+  // A new step announces itself: focus lands on its heading, not on the
+  // chrome behind the dialog, so the keyboard and a screen reader follow.
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    heading.current?.focus({ preventScroll: true });
+  }, []);
   const finish = useOnboarding((s) => s.finish);
   const blockTrackers = usePrefs((s) => s.prefs.block_trackers);
   const update = usePrefs((s) => s.update);
@@ -48,7 +54,7 @@ export function FeaturesStep() {
   return (
     <div>
       <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">{stepLabel("features")}</p>
-      <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em]">What's inside</h2>
+      <h2 ref={heading} tabIndex={-1} className="mt-1 text-lg font-semibold tracking-[-0.02em] outline-none">What's inside</h2>
       <p className="mt-0.5 text-xs text-ink-3">Everything is a keystroke away, and ⌘K finds the rest.</p>
       <ul className="mt-4 divide-y divide-line" aria-label="Features">
         {FEATURES.map((f, i) => (

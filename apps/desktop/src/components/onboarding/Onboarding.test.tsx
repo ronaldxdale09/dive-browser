@@ -78,6 +78,8 @@ describe("Onboarding", () => {
 
     // Import: nothing on this Mac to import from, so it only offers Continue.
     expect(await screen.findByRole("heading", { name: "Bring your bookmarks, history, passwords and form entries" })).toBeTruthy();
+    // Focus moves with the step, so a keyboard user is never left behind the dialog.
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Bring your bookmarks, history, passwords and form entries" }));
     expect(await screen.findByText("No other browsers with data were found")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Skip" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
@@ -90,6 +92,7 @@ describe("Onboarding", () => {
 
     // Features: every feature listed, protection preselected, default browser offered.
     expect(await screen.findByRole("heading", { name: "What's inside" })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "What's inside" }));
     expect(within(screen.getByRole("list", { name: "Features" })).getAllByRole("listitem")).toHaveLength(4);
     expect(screen.getByRole("switch", { name: "Block ads and trackers" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("button", { name: "Set as default" })).toBeTruthy();
