@@ -124,6 +124,25 @@ export const commands = {
 	 *  comes first next time.
 	 */
 	passwordsUsed: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("passwords_used", { id })),
+	/**  Answer a save or update prompt: save the submitted login, or let it go. */
+	passwordsAnswer: (token: string, save: boolean) => typedError<{
+	/**  Row id, also the keychain account name. */
+	id: string,
+	/**  The profile the login belongs to. */
+	profile_id: string,
+	/**  `scheme://host[:port]`, no path. */
+	origin: string,
+	/**  The account name as the site's form took it. */
+	username: string,
+	/**  RFC 3339. */
+	created_at: string,
+	/**  RFC 3339, when it was last filled. */
+	last_used_at: string | null,
+	/**  How many times it has been filled. */
+	uses: number,
+} | null, AppError>(__TAURI_INVOKE("passwords_answer", { token, save })),
+	/**  Fill the chosen saved login into the tab's login form. */
+	passwordsFill: (tabId: TabId, id: string) => typedError<null, AppError>(__TAURI_INVOKE("passwords_fill", { tabId, id })),
 	/**
 	 *  Give a bookmark a new title, keeping its URL and creation time. A blank
 	 *  title is refused rather than erasing the one on record.
@@ -445,6 +464,7 @@ export const commands = {
 export const events = {
 	agentPointer: makeEvent<AgentPointer>("agent-pointer"),
 	consoleEntry: makeEvent<ConsoleEntry>("console-entry"),
+	credentialPrompt: makeEvent<CredentialPrompt>("credential-prompt"),
 	devServersChanged: makeEvent<DevServersChanged>("dev-servers-changed"),
 	downloadNotice: makeEvent<DownloadNotice>("download-notice"),
 	inspectEvent: makeEvent<InspectEvent>("inspect-event"),
@@ -737,6 +757,24 @@ export type Credential = {
 	last_used_at: string | null,
 	/**  How many times it has been filled. */
 	uses: number,
+};
+
+/**  What the chrome should ask the person. */
+export type CredentialPrompt = {
+	tab_id: TabId,
+	/**
+	 *  `save` for a new login, `update` when the site's login for this
+	 *  username has a different password, `pick` when several logins fit.
+	 */
+	kind: string,
+	/**  `scheme://host[:port]`. */
+	origin: string,
+	/**  The username submitted (save, update). */
+	username: string,
+	/**  Names the person can choose from (pick). */
+	usernames: string[],
+	/**  Handle for answering a save or update; the password stays in the host. */
+	token: string,
 };
 
 /**  What the person decided for one origin and kind. */

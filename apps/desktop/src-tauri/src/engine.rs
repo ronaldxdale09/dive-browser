@@ -650,6 +650,7 @@ impl TabHost {
                     (cr, nr, rr, fr, lr)
                 };
             let session_for_prefs = session.clone();
+            let credential_workspace = tab.workspace_id;
             self.cdp.insert(tab_id, session);
             let nav = view.clone();
             let prefs_app = app.clone();
@@ -680,6 +681,13 @@ impl TabHost {
                 tracing::debug!(%tab_id, "permission page setup complete before navigation");
                 crate::activity::attach(&activity, tab_id, &activity_nonce, &session_for_prefs)
                     .await;
+                crate::credential_fill::attach(
+                    prefs_app.clone(),
+                    tab_id,
+                    credential_workspace,
+                    session_for_prefs.clone(),
+                )
+                .await;
                 crate::prefs::apply(&session_for_prefs, &prefs).await;
                 tracing::debug!(%tab_id, "browser preferences complete before navigation");
                 if let Err(e) = nav.navigate(url) {

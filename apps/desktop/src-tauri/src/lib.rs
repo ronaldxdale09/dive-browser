@@ -16,6 +16,7 @@ mod console;
 mod crash;
 #[cfg(feature = "cef")]
 mod crash_probe;
+mod credential_fill;
 mod default_browser;
 mod devservers;
 mod emulate;

@@ -14,6 +14,7 @@ import { selectDevice, useEmulation } from "../store/emulation";
 import { useLayout, visibleSplit } from "../store/layout";
 import { usePicker } from "../store/simulator";
 import { DropZones, SplitView } from "./SplitView";
+import { CredentialPromptCard } from "./CredentialPromptCard";
 import { useTabDrag } from "./TabDnd";
 import { InternalPage, isInternalUrl } from "./internal/InternalPage";
 import { errorMessage } from "../lib/errors";
@@ -65,6 +66,7 @@ export function Content() {
     <div className="relative flex min-h-0 min-w-0 flex-col bg-surface">
       {activeTab && crash && <CrashBanner attempt={crash.attempt} recovering={crash.recovering} />}
       {activeTab && <PermissionDialog key={`${activeTab}-${asked?.request_id ?? "none"}`} tabId={activeTab} request={asked} />}
+      <CredentialPromptCard tabId={activeTab} />
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <div className="relative grid min-h-0 min-w-0 flex-1">
           {internal ? (

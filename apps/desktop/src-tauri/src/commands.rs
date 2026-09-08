@@ -459,6 +459,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             passwords_reveal,
             passwords_delete,
             passwords_used,
+            passwords_answer,
+            passwords_fill,
             bookmark_rename,
             permission_set,
             permission_reply,
@@ -580,6 +582,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::loading::TabLoad,
             crate::navigation::TabHistoryChanged,
             crate::permissions::PermissionAsked,
+            crate::credential_fill::CredentialPrompt,
             crate::permissions::PermissionDismissed,
             crate::privacy::PrivacyEvent,
             crate::subtitles::SubtitleModelProgress,
@@ -1946,6 +1949,28 @@ pub(crate) fn passwords_reveal(state: State<'_, AppState>, id: String) -> AppRes
 #[specta::specta]
 pub(crate) fn passwords_used(state: State<'_, AppState>, id: String) -> AppResult<()> {
     crate::passwords::touch(&state, &id)
+}
+
+/// Answer a save or update prompt: save the submitted login, or let it go.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn passwords_answer(
+    state: State<'_, AppState>,
+    token: String,
+    save: bool,
+) -> AppResult<Option<dive_core::Credential>> {
+    crate::credential_fill::answer(&state, &token, save)
+}
+
+/// Fill the chosen saved login into the tab's login form.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn passwords_fill(
+    app: AppHandle<Runtime>,
+    tab_id: TabId,
+    id: String,
+) -> AppResult<()> {
+    crate::credential_fill::fill_into(app, tab_id, id).await
 }
 
 /// Forget a saved login.
