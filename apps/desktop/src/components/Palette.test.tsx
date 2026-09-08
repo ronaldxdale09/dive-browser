@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { events, ipc } from "../lib/ipc";
-import { Palette, paletteFilter } from "./Palette";
+import { Palette, paletteFilter, ROW_ID } from "./Palette";
 
 class ResizeObserverStub {
   observe() {}
@@ -22,6 +22,9 @@ describe("Palette", () => {
     expect(paletteFilter("The Verge https://www.theverge.com/", "verge")).toBe(1);
     expect(paletteFilter("Developer dock dock.toggle", "dev dock")).toBe(1);
     expect(paletteFilter("Device simulator simulator.toggle", "SIM")).toBe(1);
+    // A row's id tells duplicates apart but is not something to search by.
+    expect(paletteFilter(`httpbin.org/json https://httpbin.org/json${ROW_ID}01a07e34`, "01a0")).toBe(0);
+    expect(paletteFilter(`httpbin.org/json https://httpbin.org/json${ROW_ID}01a07e34`, "json")).toBe(1);
   });
 
   it("is an accessible new-tab dialog with a URL field and recent history", async () => {

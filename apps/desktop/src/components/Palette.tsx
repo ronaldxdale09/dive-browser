@@ -26,8 +26,14 @@ const HISTORY_LIMIT = 5;
  * default is a scattered-letter match, which offered "Developer dock" for
  * "verge" because those letters occur in that order across the row.
  */
+/**
+ * Rows that can repeat (two tabs on the same page) carry their id after this
+ * marker so cmdk can tell them apart; the filter ignores that part.
+ */
+export const ROW_ID = "\t";
+
 export function paletteFilter(value: string, search: string): number {
-  const haystack = value.toLowerCase();
+  const haystack = value.split(ROW_ID)[0]!.toLowerCase();
   const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
   return terms.every((term) => haystack.includes(term)) ? 1 : 0;
 }
@@ -143,7 +149,7 @@ export function Palette() {
               {tabs.map((t) => (
                 <Command.Item
                   key={t.id}
-                  value={`${t.title} ${t.url}`}
+                  value={`${t.title} ${t.url}${ROW_ID}${t.id}`}
                   onSelect={() => {
                     close();
                     void activateTab(t.id);
