@@ -310,6 +310,12 @@ describe("command dispatch", () => {
     expect(shortcutFor(key({ key: "A", metaKey: true, shiftKey: true, target: input }))).toBe("tabs.search");
     expect(shortcutFor(key({ key: "Delete", metaKey: true, shiftKey: true, target: input }))).toBe("browsing-data.open");
     expect(shortcutFor(key({ key: "Tab", ctrlKey: true, target: input }))).toBe("tab.next");
+    // Zoom acts on the page whatever has focus: a menu's search box, the find bar.
+    expect(shortcutFor(key({ key: "=", metaKey: true, target: input }))).toBe("zoom.in");
+    expect(shortcutFor(key({ key: "-", metaKey: true, target: input }))).toBe("zoom.out");
+    expect(shortcutFor(key({ key: "0", metaKey: true, target: input }))).toBe("zoom.reset");
+    expect(shortcutFor(key({ key: "+", code: "Equal", metaKey: true, shiftKey: true, target: input }))).toBe("zoom.in");
+    expect(shortcutFor(key({ key: "+", code: "NumpadAdd", metaKey: true, target: input }))).toBe("zoom.in");
     // Outside a field everything applies.
     expect(shortcutFor(key({ key: "f", metaKey: true, target: document.createElement("div") }))).toBe("find.open");
     const editable = document.createElement("div");

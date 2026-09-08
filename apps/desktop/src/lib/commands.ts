@@ -208,6 +208,9 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+shift+b": "report.compose",
   "mod+shift+r": "screencast.toggle",
   "mod+=": "zoom.in",
+  // ⌘+ is ⌘⇧= on most keyboards, and + on a numeric keypad.
+  "mod+shift+=": "zoom.in",
+  "mod++": "zoom.in",
   "mod+-": "zoom.out",
   "mod+0": "zoom.reset",
   "mod+j": "sidecar.toggle",
@@ -366,6 +369,13 @@ const CHORDS_IN_FIELDS = new Set([
   "mod+shift+]",
   "ctrl+tab",
   "ctrl+shift+tab",
+  // Zoom is about the page, never the field, so it applies while the menu,
+  // the palette or the find bar holds focus, as it does in Chrome.
+  "mod+=",
+  "mod+shift+=",
+  "mod++",
+  "mod+-",
+  "mod+0",
 ]);
 
 /** Keys that are not characters but still make sense in a chord. */
@@ -415,6 +425,8 @@ function keyOf(e: KeyboardEvent): string | null {
   // so the brackets go by physical position.
   if (e.code === "BracketLeft") return "[";
   if (e.code === "BracketRight") return "]";
+  // ⌘⇧= is how "⌘+" is typed; report the key, not the shifted character.
+  if (e.code === "Equal") return "=";
   const key = e.key;
   if (key === " ") return "space";
   if (key.length === 1) return key.toLowerCase();
