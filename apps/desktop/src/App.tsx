@@ -47,6 +47,7 @@ export function App() {
   const boot = useBrowser((s) => s.boot);
   const error = useBrowser((s) => s.error);
   const notice = useBrowser((s) => s.notice);
+  const noticeAction = useBrowser((s) => s.noticeAction);
   const editing = useBrowser((s) => s.editing);
   const open = useBrowser((s) => s.open);
   // Keep the native page covered between navigation dialogs, including while
@@ -198,8 +199,9 @@ export function App() {
       </Suspense>
       <ToastViewport
         notice={notice}
+        noticeAction={noticeAction}
         error={error}
-        onDismissNotice={() => useBrowser.setState({ notice: null })}
+        onDismissNotice={() => useBrowser.setState({ notice: null, noticeAction: null })}
         onDismissError={() => useBrowser.setState({ error: null })}
       />
       <UpdateDialog />

@@ -95,8 +95,10 @@ interface BrowserState {
   recordingTab: string | null;
   screencastToggle: () => Promise<void>;
   notice: string | null;
+  /** A button on the notice, when there is something to do about it ("Show in Finder"). */
+  noticeAction: NoticeAction | null;
   /** Show a transient toast; a newer notice replaces the old one and its timer. */
-  notify: (text: string, ms?: number) => void;
+  notify: (text: string, ms?: number, action?: NoticeAction) => void;
   reorderTabs: (ordered: string[]) => Promise<void>;
   setPinned: (id: string, pinned: boolean) => Promise<void>;
   activateWorkspace: (id: string) => Promise<void>;
@@ -120,6 +122,7 @@ interface BrowserState {
 }
 
 export type NavError = { url: string; error: string };
+export type NoticeAction = { label: string; run: () => void };
 export type ClosedTab = { url: string; title: string; workspace_id: string | null; index: number };
 /** Most closed tabs remembered for reopening. */
 export const CLOSED_TABS_LIMIT = 25;
@@ -371,12 +374,13 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   counts: {},
   error: null,
   notice: null,
-  notify: (text, ms = 3000) => {
+  noticeAction: null,
+  notify: (text, ms = 3000, action) => {
     if (noticeTimer) clearTimeout(noticeTimer);
-    set({ notice: text });
+    set({ notice: text, noticeAction: action ?? null });
     noticeTimer = setTimeout(() => {
       noticeTimer = null;
-      set({ notice: null });
+      set({ notice: null, noticeAction: null });
     }, ms);
   },
   capturing: false,
@@ -410,7 +414,9 @@ export const useBrowser = create<BrowserState>((set, get) => ({
           const d = e.payload;
           useDownloads.getState().apply(d);
           const name = d.path.split("/").pop() ?? d.url;
-          get().notify(d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : `Download failed: ${name}`, 5000);
+          // A finished file is one click from the Finder; nothing to do about the others.
+          const show = d.status === "finished" && d.path ? { label: "Show in Finder", run: () => void ipc.downloadsReveal(d.path).catch((err: unknown) => set({ error: errorMessage(err) })) } : undefined;
+          get().notify(d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : `Download failed: ${name}`, show ? 8000 : 5000, show);
           // Closed once the file is on disk, not when it starts: the engine
           // reports a download's end through the page it came from, so a
           // page closed mid-download never says "Saved".

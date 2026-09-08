@@ -377,6 +377,18 @@ describe("notify", () => {
     vi.useRealTimers();
   });
 
+  it("carries an action with the notice and drops it with the notice", () => {
+    vi.useFakeTimers();
+    const run = vi.fn();
+    useBrowser.getState().notify("Saved a.bin", 1000, { label: "Show in Finder", run });
+    expect(useBrowser.getState().noticeAction?.label).toBe("Show in Finder");
+    useBrowser.getState().notify("plain", 1000);
+    expect(useBrowser.getState().noticeAction).toBeNull();
+    vi.advanceTimersByTime(1000);
+    expect(useBrowser.getState().notice).toBeNull();
+    vi.useRealTimers();
+  });
+
   it("defaults to three seconds", () => {
     vi.useFakeTimers();
     useBrowser.getState().notify("hello");
