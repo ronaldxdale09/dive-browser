@@ -87,4 +87,12 @@ describe("tab context menu", () => {
     expect(roveMenu("Enter", [a, b], a)).toBeNull();
     expect(roveMenu("ArrowDown", [], null)).toBeNull();
   });
+
+  it("names a detached or sleeping tab's state for assistive tech", () => {
+    vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
+    useBrowser.setState({ tabs: [tab, { ...tab, id: "t2", title: "Beta", state: "discarded" } as Tab], activeTab: "t1", activeWorkspace: "w1", detached: ["t1"] });
+    render(<TabStrip />);
+    expect(screen.getByRole("tab", { name: "Alpha, in its own window" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Beta, sleeping" })).toBeTruthy();
+  });
 });
