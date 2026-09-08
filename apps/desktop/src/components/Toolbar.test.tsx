@@ -443,7 +443,8 @@ describe("Toolbar", () => {
     });
 
     render(<Toolbar />);
-    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+    // Paused here, so the trigger says so rather than just "Protection".
+    fireEvent.click(screen.getByRole("button", { name: "Protection paused on this site" }));
     const site = screen.getByRole("switch", { name: "Protection on this site" });
     expect(site.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(site);

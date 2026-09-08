@@ -83,6 +83,8 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
       <FeatureButton
         icon={globalOn ? ShieldCheck : Shield}
         label="Protection"
+        // The icon alone cannot show a pause; the tooltip and name say so.
+        {...(globalOn && paused ? { tip: "Protection paused on this site" } : {})}
         iconOnly={compact}
         tone={siteOn ? "hi" : "quiet"}
         active={open}
@@ -175,7 +177,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
 
           <footer className="flex items-center gap-2 border-t border-line bg-surface-2/45 px-3 py-2">
             <span className="font-mono text-[9.5px] text-ink-3">{infoError ? "Rules unavailable" : `Rules ${info?.version ?? "bundled"}`}</span>
-            <span className="min-w-0 flex-1 truncate text-[9.5px] text-ink-3">Across workspaces; site pauses stay host-specific.</span>
+            <span className="min-w-0 flex-1 text-[9.5px] leading-tight text-ink-3">Across workspaces; site pauses stay host-specific.</span>
             <button
               type="button"
               onClick={() => {
