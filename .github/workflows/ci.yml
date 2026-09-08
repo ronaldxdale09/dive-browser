@@ -8,6 +8,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   CEF_PATH: ${{ github.workspace }}/.cef
+  # whisper.cpp must not probe the virtualised runner CPU; see the file.
+  CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/scripts/ci/ggml-portable.cmake
 
 jobs:
   check:
