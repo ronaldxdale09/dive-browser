@@ -29,6 +29,11 @@ const TABS: { id: LibraryTab; label: string; icon: typeof Star }[] = [
 ];
 
 /** Bookmarks and history in one dialog: ⌘Y. */
+/** What a row is called: its title, or its address when the page never gave one (older rows may still say "about:blank"). */
+export function titleOf(entry: { title: string; url: string }): string {
+  return entry.title && entry.title !== "about:blank" ? entry.title : entry.url;
+}
+
 export function Library() {
   useCoversContent(true);
   const toggle = useBrowser((s) => s.toggle);
@@ -120,12 +125,12 @@ function BookmarkRow({
     <div className="group flex items-center gap-1">
       <button type="button" onClick={(e) => onOpen(e, b.url)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
         <Favicon src={b.favicon} size={14} fallback={Star} fallbackClassName="text-highlight" />
-        <span className="truncate text-ink">{b.title || b.url}</span>
+        <span className="truncate text-ink">{titleOf(b)}</span>
         <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(b.url)}</span>
       </button>
       <button
         type="button"
-        aria-label={`Remove bookmark ${b.title || b.url}`}
+        aria-label={`Remove bookmark ${titleOf(b)}`}
         onClick={() => onRemove(b.url)}
         className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100"
       >
@@ -284,12 +289,12 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
               <li key={h.url} className="group flex items-center gap-1">
                 <button type="button" onClick={(e) => open(e, h.url)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
                   <Favicon src={h.favicon} size={14} fallback={History} />
-                  <span className="truncate text-ink">{h.title || h.url}</span>
+                  <span className="truncate text-ink">{titleOf(h)}</span>
                   <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(h.url)}</span>
                 </button>
                 <button
                   type="button"
-                  aria-label={`Remove ${h.title || h.url} from history`}
+                  aria-label={`Remove ${titleOf(h)} from history`}
                   onClick={() => void remove(h.url)}
                   className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100"
                 >

@@ -1488,7 +1488,13 @@ pub fn update_tab(app: &AppHandle<Runtime>, id: TabId, f: impl FnOnce(&mut Tab))
 /// fresh tab), so the visit starts untitled and the real title fills it in
 /// when it arrives; a redirect's source address is never wrongly titled.
 fn visit_title(url_changed: bool, title: &str) -> &str {
-    if url_changed { "" } else { title }
+    // "about:blank" is the blank document's own name, never the page's;
+    // it arrives as a title change while the real page is still loading.
+    if url_changed || title == BLANK_URL {
+        ""
+    } else {
+        title
+    }
 }
 
 /// Settings key holding the main window's last position and size.
@@ -1774,6 +1780,7 @@ mod tests {
         assert_eq!(super::visit_title(true, "about:blank"), "");
         assert_eq!(super::visit_title(true, "The Verge"), "");
         assert_eq!(super::visit_title(false, "Wikipedia"), "Wikipedia");
+        assert_eq!(super::visit_title(false, "about:blank"), "");
     }
 
     #[test]

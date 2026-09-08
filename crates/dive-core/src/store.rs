@@ -984,7 +984,9 @@ impl Store {
     // ----- history -----
 
     /// Record a visit. Same URL within a minute updates the title instead of adding a row.
+    /// "about:blank" is never filed as a title: it names the empty document, not the page.
     pub fn record_visit(&self, url: &str, title: &str, at: Timestamp) -> Result<()> {
+        let title = if title == "about:blank" { "" } else { title };
         let recent: Option<i64> = self
             .conn
             .query_row(
@@ -1469,6 +1471,23 @@ fn form_entry_row(row: &Row<'_>) -> rusqlite::Result<FormEntry> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn about_blank_is_never_filed_as_a_visit_title() {
+        let store = Store::in_memory().unwrap();
+        let now = Timestamp::now();
+        store
+            .record_visit("https://a.dev/", "about:blank", now)
+            .unwrap();
+        assert_eq!(store.search_history("a.dev", 5).unwrap()[0].title, "");
+        store.record_visit("https://a.dev/", "A dev", now).unwrap();
+        assert_eq!(store.search_history("a.dev", 5).unwrap()[0].title, "A dev");
+        // A later blank title must not wipe the real one.
+        store
+            .record_visit("https://a.dev/", "about:blank", now)
+            .unwrap();
+        assert_eq!(store.search_history("a.dev", 5).unwrap()[0].title, "A dev");
+    }
+
     #[test]
     fn form_entries_match_by_field_and_prefix_and_count_uses() {
         let store = Store::in_memory().unwrap();

@@ -30,6 +30,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- History no longer files "about:blank" as a page title when the blank document's title arrives before the real one; rows that already carry it show their address instead.
 - When the engine switches workspace on its own (an automation call, a link opened into another workspace, a restore), the tab strip now loads that workspace's tabs instead of showing only the ones it already knew.
 - The profile menu says "1 tab", not "1 tabs".
 - The main menu closes when anything else opens (find in page, the dock, the agent, a dialog), so a shortcut pressed with the menu open no longer leaves both on screen taking keys.
