@@ -52,6 +52,8 @@ describe("BookmarkButton", () => {
     expect(title.value).toBe("Example docs");
     // Focus moves in an effect after the popover commits, so it can land a tick later.
     await waitFor(() => expect(document.activeElement).toBe(title));
+    // The whole title is selected, so typing a new name replaces it.
+    expect([title.selectionStart, title.selectionEnd]).toEqual([0, title.value.length]);
     expect(dialog.textContent).toContain("example.com");
     expect(screen.getByRole("button", { name: "Edit bookmark" }).getAttribute("aria-pressed")).toBe("true");
     expect(contentCoverDepth()).toBe(1);

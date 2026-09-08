@@ -134,7 +134,9 @@ async function toggleBookmark() {
     const saved = await ipc.bookmarkToggle(tab);
     window.dispatchEvent(new CustomEvent(BOOKMARKS_CHANGED));
     useBrowser.setState({ error: null });
-    useBrowser.getState().notify(saved ? "Bookmark saved" : "Bookmark removed");
+    // Saved from the keyboard, the name is the page's; offer the popover to change it.
+    if (saved) useBrowser.getState().notify("Bookmark saved", 4000, { label: "Edit", run: () => window.dispatchEvent(new CustomEvent(EDIT_BOOKMARK)) });
+    else useBrowser.getState().notify("Bookmark removed");
   } catch (error) {
     useBrowser.setState({ error: errorMessage(error) });
   }
@@ -149,6 +151,8 @@ function jumpToWorkspace(index: number) {
 
 /** Asks the toolbar to select its address field; the Toolbar listens for it. */
 export const FOCUS_ADDRESS = "dive:focus-address";
+/** Open the star's popover on the active page's bookmark (the notice's Edit action). */
+export const EDIT_BOOKMARK = "dive:edit-bookmark";
 /** Opens the share popover (QR code and LAN address) for the current page. */
 export const OPEN_SHARE = "dive:open-share";
 /** A bookmark was added, renamed or removed somewhere; anything showing bookmark state re-reads it. */

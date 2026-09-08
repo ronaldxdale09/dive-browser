@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import menuSource from "../../src-tauri/src/menu.rs?raw";
-import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor } from "./commands";
+import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK } from "./commands";
 import { events, ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "./ipc";
@@ -200,6 +200,12 @@ describe("command dispatch", () => {
     await UI_COMMANDS["bookmark.toggle"]!();
 
     expect(useBrowser.getState().notice).toBe("Bookmark saved");
+    // The notice offers to name it, which opens the star's popover.
+    const edits: Event[] = [];
+    window.addEventListener(EDIT_BOOKMARK, (e) => edits.push(e));
+    expect(useBrowser.getState().noticeAction?.label).toBe("Edit");
+    useBrowser.getState().noticeAction?.run();
+    expect(edits).toHaveLength(1);
   });
 
   it("routes the new commands to the store", async () => {

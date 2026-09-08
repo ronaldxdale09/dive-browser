@@ -8,7 +8,7 @@ import { Tooltip } from "./Tooltip";
 import { errorMessage } from "../lib/errors";
 import { renameBookmark } from "../lib/bookmarks";
 import { hostOf } from "../lib/omnibox";
-import { BOOKMARKS_CHANGED } from "../lib/commands";
+import { EDIT_BOOKMARK, BOOKMARKS_CHANGED } from "../lib/commands";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 
@@ -57,6 +57,11 @@ export function BookmarkButton() {
 
   useDismiss(root, open, dismiss);
 
+  // The title is selected whole when the popover opens, so typing replaces it.
+  useEffect(() => {
+    if (open) titleInput.current?.select();
+  }, [open]);
+
   const fail = (e: unknown) => useBrowser.setState({ error: errorMessage(e) });
   const show = (name: string, edit: boolean) => {
     setTitle(name);
@@ -84,6 +89,15 @@ export function BookmarkButton() {
       })
       .catch(fail);
   };
+  // "Bookmark saved" from ⌘D offers Edit: open the popover the star would.
+  useEffect(() => {
+    const edit = () => {
+      if (saved) onStar();
+    };
+    window.addEventListener(EDIT_BOOKMARK, edit);
+    return () => window.removeEventListener(EDIT_BOOKMARK, edit);
+  });
+
   const remove = () => {
     if (!current) return;
     ipc

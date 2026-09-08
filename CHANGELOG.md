@@ -28,6 +28,7 @@ bump may change behaviour.
 - The page's corners are slightly rounded where it meets the rail and toolbar, following the Appearance corner setting (square under Sharp). The window behind the chrome is painted in the chrome's ground colour, so nothing black shows through corners or during a resize.
 
 ### Changed
+- ⌘D's "Bookmark saved" notice offers Edit, which opens the star's popover; the popover selects the whole title, so typing a new name replaces it.
 - The Console panel starts a fresh log when the page loads again, with its own "Preserve log" checkbox, and a line from an inline script names the page's host instead of a bare ":3".
 - The Network panel shows the current page's requests: a navigation or reload clears the previous page's rows, as in DevTools, with a "Preserve log" checkbox to keep them across loads.
 - Settings › General › On launch names its third choice "Start screen" instead of "Nothing", since that is what it shows, and the home-page hint says the same.
