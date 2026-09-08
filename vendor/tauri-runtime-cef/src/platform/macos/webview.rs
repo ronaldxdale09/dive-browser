@@ -77,9 +77,28 @@ impl AppWebview {
   ///
   /// The superview holds the only strong reference to that view, so dropping it
   /// deallocates the view — and its `dealloc` is what reports `WindowDestroyed`
-  /// back to CEF.
+  /// back to CEF. A layer-backed view (rounded corners, an overlay mask) is
+  /// also held by Core Animation until its backing is gone: with the layer
+  /// still attached the view outlived its window and the browser never
+  /// closed, so the backing comes off first.
   pub(crate) fn destroy_host_window(&self) {
-    self.nsview().removeFromSuperview();
+    let nsview = self.nsview();
+    // The window retains its first responder. A view that still holds it
+    // (or whose render widget subview does) survives removal from the
+    // hierarchy, so hand focus back to the window before letting go.
+    if let Some(window) = nsview.window()
+      && let Some(responder) = window.firstResponder()
+      && let Ok(focused) = responder.downcast::<NSView>()
+      && (*focused == *nsview || focused.isDescendantOf(&nsview))
+    {
+      let _ = window.makeFirstResponder(None);
+    }
+    if let Some(layer) = nsview.layer() {
+      // SAFETY: dropping a mask cannot form a layer cycle.
+      unsafe { layer.setMask(None) };
+    }
+    nsview.setWantsLayer(false);
+    nsview.removeFromSuperview();
   }
 
   pub(crate) fn apply_physical_bounds(&self, scale: f64, x: i32, y: i32, width: i32, height: i32) {
