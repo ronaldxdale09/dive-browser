@@ -190,7 +190,7 @@ function SourceRow({ source, checked, onPick }: { source: ImportSource; checked:
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs text-ink">{label}</span>
         <span className="block truncate text-[10.5px] text-ink-3">
-          {source.access === "ok" ? "Bookmarks and history" : source.access === "denied" ? "Needs your permission" : "Nothing to import"}
+          {source.access === "ok" ? (source.passwords ? "Bookmarks, history and passwords" : "Bookmarks and history") : source.access === "denied" ? "Needs your permission" : "Nothing to import"}
         </span>
       </span>
       {source.access === "denied" && <Icon icon={FolderLock} size={13} className="shrink-0 text-ink-3" />}
