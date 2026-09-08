@@ -1,3 +1,4 @@
+import { titleOf } from "../lib/omnibox";
 import { Clapperboard, Download, FolderOpen, History, Search, Star, Trash2, Wand2, X } from "lucide-react";
 import { BOOKMARKS_CHANGED } from "../lib/commands";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -31,9 +32,7 @@ const TABS: { id: LibraryTab; label: string; icon: typeof Star }[] = [
 
 /** Bookmarks and history in one dialog: ⌘Y. */
 /** What a row is called: its title, or its address when the page never gave one (older rows may still say "about:blank"). */
-export function titleOf(entry: { title: string; url: string }): string {
-  return entry.title && entry.title !== "about:blank" ? entry.title : entry.url;
-}
+export { titleOf };
 
 export function Library() {
   useCoversContent(true);

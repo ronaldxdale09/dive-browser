@@ -55,6 +55,26 @@ export function placeOf(url: string): string {
   }
 }
 
+/**
+ * A row's name: its title, or its address when the title is empty or the
+ * blank document's own name, which older history recorded before the page
+ * had a title of its own.
+ */
+export function titleOf(entry: { title: string; url: string }): string {
+  return entry.title && entry.title !== "about:blank" ? entry.title : entry.url;
+}
+
+/**
+ * Whether typing `needle` is the start of the site `url` lives on, the way a
+ * person types "gith" meaning github.com. Only the host counts, with or
+ * without "www.", so a match in a path or a title does not qualify.
+ */
+export function leadsTo(needle: string, url: string): boolean {
+  const host = hostOf(url).toLowerCase();
+  if (!host || host === url) return false;
+  return host.startsWith(needle) || host.replace(/^www\./, "").startsWith(needle);
+}
+
 function matches(query: string, ...fields: (string | null | undefined)[]) {
   return fields.some((field) => field?.toLowerCase().includes(query));
 }
@@ -81,13 +101,21 @@ export function buildSuggestions(
     rows.push(row);
   };
   for (const tab of tabs) {
-    if (matches(needle, tab.title, tab.url)) add({ kind: "tab", url: tab.url, title: tab.title, favicon: tab.favicon, tabId: tab.id });
+    if (matches(needle, tab.title, tab.url)) add({ kind: "tab", url: tab.url, title: titleOf(tab), favicon: tab.favicon, tabId: tab.id });
   }
   for (const bookmark of bookmarks) {
-    if (matches(needle, bookmark.title, bookmark.url)) add({ kind: "bookmark", url: bookmark.url, title: bookmark.title, favicon: bookmark.favicon });
+    if (matches(needle, bookmark.title, bookmark.url)) add({ kind: "bookmark", url: bookmark.url, title: titleOf(bookmark), favicon: bookmark.favicon });
   }
   for (const entry of history) {
-    if (matches(needle, entry.title, entry.url)) add({ kind: "history", url: entry.url, title: entry.title, favicon: entry.favicon });
+    if (matches(needle, entry.title, entry.url)) add({ kind: "history", url: entry.url, title: titleOf(entry), favicon: entry.favicon });
+  }
+  // A few letters that begin a known site lead there on Enter, not to a web
+  // search for those letters: "exam" with example.com open goes to the tab.
+  // An address typed out in full keeps the literal row first, so Enter loads
+  // it afresh even when a tab already shows it.
+  if (!looksLikeUrl(trimmed)) {
+    const site = rows.findIndex((row, index) => index > 0 && leadsTo(needle, row.url));
+    if (site > 0) rows.unshift(...rows.splice(site, 1));
   }
   return rows.slice(0, limit);
 }

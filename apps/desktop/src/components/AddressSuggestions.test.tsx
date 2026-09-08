@@ -59,9 +59,10 @@ describe("address bar suggestions", () => {
     const list = screen.getByRole("listbox", { name: "Address suggestions" });
     expect(input.getAttribute("aria-expanded")).toBe("true");
     const rows = () => Array.from(list.querySelectorAll("[role='option']")).map((row) => row.textContent);
-    expect(rows()[0]).toContain("Search");
-    expect(rows()[1]).toContain("Learn Rust");
-    expect(rows()[1]).toContain("Switch to tab");
+    // "rust" begins rust-lang.org, so the open tab leads and Enter goes there.
+    expect(rows()[0]).toContain("Learn Rust");
+    expect(rows()[0]).toContain("Switch to tab");
+    expect(rows()[1]).toContain("Search");
     await waitFor(() => expect(rows()).toHaveLength(4));
     expect(rows()[2]).toContain("The Rust Book");
     expect(rows()[3]).toContain("crates.io");

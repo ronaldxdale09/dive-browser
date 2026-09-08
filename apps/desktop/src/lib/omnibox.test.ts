@@ -54,15 +54,26 @@ describe("buildSuggestions", () => {
     expect(buildSuggestions("   ", sources)).toEqual([]);
   });
 
-  it("leads with the literal row and lists each URL once, tabs before bookmarks before history", () => {
+  it("lists each URL once, tabs before bookmarks before history, and leads with the site the letters begin", () => {
     const rows = buildSuggestions("example", sources);
     expect(rows.map((r) => `${r.kind}:${r.url}`)).toEqual([
-      "search:example",
       "tab:https://example.com/docs",
+      "search:example",
       "bookmark:https://bookmarked.test/ex",
       "history:https://history.test/example",
     ]);
-    expect(rows[1]).toMatchObject({ kind: "tab", tabId: "t1" });
+    expect(rows[0]).toMatchObject({ kind: "tab", tabId: "t1" });
+  });
+
+  it("keeps the literal row first when nothing begins with the letters, or when an address was typed", () => {
+    expect(buildSuggestions("past", sources).map((r) => r.kind)).toEqual(["search", "history"]);
+    expect(buildSuggestions("other.test", sources)[0]).toMatchObject({ kind: "open", url: "other.test" });
+    expect(buildSuggestions("www", { tabs: [tab("t9", "https://www.wikipedia.org/", "Wiki")], bookmarks: [], history: [] })[0]?.kind).toBe("tab");
+  });
+
+  it("names a page by its address when its recorded title is blank or about:blank", () => {
+    const rows = buildSuggestions("iana", { tabs: [], bookmarks: [], history: [visit("https://www.iana.org/help", "about:blank"), visit("https://iana.test/", "")] });
+    expect(rows.filter((r) => r.kind === "history").map((r) => r.title)).toEqual(["https://www.iana.org/help", "https://iana.test/"]);
   });
 
   it("matches case-insensitively on title or URL and says Open for an address", () => {
