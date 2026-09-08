@@ -364,7 +364,10 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
         e.preventDefault();
         onMenu(e.clientX, e.clientY);
       }}
-      className={`tab-item group flex h-[calc(var(--row-h)-4px)] cursor-pointer items-center text-xs transition-colors ${pinned ? "w-9 shrink-0 justify-center" : `min-w-9 w-56 max-w-56 shrink ${narrow.title ? "justify-center" : ""}`} ${sleeping || detached ? "opacity-55 hover:opacity-100" : ""}`}
+      // A crowded strip squeezes every tab alike, and the active one also
+      // holds its close button, so its title went first. It keeps room for a
+      // few words; the others give way, as in every browser's strip.
+      className={`tab-item group flex h-[calc(var(--row-h)-4px)] cursor-pointer items-center text-xs transition-colors ${pinned ? "w-9 shrink-0 justify-center" : `${active && !narrow.title ? "min-w-32" : "min-w-9"} w-56 max-w-56 shrink ${narrow.title ? "justify-center" : ""}`} ${sleeping || detached ? "opacity-55 hover:opacity-100" : ""}`}
       data-active={active || undefined}
       title={detached ? `${label(t)} (in its own window)` : sleeping ? `${label(t)} (sleeping, click to wake)` : pinned ? label(t) : undefined}
       data-sleeping={sleeping || undefined}

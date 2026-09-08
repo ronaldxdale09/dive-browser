@@ -96,3 +96,16 @@ describe("tab context menu", () => {
     expect(screen.getByRole("tab", { name: "Beta, sleeping" })).toBeTruthy();
   });
 });
+
+describe("crowded strip", () => {
+  it("keeps the active tab wide enough for a few words while the others give way", () => {
+    const many = Array.from({ length: 8 }, (_, i) => ({ ...tab, id: `t${i}`, position: i, title: `Tab ${i}` }));
+    useBrowser.setState({ tabs: many, activeTab: "t3", activeWorkspace: "w1" });
+    render(<TabStrip />);
+    const active = screen.getByRole("tab", { selected: true }).closest(".tab-item")!;
+    const other = screen.getByRole("tab", { name: /^Tab 1/ }).closest(".tab-item")!;
+    expect(active.className).toContain("min-w-32");
+    expect(other.className).toContain("min-w-9");
+    expect(other.className).not.toContain("min-w-32");
+  });
+});
