@@ -4,6 +4,7 @@ import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { SharePopover } from "./SharePopover";
+import { OPEN_SHARE } from "../lib/commands";
 
 const tab: Tab = {
   id: "tab-1",
@@ -31,6 +32,13 @@ afterEach(() => {
 });
 
 describe("SharePopover", () => {
+  it("opens when the page menu asks for a QR code", async () => {
+    render(<SharePopover />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    window.dispatchEvent(new CustomEvent(OPEN_SHARE));
+    expect(await screen.findByRole("dialog", { name: "Share" })).toBeTruthy();
+  });
+
   it("names the QR code, says while the address is found, and announces a copy", async () => {
     let resolve!: (v: { lan_url: string; qr_svg: string }) => void;
     vi.mocked(ipc.shareUrl).mockReturnValue(new Promise((r) => (resolve = r)));

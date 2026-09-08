@@ -45,6 +45,8 @@ mod network_probe;
 mod normal_window;
 mod openapi;
 mod overlay_geometry;
+#[cfg(feature = "cef")]
+mod page_menu;
 mod pagescript;
 mod passwords;
 #[cfg(feature = "cef")]

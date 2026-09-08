@@ -56,6 +56,8 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "zoom.out": () => useBrowser.getState().zoomStep(-1),
   "zoom.reset": () => useBrowser.getState().zoomStep(0),
   "sidecar.toggle": () => useBrowser.getState().toggle("sidecar"),
+  "sidecar.open": () => useBrowser.getState().toggle("sidecar", true),
+  "share.open": () => void window.dispatchEvent(new CustomEvent(OPEN_SHARE)),
   "dock.toggle": () => useBrowser.getState().toggle("dock"),
   "simulator.toggle": () => usePicker.getState().toggle(),
   "subtitles.open": () => useBrowser.getState().toggle("subtitles", true),
@@ -146,6 +148,8 @@ function jumpToWorkspace(index: number) {
 
 /** Asks the toolbar to select its address field; the Toolbar listens for it. */
 export const FOCUS_ADDRESS = "dive:focus-address";
+/** Opens the share popover (QR code and LAN address) for the current page. */
+export const OPEN_SHARE = "dive:open-share";
 
 /**
  * Activate the tab `delta` places away, wrapping at both ends. Walks the
@@ -162,7 +166,7 @@ function stepTab(delta: number) {
 }
 
 /** Commands a private window refuses; the menu and palette hide them too. */
-const PRIVATE_REFUSED = ["sidecar.toggle", "extensions.open", "workspace.new", "bookmark.toggle", "subtitles.open", "bookmarks.open", "history.open", "settings.passwords", "settings.agent", "settings.subtitles", "default-browser.open"];
+const PRIVATE_REFUSED = ["sidecar.toggle", "sidecar.open", "extensions.open", "workspace.new", "bookmark.toggle", "subtitles.open", "bookmarks.open", "history.open", "settings.passwords", "settings.agent", "settings.subtitles", "default-browser.open"];
 
 export function runCommand(id: string, source: "keyboard" | "native-menu" | "command" = "command"): void {
   traceInputCommand(id, source);
@@ -256,6 +260,8 @@ export const COMMAND_TITLES: Record<string, string> = {
   "zoom.out": "Zoom out",
   "zoom.reset": "Reset zoom",
   "sidecar.toggle": "Agent",
+  "sidecar.open": "Open the agent",
+  "share.open": "Share this page: QR code and address for your phone",
   "dock.toggle": "Developer dock",
   "simulator.toggle": "Device simulator",
   "subtitles.open": "Live subtitles",

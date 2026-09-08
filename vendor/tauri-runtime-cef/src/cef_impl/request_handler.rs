@@ -3,34 +3,34 @@
 // SPDX-License-Identifier: MIT
 
 use std::{
-  borrow::Cow,
-  io::{Cursor, Read},
-  sync::{Arc, Mutex},
+    borrow::Cow,
+    io::{Cursor, Read},
+    sync::{Arc, Mutex},
 };
 
 use cef::{rc::*, *};
 use dioxus_debug_cell::RefCell;
 use html5ever::{LocalName, interface::QualName, namespace_url, ns};
 use http::{
-  HeaderMap, HeaderName, HeaderValue,
-  header::{CONTENT_SECURITY_POLICY, CONTENT_TYPE, ORIGIN},
+    HeaderMap, HeaderName, HeaderValue,
+    header::{CONTENT_SECURITY_POLICY, CONTENT_TYPE, ORIGIN},
 };
 use kuchiki::NodeRef;
 use tauri_runtime::{
-  UserEvent,
-  webview::{NavigationHandler, UriSchemeProtocolHandler},
-  window::WindowId,
+    UserEvent,
+    webview::{NavigationHandler, UriSchemeProtocolHandler},
+    window::WindowId,
 };
 use tauri_utils::{
-  config::{Csp, CspDirectiveSources},
-  html::{parse as parse_html, serialize_node},
+    config::{Csp, CspDirectiveSources},
+    html::{parse as parse_html, serialize_node},
 };
 use url::Url;
 
 use crate::{
-  cef_impl::client::{DragDropEventTarget, DragDropState, WebDragDropResourceRequestHandler},
-  runtime::RuntimeContext,
-  webview::{CefInitScript, INITIAL_LOAD_URL},
+    cef_impl::client::{DragDropEventTarget, DragDropState, WebDragDropResourceRequestHandler},
+    runtime::RuntimeContext,
+    webview::{CefInitScript, INITIAL_LOAD_URL},
 };
 
 #[path = "partial_response.rs"]
@@ -38,75 +38,75 @@ mod partial_response;
 
 type HttpResponse = Arc<RefCell<Option<http::Response<Cursor<Vec<u8>>>>>>;
 pub(crate) type SchemeRegistry = Arc<
-  Mutex<
-    std::collections::HashMap<
-      (i32, String),
-      (
-        String,
-        Arc<Box<UriSchemeProtocolHandler>>,
-        Arc<Vec<CefInitScript>>,
-      ),
+    Mutex<
+        std::collections::HashMap<
+            (i32, String),
+            (
+                String,
+                Arc<Box<UriSchemeProtocolHandler>>,
+                Arc<Vec<CefInitScript>>,
+            ),
+        >,
     >,
-  >,
 >;
 
 fn csp_inject_initialization_scripts_hashes(
-  existing_csp: String,
-  initialization_scripts: &[CefInitScript],
+    existing_csp: String,
+    initialization_scripts: &[CefInitScript],
 ) -> String {
-  if initialization_scripts.is_empty() {
-    return existing_csp;
-  }
+    if initialization_scripts.is_empty() {
+        return existing_csp;
+    }
 
-  let script_hashes: Vec<String> = initialization_scripts
-    .iter()
-    .map(|s| s.hash.clone())
-    .collect();
+    let script_hashes: Vec<String> = initialization_scripts
+        .iter()
+        .map(|s| s.hash.clone())
+        .collect();
 
-  if script_hashes.is_empty() {
-    return existing_csp;
-  }
+    if script_hashes.is_empty() {
+        return existing_csp;
+    }
 
-  let mut csp_map: std::collections::HashMap<String, CspDirectiveSources> =
-    Csp::Policy(existing_csp.to_string()).into();
+    let mut csp_map: std::collections::HashMap<String, CspDirectiveSources> =
+        Csp::Policy(existing_csp.to_string()).into();
 
-  let script_src = csp_map
-    .entry("script-src".to_string())
-    .or_insert_with(|| CspDirectiveSources::List(vec!["'self'".to_string()]));
+    let script_src = csp_map
+        .entry("script-src".to_string())
+        .or_insert_with(|| CspDirectiveSources::List(vec!["'self'".to_string()]));
 
-  script_src.extend(script_hashes);
+    script_src.extend(script_hashes);
 
-  Csp::DirectiveMap(csp_map).to_string()
+    Csp::DirectiveMap(csp_map).to_string()
 }
 
 fn inject_scripts_into_html_body(
-  body: &[u8],
-  initialization_scripts: &[CefInitScript],
+    body: &[u8],
+    initialization_scripts: &[CefInitScript],
 ) -> Option<Vec<u8>> {
-  let Ok(body_str) = std::str::from_utf8(body) else {
-    return None;
-  };
+    let Ok(body_str) = std::str::from_utf8(body) else {
+        return None;
+    };
 
-  let document = parse_html(body_str.to_string());
+    let document = parse_html(body_str.to_string());
 
-  let head = if let Ok(ref head_node) = document.select_first("head") {
-    head_node.as_node().clone()
-  } else {
-    let head_node = NodeRef::new_element(
-      QualName::new(None, ns!(html), LocalName::from("head")),
-      None,
-    );
-    document.prepend(head_node.clone());
-    head_node
-  };
+    let head = if let Ok(ref head_node) = document.select_first("head") {
+        head_node.as_node().clone()
+    } else {
+        let head_node = NodeRef::new_element(
+            QualName::new(None, ns!(html), LocalName::from("head")),
+            None,
+        );
+        document.prepend(head_node.clone());
+        head_node
+    };
 
-  for init_script in initialization_scripts.iter().rev() {
-    let script_el = NodeRef::new_element(QualName::new(None, ns!(html), "script".into()), None);
-    script_el.append(NodeRef::new_text(init_script.script.as_str()));
-    head.prepend(script_el);
-  }
+    for init_script in initialization_scripts.iter().rev() {
+        let script_el = NodeRef::new_element(QualName::new(None, ns!(html), "script".into()), None);
+        script_el.append(NodeRef::new_text(init_script.script.as_str()));
+        head.prepend(script_el);
+    }
 
-  Some(serialize_node(&document))
+    Some(serialize_node(&document))
 }
 
 wrap_request_handler! {
@@ -494,70 +494,70 @@ wrap_scheme_handler_factory! {
 struct ThreadSafe<T>(T);
 
 impl<T> ThreadSafe<T> {
-  fn into_owned(self) -> T {
-    self.0
-  }
+    fn into_owned(self) -> T {
+        self.0
+    }
 }
 
 unsafe impl<T> Send for ThreadSafe<T> {}
 unsafe impl<T> Sync for ThreadSafe<T> {}
 
 fn read_request_body(request: &mut Request) -> Vec<u8> {
-  let mut body = Vec::new();
+    let mut body = Vec::new();
 
-  if let Some(post_data) = request.post_data() {
-    let mut elements = vec![None; post_data.element_count()];
-    post_data.elements(Some(&mut elements));
-    for element in elements.into_iter().flatten() {
-      match element.get_type().as_ref() {
-        sys::cef_postdataelement_type_t::PDE_TYPE_BYTES => {
-          let size = element.bytes_count();
-          if size > 0 {
-            let mut buf = vec![0u8; size];
-            // Copy bytes into our buffer
-            let copied = element.bytes(size, buf.as_mut_ptr());
-            // Safety: CEF promises it wrote `copied` bytes into buf
-            unsafe {
-              buf.set_len(copied);
+    if let Some(post_data) = request.post_data() {
+        let mut elements = vec![None; post_data.element_count()];
+        post_data.elements(Some(&mut elements));
+        for element in elements.into_iter().flatten() {
+            match element.get_type().as_ref() {
+                sys::cef_postdataelement_type_t::PDE_TYPE_BYTES => {
+                    let size = element.bytes_count();
+                    if size > 0 {
+                        let mut buf = vec![0u8; size];
+                        // Copy bytes into our buffer
+                        let copied = element.bytes(size, buf.as_mut_ptr());
+                        // Safety: CEF promises it wrote `copied` bytes into buf
+                        unsafe {
+                            buf.set_len(copied);
+                        }
+                        body.extend(buf);
+                    }
+                }
+                sys::cef_postdataelement_type_t::PDE_TYPE_FILE => {
+                    // Read file from disk
+                    let file_path = CefString::from(&element.file()).to_string();
+                    if let Ok(mut file) = std::fs::File::open(&file_path) {
+                        use std::io::Read;
+                        let mut buf = Vec::new();
+                        if file.read_to_end(&mut buf).is_ok() {
+                            body.extend(buf);
+                        }
+                    }
+                }
+                _ => {}
             }
-            body.extend(buf);
-          }
         }
-        sys::cef_postdataelement_type_t::PDE_TYPE_FILE => {
-          // Read file from disk
-          let file_path = CefString::from(&element.file()).to_string();
-          if let Ok(mut file) = std::fs::File::open(&file_path) {
-            use std::io::Read;
-            let mut buf = Vec::new();
-            if file.read_to_end(&mut buf).is_ok() {
-              body.extend(buf);
-            }
-          }
-        }
-        _ => {}
-      }
     }
-  }
 
-  body
+    body
 }
 
 fn get_request_headers(request: &mut Request) -> HeaderMap {
-  let mut headers = HeaderMap::new();
+    let mut headers = HeaderMap::new();
 
-  let mut map = CefStringMultimap::new();
+    let mut map = CefStringMultimap::new();
 
-  request.header_map(Some(&mut map));
+    request.header_map(Some(&mut map));
 
-  // Iterate through all entries
-  for (name, value) in map {
-    for v in value {
-      headers.append(
-        HeaderName::from_bytes(name.as_bytes()).unwrap(),
-        HeaderValue::from_str(&v).unwrap(),
-      );
+    // Iterate through all entries
+    for (name, value) in map {
+        for v in value {
+            headers.append(
+                HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                HeaderValue::from_str(&v).unwrap(),
+            );
+        }
     }
-  }
 
-  headers
+    headers
 }

@@ -8,14 +8,14 @@ use cef::*;
 use tauri_runtime::{UserEvent, webview::DetachedWebview};
 
 use crate::{
-  cef_impl::client::TauriCefBrowserClient, runtime::CefRuntime, webview::CefWebviewDispatcher,
+    cef_impl::client::TauriCefBrowserClient, runtime::CefRuntime, webview::CefWebviewDispatcher,
 };
 
 const IPC_MESSAGE_NAME: &str = "tauri:ipc";
 const IPC_POST_MESSAGE_FUNCTION: &str = "postMessage";
 
 pub(crate) type IpcHandler<T> =
-  dyn Fn(DetachedWebview<T, CefRuntime<T>>, http::Request<String>) + Send;
+    dyn Fn(DetachedWebview<T, CefRuntime<T>>, http::Request<String>) + Send;
 
 wrap_v8_handler! {
   struct IpcPostMessageV8Handler;
@@ -75,35 +75,35 @@ wrap_v8_handler! {
 }
 
 fn install_ipc_post_message(context: Option<&mut V8Context>) {
-  let Some(window) = context.and_then(|context| context.global()) else {
-    return;
-  };
-  let attributes = sys::cef_v8_propertyattribute_t(
-    [
-      sys::cef_v8_propertyattribute_t::V8_PROPERTY_ATTRIBUTE_READONLY,
-      sys::cef_v8_propertyattribute_t::V8_PROPERTY_ATTRIBUTE_DONTENUM,
-      sys::cef_v8_propertyattribute_t::V8_PROPERTY_ATTRIBUTE_DONTDELETE,
-    ]
-    .into_iter()
-    .fold(0, |acc, attr| acc | attr.0),
-  )
-  .into();
-  let Some(mut ipc) = v8_value_create_object(None, None) else {
-    return;
-  };
-  let mut handler = IpcPostMessageV8Handler::new();
-  let post_message_name = CefString::from(IPC_POST_MESSAGE_FUNCTION);
-  let Some(mut post_message) =
-    v8_value_create_function(Some(&post_message_name), Some(&mut handler))
-  else {
-    return;
-  };
-  ipc.set_value_bykey(
-    Some(&post_message_name),
-    Some(&mut post_message),
-    attributes,
-  );
-  window.set_value_bykey(Some(&CefString::from("ipc")), Some(&mut ipc), attributes);
+    let Some(window) = context.and_then(|context| context.global()) else {
+        return;
+    };
+    let attributes = sys::cef_v8_propertyattribute_t(
+        [
+            sys::cef_v8_propertyattribute_t::V8_PROPERTY_ATTRIBUTE_READONLY,
+            sys::cef_v8_propertyattribute_t::V8_PROPERTY_ATTRIBUTE_DONTENUM,
+            sys::cef_v8_propertyattribute_t::V8_PROPERTY_ATTRIBUTE_DONTDELETE,
+        ]
+        .into_iter()
+        .fold(0, |acc, attr| acc | attr.0),
+    )
+    .into();
+    let Some(mut ipc) = v8_value_create_object(None, None) else {
+        return;
+    };
+    let mut handler = IpcPostMessageV8Handler::new();
+    let post_message_name = CefString::from(IPC_POST_MESSAGE_FUNCTION);
+    let Some(mut post_message) =
+        v8_value_create_function(Some(&post_message_name), Some(&mut handler))
+    else {
+        return;
+    };
+    ipc.set_value_bykey(
+        Some(&post_message_name),
+        Some(&mut post_message),
+        attributes,
+    );
+    window.set_value_bykey(Some(&CefString::from("ipc")), Some(&mut ipc), attributes);
 }
 
 wrap_render_process_handler! {
@@ -122,66 +122,75 @@ wrap_render_process_handler! {
 }
 
 pub(crate) fn on_process_message_received<T: UserEvent>(
-  client: &TauriCefBrowserClient<T>,
-  frame: Option<&mut Frame>,
-  source_process: ProcessId,
-  message: Option<&mut ProcessMessage>,
+    client: &TauriCefBrowserClient<T>,
+    frame: Option<&mut Frame>,
+    source_process: ProcessId,
+    message: Option<&mut ProcessMessage>,
 ) -> std::os::raw::c_int {
-  if source_process != ProcessId::RENDERER {
-    return 0;
-  }
-  let Some(message) = message else {
-    return 0;
-  };
-  if CefString::from(&message.name()).to_string() != IPC_MESSAGE_NAME {
-    return 0;
-  }
-  let Some(handler) = client.handlers.ipc_handler.as_ref() else {
-    return 1;
-  };
-  let Some(args) = message.argument_list() else {
-    return 1;
-  };
+    if source_process != ProcessId::RENDERER {
+        return 0;
+    }
+    let Some(message) = message else {
+        return 0;
+    };
+    if CefString::from(&message.name()).to_string() != IPC_MESSAGE_NAME {
+        return 0;
+    }
+    let Some(handler) = client.handlers.ipc_handler.as_ref() else {
+        return 1;
+    };
+    let Some(args) = message.argument_list() else {
+        return 1;
+    };
 
-  // Renderer message arguments are not an authority for origin. Only the
-  // valid native main frame may invoke IPC; subframes must not inherit their
-  // containing webview's application capabilities.
-  let Some(frame) = frame else { return 1; };
-  let native_url = CefString::from(&frame.url()).to_string();
-  let Some(url) = native_ipc_url(frame.is_valid() != 0, frame.is_main() != 0, &native_url) else { return 1; };
-  let body = CefString::from(&args.string(1)).to_string();
+    // Renderer message arguments are not an authority for origin. Only the
+    // valid native main frame may invoke IPC; subframes must not inherit their
+    // containing webview's application capabilities.
+    let Some(frame) = frame else {
+        return 1;
+    };
+    let native_url = CefString::from(&frame.url()).to_string();
+    let Some(url) = native_ipc_url(frame.is_valid() != 0, frame.is_main() != 0, &native_url) else {
+        return 1;
+    };
+    let body = CefString::from(&args.string(1)).to_string();
 
-  if let Ok(request) = http::Request::builder().uri(url).body(body) {
-    handler(
-      DetachedWebview {
-        label: client.label.clone(),
-        dispatcher: CefWebviewDispatcher {
-          window_id: Arc::new(Mutex::new(client.window_id)),
-          webview_id: client.webview_id,
-          context: client.context.clone(),
-        },
-      },
-      request,
-    );
-  }
-  1
+    if let Ok(request) = http::Request::builder().uri(url).body(body) {
+        handler(
+            DetachedWebview {
+                label: client.label.clone(),
+                dispatcher: CefWebviewDispatcher {
+                    window_id: Arc::new(Mutex::new(client.window_id)),
+                    webview_id: client.webview_id,
+                    context: client.context.clone(),
+                },
+            },
+            request,
+        );
+    }
+    1
 }
 
 fn native_ipc_url(valid: bool, main: bool, native_url: &str) -> Option<String> {
-  if !valid || !main { return None; }
-  url::Url::parse(native_url).ok().map(|url| url.to_string())
+    if !valid || !main {
+        return None;
+    }
+    url::Url::parse(native_url).ok().map(|url| url.to_string())
 }
 
 #[cfg(test)]
 mod tests {
-  use super::native_ipc_url;
+    use super::native_ipc_url;
 
-  #[test]
-  fn ipc_origin_comes_from_the_live_native_main_frame() {
-    assert_eq!(native_ipc_url(true, true, "https://page.test/"), Some("https://page.test/".into()));
-    assert_eq!(native_ipc_url(true, false, "http://tauri.localhost/"), None);
-    assert_eq!(native_ipc_url(false, true, "http://tauri.localhost/"), None);
-    assert_eq!(native_ipc_url(true, true, ""), None);
-    assert_eq!(native_ipc_url(true, true, "not a URL"), None);
-  }
+    #[test]
+    fn ipc_origin_comes_from_the_live_native_main_frame() {
+        assert_eq!(
+            native_ipc_url(true, true, "https://page.test/"),
+            Some("https://page.test/".into())
+        );
+        assert_eq!(native_ipc_url(true, false, "http://tauri.localhost/"), None);
+        assert_eq!(native_ipc_url(false, true, "http://tauri.localhost/"), None);
+        assert_eq!(native_ipc_url(true, true, ""), None);
+        assert_eq!(native_ipc_url(true, true, "not a URL"), None);
+    }
 }

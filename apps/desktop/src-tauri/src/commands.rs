@@ -2879,7 +2879,7 @@ fn cdp_for(state: &AppState, id: TabId) -> AppResult<dive_cdp::CdpSession> {
         .ok_or_else(|| AppError::new("no devtools session for this tab"))
 }
 
-fn with_view(
+pub(crate) fn with_view(
     state: &AppState,
     id: TabId,
     f: impl FnOnce(&tauri::Webview<Runtime>) -> tauri::Result<()>,
@@ -3255,7 +3255,14 @@ pub fn normalize_url_with(input: &str, template: &str) -> AppResult<url::Url> {
     if let Ok(url) = url::Url::parse(trimmed)
         && matches!(
             url.scheme(),
-            "http" | "https" | "file" | "about" | "data" | "blob" | crate::engine::INTERNAL_SCHEME
+            "http"
+                | "https"
+                | "file"
+                | "about"
+                | "data"
+                | "blob"
+                | "view-source"
+                | crate::engine::INTERNAL_SCHEME
         )
     {
         return Ok(url);

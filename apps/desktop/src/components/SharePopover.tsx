@@ -1,4 +1,5 @@
 import { Check, Copy, Share } from "lucide-react";
+import { OPEN_SHARE } from "../lib/commands";
 import { useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
 import type { ShareInfo } from "../lib/ipc";
@@ -21,6 +22,13 @@ export function SharePopover() {
   const panel = useRef<HTMLDivElement>(null);
   useCoversContent(open);
   useFocusTrap(panel, { active: open });
+
+  // The page's right-click menu asks for the QR code through the host.
+  useEffect(() => {
+    const show = () => setOpen(true);
+    window.addEventListener(OPEN_SHARE, show);
+    return () => window.removeEventListener(OPEN_SHARE, show);
+  }, []);
 
   useEffect(() => {
     if (!open || !current) return;

@@ -8,6 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- Right-clicking a page shows a proper menu: Open Link in New Tab and Copy Link Address on links; Open Image in New Tab, Save Image As… and Copy Image Address on images; Copy and "Search the Web for …" on a selection; then Back, Forward, Reload, Save As…, Print…, Create QR Code for This Page, Ask the Agent About This Page, Device Simulator, View Page Source (opens the source in a tab) and Inspect. Text fields keep the editing menu.
 - The "site can't be reached" page offers to search the web for the host, since an unresolved name is usually a typo.
 - The tab context menu gains "Duplicate tab" and "Copy address", takes keyboard focus when it opens (arrow keys, Home, End, Escape), and hands focus back to the tab afterwards.
 - The command palette reaches every Settings section by name ("Settings: Passwords & forms …", "Settings: Privacy …") and the default-browser offer; the import command names passwords and form entries.

@@ -708,6 +708,8 @@ impl TabHost {
             }
         }
         Self::round_view(&view, self.corner_radius);
+        #[cfg(feature = "cef")]
+        crate::page_menu::attach(app, tab_id, &view);
         self.views.insert(tab_id, view);
         Ok(())
     }

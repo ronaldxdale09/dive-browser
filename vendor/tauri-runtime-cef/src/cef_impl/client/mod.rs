@@ -9,8 +9,8 @@ use tauri_runtime::{UserEvent, window::WindowId};
 use winit::event_loop::EventLoopProxy as WinitEventLoopProxy;
 
 use crate::{
-  cef_impl::{ipc, request_handler},
-  runtime::{CefRuntime, Message, RuntimeContext},
+    cef_impl::{ipc, request_handler},
+    runtime::{CefRuntime, Message, RuntimeContext},
 };
 
 mod context_menu;
@@ -24,12 +24,13 @@ pub(crate) mod permission;
 mod process;
 
 use context_menu::TauriCefContextMenuHandler;
+pub use context_menu::{ContextMenuAction, ContextMenuBridge, ContextMenuCommand};
 use display::TauriCefDisplayHandler;
 use download::TauriCefDownloadHandler;
 use drag::TauriCefDragHandler;
 pub(crate) use drag::{
-  DragDropEventTarget, DragDropScriptEvent, DragDropState, WebDragDropResourceRequestHandler,
-  drag_drop_initialization_script, event_from_script_event,
+    DragDropEventTarget, DragDropScriptEvent, DragDropState, WebDragDropResourceRequestHandler,
+    drag_drop_initialization_script, event_from_script_event,
 };
 use keyboard::TauriCefKeyboardHandler;
 use life_span::TauriCefChildLifeSpanHandler;
@@ -38,35 +39,39 @@ use permission::TauriCefPermissionHandler;
 pub(crate) use process::TauriCefBrowserProcessHandler;
 
 pub(crate) struct TauriCefBrowserClientHandlers<T: UserEvent> {
-  pub(crate) permissions: Arc<permission::PermissionBridge>,
-  pub(crate) shortcut_binding: Arc<crate::reserved_shortcut_native::NativeShortcutBinding>,
-  pub(crate) ipc_handler: Option<Arc<ipc::IpcHandler<T>>>,
-  pub(crate) on_page_load_handler: Option<Arc<tauri_runtime::webview::OnPageLoadHandler>>,
-  pub(crate) document_title_changed_handler:
-    Option<Arc<tauri_runtime::webview::DocumentTitleChangedHandler>>,
-  pub(crate) navigation_handler: Option<Arc<tauri_runtime::webview::NavigationHandler>>,
-  pub(crate) address_changed_handler: Option<Arc<tauri_runtime::webview::AddressChangedHandler>>,
-  pub(crate) new_window_handler:
-    Option<Arc<tauri_runtime::webview::NewWindowHandler<T, CefRuntime<T>>>>,
-  pub(crate) download_handler: Option<Arc<tauri_runtime::webview::DownloadHandler>>,
-  pub(crate) web_content_process_terminate_handler: Option<Arc<dyn Fn() + Send>>,
+    pub(crate) permissions: Arc<permission::PermissionBridge>,
+    pub(crate) context_menu: Arc<ContextMenuBridge>,
+    pub(crate) shortcut_binding: Arc<crate::reserved_shortcut_native::NativeShortcutBinding>,
+    pub(crate) ipc_handler: Option<Arc<ipc::IpcHandler<T>>>,
+    pub(crate) on_page_load_handler: Option<Arc<tauri_runtime::webview::OnPageLoadHandler>>,
+    pub(crate) document_title_changed_handler:
+        Option<Arc<tauri_runtime::webview::DocumentTitleChangedHandler>>,
+    pub(crate) navigation_handler: Option<Arc<tauri_runtime::webview::NavigationHandler>>,
+    pub(crate) address_changed_handler: Option<Arc<tauri_runtime::webview::AddressChangedHandler>>,
+    pub(crate) new_window_handler:
+        Option<Arc<tauri_runtime::webview::NewWindowHandler<T, CefRuntime<T>>>>,
+    pub(crate) download_handler: Option<Arc<tauri_runtime::webview::DownloadHandler>>,
+    pub(crate) web_content_process_terminate_handler: Option<Arc<dyn Fn() + Send>>,
 }
 
 impl<T: UserEvent> Clone for TauriCefBrowserClientHandlers<T> {
-  fn clone(&self) -> Self {
-    Self {
-      permissions: self.permissions.clone(),
-      shortcut_binding: self.shortcut_binding.clone(),
-      ipc_handler: self.ipc_handler.clone(),
-      on_page_load_handler: self.on_page_load_handler.clone(),
-      document_title_changed_handler: self.document_title_changed_handler.clone(),
-      navigation_handler: self.navigation_handler.clone(),
-      address_changed_handler: self.address_changed_handler.clone(),
-      new_window_handler: self.new_window_handler.clone(),
-      download_handler: self.download_handler.clone(),
-      web_content_process_terminate_handler: self.web_content_process_terminate_handler.clone(),
+    fn clone(&self) -> Self {
+        Self {
+            permissions: self.permissions.clone(),
+            context_menu: self.context_menu.clone(),
+            shortcut_binding: self.shortcut_binding.clone(),
+            ipc_handler: self.ipc_handler.clone(),
+            on_page_load_handler: self.on_page_load_handler.clone(),
+            document_title_changed_handler: self.document_title_changed_handler.clone(),
+            navigation_handler: self.navigation_handler.clone(),
+            address_changed_handler: self.address_changed_handler.clone(),
+            new_window_handler: self.new_window_handler.clone(),
+            download_handler: self.download_handler.clone(),
+            web_content_process_terminate_handler: self
+                .web_content_process_terminate_handler
+                .clone(),
+        }
     }
-  }
 }
 
 wrap_client! {
@@ -141,7 +146,7 @@ wrap_client! {
     }
 
     fn context_menu_handler(&self) -> Option<ContextMenuHandler> {
-      Some(TauriCefContextMenuHandler::new(self.devtools_enabled))
+      Some(TauriCefContextMenuHandler::new(self.devtools_enabled, self.handlers.context_menu.clone()))
     }
 
     fn keyboard_handler(&self) -> Option<KeyboardHandler> {

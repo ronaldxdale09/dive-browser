@@ -13,76 +13,76 @@ type CefOsEvent<'a> = *mut u8;
 type CefOsEvent<'a> = Option<&'a mut cef::sys::MSG>;
 
 fn trace_key(stage: Stage, browser: Option<&Browser>, event: Option<&KeyEvent>) {
-  if !native_input_trace::enabled() {
-    return;
-  }
-  let Some(event) = event else { return };
-  use cef::sys::{cef_event_flags_t as Flags, cef_key_event_type_t};
-  let raw_key_down = event.type_ == cef_key_event_type_t::KEYEVENT_RAWKEYDOWN.into();
-  let key_down = raw_key_down || event.type_ == cef_key_event_type_t::KEYEVENT_KEYDOWN.into();
-  if !key_down {
-    return;
-  }
-  #[cfg(windows)]
-  let modifiers = event.modifiers as i32;
-  #[cfg(not(windows))]
-  let modifiers = event.modifiers;
-  let classification = native_input_trace::classify_key(
-    cfg!(target_os = "macos"),
-    raw_key_down,
-    event.windows_key_code,
-    modifiers & Flags::EVENTFLAG_COMMAND_DOWN.0 != 0,
-    modifiers & Flags::EVENTFLAG_CONTROL_DOWN.0 != 0,
-    modifiers & Flags::EVENTFLAG_ALT_DOWN.0 != 0,
-    modifiers & Flags::EVENTFLAG_SHIFT_DOWN.0 != 0,
-  );
-  native_input_trace::key_event(
-    stage,
-    key_down,
-    classification,
-    browser.map(|b| b.identifier()),
-  );
+    if !native_input_trace::enabled() {
+        return;
+    }
+    let Some(event) = event else { return };
+    use cef::sys::{cef_event_flags_t as Flags, cef_key_event_type_t};
+    let raw_key_down = event.type_ == cef_key_event_type_t::KEYEVENT_RAWKEYDOWN.into();
+    let key_down = raw_key_down || event.type_ == cef_key_event_type_t::KEYEVENT_KEYDOWN.into();
+    if !key_down {
+        return;
+    }
+    #[cfg(windows)]
+    let modifiers = event.modifiers as i32;
+    #[cfg(not(windows))]
+    let modifiers = event.modifiers;
+    let classification = native_input_trace::classify_key(
+        cfg!(target_os = "macos"),
+        raw_key_down,
+        event.windows_key_code,
+        modifiers & Flags::EVENTFLAG_COMMAND_DOWN.0 != 0,
+        modifiers & Flags::EVENTFLAG_CONTROL_DOWN.0 != 0,
+        modifiers & Flags::EVENTFLAG_ALT_DOWN.0 != 0,
+        modifiers & Flags::EVENTFLAG_SHIFT_DOWN.0 != 0,
+    );
+    native_input_trace::key_event(
+        stage,
+        key_down,
+        classification,
+        browser.map(|b| b.identifier()),
+    );
 }
 
 #[cfg(target_os = "macos")]
 fn dispatch_reserved_shortcut(
-  binding: &crate::reserved_shortcut_native::NativeShortcutBinding,
-  browser: Option<&Browser>,
-  event: Option<&KeyEvent>,
-  os_event: CefOsEvent<'_>,
+    binding: &crate::reserved_shortcut_native::NativeShortcutBinding,
+    browser: Option<&Browser>,
+    event: Option<&KeyEvent>,
+    os_event: CefOsEvent<'_>,
 ) -> bool {
-  use crate::reserved_shortcut::{ShortcutKey, dispatch_shortcut};
-  use cef::sys::{cef_event_flags_t as Flags, cef_key_event_type_t};
-  use objc2::MainThreadMarker;
-  use objc2_app_kit::{NSEvent, NSEventType};
+    use crate::reserved_shortcut::{ShortcutKey, dispatch_shortcut};
+    use cef::sys::{cef_event_flags_t as Flags, cef_key_event_type_t};
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSEvent, NSEventType};
 
-  let Some(event) = event else { return false };
-  let Some(browser) = browser else { return false };
-  let modifiers = event.modifiers;
-  dispatch_shortcut(
-    true,
-    ShortcutKey {
-      raw_key_down: event.type_ == cef_key_event_type_t::KEYEVENT_RAWKEYDOWN.into(),
-      key_code: event.windows_key_code,
-      command: modifiers & Flags::EVENTFLAG_COMMAND_DOWN.0 != 0,
-      control: modifiers & Flags::EVENTFLAG_CONTROL_DOWN.0 != 0,
-      alt: modifiers & Flags::EVENTFLAG_ALT_DOWN.0 != 0,
-      shift: modifiers & Flags::EVENTFLAG_SHIFT_DOWN.0 != 0,
-    },
-    !os_event.is_null(),
-    |action| {
-      let Some(_mtm) = MainThreadMarker::new() else {
-        return false;
-      };
-      // SAFETY: CEF supplies the native NSEvent for this UI-thread callback;
-      // the event is borrowed here, never retained or stored.
-      let Some(event) = (unsafe { os_event.cast::<NSEvent>().as_ref() }) else {
-        return false;
-      };
-      event.r#type() == NSEventType::KeyDown
-        && crate::reserved_shortcut_native::dispatch(binding, browser, action)
-    },
-  )
+    let Some(event) = event else { return false };
+    let Some(browser) = browser else { return false };
+    let modifiers = event.modifiers;
+    dispatch_shortcut(
+        true,
+        ShortcutKey {
+            raw_key_down: event.type_ == cef_key_event_type_t::KEYEVENT_RAWKEYDOWN.into(),
+            key_code: event.windows_key_code,
+            command: modifiers & Flags::EVENTFLAG_COMMAND_DOWN.0 != 0,
+            control: modifiers & Flags::EVENTFLAG_CONTROL_DOWN.0 != 0,
+            alt: modifiers & Flags::EVENTFLAG_ALT_DOWN.0 != 0,
+            shift: modifiers & Flags::EVENTFLAG_SHIFT_DOWN.0 != 0,
+        },
+        !os_event.is_null(),
+        |action| {
+            let Some(_mtm) = MainThreadMarker::new() else {
+                return false;
+            };
+            // SAFETY: CEF supplies the native NSEvent for this UI-thread callback;
+            // the event is borrowed here, never retained or stored.
+            let Some(event) = (unsafe { os_event.cast::<NSEvent>().as_ref() }) else {
+                return false;
+            };
+            event.r#type() == NSEventType::KeyDown
+                && crate::reserved_shortcut_native::dispatch(binding, browser, action)
+        },
+    )
 }
 
 wrap_keyboard_handler! {
