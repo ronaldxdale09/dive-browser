@@ -104,7 +104,7 @@ function Updates({ channel }: { channel: string | null }) {
           ) : dev ? (
             "Updates are delivered to release builds."
           ) : status === "none" ? (
-            "You're up to date."
+            "Nothing newer on the release channel."
           ) : status === "error" ? (
             <span className="text-danger">{error}</span>
           ) : (
@@ -118,7 +118,7 @@ function Updates({ channel }: { channel: string | null }) {
             </Button>
           ) : dev ? null : (
             <Button variant="quiet" disabled={status === "checking"} onClick={() => void check()}>
-              {status === "checking" ? "Checking…" : status === "none" ? "Check again" : "Check for updates"}
+              {status === "checking" ? "Checking…" : status === "none" ? "Check again" : status === "error" ? "Try again" : "Check for updates"}
             </Button>
           )
         }

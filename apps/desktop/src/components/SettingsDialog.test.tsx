@@ -339,7 +339,7 @@ describe("About and updates", () => {
     await waitFor(() => expect(screen.getByText("/tmp/dive")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain("You're up to date"));
-    expect(screen.getByText("You're up to date.")).toBeTruthy();
+    expect(screen.getByText("Nothing newer on the release channel.")).toBeTruthy();
     expect(ipc.updateCheck).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
     expect(screen.queryByText("Updates are delivered to release builds.")).toBeNull();
