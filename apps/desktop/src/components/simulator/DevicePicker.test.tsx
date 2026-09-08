@@ -109,12 +109,19 @@ describe("DevicePicker", () => {
     });
   });
 
-  it("closes on Escape and on the close button", () => {
+  it("the close button ends the simulation; Escape only hides the list", async () => {
+    useEmulation.setState({ byTab: { [tab.id]: { deviceId: "iphone-15", landscape: false, ui: "browser", zoom: "fit" } } });
+    await useEmulation.getState().setScale(tab.id, 1);
+    vi.mocked(ipc.tabEmulate).mockClear();
     render(<DevicePicker />);
     fireEvent.click(screen.getByRole("button", { name: "Close device simulator" }));
     expect(usePicker.getState().open).toBe(false);
+    expect(useEmulation.getState().byTab[tab.id]).toBeUndefined();
+    await vi.waitFor(() => expect(ipc.tabEmulate).toHaveBeenCalledWith(tab.id, null, true));
+    useEmulation.setState({ byTab: { [tab.id]: { deviceId: "iphone-15", landscape: false, ui: "browser", zoom: "fit" } } });
     act(() => usePicker.setState({ open: true }));
     fireEvent.keyDown(window, { key: "Escape" });
     expect(usePicker.getState().open).toBe(false);
+    expect(useEmulation.getState().byTab[tab.id]?.deviceId).toBe("iphone-15");
   });
 });

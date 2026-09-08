@@ -47,6 +47,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- Closing the device simulator with its X shows the page at full size again; before, the phone stayed applied with the panel gone. Escape still just hides the device list.
 - Popovers (downloads, bookmark, profile, protection, build badge) close when focus moves elsewhere, so ⌘F or ⌘L no longer opens a bar underneath one; closing the find bar hands keyboard focus back to the page.
 - Middle-clicking a link, or ⌘-clicking it, opens it in a background tab instead of replacing the page; ⌘⇧-click opens it in a tab that takes focus.
 - The home page's detected dev servers no longer include Dive's own remote-debugging port, or a private window's, which showed up as an "HTTP" server with an Open Tab button.

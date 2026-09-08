@@ -64,7 +64,17 @@ export function DevicePicker() {
           <Icon icon={Smartphone} size={14} className="text-highlight" />
           <span className="text-sm font-medium">Device simulator</span>
           <span className="flex-1" />
-          <IconButton icon={X} label="Close device simulator" onClick={() => setOpen(false)} size={14} />
+          <IconButton
+            icon={X}
+            label="Close device simulator"
+            description="Shows the page at full size again. Escape hides this list and keeps the device."
+            onClick={() => {
+              // The label says the simulator closes: the page goes back to full size.
+              if (tab) void setDevice(tab, null);
+              setOpen(false);
+            }}
+            size={14}
+          />
         </div>
 
         <div className="px-4 pb-2">
