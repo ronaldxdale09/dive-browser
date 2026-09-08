@@ -434,6 +434,12 @@ export const commands = {
 	browsingDataClear: (what: ClearRequest) => typedError<string, AppError>(__TAURI_INVOKE("browsing_data_clear", { what })),
 	/**  Show a download in the system file manager, or the downloads folder when `path` is `None`. */
 	downloadsReveal: (path: string | null) => typedError<null, AppError>(__TAURI_INVOKE("downloads_reveal", { path })),
+	/**
+	 *  Open a downloaded file with whatever the system opens that kind of file
+	 *  with. Only a file the downloads list knows about is offered, and it must
+	 *  still exist.
+	 */
+	downloadsOpen: (path: string) => typedError<null, AppError>(__TAURI_INVOKE("downloads_open", { path })),
 	/**  Dev servers listening on localhost, discovered from the OS socket table. */
 	devServers: () => typedError<DevServer[], AppError>(__TAURI_INVOKE("dev_servers")),
 	/**  Enable or disable low-frequency dev-server change events while a panel is open. */

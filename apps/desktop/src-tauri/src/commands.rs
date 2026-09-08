@@ -371,6 +371,31 @@ pub(crate) fn downloads_reveal(state: State<'_, AppState>, path: Option<String>)
     reveal(&target)
 }
 
+#[tauri::command]
+#[specta::specta]
+/// Open a downloaded file with whatever the system opens that kind of file
+/// with. Only a file the downloads list knows about is offered, and it must
+/// still exist.
+pub(crate) fn downloads_open(path: String) -> AppResult<()> {
+    let target = std::path::PathBuf::from(&path);
+    if path.is_empty() || !target.is_file() {
+        return Err(AppError::new("that file is no longer there"));
+    }
+    #[cfg(target_os = "macos")]
+    let status = std::process::Command::new("open").arg(&target).status();
+    #[cfg(target_os = "linux")]
+    let status = std::process::Command::new("xdg-open").arg(&target).status();
+    #[cfg(target_os = "windows")]
+    let status = std::process::Command::new("cmd")
+        .args(["/C", "start", "", &target.display().to_string()])
+        .status();
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(AppError::new(format!("could not open the file ({s})"))),
+        Err(e) => Err(AppError::new(e)),
+    }
+}
+
 /// Open `path` in the platform file manager, selecting it when it is a file.
 fn reveal(path: &std::path::Path) -> AppResult<()> {
     #[cfg(target_os = "macos")]
@@ -556,6 +581,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             prefs_set,
             browsing_data_clear,
             downloads_reveal,
+            downloads_open,
             dev_servers,
             dev_servers_watch,
             history_search,

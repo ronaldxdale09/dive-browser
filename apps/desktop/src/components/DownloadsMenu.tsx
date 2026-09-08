@@ -41,6 +41,9 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
   const reveal = (path: string | null) => {
     void ipc.downloadsReveal(path).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
   };
+  const openFile = (path: string) => {
+    void ipc.downloadsOpen(path).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+  };
 
   return (
     <div ref={ref} className="relative">
@@ -65,7 +68,7 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
           ) : (
             <ul className="max-h-72 overflow-y-auto">
               {items.map((d) => (
-                <Row key={`${d.path}|${d.url}|${d.at}`} item={d} onReveal={() => reveal(d.path)} />
+                <Row key={`${d.path}|${d.url}|${d.at}`} item={d} onReveal={() => reveal(d.path)} onOpen={() => openFile(d.path)} />
               ))}
             </ul>
           )}
@@ -86,7 +89,7 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
   );
 }
 
-function Row({ item, onReveal }: { item: Item; onReveal: () => void }) {
+function Row({ item, onReveal, onOpen }: { item: Item; onReveal: () => void; onOpen: () => void }) {
   let host = "";
   try {
     host = new URL(item.url).host;
@@ -100,9 +103,16 @@ function Row({ item, onReveal }: { item: Item; onReveal: () => void }) {
         aria-hidden
       />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-ink" title={item.path || item.url}>
-          {item.name}
-        </span>
+        {item.status === "finished" && item.path ? (
+          // The name opens the file, as in every browser's download shelf.
+          <button type="button" onClick={onOpen} aria-label={`Open ${item.name}`} title={`Open ${item.path}`} className="block max-w-full truncate text-left text-ink hover:underline">
+            {item.name}
+          </button>
+        ) : (
+          <span className="block truncate text-ink" title={item.path || item.url}>
+            {item.name}
+          </span>
+        )}
         <span className="block truncate text-[10.5px] text-ink-3">
           {item.status === "started" ? "Downloading…" : item.status === "finished" ? "Saved" : "Failed"}
           {host && ` · ${host}`} · {ago(item.at)}

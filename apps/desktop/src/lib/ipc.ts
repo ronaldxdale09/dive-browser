@@ -154,6 +154,7 @@ export const ipc = {
   prefsSet: async (prefs: Prefs) => unwrap(await commands.prefsSet(prefs)),
   browsingDataClear: async (what: ClearRequest) => unwrap(await commands.browsingDataClear(what)),
   downloadsReveal: async (path: string | null) => unwrap(await commands.downloadsReveal(path)),
+  downloadsOpen: async (path: string) => unwrap(await commands.downloadsOpen(path)),
   tabRecordStart: async (id: string) => unwrap(await commands.tabRecordStart(id)),
   tabRecordStop: (id: string) => commands.tabRecordStop(id),
   tabOpenapi: async (id: string) => unwrap(await commands.tabOpenapi(id)),
