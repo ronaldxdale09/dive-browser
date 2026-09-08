@@ -199,7 +199,7 @@ export const ipc = {
   defaultBrowserStatus: () => commands.defaultBrowserStatus(),
   defaultBrowserSet: async () => unwrap(await commands.defaultBrowserSet()),
   browserImportSources: async () => unwrap(await commands.browserImportSources()),
-  browserImportRun: async (id: string, bookmarks: boolean, history: boolean) => unwrap(await commands.browserImportRun(id, bookmarks, history)),
+  browserImportRun: async (id: string, bookmarks: boolean, history: boolean, passwords = false) => unwrap(await commands.browserImportRun(id, bookmarks, history, passwords)),
   browserImportOpenPrivacy: async () => unwrap(await commands.browserImportOpenPrivacy()),
   updateInstall: async () => unwrap(await commands.updateInstall()),
   historySearch: async (query: string, limit = 20) => unwrap(await commands.historySearch(query, limit)),

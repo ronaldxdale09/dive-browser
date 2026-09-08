@@ -16,6 +16,7 @@ interface BrowserImportState {
   selected: string | null;
   bookmarks: boolean;
   history: boolean;
+  passwords: boolean;
   importing: boolean;
   outcome: ImportOutcome | null;
   error: string | null;
@@ -27,6 +28,7 @@ interface BrowserImportState {
   select: (id: string) => void;
   setBookmarks: (v: boolean) => void;
   setHistory: (v: boolean) => void;
+  setPasswords: (v: boolean) => void;
   openPrivacySettings: () => Promise<void>;
   run: () => Promise<void>;
   reset: () => void;
@@ -74,6 +76,7 @@ export const useBrowserImport = create<BrowserImportState>((set, get) => ({
   selected: null,
   bookmarks: true,
   history: true,
+  passwords: true,
   importing: false,
   outcome: null,
   error: null,
@@ -96,6 +99,7 @@ export const useBrowserImport = create<BrowserImportState>((set, get) => ({
   select: (selected) => set({ selected, outcome: null, error: null }),
   setBookmarks: (bookmarks) => set({ bookmarks }),
   setHistory: (history) => set({ history }),
+  setPasswords: (passwords) => set({ passwords }),
   openPrivacySettings: async () => {
     try {
       await ipc.browserImportOpenPrivacy();
@@ -104,12 +108,13 @@ export const useBrowserImport = create<BrowserImportState>((set, get) => ({
     }
   },
   run: async () => {
-    const { selected, sources, bookmarks, history, importing } = get();
+    const { selected, sources, bookmarks, history, passwords, importing } = get();
     const source = sources?.find((s) => s.id === selected);
-    if (!source || importing || (!bookmarks && !history)) return;
+    const wantPasswords = passwords && source?.passwords === true;
+    if (!source || importing || (!bookmarks && !history && !wantPasswords)) return;
     set({ importing: true, error: null, outcome: null });
     try {
-      const summary = await ipc.browserImportRun(source.id, bookmarks, history);
+      const summary = await ipc.browserImportRun(source.id, bookmarks, history, wantPasswords);
       set({ importing: false, outcome: { source, summary } });
     } catch (e) {
       set({ importing: false, error: errorMessage(e) });

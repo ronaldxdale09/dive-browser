@@ -1,4 +1,4 @@
-import { Check, FolderLock, History, Loader2, Star } from "lucide-react";
+import { Check, FolderLock, History, KeyRound, Loader2, Star } from "lucide-react";
 import { useEffect } from "react";
 import type { ImportSource } from "../../lib/ipc";
 import { useBrowserImport } from "../../store/browserImport";
@@ -21,11 +21,13 @@ const MARKS: Record<string, { text: string; color: string }> = {
 };
 
 /** "1,240 bookmarks and 38,120 pages", or what was asked for. */
-export function describeOutcome(bookmarks: number, history: number, askedBookmarks: boolean, askedHistory: boolean): string {
+export function describeOutcome(bookmarks: number, history: number, askedBookmarks: boolean, askedHistory: boolean, passwords = 0, askedPasswords = false): string {
   const parts: string[] = [];
   if (askedBookmarks) parts.push(`${bookmarks.toLocaleString()} ${bookmarks === 1 ? "bookmark" : "bookmarks"}`);
   if (askedHistory) parts.push(`${history.toLocaleString()} ${history === 1 ? "page of history" : "pages of history"}`);
-  return parts.join(" and ");
+  if (askedPasswords) parts.push(`${passwords.toLocaleString()} ${passwords === 1 ? "password" : "passwords"}`);
+  if (parts.length <= 1) return parts.join("");
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
 /**
@@ -39,6 +41,8 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
   const selected = useBrowserImport((s) => s.selected);
   const bookmarks = useBrowserImport((s) => s.bookmarks);
   const history = useBrowserImport((s) => s.history);
+  const passwords = useBrowserImport((s) => s.passwords);
+  const setPasswords = useBrowserImport((s) => s.setPasswords);
   const importing = useBrowserImport((s) => s.importing);
   const outcome = useBrowserImport((s) => s.outcome);
   const error = useBrowserImport((s) => s.error);
@@ -62,7 +66,8 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
   }, [load, prefer]);
 
   const current = sources?.find((s) => s.id === selected) ?? null;
-  const ready = current?.access === "ok" && (bookmarks || history) && !importing;
+  const canPasswords = current?.passwords === true;
+  const ready = current?.access === "ok" && (bookmarks || history || (passwords && canPasswords)) && !importing;
 
   if (sources === null || (loading && sources.length === 0)) {
     return (
@@ -119,6 +124,12 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
           <Switch label="History" checked={history} onChange={setHistory} />
           <Icon icon={History} size={12} className="text-ink-3" /> History
         </label>
+        {canPasswords && (
+          <label className="flex items-center gap-2 text-xs text-ink">
+            <Switch label="Passwords" checked={passwords} onChange={setPasswords} />
+            <Icon icon={KeyRound} size={12} className="text-ink-3" /> Passwords
+          </label>
+        )}
         <span className="flex-1" />
         <button type="button" disabled={!ready} onClick={() => void run()} className="pressable h-8 rounded-full bg-accent px-4 text-xs font-medium text-accent-ink hover:brightness-110 disabled:opacity-40">
           {importing ? (
@@ -134,9 +145,9 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
       {outcome && (
         <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-ink-2">
           <Icon icon={Check} size={12} className="text-highlight" />
-          {outcome.summary.bookmarks + outcome.summary.history === 0
+          {outcome.summary.bookmarks + outcome.summary.history + outcome.summary.passwords === 0
             ? `Nothing new from ${outcome.source.name}: everything there was already here.`
-            : `Brought in ${describeOutcome(outcome.summary.bookmarks, outcome.summary.history, bookmarks, history)} from ${outcome.source.name}. Anything already here was kept.`}
+            : `Brought in ${describeOutcome(outcome.summary.bookmarks, outcome.summary.history, bookmarks, history, outcome.summary.passwords, passwords && outcome.source.passwords)} from ${outcome.source.name}. Anything already here was kept.`}
         </p>
       )}
       {error && (
@@ -144,7 +155,11 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
           {error}
         </p>
       )}
-      <p className="mt-3 text-[10.5px] text-ink-3">Passwords, cookies and extensions stay in the other browser.</p>
+      <p className="mt-3 text-[10.5px] text-ink-3">
+        {canPasswords && passwords
+          ? `Passwords go into this profile's Keychain; macOS will ask once to let Dive read ${current?.name ?? "the browser"}'s password key. Cookies and extensions stay behind.`
+          : "Cookies and extensions stay in the other browser."}
+      </p>
     </div>
   );
 }

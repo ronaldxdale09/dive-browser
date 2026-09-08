@@ -1385,7 +1385,9 @@ pub(crate) async fn browser_import_sources() -> AppResult<Vec<crate::browser_imp
         .map_err(AppError::new)
 }
 
-/// Bring bookmarks and/or history in from one source.
+/// Bring bookmarks, history and/or saved passwords in from one source.
+/// Passwords land in the active profile; a login Dive already has for the
+/// same site and username is left as it is.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn browser_import_run(
@@ -1393,19 +1395,48 @@ pub(crate) async fn browser_import_run(
     id: String,
     bookmarks: bool,
     history: bool,
+    passwords: bool,
 ) -> AppResult<crate::browser_import::ImportSummary> {
     let source = crate::browser_import::find(&id)?;
     let harvest = tauri::async_runtime::spawn_blocking(move || {
-        crate::browser_import::harvest(&source, bookmarks, history)
+        crate::browser_import::harvest(&source, bookmarks, history, passwords)
     })
     .await
     .map_err(AppError::new)??;
-    let store = lock(&state.store);
-    let added_bookmarks = store.import_bookmarks(&harvest.bookmarks)?;
-    let added_history = store.import_history(&harvest.history)?;
+    let (added_bookmarks, added_history, profile) = {
+        let store = lock(&state.store);
+        let profile = active_profile(&store, *lock(&state.active_workspace))?;
+        (
+            store.import_bookmarks(&harvest.bookmarks)?,
+            store.import_history(&harvest.history)?,
+            profile,
+        )
+    };
+    let known = crate::passwords::list(&state, profile.id)?;
+    let mut added_passwords = 0u32;
+    for login in &harvest.passwords {
+        if known
+            .iter()
+            .any(|c| c.origin == login.origin && c.username == login.username)
+        {
+            continue;
+        }
+        if crate::passwords::save(
+            &state,
+            profile.id,
+            &login.origin,
+            &login.username,
+            &login.password,
+        )
+        .is_ok()
+        {
+            added_passwords += 1;
+        }
+    }
     Ok(crate::browser_import::ImportSummary {
         bookmarks: u32::try_from(added_bookmarks).unwrap_or(u32::MAX),
         history: u32::try_from(added_history).unwrap_or(u32::MAX),
+        passwords: added_passwords,
     })
 }
 

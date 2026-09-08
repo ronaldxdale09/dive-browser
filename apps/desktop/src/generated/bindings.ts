@@ -77,8 +77,12 @@ export const commands = {
 	uiStateSet: (key: string, value: string | null) => typedError<null, AppError>(__TAURI_INVOKE("ui_state_set", { key, value })),
 	/**  Browsers on this Mac whose bookmarks and history can be brought in. */
 	browserImportSources: () => typedError<ImportSource[], AppError>(__TAURI_INVOKE("browser_import_sources")),
-	/**  Bring bookmarks and/or history in from one source. */
-	browserImportRun: (id: string, bookmarks: boolean, history: boolean) => typedError<ImportSummary, AppError>(__TAURI_INVOKE("browser_import_run", { id, bookmarks, history })),
+	/**
+	 *  Bring bookmarks, history and/or saved passwords in from one source.
+	 *  Passwords land in the active profile; a login Dive already has for the
+	 *  same site and username is left as it is.
+	 */
+	browserImportRun: (id: string, bookmarks: boolean, history: boolean, passwords: boolean) => typedError<ImportSummary, AppError>(__TAURI_INVOKE("browser_import_run", { id, bookmarks, history, passwords })),
 	/**  Open System Settings on the Full Disk Access list, the other way in. */
 	browserImportOpenPrivacy: () => typedError<null, AppError>(__TAURI_INVOKE("browser_import_open_privacy")),
 	tabNavigate: (id: TabId, url: string) => typedError<null, AppError>(__TAURI_INVOKE("tab_navigate", { id, url })),
@@ -977,6 +981,8 @@ export type ImportSource = {
 	/**  Folder the files are read from. */
 	dir: string,
 	access: Access,
+	/**  Whether saved passwords can be read from this browser. */
+	passwords: boolean,
 	/**
 	 *  The browser's own icon from its app bundle, as a PNG data URL; `None`
 	 *  when the app itself is not installed (its data can outlive it).
@@ -988,6 +994,7 @@ export type ImportSource = {
 export type ImportSummary = {
 	bookmarks: number,
 	history: number,
+	passwords: number,
 };
 
 /**  Insets in CSS pixels. */

@@ -19,6 +19,12 @@ dive-cdp = { path = "../../../crates/dive-cdp" }
 dive-mcp = { path = "../../../crates/dive-mcp" }
 dive-agent = { path = "../../../crates/dive-agent" }
 keyring-core = "1"
+# Chromium keeps saved passwords AES-128-CBC encrypted under a key derived
+# from its Safe Storage keychain item; these read them during an import.
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+hmac = "0.12"
+sha1 = "0.10"
 futures-util = "0.3"
 # Direct access to the same pinned native CEF types for safe discard.
 cef = { version = "=151.8.1", optional = true }

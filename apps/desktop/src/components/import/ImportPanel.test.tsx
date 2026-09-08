@@ -5,8 +5,8 @@ import { ipc } from "../../lib/ipc";
 import { useBrowserImport } from "../../store/browserImport";
 import { ImportPanel, describeOutcome } from "./ImportPanel";
 
-const brave: ImportSource = { id: "brave:Default", browser: "brave", name: "Brave", family: "chromium", profile: null, dir: "/x/brave", access: "denied", icon: null };
-const chrome: ImportSource = { id: "chrome:Profile 1", browser: "chrome", name: "Chrome", family: "chromium", profile: "Work", dir: "/x/chrome", access: "ok", icon: "data:image/png;base64,AAAA" };
+const brave: ImportSource = { id: "brave:Default", browser: "brave", name: "Brave", family: "chromium", profile: null, dir: "/x/brave", access: "denied", passwords: true, icon: null };
+const chrome: ImportSource = { id: "chrome:Profile 1", browser: "chrome", name: "Chrome", family: "chromium", profile: "Work", dir: "/x/chrome", access: "ok", passwords: true, icon: "data:image/png;base64,AAAA" };
 const initial = useBrowserImport.getState();
 
 afterEach(() => {
@@ -24,14 +24,14 @@ describe("ImportPanel", () => {
 
   it("lists profiles by name, imports from the chosen one and reports the outcome", async () => {
     vi.spyOn(ipc, "browserImportSources").mockResolvedValue([brave, chrome]);
-    const run = vi.spyOn(ipc, "browserImportRun").mockResolvedValue({ bookmarks: 1, history: 2500 });
+    const run = vi.spyOn(ipc, "browserImportRun").mockResolvedValue({ bookmarks: 1, history: 2500, passwords: 0 });
     render(<ImportPanel />);
     const chromeRow = await screen.findByRole("radio", { name: "Chrome · Work" });
     // The readable browser is chosen first, even though Brave is listed first.
     expect(chromeRow.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "Import from Chrome" }));
-    await waitFor(() => expect(run).toHaveBeenCalledWith("chrome:Profile 1", true, true));
-    expect((await screen.findByRole("status")).textContent).toContain("Brought in 1 bookmark and 2,500 pages of history from Chrome");
+    await waitFor(() => expect(run).toHaveBeenCalledWith("chrome:Profile 1", true, true, true));
+    expect((await screen.findByRole("status")).textContent).toContain("Brought in 1 bookmark, 2,500 pages of history and 0 passwords from Chrome");
   });
 
   it("explains a protected folder, sends to System Settings and looks again", async () => {
@@ -51,7 +51,7 @@ describe("ImportPanel", () => {
 
   it("says when a second import finds nothing new", async () => {
     vi.spyOn(ipc, "browserImportSources").mockResolvedValue([chrome]);
-    vi.spyOn(ipc, "browserImportRun").mockResolvedValue({ bookmarks: 0, history: 0 });
+    vi.spyOn(ipc, "browserImportRun").mockResolvedValue({ bookmarks: 0, history: 0, passwords: 0 });
     render(<ImportPanel />);
     fireEvent.click(await screen.findByRole("button", { name: "Import from Chrome" }));
     expect((await screen.findByRole("status")).textContent).toContain("Nothing new from Chrome");
@@ -60,5 +60,7 @@ describe("ImportPanel", () => {
   it("phrases the outcome for what was asked", () => {
     expect(describeOutcome(3, 0, true, false)).toBe("3 bookmarks");
     expect(describeOutcome(1, 1, true, true)).toBe("1 bookmark and 1 page of history");
+    expect(describeOutcome(2, 0, true, true, 5, true)).toBe("2 bookmarks, 0 pages of history and 5 passwords");
+    expect(describeOutcome(0, 0, false, false, 1, true)).toBe("1 password");
   });
 });

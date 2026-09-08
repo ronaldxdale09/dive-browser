@@ -56,6 +56,8 @@ pub struct ImportSource {
     /// Folder the files are read from.
     pub dir: String,
     pub access: Access,
+    /// Whether saved passwords can be read from this browser.
+    pub passwords: bool,
     /// The browser's own icon from its app bundle, as a PNG data URL; `None`
     /// when the app itself is not installed (its data can outlive it).
     pub icon: Option<String>,
@@ -66,6 +68,16 @@ pub struct ImportSource {
 pub struct ImportSummary {
     pub bookmarks: u32,
     pub history: u32,
+    pub passwords: u32,
+}
+
+/// A saved login read from another browser, decrypted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedLogin {
+    /// `scheme://host[:port]`.
+    pub origin: String,
+    pub username: String,
+    pub password: String,
 }
 
 /// Bookmarks and visits read from one source, before they reach the store.
@@ -73,6 +85,7 @@ pub struct ImportSummary {
 pub struct Harvest {
     pub bookmarks: Vec<ImportedEntry>,
     pub history: Vec<ImportedEntry>,
+    pub passwords: Vec<ImportedLogin>,
 }
 
 /// Visits beyond this are left behind; nobody scrolls that far back.
@@ -209,6 +222,7 @@ fn source(known: &Known, dir: &Path, profile: Option<String>, access: Access) ->
         browser: known.browser.into(),
         name: known.name.into(),
         family: known.family,
+        passwords: known.family == Family::Chromium,
         profile,
         dir: dir.to_string_lossy().into_owned(),
         access,
@@ -396,7 +410,12 @@ pub fn find(id: &str) -> AppResult<ImportSource> {
 }
 
 /// Read everything asked for from `source`.
-pub fn harvest(source: &ImportSource, bookmarks: bool, history: bool) -> AppResult<Harvest> {
+pub fn harvest(
+    source: &ImportSource,
+    bookmarks: bool,
+    history: bool,
+    passwords: bool,
+) -> AppResult<Harvest> {
     let dir = Path::new(&source.dir);
     let temp = tempfile::tempdir()?;
     let mut out = Harvest::default();
@@ -407,6 +426,10 @@ pub fn harvest(source: &ImportSource, bookmarks: bool, history: bool) -> AppResu
             }
             if history && let Some(db) = copied(dir, "History", temp.path())? {
                 out.history = chromium_history(&db)?;
+            }
+            if passwords && let Some(db) = copied(dir, "Login Data", temp.path())? {
+                let key = chromium_key(&source.browser, &source.name)?;
+                out.passwords = chromium_logins(&db, &key)?;
             }
         }
         Family::Firefox => {
@@ -429,6 +452,126 @@ pub fn harvest(source: &ImportSource, bookmarks: bool, history: bool) -> AppResu
                 out.history = safari_history(&db)?;
             }
         }
+    }
+    Ok(out)
+}
+
+/// The keychain item each Chromium browser keeps its password key in.
+fn safe_storage(browser: &str) -> Option<(&'static str, &'static str)> {
+    Some(match browser {
+        "chrome" => ("Chrome Safe Storage", "Chrome"),
+        "brave" => ("Brave Safe Storage", "Brave"),
+        "edge" => ("Microsoft Edge Safe Storage", "Microsoft Edge"),
+        "arc" => ("Arc Safe Storage", "Arc"),
+        "vivaldi" => ("Vivaldi Safe Storage", "Vivaldi"),
+        "opera" => ("Opera Safe Storage", "Opera"),
+        "chromium" => ("Chromium Safe Storage", "Chromium"),
+        _ => return None,
+    })
+}
+
+/// The AES key a Chromium browser encrypts saved passwords with, derived
+/// from its Safe Storage item the way it does. Reading that item makes
+/// macOS ask the person to allow it, which is the consent step.
+fn chromium_key(browser: &str, name: &str) -> AppResult<[u8; 16]> {
+    let (service, account) = safe_storage(browser)
+        .ok_or_else(|| AppError::new(format!("{name} does not keep passwords Dive can read")))?;
+    let secret = keyring_core::Entry::new(service, account)
+        .and_then(|e| e.get_password())
+        .map_err(|e| {
+            AppError::new(format!(
+                "macOS did not hand over {name}'s password key ({e}). Choose Allow when it asks, then try again."
+            ))
+        })?;
+    Ok(chromium_key_from_secret(secret.as_bytes()))
+}
+
+/// Chromium's derivation: PBKDF2-HMAC-SHA1 over the Safe Storage secret,
+/// salt `saltysalt`, 1003 rounds, 16 bytes.
+pub fn chromium_key_from_secret(secret: &[u8]) -> [u8; 16] {
+    let mut key = [0u8; 16];
+    pbkdf2_sha1(secret, b"saltysalt", 1003, &mut key);
+    key
+}
+
+fn pbkdf2_sha1(password: &[u8], salt: &[u8], rounds: u32, out: &mut [u8]) {
+    use hmac::{Hmac, Mac};
+    type H = Hmac<sha1::Sha1>;
+    let mut block: u32 = 1;
+    let mut written = 0;
+    while written < out.len() {
+        let mut mac = H::new_from_slice(password).expect("hmac accepts any key length");
+        mac.update(salt);
+        mac.update(&block.to_be_bytes());
+        let mut u = mac.finalize().into_bytes();
+        let mut t = u;
+        for _ in 1..rounds {
+            let mut mac = H::new_from_slice(password).expect("hmac accepts any key length");
+            mac.update(&u);
+            u = mac.finalize().into_bytes();
+            for (a, b) in t.iter_mut().zip(u.iter()) {
+                *a ^= b;
+            }
+        }
+        let take = (out.len() - written).min(t.len());
+        out[written..written + take].copy_from_slice(&t[..take]);
+        written += take;
+        block += 1;
+    }
+}
+
+/// A `v10` password blob as Chromium stores it on macOS: AES-128-CBC with a
+/// sixteen-space IV and PKCS#7 padding. `None` for anything else, including
+/// an empty or plaintext value.
+pub fn decrypt_v10(blob: &[u8], key: &[u8; 16]) -> Option<String> {
+    use aes::cipher::{BlockDecryptMut, KeyIvInit, block_padding::Pkcs7};
+    let body = blob.strip_prefix(b"v10")?;
+    if body.is_empty() || body.len() % 16 != 0 {
+        return None;
+    }
+    let iv = [b' '; 16];
+    let plain = cbc::Decryptor::<aes::Aes128>::new(key.into(), &iv.into())
+        .decrypt_padded_vec_mut::<Pkcs7>(body)
+        .ok()?;
+    String::from_utf8(plain).ok()
+}
+
+/// Saved logins from a copy of Chromium's `Login Data`, decrypted; sites
+/// the person told the browser never to save for are skipped.
+pub fn chromium_logins(db: &Path, key: &[u8; 16]) -> AppResult<Vec<ImportedLogin>> {
+    let conn = open_ro(db)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT origin_url, username_value, password_value FROM logins
+             WHERE blacklisted_by_user = 0 ORDER BY date_last_used DESC",
+        )
+        .map_err(AppError::new)?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Vec<u8>>(2)?,
+            ))
+        })
+        .map_err(AppError::new)?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (url, username, blob) = row.map_err(AppError::new)?;
+        let Some(origin) = dive_core::origin_of(&url) else {
+            continue;
+        };
+        let Some(password) = decrypt_v10(&blob, key) else {
+            continue;
+        };
+        if password.is_empty() || username.trim().is_empty() {
+            continue;
+        }
+        out.push(ImportedLogin {
+            origin,
+            username,
+            password,
+        });
     }
     Ok(out)
 }
@@ -671,6 +814,101 @@ fn query<T: rusqlite::types::FromSql>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pbkdf2_matches_the_rfc_6070_vectors() {
+        let mut out = [0u8; 20];
+        super::pbkdf2_sha1(b"password", b"salt", 1, &mut out);
+        assert_eq!(hex(&out), "0c60c80f961f0e71f3a9b524af6012062fe037a6");
+        super::pbkdf2_sha1(b"password", b"salt", 2, &mut out);
+        assert_eq!(hex(&out), "ea6c014dc72d6f8ccd1ed92ace1d41f0d8de8957");
+        let mut long = [0u8; 25];
+        super::pbkdf2_sha1(
+            b"passwordPASSWORDpassword",
+            b"saltSALTsaltSALTsaltSALTsaltSALTsalt",
+            4096,
+            &mut long,
+        );
+        assert_eq!(
+            hex(&long),
+            "3d2eec4fe41c849b80c8d83662c0e44a8b291a964cf2f07038"
+        );
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        use std::fmt::Write as _;
+        bytes.iter().fold(String::new(), |mut out, b| {
+            let _ = write!(out, "{b:02x}");
+            out
+        })
+    }
+
+    #[test]
+    fn v10_blobs_round_trip_and_anything_else_is_skipped() {
+        use aes::cipher::{BlockEncryptMut, KeyIvInit, block_padding::Pkcs7};
+        let key = super::chromium_key_from_secret(b"peanuts");
+        let iv = [b' '; 16];
+        let cipher = cbc::Encryptor::<aes::Aes128>::new((&key).into(), (&iv).into())
+            .encrypt_padded_vec_mut::<Pkcs7>(b"hunter2");
+        let mut blob = b"v10".to_vec();
+        blob.extend(cipher);
+        assert_eq!(super::decrypt_v10(&blob, &key).as_deref(), Some("hunter2"));
+        assert_eq!(super::decrypt_v10(b"", &key), None);
+        assert_eq!(super::decrypt_v10(b"v10", &key), None);
+        assert_eq!(super::decrypt_v10(b"plaintext", &key), None);
+        let wrong = super::chromium_key_from_secret(b"other");
+        assert_ne!(
+            super::decrypt_v10(&blob, &wrong).as_deref(),
+            Some("hunter2")
+        );
+    }
+
+    #[test]
+    fn chromium_logins_read_and_decrypt_a_login_data_copy() {
+        use aes::cipher::{BlockEncryptMut, KeyIvInit, block_padding::Pkcs7};
+        let key = super::chromium_key_from_secret(b"peanuts");
+        let enc = |s: &str| {
+            let mut blob = b"v10".to_vec();
+            blob.extend(
+                cbc::Encryptor::<aes::Aes128>::new((&key).into(), (&[b' '; 16]).into())
+                    .encrypt_padded_vec_mut::<Pkcs7>(s.as_bytes()),
+            );
+            blob
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("Login Data");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE logins (origin_url TEXT, username_value TEXT, password_value BLOB, blacklisted_by_user INTEGER, date_last_used INTEGER);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO logins VALUES ('https://github.com/login', 'dale', ?1, 0, 5)",
+            [enc("hunter2")],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO logins VALUES ('https://never.test/', '', ?1, 1, 4)",
+            [enc("x")],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO logins VALUES ('https://old.test/', 'eve', X'', 0, 3)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let logins = super::chromium_logins(&db, &key).unwrap();
+        assert_eq!(logins.len(), 1);
+        assert_eq!(logins[0].origin, "https://github.com");
+        assert_eq!(logins[0].username, "dale");
+        assert_eq!(logins[0].password, "hunter2");
+        assert_eq!(
+            super::safe_storage("brave"),
+            Some(("Brave Safe Storage", "Brave"))
+        );
+        assert_eq!(super::safe_storage("firefox"), None);
+    }
+
     use super::*;
 
     #[test]
