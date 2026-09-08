@@ -7,6 +7,8 @@ bump may change behaviour.
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-09-08
+
 ### Added
 - Settings › General has a "Default browser" row that names where links from other apps open and offers Make default…, so the flow stays reachable after the rail's card has been rested.
 - Reopen closed tab (⌘⇧T, also in the menu): the tabs closed this session come back one at a time, in the workspace they were in. The shortcut was reserved but did nothing.
@@ -302,5 +304,6 @@ bump may change behaviour.
 - Editor exports tracked as browser downloads; provider setup waits for
   confirmed activation.
 
-[Unreleased]: https://github.com/ronaldxdale09/dive-browser/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/ronaldxdale09/dive-browser/compare/v0.1.15...HEAD
+[0.1.15]: https://github.com/ronaldxdale09/dive-browser/releases/tag/v0.1.15
 [0.1.4]: https://github.com/ronaldxdale09/dive-browser/releases/tag/v0.1.4
