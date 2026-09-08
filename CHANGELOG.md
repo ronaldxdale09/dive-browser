@@ -26,6 +26,7 @@ bump may change behaviour.
 - The page's corners are slightly rounded where it meets the rail and toolbar, following the Appearance corner setting (square under Sharp). The window behind the chrome is painted in the chrome's ground colour, so nothing black shows through corners or during a resize.
 
 ### Changed
+- The app icon is the Dive logo on a light tile at every size, so the Dock, Finder, the installer and Windows all show the same mark instead of the placeholder wave the smaller sizes carried.
 - The Storage panel has a header row (Name, Value, Domain · path · flags), so the right-hand column of a cookie row is explained.
 - Settings › About: after a check finds nothing, "You're up to date" appears once instead of twice, and after a failed check the button reads "Try again".
 - Settings › General › Import no longer says passwords stay behind; it lists what comes over from each browser.

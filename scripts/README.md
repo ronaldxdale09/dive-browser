@@ -19,6 +19,7 @@ tooling lives in `release/` and is described in [`../RELEASING.md`](../RELEASING
 | `network_capture_check.py` | Bounded response-body capture (size limits, gzip, ranges) in the network panel. |
 | `subtitles-live-check.mjs` | Live subtitles end to end over CDP: a private instance with a downloaded `base` model plays a local speech fixture and captions must appear; `DIVE_SUBTITLE_SOAK_SECS` adds a sustained-playback RSS soak. |
 | `tests/test_*.py` | Unit tests for the probe runners (`pnpm test:probes`, part of `pnpm check`). |
+| `app-icon.py` | Regenerates every app icon size from `assets/logo.png` (the logo on a light macOS tile); needs Pillow. |
 
 ## Benchmark and probe details
 
