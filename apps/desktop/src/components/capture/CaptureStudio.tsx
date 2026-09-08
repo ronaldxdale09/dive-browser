@@ -17,6 +17,8 @@ type Operation = Mark | (Region & { kind: "crop" });
 type CaptureStudioProps = { src: string | null; sourceUrl: string | null; sourceTitle: string | null };
 
 const COLORS = ["#ef4444", "#f59e0b", "#3b82f6", "#22c55e", "#ffffff", "#111827"];
+/** What each swatch is called, so a screen reader says "Red" rather than a hex code. */
+const COLOR_NAMES: Record<string, string> = { "#ef4444": "Red", "#f59e0b": "Amber", "#3b82f6": "Blue", "#22c55e": "Green", "#ffffff": "White", "#111827": "Ink" };
 const TOOLS: { id: Tool; label: string; icon: typeof Crop }[] = [
   { id: "crop", label: "Crop", icon: Crop },
   { id: "rect", label: "Rectangle", icon: Square },
@@ -225,7 +227,7 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
         </section>
         <aside aria-label="Tool settings" className="flex w-52 shrink-0 flex-col border-l border-line bg-surface p-4">
           <h2 className="text-xs font-semibold">{TOOLS.find((item) => item.id === tool)?.label}</h2><p className="mt-1 text-[11px] leading-relaxed text-ink-3">{toolHint(tool)}</p>
-          {tool !== "crop" && tool !== "blur" && <><label className="mt-5 text-[10px] font-medium tracking-wider text-ink-3 uppercase">Color</label><div className="mt-2 flex flex-wrap gap-2">{COLORS.map((choice) => <button key={choice} type="button" aria-label={`Color ${choice}`} aria-pressed={color === choice} onClick={() => setColor(choice)} className="size-6 rounded-full border border-line-2 aria-pressed:ring-2 aria-pressed:ring-highlight" style={{ background: choice }} />)}</div><label htmlFor="capture-stroke" className="mt-5 flex justify-between text-[10px] font-medium tracking-wider text-ink-3 uppercase"><span>Stroke</span><span>{width}px</span></label><input id="capture-stroke" aria-label="Stroke width" type="range" min="2" max="20" value={width} onChange={(event) => setWidth(Number(event.target.value))} className="mt-2 accent-[var(--color-highlight)]" /></>}
+          {tool !== "crop" && tool !== "blur" && <><label className="mt-5 text-[10px] font-medium tracking-wider text-ink-3 uppercase">Color</label><div className="mt-2 flex flex-wrap gap-2">{COLORS.map((choice) => <button key={choice} type="button" aria-label={`Color ${COLOR_NAMES[choice] ?? choice}`} title={COLOR_NAMES[choice] ?? choice} aria-pressed={color === choice} onClick={() => setColor(choice)} className="size-6 rounded-full border border-line-2 aria-pressed:ring-2 aria-pressed:ring-highlight" style={{ background: choice }} />)}</div><label htmlFor="capture-stroke" className="mt-5 flex justify-between text-[10px] font-medium tracking-wider text-ink-3 uppercase"><span>Stroke</span><span>{width}px</span></label><input id="capture-stroke" aria-label="Stroke width" type="range" min="2" max="20" value={width} onChange={(event) => setWidth(Number(event.target.value))} className="mt-2 accent-[var(--color-highlight)]" /></>}
           <div className="mt-auto space-y-2 border-t border-line pt-4 text-[11px] text-ink-3">{image && <p>{image.naturalWidth.toLocaleString()} × {image.naturalHeight.toLocaleString()} px</p>}{cropRegion && <p className="text-highlight">Crop: {Math.round(cropRegion.width)} × {Math.round(cropRegion.height)} px</p>}<button type="button" disabled={!src} onClick={() => src && void ipc.downloadsReveal(src)} className="flex items-center gap-1.5 text-ink-2 hover:text-ink disabled:opacity-40"><Icon icon={FolderOpen} size={13} /> Original in Finder</button></div>
         </aside>
       </div>
