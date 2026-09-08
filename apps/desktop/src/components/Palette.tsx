@@ -3,7 +3,7 @@ import { ArrowUpRight, Search, Terminal, Server, History, Star } from "lucide-re
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { events, ipc } from "../lib/ipc";
 import { chromeCommands, formatChord, runCommand } from "../lib/commands";
-import type { Bookmark, Command as CommandDef, DevServer, HistoryEntry } from "../lib/ipc";
+import type { Bookmark, Command as CommandDef, DevServer, HistoryEntry, Tab } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { Favicon } from "./Favicon";
@@ -11,6 +11,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { tracePaletteLifecycle } from "../lib/inputTimingProbe";
+import { leadsTo, titleOf } from "../lib/omnibox";
 
 /**
  * How many history rows the palette offers. It is a launcher, not a history
@@ -36,6 +37,23 @@ export function paletteFilter(value: string, search: string): number {
   const haystack = value.split(ROW_ID)[0]!.toLowerCase();
   const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
   return terms.every((term) => haystack.includes(term)) ? 1 : 0;
+}
+
+/**
+ * The site the typed letters begin ("exam" for example.com), taken from the
+ * open tabs first, then bookmarks, then history: it is offered first, ahead
+ * of the search row, as under the address bar. An address typed out keeps
+ * the literal row first so Enter loads it afresh.
+ */
+export function leadingSite(query: string, tabs: readonly Tab[], bookmarks: readonly Bookmark[], history: readonly HistoryEntry[]): { kind: "tab"; tab: Tab } | { kind: "bookmark" | "history"; entry: Bookmark | HistoryEntry } | null {
+  const needle = query.trim().toLowerCase();
+  if (!needle || /\s/.test(needle) || /^[\w-]+(\.[\w-]+)+|^localhost|^https?:\/\//i.test(needle)) return null;
+  const tab = tabs.find((t) => leadsTo(needle, t.url));
+  if (tab) return { kind: "tab", tab };
+  const bookmark = bookmarks.find((b) => leadsTo(needle, b.url));
+  if (bookmark) return { kind: "bookmark", entry: bookmark };
+  const entry = history.find((h) => leadsTo(needle, h.url));
+  return entry ? { kind: "history", entry } : null;
 }
 
 export function Palette() {
@@ -101,15 +119,20 @@ export function Palette() {
     await openTab(url);
   };
   const looksLikeUrl = /^[\w-]+(\.[\w-]+)+|^localhost|^https?:\/\//i.test(query.trim());
+  const lead = useMemo(() => leadingSite(query, tabs, bookmarks, history), [query, tabs, bookmarks, history]);
+  const leadUrl = lead === null ? null : lead.kind === "tab" ? lead.tab.url : lead.entry.url;
+  const shownTabs = tabs.filter((t) => t.url !== leadUrl);
+  const shownBookmarks = bookmarks.filter((b) => b.url !== leadUrl);
+  const shownHistory = history.filter((h) => h.url !== leadUrl);
 
   // Opened to find a tab ("All tabs", ⌘⇧A), the open tabs lead the list.
   const tabsFirst = useBrowser((s) => s.paletteFocus === "tabs");
-  const tabGroup = tabs.length > 0 && (
+  const tabGroup = shownTabs.length > 0 && (
     <Command.Group heading="Tabs">
-      {tabs.map((t) => (
+      {shownTabs.map((t) => (
         <Command.Item
           key={t.id}
-          value={`${t.title} ${t.url}${ROW_ID}${t.id}`}
+          value={`${titleOf(t)} ${t.url}${ROW_ID}${t.id}`}
           onSelect={() => {
             close();
             void activateTab(t.id);
@@ -117,7 +140,7 @@ export function Palette() {
           className="flex items-center gap-2 rounded-lg px-3 py-2"
         >
           <Favicon src={t.favicon} size={14} />
-          <span className="truncate">{t.title || t.url}</span>
+          <span className="truncate">{titleOf(t)}</span>
           <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(t.url)}</span>
         </Command.Item>
       ))}
@@ -147,20 +170,40 @@ export function Palette() {
           />
         </div>
         <Command.List className="max-h-80 overflow-auto p-1.5 text-xs">
+          {lead && (
+            <Command.Group value="lead">
+              {lead.kind === "tab" ? (
+                <Command.Item value={`${titleOf(lead.tab)} ${lead.tab.url}${ROW_ID}${lead.tab.id}`} onSelect={() => { close(); void activateTab(lead.tab.id); }} className="flex items-center gap-2 rounded-lg px-3 py-2">
+                  <Favicon src={lead.tab.favicon} size={14} />
+                  <span className="truncate">{titleOf(lead.tab)}</span>
+                  <span className="rounded-md bg-surface-3 px-1.5 py-0.5 text-[10px] text-ink-2">Switch to tab</span>
+                  <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(lead.tab.url)}</span>
+                </Command.Item>
+              ) : (
+                <Command.Item value={`${lead.kind} ${titleOf(lead.entry)} ${lead.entry.url}`} onSelect={() => void go(lead.entry.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
+                  {lead.kind === "bookmark" ? <Favicon src={lead.entry.favicon} size={14} fallback={Star} fallbackClassName="text-highlight" /> : <Favicon src={lead.entry.favicon} size={14} fallback={History} />}
+                  <span className="truncate">{titleOf(lead.entry)}</span>
+                  <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(lead.entry.url)}</span>
+                </Command.Item>
+              )}
+            </Command.Group>
+          )}
           {query.trim() && (
-            <Command.Item value={`open ${query}`} onSelect={() => void go(query)} className="flex items-center gap-2 rounded-lg px-3 py-2">
-              <Icon icon={looksLikeUrl ? ArrowUpRight : Search} size={14} className="text-ink-3" />
-              <span className="text-ink-2">{looksLikeUrl ? "Open" : "Search"}</span>
-              <span className="truncate font-mono text-ink">{query}</span>
-            </Command.Item>
+            <Command.Group value="open">
+              <Command.Item value={`open ${query}`} onSelect={() => void go(query)} className="flex items-center gap-2 rounded-lg px-3 py-2">
+                <Icon icon={looksLikeUrl ? ArrowUpRight : Search} size={14} className="text-ink-3" />
+                <span className="text-ink-2">{looksLikeUrl ? "Open" : "Search"}</span>
+                <span className="truncate font-mono text-ink">{query}</span>
+              </Command.Item>
+            </Command.Group>
           )}
           {tabsFirst && tabGroup}
-          {bookmarks.length > 0 && (
+          {shownBookmarks.length > 0 && (
             <Command.Group heading="Bookmarks">
-              {bookmarks.map((b) => (
-                <Command.Item key={b.url} value={`bookmark ${b.title} ${b.url}`} onSelect={() => void go(b.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
+              {shownBookmarks.map((b) => (
+                <Command.Item key={b.url} value={`bookmark ${titleOf(b)} ${b.url}`} onSelect={() => void go(b.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
                   <Favicon src={b.favicon} size={14} fallback={Star} fallbackClassName="text-highlight" />
-                  <span className="truncate">{b.title || b.url}</span>
+                  <span className="truncate">{titleOf(b)}</span>
                   <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(b.url)}</span>
                 </Command.Item>
               ))}
@@ -179,12 +222,12 @@ export function Palette() {
               ))}
             </Command.Group>
           )}
-          {history.length > 0 && (
+          {shownHistory.length > 0 && (
             <Command.Group heading="History">
-              {history.map((h) => (
-                <Command.Item key={h.url} value={`history ${h.title} ${h.url}`} onSelect={() => void go(h.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
+              {shownHistory.map((h) => (
+                <Command.Item key={h.url} value={`history ${titleOf(h)} ${h.url}`} onSelect={() => void go(h.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
                   <Favicon src={h.favicon} size={14} fallback={History} />
-                  <span className="truncate">{h.title || h.url}</span>
+                  <span className="truncate">{titleOf(h)}</span>
                   <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(h.url)}</span>
                 </Command.Item>
               ))}

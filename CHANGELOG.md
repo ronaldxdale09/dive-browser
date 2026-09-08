@@ -27,6 +27,7 @@ bump may change behaviour.
 - The page's corners are slightly rounded where it meets the rail and toolbar, following the Appearance corner setting (square under Sharp). The window behind the chrome is painted in the chrome's ground colour, so nothing black shows through corners or during a resize.
 
 ### Changed
+- The new-tab palette offers the site your letters begin first, with "Switch to tab" when it is open, then the search row, matching the address bar; its rows name a page by its address when the recorded title was blank.
 - Typing the first letters of a site you have open, bookmarked or visited ("exam" for example.com) puts that site first under the address bar, so Enter goes there instead of searching the web for the letters; a full address typed out still loads afresh. Pages whose recorded title was blank or "about:blank" are named by their address.
 - The app icon is the Dive logo on a light tile at every size, so the Dock, Finder, the installer and Windows all show the same mark instead of the placeholder wave the smaller sizes carried.
 - The Storage panel has a header row (Name, Value, Domain · path · flags), so the right-hand column of a cookie row is explained.
