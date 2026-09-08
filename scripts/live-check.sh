@@ -102,7 +102,7 @@ for offset in offsets:
 pdf.extend(f"trailer<</Size {len(objects) + 1}/Root 1 0 R>>\nstartxref\n{xref}\n%%EOF\n".encode())
 pathlib.Path(sys.argv[1]).write_bytes(pdf)
 PY
-python3 -u -m http.server --bind 127.0.0.1 0 --directory "${SITE_DIR}" >"${DATA_DIR}/http.log" 2>&1 &
+python3 -u "${SCRIPT_DIR}/loopback_server.py" "${SITE_DIR}" >"${DATA_DIR}/http.log" 2>&1 &
 HTTP=$!
 for _ in $(seq 1 40); do
     SITE_PORT=$(sed -n 's/.*port \([0-9]*\).*/\1/p' "${DATA_DIR}/http.log" | head -1)

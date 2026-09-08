@@ -18,3 +18,19 @@ class LoopbackServer(ThreadingHTTPServer):
         host, port = self.server_address[:2]
         self.server_name = host
         self.server_port = port
+
+
+def serve_directory(directory: str) -> None:
+    """Serve `directory` on a free loopback port and print `port N` first."""
+    from functools import partial
+    from http.server import SimpleHTTPRequestHandler
+
+    server = LoopbackServer(("127.0.0.1", 0), partial(SimpleHTTPRequestHandler, directory=directory))
+    print(f"port {server.server_port}", flush=True)
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    import sys
+
+    serve_directory(sys.argv[1])
