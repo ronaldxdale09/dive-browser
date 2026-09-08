@@ -29,6 +29,7 @@ bump may change behaviour.
 - The page's corners are slightly rounded where it meets the rail and toolbar, following the Appearance corner setting (square under Sharp). The window behind the chrome is painted in the chrome's ground colour, so nothing black shows through corners or during a resize.
 
 ### Changed
+- An error status with no page behind it (a bare 500 or 503) gets its own error page, "The server answered with an error", instead of the raw Chromium code; so does a reply that is not HTTP at all. A 500 that carries a page still shows that page.
 - History rows in the Library show the time of day each page was last visited.
 - ⌘D's "Bookmark saved" notice offers Edit, which opens the star's popover; the popover selects the whole title, so typing a new name replaces it.
 - The Console panel starts a fresh log when the page loads again, with its own "Preserve log" checkbox, and a line from an inline script names the page's host instead of a bare ":3".

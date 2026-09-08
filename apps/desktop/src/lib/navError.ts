@@ -48,6 +48,11 @@ export function describeNavError(error: string, url: string): NavErrorText {
       return { title: "Certificate expired", detail: "The site's certificate is past its dates, or not yet valid.", hint: "If the site is fine elsewhere, check this Mac's date and time." };
     case "ERR_CERT_COMMON_NAME_INVALID":
       return { title: "Certificate is for another site", detail: "The certificate the server sent does not name this host.", hint: "A dev server answering on a different hostname than its certificate does this." };
+    case "ERR_HTTP_RESPONSE_CODE_FAILURE":
+      return { title: "The server answered with an error", detail: "It replied with an error status and no page to show.", hint: "If this is your dev server, its terminal or log has the reason. The Network panel shows the status." };
+    case "ERR_INVALID_RESPONSE":
+    case "ERR_INVALID_HTTP_RESPONSE":
+      return { title: "The server's reply made no sense", detail: "What came back was not a valid HTTP response.", hint: "A server speaking another protocol on that port, or a crash mid-reply, does this." };
     case "ERR_BLOCKED_BY_CLIENT":
       return { title: "Blocked by Dive", detail: "A request rule in this workspace, or DivePrivacy, stopped this page from loading.", hint: "Check the Rules panel in the developer dock, or pause protection for this site." };
     default:

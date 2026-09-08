@@ -13,6 +13,9 @@ describe("describeNavError", () => {
     expect(describeNavError("net::ERR_INVALID_URL", "nope").title).toBe("That is not a valid address");
     expect(describeNavError("net::ERR_CERT_DATE_INVALID", "https://expired.badssl.com/").title).toBe("Certificate expired");
     expect(describeNavError("net::ERR_CERT_COMMON_NAME_INVALID", "https://x").title).toBe("Certificate is for another site");
+    // An error status with an empty body: Chromium has no page to show, so this one says what happened.
+    expect(describeNavError("net::ERR_HTTP_RESPONSE_CODE_FAILURE", "http://localhost:3000/api")).toMatchObject({ title: "The server answered with an error", hint: expect.stringContaining("Network panel") });
+    expect(describeNavError("net::ERR_INVALID_HTTP_RESPONSE", "http://localhost:5432/").title).toBe("The server's reply made no sense");
   });
 
   it("points a refused connection at the port in the URL", () => {
