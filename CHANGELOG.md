@@ -54,6 +54,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Library › Recordings asks before deleting a recording (Keep / Delete), confirms with a notice, uses the same Finder icon as Downloads, and deleting also removes the recording's DiveScreen project file.
 - Agent: a reply that finished with no text, no steps and no error (a small model can do this) shows "The model sent nothing back" instead of an empty bubble with a token count.
 - Network replay editor: the Headers and Body fields no longer collapse to a single line when the response arrives; the pane scrolls instead.
 - Text fields in the dock filters and Settings show a highlight border when focused, so keyboard focus is visible rather than a one-shade change of grey.

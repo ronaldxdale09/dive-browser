@@ -1796,14 +1796,14 @@ pub(crate) fn recording_open(path: String) -> AppResult<()> {
 pub(crate) fn recording_delete(path: String) -> AppResult<()> {
     let file = recording_file(&path)?;
     std::fs::remove_file(&file)?;
-    // The preview companion goes with it.
+    // The preview companion and any DiveScreen edits go with it.
     if let Some(stem) = file.file_stem()
         && let Some(dir) = file.parent()
     {
-        let preview = dir
-            .join(crate::screencast::PREVIEW_DIR)
-            .join(format!("{}.webm", stem.to_string_lossy()));
-        let _ = std::fs::remove_file(preview);
+        let side = dir.join(crate::screencast::PREVIEW_DIR);
+        let stem = stem.to_string_lossy();
+        let _ = std::fs::remove_file(side.join(format!("{stem}.webm")));
+        let _ = std::fs::remove_file(side.join(format!("{stem}.divescreen.json")));
     }
     Ok(())
 }

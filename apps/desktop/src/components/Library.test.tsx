@@ -199,4 +199,24 @@ describe("Library recordings import", () => {
     expect(ipc.tabOpen).not.toHaveBeenCalled();
     expect(useBrowser.getState().open.library).toBe(true);
   });
+
+  it("asks before deleting a recording, and removes it only on the second press", async () => {
+    vi.spyOn(ipc, "recordingsList").mockResolvedValue([
+      { path: "/captures/clip.mov", name: "clip.mov", format: "mov", bytes: 10, modified_ms: 1, editable: true, has_project: false },
+    ]);
+    const del = vi.spyOn(ipc, "recordingDelete").mockResolvedValue(null);
+    render(<Library />);
+    fireEvent.click(screen.getByRole("tab", { name: "Recordings" }));
+    await waitFor(() => expect(screen.getByText("clip.mov")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Delete clip.mov" }));
+    expect(del).not.toHaveBeenCalled();
+    expect(screen.getByText("Delete this recording?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+    expect(screen.queryByText("Delete this recording?")).toBeNull();
+    expect(screen.getByText("clip.mov")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Delete clip.mov" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete clip.mov for good" }));
+    expect(del).toHaveBeenCalledWith("/captures/clip.mov");
+    await waitFor(() => expect(screen.queryByText("clip.mov")).toBeNull());
+  });
 });

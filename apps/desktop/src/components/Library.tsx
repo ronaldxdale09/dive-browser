@@ -1,4 +1,4 @@
-import { Clapperboard, Download, ExternalLink, FolderOpen, History, Search, Star, Trash2, Wand2, X } from "lucide-react";
+import { Clapperboard, Download, FolderOpen, History, Search, Star, Trash2, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ipc } from "../lib/ipc";
@@ -348,6 +348,8 @@ function DownloadsList({ query }: { query: string }) {
 /** Every recording on disk: open it, find it, or edit it in DiveScreen. */
 function Recordings({ query, onOpened }: { query: string; onOpened: () => void }) {
   const [items, setItems] = useState<RecordingInfo[] | null>(null);
+  // The row whose Delete was pressed once; the file only goes on the second press.
+  const [confirming, setConfirming] = useState<string | null>(null);
   const openTab = useBrowser((s) => s.openTab);
   const importing = useImportVideo((s) => s.busy);
   useEffect(() => {
@@ -362,11 +364,15 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
   }, []);
   const remove = (path: string) => {
     const prev = items;
+    setConfirming(null);
     setItems((list) => (list ?? []).filter((r) => r.path !== path));
-    void ipc.recordingDelete(path).catch((err) => {
-      setItems(prev);
-      useBrowser.setState({ error: err instanceof Error ? err.message : String(err) });
-    });
+    void ipc
+      .recordingDelete(path)
+      .then(() => useBrowser.getState().notify("Recording deleted", 4000))
+      .catch((err) => {
+        setItems(prev);
+        useBrowser.setState({ error: err instanceof Error ? err.message : String(err) });
+      });
   };
   const reveal = (path: string) => {
     void ipc.downloadsReveal(path).catch((err) => {
@@ -412,26 +418,40 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
               </span>
             </span>
           </button>
-          {r.editable && (
-            <button
-              type="button"
-              aria-label={`Edit ${r.name} in DiveScreen`}
-              title="Edit in DiveScreen"
-              onClick={() => {
-                onOpened();
-                void openTab(screenUrl(r.path));
-              }}
-              className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-highlight"
-            >
-              <Icon icon={Wand2} size={13} />
-            </button>
+          {confirming === r.path ? (
+            <>
+              <span className="shrink-0 text-[11px] text-ink-2">Delete this recording?</span>
+              <button type="button" onClick={() => setConfirming(null)} className="h-7 shrink-0 rounded-full px-2.5 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
+                Keep
+              </button>
+              <button type="button" aria-label={`Delete ${r.name} for good`} onClick={() => remove(r.path)} className="h-7 shrink-0 rounded-full bg-danger px-2.5 text-[11px] font-medium text-white hover:brightness-110">
+                Delete
+              </button>
+            </>
+          ) : (
+            <>
+              {r.editable && (
+                <button
+                  type="button"
+                  aria-label={`Edit ${r.name} in DiveScreen`}
+                  title="Edit in DiveScreen"
+                  onClick={() => {
+                    onOpened();
+                    void openTab(screenUrl(r.path));
+                  }}
+                  className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-highlight"
+                >
+                  <Icon icon={Wand2} size={13} />
+                </button>
+              )}
+              <button type="button" aria-label={`Show ${r.name} in Finder`} onClick={() => reveal(r.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
+                <Icon icon={FolderOpen} size={13} />
+              </button>
+              <button type="button" aria-label={`Delete ${r.name}`} onClick={() => setConfirming(r.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100">
+                <Icon icon={Trash2} size={13} />
+              </button>
+            </>
           )}
-          <button type="button" aria-label={`Show ${r.name} in Finder`} onClick={() => reveal(r.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
-            <Icon icon={ExternalLink} size={13} />
-          </button>
-          <button type="button" aria-label={`Delete ${r.name}`} onClick={() => remove(r.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100">
-            <Icon icon={Trash2} size={13} />
-          </button>
         </li>
       ))}
     </ul>
