@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { beginsAwaitedPage, fold, resetNavigationWaits, rowsSinceNavigation, selectFrames, selectRequests, useNetwork } from "./network";
+import { beginsAwaitedPage, fold, isMocked, resetNavigationWaits, rowsSinceNavigation, selectFrames, selectRequests, useNetwork } from "./network";
 import type { NetworkEvent } from "../lib/ipc";
 
 type SentEvent = Extract<NetworkEvent, { type: "sent" }>;
@@ -153,6 +153,17 @@ describe("network UI batches", () => {
     expect(selectRequests("t")(useNetwork.getState())).toHaveLength(1000);
     expect(selectFrames("t", "old")(useNetwork.getState())).toEqual([]);
     expect(useNetwork.getState().byTab.other).toBe(before);
+  });
+});
+
+describe("mocked replies", () => {
+  it("reads the engine's X-Dive-Mock header, whatever its case", () => {
+    expect(isMocked({ "X-Dive-Mock": "1" })).toBe(true);
+    expect(isMocked({ "x-dive-mock": "1", "content-type": "application/json" })).toBe(true);
+    expect(isMocked({ "content-type": "application/json" })).toBe(false);
+    let rows = fold(undefined, sent("1", "https://a.dev/api"));
+    rows = fold(rows, { type: "response", data: { tab_id: "t", request_id: "1", status: 200, mime_type: "application/json", from_cache: false, headers: { "X-Dive-Mock": "1" }, timestamp: 1.05 } });
+    expect(rows[0]?.mocked).toBe(true);
   });
 });
 

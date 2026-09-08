@@ -12,6 +12,8 @@ export interface RequestRow {
   status: number | null;
   mimeType: string;
   fromCache: boolean;
+  /** Answered by a workspace rule (the engine marks the reply with X-Dive-Mock). */
+  mocked: boolean;
   size: number | null;
   error: string | null;
   startedAt: number;
@@ -86,12 +88,17 @@ export function rowsSinceNavigation(rows: readonly RequestRow[]): RequestRow[] {
   return start <= 0 ? [...rows] : rows.slice(start);
 }
 
+/** Whether a reply came from a workspace rule: the engine marks those with X-Dive-Mock. */
+export function isMocked(headers: Record<string, string>): boolean {
+  return Object.keys(headers).some((name) => name.toLowerCase() === "x-dive-mock");
+}
+
 /** Apply the same request semantics for immediate and batched updates. */
 function updateRow(row: RequestRow | undefined, event: NetworkEvent): RequestRow | undefined {
   const at = event.data.timestamp ?? 0;
   if (event.type === "frame") return row;
   if (event.type === "sent" || event.type === "socket") {
-    const base = { status: null, mimeType: "", fromCache: false, size: null, error: null, startedAt: row?.startedAt ?? at, durationMs: null, sentAt: row?.sentAt ?? (event.type === "sent" ? (event.data.wall_time ?? Date.now() / 1000) : Date.now() / 1000) };
+    const base = { status: null, mimeType: "", fromCache: false, mocked: false, size: null, error: null, startedAt: row?.startedAt ?? at, durationMs: null, sentAt: row?.sentAt ?? (event.type === "sent" ? (event.data.wall_time ?? Date.now() / 1000) : Date.now() / 1000) };
     return event.type === "socket"
       ? { ...base, id: event.data.request_id, url: event.data.url, method: "GET", resourceType: "WebSocket", mimeType: "websocket" }
       : { ...base, id: event.data.request_id, url: event.data.url, method: event.data.method, resourceType: event.data.resource_type };
@@ -99,7 +106,7 @@ function updateRow(row: RequestRow | undefined, event: NetworkEvent): RequestRow
   if (!row) return undefined;
   const durationMs = Math.max(0, Math.round((at - row.startedAt) * 1000));
   switch (event.type) {
-    case "response": return { ...row, status: event.data.status, mimeType: event.data.mime_type, fromCache: event.data.from_cache };
+    case "response": return { ...row, status: event.data.status, mimeType: event.data.mime_type, fromCache: event.data.from_cache, mocked: isMocked(event.data.headers) };
     case "finished": return { ...row, size: event.data.encoded_length ?? 0, durationMs };
     // A blocked or failed request transferred nothing the person can use; an
     // engine-side error page must not read as 180 kB of response.

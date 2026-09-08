@@ -101,7 +101,7 @@ const NetworkRow = memo(function NetworkRow({
     >
       <td className="max-w-[360px] truncate px-3 text-ink" title={r.url}>{name(r.url)}</td>
       <td className="px-2 text-ink-2">{r.method}</td>
-      <td className={`px-2 ${statusClass(r)}`} title={r.error ?? undefined}>{outcomeLabel(r)}{r.fromCache ? " (cache)" : ""}</td>
+      <td className={`px-2 ${statusClass(r)}`} title={r.error ?? undefined}>{outcomeLabel(r)}{r.mocked ? " (mock)" : r.fromCache ? " (cache)" : ""}</td>
       <td className="px-2 text-ink-2">{r.resourceType.toLowerCase()}</td>
       <td className="px-2 text-right text-ink-2 tabular-nums">{size(r.size)}</td>
       <td className="px-3 text-right text-ink-2 tabular-nums">{r.durationMs === null ? "" : `${r.durationMs} ms`}</td>

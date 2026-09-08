@@ -20,6 +20,7 @@ const row = (i: number): RequestRow => ({
   startedAt: i,
   durationMs: 12,
   sentAt: 1_700_000_000,
+  mocked: false,
 });
 const rows = (n: number) => Array.from({ length: n }, (_, i) => row(i));
 
@@ -162,6 +163,14 @@ describe("NetworkPanel", () => {
     });
     expect(screen.getByText("2 requests")).toBeTruthy();
     expect(screen.queryByText("b.dev")).toBeNull();
+  });
+});
+
+describe("mocked rows", () => {
+  it("says (mock) beside the status of a reply a rule answered", () => {
+    useNetwork.setState({ byTab: { "tab-1": [{ ...rows(1)[0]!, status: 200, mocked: true }] } });
+    render(<NetworkPanel />);
+    expect(screen.getByText("200 (mock)")).toBeTruthy();
   });
 });
 
