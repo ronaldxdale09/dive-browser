@@ -294,6 +294,36 @@ pub(crate) fn prefs_get(state: State<'_, AppState>) -> crate::prefs::Prefs {
     state.prefs.get(&state)
 }
 
+/// The chrome reports the scheme it is drawn in ("dark" | "light"). When
+/// pages are told the theme, every open tab is told this at once.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn pages_scheme(state: State<'_, AppState>, scheme: String) -> AppResult<()> {
+    if scheme != "dark" && scheme != "light" {
+        return Err(AppError::new(format!("unknown scheme {scheme}")));
+    }
+    if !state.prefs.set_chrome_scheme(&scheme) {
+        return Ok(());
+    }
+    let prefs = state.prefs.get(&state);
+    if !prefs.tell_pages_theme {
+        return Ok(());
+    }
+    let sessions = {
+        let host = lock(&state.host);
+        host.as_ref().map_or_else(Vec::new, |host| {
+            host.sessions()
+                .into_iter()
+                .map(|(_, session)| session)
+                .collect()
+        })
+    };
+    for session in &sessions {
+        crate::prefs::apply(session, &prefs, Some(&scheme)).await;
+    }
+    Ok(())
+}
+
 /// Store preferences and put them into force on every open tab. Returns the
 /// stored form, which may differ where a value was out of range.
 #[tauri::command]
@@ -318,8 +348,9 @@ pub(crate) async fn prefs_set(
                 .collect()
         })
     };
+    let chrome_scheme = state.prefs.chrome_scheme();
     for (tab_id, session, document_url) in &sessions {
-        crate::prefs::apply(session, &stored).await;
+        crate::prefs::apply(session, &stored, chrome_scheme.as_deref()).await;
         crate::privacy::refresh_page_policy(&state, *tab_id, session, &stored).await;
         if privacy_site_state_changed(&previous, &stored, document_url)
             && let Err(error) = session.call0("Page.reload").await
@@ -603,6 +634,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::privacy::privacy_info,
             prefs_get,
             prefs_set,
+            pages_scheme,
             browsing_data_clear,
             downloads_reveal,
             downloads_open,

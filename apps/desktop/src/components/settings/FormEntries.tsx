@@ -9,7 +9,30 @@ import { Button, Group } from "../SettingsFields";
 
 /** A field name as the list shows it: `billing_email` → "billing email". */
 export function fieldLabel(field: string): string {
-  return field.replace(/[_\-.]+/g, " ").trim() || "field";
+  const words = field
+    // camelCase and glued names ("fullName", "postalCode") split at the case change.
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_\-.]+/g, " ")
+    .trim()
+    .toLowerCase();
+  // Common glued names sites use without a separator.
+  const known: Record<string, string> = {
+    fullname: "full name",
+    firstname: "first name",
+    lastname: "last name",
+    middlename: "middle name",
+    username: "username",
+    postalcode: "postal code",
+    zipcode: "zip code",
+    phonenumber: "phone number",
+    streetaddress: "street address",
+    companyname: "company name",
+    cardholder: "cardholder",
+  };
+  return words
+    .split(" ")
+    .map((word) => known[word] ?? word)
+    .join(" ") || "field";
 }
 
 /** Entries grouped by field, in the order the host returns them. */

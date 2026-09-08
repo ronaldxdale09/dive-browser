@@ -178,6 +178,18 @@ describe("preference persistence", () => {
 });
 
 describe("applyAppearance", () => {
+  it("tells the host the scheme the chrome is drawn in, once per change", () => {
+    const told = vi.spyOn(ipc, "pagesScheme").mockResolvedValue(null);
+    // A light-only template with the mode on System: the chrome is light, so pages must hear "light".
+    applyAppearance({ ...DEFAULT_PREFS, theme: "system", appearance_preset: "paper" });
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(told).toHaveBeenLastCalledWith("light");
+    applyAppearance({ ...DEFAULT_PREFS, theme: "system", appearance_preset: "paper", density: "compact" });
+    expect(told).toHaveBeenCalledTimes(1);
+    applyAppearance({ ...DEFAULT_PREFS, theme: "dark" });
+    expect(told).toHaveBeenLastCalledWith("dark");
+  });
+
   it("puts an explicit theme on the document root", () => {
     applyAppearance({ ...DEFAULT_PREFS, theme: "light" });
     expect(document.documentElement.dataset.theme).toBe("light");

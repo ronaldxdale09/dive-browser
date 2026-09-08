@@ -663,9 +663,9 @@ impl TabHost {
                 let _ = loading_ready.await;
                 // Privacy preferences have to be in force before the document
                 // request goes out, or the first load escapes them.
-                let prefs = {
+                let (prefs, chrome_scheme) = {
                     let state = prefs_app.state::<AppState>();
-                    state.prefs.get(&state)
+                    (state.prefs.get(&state), state.prefs.chrome_scheme())
                 };
                 crate::privacy::attach_page(prefs_app.clone(), tab_id, session_for_prefs.clone())
                     .await;
@@ -690,7 +690,7 @@ impl TabHost {
                 .await;
                 crate::form_fill::attach(prefs_app.clone(), tab_id, session_for_prefs.clone())
                     .await;
-                crate::prefs::apply(&session_for_prefs, &prefs).await;
+                crate::prefs::apply(&session_for_prefs, &prefs, chrome_scheme.as_deref()).await;
                 tracing::debug!(%tab_id, "browser preferences complete before navigation");
                 if let Err(e) = nav.navigate(url) {
                     tracing::warn!(%tab_id, "initial navigation failed: {e}");

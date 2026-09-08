@@ -56,6 +56,8 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- "Tell pages the theme" now passes on the scheme the chrome is actually drawn in, so a light-only template such as Paper with the mode on System gives pages a light scheme too; it used to say nothing unless the mode was set by hand.
+- Settings › Passwords & forms labels remembered fields in words ("full name", "postal code") instead of raw names like FULLNAME.
 - DevTools opens at a working size (about 70% of the Dive window, at least 960×700) just down and right of the page, instead of Chromium's 640×608 default in the corner of the screen.
 - The agent's tools no longer fail with "bad tab id" when a small model sends a blank or made-up tab id; they act on the tab the agent is working on. MCP clients get the same for a blank id, and a malformed one is told to use tabs_list.
 - Loading an unpacked extension from the wrong folder says what to pick ("that folder has no manifest.json, choose the one that holds it") instead of an OS error code.

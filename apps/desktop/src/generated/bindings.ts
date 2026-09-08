@@ -432,6 +432,11 @@ export const commands = {
 	 *  stored form, which may differ where a value was out of range.
 	 */
 	prefsSet: (prefs: Prefs) => typedError<Prefs, AppError>(__TAURI_INVOKE("prefs_set", { prefs })),
+	/**
+	 *  The chrome reports the scheme it is drawn in ("dark" | "light"). When
+	 *  pages are told the theme, every open tab is told this at once.
+	 */
+	pagesScheme: (scheme: string) => typedError<null, AppError>(__TAURI_INVOKE("pages_scheme", { scheme })),
 	/**  Delete browsing data; returns a one-line summary of what went. */
 	browsingDataClear: (what: ClearRequest) => typedError<string, AppError>(__TAURI_INVOKE("browsing_data_clear", { what })),
 	/**  Show a download in the system file manager, or the downloads folder when `path` is `None`. */

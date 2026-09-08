@@ -56,6 +56,9 @@ describe("Settings › Form entries", () => {
 
   it("labels fields and groups neighbours", () => {
     expect(fieldLabel("billing_email-address")).toBe("billing email address");
+    expect(fieldLabel("fullname")).toBe("full name");
+    expect(fieldLabel("shipping_postalCode")).toBe("shipping postal code");
+    expect(fieldLabel("firstName")).toBe("first name");
     expect(fieldLabel("")).toBe("field");
     expect(groupByField(entries).map((g) => [g.field, g.entries.length])).toEqual([
       ["email", 2],

@@ -217,6 +217,7 @@ export function applyAppearance(prefs: Prefs) {
   const root = document.documentElement;
   const scheme = resolveScheme(prefs, systemTheme);
   root.dataset.theme = scheme;
+  syncPagesScheme(scheme);
   root.dataset.density = prefs.density;
   root.dataset.tabStyle = prefs.tab_style;
   root.dataset.motion = resolveMotion(prefs);
@@ -231,6 +232,17 @@ export function applyAppearance(prefs: Prefs) {
   if (scale === 1) root.style.removeProperty("font-size");
   else root.style.fontSize = `${16 * scale}px`;
   syncWindowBackground();
+}
+
+// Pages that are told the theme get the scheme the chrome is drawn in, which
+// template, mode and the OS decide together; only the chrome knows it.
+let sentScheme: "dark" | "light" | null = null;
+function syncPagesScheme(scheme: "dark" | "light") {
+  if (scheme === sentScheme) return;
+  sentScheme = scheme;
+  ipc.pagesScheme(scheme).catch(() => {
+    sentScheme = null;
+  });
 }
 
 // The window behind the chrome shows through a page's rounded corners and

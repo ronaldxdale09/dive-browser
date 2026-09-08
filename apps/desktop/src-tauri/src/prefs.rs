@@ -465,9 +465,35 @@ fn is_hex_color(s: &str) -> bool {
 pub struct Registry {
     cached: Mutex<Option<Arc<Prefs>>>,
     updates: tokio::sync::Mutex<()>,
+    /// The scheme the chrome is drawn in ("dark" | "light"), reported by the
+    /// chrome once it has resolved template, mode and the OS. Pages are told
+    /// this, never the raw mode, so a light-only template with the mode on
+    /// System still gives pages a light scheme.
+    chrome_scheme: Mutex<Option<String>>,
 }
 
 impl Registry {
+    /// The scheme the chrome is drawn in, once it has said.
+    pub fn chrome_scheme(&self) -> Option<String> {
+        self.chrome_scheme
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Record the chrome's scheme. Returns whether it changed.
+    pub fn set_chrome_scheme(&self, scheme: &str) -> bool {
+        let mut slot = self
+            .chrome_scheme
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if slot.as_deref() == Some(scheme) {
+            return false;
+        }
+        *slot = Some(scheme.to_owned());
+        true
+    }
+
     /// Enter one complete persist-and-apply preference transaction. Commands
     /// keep this guard until every live tab has seen the stored snapshot, so
     /// an older request can never apply after a newer request.
@@ -574,7 +600,9 @@ fn parse_stored(json: &str) -> Prefs {
 ///
 /// The emulated color scheme is only sent when the user asked for it, so a
 /// preference write never clobbers a per-tab override from the device menu.
-pub fn calls(prefs: &Prefs) -> Vec<(&'static str, Value)> {
+/// `chrome_scheme` is what the chrome is actually drawn in; without it the
+/// explicit mode is the best guess and System says nothing.
+pub fn calls(prefs: &Prefs, chrome_scheme: Option<&str>) -> Vec<(&'static str, Value)> {
     let headers = if prefs.do_not_track {
         json!({"DNT": "1", "Sec-GPC": "1"})
     } else {
@@ -591,10 +619,14 @@ pub fn calls(prefs: &Prefs) -> Vec<(&'static str, Value)> {
             json!({"value": !prefs.javascript}),
         ),
     ];
-    if prefs.tell_pages_theme && prefs.theme != "system" {
+    let scheme =
+        chrome_scheme.or_else(|| (prefs.theme != "system").then_some(prefs.theme.as_str()));
+    if prefs.tell_pages_theme
+        && let Some(scheme) = scheme
+    {
         calls.push((
             "Emulation.setEmulatedMedia",
-            json!({"features": [{"name": "prefers-color-scheme", "value": prefs.theme}]}),
+            json!({"features": [{"name": "prefers-color-scheme", "value": scheme}]}),
         ));
     }
     calls
@@ -602,8 +634,8 @@ pub fn calls(prefs: &Prefs) -> Vec<(&'static str, Value)> {
 
 /// Apply `prefs` to one tab's session. Failures are logged, not fatal: a tab
 /// that has just closed must not fail a settings write.
-pub async fn apply(session: &CdpSession, prefs: &Prefs) {
-    for (method, params) in calls(prefs) {
+pub async fn apply(session: &CdpSession, prefs: &Prefs, chrome_scheme: Option<&str>) {
+    for (method, params) in calls(prefs, chrome_scheme) {
         if let Err(e) = session.call(method, params).await {
             tracing::debug!("{method} failed: {e}");
         }
@@ -1166,17 +1198,28 @@ mod tests {
             tell_pages_theme: true,
             ..Prefs::default()
         };
-        let sent = calls(&prefs);
+        let sent = calls(&prefs, None);
         assert_eq!(sent[0].1["headers"]["DNT"], "1");
         assert_eq!(sent[2].1["value"], true);
         assert_eq!(sent[3].0, "Emulation.setEmulatedMedia");
-        // Following the system theme leaves the page's scheme alone.
+        assert_eq!(sent[3].1["features"][0]["value"], "dark");
+        // Following the system theme says nothing until the chrome reports
+        // what it is drawn in; then pages get that, whatever the mode.
         let system = Prefs {
             tell_pages_theme: true,
             ..Prefs::default()
         };
-        assert_eq!(calls(&system).len(), 3);
-        assert_eq!(calls(&system)[0].1["headers"], json!({}));
+        assert_eq!(calls(&system, None).len(), 3);
+        assert_eq!(calls(&system, None)[0].1["headers"], json!({}));
+        let told = calls(&system, Some("light"));
+        assert_eq!(told[3].1["features"][0]["value"], "light");
+        // A light-only template under a dark mode: the chrome's word wins.
+        assert_eq!(
+            calls(&prefs, Some("light"))[3].1["features"][0]["value"],
+            "light"
+        );
+        // Nobody asked: nothing is sent even when the chrome has reported.
+        assert_eq!(calls(&Prefs::default(), Some("light")).len(), 3);
     }
 
     #[test]
