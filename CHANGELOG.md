@@ -52,6 +52,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Privacy › Site permissions no longer says "Remembered for Personal · Personal" when the container carries the profile's own name.
 - General settings: a custom search URL saved without `{query}` now shows a warning that DuckDuckGo is being used until it is added, rather than a static hint.
 - About: a dev build no longer shows a "Check again" button that did nothing; the note that updates go to release builds stands alone.
 - The menu, palette and shortcuts list call the same actions by the same names: "Copy bug report" (the menu said "Report a bug…", which suggested a form) and "Record a video" (the shortcuts list said "Record tab").

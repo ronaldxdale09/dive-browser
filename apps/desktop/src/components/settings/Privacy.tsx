@@ -17,6 +17,11 @@ const RETENTION = [
 ];
 
 /** Settings › Privacy: DivePrivacy, request policy, history, clearing and site permissions. */
+/** "Personal · Client work", or just "Personal" when the container carries the profile's own name. */
+export function scopeLabel(profile: string, container: string): string {
+  return container && container !== profile ? `${profile} · ${container}` : profile;
+}
+
 export function Privacy() {
   const [prefs, set] = usePref();
   const privacyInfo = usePrivacy((s) => s.info);
@@ -210,7 +215,7 @@ function ScopedSitePermissions() {
   };
   const groups = groupPermissions(list ?? []);
   return (
-    <Group title="Site permissions" description={context ? `Remembered for ${context.profile_name} · ${context.container_name}. Ask removes the remembered decision; page-only choices end when the requesting page navigates or closes.` : "Permissions for the selected profile and container."}>
+    <Group title="Site permissions" description={context ? `Remembered for ${scopeLabel(context.profile_name, context.container_name)}. Ask removes the remembered decision; page-only choices end when the requesting page navigates or closes.` : "Permissions for the selected profile and container."}>
       {context?.legacy_ignored && <p className="py-2 text-xs text-ink-3">Permissions from earlier versions must be approved again. Choices are now kept in this profile and container.</p>}
       {list === null && !error && <p className="py-3 text-xs text-ink-3">Loading…</p>}
       {error && (
