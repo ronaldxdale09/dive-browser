@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/hero-dark.png" alt="Dive with the Network dock open on a GitHub repository" width="100%" />
+  <img src="assets/screenshots/home-dark.png" alt="The Dive home page with detected dev servers listed and ready to open" width="100%" />
 </p>
 
 Dive is a native macOS browser on the Chromium Embedded Framework with a Rust core and a React chrome. It is fast, keyboard-first and private by default, and it turns the browser into a tool an engineer, a designer or an AI agent can operate.
@@ -37,11 +37,13 @@ Dive is a native macOS browser on the Chromium Embedded Framework with a Rust co
 - **Mock and rewrite rules.** Intercept requests per workspace: mock a response, rewrite a host, or fail a call to see how the UI copes.
 - **Light on memory.** Tabs idle for an hour drop their Chromium process and keep their chip, favicon, scroll position and history. Everything restores on click.
 - **Bug reports with proof.** One shortcut captures a screenshot, the console problems and the failed requests into a Markdown report you can hand to a teammate.
-- **Signed, notarized, self-updating.** Releases are notarized by Apple and verified in-app with a signed updater manifest.
 
 ## Screenshots
 
 <table>
+  <tr>
+    <td colspan="2"><img src="assets/screenshots/hero-dark.png" alt="Dive with the Network dock open on a GitHub repository" /><br /><sub><b>Developer dock</b> with the Network panel open beside the page, not in front of it.</sub></td>
+  </tr>
   <tr>
     <td width="50%"><img src="assets/screenshots/agent.png" alt="Agent panel answering a question about the open repository" /><br /><sub><b>Agent</b> reads the page and answers, here through a local Ollama model.</sub></td>
     <td width="50%"><img src="assets/screenshots/divescreen.png" alt="DiveScreen editor with a zoom region on a recording" /><br /><sub><b>DiveScreen</b> turns a tab recording into a demo with zooms and cursor effects.</sub></td>
