@@ -243,6 +243,22 @@ describe("optimistic switching", () => {
     expect(useBrowser.getState().activeTab).toBe("z");
   });
 
+  it("fetches the snapshot when the engine switches workspace on its own, not when this chrome asked", async () => {
+    const snapshot = vi.spyOn(ipc, "snapshot").mockResolvedValue({ workspaces: [], active_workspace: "w9", tabs: [tab("z")], active_tab: "z", detached: [], profiles: [], active_profile: null });
+    vi.spyOn(ipc, "workspaceTabCounts").mockResolvedValue([]);
+    vi.spyOn(ipc, "workspaceActivate").mockResolvedValue(null);
+    useBrowser.setState({ activeWorkspace: "w1", tabs: [tab("a")], activeTab: "a", workspaces: [] });
+    // An automation call moved the engine to w9: this chrome only hears the event.
+    useBrowser.getState().applyEvent({ type: "workspace_activated", data: "w9" });
+    await vi.waitFor(() => expect(useBrowser.getState().tabs.map((t) => t.id)).toEqual(["z"]));
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    // Asked for by this chrome: activateWorkspace fetches once, the event adds nothing.
+    await useBrowser.getState().activateWorkspace("w3");
+    useBrowser.getState().applyEvent({ type: "workspace_activated", data: "w3" });
+    await Promise.resolve();
+    expect(snapshot).toHaveBeenCalledTimes(2);
+  });
+
   it("rolls the workspace back when the engine refuses, without a snapshot", async () => {
     vi.spyOn(ipc, "workspaceActivate").mockRejectedValue(new Error("unknown workspace"));
     const snapshot = vi.spyOn(ipc, "snapshot");

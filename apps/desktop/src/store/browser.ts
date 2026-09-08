@@ -295,6 +295,8 @@ let unlistenDownload: (() => void) | null = null;
 let booting: Promise<void> | null = null;
 /** The one toast timer: a newer notice cancels the older one's clearing. */
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+/** The workspace this chrome asked the engine for; its `workspace_activated` needs no refresh. */
+let requestedWorkspace: string | null = null;
 
 /**
  * True when the tab has no page of its own: nothing in its history, or only
@@ -619,9 +621,11 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     const prev = get().activeWorkspace;
     if (prev === id) return;
     set({ activeWorkspace: id });
+    requestedWorkspace = id;
     try {
       await ipc.workspaceActivate(id);
     } catch (e) {
+      requestedWorkspace = null;
       set((s) => ({ activeWorkspace: s.activeWorkspace === id ? prev : s.activeWorkspace, error: errorMessage(e) }));
       return;
     }
@@ -668,6 +672,18 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     const gone = event.type === "tab_closed" ? get().tabs.find((t) => t.id === event.data) : undefined;
     const goneIndex = event.type === "tab_closed" ? stripIndex(get().tabs, event.data) : -1;
     set((s) => reduceEvent(s, event));
+    // A switch the engine made on its own (an automation call, a restore, a
+    // link opened into another workspace) brings tabs this chrome has never
+    // seen; only the snapshot has them. A switch this chrome asked for is
+    // already fetching one.
+    if (event.type === "workspace_activated") {
+      const expected = requestedWorkspace === event.data;
+      requestedWorkspace = null;
+      if (!expected) {
+        void run(set, async () => set(fromSnapshot(await ipc.snapshot())));
+        void get().refreshCounts();
+      }
+    }
     if (event.type === "tab_closed") {
       const id = event.data;
       set((s) => ({ closedTabs: rememberClosed(s.closedTabs, gone, goneIndex) }));
