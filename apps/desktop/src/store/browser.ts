@@ -419,6 +419,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     if (load.phase === "started") {
       clearPrivacy(load.tab_id);
       useNetwork.getState().navigated(load.tab_id, load.url);
+      useConsole.getState().navigated(load.tab_id);
     }
     set((s) => reduceLoad(s, load));
   },

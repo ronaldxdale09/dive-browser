@@ -16,6 +16,11 @@ interface ConsoleState {
   flush: () => void;
   clear: (tabId: string) => void;
   drop: (tabId: string) => void;
+  /** Keep output across navigations, as DevTools' "Preserve log" does. Off, a reload shows only the new page's output. */
+  preserve: boolean;
+  setPreserve: (on: boolean) => void;
+  /** The tab's main frame started loading a new document: the page it left is done talking. */
+  navigated: (tabId: string) => void;
 }
 
 let seq = 0;
@@ -67,6 +72,13 @@ export const useConsole = create<ConsoleState>((set, get) => ({
       delete byTab[tabId];
       return { byTab };
     });
+  },
+  preserve: false,
+  setPreserve: (preserve) => set({ preserve }),
+  navigated: (tabId) => {
+    if (get().preserve) return;
+    if ((get().byTab[tabId]?.length ?? 0) === 0 && !pending.has(tabId)) return;
+    get().clear(tabId);
   },
 }));
 

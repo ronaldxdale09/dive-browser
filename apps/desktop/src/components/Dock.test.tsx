@@ -4,7 +4,7 @@ import type { ConsoleEntry } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { useConsole } from "../store/console";
 import { useNetwork } from "../store/network";
-import { Dock, stepPanel } from "./Dock";
+import { Dock, sourceName, stepPanel } from "./Dock";
 
 const entry = (i: number, text = `line ${i}`, level: ConsoleEntry["level"] = "info"): ConsoleEntry => ({
   tab_id: "tab-1",
@@ -166,5 +166,26 @@ describe("Dock console panel", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Network" }));
     expect(screen.getByText("No requests yet.")).toBeTruthy();
     expect(screen.getByLabelText("Filter requests")).toBeTruthy();
+  });
+});
+
+describe("console per page", () => {
+  it("names a line's source by file, or by host for a bare document path", () => {
+    expect(sourceName("http://127.0.0.1:5173/app.js?v=2")).toBe("app.js");
+    expect(sourceName("http://127.0.0.1:5173/")).toBe("127.0.0.1:5173");
+    expect(sourceName("https://example.com/docs/")).toBe("example.com");
+  });
+
+  it("starts a fresh log when the page's main frame loads again, unless preserved", () => {
+    useConsole.setState({ byTab: {}, preserve: false });
+    const c = useConsole.getState();
+    c.push({ tab_id: "t", level: "log", source: "console", text: "hello", url: "http://a.dev/", line: 3, timestamp: 1 } as never);
+    c.navigated("t");
+    expect(useConsole.getState().byTab.t).toEqual([]);
+    c.push({ tab_id: "t", level: "log", source: "console", text: "again", url: "http://a.dev/", line: 3, timestamp: 2 } as never);
+    c.setPreserve(true);
+    c.navigated("t");
+    expect(useConsole.getState().byTab.t!.map((e) => e.text)).toEqual(["again"]);
+    useConsole.setState({ preserve: false });
   });
 });

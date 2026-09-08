@@ -134,6 +134,8 @@ const BOTTOM_SLACK = 8;
 function ConsolePanel() {
   const activeTab = useBrowser((s) => s.activeTab);
   const entries = useConsole(selectEntries(activeTab));
+  const preserve = useConsole((s) => s.preserve);
+  const setPreserve = useConsole((s) => s.setPreserve);
   const [filter, setFilter] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   // Whether the user was at the end the last time they scrolled; new output only pulls the view along then.
@@ -160,7 +162,7 @@ function ConsolePanel() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="px-2 pb-1">
+      <div className="flex items-center gap-3 px-2 pb-1 text-[11px] text-ink-3">
         <input
           aria-label="Filter console"
           value={filter}
@@ -168,6 +170,10 @@ function ConsolePanel() {
           placeholder="Filter"
           className="h-6 w-56 rounded-md border border-line bg-surface-2 px-2 text-[11px] outline-none placeholder:text-ink-3 focus:border-highlight/60"
         />
+        <label className="ml-auto flex items-center gap-1.5 select-none">
+          <input type="checkbox" checked={preserve} onChange={(e) => setPreserve(e.target.checked)} className="accent-highlight" />
+          Preserve log
+        </label>
       </div>
       <div
         ref={scrollRef}
@@ -192,6 +198,21 @@ function ConsolePanel() {
   );
 }
 
+/**
+ * How a console line names where it came from: the file, or the host when
+ * the source is a document at a bare path ("example.com" rather than ""),
+ * so a line from an inline script is not just ":3".
+ */
+export function sourceName(url: string): string {
+  const last = url.split("?")[0]!.split("#")[0]!.split("/").pop() ?? "";
+  if (last) return last;
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
+}
+
 /** One console line. Memoized on the entry object, so output arriving elsewhere in the list leaves it alone. */
 const Row = memo(function Row({
   entry,
@@ -207,7 +228,7 @@ const Row = memo(function Row({
   measure: (node: HTMLDivElement | null) => void;
 }) {
   const preferredEditor = usePrefs((s) => s.prefs.preferred_editor || "vscode");
-  const loc = entry.url ? `${entry.url.split("/").pop() ?? entry.url}${entry.line ? `:${entry.line}` : ""}` : "";
+  const loc = entry.url ? `${sourceName(entry.url)}${entry.line ? `:${entry.line}` : ""}` : "";
   const [jumping, setJumping] = useState(false);
 
   const handleClick = async () => {
