@@ -116,7 +116,7 @@ function Updates({ channel }: { channel: string | null }) {
             <Button variant="primary" disabled={installing} onClick={() => void install()}>
               {installing ? "Installing…" : "Install and restart"}
             </Button>
-          ) : (
+          ) : dev ? null : (
             <Button variant="quiet" disabled={status === "checking"} onClick={() => void check()}>
               {status === "checking" ? "Checking…" : status === "none" ? "Check again" : "Check for updates"}
             </Button>
