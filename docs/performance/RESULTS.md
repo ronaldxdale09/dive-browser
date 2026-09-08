@@ -85,7 +85,7 @@ Computer use verified local animated video, form input, YouTube playback through
 - Sandbox before/after receipts: `target/performance-goal/sandbox-before/` and `sandbox-after/`.
 - Reproduce with `scripts/browser-comparison.mjs`, explicit exact browser binaries, `BENCH_RUNS=3`, and a fresh `BENCH_OUTPUT`. Metadata fingerprints the harness, helper, main binaries, fixture, host and configuration. Frameworks are version-identified rather than fully content-hashed.
 
-Work remains uncommitted, uninstalled and unreleased. See [upstream references](upstream-references.md) and the [investigation history](2026-09-06-goal.md). Allocator, bridge-filter and extra message-pump experiments were not retained. The working source and restored default local release bundle use the qualified sandbox implementation; experimental bundles under target remain unqualified.
+Work remains uncommitted, uninstalled and unreleased. See [upstream references](upstream-references.md). Allocator, bridge-filter and extra message-pump experiments were not retained. The working source and restored default local release bundle use the qualified sandbox implementation; experimental bundles under target remain unqualified.
 
 ## Current runtime investigation
 

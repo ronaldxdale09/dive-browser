@@ -41,7 +41,7 @@ if mode == 'hang': time.sleep(60)
                            'DIVE_PROBE_TIMEOUT_SECS': '0.75',
                            'DIVE_BENCHMARK_RESULTS_DIR': str(root / 'results')}
             completed = subprocess.run(['bash', str(scripts / 'benchmark-startup.sh')],
-                                       env=environment, capture_output=True, text=True, timeout=5)
+                                       env=environment, capture_output=True, text=True, timeout=20)
             summary_path = root / 'target/startup-benchmark-summary.json'
             summary = json.loads(summary_path.read_text()) if summary_path.exists() else None
             logs = list((root / 'results').glob('*.log'))

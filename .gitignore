@@ -1,33 +1,31 @@
-# deps / build
+# Dependencies and build output
 node_modules/
 target/
 dist/
 .pnpm-store/
 *.tsbuildinfo
-# tauri
 apps/desktop/src-tauri/gen/
-# cef binaries / vendored engine
+
+# Chromium Embedded Framework binaries (downloaded, never vendored)
 vendor/cef/
 .cef/
-# local
+
+# Local release artifacts
+/out
+*.dmg
+*.p12
+
+# Machine-local files
 .env
 .env.*
 !.env.example
 .DS_Store
 *.log
-*.p12
-*.dmg
 .vscode/
 .idea/
-# generated
-packages/protocol/src/generated/
-# agent working state, never source
-.claude/autopilot/
+
+# Coding-agent working state (see CONTRIBUTING.md)
+/.claude/
 /.agents
 /.superpowers
 /scratchpad
-# local release artifacts
-/out
-
-# Claude Code project state and locally installed agent skills (see CONTRIBUTING.md)
-/.claude/

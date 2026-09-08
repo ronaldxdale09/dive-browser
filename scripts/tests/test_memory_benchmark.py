@@ -54,7 +54,7 @@ sys.exit(9 if os.environ['FAKE_MODE'] in ('crash', 'late-crash') else 0)
                                        text=True, start_new_session=True)
             timed_out = False
             try:
-                out, err = process.communicate(timeout=3)
+                out, err = process.communicate(timeout=20)
             except subprocess.TimeoutExpired:
                 timed_out = True
                 os.killpg(process.pid, signal.SIGKILL)

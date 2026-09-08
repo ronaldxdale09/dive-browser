@@ -4,16 +4,6 @@ Date: 2026-09-03. Stack: Tauri v2 (Rust) + CEF (Chromium Embedded Framework) + R
 
 Dive is a developer-focused, multi-workspace Chromium browser with a built-in dev toolkit and an AI agent that does more than chat.
 
-## Verified implementation status (2026-09-04)
-
-The original phase plan below is retained as architecture/product history; it is no longer a statement that the repository is unscaffolded. The current production-readiness evidence is maintained in [`docs/production-readiness.md`](production-readiness.md).
-
-- The macOS private Probe passes the expanded lifecycle check: popup, permissions/camera result, PDF, localhost, offline recovery, real YouTube playback, tab discard/wake and renderer recovery.
-- Current measured targets pass: CDP p95 `0.419 ms`, warm startup p95 `217.30 ms`, and deterministic 20-tab reclaim `108%` of measured growth.
-- Static and automated gates pass: strict Rust formatting/Clippy, 325 Rust tests, monorepo typecheck/lint, and 474 frontend tests in the post-report shared-tree rerun.
-- The current release is not signable from this host: updater signing requires CI-held secrets, Windows/Linux live evidence is absent, `cargo-audit` is unavailable, and concurrent recording bindings must be committed atomically before the generated-file check can pass.
-- Ownership-gated work remains for optimistic navigation/reorder rollback, Library row windowing and error states, plus a unified reduced-motion-aware close lifecycle for anchored popovers. These are explicit deferrals in the readiness ledger, not shipped claims.
-
 ---
 
 ## 1. Summary of decisions

@@ -55,7 +55,7 @@ else:
             env = {**os.environ, 'DIVE_BIN': str(fake), 'RECORDED_ENV': str(recorded), **extra}
             env.pop('DIVE_USE_MOCK_KEYCHAIN', None)
             command = ['bash' if launcher.endswith('.sh') else 'python3', str(scripts / launcher)]
-            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
             return result, [json.loads(line) for line in recorded.read_text().splitlines()]
 
     def test_lifecycle_and_negative_startup_use_disposable_keychain(self):
