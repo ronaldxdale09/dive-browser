@@ -1,6 +1,6 @@
 import { SortableContext, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AppWindow, Columns2, Loader2, Moon, Pin, Plus, Star, X } from "lucide-react";
+import { AppWindow, Columns2, CopyPlus, Link, Loader2, Moon, Pin, Plus, Star, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBrowser } from "../store/browser";
 import { MAX_PANES, useLayout, type Split } from "../store/layout";
@@ -77,6 +77,7 @@ export function TabStrip() {
   const workspace = useBrowser((s) => s.activeWorkspace);
   const activate = useBrowser((s) => s.activateTab);
   const close = useBrowser((s) => s.closeTab);
+  const openTab = useBrowser((s) => s.openTab);
   const toggle = useBrowser((s) => s.toggle);
   const setPinned = useBrowser((s) => s.setPinned);
   const setTier = useBrowser((s) => s.setTier);
@@ -214,6 +215,16 @@ export function TabStrip() {
             setMenu(null);
           }}
           onDismiss={() => setMenu(null)}
+          onDuplicate={() => {
+            const t = all.find((x) => x.id === menu.id);
+            if (t) void openTab(t.url);
+            setMenu(null);
+          }}
+          onCopy={() => {
+            const t = all.find((x) => x.id === menu.id);
+            if (t) void copyAddress(t.url);
+            setMenu(null);
+          }}
           onCloseOthers={() => {
             for (const t of tabs) if (t.id !== menu.id && t.tier !== "pinned") void close(t.id);
             setMenu(null);
@@ -485,32 +496,75 @@ function EssentialTab({ tab: t, active, loading, onActivate, onMenu }: { tab: Ta
   );
 }
 
-function TabMenu({ x, y, tier, detached, split, onPin, onEssential, onWindow, onSplit, onClose, onCloseOthers, onDismiss }: { x: number; y: number; tier: Tab["tier"]; detached: boolean; split: SplitAction | null; onPin: (v: boolean) => void; onEssential: (v: boolean) => void; onWindow: (out: boolean) => void; onSplit: (action: SplitAction) => void; onClose: () => void; onCloseOthers: () => void; onDismiss: () => void }) {
+/** Put a page address on the clipboard and say so; the notice names the failure if the OS refuses. */
+async function copyAddress(url: string) {
+  const { notify } = useBrowser.getState();
+  try {
+    await navigator.clipboard.writeText(url);
+    notify("Copied the address");
+  } catch {
+    notify("Could not copy: the clipboard is not available.");
+  }
+}
+
+/** The menu item that focus should move to for an arrow, Home or End key; null for other keys. */
+export function roveMenu(key: string, items: readonly HTMLElement[], current: Element | null): HTMLElement | null {
+  if (items.length === 0) return null;
+  const at = items.findIndex((el) => el === current);
+  switch (key) {
+    case "ArrowDown":
+      return items[(at + 1) % items.length] ?? null;
+    case "ArrowUp":
+      return items[(at <= 0 ? items.length : at) - 1] ?? null;
+    case "Home":
+      return items[0] ?? null;
+    case "End":
+      return items[items.length - 1] ?? null;
+    default:
+      return null;
+  }
+}
+
+function TabMenu({ x, y, tier, detached, split, onPin, onEssential, onWindow, onSplit, onClose, onCloseOthers, onDuplicate, onCopy, onDismiss }: { x: number; y: number; tier: Tab["tier"]; detached: boolean; split: SplitAction | null; onPin: (v: boolean) => void; onEssential: (v: boolean) => void; onWindow: (out: boolean) => void; onSplit: (action: SplitAction) => void; onClose: () => void; onCloseOthers: () => void; onDuplicate: () => void; onCopy: () => void; onDismiss: () => void }) {
   useCoversContent(true);
   const ref = useRef<HTMLDivElement>(null);
   // Like every other menu: a press anywhere else or Escape puts it away.
+  // Focus lands on the first item so the arrow keys walk the list, and goes
+  // back to where it came from when the menu closes.
   useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
     const onDown = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) onDismiss();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onDismiss();
+      if (e.key === "Escape") {
+        onDismiss();
+        return;
+      }
+      const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+      const next = roveMenu(e.key, items, document.activeElement);
+      if (next) {
+        e.preventDefault();
+        next.focus();
+      }
     };
     window.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
+      if (opener?.isConnected) opener.focus();
     };
   }, [onDismiss]);
   const pinned = tier === "pinned";
   const essential = tier === "essential";
   const item = "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink";
   const chords = chordsByCommand();
-  const rows = 4 + (essential ? 0 : 1) + (split ? 1 : 0);
+  const rows = 6 + (essential ? 0 : 1) + (split ? 1 : 0);
   const position = clampFloatingPosition({ x, y, width: 208, height: 12 + rows * 30 + 2 * 9, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
   return (
-    <div ref={ref} role="menu" style={{ left: position.x, top: position.y }} className="surface-enter fixed z-50 w-52 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+    <div ref={ref} role="menu" aria-label="Tab actions" style={{ left: position.x, top: position.y }} className="surface-enter fixed z-50 w-52 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
       {!essential && (
         <button type="button" role="menuitem" className={item} aria-keyshortcuts={chords["tab.pin"]} onClick={() => onPin(!pinned)}>
           <Icon icon={Pin} size={13} /> {pinned ? "Unpin tab" : "Pin tab"}
@@ -529,6 +583,13 @@ function TabMenu({ x, y, tier, detached, split, onPin, onEssential, onWindow, on
       <button type="button" role="menuitem" className={item} aria-keyshortcuts={chords["tab.detach"]} onClick={() => onWindow(!detached)}>
         <Icon icon={AppWindow} size={13} /> {detached ? "Move back to this window" : "Open in new window"}
         <MenuChord chord={chords["tab.detach"]} />
+      </button>
+      <div className="my-1 h-px bg-line" role="separator" />
+      <button type="button" role="menuitem" className={item} onClick={onDuplicate}>
+        <Icon icon={CopyPlus} size={13} /> Duplicate tab
+      </button>
+      <button type="button" role="menuitem" className={item} onClick={onCopy}>
+        <Icon icon={Link} size={13} /> Copy address
       </button>
       <div className="my-1 h-px bg-line" role="separator" />
       <button type="button" role="menuitem" className={item} aria-keyshortcuts={chords["tab.close"]} onClick={onClose}>

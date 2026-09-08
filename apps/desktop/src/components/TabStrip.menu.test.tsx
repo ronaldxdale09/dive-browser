@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
-import { TabStrip } from "./TabStrip";
+import { TabStrip, roveMenu } from "./TabStrip";
 
 const tab: Tab = { id: "t1", workspace_id: "w1", url: "https://a.test/", title: "Alpha", favicon: null, tier: "today", position: 0, created_at: "", last_active_at: "", state: "active", scroll_x: 0, scroll_y: 0 } as Tab;
 
@@ -40,5 +40,51 @@ describe("tab context menu", () => {
     expect(screen.getByRole("menu")).toBeTruthy();
     fireEvent.mouseDown(document.body);
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  });
+
+  it("takes focus, walks its items with the arrow keys, and gives focus back when it closes", async () => {
+    vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
+    useBrowser.setState({ tabs: [tab], activeTab: "t1", activeWorkspace: "w1" });
+    render(<TabStrip />);
+    const alpha = screen.getByRole("tab", { name: /Alpha/ });
+    alpha.focus();
+    fireEvent.contextMenu(alpha);
+    expect(screen.getByRole("menu", { name: "Tab actions" })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Pin tab" }));
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Make essential" }));
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Close other tabs" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(document.activeElement).toBe(alpha);
+  });
+
+  it("duplicates the tab and copies its address", async () => {
+    vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
+    const open = vi.spyOn(ipc, "tabOpen").mockResolvedValue({} as never);
+    const write = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: write }, configurable: true });
+    useBrowser.setState({ tabs: [tab], activeTab: "t1", activeWorkspace: "w1" });
+    render(<TabStrip />);
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Alpha/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Duplicate tab" }));
+    await waitFor(() => expect(open).toHaveBeenCalledWith("w1", "https://a.test/"));
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Alpha/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy address" }));
+    await waitFor(() => expect(write).toHaveBeenCalledWith("https://a.test/"));
+    await waitFor(() => expect(useBrowser.getState().notice).toBe("Copied the address"));
+  });
+
+  it("roves with wrap-around and ignores other keys", () => {
+    const a = document.createElement("button");
+    const b = document.createElement("button");
+    expect(roveMenu("ArrowDown", [a, b], b)).toBe(a);
+    expect(roveMenu("ArrowUp", [a, b], a)).toBe(b);
+    expect(roveMenu("ArrowUp", [a, b], null)).toBe(b);
+    expect(roveMenu("End", [a, b], null)).toBe(b);
+    expect(roveMenu("Enter", [a, b], a)).toBeNull();
+    expect(roveMenu("ArrowDown", [], null)).toBeNull();
   });
 });
