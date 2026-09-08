@@ -575,7 +575,9 @@ impl TabHost {
                 let app = nav_app.clone();
                 let nonce = nav_nonce.clone();
                 tauri::async_runtime::spawn(async move {
-                    update_session_tab(&app, tab_id, &nonce, |t| t.url = url);
+                    update_session_tab(&app, tab_id, &nonce, |t| {
+                        t.url = reported_url(&t.url, url);
+                    });
                 });
             });
         }
@@ -1485,6 +1487,16 @@ pub fn update_tab(app: &AppHandle<Runtime>, id: TabId, f: impl FnOnce(&mut Tab))
     state.bus.publish(CoreEvent::TabUpserted(tab));
 }
 
+/// The address to record for a page after the engine reports `reported`.
+/// A source view reports the page it shows, not its own `view-source:`
+/// address; keeping the prefix means the tab restores as the source view.
+fn reported_url(current: &str, reported: String) -> String {
+    match current.strip_prefix("view-source:") {
+        Some(shown) if shown == reported => current.to_owned(),
+        _ => reported,
+    }
+}
+
 /// The title to file a visit under. When the address just changed, the
 /// tab's title still belongs to the page it left (or is "about:blank" for a
 /// fresh tab), so the visit starts untitled and the real title fills it in
@@ -1783,6 +1795,18 @@ mod tests {
         assert_eq!(super::visit_title(true, "The Verge"), "");
         assert_eq!(super::visit_title(false, "Wikipedia"), "Wikipedia");
         assert_eq!(super::visit_title(false, "about:blank"), "");
+        assert_eq!(
+            super::reported_url("view-source:https://a.test/", "https://a.test/".into()),
+            "view-source:https://a.test/"
+        );
+        assert_eq!(
+            super::reported_url("view-source:https://a.test/", "https://b.test/".into()),
+            "https://b.test/"
+        );
+        assert_eq!(
+            super::reported_url("https://a.test/", "https://c.test/".into()),
+            "https://c.test/"
+        );
     }
 
     #[test]

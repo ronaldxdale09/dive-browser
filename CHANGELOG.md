@@ -37,6 +37,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- A tab showing page source keeps its view-source address, so it restores as the source view rather than the page.
 - Closing a tab frees its page again. Since the rounded page corners, the layer-backed CEF view was kept alive by Core Animation after it left the window, so the browser never finished closing and every closed tab left a hidden renderer behind. The view now drops its layer backing and any overlay mask, and gives up first responder, before it is removed.
 - A tab moved to its own window, or one asleep, says so in its accessible name, not only in a mouse tooltip.
 - Pressing ⌘+ twice quickly no longer leaves the badge at 125% over a page zoomed to 110%: zoom commands go to the engine one at a time, the latest level following once the previous settles.
