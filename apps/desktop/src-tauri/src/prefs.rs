@@ -490,7 +490,7 @@ impl Registry {
             .setting(KEY)
             .ok()
             .flatten()
-            .map_or_else(Prefs::default, |json| parse_stored(&json));
+            .map_or_else(fresh_profile_prefs, |json| parse_stored(&json));
         Arc::clone(crate::state::lock(&self.cached).get_or_insert_with(|| Arc::new(stored)))
     }
 
@@ -501,6 +501,20 @@ impl Registry {
         crate::state::lock(&state.store).set_setting(KEY, &json)?;
         *crate::state::lock(&self.cached) = Some(Arc::new(prefs.clone()));
         Ok(prefs)
+    }
+}
+
+/// Defaults for a profile that has never stored preferences. Disposable
+/// probe profiles set `DIVE_SKIP_ONBOARDING=1` so the first-run flow does
+/// not cover the page they are about to drive.
+fn fresh_profile_prefs() -> Prefs {
+    fresh_profile_prefs_with(std::env::var_os("DIVE_SKIP_ONBOARDING").is_some_and(|v| v == "1"))
+}
+
+fn fresh_profile_prefs_with(skip_onboarding: bool) -> Prefs {
+    Prefs {
+        onboarded: skip_onboarding,
+        ..Prefs::default()
     }
 }
 
@@ -1084,6 +1098,17 @@ mod tests {
     #[test]
     fn onboarding_is_pending_only_on_a_fresh_install() {
         assert!(!Prefs::default().onboarded);
+        assert!(!fresh_profile_prefs_with(false).onboarded);
+        // A throwaway probe profile can opt out, and only of the flow.
+        let probe = fresh_profile_prefs_with(true);
+        assert!(probe.onboarded);
+        assert_eq!(
+            Prefs {
+                onboarded: false,
+                ..probe
+            },
+            Prefs::default()
+        );
         assert!(parse_stored(r#"{"theme":"dark"}"#).onboarded);
         assert!(!parse_stored(r#"{"onboarded":false}"#).onboarded);
         assert!(parse_stored(r#"{"onboarded":true}"#).onboarded);

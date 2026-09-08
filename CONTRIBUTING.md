@@ -41,6 +41,7 @@ token (`mcp-token`, user-readable only) and downloaded speech models
 | `DIVE_DATA_DIR` | Use another data directory (a private profile for tests) |
 | `DIVE_MCP_PORT` | MCP server port; default `7391`, `0` disables the server |
 | `DIVE_USE_MOCK_KEYCHAIN=1` | Skip the macOS keychain for throwaway instances (no Safe Storage prompt) |
+| `DIVE_SKIP_ONBOARDING=1` | Start a fresh data directory past the first-run flow, so a probe can drive the page at once |
 | `DIVE_OPEN_URL` | Open this URL (or several, whitespace-separated) at launch, like passing them as arguments |
 | `--remote-debugging-port=P` (argument) | Chrome DevTools Protocol on `P` for the chrome and pages; a private window's process then listens on `P + 1` |
 
