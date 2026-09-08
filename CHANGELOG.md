@@ -52,6 +52,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Capture and recording file names carry the local time of day (as on the menu bar) instead of UTC.
 - A tab opened only to fetch a file now closes when the download ends rather than when it starts. Closing it at the start took the download's progress with it: the Downloads menu said "Downloading…" forever for a file that was already saved.
 - Two quick zoom steps (a double click on +, a held ⌘=) step twice instead of once: the level updates as soon as the step is asked for.
 - Copying a command in Settings announces "Copied" (the button also says so), and the find bar's match count is a live region read as "Match 2 of 5".

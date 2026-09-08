@@ -48,6 +48,8 @@ tempfile = "3"
 url = { workspace = true }
 psl = "2"
 time = { workspace = true }
+# Local wall-clock offset for capture file names; already compiled for rmcp.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 base64 = "0.22"
 sourcemap = "9"
 similar = "2"

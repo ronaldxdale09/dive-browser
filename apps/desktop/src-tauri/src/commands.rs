@@ -2586,6 +2586,13 @@ pub(crate) fn capture_name(
 }
 
 /// The name without its extension; recordings add theirs once encoded.
+/// The Mac's wall-clock offset, so a capture is named by the time on the
+/// menu bar rather than UTC. `chrono` reads the zone safely from any thread.
+pub(crate) fn local_offset() -> time::UtcOffset {
+    let seconds = chrono::Local::now().offset().local_minus_utc();
+    time::UtcOffset::from_whole_seconds(seconds).unwrap_or(time::UtcOffset::UTC)
+}
+
 pub(crate) fn capture_stem(page_url: &str, kind: &str, at: dive_core::Timestamp) -> String {
     let host = url::Url::parse(page_url)
         .ok()
@@ -2595,10 +2602,11 @@ pub(crate) fn capture_stem(page_url: &str, kind: &str, at: dive_core::Timestamp)
         })
         .filter(|h| !h.is_empty());
     let stamp =
-        at.0.format(time::macros::format_description!(
-            "[year]-[month]-[day] [hour].[minute].[second]"
-        ))
-        .unwrap_or_default();
+        at.0.to_offset(local_offset())
+            .format(time::macros::format_description!(
+                "[year]-[month]-[day] [hour].[minute].[second]"
+            ))
+            .unwrap_or_default();
     match host {
         Some(host) => format!("{host} {kind} {stamp}"),
         None => format!("{kind} {stamp}"),
@@ -3030,8 +3038,15 @@ pub fn normalize_url_with(input: &str, template: &str) -> AppResult<url::Url> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn capture_names_read_as_host_kind_and_time() {
+    fn capture_names_read_as_host_kind_and_local_time() {
         let at = dive_core::Timestamp::parse("2026-09-07T18:19:30Z").unwrap();
+        // Named by the clock on the menu bar, whatever zone the test runs in.
+        let local =
+            at.0.to_offset(local_offset())
+                .format(time::macros::format_description!(
+                    "[year]-[month]-[day] [hour].[minute].[second]"
+                ))
+                .unwrap();
         assert_eq!(
             capture_name(
                 "https://www.github.com/tauri-apps/tauri",
@@ -3039,11 +3054,11 @@ mod tests {
                 "har",
                 at
             ),
-            "github.com requests 2026-09-07 18.19.30.har"
+            format!("github.com requests {local}.har")
         );
         assert_eq!(
             capture_name("about:blank", "bug report", "md", at),
-            "bug report 2026-09-07 18.19.30.md"
+            format!("bug report {local}.md")
         );
     }
 

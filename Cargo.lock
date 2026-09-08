@@ -1604,6 +1604,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "cef",
+ "chrono",
  "core-foundation 0.10.1",
  "dive-agent",
  "dive-cdp",
