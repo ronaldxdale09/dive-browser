@@ -117,12 +117,20 @@ jobs:
         run: scripts/benchmark-startup.sh
         env:
           DIVE_BIN: target/debug/bundle/macos/Dive.app/Contents/MacOS/dive-desktop
+      # A native crash on the runner leaves its report here and nowhere else.
+      - name: Collect crash reports
+        if: always()
+        run: |
+          mkdir -p target/crash-reports
+          cp ~/Library/Logs/DiagnosticReports/dive-desktop*.ips target/crash-reports/ 2>/dev/null || true
+          ls target/crash-reports
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: live-logs
           path: |
             target/live-check.log
+            target/crash-reports/
             target/memory-benchmark.json
             target/memory-probe-*/
             target/startup-benchmark-summary.json
