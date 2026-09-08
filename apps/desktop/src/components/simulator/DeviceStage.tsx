@@ -129,7 +129,7 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
             secure={secure}
             preview={preview}
             onPageRect={onPageRect}
-            caption={`${device.name} · ${layout.viewport.width}×${layout.viewport.height} @${device.dpr}x · ${Math.round(layout.scale * 100)}%`}
+            caption={`${device.name} · viewport ${layout.viewport.width}×${layout.viewport.height} @${device.dpr}x · shown at ${Math.round(layout.scale * 100)}%`}
           />
         )}
       </div>

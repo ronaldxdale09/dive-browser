@@ -48,7 +48,7 @@ describe("DeviceStage", () => {
     // The Safari address pill shows the host, not the URL.
     expect(screen.getAllByText("x.com").length).toBeGreaterThan(0);
     // Caption states the real viewport and the scale it is drawn at.
-    expect(screen.getByText(/iPhone 15 · 393×659 @3x · \d+%/)).toBeTruthy();
+    expect(screen.getByText(/iPhone 15 · viewport 393×659 @3x · shown at \d+%/)).toBeTruthy();
     // The engine hears about the device once the scale is measured, with a
     // reload because the user agent changed from nothing to an iPhone.
     await vi.waitFor(() => expect(ipc.tabEmulate).toHaveBeenCalledWith(tab.id, expect.objectContaining({ width: 393, height: 659, user_agent: expect.stringContaining("iPhone") }), true));
@@ -112,6 +112,6 @@ describe("DeviceStage", () => {
     useEmulation.setState({ byTab: { [tab.id]: pixel } });
     render(<DeviceStage tabId={tab.id} sel={pixel} />);
     expect(screen.getByLabelText("Pixel 8")).toBeTruthy();
-    expect(screen.getByText(/Pixel 8 · 412×811 @2.625x/)).toBeTruthy();
+    expect(screen.getByText(/Pixel 8 · viewport 412×811 @2.625x/)).toBeTruthy();
   });
 });
