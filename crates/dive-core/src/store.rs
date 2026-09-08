@@ -789,6 +789,13 @@ impl Store {
             .map_err(Into::into)
     }
 
+    /// Forget every visit to one URL; returns how many rows went.
+    pub fn remove_history(&self, url: &str) -> Result<usize> {
+        Ok(self
+            .conn
+            .execute("DELETE FROM history WHERE url = ?1", [url])?)
+    }
+
     /// Delete every visit; returns how many rows went.
     pub fn clear_history(&self) -> Result<usize> {
         Ok(self.conn.execute("DELETE FROM history", [])?)
@@ -1751,6 +1758,11 @@ mod tests {
         let left = store.search_history("", 10).unwrap();
         assert_eq!(left.len(), 1);
         assert_eq!(left[0].url, "https://new.dev/");
+        store
+            .record_visit("https://gone.dev/", "Gone", now)
+            .unwrap();
+        assert_eq!(store.remove_history("https://gone.dev/").unwrap(), 1);
+        assert_eq!(store.remove_history("https://gone.dev/").unwrap(), 0);
         assert_eq!(store.clear_history().unwrap(), 1);
         assert!(store.search_history("", 10).unwrap().is_empty());
     }

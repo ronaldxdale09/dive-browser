@@ -249,6 +249,16 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
     };
   }, []);
   const open = useOpenRow(onOpened);
+  // The row goes at once; a failed removal brings it back.
+  const remove = async (url: string) => {
+    const before = items;
+    setItems((list) => (list ?? []).filter((h) => h.url !== url));
+    try {
+      await ipc.historyRemove(url);
+    } catch {
+      setItems(before);
+    }
+  };
   const groups = useMemo(() => groupByDay((items ?? []).filter((h) => matches(query, h.title, h.url))), [items, query]);
   return (
     <>
@@ -271,11 +281,19 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
           <h4 className="px-2.5 py-1.5 text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">{g.day}</h4>
           <ul className="flex flex-col">
             {g.entries.map((h) => (
-              <li key={h.url}>
-                <button type="button" onClick={(e) => open(e, h.url)} className="flex h-9 w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
+              <li key={h.url} className="group flex items-center gap-1">
+                <button type="button" onClick={(e) => open(e, h.url)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
                   <Favicon src={h.favicon} size={14} fallback={History} />
                   <span className="truncate text-ink">{h.title || h.url}</span>
                   <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(h.url)}</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Remove ${h.title || h.url} from history`}
+                  onClick={() => void remove(h.url)}
+                  className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100"
+                >
+                  <Icon icon={Trash2} size={13} />
                 </button>
               </li>
             ))}

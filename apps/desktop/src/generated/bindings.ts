@@ -376,6 +376,8 @@ export const commands = {
 	devServersWatch: (on: boolean) => typedError<DevServer[], AppError>(__TAURI_INVOKE("dev_servers_watch", { on })),
 	/**  Recent history matching `query`, newest first. */
 	historySearch: (query: string, limit: number) => typedError<HistoryEntry[], AppError>(__TAURI_INVOKE("history_search", { query, limit })),
+	/**  Forget every visit to `url`; true when there was one. */
+	historyRemove: (url: string) => typedError<boolean, AppError>(__TAURI_INVOKE("history_remove", { url })),
 	/**  Toggle the bookmark for a tab's current URL; returns the new state. */
 	bookmarkToggle: (id: TabId) => typedError<boolean, AppError>(__TAURI_INVOKE("bookmark_toggle", { id })),
 	/**  Whether `url` is bookmarked. */

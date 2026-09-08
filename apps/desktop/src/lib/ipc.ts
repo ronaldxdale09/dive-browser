@@ -193,6 +193,7 @@ export const ipc = {
   browserImportOpenPrivacy: async () => unwrap(await commands.browserImportOpenPrivacy()),
   updateInstall: async () => unwrap(await commands.updateInstall()),
   historySearch: async (query: string, limit = 20) => unwrap(await commands.historySearch(query, limit)),
+  historyRemove: async (url: string) => unwrap(await commands.historyRemove(url)),
   shareUrl: async (url: string) => unwrap(await commands.shareUrl(url)),
   agentProviders: () => commands.agentProviders(),
   agentKeys: () => commands.agentKeys(),

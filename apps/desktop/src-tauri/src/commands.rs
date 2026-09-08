@@ -183,6 +183,13 @@ pub(crate) fn history_search(
     Ok(lock(&state.store).search_history(&query, usize::try_from(limit.min(200)).unwrap_or(50))?)
 }
 
+/// Forget every visit to `url`; true when there was one.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn history_remove(state: State<'_, AppState>, url: String) -> AppResult<bool> {
+    Ok(lock(&state.store).remove_history(&url)? > 0)
+}
+
 /// Dev servers listening on localhost, discovered from the OS socket table.
 #[tauri::command]
 #[specta::specta]
@@ -534,6 +541,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             dev_servers,
             dev_servers_watch,
             history_search,
+            history_remove,
             bookmark_toggle,
             bookmark_status,
             bookmarks_search,

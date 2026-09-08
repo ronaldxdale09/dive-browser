@@ -22,6 +22,7 @@ beforeEach(() => {
     { url: "https://docs.example.com/", title: "Example docs", created_at: "2026-09-01T00:00:00Z", favicon: null },
     { url: "https://github.com/dive", title: "dive on GitHub", created_at: "2026-09-02T00:00:00Z", favicon: null },
   ]);
+  vi.spyOn(ipc, "historyRemove").mockResolvedValue(true);
   vi.spyOn(ipc, "historySearch").mockResolvedValue([
     { url: "https://a.test/", title: "A", last_visited_at: new Date().toISOString(), visits: 2, favicon: null },
     { url: "https://b.test/", title: "B", last_visited_at: new Date(Date.now() - 86_400_000).toISOString(), visits: 1, favicon: null },
@@ -141,6 +142,12 @@ describe("Library dialog", () => {
     expect(screen.getByRole("region", { name: "Yesterday" })).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText("Filter history"), { target: { value: "b.test" } });
+    expect(screen.queryByText("A")).toBeNull();
+    expect(screen.getByText("B")).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("Filter history"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Remove A from history" }));
+    expect(ipc.historyRemove).toHaveBeenCalledWith("https://a.test/");
     expect(screen.queryByText("A")).toBeNull();
     expect(screen.getByText("B")).toBeTruthy();
 
