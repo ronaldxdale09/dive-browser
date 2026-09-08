@@ -115,7 +115,7 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
         </div>
       )}
 
-      <div className="mt-3 flex items-center gap-4">
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
         <label className="flex items-center gap-2 text-xs text-ink">
           <Switch label="Bookmarks" checked={bookmarks} onChange={setBookmarks} />
           <Icon icon={Star} size={12} className="text-ink-3" /> Bookmarks
@@ -131,7 +131,7 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
           </label>
         )}
         <span className="flex-1" />
-        <button type="button" disabled={!ready} onClick={() => void run()} className="pressable h-8 rounded-full bg-accent px-4 text-xs font-medium text-accent-ink hover:brightness-110 disabled:opacity-40">
+        <button type="button" disabled={!ready} onClick={() => void run()} className="pressable h-8 shrink-0 rounded-full bg-accent px-4 text-xs font-medium whitespace-nowrap text-accent-ink hover:brightness-110 disabled:opacity-40">
           {importing ? (
             <span className="inline-flex items-center gap-1.5">
               <Icon icon={Loader2} size={12} className="animate-spin" /> Importing…

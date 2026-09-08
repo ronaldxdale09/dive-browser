@@ -118,8 +118,10 @@ describe("BookmarkButton", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit bookmark" }));
     // Reopened on a lit star: the popover is for editing now.
     await screen.findByRole("dialog", { name: "Edit bookmark" });
-    act(() => void fireEvent.mouseDown(document.body));
-    expect(screen.queryByRole("dialog")).toBeNull();
+    // The outside-press listener is attached in an effect after the popover
+    // commits, so give it a tick before pressing.
+    await waitFor(() => act(() => void fireEvent.mouseDown(document.body)));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(ipc.bookmarkRemove).not.toHaveBeenCalled();
   });
 });

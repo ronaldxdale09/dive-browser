@@ -94,7 +94,7 @@ export function DefaultBrowserDialog() {
   };
   const importRow = current && (
     <p className="mt-2.5 flex items-center gap-2 border-t border-line pt-2.5 text-[11px] text-ink-3">
-      <span className="min-w-0 flex-1">Bring your bookmarks and history from {current} too.</span>
+      <span className="min-w-0 flex-1">Bring your bookmarks, history and passwords from {current} too.</span>
       <button type="button" onClick={openImport} className="pressable h-7 shrink-0 rounded-full border border-line-2 px-2.5 text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink">
         Import…
       </button>

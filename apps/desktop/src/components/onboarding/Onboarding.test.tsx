@@ -77,7 +77,7 @@ describe("Onboarding", () => {
     await waitFor(() => expect(updateProfile).toHaveBeenCalledWith("p1", expect.objectContaining({ name: "Ada", avatar: "ada" })));
 
     // Import: nothing on this Mac to import from, so it only offers Continue.
-    expect(await screen.findByRole("heading", { name: "Bring your bookmarks and history" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Bring your bookmarks, history and passwords" })).toBeTruthy();
     expect(await screen.findByText("No other browsers with data were found")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Skip" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
@@ -119,7 +119,7 @@ describe("Onboarding", () => {
     act(() => useOnboarding.setState({ stage: "profile" }));
     render(<Onboarding />);
     fireEvent.click(screen.getByRole("button", { name: "Skip" }));
-    expect(await screen.findByRole("heading", { name: "Bring your bookmarks and history" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Bring your bookmarks, history and passwords" })).toBeTruthy();
     expect(updateProfile).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(await screen.findByRole("heading", { name: "Who's diving?" })).toBeTruthy();

@@ -23,7 +23,7 @@ export function ImportStep() {
         </span>
         <div className="min-w-0">
           <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">{stepLabel("import")}</p>
-          <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em]">Bring your bookmarks and history</h2>
+          <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em]">Bring your bookmarks, history and passwords</h2>
           <p className="mt-0.5 text-xs text-ink-3">From the browser you have been using. Nothing there changes, and you can do this later from Settings.</p>
         </div>
       </div>
