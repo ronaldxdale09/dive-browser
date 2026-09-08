@@ -1,4 +1,5 @@
 import { Clapperboard, Download, FolderOpen, History, Search, Star, Trash2, Wand2, X } from "lucide-react";
+import { BOOKMARKS_CHANGED } from "../lib/commands";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ipc } from "../lib/ipc";
@@ -158,10 +159,13 @@ function Bookmarks({ query, onOpened }: { query: string; onOpened: () => void })
   const remove = (url: string) => {
     const prev = items;
     setItems((list) => (list ?? []).filter((b) => b.url !== url));
-    void ipc.bookmarkRemove(url).catch((err) => {
-      setItems(prev);
-      useBrowser.setState({ error: err instanceof Error ? err.message : String(err) });
-    });
+    void ipc
+      .bookmarkRemove(url)
+      .then(() => window.dispatchEvent(new CustomEvent(BOOKMARKS_CHANGED)))
+      .catch((err) => {
+        setItems(prev);
+        useBrowser.setState({ error: err instanceof Error ? err.message : String(err) });
+      });
   };
 
   // eslint-disable-next-line react-hooks/incompatible-library

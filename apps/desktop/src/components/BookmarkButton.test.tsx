@@ -5,6 +5,7 @@ import { ipc } from "../lib/ipc";
 import { contentCoverDepth, resetContentCover } from "../lib/overlay";
 import { useBrowser } from "../store/browser";
 import { BookmarkButton } from "./BookmarkButton";
+import { BOOKMARKS_CHANGED } from "../lib/commands";
 
 const tab: Tab = {
   id: "tab-1",
@@ -107,6 +108,15 @@ describe("BookmarkButton", () => {
     expect(screen.getByRole("button", { name: "Bookmark this page" }).getAttribute("aria-pressed")).toBe("false");
     expect(useBrowser.getState().notice).toBe("Bookmark removed");
     expect(contentCoverDepth()).toBe(0);
+  });
+
+  it("follows a removal made elsewhere, such as the Library", async () => {
+    vi.mocked(ipc.bookmarkStatus).mockResolvedValue(true);
+    render(<BookmarkButton />);
+    expect(await screen.findByRole("button", { name: "Edit bookmark" })).toBeTruthy();
+    vi.mocked(ipc.bookmarkStatus).mockResolvedValue(false);
+    act(() => void window.dispatchEvent(new CustomEvent(BOOKMARKS_CHANGED)));
+    expect(await screen.findByRole("button", { name: "Bookmark this page" })).toBeTruthy();
   });
 
   it("closes on Escape and on an outside press, keeping the bookmark", async () => {

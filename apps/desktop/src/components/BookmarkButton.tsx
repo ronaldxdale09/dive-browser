@@ -7,6 +7,7 @@ import { Tooltip } from "./Tooltip";
 import { errorMessage } from "../lib/errors";
 import { renameBookmark } from "../lib/bookmarks";
 import { hostOf } from "../lib/omnibox";
+import { BOOKMARKS_CHANGED } from "../lib/commands";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 
@@ -34,12 +35,19 @@ export function BookmarkButton() {
   useEffect(() => {
     if (!url) return;
     let alive = true;
-    ipc
-      .bookmarkStatus(url)
-      .then((v) => alive && setSaved(v))
-      .catch(() => alive && setSaved(false));
+    const read = () =>
+      ipc
+        .bookmarkStatus(url)
+        .then((v) => alive && setSaved(v))
+        .catch(() => alive && setSaved(false));
+    read();
+    // The Library or a shortcut can change this page's bookmark while the
+    // star is showing; the star follows.
+    const changed = () => void read();
+    window.addEventListener(BOOKMARKS_CHANGED, changed);
     return () => {
       alive = false;
+      window.removeEventListener(BOOKMARKS_CHANGED, changed);
       // The popover names one page; leaving it closes the popover.
       setOpen(false);
     };

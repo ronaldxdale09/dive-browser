@@ -132,6 +132,7 @@ async function toggleBookmark() {
   if (!tab) return;
   try {
     const saved = await ipc.bookmarkToggle(tab);
+    window.dispatchEvent(new CustomEvent(BOOKMARKS_CHANGED));
     useBrowser.setState({ error: null });
     useBrowser.getState().notify(saved ? "Bookmark saved" : "Bookmark removed");
   } catch (error) {
@@ -150,6 +151,8 @@ function jumpToWorkspace(index: number) {
 export const FOCUS_ADDRESS = "dive:focus-address";
 /** Opens the share popover (QR code and LAN address) for the current page. */
 export const OPEN_SHARE = "dive:open-share";
+/** A bookmark was added, renamed or removed somewhere; anything showing bookmark state re-reads it. */
+export const BOOKMARKS_CHANGED = "dive:bookmarks-changed";
 
 /**
  * Activate the tab `delta` places away, wrapping at both ends. Walks the

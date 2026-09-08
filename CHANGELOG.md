@@ -37,6 +37,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- The toolbar star follows bookmark changes made in the Library or by the shortcut, instead of still saying "Edit bookmark" after a removal.
 - The page menu in a private window leaves out "Ask the Agent About This Page", which private windows refuse anyway.
 - Setup: the Import and What's inside steps take keyboard focus on their heading when they appear, instead of leaving focus on the chrome behind the dialog.
 - A tab showing page source keeps its view-source address, so it restores as the source view rather than the page.
