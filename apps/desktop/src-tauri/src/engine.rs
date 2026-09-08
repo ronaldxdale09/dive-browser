@@ -305,6 +305,9 @@ pub struct TabHost {
     /// as long as one is up, otherwise the overlay is buried behind the page.
     covered: bool,
     live_overlays: HashMap<String, Vec<Bounds>>,
+    /// Corner radius of page views in the main window, in logical pixels,
+    /// following the chrome's corner preference. Zero is square.
+    corner_radius: f64,
     /// Split view: tabs shown side by side, each at its own rectangle. Empty
     /// means the active tab alone fills the content area.
     panes: Vec<PaneBounds>,
@@ -439,6 +442,7 @@ impl TabHost {
             profiles_root,
             covered: false,
             live_overlays: HashMap::new(),
+            corner_radius: 0.0,
             panes: Vec::new(),
             popouts: HashMap::new(),
             internal: std::collections::HashSet::new(),
@@ -695,8 +699,31 @@ impl TabHost {
                 view.open_devtools();
             }
         }
+        Self::round_view(&view, self.corner_radius);
         self.views.insert(tab_id, view);
         Ok(())
+    }
+
+    /// Round (or square) the corners of every page view in the main window.
+    /// Popouts fill their own window and keep square corners.
+    pub fn set_corner_radius(&mut self, radius: f64) {
+        self.corner_radius = radius;
+        for (tab, view) in &self.views {
+            if !self.popouts.contains_key(tab) {
+                Self::round_view(view, radius);
+            }
+        }
+    }
+
+    fn round_view(view: &Webview<Runtime>, radius: f64) {
+        #[cfg(all(feature = "cef", target_os = "macos"))]
+        {
+            let _ = view.with_webview(move |native| {
+                native.set_corner_radius(radius);
+            });
+        }
+        #[cfg(not(all(feature = "cef", target_os = "macos")))]
+        let _ = (view, radius);
     }
 
     /// `DevTools` protocol session for `id`, if the engine exposes one.

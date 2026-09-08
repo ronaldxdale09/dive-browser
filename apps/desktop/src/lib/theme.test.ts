@@ -15,7 +15,7 @@ import {
   resolvePalette,
   resolveScheme,
   themeCss,
-  toHex,
+  toHex,  contentCornerRadius,
 } from "./theme";
 
 /** Per-channel distance between two hex colours, 0 to 255. */
@@ -194,5 +194,14 @@ describe("colour maths", () => {
   it("computes WCAG contrast", () => {
     expect(contrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 1);
     expect(contrastRatio("#ececec", "#111111")).toBeGreaterThan(14);
+  });
+});
+
+describe("contentCornerRadius", () => {
+  it("follows the corner preference and is square for sharp", () => {
+    expect(contentCornerRadius("sharp")).toBe(0);
+    expect(contentCornerRadius("soft")).toBe(4);
+    expect(contentCornerRadius("round")).toBe(6);
+    expect(contentCornerRadius("anything-else")).toBe(6);
   });
 });

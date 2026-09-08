@@ -110,6 +110,27 @@ impl AppWebview {
 /// and chrome owns clicks outside its visible mask so the DOM scrim can dismiss
 /// a menu or keep a modal's focus trap. Closing restores the normal view order.
 impl crate::webview::Webview {
+  /// Round the view's corners by clipping its layer. Zero restores square
+  /// corners. Main thread only; false when the view has no layer yet.
+  pub fn set_corner_radius(&self, radius: f64) -> bool {
+    use cef::ImplBrowser;
+    use objc2::MainThreadMarker;
+    use objc2_quartz_core::CATransaction;
+    if MainThreadMarker::new().is_none() { return false; }
+    let Some(host) = self.browser().host() else { return false; };
+    // SAFETY: the live BrowserHost owns this NSView; all operations are on the
+    // AppKit main thread and the retained handle spans this synchronous call.
+    let Some(view) = (unsafe { Retained::<NSView>::retain(host.window_handle().cast()) }) else { return false; };
+    view.setWantsLayer(true);
+    let Some(layer) = view.layer() else { return false; };
+    CATransaction::begin();
+    CATransaction::setDisableActions(true);
+    layer.setCornerRadius(radius.max(0.0));
+    layer.setMasksToBounds(radius > 0.0);
+    CATransaction::commit();
+    true
+  }
+
   pub fn set_chrome_overlay_mask(&self, holes: &[[f64; 4]], active: bool) -> bool {
     use cef::ImplBrowser;
     use objc2::MainThreadMarker;

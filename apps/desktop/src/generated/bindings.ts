@@ -334,6 +334,11 @@ export const commands = {
 	 *  is on screen, since child webviews always paint above the main webview.
 	 */
 	layoutSetContentCovered: (covered: boolean) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_covered", { covered })),
+	/**
+	 *  Round the corners of the page views to match the chrome's corner
+	 *  preference; zero makes them square again.
+	 */
+	layoutSetCornerRadius: (radius: number | null) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_corner_radius", { radius })),
 	/**  Regions belong to trusted chrome and use CSS logical pixels. */
 	layoutSetOverlayRegions: (regions: Bounds[], active: boolean) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_overlay_regions", { regions, active })),
 	/**

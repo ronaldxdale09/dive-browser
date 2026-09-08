@@ -244,6 +244,11 @@ export const RADII = {
   round: ["0.25rem", "0.375rem", "0.5rem", "0.75rem", "1rem", "1.5rem"],
 } as const;
 
+/** How far the page's own corners are rounded for each corner preference, in px. */
+export function contentCornerRadius(pref: string): number {
+  return pref === "sharp" ? 0 : pref === "soft" ? 4 : 6;
+}
+
 export const DENSITY = {
   compact: { row: "30px", gap: "2px" },
   comfortable: { row: "36px", gap: "4px" },

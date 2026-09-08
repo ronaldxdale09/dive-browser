@@ -525,6 +525,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             layout_set_content_bounds,
             layout_prepare_content_cover,
             layout_set_content_covered,
+            layout_set_corner_radius,
             layout_set_overlay_regions,
             layout_set_panes,
             tab_detach,
@@ -2740,6 +2741,24 @@ pub(crate) async fn layout_prepare_content_cover(
             }
         })
         .collect())
+}
+
+#[tauri::command]
+#[specta::specta]
+/// Round the corners of the page views to match the chrome's corner
+/// preference; zero makes them square again.
+pub(crate) fn layout_set_corner_radius(app: AppHandle<Runtime>, radius: f64) -> AppResult<()> {
+    let radius = if radius.is_finite() {
+        radius.clamp(0.0, 24.0)
+    } else {
+        0.0
+    };
+    on_main(&app, move |_, _, state| {
+        if let Some(host) = lock(&state.host).as_mut() {
+            host.set_corner_radius(radius);
+        }
+        Ok(())
+    })
 }
 
 #[tauri::command]

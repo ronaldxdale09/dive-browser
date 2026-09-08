@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { ipc } from "../lib/ipc";
 import type { Prefs as WirePrefs } from "../lib/ipc";
 import { useBrowser } from "./browser";
-import { APPEARANCE_KEYS, THEME_VARS, accentInk, resolveScheme, themeCss } from "../lib/theme";
+import { APPEARANCE_KEYS, THEME_VARS, accentInk, contentCornerRadius, resolveScheme, themeCss } from "../lib/theme";
 import { errorMessage } from "../lib/errors";
 
 /**
@@ -257,4 +257,17 @@ export function watchReducedMotion(): () => void {
 // same number so the badge and ⌘+/⌘− start from what is on screen.
 usePrefs.subscribe((s) => {
   if (useBrowser.getState().defaultZoom !== s.prefs.default_zoom) useBrowser.setState({ defaultZoom: s.prefs.default_zoom });
+});
+
+// The page is a native view above the chrome, so its corners are rounded
+// by the engine to match the corner preference the chrome uses.
+let sentCornerRadius: number | null = null;
+usePrefs.subscribe((s) => {
+  if (!s.loaded) return;
+  const radius = contentCornerRadius(s.prefs.corner_radius);
+  if (radius === sentCornerRadius) return;
+  sentCornerRadius = radius;
+  ipc.setContentCornerRadius(radius).catch(() => {
+    sentCornerRadius = null;
+  });
 });
