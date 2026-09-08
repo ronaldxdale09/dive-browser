@@ -271,10 +271,14 @@ function useNarrowTabs(count: number): [React.RefObject<HTMLDivElement | null>, 
 type Narrow = { close: boolean; title: boolean };
 
 /** Which of a scrolling list's children lie wholly or partly outside its viewport. */
-export function countOutOfView(list: { scrollLeft: number; clientWidth: number }, items: { offsetLeft: number; offsetWidth: number }[]): number {
-  const left = list.scrollLeft;
-  const right = left + list.clientWidth;
-  return items.filter((item) => item.offsetLeft < left - 1 || item.offsetLeft + item.offsetWidth > right + 1).length;
+/**
+ * How many items poke past either edge of the strip. Both are screen-space
+ * rectangles: the strip is not positioned, so an item's offsetLeft is
+ * measured from the page and every tab past the strip's width from the
+ * window's left edge counted as hidden, even with all of them in view.
+ */
+export function countOutOfView(list: { left: number; right: number }, items: { left: number; right: number }[]): number {
+  return items.filter((item) => item.left < list.left - 1 || item.right > list.right + 1).length;
 }
 
 /**
@@ -287,7 +291,13 @@ function useHiddenTabs(ref: React.RefObject<HTMLDivElement | null>, count: numbe
   useEffect(() => {
     const list = ref.current;
     if (!list) return;
-    const measure = () => setHidden(countOutOfView(list, [...list.querySelectorAll<HTMLElement>('[role="presentation"]')]));
+    const measure = () =>
+      setHidden(
+        countOutOfView(
+          list.getBoundingClientRect(),
+          [...list.querySelectorAll<HTMLElement>('[role="presentation"]')].map((el) => el.getBoundingClientRect()),
+        ),
+      );
     measure();
     list.addEventListener("scroll", measure, { passive: true });
     const ro = new ResizeObserver(measure);

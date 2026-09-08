@@ -134,13 +134,14 @@ describe("TabStrip controls", () => {
   });
 
   it("counts the tabs scrolled out of the strip", () => {
-    const items = [0, 60, 120, 180, 240].map((offsetLeft) => ({ offsetLeft, offsetWidth: 56 }));
-    expect(countOutOfView({ scrollLeft: 0, clientWidth: 300 }, items)).toBe(0);
-    expect(countOutOfView({ scrollLeft: 0, clientWidth: 200 }, items)).toBe(2);
+    // Screen-space: the strip starts 400px into the window, like the real one.
+    const items = [400, 460, 520, 580, 640].map((left) => ({ left, right: left + 56 }));
+    expect(countOutOfView({ left: 400, right: 700 }, items)).toBe(0);
+    expect(countOutOfView({ left: 400, right: 600 }, items)).toBe(2);
     // Scrolled to the end: the first two are gone past the left edge.
-    expect(countOutOfView({ scrollLeft: 100, clientWidth: 200 }, items)).toBe(2);
+    expect(countOutOfView({ left: 500, right: 700 }, items)).toBe(2);
     // Rounding slack: a tab flush with the edge still counts as in view.
-    expect(countOutOfView({ scrollLeft: 0, clientWidth: 296.5 }, items)).toBe(0);
+    expect(countOutOfView({ left: 400, right: 696.5 }, items)).toBe(0);
   });
 
   it("offers a way to the tabs that scrolled out of view, none when they all fit", () => {
