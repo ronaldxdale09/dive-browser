@@ -39,6 +39,22 @@ export function hostOf(url: string): string {
   }
 }
 
+/**
+ * Where a row leads, as the list shows it: host and path without scheme,
+ * query or a trailing slash ("localhost:8771/form.html"), so two pages on
+ * one site can be told apart. Dive's own pages keep their whole address.
+ */
+export function placeOf(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return url;
+    const path = parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/$/, "");
+    return parsed.host + path;
+  } catch {
+    return "";
+  }
+}
+
 function matches(query: string, ...fields: (string | null | undefined)[]) {
   return fields.some((field) => field?.toLowerCase().includes(query));
 }
