@@ -6,6 +6,15 @@ import { useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
 import { ReadError } from "./ReadError";
 
+/**
+ * Rows by key, then by their domain and path. The engine hands cookies back
+ * in whatever order its store keeps them, which changed from one refresh to
+ * the next, so a row the reader was looking at moved under their eyes.
+ */
+export function sortRows(rows: [string, string, string][]): [string, string, string][] {
+  return [...rows].sort((a, b) => a[0].localeCompare(b[0]) || a[2].localeCompare(b[2]));
+}
+
 /** Cookies, localStorage and sessionStorage for the active tab. */
 export function StoragePanel() {
   const activeTab = useBrowser((s) => s.activeTab);
@@ -15,10 +24,11 @@ export function StoragePanel() {
   const { data, error, refresh } = useTabData(activeTab, url, ipc.tabStorage, 0, loading);
   const [section, setSection] = useState<"cookies" | "local" | "session">("cookies");
 
-  const rows: [string, string, string][] =
+  const rows = sortRows(
     section === "cookies"
       ? (data?.cookies ?? []).map((c) => [c.name, c.value, `${c.domain}${c.path}${c.http_only ? " · HttpOnly" : ""}${c.secure ? " · Secure" : ""}${c.same_site ? ` · ${c.same_site}` : ""}`])
-      : (section === "local" ? (data?.local ?? []) : (data?.session ?? [])).map(([k, v]) => [k, v, ""]);
+      : (section === "local" ? (data?.local ?? []) : (data?.session ?? [])).map(([k, v]) => [k, v, ""]),
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
