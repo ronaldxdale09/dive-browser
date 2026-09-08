@@ -185,11 +185,19 @@ describe("SettingsDialog", () => {
     expect(usePrefs.getState().prefs.privacy_exceptions).toEqual([]);
   });
 
-  it("only offers a search URL for a custom engine", () => {
+  it("only offers a search URL for a custom engine, and warns when it has no {query}", async () => {
     render(<SettingsDialog />);
     expect(screen.queryByLabelText("Search URL")).toBeNull();
     fireEvent.change(screen.getByLabelText("Search engine"), { target: { value: "custom" } });
-    expect(screen.getByLabelText("Search URL")).toBeTruthy();
+    const url = screen.getByLabelText("Search URL");
+    fireEvent.change(url, { target: { value: "https://kagi.com/search?q=" } });
+    fireEvent.blur(url);
+    await waitFor(() => expect(screen.getByText(/Put \{query\} where the search words go/)).toBeTruthy());
+    // The field remounts on every saved value, so find it again.
+    const again = screen.getByLabelText("Search URL");
+    fireEvent.change(again, { target: { value: "https://kagi.com/search?q={query}" } });
+    fireEvent.blur(again);
+    await waitFor(() => expect(screen.queryByText(/Put \{query\} where/)).toBeNull());
   });
 
   it("closes on Escape", async () => {

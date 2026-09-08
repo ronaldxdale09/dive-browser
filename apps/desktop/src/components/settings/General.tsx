@@ -76,7 +76,13 @@ export function General() {
           <Row
             label="Search URL"
             htmlFor="pref-template"
-            hint="Must contain {query}; without it Dive falls back to DuckDuckGo."
+            hint={
+              prefs.search_template.trim() && !prefs.search_template.includes("{query}") ? (
+                <span className="text-warn">Put {"{query}"} where the search words go. Until then DuckDuckGo is used.</span>
+              ) : (
+                "Must contain {query}; without it Dive falls back to DuckDuckGo."
+              )
+            }
             control={
               <TextInput
                 id="pref-template"
