@@ -53,7 +53,9 @@ function size(n: number | null) {
 /** What the status column says: a rule or the blocklist stopping a request is not the page failing. */
 export function outcomeLabel(r: { error: string | null; status: number | null }): string {
   if (r.error === "canceled") return "canceled";
-  if (r.error && /BLOCKED_BY_CLIENT|BLOCKED_BY_/i.test(r.error)) return "blocked";
+  // A rule or the inspector blocks with "blocked: <reason>"; the network
+  // stack reports its own blocks as net::ERR_BLOCKED_BY_*.
+  if (r.error && /^blocked\b|BLOCKED_BY_/i.test(r.error)) return "blocked";
   if (r.error) return "failed";
   return r.status === null ? "…" : String(r.status);
 }

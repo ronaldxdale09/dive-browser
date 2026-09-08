@@ -39,7 +39,11 @@ export function Tooltip({
       <span
         id={id}
         role="tooltip"
-        className={`pointer-events-none invisible absolute z-50 flex w-max max-w-56 items-center gap-2 rounded-md border border-line-2 bg-surface-2 px-2 py-1 text-[11px] leading-none whitespace-nowrap text-ink opacity-0 shadow-lg transition-opacity delay-500 duration-100 group-hover/tooltip:visible group-hover/tooltip:opacity-100 group-focus-within/tooltip:visible group-focus-within/tooltip:opacity-100 group-focus-within/tooltip:delay-0 ${position}`}
+        // Hidden rather than invisible: a positioned element that is merely
+        // invisible still counts as scrollable overflow, and a tooltip near the
+        // edge of a scrolling panel gave the panel a scrollbar. It fades in
+        // from its starting style after the usual delay.
+        className={`pointer-events-none absolute z-50 hidden w-max max-w-56 items-center gap-2 rounded-md border border-line-2 bg-surface-2 px-2 py-1 text-[11px] leading-none whitespace-nowrap text-ink shadow-lg transition-opacity delay-500 duration-100 starting:opacity-0 group-hover/tooltip:flex group-focus-within/tooltip:flex group-focus-within/tooltip:delay-0 ${position}`}
       >
         {label}
         {shortcut && <kbd className="font-mono text-[9px] text-ink-3">{shortcut}</kbd>}

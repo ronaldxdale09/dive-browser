@@ -54,6 +54,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- A request stopped by one of your rules shows as "blocked" in the Network panel rather than "failed", and the Rules panel no longer grows a stray horizontal scrollbar (a hidden tooltip was poking past its edge).
 - The console filter also matches an entry's level and source, so typing "error", "warn" or "network" narrows to those lines; when nothing matches it says so instead of claiming there is no output.
 - The A11y panel explains each failing element with axe's own summary (for example the contrast ratio measured and the one expected) instead of listing bare selectors, and the Network panel shows a request's query string instead of a bare "?".
 - The device simulator's search placeholder no longer runs off the end of its box, and its close button is named "Close device simulator" for assistive tech.
