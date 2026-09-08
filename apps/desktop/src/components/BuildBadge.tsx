@@ -1,5 +1,6 @@
+import { useDismiss } from "../lib/useDismiss";
 import { Copy } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { errorMessage } from "../lib/errors";
 import type { AppInfo } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
@@ -16,6 +17,7 @@ import { Icon } from "./Icon";
 export function BuildBadge() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [open, setOpen] = useState(false);
+  const dismiss = useCallback(() => setOpen(false), []);
   const ref = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   useCoversContent(open);
@@ -32,19 +34,7 @@ export function BuildBadge() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  useDismiss(ref, open, dismiss);
 
   const channel = info?.build.channel ?? (import.meta.env.DEV ? "dev" : "beta");
   const dev = channel === "dev";

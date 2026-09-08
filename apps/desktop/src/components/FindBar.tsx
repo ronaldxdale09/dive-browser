@@ -33,7 +33,11 @@ export function FindBar() {
   }, [activeTab, query, index]);
 
   const close = () => {
-    if (activeTab) void ipc.tabFind(activeTab, "", 1).catch(() => undefined);
+    if (activeTab) {
+      void ipc.tabFind(activeTab, "", 1).catch(() => undefined);
+      // The bar took the keyboard; hand it back so the page scrolls with the keys again.
+      void ipc.tabFocus(activeTab).catch(() => undefined);
+    }
     toggle("find", false);
   };
 

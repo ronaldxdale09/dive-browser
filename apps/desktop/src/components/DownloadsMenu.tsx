@@ -1,5 +1,6 @@
+import { useDismiss } from "../lib/useDismiss";
 import { Download, FolderOpen, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState, useCallback } from "react";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { selectActive, useDownloads } from "../store/downloads";
@@ -19,24 +20,13 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
   const clear = useDownloads((s) => s.clear);
   const folder = usePrefs((s) => s.prefs.download_dir) || "~/Downloads";
   const [open, setOpen] = useState(false);
+  const dismiss = useCallback(() => setOpen(false), []);
   const ref = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   useCoversContent(open);
   useFocusTrap(panel, { active: open });
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  useDismiss(ref, open, dismiss);
 
   const reveal = (path: string | null) => {
     void ipc.downloadsReveal(path).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));

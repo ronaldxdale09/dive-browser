@@ -440,6 +440,11 @@ export const commands = {
 	 *  still exist.
 	 */
 	downloadsOpen: (path: string) => typedError<null, AppError>(__TAURI_INVOKE("downloads_open", { path })),
+	/**
+	 *  Give the page keyboard focus again, after a chrome surface such as the
+	 *  find bar closes; arrow keys and space then scroll the page as expected.
+	 */
+	tabFocus: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_focus", { id })),
 	/**  Dev servers listening on localhost, discovered from the OS socket table. */
 	devServers: () => typedError<DevServer[], AppError>(__TAURI_INVOKE("dev_servers")),
 	/**  Enable or disable low-frequency dev-server change events while a panel is open. */

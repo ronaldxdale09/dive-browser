@@ -1,6 +1,7 @@
+import { useDismiss } from "../lib/useDismiss";
 import { AvatarImage } from "./AvatarImage";
 import { Check, ChevronDown, Pencil, Plus, Shield } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState, useCallback } from "react";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
@@ -19,24 +20,13 @@ export function ProfileChip() {
   const activate = useBrowser((s) => s.activateProfile);
   const setEditing = useBrowser((s) => s.setEditingProfile);
   const [open, setOpen] = useState(false);
+  const dismiss = useCallback(() => setOpen(false), []);
   const ref = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   useCoversContent(open);
   useFocusTrap(menu, { active: open, menu: true });
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  useDismiss(ref, open, dismiss);
 
   const current = profiles.find((p) => p.id === activeProfile) ?? profiles[0];
   if (!current) return null;

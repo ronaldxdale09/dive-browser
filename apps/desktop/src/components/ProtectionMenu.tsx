@@ -1,5 +1,6 @@
+import { useDismiss } from "../lib/useDismiss";
 import { Megaphone, Play, Radar, Shield, ShieldCheck, SlidersHorizontal } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCoversContent } from "../lib/overlay";
@@ -25,6 +26,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
   const eventError = usePrivacy((s) => s.eventError);
   const loadInfo = usePrivacy((s) => s.loadInfo);
   const [open, setOpen] = useState(false);
+  const dismiss = useCallback(() => setOpen(false), []);
   const [siteSaving, setSiteSaving] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -56,14 +58,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
     previousGlobalOn.current = globalOn;
   }, [globalOn, open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const closeOutside = (event: MouseEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
-    };
-    window.addEventListener("mousedown", closeOutside);
-    return () => window.removeEventListener("mousedown", closeOutside);
-  }, [open]);
+  useDismiss(root, open, dismiss);
 
   const changeSite = async (enabled: boolean) => {
     if (!activeTab || !host || !globalOn || siteSaving) return;

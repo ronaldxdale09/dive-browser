@@ -373,6 +373,17 @@ pub(crate) fn downloads_reveal(state: State<'_, AppState>, path: Option<String>)
 
 #[tauri::command]
 #[specta::specta]
+/// Give the page keyboard focus again, after a chrome surface such as the
+/// find bar closes; arrow keys and space then scroll the page as expected.
+pub(crate) fn tab_focus(app: AppHandle<Runtime>, id: TabId) -> AppResult<()> {
+    on_main(&app, move |_, _, state| {
+        with_view(state, id, tauri::Webview::set_focus)?;
+        Ok(())
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
 /// Open a downloaded file with whatever the system opens that kind of file
 /// with. Only a file the downloads list knows about is offered, and it must
 /// still exist.
@@ -582,6 +593,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             browsing_data_clear,
             downloads_reveal,
             downloads_open,
+            tab_focus,
             dev_servers,
             dev_servers_watch,
             history_search,

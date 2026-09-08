@@ -1,5 +1,6 @@
+import { useDismiss } from "../lib/useDismiss";
 import { Star } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
@@ -20,6 +21,7 @@ export function BookmarkButton() {
   const current = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
   const [saved, setSaved] = useState(false);
   const [open, setOpen] = useState(false);
+  const dismiss = useCallback(() => setOpen(false), []);
   const [title, setTitle] = useState("");
   // What the bookmark is called now; Done only renames when that changes.
   const [initial, setInitial] = useState("");
@@ -53,14 +55,7 @@ export function BookmarkButton() {
     };
   }, [url]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!root.current?.contains(e.target as Node)) setOpen(false);
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [open]);
+  useDismiss(root, open, dismiss);
 
   const fail = (e: unknown) => useBrowser.setState({ error: errorMessage(e) });
   const show = (name: string, edit: boolean) => {
