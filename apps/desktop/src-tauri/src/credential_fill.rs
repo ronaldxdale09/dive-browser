@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use dive_cdp::{CdpEvent, CdpSession};
-use dive_core::{ProfileId, TabId, WorkspaceId};
+use dive_core::{ProfileId, TabId};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use specta::Type;
@@ -79,19 +79,22 @@ fn script(nonce: &str) -> String {
     )
 }
 
-fn profile_of(app: &AppHandle<Runtime>, workspace: Option<WorkspaceId>) -> Option<ProfileId> {
+/// The profile a tab's page belongs to right now: its workspace's, or the
+/// active profile's for a tab that lives in every workspace (essential).
+/// Looked up per request, since a tab can change tier after it was set up.
+pub fn profile_of_tab(app: &AppHandle<Runtime>, tab_id: TabId) -> Option<ProfileId> {
     let state = app.state::<AppState>();
     let store = crate::state::lock(&state.store);
-    store.workspace(workspace?).ok().map(|w| w.profile_id)
+    let workspace = store
+        .tab(tab_id)
+        .ok()
+        .and_then(|t| t.workspace_id)
+        .or(*crate::state::lock(&state.active_workspace))?;
+    store.workspace(workspace).ok().map(|w| w.profile_id)
 }
 
 /// Install the script and binding on a tab and serve its requests.
-pub async fn attach(
-    app: AppHandle<Runtime>,
-    tab_id: TabId,
-    workspace: Option<WorkspaceId>,
-    session: CdpSession,
-) {
+pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
     let nonce = dive_core::TabId::new().to_string().replace('-', "");
     {
         let mut guard = NONCES
@@ -127,7 +130,7 @@ pub async fn attach(
             let Some(payload) = binding_payload(&event, &nonce) else {
                 continue;
             };
-            if let Err(error) = handle(&app, tab_id, workspace, &session, &nonce, payload).await {
+            if let Err(error) = handle(&app, tab_id, &session, &nonce, payload).await {
                 tracing::debug!(%tab_id, "saved logins request failed: {error}");
             }
         }
@@ -165,12 +168,11 @@ fn field(payload: &Value, key: &str) -> String {
 async fn handle(
     app: &AppHandle<Runtime>,
     tab_id: TabId,
-    workspace: Option<WorkspaceId>,
     session: &CdpSession,
     nonce: &str,
     payload: Value,
 ) -> AppResult<()> {
-    let Some(profile) = profile_of(app, workspace) else {
+    let Some(profile) = profile_of_tab(app, tab_id) else {
         return Ok(());
     };
     let state = app.state::<AppState>();
@@ -336,14 +338,8 @@ pub async fn fill_into(app: AppHandle<Runtime>, tab_id: TabId, id: String) -> Ap
         .ok_or_else(|| AppError::new("that tab is gone"))?;
     let nonce = nonce_for(tab_id)
         .ok_or_else(|| AppError::new("saved logins are not set up on that tab"))?;
-    let profile = {
-        let store = crate::state::lock(&state.store);
-        let tab = store.tab(tab_id)?;
-        let workspace = tab
-            .workspace_id
-            .ok_or_else(|| AppError::new("that tab is not in a workspace"))?;
-        store.workspace(workspace)?.profile_id
-    };
+    let profile =
+        profile_of_tab(&app, tab_id).ok_or_else(|| AppError::new("that tab has no profile"))?;
     fill(&state, &session, &nonce, profile, &id).await
 }
 

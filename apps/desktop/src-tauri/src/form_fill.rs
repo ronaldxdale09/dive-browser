@@ -4,7 +4,7 @@
 //! offered entries but never add to them.
 
 use dive_cdp::{CdpEvent, CdpSession};
-use dive_core::{ProfileId, TabId, WorkspaceId};
+use dive_core::TabId;
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager};
 
@@ -32,19 +32,8 @@ fn script(nonce: &str) -> String {
     )
 }
 
-fn profile_of(app: &AppHandle<Runtime>, workspace: Option<WorkspaceId>) -> Option<ProfileId> {
-    let state = app.state::<AppState>();
-    let store = crate::state::lock(&state.store);
-    store.workspace(workspace?).ok().map(|w| w.profile_id)
-}
-
 /// Install the script and binding on a tab and serve its requests.
-pub async fn attach(
-    app: AppHandle<Runtime>,
-    tab_id: TabId,
-    workspace: Option<WorkspaceId>,
-    session: CdpSession,
-) {
+pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
     let nonce = TabId::new().to_string().replace('-', "");
     let source = script(&nonce);
     let mut events = session.subscribe();
@@ -72,7 +61,7 @@ pub async fn attach(
             let Some(payload) = binding_payload(&event, &nonce) else {
                 continue;
             };
-            if let Err(error) = handle(&app, workspace, &session, &nonce, &payload).await {
+            if let Err(error) = handle(&app, tab_id, &session, &nonce, &payload).await {
                 tracing::debug!(%tab_id, "form entries request failed: {error}");
             }
         }
@@ -117,12 +106,12 @@ pub fn submitted_entries(payload: &Value) -> Vec<(String, String)> {
 
 async fn handle(
     app: &AppHandle<Runtime>,
-    workspace: Option<WorkspaceId>,
+    tab_id: TabId,
     session: &CdpSession,
     nonce: &str,
     payload: &Value,
 ) -> AppResult<()> {
-    let Some(profile) = profile_of(app, workspace) else {
+    let Some(profile) = crate::credential_fill::profile_of_tab(app, tab_id) else {
         return Ok(());
     };
     let state = app.state::<AppState>();
