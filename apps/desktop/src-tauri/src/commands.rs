@@ -463,6 +463,9 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             passwords_fill,
             passwords_pick_csv,
             passwords_import_csv,
+            forms_list,
+            forms_delete,
+            forms_clear,
             bookmark_rename,
             permission_set,
             permission_reply,
@@ -1395,22 +1398,21 @@ pub(crate) async fn browser_import_sources() -> AppResult<Vec<crate::browser_imp
 pub(crate) async fn browser_import_run(
     state: State<'_, AppState>,
     id: String,
-    bookmarks: bool,
-    history: bool,
-    passwords: bool,
+    choice: crate::browser_import::ImportChoice,
 ) -> AppResult<crate::browser_import::ImportSummary> {
     let source = crate::browser_import::find(&id)?;
     let harvest = tauri::async_runtime::spawn_blocking(move || {
-        crate::browser_import::harvest(&source, bookmarks, history, passwords)
+        crate::browser_import::harvest(&source, choice)
     })
     .await
     .map_err(AppError::new)??;
-    let (added_bookmarks, added_history, profile) = {
+    let (added_bookmarks, added_history, added_forms, profile) = {
         let store = lock(&state.store);
         let profile = active_profile(&store, *lock(&state.active_workspace))?;
         (
             store.import_bookmarks(&harvest.bookmarks)?,
             store.import_history(&harvest.history)?,
+            store.import_form_entries(profile.id, &harvest.forms)?,
             profile,
         )
     };
@@ -1439,6 +1441,7 @@ pub(crate) async fn browser_import_run(
         bookmarks: u32::try_from(added_bookmarks).unwrap_or(u32::MAX),
         history: u32::try_from(added_history).unwrap_or(u32::MAX),
         passwords: added_passwords,
+        forms: u32::try_from(added_forms).unwrap_or(u32::MAX),
     })
 }
 
@@ -2037,6 +2040,37 @@ pub(crate) fn passwords_import_csv(
 pub(crate) fn passwords_delete(state: State<'_, AppState>, id: String) -> AppResult<bool> {
     let profile = active_profile(&lock(&state.store), *lock(&state.active_workspace))?;
     crate::passwords::delete(&state, profile.id, &id)
+}
+
+/// Every form entry remembered in the active profile.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn forms_list(state: State<'_, AppState>) -> AppResult<Vec<dive_core::FormEntry>> {
+    let store = lock(&state.store);
+    let profile = active_profile(&store, *lock(&state.active_workspace))?;
+    Ok(store.form_entries(profile.id)?)
+}
+
+/// Forget one form entry.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn forms_delete(state: State<'_, AppState>, id: String) -> AppResult<bool> {
+    let store = lock(&state.store);
+    let profile = active_profile(&store, *lock(&state.active_workspace))?;
+    let owned = store.form_entries(profile.id)?.iter().any(|e| e.id == id);
+    if !owned {
+        return Ok(false);
+    }
+    Ok(store.remove_form_entry(&id)?)
+}
+
+/// Forget every form entry in the active profile; returns how many went.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn forms_clear(state: State<'_, AppState>) -> AppResult<u32> {
+    let store = lock(&state.store);
+    let profile = active_profile(&store, *lock(&state.active_workspace))?;
+    Ok(u32::try_from(store.clear_form_entries(profile.id)?).unwrap_or(u32::MAX))
 }
 
 /// Forget a bookmark by URL.

@@ -3,8 +3,8 @@ import type { ImportSource } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { browserForBundle, pickSource, useBrowserImport } from "./browserImport";
 
-const brave: ImportSource = { id: "brave:Default", browser: "brave", name: "Brave", family: "chromium", profile: null, dir: "/x/brave", access: "denied", passwords: true, icon: null };
-const chrome: ImportSource = { id: "chrome:Default", browser: "chrome", name: "Chrome", family: "chromium", profile: null, dir: "/x/chrome", access: "ok", passwords: true, icon: "data:image/png;base64,AAAA" };
+const brave: ImportSource = { id: "brave:Default", browser: "brave", name: "Brave", family: "chromium", profile: null, dir: "/x/brave", access: "denied", passwords: true, forms: true, icon: null };
+const chrome: ImportSource = { id: "chrome:Default", browser: "chrome", name: "Chrome", family: "chromium", profile: null, dir: "/x/chrome", access: "ok", passwords: true, forms: true, icon: "data:image/png;base64,AAAA" };
 const initial = useBrowserImport.getState();
 
 afterEach(() => {
@@ -25,7 +25,7 @@ describe("browser import", () => {
 
   it("loads sources, imports from the chosen one and reports what came in", async () => {
     vi.spyOn(ipc, "browserImportSources").mockResolvedValue([brave, chrome]);
-    const run = vi.spyOn(ipc, "browserImportRun").mockResolvedValue({ bookmarks: 12, history: 340, passwords: 0 });
+    const run = vi.spyOn(ipc, "browserImportRun").mockResolvedValue({ bookmarks: 12, history: 340, passwords: 0, forms: 0 });
     await useBrowserImport.getState().load();
     expect(useBrowserImport.getState().selected).toBe("chrome:Default");
     // Opened again for a particular browser, that browser wins over the earlier pick.
@@ -34,8 +34,8 @@ describe("browser import", () => {
     useBrowserImport.getState().select("chrome:Default");
     useBrowserImport.getState().setHistory(false);
     await useBrowserImport.getState().run();
-    expect(run).toHaveBeenCalledWith("chrome:Default", true, false, true);
-    expect(useBrowserImport.getState().outcome).toEqual({ source: chrome, summary: { bookmarks: 12, history: 340, passwords: 0 } });
+    expect(run).toHaveBeenCalledWith("chrome:Default", true, false, true, true);
+    expect(useBrowserImport.getState().outcome).toEqual({ source: chrome, summary: { bookmarks: 12, history: 340, passwords: 0, forms: 0 } });
   });
 
   it("starts on a protected source without running anything", async () => {

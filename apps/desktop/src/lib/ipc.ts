@@ -22,7 +22,7 @@ export const events = {
     once: (callback: EventCallback<string>) => generatedEvents.menuCommand(getCurrentWebview()).once(callback),
   },
 };
-export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, CsvImportSummary } from "../generated/bindings";
+export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, CsvImportSummary, FormEntry } from "../generated/bindings";
 export type { ExtensionInfo, ExtensionList };
 export type { Prefs, ClearRequest, Rule, RuleAction, PrivacyCategory, PrivacyEvent, PrivacyInfo, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RequestDetail, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, RecordOptions, RecordingResult, RecordingCapabilities, RecordingEvent, Microphone, MediaInfo, ExportRequest, KeptSegment, RecordingInfo, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions, SitePermission, PermissionList, Scope, Duration, PermissionDismissed, Decision, UpdateInfo, PermissionAsked, TabTier, DefaultBrowserStatus, Profile, ProfileId, ProfileDraft, SubtitleModel, SubtitleModelProgress, SubtitleCue, SubtitleState, ImportSource, ImportSummary } from "../generated/bindings";
 
@@ -201,7 +201,10 @@ export const ipc = {
   defaultBrowserStatus: () => commands.defaultBrowserStatus(),
   defaultBrowserSet: async () => unwrap(await commands.defaultBrowserSet()),
   browserImportSources: async () => unwrap(await commands.browserImportSources()),
-  browserImportRun: async (id: string, bookmarks: boolean, history: boolean, passwords = false) => unwrap(await commands.browserImportRun(id, bookmarks, history, passwords)),
+  browserImportRun: async (id: string, bookmarks: boolean, history: boolean, passwords = false, forms = false) => unwrap(await commands.browserImportRun(id, { bookmarks, history, passwords, forms })),
+  formsList: async () => unwrap(await commands.formsList()),
+  formsDelete: async (id: string) => unwrap(await commands.formsDelete(id)),
+  formsClear: async () => unwrap(await commands.formsClear()),
   browserImportOpenPrivacy: async () => unwrap(await commands.browserImportOpenPrivacy()),
   updateInstall: async () => unwrap(await commands.updateInstall()),
   historySearch: async (query: string, limit = 20) => unwrap(await commands.historySearch(query, limit)),

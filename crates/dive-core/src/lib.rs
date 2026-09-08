@@ -15,7 +15,10 @@ pub use model::{
     Container, ContainerId, Profile, ProfileId, Tab, TabId, TabState, TabTier, Timestamp,
     Workspace, WorkspaceId,
 };
-pub use store::{Bookmark, Credential, HistoryEntry, ImportedEntry, Store, origin_of};
+pub use store::{
+    Bookmark, Credential, FormEntry, HistoryEntry, ImportedEntry, ImportedFormEntry, Store,
+    origin_of,
+};
 
 /// Convenience alias used throughout the crate.
 pub type Result<T> = std::result::Result<T, CoreError>;

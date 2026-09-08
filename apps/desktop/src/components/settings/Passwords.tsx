@@ -6,6 +6,7 @@ import { errorMessage } from "../../lib/errors";
 import { useBrowser } from "../../store/browser";
 import { Icon, IconButton } from "../Icon";
 import { Button, Group } from "../SettingsFields";
+import { FormEntries } from "./FormEntries";
 
 /** The site as the list shows it: the host, without the scheme. */
 export function siteLabel(origin: string): string {
@@ -115,6 +116,7 @@ export function Passwords() {
       <Group title="Bringing passwords over" description="Chrome, Brave and Edge can be read directly from Import from another browser. Safari, Firefox and password managers export a CSV: Safari under File › Export › Passwords, Firefox under about:logins › Export, 1Password and Bitwarden from their export pages. Import it here, then delete the file: it holds every password in plain text.">
         {null}
       </Group>
+      <FormEntries />
     </>
   );
 }

@@ -16,7 +16,7 @@
 //! temporary folder before it is read.
 
 use crate::error::{AppError, AppResult};
-use dive_core::{ImportedEntry, Timestamp};
+use dive_core::{ImportedEntry, ImportedFormEntry, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -58,9 +58,21 @@ pub struct ImportSource {
     pub access: Access,
     /// Whether saved passwords can be read from this browser.
     pub passwords: bool,
+    /// Whether form entries (names, addresses, emails) can be read.
+    pub forms: bool,
     /// The browser's own icon from its app bundle, as a PNG data URL; `None`
     /// when the app itself is not installed (its data can outlive it).
     pub icon: Option<String>,
+}
+
+/// What to bring over. Four independent switches, as the panel shows them.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
+pub struct ImportChoice {
+    pub bookmarks: bool,
+    pub history: bool,
+    pub passwords: bool,
+    pub forms: bool,
 }
 
 /// What an import brought in.
@@ -69,6 +81,7 @@ pub struct ImportSummary {
     pub bookmarks: u32,
     pub history: u32,
     pub passwords: u32,
+    pub forms: u32,
 }
 
 /// A saved login read from another browser, decrypted.
@@ -86,6 +99,7 @@ pub struct Harvest {
     pub bookmarks: Vec<ImportedEntry>,
     pub history: Vec<ImportedEntry>,
     pub passwords: Vec<ImportedLogin>,
+    pub forms: Vec<ImportedFormEntry>,
 }
 
 /// Visits beyond this are left behind; nobody scrolls that far back.
@@ -223,6 +237,7 @@ fn source(known: &Known, dir: &Path, profile: Option<String>, access: Access) ->
         name: known.name.into(),
         family: known.family,
         passwords: known.family != Family::Safari,
+        forms: known.family != Family::Safari,
         profile,
         dir: dir.to_string_lossy().into_owned(),
         access,
@@ -410,12 +425,13 @@ pub fn find(id: &str) -> AppResult<ImportSource> {
 }
 
 /// Read everything asked for from `source`.
-pub fn harvest(
-    source: &ImportSource,
-    bookmarks: bool,
-    history: bool,
-    passwords: bool,
-) -> AppResult<Harvest> {
+pub fn harvest(source: &ImportSource, choice: ImportChoice) -> AppResult<Harvest> {
+    let ImportChoice {
+        bookmarks,
+        history,
+        passwords,
+        forms,
+    } = choice;
     let dir = Path::new(&source.dir);
     let temp = tempfile::tempdir()?;
     let mut out = Harvest::default();
@@ -430,6 +446,9 @@ pub fn harvest(
             if passwords && let Some(db) = copied(dir, "Login Data", temp.path())? {
                 let key = chromium_key(&source.browser, &source.name)?;
                 out.passwords = chromium_logins(&db, &key)?;
+            }
+            if forms && let Some(db) = copied(dir, "Web Data", temp.path())? {
+                out.forms = chromium_forms(&db)?;
             }
         }
         Family::Firefox => {
@@ -448,6 +467,9 @@ pub fn harvest(
             {
                 let key = firefox_key(&key_db)?;
                 out.passwords = firefox_logins(&logins, &key)?;
+            }
+            if forms && let Some(db) = copied(dir, "formhistory.sqlite", temp.path())? {
+                out.forms = firefox_forms(&db)?;
             }
         }
         Family::Safari => {
@@ -578,6 +600,98 @@ pub fn chromium_logins(db: &Path, key: &[u8; 16]) -> AppResult<Vec<ImportedLogin
             origin,
             username,
             password,
+        });
+    }
+    Ok(out)
+}
+
+// ---- Form entries ----
+
+/// Entries longer than this are pasted text, not something to offer again.
+const FORM_VALUE_LIMIT: usize = 200;
+
+/// Field names that mark a secret or card detail a browser should never have kept.
+const SECRET: &[&str] = &[
+    "password", "passwd", "pwd", "cvc", "cvv", "ccnumber", "card", "otp", "token", "secret", "ssn",
+];
+
+/// Whether a remembered field is worth carrying over: named, short, and
+/// not a secret or card detail that a browser should never have kept.
+pub fn keep_form_entry(field: &str, value: &str) -> bool {
+    let f = field.to_lowercase();
+    let v = value.trim();
+    if f.is_empty() || v.is_empty() || v.chars().count() > FORM_VALUE_LIMIT || v.contains('\n') {
+        return false;
+    }
+    if SECRET.iter().any(|w| f.contains(w)) {
+        return false;
+    }
+    // Sixteen digits with separators is a card number whatever the field.
+    let digits = v.chars().filter(char::is_ascii_digit).count();
+    !(digits >= 13
+        && v.chars()
+            .all(|c| c.is_ascii_digit() || c == ' ' || c == '-'))
+}
+
+/// Chromium's `Web Data`: the `autofill` table, unencrypted.
+pub fn chromium_forms(db: &Path) -> AppResult<Vec<ImportedFormEntry>> {
+    let conn = open_ro(db)?;
+    let mut stmt = conn
+        .prepare("SELECT name, value, count, date_last_used FROM autofill ORDER BY count DESC")
+        .map_err(AppError::new)?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        })
+        .map_err(AppError::new)?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (field, value, uses, last) = row.map_err(AppError::new)?;
+        if !keep_form_entry(&field, &value) {
+            continue;
+        }
+        out.push(ImportedFormEntry {
+            field: field.to_lowercase(),
+            value: value.trim().to_string(),
+            uses: u32::try_from(uses).unwrap_or(1),
+            last_used_at: (last > 0).then(|| from_unix(last)),
+        });
+    }
+    Ok(out)
+}
+
+/// Firefox's `formhistory.sqlite`: `moz_formhistory`, times in microseconds.
+pub fn firefox_forms(db: &Path) -> AppResult<Vec<ImportedFormEntry>> {
+    let conn = open_ro(db)?;
+    let mut stmt = conn
+        .prepare("SELECT fieldname, value, timesUsed, lastUsed FROM moz_formhistory ORDER BY timesUsed DESC")
+        .map_err(AppError::new)?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<i64>>(2)?,
+                r.get::<_, Option<i64>>(3)?,
+            ))
+        })
+        .map_err(AppError::new)?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (field, value, uses, last) = row.map_err(AppError::new)?;
+        if !keep_form_entry(&field, &value) {
+            continue;
+        }
+        out.push(ImportedFormEntry {
+            field: field.to_lowercase(),
+            value: value.trim().to_string(),
+            uses: u32::try_from(uses.unwrap_or(1)).unwrap_or(1),
+            last_used_at: last.filter(|t| *t > 0).map(from_unix_micros),
         });
     }
     Ok(out)
@@ -1033,6 +1147,48 @@ fn query<T: rusqlite::types::FromSql>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn form_entries_are_read_from_chromium_and_firefox_and_secrets_are_left() {
+        let dir = tempfile::tempdir().unwrap();
+        let web = dir.path().join("Web Data");
+        let conn = rusqlite::Connection::open(&web).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE autofill (name TEXT, value TEXT, value_lower TEXT, date_created INTEGER, date_last_used INTEGER, count INTEGER);
+             INSERT INTO autofill VALUES ('Email', 'dale@example.com', 'dale@example.com', 1, 1700000000, 12);
+             INSERT INTO autofill VALUES ('cc-number', '4111 1111 1111 1111', '', 1, 1, 1);
+             INSERT INTO autofill VALUES ('note', '4111-1111-1111-1111', '', 1, 1, 1);
+             INSERT INTO autofill VALUES ('password_hint', 'blue', '', 1, 1, 1);
+             INSERT INTO autofill VALUES ('name', '  Dale  ', 'dale', 1, 0, 3);",
+        )
+        .unwrap();
+        drop(conn);
+        let got = super::chromium_forms(&web).unwrap();
+        assert_eq!(
+            got.iter()
+                .map(|e| (e.field.as_str(), e.value.as_str(), e.uses))
+                .collect::<Vec<_>>(),
+            vec![("email", "dale@example.com", 12), ("name", "Dale", 3)]
+        );
+        assert!(got[0].last_used_at.is_some() && got[1].last_used_at.is_none());
+
+        let ff = dir.path().join("formhistory.sqlite");
+        let conn = rusqlite::Connection::open(&ff).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE moz_formhistory (id INTEGER PRIMARY KEY, fieldname TEXT, value TEXT, timesUsed INTEGER, firstUsed INTEGER, lastUsed INTEGER, guid TEXT);
+             INSERT INTO moz_formhistory VALUES (1, 'searchbar-history', 'rust', 4, 0, 1700000000000000, 'g');
+             INSERT INTO moz_formhistory VALUES (2, 'city', 'Cebu', NULL, NULL, NULL, 'h');",
+        )
+        .unwrap();
+        drop(conn);
+        let got = super::firefox_forms(&ff).unwrap();
+        assert_eq!(
+            got.iter()
+                .map(|e| (e.field.as_str(), e.value.as_str(), e.uses))
+                .collect::<Vec<_>>(),
+            vec![("searchbar-history", "rust", 4), ("city", "Cebu", 1)]
+        );
+    }
+
     /// A tiny DER writer for the fixtures below.
     #[allow(clippy::cast_possible_truncation)]
     fn der(tag: u8, body: &[u8]) -> Vec<u8> {

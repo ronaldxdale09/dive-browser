@@ -82,7 +82,7 @@ export const commands = {
 	 *  Passwords land in the active profile; a login Dive already has for the
 	 *  same site and username is left as it is.
 	 */
-	browserImportRun: (id: string, bookmarks: boolean, history: boolean, passwords: boolean) => typedError<ImportSummary, AppError>(__TAURI_INVOKE("browser_import_run", { id, bookmarks, history, passwords })),
+	browserImportRun: (id: string, choice: ImportChoice) => typedError<ImportSummary, AppError>(__TAURI_INVOKE("browser_import_run", { id, choice })),
 	/**  Open System Settings on the Full Disk Access list, the other way in. */
 	browserImportOpenPrivacy: () => typedError<null, AppError>(__TAURI_INVOKE("browser_import_open_privacy")),
 	tabNavigate: (id: TabId, url: string) => typedError<null, AppError>(__TAURI_INVOKE("tab_navigate", { id, url })),
@@ -151,6 +151,12 @@ export const commands = {
 	passwordsPickCsv: () => __TAURI_INVOKE<string | null>("passwords_pick_csv"),
 	/**  Import the logins in a CSV export into the active profile. */
 	passwordsImportCsv: (path: string) => typedError<CsvImportSummary, AppError>(__TAURI_INVOKE("passwords_import_csv", { path })),
+	/**  Every form entry remembered in the active profile. */
+	formsList: () => typedError<FormEntry[], AppError>(__TAURI_INVOKE("forms_list")),
+	/**  Forget one form entry. */
+	formsDelete: (id: string) => typedError<boolean, AppError>(__TAURI_INVOKE("forms_delete", { id })),
+	/**  Forget every form entry in the active profile; returns how many went. */
+	formsClear: () => typedError<number, AppError>(__TAURI_INVOKE("forms_clear")),
 	/**
 	 *  Give a bookmark a new title, keeping its URL and creation time. A blank
 	 *  title is refused rather than erasing the one on record.
@@ -942,6 +948,25 @@ export type FindResult = {
 	current: number,
 };
 
+/**
+ *  One thing typed into a form field once, offered again when the same
+ *  field (by its name) is typed into.
+ */
+export type FormEntry = {
+	/**  Row id. */
+	id: string,
+	/**  The profile the entry belongs to. */
+	profile_id: string,
+	/**  The field's `name` (or `id`) attribute, lower-cased. */
+	field: string,
+	/**  What was typed. */
+	value: string,
+	/**  How many times it was used, here or before import. */
+	uses: number,
+	/**  RFC 3339. */
+	last_used_at: string | null,
+};
+
 /**  How the bezel is drawn, and which browser's bars go with it. */
 export type Frame =
 /**  iPhone with a dynamic island. */
@@ -981,6 +1006,14 @@ export type HistoryEntry = {
 	favicon: string | null,
 };
 
+/**  What to bring over. Four independent switches, as the panel shows them. */
+export type ImportChoice = {
+	bookmarks: boolean,
+	history: boolean,
+	passwords: boolean,
+	forms: boolean,
+};
+
 /**  One browser profile the import can read. */
 export type ImportSource = {
 	/**  `browser:profile-folder`, stable across calls. */
@@ -997,6 +1030,8 @@ export type ImportSource = {
 	access: Access,
 	/**  Whether saved passwords can be read from this browser. */
 	passwords: boolean,
+	/**  Whether form entries (names, addresses, emails) can be read. */
+	forms: boolean,
 	/**
 	 *  The browser's own icon from its app bundle, as a PNG data URL; `None`
 	 *  when the app itself is not installed (its data can outlive it).
@@ -1009,6 +1044,7 @@ export type ImportSummary = {
 	bookmarks: number,
 	history: number,
 	passwords: number,
+	forms: number,
 };
 
 /**  Insets in CSS pixels. */

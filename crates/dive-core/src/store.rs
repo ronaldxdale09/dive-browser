@@ -116,6 +116,17 @@ const MIGRATIONS: &[&str] = &[
         UNIQUE(profile_id, origin, username)
     );
     CREATE INDEX credentials_origin ON credentials(profile_id, origin);",
+    // v11: form entries (names, addresses, emails) offered while typing.
+    "CREATE TABLE form_entries (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        field TEXT NOT NULL,
+        value TEXT NOT NULL,
+        uses INTEGER NOT NULL DEFAULT 1,
+        last_used_at TEXT,
+        UNIQUE(profile_id, field, value)
+    );
+    CREATE INDEX form_entries_field ON form_entries(profile_id, field);",
 ];
 
 /// Copy an existing database aside when this build is about to migrate it,
@@ -209,6 +220,37 @@ pub struct Credential {
     pub last_used_at: Option<String>,
     /// How many times it has been filled.
     pub uses: u32,
+}
+
+/// One thing typed into a form field once, offered again when the same
+/// field (by its name) is typed into.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct FormEntry {
+    /// Row id.
+    pub id: String,
+    /// The profile the entry belongs to.
+    pub profile_id: String,
+    /// The field's `name` (or `id`) attribute, lower-cased.
+    pub field: String,
+    /// What was typed.
+    pub value: String,
+    /// How many times it was used, here or before import.
+    pub uses: u32,
+    /// RFC 3339.
+    pub last_used_at: Option<String>,
+}
+
+/// A form entry on its way in from another browser.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedFormEntry {
+    /// The field's name, any case.
+    pub field: String,
+    /// What was typed.
+    pub value: String,
+    /// The other browser's use count.
+    pub uses: u32,
+    /// When it was last used there.
+    pub last_used_at: Option<Timestamp>,
 }
 
 /// One page in history, aggregated by URL.
@@ -746,6 +788,117 @@ impl Store {
             params![id, at.to_rfc3339()],
         )?;
         Ok(())
+    }
+
+    /// Every form entry in `profile`, by field then most used.
+    pub fn form_entries(&self, profile: ProfileId) -> Result<Vec<FormEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, profile_id, field, value, uses, last_used_at FROM form_entries
+             WHERE profile_id = ?1 ORDER BY field, uses DESC, value",
+        )?;
+        let rows = stmt.query_map([profile.to_string()], form_entry_row)?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    /// Entries for one field whose value starts with `prefix` (case-folded),
+    /// most used first, at most `limit`.
+    pub fn form_entries_for(
+        &self,
+        profile: ProfileId,
+        field: &str,
+        prefix: &str,
+        limit: usize,
+    ) -> Result<Vec<FormEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, profile_id, field, value, uses, last_used_at FROM form_entries
+             WHERE profile_id = ?1 AND field = ?2 AND lower(value) LIKE ?3 ESCAPE '\\'
+             ORDER BY uses DESC, last_used_at DESC, value LIMIT ?4",
+        )?;
+        let escaped = prefix
+            .to_lowercase()
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let rows = stmt.query_map(
+            params![
+                profile.to_string(),
+                field.to_lowercase(),
+                format!("{escaped}%"),
+                i64::try_from(limit).unwrap_or(i64::MAX)
+            ],
+            form_entry_row,
+        )?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    /// Remember that `value` was submitted in `field`; a repeat counts a use.
+    pub fn record_form_entry(
+        &self,
+        profile: ProfileId,
+        field: &str,
+        value: &str,
+        at: Timestamp,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO form_entries (id, profile_id, field, value, uses, last_used_at)
+             VALUES (?1, ?2, ?3, ?4, 1, ?5)
+             ON CONFLICT(profile_id, field, value) DO UPDATE SET
+                 uses = uses + 1, last_used_at = excluded.last_used_at",
+            params![
+                uuid::Uuid::now_v7().to_string(),
+                profile.to_string(),
+                field.to_lowercase(),
+                value,
+                at.to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Add entries from another browser, skipping any already here.
+    /// Returns how many were new.
+    pub fn import_form_entries(
+        &self,
+        profile: ProfileId,
+        entries: &[ImportedFormEntry],
+    ) -> Result<usize> {
+        let tx = self.conn.unchecked_transaction()?;
+        let mut added = 0;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO form_entries (id, profile_id, field, value, uses, last_used_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(profile_id, field, value) DO NOTHING",
+            )?;
+            for e in entries {
+                added += stmt.execute(params![
+                    uuid::Uuid::now_v7().to_string(),
+                    profile.to_string(),
+                    e.field.to_lowercase(),
+                    e.value,
+                    e.uses.max(1),
+                    e.last_used_at.map(Timestamp::to_rfc3339)
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(added)
+    }
+
+    /// Forget one entry; returns whether it existed.
+    pub fn remove_form_entry(&self, id: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .execute("DELETE FROM form_entries WHERE id = ?1", [id])?
+            > 0)
+    }
+
+    /// Forget every entry in `profile`; returns how many there were.
+    pub fn clear_form_entries(&self, profile: ProfileId) -> Result<usize> {
+        Ok(self.conn.execute(
+            "DELETE FROM form_entries WHERE profile_id = ?1",
+            [profile.to_string()],
+        )?)
     }
 
     /// Remove a bookmark; returns whether one existed.
@@ -1303,8 +1456,85 @@ fn credential_row(row: &Row<'_>) -> rusqlite::Result<Credential> {
     })
 }
 
+fn form_entry_row(row: &Row<'_>) -> rusqlite::Result<FormEntry> {
+    Ok(FormEntry {
+        id: row.get(0)?,
+        profile_id: row.get(1)?,
+        field: row.get(2)?,
+        value: row.get(3)?,
+        uses: row.get(4)?,
+        last_used_at: row.get(5)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn form_entries_match_by_field_and_prefix_and_count_uses() {
+        let store = Store::in_memory().unwrap();
+        let profile = store.ensure_default_profile().unwrap();
+        let now = Timestamp::now();
+        store
+            .record_form_entry(profile.id, "Email", "dale@example.com", now)
+            .unwrap();
+        store
+            .record_form_entry(profile.id, "email", "dale@example.com", now)
+            .unwrap();
+        store
+            .record_form_entry(profile.id, "email", "dee@example.com", now)
+            .unwrap();
+        let added = store
+            .import_form_entries(
+                profile.id,
+                &[
+                    ImportedFormEntry {
+                        field: "email".into(),
+                        value: "dale@example.com".into(),
+                        uses: 9,
+                        last_used_at: None,
+                    },
+                    ImportedFormEntry {
+                        field: "name".into(),
+                        value: "Dale".into(),
+                        uses: 0,
+                        last_used_at: Some(now),
+                    },
+                ],
+            )
+            .unwrap();
+        assert_eq!(added, 1, "the duplicate is kept as it was");
+        let all = store.form_entries(profile.id).unwrap();
+        assert_eq!(
+            all.iter()
+                .map(|e| (e.field.as_str(), e.value.as_str(), e.uses))
+                .collect::<Vec<_>>(),
+            vec![
+                ("email", "dale@example.com", 2),
+                ("email", "dee@example.com", 1),
+                ("name", "Dale", 1)
+            ]
+        );
+        let d = store
+            .form_entries_for(profile.id, "EMAIL", "D", 10)
+            .unwrap();
+        assert_eq!(d.len(), 2);
+        assert_eq!(d[0].value, "dale@example.com");
+        // `%` and `_` in the prefix are literal.
+        assert!(
+            store
+                .form_entries_for(profile.id, "email", "%", 10)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            store.form_entries(ProfileId::new()).unwrap().is_empty(),
+            "entries stay with their profile"
+        );
+        assert!(store.remove_form_entry(&d[1].id).unwrap());
+        assert_eq!(store.clear_form_entries(profile.id).unwrap(), 2);
+        assert!(store.form_entries(profile.id).unwrap().is_empty());
+    }
+
     #[test]
     fn credentials_round_trip_per_profile_and_keep_their_id_on_resave() {
         let store = Store::in_memory().unwrap();
@@ -2095,6 +2325,7 @@ mod tests {
             0x0b4e_ecbb_d242_ffaf,
             0x99e5_fa52_17a9_ae16,
             0x1340_2877_32bd_71cf,
+            0x755e_bc0a_ec8c_b672,
         ];
         assert!(
             MIGRATIONS.len() >= SHIPPED.len(),

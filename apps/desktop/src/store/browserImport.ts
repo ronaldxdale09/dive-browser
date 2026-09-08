@@ -17,6 +17,7 @@ interface BrowserImportState {
   bookmarks: boolean;
   history: boolean;
   passwords: boolean;
+  forms: boolean;
   importing: boolean;
   outcome: ImportOutcome | null;
   error: string | null;
@@ -29,6 +30,7 @@ interface BrowserImportState {
   setBookmarks: (v: boolean) => void;
   setHistory: (v: boolean) => void;
   setPasswords: (v: boolean) => void;
+  setForms: (v: boolean) => void;
   openPrivacySettings: () => Promise<void>;
   run: () => Promise<void>;
   reset: () => void;
@@ -77,6 +79,7 @@ export const useBrowserImport = create<BrowserImportState>((set, get) => ({
   bookmarks: true,
   history: true,
   passwords: true,
+  forms: true,
   importing: false,
   outcome: null,
   error: null,
@@ -100,6 +103,7 @@ export const useBrowserImport = create<BrowserImportState>((set, get) => ({
   setBookmarks: (bookmarks) => set({ bookmarks }),
   setHistory: (history) => set({ history }),
   setPasswords: (passwords) => set({ passwords }),
+  setForms: (forms) => set({ forms }),
   openPrivacySettings: async () => {
     try {
       await ipc.browserImportOpenPrivacy();
@@ -108,13 +112,14 @@ export const useBrowserImport = create<BrowserImportState>((set, get) => ({
     }
   },
   run: async () => {
-    const { selected, sources, bookmarks, history, passwords, importing } = get();
+    const { selected, sources, bookmarks, history, passwords, forms, importing } = get();
     const source = sources?.find((s) => s.id === selected);
     const wantPasswords = passwords && source?.passwords === true;
-    if (!source || importing || (!bookmarks && !history && !wantPasswords)) return;
+    const wantForms = forms && source?.forms === true;
+    if (!source || importing || (!bookmarks && !history && !wantPasswords && !wantForms)) return;
     set({ importing: true, error: null, outcome: null });
     try {
-      const summary = await ipc.browserImportRun(source.id, bookmarks, history, wantPasswords);
+      const summary = await ipc.browserImportRun(source.id, bookmarks, history, wantPasswords, wantForms);
       set({ importing: false, outcome: { source, summary } });
     } catch (e) {
       set({ importing: false, error: errorMessage(e) });

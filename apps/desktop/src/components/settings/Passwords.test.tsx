@@ -14,6 +14,7 @@ beforeEach(() => {
   vi.spyOn(ipc, "passwordsDelete").mockResolvedValue(true);
   vi.spyOn(ipc, "passwordsSave").mockResolvedValue({ ...login, id: "c2", origin: "https://example.org", username: "eve" });
   vi.spyOn(ipc, "passwordsPickCsv").mockResolvedValue("/tmp/passwords.csv");
+  vi.spyOn(ipc, "formsList").mockResolvedValue([]);
   vi.spyOn(ipc, "passwordsImportCsv").mockResolvedValue({ added: 2, skipped: 1, unreadable: 0 });
 });
 
