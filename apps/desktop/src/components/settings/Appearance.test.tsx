@@ -41,9 +41,12 @@ describe("Appearance", () => {
     expect(screen.getByText("This template is dark only.")).toBeTruthy();
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(document.documentElement.style.getPropertyValue("--color-ground")).toBe("#0b0c0e");
+    // The Mode control shows the scheme the template forces, not System.
+    expect(screen.getByRole("radio", { name: "Dark" }).getAttribute("aria-checked")).toBe("true");
 
     fireEvent.click(screen.getByRole("radio", { name: "Paper" }));
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
+    expect(screen.getByRole("radio", { name: "Light" }).getAttribute("aria-checked")).toBe("true");
     // Mode is inert while a fixed template is chosen.
     fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
     expect(prefs().theme).toBe("system");

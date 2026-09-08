@@ -8,6 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Fixed
+- Settings › Appearance: with a dark-only or light-only template the Mode control shows the scheme the template forces instead of "System".
 - The chrome could shift sideways, leaving no margin on the right and hiding the Menu button and the tab-search chevron: revealing the active tab scrolled every scrollable ancestor, and anything poking past the right edge let the document move. The chrome is now clipped, and only the tab strip itself scrolls.
 
 ## [0.1.15] - 2026-09-08
