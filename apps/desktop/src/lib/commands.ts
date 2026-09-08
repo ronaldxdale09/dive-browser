@@ -20,7 +20,7 @@ const WORKSPACE_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
  */
 export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "palette.open": () => useBrowser.getState().toggle("palette", true),
-  "tabs.search": () => useBrowser.getState().toggle("palette", true),
+  "tabs.search": () => useBrowser.getState().openPalette("tabs"),
   "tab.new": () => useBrowser.getState().toggle("palette", true),
   "window.new": () => openWindow(),
   "private.exit": () => ipc.windowExitPrivate().then(() => undefined).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) })),

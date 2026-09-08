@@ -1,6 +1,8 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { events, ipc } from "../lib/ipc";
+import type { Tab } from "../lib/ipc";
+import { useBrowser } from "../store/browser";
 import { Palette, paletteFilter, ROW_ID } from "./Palette";
 
 class ResizeObserverStub {
@@ -11,8 +13,13 @@ class ResizeObserverStub {
 
 vi.stubGlobal("ResizeObserver", ResizeObserverStub);
 
+const initialBrowser = useBrowser.getState();
+// cmdk scrolls the highlighted row into view; jsdom has no layout to scroll.
+Element.prototype.scrollIntoView ??= () => undefined;
+
 afterEach(() => {
   cleanup();
+  useBrowser.setState(initialBrowser, true);
   vi.restoreAllMocks();
 });
 
@@ -25,6 +32,26 @@ describe("Palette", () => {
     // A row's id tells duplicates apart but is not something to search by.
     expect(paletteFilter(`httpbin.org/json https://httpbin.org/json${ROW_ID}01a07e34`, "01a0")).toBe(0);
     expect(paletteFilter(`httpbin.org/json https://httpbin.org/json${ROW_ID}01a07e34`, "json")).toBe(1);
+  });
+
+  it("leads with the open tabs when opened to find one", async () => {
+    vi.spyOn(ipc, "commandsList").mockResolvedValue([]);
+    vi.spyOn(ipc, "devServersWatch").mockResolvedValue([]);
+    vi.spyOn(events.devServersChanged, "listen").mockResolvedValue(() => undefined);
+    vi.spyOn(ipc, "bookmarksSearch").mockResolvedValue([{ url: "https://docs.example.com/", title: "Example docs", created_at: "2026-09-01T00:00:00Z", favicon: null }]);
+    vi.spyOn(ipc, "historySearch").mockResolvedValue([]);
+    const tab = { id: "t1", workspace_id: "w", url: "https://a.test/", title: "Alpha", favicon: null, tier: "today", position: 0, state: "active", last_active_at: "2026-09-01T00:00:00Z" } as unknown as Tab;
+    useBrowser.setState({ tabs: [tab], activeTab: "t1" });
+    useBrowser.getState().openPalette("tabs");
+    expect(useBrowser.getState().paletteFocus).toBe("tabs");
+    render(<Palette />);
+    await waitFor(() => expect(screen.getByText("Example docs")).toBeTruthy());
+    const headings = Array.from(document.querySelectorAll("[cmdk-group-heading]")).map((h) => h.textContent);
+    expect(headings.indexOf("Tabs")).toBeGreaterThanOrEqual(0);
+    expect(headings.indexOf("Tabs")).toBeLessThan(headings.indexOf("Bookmarks"));
+    // A plain open leads with everything again.
+    useBrowser.getState().toggle("palette", true);
+    expect(useBrowser.getState().paletteFocus).toBe("all");
   });
 
   it("is an accessible new-tab dialog with a URL field and recent history", async () => {

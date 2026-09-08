@@ -52,6 +52,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- "All tabs" in the tab strip and Search tabs (⌘⇧A) open the palette with the open tabs listed first, not after the bookmarks.
 - Essential tabs, which show only their icon, carry their title as an accessible name.
 - The address bar is a proper combobox for assistive tech: it announces when its suggestion list opens and closes.
 - Console panel: `console.log("%cstyled", "color:red")` reads "styled" and `%s`/`%d`/`%o` directives take their arguments, as in DevTools, instead of printing the raw format string and its style argument.

@@ -102,6 +102,27 @@ export function Palette() {
   };
   const looksLikeUrl = /^[\w-]+(\.[\w-]+)+|^localhost|^https?:\/\//i.test(query.trim());
 
+  // Opened to find a tab ("All tabs", ⌘⇧A), the open tabs lead the list.
+  const tabsFirst = useBrowser((s) => s.paletteFocus === "tabs");
+  const tabGroup = tabs.length > 0 && (
+    <Command.Group heading="Tabs">
+      {tabs.map((t) => (
+        <Command.Item
+          key={t.id}
+          value={`${t.title} ${t.url}${ROW_ID}${t.id}`}
+          onSelect={() => {
+            close();
+            void activateTab(t.id);
+          }}
+          className="flex items-center gap-2 rounded-lg px-3 py-2"
+        >
+          <Favicon src={t.favicon} size={14} />
+          <span className="truncate">{t.title || t.url}</span>
+          <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(t.url)}</span>
+        </Command.Item>
+      ))}
+    </Command.Group>
+  );
   return (
     <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 ${className}`} onMouseDown={close}>
       <Command
@@ -133,6 +154,7 @@ export function Palette() {
               <span className="truncate font-mono text-ink">{query}</span>
             </Command.Item>
           )}
+          {tabsFirst && tabGroup}
           {bookmarks.length > 0 && (
             <Command.Group heading="Bookmarks">
               {bookmarks.map((b) => (
@@ -144,25 +166,7 @@ export function Palette() {
               ))}
             </Command.Group>
           )}
-          {tabs.length > 0 && (
-            <Command.Group heading="Tabs">
-              {tabs.map((t) => (
-                <Command.Item
-                  key={t.id}
-                  value={`${t.title} ${t.url}${ROW_ID}${t.id}`}
-                  onSelect={() => {
-                    close();
-                    void activateTab(t.id);
-                  }}
-                  className="flex items-center gap-2 rounded-lg px-3 py-2"
-                >
-                  <Favicon src={t.favicon} size={14} />
-                  <span className="truncate">{t.title || t.url}</span>
-                  <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(t.url)}</span>
-                </Command.Item>
-              ))}
-            </Command.Group>
-          )}
+          {!tabsFirst && tabGroup}
           {servers.length > 0 && (
             <Command.Group heading="Local servers">
               {servers.map((d) => (

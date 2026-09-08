@@ -106,6 +106,9 @@ interface BrowserState {
   /** Which library section opens next; the dialog reads it once. */
   libraryTab: LibraryTab;
   openLibrary: (tab: LibraryTab) => void;
+  /** What the palette leads with: everything, or the open tabs when it was opened to find one. */
+  paletteFocus: "all" | "tabs";
+  openPalette: (focus?: "all" | "tabs") => void;
   applyEvent: (event: CoreEvent) => void;
 }
 
@@ -296,6 +299,8 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false },
   libraryTab: "bookmarks",
   openLibrary: (libraryTab) => set((s) => ({ libraryTab, open: togglePanel(s.open, "library", true) })),
+  paletteFocus: "all",
+  openPalette: (focus = "all") => set((s) => ({ paletteFocus: focus, open: togglePanel(s.open, "palette", true) })),
   settingsSection: "general",
   settingsAnchor: null,
   openSettings: (section = "general", anchor) => set((s) => ({ settingsSection: section, settingsAnchor: anchor ?? null, open: togglePanel(s.open, "settings", true) })),
@@ -583,7 +588,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     void get().refreshCounts();
   },
 
-  toggle: (panel, value) => set((s) => ({ open: togglePanel(s.open, panel, value) })),
+  toggle: (panel, value) => set((s) => ({ open: togglePanel(s.open, panel, value), ...(panel === "palette" ? { paletteFocus: "all" as const } : {}) })),
   applyEvent: (event) => {
     set((s) => reduceEvent(s, event));
     if (event.type === "tab_closed") {

@@ -47,7 +47,7 @@ function useNarrow(ref: RefObject<HTMLElement | null>): boolean {
  * record, the device emulator, the agent.
  */
 export function FeatureBar({ compact = false }: { compact?: boolean }) {
-  const toggle = useBrowser((s) => s.toggle);
+  const openPalette = useBrowser((s) => s.openPalette);
   const ref = useRef<HTMLDivElement>(null);
   const measuredNarrow = useNarrow(ref);
   const narrow = compact || measuredNarrow;
@@ -60,7 +60,7 @@ export function FeatureBar({ compact = false }: { compact?: boolean }) {
       <span className="mx-1.5 h-4 w-px bg-line-2" aria-hidden />
       {!isPrivateWindow() && <UpdatePill compact={narrow} />}
       {isPrivateWindow() ? <PrivateBadge /> : <BuildBadge />}
-      <IconButton icon={ChevronDown} label="All tabs" onClick={() => toggle("palette", true)} size={14} tooltipAlign="end" tooltipSide="bottom" />
+      <IconButton icon={ChevronDown} label="All tabs" onClick={() => openPalette("tabs")} size={14} tooltipAlign="end" tooltipSide="bottom" />
     </div>
   );
 }
