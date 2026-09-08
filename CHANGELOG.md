@@ -52,6 +52,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Essential tabs, which show only their icon, carry their title as an accessible name.
 - The address bar is a proper combobox for assistive tech: it announces when its suggestion list opens and closes.
 - Console panel: `console.log("%cstyled", "color:red")` reads "styled" and `%s`/`%d`/`%o` directives take their arguments, as in DevTools, instead of printing the raw format string and its style argument.
 - A11y panel: each violation row shows a chevron and a pointer cursor, so it is clear the offending elements are one click away.

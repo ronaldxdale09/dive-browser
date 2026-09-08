@@ -49,6 +49,8 @@ describe("Essentials rail", () => {
     expect(essential.getAttribute("data-essential")).not.toBeNull();
     expect(essential.textContent).toBe("");
     expect(essential.getAttribute("title")).toBe("Mail");
+    // Icon-only on screen, but named for a screen reader.
+    expect(essential.getAttribute("aria-label")).toBe("Mail");
     const divider = screen.getByTestId("essentials-divider");
     expect(rail.compareDocumentPosition(divider) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(divider.compareDocumentPosition(screen.getByRole("tablist", { name: "Tabs" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
