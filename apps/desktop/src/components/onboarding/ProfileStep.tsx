@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { PROFILE_COLORS, PROFILE_SEEDS, seedFromProfileName } from "../../lib/profileAvatar";
+import { PROFILE_COLORS, PROFILE_SEEDS, colorName, seedFromProfileName } from "../../lib/profileAvatar";
 import { useBrowser } from "../../store/browser";
 import { useOnboarding } from "../../store/onboarding";
 import { AvatarImage } from "../AvatarImage";
@@ -71,7 +71,7 @@ export function ProfileStep() {
           <p className="text-[11px] text-ink-2">Face</p>
           <div role="radiogroup" aria-label="Face" className="mt-1.5 grid grid-cols-8 gap-2">
             {seeds.map((s) => (
-              <button key={s} type="button" role="radio" aria-checked={avatar === s} aria-label={`Face ${s}`} onClick={() => setSeed(s)} className={`aspect-square rounded-full ring-offset-2 ring-offset-surface ${avatar === s ? "ring-2 ring-highlight" : "opacity-75 hover:opacity-100"}`}>
+              <button key={s} type="button" role="radio" aria-checked={avatar === s} aria-label={s === seedFromProfileName(name) ? "Face from the name" : `Face ${s}`} title={s === seedFromProfileName(name) ? "Face from the name" : s} onClick={() => setSeed(s)} className={`aspect-square rounded-full ring-offset-2 ring-offset-surface ${avatar === s ? "ring-2 ring-highlight" : "opacity-75 hover:opacity-100"}`}>
                 <AvatarImage kind="profile" seed={s} color={color} alt="" className="size-full rounded-full" />
               </button>
             ))}
@@ -81,7 +81,7 @@ export function ProfileStep() {
           <p className="text-[11px] text-ink-2">Colour</p>
           <div role="radiogroup" aria-label="Colour" className="mt-1.5 grid grid-cols-4 gap-2">
             {PROFILE_COLORS.map((c) => (
-              <button key={c} type="button" role="radio" aria-checked={color === c} aria-label={c} onClick={() => setColor(c)} className={`size-6 rounded-full ring-offset-2 ring-offset-surface ${color === c ? "ring-2 ring-highlight" : ""}`} style={{ background: c }} />
+              <button key={c} type="button" role="radio" aria-checked={color === c} aria-label={colorName(c)} title={colorName(c)} onClick={() => setColor(c)} className={`size-6 rounded-full ring-offset-2 ring-offset-surface ${color === c ? "ring-2 ring-highlight" : ""}`} style={{ background: c }} />
             ))}
           </div>
         </div>

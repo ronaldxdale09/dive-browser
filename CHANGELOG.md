@@ -54,6 +54,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Onboarding's colour swatches are named (Mint, Amber…) for assistive tech instead of raw hex codes, and the face that follows your name is labelled as such.
 - In the profile and workspace dialogs, the face or mark that follows the name is labelled "from the name" instead of "someone" or a raw seed word.
 - Edit workspace shows the workspace's current colour and mark as selected; for the first workspace, whose colour and mark are not in the palette, nothing was selected.
 - The Keyboard shortcuts dialog and palette use the same names as the menu: "Record a video" (was "Record tab") and "Clear browsing data…" (was "Delete browsing data…").

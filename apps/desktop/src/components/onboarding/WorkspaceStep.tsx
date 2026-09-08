@@ -1,3 +1,4 @@
+import { colorName } from "../../lib/profileAvatar";
 import { useEffect, useRef, useState } from "react";
 import { AVATAR_SEEDS, seedFromName } from "../../lib/workspaceAvatar";
 import { useBrowser } from "../../store/browser";
@@ -89,7 +90,7 @@ export function WorkspaceStep() {
           <p className="text-[11px] text-ink-2">Colour</p>
           <div role="radiogroup" aria-label="Colour" className="mt-1.5 grid grid-cols-4 gap-2">
             {SWATCHES.map((c) => (
-              <button key={c} type="button" role="radio" aria-checked={c === color} aria-label={c} onClick={() => setColor(c)} className="size-6 rounded-full ring-offset-2 ring-offset-surface aria-checked:ring-2 aria-checked:ring-highlight" style={{ background: c }} />
+              <button key={c} type="button" role="radio" aria-checked={c === color} aria-label={colorName(c)} title={colorName(c)} onClick={() => setColor(c)} className="size-6 rounded-full ring-offset-2 ring-offset-surface aria-checked:ring-2 aria-checked:ring-highlight" style={{ background: c }} />
             ))}
           </div>
         </div>
