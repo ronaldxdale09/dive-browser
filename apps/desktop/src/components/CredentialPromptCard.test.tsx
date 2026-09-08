@@ -54,6 +54,11 @@ describe("CredentialPromptCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     await waitFor(() => expect(ipc.passwordsAnswer).toHaveBeenCalledWith("tok1", false));
     expect(useBrowser.getState().notice).toBeNull();
+    cleanup();
+    useCredentialPrompt.setState({ byTab: { t1: { ...save, kind: "update" } } });
+    render(<CredentialPromptCard tabId="t1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+    await waitFor(() => expect(useBrowser.getState().notice).toBe("Updated the password for github.com"));
   });
 
   it("fills the chosen login when several are saved", async () => {

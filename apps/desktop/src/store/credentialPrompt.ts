@@ -39,7 +39,8 @@ export const useCredentialPrompt = create<CredentialPromptStore>((set, get) => (
     get().dismiss(prompt.tab_id);
     try {
       const saved = await ipc.passwordsAnswer(prompt.token, save);
-      if (saved) useBrowser.getState().notify(`Saved the login for ${prompt.origin.replace(/^https?:\/\//, "")}`, 3000);
+      const site = prompt.origin.replace(/^https?:\/\//, "");
+      if (saved) useBrowser.getState().notify(prompt.kind === "update" ? `Updated the password for ${site}` : `Saved the login for ${site}`, 3000);
     } catch (e) {
       useBrowser.setState({ error: errorMessage(e) });
     }
