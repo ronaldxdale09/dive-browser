@@ -105,7 +105,7 @@ export function General() {
       <Group title="Import">
         <Row
           label="From another browser"
-          hint="Bookmarks and history from Chrome, Brave, Edge, Arc, Vivaldi, Opera, Firefox or Safari. Passwords stay where they are."
+          hint="Bookmarks, history, passwords and form entries from Chrome, Brave, Edge, Arc, Vivaldi, Opera or Firefox; bookmarks and history from Safari. Cookies and extensions stay behind."
           control={<Button onClick={() => toggle("import", true)}>Import…</Button>}
         />
       </Group>

@@ -25,6 +25,7 @@ bump may change behaviour.
 - The page's corners are slightly rounded where it meets the rail and toolbar, following the Appearance corner setting (square under Sharp). The window behind the chrome is painted in the chrome's ground colour, so nothing black shows through corners or during a resize.
 
 ### Changed
+- Settings › General › Import no longer says passwords stay behind; it lists what comes over from each browser.
 - The device simulator's caption says "viewport 430×739 … shown at 76%", so the size under the device name is not mistaken for the screen size.
 - The empty Extensions panel says where an unpacked extension comes from: the source from GitHub, or the folder Chrome, Brave or Edge keeps installed extensions in.
 - New workspace: "Separate cookies and logins" reads "Separate cookies and sign-ins", and its note says saved passwords and form entries stay shared across the profile.
