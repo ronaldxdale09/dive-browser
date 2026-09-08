@@ -129,9 +129,9 @@ export function WorkspaceDialog() {
             <input type="checkbox" checked={separate} onChange={(e) => setSeparate(e.target.checked)} className="mt-0.5 accent-highlight" />
             <span>
               <span className="flex items-center gap-1.5 text-ink">
-                <Icon icon={Shield} size={12} /> Separate cookies and logins
+                <Icon icon={Shield} size={12} /> Separate cookies and sign-ins
               </span>
-              <span className="text-[11px] text-ink-3">Its own browser profile, so you can be signed in as two people at once.</span>
+              <span className="text-[11px] text-ink-3">Its own cookie jar, so you can be signed in as two people at once. Saved passwords and form entries stay shared across this profile.</span>
             </span>
           </label>
         )}
