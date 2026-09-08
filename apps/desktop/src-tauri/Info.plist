@@ -43,6 +43,8 @@
   <string>Sites you visit may use Bluetooth for passkeys, security keys, or Web Bluetooth devices.</string>
   <key>NSBluetoothPeripheralUsageDescription</key>
   <string>Sites you visit may use Bluetooth for passkeys, security keys, or Web Bluetooth devices.</string>
+  <key>NSHumanReadableCopyright</key>
+  <string>© 2026 Dive contributors. MIT License.</string>
   <key>NSCameraUsageDescription</key>
   <string>Pages you visit may ask to use the camera.</string>
   <key>NSMicrophoneUsageDescription</key>

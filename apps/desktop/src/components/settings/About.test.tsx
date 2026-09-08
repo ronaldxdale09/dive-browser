@@ -12,6 +12,15 @@ afterEach(() => {
   useUpdates.setState(initial, true);
 });
 
+describe("About header", () => {
+  it("leads with the mark, the name and the version", () => {
+    render(<About info={info("release")} />);
+    expect(screen.getByText("Dive")).toBeTruthy();
+    expect(screen.getByTestId("about-summary").textContent).toContain("Version 0.1.16");
+    expect(screen.getByTestId("about-summary").textContent).toContain(engineLabel());
+  });
+});
+
 describe("About updates", () => {
   it("says a dev build has no updater instead of offering a check", () => {
     render(<About info={info("dev")} />);

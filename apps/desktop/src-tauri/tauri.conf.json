@@ -37,7 +37,11 @@
       "minimumSystemVersion": "13.0",
       "entitlements": "entitlements.plist"
     },
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "copyright": "© 2026 Dive contributors. MIT License.",
+    "shortDescription": "The browser built for developers",
+    "longDescription": "A Chromium browser with a workspace per project, a developer toolkit beside the page, and an agent that can work in your tabs.",
+    "category": "DeveloperTool"
   },
   "plugins": {
     "updater": {

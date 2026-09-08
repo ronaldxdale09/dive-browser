@@ -7,6 +7,7 @@ import { useUpdates } from "../../store/updates";
 import { Icon } from "../Icon";
 import { Button, Group, Row } from "../SettingsFields";
 import { CopyBlock } from "./CopyBlock";
+import logo from "../../assets/logo.png";
 
 /** "Chromium 151 · CEF" from the chrome's own user agent; the engine is what runs this very page. */
 export function engineLabel(userAgent: string = navigator.userAgent): string {
@@ -18,8 +19,17 @@ export function engineLabel(userAgent: string = navigator.userAgent): string {
 export function About({ info }: { info: AppInfo | null }) {
   return (
     <>
+      <div className="mb-4 flex items-center gap-3.5 rounded-2xl border border-line bg-surface-2/50 px-4 py-3.5">
+        <img src={logo} alt="" width={44} height={44} className="size-11 shrink-0" />
+        <div className="min-w-0">
+          <p className="text-[13px] font-semibold text-ink">Dive</p>
+          <p className="text-[11px] text-ink-3" data-testid="about-summary">
+            Version {info?.version ?? "…"} · {engineLabel()}
+          </p>
+          <p className="text-[10.5px] text-ink-3">The browser built for developers. MIT licensed; Chromium under its own terms.</p>
+        </div>
+      </div>
       <Group title="This build">
-        <Row label="Version" control={<span className="font-mono text-[11px] text-ink-2 select-text">{info?.version ?? "…"}</span>} />
         <Row label="Engine" hint="Chromium through CEF, one process tree per container." control={<span className="font-mono text-[11px] text-ink-2 select-text">{engineLabel()}</span>} />
         <Row
           stacked
