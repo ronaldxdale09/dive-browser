@@ -1,4 +1,4 @@
-import { ChevronRight, ExternalLink, Play } from "lucide-react";
+import { ChevronRight, ExternalLink, Locate, Play } from "lucide-react";
 import { useState } from "react";
 import { ipc } from "../lib/ipc";
 import type { A11yReport } from "../lib/ipc";
@@ -18,7 +18,12 @@ const IMPACT: Record<string, string> = {
 export function A11yPanel() {
   const activeTab = useBrowser((s) => s.activeTab);
   const url = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.url);
-  const [report, setReport] = useState<A11yReport | null>(null);
+  const openTab = useBrowser((s) => s.openTab);
+  const [missing, setMissing] = useState<string | null>(null);
+  // One report per tab, so switching tabs never shows another page's
+  // findings, and switching back keeps the ones already gathered.
+  const [reports, setReports] = useState<Record<string, A11yReport>>({});
+  const report = activeTab ? (reports[activeTab] ?? null) : null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,13 +31,26 @@ export function A11yPanel() {
     if (!activeTab) return;
     setBusy(true);
     setError(null);
+    setMissing(null);
     try {
       const { default: axeSource } = await import("axe-core/axe.min.js?raw");
-      setReport(await ipc.tabA11y(activeTab, axeSource));
+      const next = await ipc.tabA11y(activeTab, axeSource);
+      setReports((all) => ({ ...all, [activeTab]: next }));
     } catch (e) {
       setError(errorMessage(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Scroll the page to the offending element and flash it. A selector that
+  // no longer matches (the page changed) is reported instead of ignored.
+  const reveal = async (selector: string) => {
+    if (!activeTab) return;
+    try {
+      setMissing((await ipc.tabA11yReveal(activeTab, selector)) ? null : selector);
+    } catch (e) {
+      setError(errorMessage(e));
     }
   };
 
@@ -69,14 +87,33 @@ export function A11yPanel() {
               <span className={`w-16 shrink-0 font-mono text-[10px] uppercase ${IMPACT[v.impact] ?? "text-ink-2"}`}>{v.impact}</span>
               <span className="flex-1 text-ink">{v.help}</span>
               <span className="font-mono text-[10px] text-ink-3">{v.count}×</span>
-              <a href={v.help_url} target="_blank" rel="noreferrer" className="text-ink-3 hover:text-ink" aria-label={`Docs for ${v.id}`}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  void openTab(v.help_url);
+                }}
+                className="rounded text-ink-3 hover:text-ink focus-visible:ring-2 focus-visible:ring-highlight"
+                aria-label={`Docs for ${v.id}`}
+                title="Open the rule's documentation in a new tab"
+              >
                 <Icon icon={ExternalLink} size={11} />
-              </a>
+              </button>
             </summary>
             <ul className="mt-1 ml-[88px] text-[11px] text-ink-2">
               {v.targets.map((t, i) => (
                 <li key={t} className="py-0.5">
-                  <div className="truncate font-mono" title={t}>{t}</div>
+                  <button
+                    type="button"
+                    onClick={() => void reveal(t)}
+                    className="flex max-w-full items-center gap-1.5 rounded font-mono text-ink-2 hover:text-ink focus-visible:ring-2 focus-visible:ring-highlight"
+                    aria-label={`Show ${t} in the page`}
+                    title="Scroll the page to this element"
+                  >
+                    <Icon icon={Locate} size={11} className="shrink-0 text-ink-3" />
+                    <span className="truncate">{t}</span>
+                  </button>
+                  {missing === t && <p className="mt-0.5 text-[10.5px] text-warn">Not on the page any more. Run the audit again.</p>}
                   {v.notes[i] && <p className="mt-0.5 whitespace-pre-line text-[10.5px] leading-snug text-ink-3">{v.notes[i]}</p>}
                 </li>
               ))}

@@ -330,6 +330,8 @@ export const commands = {
 	tabMeta: (id: TabId) => typedError<MetaSnapshot, AppError>(__TAURI_INVOKE("tab_meta", { id })),
 	/**  Run axe-core (source supplied by the chrome) and return violations. */
 	tabA11y: (id: TabId, axeSource: string) => typedError<A11yReport, AppError>(__TAURI_INVOKE("tab_a11y", { id, axeSource })),
+	/**  Scroll to the first element matching `selector` and flash it. */
+	tabA11yReveal: (id: TabId, selector: string) => typedError<boolean, AppError>(__TAURI_INVOKE("tab_a11y_reveal", { id, selector })),
 	/**  Find in page: select match `index` (1-based, wraps) of `query`; empty query clears. */
 	tabFind: (id: TabId, query: string, index: number) => typedError<FindResult, AppError>(__TAURI_INVOKE("tab_find", { id, query, index })),
 	/**  Web Vitals from buffered performance entries. */

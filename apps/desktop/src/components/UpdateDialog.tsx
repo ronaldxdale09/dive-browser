@@ -2,6 +2,7 @@ import { ArrowUpCircle, ExternalLink, Loader2, RefreshCw, X } from "lucide-react
 import { useCallback, useRef, useState } from "react";
 import { REPO_URL } from "../lib/constants";
 import { useFocusTrap } from "../lib/useFocusTrap";
+import { useBrowser } from "../store/browser";
 import { useUpdates } from "../store/updates";
 import { Icon } from "./Icon";
 
@@ -18,6 +19,7 @@ export function UpdateDialog() {
   const dismissed = useUpdates((s) => s.dismissed);
   const dismiss = useUpdates((s) => s.dismiss);
   const install = useUpdates((s) => s.install);
+  const openTab = useBrowser((s) => s.openTab);
 
   const [exiting, setExiting] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -84,15 +86,14 @@ export function UpdateDialog() {
       )}
 
       <div className="mt-4 flex items-center gap-2 border-t border-line pt-3">
-        <a
-          href={`${REPO_URL}/releases/tag/${versionString}`}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-ink-3 hover:text-ink"
+        <button
+          type="button"
+          onClick={() => void openTab(`${REPO_URL}/releases/tag/${versionString}`)}
+          className="inline-flex items-center gap-1 rounded text-xs text-ink-3 hover:text-ink focus-visible:ring-2 focus-visible:ring-highlight"
         >
           Release notes
           <Icon icon={ExternalLink} size={11} />
-        </a>
+        </button>
         <span className="flex-1" />
         <button
           type="button"

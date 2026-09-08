@@ -108,4 +108,17 @@ describe("crowded strip", () => {
     expect(other.className).toContain("min-w-9");
     expect(other.className).not.toContain("min-w-32");
   });
+
+  it("keeps the active tab's title when the others are down to a favicon", () => {
+    const many = Array.from({ length: 8 }, (_, i) => ({ ...tab, id: `t${i}`, position: i, title: `Tab ${i}` }));
+    useBrowser.setState({ tabs: many, activeTab: "t3", activeWorkspace: "w1" });
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ width: 60, height: 30, top: 0, left: 0, right: 60, bottom: 30, x: 0, y: 0, toJSON: () => ({}) } as DOMRect);
+    render(<TabStrip />);
+    const active = screen.getByRole("tab", { selected: true });
+    const other = screen.getByRole("tab", { name: /^Tab 1/ });
+    expect(active.textContent).toContain("Tab 3");
+    expect(other.textContent).not.toContain("Tab 1");
+    expect(other.getAttribute("title")).toBe("Tab 1");
+    rect.mockRestore();
+  });
 });

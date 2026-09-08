@@ -250,9 +250,13 @@ export function roveTab(key: string, list: HTMLElement, target: EventTarget | nu
   return j === -1 ? null : (tabs[j] ?? null);
 }
 
-/** Below this width a tab drops its close button, and below the second its title, like Chrome's. */
+/**
+ * Below this width a tab drops its close button, and below the second its
+ * title, like Chrome's. The title goes once fewer than about four characters
+ * fit beside the favicon: "L…" says less than the icon alone.
+ */
 const CLOSE_MIN = 88;
-const TITLE_MIN = 56;
+const TITLE_MIN = 72;
 
 /**
  * Every unpinned tab is the same width, so watching one is enough to know
@@ -341,6 +345,9 @@ export function revealScrollLeft(list: { left: number; right: number; scrollLeft
  * tick of any tab, and each tab only needs its own boolean.
  */
 const SortableTab = memo(function SortableTab({ tab: t, active, loading, detached, inSplit, narrow, inTabOrder, onFocus: focusTab, onActivate: activateTab, onClose: closeTab, onMenu: openMenu }: { tab: Tab; active: boolean; loading: boolean; detached: boolean; inSplit: boolean; narrow: Narrow; inTabOrder: boolean; onFocus: (id: string) => void; onActivate: (id: string) => void; onClose: (id: string) => void; onMenu: (id: string, x: number, y: number) => void }) {
+  // The active tab keeps its title however crowded the strip gets; only the
+  // others fall back to a bare favicon.
+  const bare = narrow.title && !active;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id });
   const onFocus = () => focusTab(t.id);
   const onActivate = () => activateTab(t.id);
@@ -367,7 +374,7 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
       // A crowded strip squeezes every tab alike, and the active one also
       // holds its close button, so its title went first. It keeps room for a
       // few words; the others give way, as in every browser's strip.
-      className={`tab-item group flex h-[calc(var(--row-h)-4px)] cursor-pointer items-center text-xs transition-colors ${pinned ? "w-9 shrink-0 justify-center" : `${active && !narrow.title ? "min-w-32" : "min-w-9"} w-56 max-w-56 shrink ${narrow.title ? "justify-center" : ""}`} ${sleeping || detached ? "opacity-55 hover:opacity-100" : ""}`}
+      className={`tab-item group flex h-[calc(var(--row-h)-4px)] cursor-pointer items-center text-xs transition-colors ${pinned ? "w-9 shrink-0 justify-center" : `${active ? "min-w-32" : "min-w-9"} w-56 max-w-56 shrink ${bare ? "justify-center" : ""}`} ${sleeping || detached ? "opacity-55 hover:opacity-100" : ""}`}
       data-active={active || undefined}
       title={detached ? `${label(t)} (in its own window)` : sleeping ? `${label(t)} (sleeping, click to wake)` : pinned ? label(t) : undefined}
       data-sleeping={sleeping || undefined}
@@ -408,8 +415,8 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
         data-detached={detached || undefined}
         data-pinned={pinned || undefined}
         // Icon-only tabs still answer "which one is this?" on hover.
-        title={pinned || narrow.title ? label(t) : undefined}
-        className={`flex h-full min-w-0 flex-1 items-center gap-2 rounded-lg bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-highlight focus-visible:ring-inset ${pinned || narrow.title ? "justify-center px-0" : "px-2.5"}`}
+        title={pinned || bare ? label(t) : undefined}
+        className={`flex h-full min-w-0 flex-1 items-center gap-2 rounded-lg bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-highlight focus-visible:ring-inset ${pinned || bare ? "justify-center px-0" : "px-2.5"}`}
       >
         {/* A pinned tab is icon-only, so the site's own mark is the only thing
             left to tell it apart; the pin itself moves to a corner dot. */}
@@ -427,7 +434,7 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
             </span>
           )}
         </span>
-        {!pinned && !narrow.title && <span className="truncate">{label(t)}</span>}
+        {!pinned && !bare && <span className="truncate">{label(t)}</span>}
         {sleeping && !pinned && (
           <span className="grid shrink-0 place-items-center text-ink-3" aria-label="Sleeping">
             <Icon icon={Moon} size={11} />
@@ -438,13 +445,13 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
             <Icon icon={AppWindow} size={11} />
           </span>
         )}
-        {inSplit && !detached && !pinned && !narrow.title && (
+        {inSplit && !detached && !pinned && !bare && (
           <span className="grid shrink-0 place-items-center text-highlight" aria-label="In split view">
             <Icon icon={Columns2} size={11} />
           </span>
         )}
       </button>
-      {!pinned && !narrow.title && (!narrow.close || active) && (
+      {!pinned && !bare && (!narrow.close || active) && (
         <span
           data-close-tab
           data-tauri-drag-region="false"

@@ -570,6 +570,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_storage,
             tab_meta,
             tab_a11y,
+            tab_a11y_reveal,
             tab_find,
             tab_vitals,
             resolve_frame,
@@ -2962,6 +2963,18 @@ pub(crate) async fn tab_a11y(
 ) -> AppResult<crate::a11y::A11yReport> {
     let session = cdp_for(&state, id)?;
     crate::a11y::run(&session, &axe_source).await
+}
+
+/// Scroll to the first element matching `selector` and flash it.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_a11y_reveal(
+    state: State<'_, AppState>,
+    id: TabId,
+    selector: String,
+) -> AppResult<bool> {
+    let session = cdp_for(&state, id)?;
+    crate::a11y::reveal(&session, &selector).await
 }
 
 fn cdp_for(state: &AppState, id: TabId) -> AppResult<dive_cdp::CdpSession> {

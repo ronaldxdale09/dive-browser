@@ -8,6 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- In the A11y panel each failing element is a button that scrolls the page to it and flashes an outline, and a rule's docs link opens as a Dive tab; a report now stays with the tab it was run on instead of following you to the next tab.
 - The Storage panel can delete a cookie or a local or session storage key from its row; the page sees the change at once.
 - Settings › Developer offers a ready `mcp.json` entry for Cursor and other JSON-configured MCP clients, with the token masked on screen and copied whole.
 - In the Downloads list, a saved file's name opens it with the app the system uses for that kind of file; Show still reveals it in the folder.
@@ -53,6 +54,8 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- Crowded tab strips no longer show a single letter and an ellipsis beside each favicon; the active tab keeps its title, the rest show the icon alone.
+- The update dialog's Release notes link opens in a tab (it used to do nothing).
 - Workspace rows in the rail answer Space as well as Enter from the keyboard, and Space no longer scrolls the rail.
 - Closing the device simulator with its X shows the page at full size again; before, the phone stayed applied with the panel gone. Escape still just hides the device list.
 - Popovers (downloads, bookmark, profile, protection, build badge) close when focus moves elsewhere, so ⌘F or ⌘L no longer opens a bar underneath one; closing the find bar hands keyboard focus back to the page.

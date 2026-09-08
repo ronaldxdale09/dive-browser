@@ -64,6 +64,36 @@ pub async fn run(session: &CdpSession, axe_source: &str) -> AppResult<A11yReport
     Ok(parse_report(&serde_json::from_str(raw).unwrap_or_default()))
 }
 
+/// Scroll the first element matching `selector` into view and flash an
+/// outline around it, so a finding can be located on the page. `false`
+/// means nothing matched (the page changed since the audit).
+pub async fn reveal(session: &CdpSession, selector: &str) -> AppResult<bool> {
+    let result = session
+        .call(
+            "Runtime.evaluate",
+            json!({"expression": reveal_script(selector), "returnByValue": true}),
+        )
+        .await
+        .map_err(AppError::new)?;
+    if let Some(details) = result.get("exceptionDetails") {
+        return Err(AppError::new(
+            details["exception"]["description"]
+                .as_str()
+                .unwrap_or("could not reach the element"),
+        ));
+    }
+    Ok(result["result"]["value"].as_bool().unwrap_or(false))
+}
+
+/// The page-side script for [`reveal`]. The selector travels as a JSON
+/// string literal so quotes and backslashes inside it cannot break out.
+pub fn reveal_script(selector: &str) -> String {
+    let literal = serde_json::to_string(selector).unwrap_or_else(|_| "\"\"".into());
+    format!(
+        "(() => {{ const el = document.querySelector({literal}); if (!el) return false;          el.scrollIntoView({{block: 'center', inline: 'center'}});          const r = el.getBoundingClientRect(); const box = document.createElement('div');          box.setAttribute('data-dive-reveal', '');          box.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;box-sizing:border-box;' +            'border:2px solid #ff8a3d;border-radius:4px;box-shadow:0 0 0 4px rgba(255,138,61,.35);transition:opacity .4s ease;' +            `left:${{r.left - 4}}px;top:${{r.top - 4}}px;width:${{Math.max(r.width, 4) + 8}}px;height:${{Math.max(r.height, 4) + 8}}px`;          document.querySelectorAll('[data-dive-reveal]').forEach((n) => n.remove());          document.documentElement.appendChild(box);          setTimeout(() => {{ box.style.opacity = '0'; }}, 1400); setTimeout(() => box.remove(), 1900);          return true; }})()"
+    )
+}
+
 /// Map axe's JSON to the report.
 pub fn parse_report(v: &Value) -> A11yReport {
     let rank = |impact: &str| match impact {
@@ -144,5 +174,17 @@ mod tests {
         );
         assert_eq!((r.passes, r.incomplete), (40, 2));
         assert_eq!(parse_report(&json!({})), A11yReport::default());
+    }
+}
+
+#[cfg(test)]
+mod reveal_tests {
+    use super::reveal_script;
+
+    #[test]
+    fn the_selector_is_quoted_as_a_string_literal() {
+        let script = reveal_script("a[href=\"x\"] > span");
+        assert!(script.contains("document.querySelector(\"a[href=\\\"x\\\"] > span\")"));
+        assert!(script.contains("scrollIntoView"));
     }
 }

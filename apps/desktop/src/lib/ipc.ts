@@ -129,6 +129,7 @@ export const ipc = {
   tabVitals: async (id: string) => unwrap(await commands.tabVitals(id)),
   tabFind: async (id: string, query: string, index: number) => unwrap(await commands.tabFind(id, query, index)),
   tabA11y: async (id: string, axeSource: string) => unwrap(await commands.tabA11y(id, axeSource)),
+  tabA11yReveal: async (id: string, selector: string) => unwrap(await commands.tabA11yReveal(id, selector)),
   /** `reload` only when the user agent changed; rotating or zooming keeps the page's state. */
   tabEmulate: async (id: string, device: DeviceInput | null, reload: boolean) => unwrap(await commands.tabEmulate(id, device, reload)),
   tabEnvironment: async (id: string, environment: EnvironmentInput) => unwrap(await commands.tabEnvironment(id, environment)),

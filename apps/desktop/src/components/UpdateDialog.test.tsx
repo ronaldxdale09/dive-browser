@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UpdateDialog } from "./UpdateDialog";
+import { useBrowser } from "../store/browser";
 import { useUpdates } from "../store/updates";
 
 beforeEach(() => {
@@ -43,6 +44,17 @@ describe("UpdateDialog", () => {
     expect(screen.getByText("v0.1.1-rc.0")).toBeTruthy();
     expect(screen.getByText("Major performance upgrade and bug fixes.")).toBeTruthy();
     expect(screen.getByRole("button", { name: /install and restart/i })).toBeTruthy();
+  });
+
+  it("opens the release notes as a Dive tab", () => {
+    const openTab = vi.fn().mockResolvedValue(undefined);
+    const initial = useBrowser.getState();
+    useBrowser.setState({ openTab });
+    useUpdates.setState({ status: "available", update: { version: "0.1.1", notes: "" }, dismissed: false });
+    render(<UpdateDialog />);
+    fireEvent.click(screen.getByRole("button", { name: /release notes/i }));
+    expect(openTab).toHaveBeenCalledWith(expect.stringMatching(/releases\/tag\/v0\.1\.1$/));
+    useBrowser.setState(initial, true);
   });
 
   it("dismisses when clicking later or close", () => {
