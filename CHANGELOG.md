@@ -55,7 +55,7 @@ bump may change behaviour.
 - About: a dev build no longer shows a "Check again" button that did nothing; the note that updates go to release builds stands alone.
 - The menu, palette and shortcuts list call the same actions by the same names: "Copy bug report" (the menu said "Report a bug…", which suggested a form) and "Record a video" (the shortcuts list said "Record tab").
 - Deleting an empty workspace asks "Delete X? It has no open tabs." instead of "close its 0 tabs?".
-- Profile and workspace dialogs name their colour swatches (Mint, Amber, …) for screen readers and tooltips instead of reading out hex codes.
+- Profile and workspace dialogs and the Appearance accent picker name their colour swatches (Mint, Amber, …) for screen readers and tooltips instead of reading out hex codes.
 - Command palette: two tabs on the same page were one row to the keyboard, highlighted together and only the first reachable; each tab row is now distinct.
 - In windows narrower than 960 px, where only one of the dock, agent and picker shows at a time, the Developer dock button no longer lights up for a dock hidden behind the agent, and pressing it swaps the agent for the dock instead of doing nothing visible.
 - The agent composer shows an "Acts without asking" chip when that setting is on, not only for the session-only "Allow all"; clicking it opens the Agent settings.

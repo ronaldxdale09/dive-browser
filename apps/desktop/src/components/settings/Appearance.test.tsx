@@ -85,7 +85,7 @@ describe("Appearance", () => {
 
   it("keeps the accent swatches and adds a custom well", async () => {
     render(<Appearance />);
-    fireEvent.click(screen.getByRole("radio", { name: "#8FB8F0" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Sky" }));
     await waitFor(() => expect(prefs().accent).toBe("#8FB8F0"));
     fireEvent.change(screen.getByLabelText("Custom accent"), { target: { value: "#ff8800" } });
     await waitFor(() => expect(prefs().accent).toBe("#FF8800"));

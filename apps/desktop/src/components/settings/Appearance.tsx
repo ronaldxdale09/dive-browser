@@ -5,6 +5,7 @@ import type { LucideIcon } from "lucide-react";
 import { Icon } from "../Icon";
 import { Button, Group, Row, Segmented, Select, Switch } from "../SettingsFields";
 import { DEFAULT_APPEARANCE, DEFAULT_PREFS, usePrefs } from "../../store/prefs";
+import { colorName } from "../../lib/profileAvatar";
 import type { Prefs } from "../../store/prefs";
 import { CUSTOM_PRESET_ID, PRESETS, contrastRatio, exportTheme, findPreset, importTheme, isHex, presetSeeds, resolveScheme } from "../../lib/theme";
 import type { Preset, Seeds } from "../../lib/theme";
@@ -83,7 +84,8 @@ export function Appearance() {
                     type="button"
                     role="radio"
                     aria-checked={c.toUpperCase() === prefs.accent.toUpperCase()}
-                    aria-label={c === DEFAULT_PREFS.accent ? "Template accent" : c}
+                    aria-label={c === DEFAULT_PREFS.accent ? "Template accent" : colorName(c)}
+                    title={c === DEFAULT_PREFS.accent ? "Template accent" : colorName(c)}
                     onClick={() => set({ accent: c })}
                     className="size-5 rounded-full ring-offset-2 ring-offset-surface aria-checked:ring-2 aria-checked:ring-ink"
                     style={{ background: c }}
