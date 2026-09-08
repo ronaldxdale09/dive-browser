@@ -55,8 +55,14 @@ else:
             env = {**os.environ, 'DIVE_BIN': str(fake), 'RECORDED_ENV': str(recorded), **extra}
             env.pop('DIVE_USE_MOCK_KEYCHAIN', None)
             command = ['bash' if launcher.endswith('.sh') else 'python3', str(scripts / launcher)]
-            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
-            return result, [json.loads(line) for line in recorded.read_text().splitlines()]
+            try:
+                result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+            except subprocess.TimeoutExpired as expired:
+                # Say what the launcher and the fake browser managed to do before the deadline.
+                logs = '\n'.join(f'--- {log}\n{log.read_text(errors="replace")[-4000:]}' for log in sorted((SCRIPTS.parent / 'target').glob('*probe*/*.log')))
+                raise AssertionError(f'{launcher} timed out\nstdout: {(expired.stdout or b"")[-4000:]}\nstderr: {(expired.stderr or b"")[-4000:]}\n{logs}') from None
+            records = [json.loads(line) for line in recorded.read_text().splitlines()] if recorded.exists() else []
+            return result, records
 
     def test_lifecycle_and_negative_startup_use_disposable_keychain(self):
         result, records = self.run_launcher('native_lifecycle_check.py')

@@ -102,7 +102,8 @@ def main():
                 deadline = time.monotonic() + 5
                 while not port_file.read_text().strip():
                     if fixture.poll() is not None or time.monotonic() > deadline:
-                        raise RuntimeError('memory fixture did not start')
+                        detail = (evidence / 'fixture.log').read_text(errors='replace').strip()
+                        raise RuntimeError(f'memory fixture did not start (exit {fixture.poll()}, python {sys.executable}): {detail or "no output"}')
                     time.sleep(0.05)
                 port = int(port_file.read_text().strip())
                 urls = ' '.join(f'http://127.0.0.1:{port}/tab-{i}' for i in range(tabs))

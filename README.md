@@ -17,9 +17,17 @@
 
 <p align="center">
   <a href="https://github.com/ronaldxdale09/dive-browser/releases/latest"><img src="https://img.shields.io/github/v/release/ronaldxdale09/dive-browser?style=flat-square&label=Release&color=0f8f7e" alt="Latest release" /></a>
-  <a href="https://github.com/ronaldxdale09/dive-browser/actions/workflows/ci.yml"><img src="https://github.com/ronaldxdale09/dive-browser/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://bitbucket.org/chromiumembedded/cef"><img src="https://img.shields.io/badge/Chromium-151-4285F4?style=flat-square&logo=googlechrome&logoColor=white" alt="Chromium 151" /></a>
+  <a href="https://github.com/ronaldxdale09/dive-browser/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ronaldxdale09/dive-browser/ci.yml?style=flat-square&label=CI" alt="CI" /></a>
+  <a href="https://github.com/ronaldxdale09/dive-browser/releases"><img src="https://img.shields.io/github/downloads/ronaldxdale09/dive-browser/total?style=flat-square&label=Downloads&color=0f8f7e" alt="Downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT" /></a>
+  <br />
+  <a href="https://bitbucket.org/chromiumembedded/cef"><img src="https://img.shields.io/badge/Chromium-151-4285F4?style=flat-square&logo=googlechrome&logoColor=white" alt="Chromium 151" /></a>
+  <a href="https://tauri.app"><img src="https://img.shields.io/badge/Tauri-v2-24C8DB?style=flat-square&logo=tauri&logoColor=white" alt="Tauri v2" /></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/Rust-2024-DEA584?style=flat-square&logo=rust&logoColor=black" alt="Rust 2024" /></a>
+  <a href="https://react.dev"><img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React 19" /></a>
+  <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" /></a>
+  <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-built--in-8A63D2?style=flat-square" alt="MCP built in" /></a>
+  <img src="https://img.shields.io/badge/Platform-macOS-000000?style=flat-square&logo=apple&logoColor=white" alt="macOS" />
 </p>
 
 <p align="center">
