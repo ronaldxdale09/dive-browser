@@ -77,7 +77,7 @@ export function ProfileChip() {
                 <AvatarImage kind="profile" seed={p.avatar} color={p.color} alt="" width={30} height={30} className="size-[30px] shrink-0 rounded-full" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{p.name}</span>
-                  <span className="block truncate text-[10.5px] text-ink-3">{p.note || `${spacesOf(p.id)} ${spacesOf(p.id) === 1 ? "workspace" : "workspaces"} · ${tabsOf(p.id)} tabs`}</span>
+                  <span className="block truncate text-[10.5px] text-ink-3">{p.note || `${spacesOf(p.id)} ${spacesOf(p.id) === 1 ? "workspace" : "workspaces"} · ${tabsOf(p.id)} ${tabsOf(p.id) === 1 ? "tab" : "tabs"}`}</span>
                 </span>
                 <span className="grid shrink-0 place-items-center text-ink-3" title="Own cookies and logins">
                   <Icon icon={Shield} size={12} />

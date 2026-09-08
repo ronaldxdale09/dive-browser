@@ -28,6 +28,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- The profile menu says "1 tab", not "1 tabs".
 - The main menu closes when anything else opens (find in page, the dock, the agent, a dialog), so a shortcut pressed with the menu open no longer leaves both on screen taking keys.
 - Reopen closed tab (⇧⌘T) puts the tab back where it was in the strip instead of at the end.
 - Private windows no longer offer to save or update a login, and refuse to save one from Settings or a CSV: their store lives in memory, so a password written to the Keychain from there would have been orphaned.

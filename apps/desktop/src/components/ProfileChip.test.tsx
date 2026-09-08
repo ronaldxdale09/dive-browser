@@ -30,6 +30,13 @@ describe("ProfileChip", () => {
     expect(items[1]!.textContent).toContain("ronald@company.com");
   });
 
+  it("counts one workspace and one tab in the singular", () => {
+    useBrowser.setState({ profiles: [personal, { ...work, note: "" }], counts: { home: 3, side: 1, office: 1 } });
+    render(<ProfileChip />);
+    fireEvent.click(screen.getByRole("button", { name: "Profile: Ronald" }));
+    expect(screen.getAllByRole("menuitemradio")[1]!.textContent).toContain("1 workspace · 1 tab");
+  });
+
   it("switches profile through the engine", () => {
     const activate = vi.fn().mockResolvedValue(undefined);
     useBrowser.setState({ activateProfile: activate });
