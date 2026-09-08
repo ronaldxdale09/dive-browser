@@ -1,10 +1,10 @@
 import { isPrivateWindow } from "../lib/privateMode";
 import { PrivateWelcome } from "./PrivateMode";
-import { AlertTriangle, Check, RotateCw, ShieldQuestion, WifiOff, X } from "lucide-react";
+import { AlertTriangle, Check, RotateCw, Search, ShieldQuestion, WifiOff, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
 import { createBoundsReporter, elementBounds } from "../lib/boundsReporter";
-import { describeNavError } from "../lib/navError";
+import { describeNavError, searchTermFor } from "../lib/navError";
 import { useContentPreview, useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
@@ -211,8 +211,11 @@ function PermissionDialog({ tabId, request }: { tabId: string; request: Permissi
 function NavErrorPanel({ url, error }: { url: string; error: string }) {
   useCoversContent(true);
   const reload = useBrowser((s) => s.reload);
+  const navigate = useBrowser((s) => s.navigate);
   const text = describeNavError(error, url);
   const offline = /ERR_INTERNET_DISCONNECTED/.test(error);
+  // A host that does not exist is often a typo for one that does.
+  const term = /ERR_NAME_NOT_RESOLVED/.test(error) ? searchTermFor(url) : "";
   return (
     <div data-native-overlay role="alert" aria-labelledby="nav-error-title" className="absolute inset-0 z-10 grid place-items-center bg-surface p-6">
       <div className="flex w-full max-w-md flex-col items-start gap-3">
@@ -226,9 +229,16 @@ function NavErrorPanel({ url, error }: { url: string; error: string }) {
           {url}
         </p>
         <p className="font-mono text-[11px] text-ink-3">{error}</p>
-        <button type="button" onClick={() => void reload()} className="mt-1 flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-sm text-accent-ink hover:opacity-90">
-          <Icon icon={RotateCw} size={13} /> Retry
-        </button>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => void reload()} className="flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-sm text-accent-ink hover:opacity-90">
+            <Icon icon={RotateCw} size={13} /> Retry
+          </button>
+          {term && (
+            <button type="button" onClick={() => void navigate(term)} className="flex h-8 items-center gap-1.5 rounded-lg border border-line-2 px-3 text-sm text-ink hover:bg-surface-2">
+              <Icon icon={Search} size={13} /> Search for “{term}”
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

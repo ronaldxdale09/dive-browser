@@ -66,3 +66,20 @@ function portOf(url: string): string | null {
     return null;
   }
 }
+
+/**
+ * What to search for when a host does not resolve: its labels without the
+ * top-level domain or a leading "www", joined with spaces so the address
+ * bar treats it as a query, not another host. Empty when there is no host.
+ */
+export function searchTermFor(url: string): string {
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return "";
+  }
+  const labels = host.replace(/^www\./, "").split(".").filter(Boolean);
+  if (labels.length > 1) labels.pop();
+  return labels.join(" ");
+}

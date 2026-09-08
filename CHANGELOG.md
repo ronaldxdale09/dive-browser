@@ -8,6 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- The "site can't be reached" page offers to search the web for the host, since an unresolved name is usually a typo.
 - The tab context menu gains "Duplicate tab" and "Copy address", takes keyboard focus when it opens (arrow keys, Home, End, Escape), and hands focus back to the tab afterwards.
 - The command palette reaches every Settings section by name ("Settings: Passwords & forms …", "Settings: Privacy …") and the default-browser offer; the import command names passwords and form entries.
 - The "Saved …" notice after a download has a "Show in Finder" button and stays a little longer.

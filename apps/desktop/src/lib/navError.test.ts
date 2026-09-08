@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeNavError } from "./navError";
+import { describeNavError, searchTermFor } from "./navError";
 
 describe("describeNavError", () => {
   it("names the common failures", () => {
@@ -23,5 +23,12 @@ describe("describeNavError", () => {
 
   it("explains a block as Dive's own doing", () => {
     expect(describeNavError("net::ERR_BLOCKED_BY_CLIENT", "https://httpbin.org/api/ping").title).toBe("Blocked by Dive");
+  });
+
+  it("turns an unresolved host into a search term without its domain suffix", () => {
+    expect(searchTermFor("http://nonexistent-host-dive.invalid/page")).toBe("nonexistent-host-dive");
+    expect(searchTermFor("https://www.docs.example.com/")).toBe("docs example");
+    expect(searchTermFor("https://intranet/")).toBe("intranet");
+    expect(searchTermFor("not a url")).toBe("");
   });
 });
