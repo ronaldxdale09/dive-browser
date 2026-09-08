@@ -14,6 +14,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- Clicking the Dock icon while the window is minimized brings it back; the app ignored that click.
 - Settings › Appearance: with a dark-only or light-only template the Mode control shows the scheme the template forces instead of "System".
 - The chrome could shift sideways, leaving no margin on the right and hiding the Menu button and the tab-search chevron: revealing the active tab scrolled every scrollable ancestor, and anything poking past the right edge let the document move. The chrome is now clipped, and only the tab strip itself scrolls.
 

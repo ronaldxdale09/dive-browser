@@ -87,6 +87,32 @@ pub const CHROME_LABEL: &str = "chrome";
 /// Label of the main window.
 pub const MAIN_WINDOW: &str = "main";
 
+/// Bring a window back for a Dock click: unminimize the main window (or the
+/// first one still around), else open a fresh one.
+#[cfg(target_os = "macos")]
+fn reopen_window(app: &tauri::AppHandle<Runtime>) {
+    use tauri::Manager as _;
+    let windows = app.windows();
+    let window = windows
+        .get(MAIN_WINDOW)
+        .or_else(|| windows.values().next())
+        .cloned();
+    match window {
+        Some(window) => {
+            if window.is_minimized().unwrap_or(false) {
+                let _ = window.unminimize();
+            }
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        None => {
+            if let Err(error) = commands::window_open_local(app.clone()) {
+                tracing::warn!(%error, "could not open a window for the Dock click");
+            }
+        }
+    }
+}
+
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StartupMilestonePayload {
@@ -386,6 +412,18 @@ pub fn run() {
                     api.prevent_exit();
                     drain_export_exit(app.clone(), registry, code.unwrap_or(0));
                 }
+            }
+        }
+        // A click on the Dock icon while every window is minimized (or none
+        // is left). The runtime leaves this to the app, so without it the
+        // click did nothing and the window stayed in the Dock.
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } => {
+            if !has_visible_windows {
+                reopen_window(app);
             }
         }
         tauri::RunEvent::Exit => tracing::info!("event loop exited"),
