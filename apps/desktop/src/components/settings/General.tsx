@@ -36,7 +36,7 @@ export function General() {
               options={[
                 { value: "restore", label: "Last tab" },
                 { value: "home", label: "Home page" },
-                { value: "none", label: "Nothing" },
+                { value: "none", label: "Start screen" },
               ]}
             />
           }
@@ -44,7 +44,7 @@ export function General() {
         <Row
           label="Home page"
           htmlFor="pref-homepage"
-          hint="Opened at launch when “Home page” is chosen above. Leave it empty for the welcome screen."
+          hint="Opened at launch when “Home page” is chosen above. Leave it empty and the start screen opens instead."
           control={
             <TextInput
               id="pref-homepage"
