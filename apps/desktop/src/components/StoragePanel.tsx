@@ -1,9 +1,10 @@
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { ipc } from "../lib/ipc";
 import { useTabData } from "../lib/useTabData";
 import { useBrowser } from "../store/browser";
-import { IconButton } from "./Icon";
+import { Icon, IconButton } from "./Icon";
+import { errorMessage } from "../lib/errors";
 import { ReadError } from "./ReadError";
 
 /**
@@ -29,6 +30,15 @@ export function StoragePanel() {
       ? (data?.cookies ?? []).map((c) => [c.name, c.value, `${c.domain}${c.path}${c.http_only ? " · HttpOnly" : ""}${c.secure ? " · Secure" : ""}${c.same_site ? ` · ${c.same_site}` : ""}`])
       : (section === "local" ? (data?.local ?? []) : (data?.session ?? [])).map(([k, v]) => [k, v, ""]),
   );
+  // Delete a row: a cookie by its name, domain and path (two cookies can share a name), a key otherwise.
+  const remove = (key: string, meta: string) => {
+    if (!activeTab) return;
+    const cookie = section === "cookies" ? (data?.cookies ?? []).find((c) => c.name === key && meta.startsWith(`${c.domain}${c.path}`)) : undefined;
+    void ipc
+      .tabStorageDelete(activeTab, section, key, cookie?.domain ?? null, cookie?.path ?? null)
+      .then(refresh)
+      .catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -58,10 +68,18 @@ export function StoragePanel() {
           </div>
         )}
         {rows.map(([k, v, meta]) => (
-          <div key={k + meta} className="flex gap-3 border-b border-line/60 px-3 py-0.5">
+          <div key={k + meta} className="group flex items-center gap-3 border-b border-line/60 px-3 py-0.5">
             <span className="w-48 shrink-0 truncate text-ink" title={k}>{k}</span>
             <span className="min-w-0 flex-1 truncate text-ink-2" title={v}>{v}</span>
             {meta && <span className="shrink-0 text-ink-3">{meta}</span>}
+            <button
+              type="button"
+              aria-label={`Delete ${k}`}
+              onClick={() => remove(k, meta)}
+              className="grid size-5 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100"
+            >
+              <Icon icon={Trash2} size={11} />
+            </button>
           </div>
         ))}
       </div>

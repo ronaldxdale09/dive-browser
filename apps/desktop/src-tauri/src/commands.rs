@@ -607,6 +607,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             downloads_open,
             tab_focus,
             mcp_token,
+            tab_storage_delete,
             dev_servers,
             dev_servers_watch,
             history_search,
@@ -2662,6 +2663,30 @@ pub(crate) async fn tab_storage(
     let url = lock(&state.store).tab(id)?.url;
     let session = cdp_for(&state, id)?;
     crate::storage::snapshot(&session, &url).await
+}
+
+/// Remove a cookie or a web-storage key from the Storage panel.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_storage_delete(
+    state: State<'_, AppState>,
+    id: TabId,
+    section: String,
+    key: String,
+    domain: Option<String>,
+    path: Option<String>,
+) -> AppResult<()> {
+    let url = lock(&state.store).tab(id)?.url;
+    let session = cdp_for(&state, id)?;
+    crate::storage::delete(
+        &session,
+        &url,
+        &section,
+        &key,
+        domain.as_deref(),
+        path.as_deref(),
+    )
+    .await
 }
 
 /// Find in page: select match `index` (1-based, wraps) of `query`; empty query clears.

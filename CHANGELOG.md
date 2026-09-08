@@ -8,6 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- The Storage panel can delete a cookie or a local or session storage key from its row; the page sees the change at once.
 - Settings › Developer offers a ready `mcp.json` entry for Cursor and other JSON-configured MCP clients, with the token masked on screen and copied whole.
 - In the Downloads list, a saved file's name opens it with the app the system uses for that kind of file; Show still reveals it in the folder.
 - Settings › About opens with the Dive mark, the name, the version and the engine on one line, and the bundle now carries a copyright line, a description and the Developer Tools category, so Finder's Get Info and the App Store category are no longer blank.

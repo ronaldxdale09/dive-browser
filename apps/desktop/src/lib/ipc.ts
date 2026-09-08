@@ -157,6 +157,8 @@ export const ipc = {
   downloadsOpen: async (path: string) => unwrap(await commands.downloadsOpen(path)),
   tabFocus: async (id: string) => unwrap(await commands.tabFocus(id)),
   mcpToken: async () => unwrap(await commands.mcpToken()),
+  tabStorageDelete: async (id: string, section: "cookies" | "local" | "session", key: string, domain: string | null, path: string | null) =>
+    unwrap(await commands.tabStorageDelete(id, section, key, domain, path)),
   tabRecordStart: async (id: string) => unwrap(await commands.tabRecordStart(id)),
   tabRecordStop: (id: string) => commands.tabRecordStop(id),
   tabOpenapi: async (id: string) => unwrap(await commands.tabOpenapi(id)),

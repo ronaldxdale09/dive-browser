@@ -37,3 +37,18 @@ describe("StoragePanel", () => {
     expect(screen.queryByText("Key")).toBeNull();
   });
 });
+
+describe("StoragePanel deletes", () => {
+  it("removes a cookie by name, domain and path, and a storage key by name, then reads again", async () => {
+    const del = vi.spyOn(ipc, "tabStorageDelete").mockResolvedValue(null as never);
+    render(<StoragePanel />);
+    await screen.findByText("session");
+    const reads = vi.mocked(ipc.tabStorage).mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Delete session" }));
+    expect(del).toHaveBeenCalledWith("t1", "cookies", "session", "a.test", "/");
+    await vi.waitFor(() => expect(vi.mocked(ipc.tabStorage).mock.calls.length).toBeGreaterThan(reads));
+    fireEvent.click(screen.getByRole("button", { name: "Local (1)" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete theme" }));
+    expect(del).toHaveBeenCalledWith("t1", "local", "theme", null, null);
+  });
+});

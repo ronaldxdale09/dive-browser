@@ -80,6 +80,54 @@ async fn storage_items(
     Ok(parse_items(&result))
 }
 
+/// Remove one entry: a cookie by name, domain and path, or a web-storage
+/// key for the page's origin. The page sees the change at once.
+pub async fn delete(
+    session: &CdpSession,
+    url: &str,
+    section: &str,
+    key: &str,
+    domain: Option<&str>,
+    path: Option<&str>,
+) -> AppResult<()> {
+    match section {
+        "cookies" => {
+            let mut params = json!({"name": key});
+            if let Some(domain) = domain {
+                params["domain"] = json!(domain);
+            }
+            if let Some(path) = path {
+                params["path"] = json!(path);
+            }
+            if domain.is_none() {
+                params["url"] = json!(url);
+            }
+            session
+                .call("Network.deleteCookies", params)
+                .await
+                .map_err(AppError::new)?;
+        }
+        "local" | "session" => {
+            let origin = url::Url::parse(url)
+                .ok()
+                .map(|u| u.origin().ascii_serialization())
+                .unwrap_or_default();
+            if origin.is_empty() || origin == "null" {
+                return Err(AppError::new("this page has no storage of its own"));
+            }
+            session
+                .call(
+                    "DOMStorage.removeDOMStorageItem",
+                    json!({"storageId": {"securityOrigin": origin, "isLocalStorage": section == "local"}, "key": key}),
+                )
+                .await
+                .map_err(AppError::new)?;
+        }
+        other => return Err(AppError::new(format!("unknown storage section: {other}"))),
+    }
+    Ok(())
+}
+
 /// `Network.getCookies` result to rows.
 pub fn parse_cookies(result: &Value) -> Vec<Cookie> {
     result["cookies"]

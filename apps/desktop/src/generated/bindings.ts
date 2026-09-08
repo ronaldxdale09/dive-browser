@@ -451,6 +451,8 @@ export const commands = {
 	 *  reach commands.
 	 */
 	mcpToken: () => typedError<string, AppError>(__TAURI_INVOKE("mcp_token")),
+	/**  Remove a cookie or a web-storage key from the Storage panel. */
+	tabStorageDelete: (id: TabId, section: string, key: string, domain: string | null, path: string | null) => typedError<null, AppError>(__TAURI_INVOKE("tab_storage_delete", { id, section, key, domain, path })),
 	/**  Dev servers listening on localhost, discovered from the OS socket table. */
 	devServers: () => typedError<DevServer[], AppError>(__TAURI_INVOKE("dev_servers")),
 	/**  Enable or disable low-frequency dev-server change events while a panel is open. */
