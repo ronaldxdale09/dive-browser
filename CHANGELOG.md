@@ -8,6 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- Tab strip: when tabs scroll out of the strip (its scrollbar is hidden), a "+N" chip after the new-tab button says how many are out of view and opens tab search; the active tab is scrolled into view whenever it changes.
 - The Playwright recorder is reachable from the chrome: "Record steps as a
   Playwright test" in the browser menu and palette starts recording the
   current tab, a toolbar button shows it is on, and stopping opens the spec

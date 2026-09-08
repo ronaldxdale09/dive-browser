@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { essentialTabs, orderTabs, roveTab, splitAction, tabLabel, TabStrip } from "./TabStrip";
+import { countOutOfView, essentialTabs, orderTabs, roveTab, splitAction, tabLabel, TabStrip } from "./TabStrip";
 import type { Tab } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { ipc } from "../lib/ipc";
@@ -129,6 +129,23 @@ describe("TabStrip controls", () => {
     fireEvent.click(screen.getByRole("button", { name: "New tab" }));
 
     expect(toggle).toHaveBeenCalledWith("palette", true);
+  });
+
+  it("counts the tabs scrolled out of the strip", () => {
+    const items = [0, 60, 120, 180, 240].map((offsetLeft) => ({ offsetLeft, offsetWidth: 56 }));
+    expect(countOutOfView({ scrollLeft: 0, clientWidth: 300 }, items)).toBe(0);
+    expect(countOutOfView({ scrollLeft: 0, clientWidth: 200 }, items)).toBe(2);
+    // Scrolled to the end: the first two are gone past the left edge.
+    expect(countOutOfView({ scrollLeft: 100, clientWidth: 200 }, items)).toBe(2);
+    // Rounding slack: a tab flush with the edge still counts as in view.
+    expect(countOutOfView({ scrollLeft: 0, clientWidth: 296.5 }, items)).toBe(0);
+  });
+
+  it("offers a way to the tabs that scrolled out of view, none when they all fit", () => {
+    useBrowser.setState({ tabs: [t("a", "today", 0), t("b", "today", 1)], activeTab: "a", toggle: vi.fn() });
+    render(createElement(TabStrip));
+    // jsdom lays nothing out: every tab is at 0×0, so all are in view.
+    expect(screen.queryByRole("button", { name: /out of view/ })).toBeNull();
   });
 
   it("closes a tab without activating it and keeps controls out of the window drag region", () => {

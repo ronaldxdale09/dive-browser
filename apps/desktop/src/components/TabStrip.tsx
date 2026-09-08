@@ -91,6 +91,7 @@ export function TabStrip() {
   const essentials = useMemo(() => essentialTabs(all), [all]);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [tablistRef, narrow] = useNarrowTabs(tabs.length);
+  const hidden = useHiddenTabs(tablistRef, tabs.length, active);
   // Roving tabindex: one tab is in the Tab order at a time, the focused one
   // if any, else the active one. The arrow keys move focus without activating.
   const [focused, setFocused] = useState<string | null>(null);
@@ -162,6 +163,19 @@ export function TabStrip() {
         </div>
       </SortableContext>
       <IconButton icon={Plus} label="New tab" onClick={() => toggle("palette", true)} />
+      {hidden > 0 && (
+        <button
+          type="button"
+          aria-label={`${hidden} more ${hidden === 1 ? "tab" : "tabs"} out of view. Search tabs`}
+          title={`${hidden} more ${hidden === 1 ? "tab" : "tabs"} out of view · Search tabs (${formatChord(chordsByCommand()["tabs.search"] ?? "")})`}
+          data-tauri-drag-region="false"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => toggle("palette", true)}
+          className="pressable h-6 shrink-0 rounded-full bg-surface-2 px-2 font-mono text-[10.5px] text-ink-2 tabular-nums hover:bg-surface-3 hover:text-ink"
+        >
+          +{hidden}
+        </button>
+      )}
       <div className="min-w-3 flex-1 self-stretch" data-tauri-drag-region="true" />
       {menu && (
         <TabMenu
@@ -256,6 +270,41 @@ function useNarrowTabs(count: number): [React.RefObject<HTMLDivElement | null>, 
 
 type Narrow = { close: boolean; title: boolean };
 
+/** Which of a scrolling list's children lie wholly or partly outside its viewport. */
+export function countOutOfView(list: { scrollLeft: number; clientWidth: number }, items: { offsetLeft: number; offsetWidth: number }[]): number {
+  const left = list.scrollLeft;
+  const right = left + list.clientWidth;
+  return items.filter((item) => item.offsetLeft < left - 1 || item.offsetLeft + item.offsetWidth > right + 1).length;
+}
+
+/**
+ * How many tabs have scrolled out of the strip. The strip hides its
+ * scrollbar, so without this a tab past the edge might as well be closed.
+ * The active tab is also kept in view whenever it changes.
+ */
+function useHiddenTabs(ref: React.RefObject<HTMLDivElement | null>, count: number, active: string | null): number {
+  const [hidden, setHidden] = useState(0);
+  useEffect(() => {
+    const list = ref.current;
+    if (!list) return;
+    const measure = () => setHidden(countOutOfView(list, [...list.querySelectorAll<HTMLElement>('[role="presentation"]')]));
+    measure();
+    list.addEventListener("scroll", measure, { passive: true });
+    const ro = new ResizeObserver(measure);
+    ro.observe(list);
+    return () => {
+      list.removeEventListener("scroll", measure);
+      ro.disconnect();
+    };
+  }, [ref, count]);
+  useEffect(() => {
+    const list = ref.current;
+    const tab = active ? [...(list?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])].find((el) => el.dataset["tabId"] === active) : null;
+    tab?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [ref, active]);
+  return hidden;
+}
+
 /**
  * One tab in the strip. Memoised: the strip re-renders on every load-state
  * tick of any tab, and each tab only needs its own boolean.
@@ -296,6 +345,7 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
         {...attributes}
         {...listeners}
         data-tab-drag-handle
+        data-tab-id={t.id}
         data-tauri-drag-region="false"
         role="tab"
         id={`dive-tab-${t.id}`}
