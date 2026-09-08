@@ -50,6 +50,13 @@ export function StoragePanel() {
       <div className="min-h-0 flex-1 select-text overflow-auto font-mono text-[11.5px] leading-5">
         {error && <ReadError message={error} onRetry={refresh} />}
         {!error && rows.length === 0 && <div className="px-3 py-2 text-ink-3">{activeTab ? "Nothing stored." : "Open a tab to inspect its storage."}</div>}
+        {rows.length > 0 && (
+          <div className="flex gap-3 border-b border-line px-3 py-0.5 font-sans text-[10px] tracking-[0.06em] text-ink-3 uppercase" aria-hidden>
+            <span className="w-48 shrink-0">{section === "cookies" ? "Name" : "Key"}</span>
+            <span className="min-w-0 flex-1">Value</span>
+            {section === "cookies" && <span className="shrink-0">Domain · path · flags</span>}
+          </div>
+        )}
         {rows.map(([k, v, meta]) => (
           <div key={k + meta} className="flex gap-3 border-b border-line/60 px-3 py-0.5">
             <span className="w-48 shrink-0 truncate text-ink" title={k}>{k}</span>
