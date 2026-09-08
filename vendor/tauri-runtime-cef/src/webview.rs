@@ -30,7 +30,7 @@ use crate::window::AppWindow;
 
 pub use crate::reserved_shortcut_native::NativeNewTabTarget;
 pub use browser_client::permission::{NativePermissionRequest, PermissionContext};
-pub use browser_client::{ContextMenuAction, ContextMenuCommand};
+pub use browser_client::{ContextMenuAction, ContextMenuCommand, ContextMenuOptions};
 
 // Weak ownership: the context is released with the last live webview, before
 // CEF shutdown. A data directory is only a grouping key for incognito views;
@@ -72,6 +72,11 @@ impl Webview {
     /// Receive the page context menu choices CEF cannot carry out itself
     /// (open in new tab, copy link, save, and the application's own items).
     /// Called on a CEF thread; hop to the main thread before touching windows.
+    /// Which of the application's own menu items apply on this view.
+    pub fn set_context_menu_options(&self, options: ContextMenuOptions) {
+        self.context_menu.set_options(options);
+    }
+
     pub fn set_context_menu_handler(
         &self,
         handler: impl Fn(browser_client::ContextMenuCommand) + Send + Sync + 'static,

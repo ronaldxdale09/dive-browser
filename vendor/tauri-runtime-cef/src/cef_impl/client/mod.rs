@@ -24,7 +24,9 @@ pub(crate) mod permission;
 mod process;
 
 use context_menu::TauriCefContextMenuHandler;
-pub use context_menu::{ContextMenuAction, ContextMenuBridge, ContextMenuCommand};
+pub use context_menu::{
+    ContextMenuAction, ContextMenuBridge, ContextMenuCommand, ContextMenuOptions,
+};
 use display::TauriCefDisplayHandler;
 use download::TauriCefDownloadHandler;
 use drag::TauriCefDragHandler;

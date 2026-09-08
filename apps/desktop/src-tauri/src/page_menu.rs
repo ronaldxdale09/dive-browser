@@ -5,7 +5,7 @@
 //! Print, View Source and the editing commands itself.
 
 use tauri::{AppHandle, Manager};
-use tauri_runtime_cef::{ContextMenuAction, ContextMenuCommand};
+use tauri_runtime_cef::{ContextMenuAction, ContextMenuCommand, ContextMenuOptions};
 use tauri_specta::Event;
 
 use dive_core::TabId;
@@ -19,6 +19,10 @@ use crate::state::{AppState, lock};
 pub fn attach(app: &AppHandle<Runtime>, tab_id: TabId, view: &tauri::Webview<Runtime>) {
     let app = app.clone();
     if let Err(error) = view.with_webview(move |native| {
+        // A private window refuses the agent, so the menu does not offer it.
+        native.set_context_menu_options(ContextMenuOptions {
+            agent: !crate::private_session::is_private(),
+        });
         native.set_context_menu_handler(move |command| {
             let app = app.clone();
             let _ = app.clone().run_on_main_thread(move || {

@@ -71,6 +71,19 @@ impl ContextMenuAction {
 
 type Handler = Arc<dyn Fn(ContextMenuCommand) + Send + Sync>;
 
+/// What the application can offer from the menu right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContextMenuOptions {
+    /// Whether "Ask the Agent" applies; a private window has no agent.
+    pub agent: bool,
+}
+
+impl Default for ContextMenuOptions {
+    fn default() -> Self {
+        Self { agent: true }
+    }
+}
+
 /// Where the application's handler for a webview's menu choices lives.
 #[derive(Default)]
 ///
@@ -81,11 +94,20 @@ type Handler = Arc<dyn Fn(ContextMenuCommand) + Send + Sync>;
 pub struct ContextMenuBridge {
     handler: Mutex<Option<Handler>>,
     pending: Mutex<Option<ContextMenuCommand>>,
+    options: Mutex<ContextMenuOptions>,
 }
 
 impl ContextMenuBridge {
     pub fn install(&self, handler: Handler) {
         *self.handler.lock().unwrap() = Some(handler);
+    }
+
+    pub fn set_options(&self, options: ContextMenuOptions) {
+        *self.options.lock().unwrap() = options;
+    }
+
+    pub fn options(&self) -> ContextMenuOptions {
+        *self.options.lock().unwrap()
     }
 
     fn installed(&self) -> bool {
@@ -193,7 +215,9 @@ wrap_context_menu_handler! {
       model.add_separator();
       item(model, ContextMenuAction::QrCode, "Create QR Code for This Page");
       model.add_separator();
-      item(model, ContextMenuAction::AskAgent, "Ask the Agent About This Page");
+      if self.bridge.options().agent {
+        item(model, ContextMenuAction::AskAgent, "Ask the Agent About This Page");
+      }
       item(model, ContextMenuAction::DeviceSimulator, "Device Simulator");
       model.add_separator();
       // CEF's own View Source opens a popup window, which the application
@@ -235,4 +259,26 @@ wrap_context_menu_handler! {
       self.bridge.release();
     }
   }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn options_default_to_everything_and_take_what_the_app_sets() {
+        let bridge = ContextMenuBridge::default();
+        assert!(bridge.options().agent);
+        bridge.set_options(ContextMenuOptions { agent: false });
+        assert!(!bridge.options().agent);
+    }
+
+    #[test]
+    fn action_ids_round_trip_above_the_user_range() {
+        for action in ContextMenuAction::ALL {
+            assert_eq!(ContextMenuAction::from_id(action.id()), Some(action));
+            assert!(action.id() >= cef::sys::cef_menu_id_t::MENU_ID_USER_FIRST as i32);
+        }
+        assert_eq!(ContextMenuAction::from_id(1), None);
+    }
 }

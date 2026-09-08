@@ -37,6 +37,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- The page menu in a private window leaves out "Ask the Agent About This Page", which private windows refuse anyway.
 - Setup: the Import and What's inside steps take keyboard focus on their heading when they appear, instead of leaving focus on the chrome behind the dialog.
 - A tab showing page source keeps its view-source address, so it restores as the source view rather than the page.
 - Closing a tab frees its page again. Since the rounded page corners, the layer-backed CEF view was kept alive by Core Animation after it left the window, so the browser never finished closing and every closed tab left a hidden renderer behind. The view now drops its layer backing and any overlay mask, and gives up first responder, before it is removed.
