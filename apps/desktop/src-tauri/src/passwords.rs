@@ -48,6 +48,21 @@ pub fn for_url(state: &AppState, profile: ProfileId, url: &str) -> AppResult<Vec
     Ok(crate::state::lock(&state.store).credentials_for(profile, &origin)?)
 }
 
+/// Why a private window keeps nothing.
+pub const PRIVATE_SAVE: &str =
+    "Private windows do not keep passwords. Sign in from a normal window to save this login.";
+
+/// A login worth keeping has both halves.
+pub fn check_login(username: &str, password: &str) -> AppResult<()> {
+    if username.trim().is_empty() {
+        return Err(AppError::new("a login needs a username"));
+    }
+    if password.is_empty() {
+        return Err(AppError::new("a login needs a password"));
+    }
+    Ok(())
+}
+
 /// Save (or update the password of) a login for the site of `url`.
 pub fn save(
     state: &AppState,
@@ -56,13 +71,13 @@ pub fn save(
     username: &str,
     password: &str,
 ) -> AppResult<Credential> {
+    check_login(username, password)?;
+    if crate::private_session::is_private() {
+        // The private store is in memory; a Keychain item written now would
+        // outlive its row and never be listed or removed again.
+        return Err(AppError::new(PRIVATE_SAVE));
+    }
     let username = username.trim();
-    if username.is_empty() {
-        return Err(AppError::new("a login needs a username"));
-    }
-    if password.is_empty() {
-        return Err(AppError::new("a login needs a password"));
-    }
     let origin = origin_of(url)?;
     let id = dive_core::TabId::new().to_string();
     let row = crate::state::lock(&state.store).upsert_credential(
@@ -262,6 +277,23 @@ pub fn import_csv(state: &AppState, profile: ProfileId, text: &str) -> AppResult
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_login_needs_both_halves() {
+        assert!(super::check_login("dale", "x").is_ok());
+        assert!(
+            super::check_login("  ", "x")
+                .unwrap_err()
+                .to_string()
+                .contains("username")
+        );
+        assert!(
+            super::check_login("dale", "")
+                .unwrap_err()
+                .to_string()
+                .contains("password")
+        );
+    }
+
     use super::{origin_of, parse_csv, parse_password_csv};
 
     #[test]

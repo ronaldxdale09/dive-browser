@@ -219,7 +219,9 @@ async fn handle(
             }
             .emit(app);
         }
-        "submitted" => {
+        // A private window fills what it knows but never offers to keep a
+        // login: its store is in memory and the Keychain is not.
+        "submitted" if !crate::private_session::is_private() => {
             let url = field(&payload, "url");
             let username = field(&payload, "username");
             let password = field(&payload, "password");

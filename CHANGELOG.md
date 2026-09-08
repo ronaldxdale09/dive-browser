@@ -22,6 +22,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- Private windows no longer offer to save or update a login, and refuse to save one from Settings or a CSV: their store lives in memory, so a password written to the Keychain from there would have been orphaned.
 - Saved logins and form entries follow the profile a tab is in at the moment it asks, so a tab made essential (shown in every workspace) fills from the active profile instead of the one it started in, and never from a profile it has left.
 - Clicking the Dock icon while the window is minimized brings it back; the app ignored that click.
 - Settings › Appearance: with a dark-only or light-only template the Mode control shows the scheme the template forces instead of "System".
