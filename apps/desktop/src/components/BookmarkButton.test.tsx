@@ -26,6 +26,7 @@ beforeEach(() => {
   vi.spyOn(ipc, "bookmarkToggle").mockResolvedValue(true);
   vi.spyOn(ipc, "bookmarkRemove").mockResolvedValue(true);
   vi.spyOn(ipc, "bookmarkRename").mockResolvedValue(null);
+  vi.spyOn(ipc, "bookmarksSearch").mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -55,6 +56,20 @@ describe("BookmarkButton", () => {
     expect(contentCoverDepth()).toBe(1);
     await waitFor(() => expect(ipc.setContentCovered).toHaveBeenCalledWith(true));
     expect(useBrowser.getState().notice).toBeNull();
+  });
+
+  it("opens an existing bookmark as Edit bookmark with the name it was saved under", async () => {
+    vi.mocked(ipc.bookmarkStatus).mockResolvedValue(true);
+    vi.spyOn(ipc, "bookmarksSearch").mockResolvedValue([{ url: tab.url, title: "My docs", created_at: "2026-09-06T00:00:00Z", favicon: null }]);
+    render(<BookmarkButton />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit bookmark" }));
+    await screen.findByRole("dialog", { name: "Edit bookmark" });
+    const title = screen.getByRole("textbox", { name: "Bookmark title" }) as HTMLInputElement;
+    expect(title.value).toBe("My docs");
+    expect(ipc.bookmarkToggle).not.toHaveBeenCalled();
+    // The saved name unchanged: nothing to rename.
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(ipc.bookmarkRename).not.toHaveBeenCalled();
   });
 
   it("saves an edited title through Done", async () => {
@@ -101,7 +116,8 @@ describe("BookmarkButton", () => {
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Edit bookmark" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Edit bookmark" }));
-    await screen.findByRole("dialog", { name: "Bookmark added" });
+    // Reopened on a lit star: the popover is for editing now.
+    await screen.findByRole("dialog", { name: "Edit bookmark" });
     act(() => void fireEvent.mouseDown(document.body));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(ipc.bookmarkRemove).not.toHaveBeenCalled();

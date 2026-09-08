@@ -20,6 +20,10 @@ export function BookmarkButton() {
   const [saved, setSaved] = useState(false);
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
+  // What the bookmark is called now; Done only renames when that changes.
+  const [initial, setInitial] = useState("");
+  // "Bookmark added" the moment the star saves it; "Edit bookmark" when a lit star is opened later.
+  const [editing, setEditing] = useState(false);
   const url = current?.url;
   const root = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -51,21 +55,28 @@ export function BookmarkButton() {
   }, [open]);
 
   const fail = (e: unknown) => useBrowser.setState({ error: errorMessage(e) });
-  const show = (name: string) => {
+  const show = (name: string, edit: boolean) => {
     setTitle(name);
+    setInitial(name);
+    setEditing(edit);
     setOpen(true);
   };
   const onStar = () => {
     if (!current) return;
     if (saved) {
-      show(current.title || current.url);
+      // The saved title may differ from the page's; show what the bookmark is called.
+      const fallback = current.title || current.url;
+      ipc
+        .bookmarksSearch(current.url, 5)
+        .then((found) => show(found.find((b) => b.url === current.url)?.title || fallback, true))
+        .catch(() => show(fallback, true));
       return;
     }
     ipc
       .bookmarkToggle(current.id)
       .then((v) => {
         setSaved(v);
-        if (v) show(current.title || current.url);
+        if (v) show(current.title || current.url, false);
         else useBrowser.getState().notify("Bookmark removed", 2000);
       })
       .catch(fail);
@@ -85,7 +96,7 @@ export function BookmarkButton() {
     if (!current) return;
     const next = title.trim();
     setOpen(false);
-    if (!next || next === (current.title || current.url)) return;
+    if (!next || next === initial) return;
     renameBookmark(current.url, next).catch(fail);
   };
 
@@ -106,10 +117,10 @@ export function BookmarkButton() {
         </button>
       </Tooltip>
       {open && current && (
-        <div ref={panel} role="dialog" aria-label="Bookmark added" className="surface-enter absolute right-0 z-50 mt-1 w-72 rounded-xl border border-line-2 bg-surface p-3 text-xs shadow-2xl">
+        <div ref={panel} role="dialog" aria-label={editing ? "Edit bookmark" : "Bookmark added"} className="surface-enter absolute right-0 z-50 mt-1 w-72 rounded-xl border border-line-2 bg-surface p-3 text-xs shadow-2xl">
           <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">
             <Icon icon={Star} size={11} fill="currentColor" className="text-highlight" />
-            Bookmark added
+            {editing ? "Edit bookmark" : "Bookmark added"}
           </div>
           <form
             onSubmit={(e) => {

@@ -54,6 +54,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Clicking a lit star opens "Edit bookmark" with the name the bookmark was saved under; it used to say "Bookmark added" and show the page's title, so a renamed bookmark looked unrenamed.
 - The Meta panel's social card says "og:image did not load" instead of showing a broken-image glyph, and an absent robots tag reads as the default (index, follow) rather than a red "missing".
 - A request stopped by one of your rules shows as "blocked" in the Network panel rather than "failed", and the Rules panel no longer grows a stray horizontal scrollbar (a hidden tooltip was poking past its edge).
 - The console filter also matches an entry's level and source, so typing "error", "warn" or "network" narrows to those lines; when nothing matches it says so instead of claiming there is no output.
