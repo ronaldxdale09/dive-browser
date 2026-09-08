@@ -3,6 +3,7 @@ import { Shield, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { useBrowser } from "../store/browser";
 import { AVATAR_SEEDS, seedFromName } from "../lib/workspaceAvatar";
+import { colorName } from "../lib/profileAvatar";
 import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
@@ -82,7 +83,8 @@ export function WorkspaceDialog() {
               type="button"
               role="radio"
               aria-checked={c === color}
-              aria-label={c}
+              aria-label={colorName(c)}
+              title={colorName(c)}
               onClick={() => setColor(c)}
               className="size-6 rounded-full ring-offset-2 ring-offset-surface aria-checked:ring-2 aria-checked:ring-ink"
               style={{ background: c }}

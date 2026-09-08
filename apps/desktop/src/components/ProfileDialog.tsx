@@ -1,7 +1,7 @@
 import { AvatarImage } from "./AvatarImage";
 import { Shield, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
-import { PROFILE_COLORS, PROFILE_SEEDS, seedFromProfileName } from "../lib/profileAvatar";
+import { colorName, PROFILE_COLORS, PROFILE_SEEDS, seedFromProfileName } from "../lib/profileAvatar";
 import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
@@ -87,7 +87,7 @@ function ProfileForm({ id }: { id: string | null }) {
         <p className="mt-4 text-[11px] text-ink-2">Colour</p>
         <div role="radiogroup" aria-label="Colour" className="mt-1.5 flex gap-2">
           {PROFILE_COLORS.map((c) => (
-            <button key={c} type="button" role="radio" aria-checked={color === c} aria-label={c} onClick={() => setColor(c)} className={`size-7 rounded-full ring-offset-2 ring-offset-surface ${color === c ? "ring-2 ring-highlight" : ""}`} style={{ background: c }} />
+            <button key={c} type="button" role="radio" aria-checked={color === c} aria-label={colorName(c)} title={colorName(c)} onClick={() => setColor(c)} className={`size-7 rounded-full ring-offset-2 ring-offset-surface ${color === c ? "ring-2 ring-highlight" : ""}`} style={{ background: c }} />
           ))}
         </div>
 
