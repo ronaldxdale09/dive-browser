@@ -67,6 +67,56 @@ pub fn attach(
     )
 }
 
+/// The arguments of one `console.*` call as a line of text. A leading string
+/// is a format string the way the `DevTools` console reads it: `%s`, `%d`,
+/// `%i`, `%f`, `%o`, `%O` and `%j` take the next argument, `%c` takes a style
+/// argument and shows nothing, `%%` is a percent sign. Arguments the format
+/// did not use follow, separated by spaces.
+pub fn join_console_args(args: &[Value]) -> String {
+    let mut texts = args.iter().map(remote_object_text);
+    let Some(first) = texts.next() else {
+        return String::new();
+    };
+    let mut rest = texts.peekable();
+    let formatted = if args[0]["type"].as_str() == Some("string") && first.contains('%') {
+        let mut out = String::with_capacity(first.len());
+        let mut chars = first.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c != '%' {
+                out.push(c);
+                continue;
+            }
+            match chars.peek().copied() {
+                Some('%') => {
+                    chars.next();
+                    out.push('%');
+                }
+                Some('c') => {
+                    chars.next();
+                    // The style argument is consumed and not shown.
+                    rest.next();
+                }
+                Some(d @ ('s' | 'd' | 'i' | 'f' | 'o' | 'O' | 'j')) => {
+                    chars.next();
+                    if let Some(value) = rest.next() {
+                        out.push_str(&value);
+                    } else {
+                        out.push('%');
+                        out.push(d);
+                    }
+                }
+                _ => out.push('%'),
+            }
+        }
+        out
+    } else {
+        first
+    };
+    let mut parts = vec![formatted];
+    parts.extend(rest);
+    parts.join(" ")
+}
+
 /// Translate a CDP event into an entry, if it is console-worthy.
 pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<ConsoleEntry> {
     let p = &event.params;
@@ -80,12 +130,7 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<ConsoleEntry> {
             };
             let text = p["args"]
                 .as_array()
-                .map(|args| {
-                    args.iter()
-                        .map(remote_object_text)
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                })
+                .map(|args| join_console_args(args))
                 .unwrap_or_default();
             let frame = p["stackTrace"]["callFrames"].get(0);
             Some(ConsoleEntry {
@@ -307,5 +352,27 @@ mod tests {
         let entry = map_event(TabId::new(), &event).unwrap();
         assert_eq!(entry.text.chars().count(), MAX_TEXT + 1);
         assert_eq!(entry.url.unwrap().chars().count(), MAX_URL + 1);
+    }
+
+    #[test]
+    fn format_directives_read_as_devtools_shows_them() {
+        let arg = |t: &str, v: &str| json!({"type": t, "value": v});
+        let s = |v: &str| arg("string", v);
+        let n = |v: i64| json!({"type": "number", "value": v, "description": v.to_string()});
+        assert_eq!(
+            join_console_args(&[s("%cstyled"), s("color:red")]),
+            "styled"
+        );
+        assert_eq!(
+            join_console_args(&[s("%s has %d items"), s("cart"), n(3), s("extra")]),
+            "cart has 3 items extra"
+        );
+        assert_eq!(
+            join_console_args(&[s("100%% done %z"), s("tail")]),
+            "100% done %z tail"
+        );
+        assert_eq!(join_console_args(&[s("%s only")]), "%s only");
+        assert_eq!(join_console_args(&[n(42), s("%s")]), "42 %s");
+        assert_eq!(join_console_args(&[]), "");
     }
 }

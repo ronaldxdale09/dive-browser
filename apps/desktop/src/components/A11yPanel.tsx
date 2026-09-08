@@ -1,4 +1,4 @@
-import { ExternalLink, Play } from "lucide-react";
+import { ChevronRight, ExternalLink, Play } from "lucide-react";
 import { useState } from "react";
 import { ipc } from "../lib/ipc";
 import type { A11yReport } from "../lib/ipc";
@@ -59,8 +59,9 @@ export function A11yPanel() {
         {!report && !error && <div className="py-2 text-ink-3">{activeTab ? "Run axe-core against the current page." : "Open a tab to audit it."}</div>}
         {report?.violations.length === 0 && <div className="py-2 text-ink-2">No violations found.</div>}
         {report?.violations.map((v) => (
-          <details key={v.id} className="border-b border-line/60 py-1.5">
-            <summary className="flex cursor-default items-center gap-2">
+          <details key={v.id} className="group border-b border-line/60 py-1.5">
+            <summary className="flex cursor-pointer list-none items-center gap-2 rounded hover:bg-surface-2" title="Show the elements">
+              <Icon icon={ChevronRight} size={11} className="shrink-0 text-ink-3 transition-transform group-open:rotate-90" />
               <span className={`w-16 shrink-0 font-mono text-[10px] uppercase ${IMPACT[v.impact] ?? "text-ink-2"}`}>{v.impact}</span>
               <span className="flex-1 text-ink">{v.help}</span>
               <span className="font-mono text-[10px] text-ink-3">{v.count}×</span>
@@ -68,7 +69,7 @@ export function A11yPanel() {
                 <Icon icon={ExternalLink} size={11} />
               </a>
             </summary>
-            <ul className="mt-1 ml-[72px] font-mono text-[11px] text-ink-2">
+            <ul className="mt-1 ml-[88px] font-mono text-[11px] text-ink-2">
               {v.targets.map((t) => (
                 <li key={t} className="truncate" title={t}>{t}</li>
               ))}

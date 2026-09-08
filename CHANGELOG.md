@@ -52,6 +52,8 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Console panel: `console.log("%cstyled", "color:red")` reads "styled" and `%s`/`%d`/`%o` directives take their arguments, as in DevTools, instead of printing the raw format string and its style argument.
+- A11y panel: each violation row shows a chevron and a pointer cursor, so it is clear the offending elements are one click away.
 - Network panel: a request stopped by a mock rule or the blocklist reads "blocked" instead of "failed", with the engine's reason in the tooltip.
 - The Protection popover no longer calls a site "Clean so far" while protection is paused there; it says nothing is blocked while paused.
 - Playwright step recorder: a navigation the engine reported twice no longer becomes two `goto` lines (and the one a click caused is dropped as intended), the test ends by checking the last address reached rather than `toHaveURL(/./)`, the header counts the steps actually kept, and stopping with nothing recorded says so.
