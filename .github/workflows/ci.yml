@@ -91,7 +91,7 @@ jobs:
           path: .cef
           key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
       - name: Build the debug app bundle
-        run: pnpm --filter @dive/desktop exec tauri build --debug --bundles app
+        run: pnpm --filter @dive/desktop exec tauri build --debug --bundles app --config src-tauri/tauri.no-updater.conf.json
       - name: Live end-to-end check
         run: scripts/live-check.sh
         env:
