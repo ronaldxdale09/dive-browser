@@ -12,7 +12,7 @@ export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "li
 export type LibraryTab = "bookmarks" | "history" | "downloads" | "recordings";
 
 /** The panels of the settings dialog; `openSettings` can land on any of them. */
-export type SettingsSection = "general" | "appearance" | "privacy" | "downloads" | "developer" | "agent" | "subtitles" | "shortcuts" | "about";
+export type SettingsSection = "general" | "appearance" | "privacy" | "passwords" | "downloads" | "developer" | "agent" | "subtitles" | "shortcuts" | "about";
 
 /** A page's outstanding request for a capability, awaiting the person's answer. */
 export type PermissionRequest = PermissionAsked;

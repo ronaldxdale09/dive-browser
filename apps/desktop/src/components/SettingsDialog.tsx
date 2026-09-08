@@ -6,7 +6,7 @@ import {
   Plug,
   ShieldCheck,
   SlidersHorizontal,
-  X,
+  X,  KeyRound,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { isPrivateWindow } from "../lib/privateMode";
@@ -27,6 +27,7 @@ import { Appearance } from "./settings/Appearance";
 import { Developer } from "./settings/Developer";
 import { General } from "./settings/General";
 import { Privacy } from "./settings/Privacy";
+import { Passwords } from "./settings/Passwords";
 import { Shortcuts } from "./settings/Shortcuts";
 import { SubtitlesControls } from "./settings/SubtitlesControls";
 
@@ -41,6 +42,7 @@ const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
   { id: "general", label: "General", icon: SlidersHorizontal },
   { id: "appearance", label: "Appearance", icon: PaletteIcon },
   { id: "privacy", label: "Privacy", icon: ShieldCheck },
+  { id: "passwords", label: "Passwords", icon: KeyRound },
   { id: "developer", label: "Developer", icon: Plug },
   { id: "agent", label: "Agent", icon: AgentIcon as LucideIcon },
   { id: "subtitles", label: "Live subtitles", icon: Captions },
@@ -54,7 +56,7 @@ const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
  * list them.
  */
 export function visibleSections(privateWindow: boolean = isPrivateWindow()): typeof SECTIONS {
-  return privateWindow ? SECTIONS.filter((s) => s.id !== "agent" && s.id !== "subtitles") : SECTIONS;
+  return privateWindow ? SECTIONS.filter((s) => s.id !== "agent" && s.id !== "subtitles" && s.id !== "passwords") : SECTIONS;
 }
 
 /** Settings: a section list on the left, one panel of settings on the right. */
@@ -165,6 +167,8 @@ function Panel({ section, info }: { section: SectionId; info: AppInfo | null }) 
       return <Appearance />;
     case "privacy":
       return <Privacy />;
+    case "passwords":
+      return <Passwords />;
     case "developer":
       return <Developer info={info} />;
     case "agent":

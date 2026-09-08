@@ -103,6 +103,19 @@ const MIGRATIONS: &[&str] = &[
         WHERE EXISTS (SELECT 1 FROM tabs t WHERE t.id = s.tab_id);
     DROP TABLE tab_scroll;
     ALTER TABLE tab_scroll_new RENAME TO tab_scroll;",
+    // v10: saved logins. The password lives in the keychain under `id`; this
+    // is the listing and the fill index.
+    "CREATE TABLE credentials (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        origin TEXT NOT NULL,
+        username TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_used_at TEXT,
+        uses INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(profile_id, origin, username)
+    );
+    CREATE INDEX credentials_origin ON credentials(profile_id, origin);",
 ];
 
 /// Copy an existing database aside when this build is about to migrate it,
@@ -175,6 +188,27 @@ pub struct Bookmark {
     pub created_at: String,
     /// The site's remembered icon as a `data:` URL, when one is known.
     pub favicon: Option<String>,
+}
+
+/// A saved login for one site in one profile. The password itself lives in
+/// the OS keychain under the credential's id; this row is what the list
+/// shows and what fill matches on.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct Credential {
+    /// Row id, also the keychain account name.
+    pub id: String,
+    /// The profile the login belongs to.
+    pub profile_id: String,
+    /// `scheme://host[:port]`, no path.
+    pub origin: String,
+    /// The account name as the site's form took it.
+    pub username: String,
+    /// RFC 3339.
+    pub created_at: String,
+    /// RFC 3339, when it was last filled.
+    pub last_used_at: Option<String>,
+    /// How many times it has been filled.
+    pub uses: u32,
 }
 
 /// One page in history, aggregated by URL.
@@ -649,6 +683,67 @@ impl Store {
             "INSERT INTO bookmarks (url, title, created_at) VALUES (?1, ?2, ?3)
              ON CONFLICT(url) DO UPDATE SET title = CASE WHEN excluded.title != '' THEN excluded.title ELSE bookmarks.title END",
             params![url, title, at.to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// Saved logins for `profile`, by site then username.
+    pub fn credentials(&self, profile: ProfileId) -> Result<Vec<Credential>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, profile_id, origin, username, created_at, last_used_at, uses
+             FROM credentials WHERE profile_id = ?1 ORDER BY origin, username",
+        )?;
+        let rows = stmt.query_map([profile.to_string()], credential_row)?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    /// Saved logins for one site in `profile`, most used first.
+    pub fn credentials_for(&self, profile: ProfileId, origin: &str) -> Result<Vec<Credential>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, profile_id, origin, username, created_at, last_used_at, uses
+             FROM credentials WHERE profile_id = ?1 AND origin = ?2 ORDER BY uses DESC, username",
+        )?;
+        let rows = stmt.query_map(params![profile.to_string(), origin], credential_row)?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    /// Record a login (the secret is the caller's to keep). Saving the same
+    /// site and username again keeps the existing row and its id.
+    pub fn upsert_credential(
+        &self,
+        id: &str,
+        profile: ProfileId,
+        origin: &str,
+        username: &str,
+        at: Timestamp,
+    ) -> Result<Credential> {
+        self.conn.execute(
+            "INSERT INTO credentials (id, profile_id, origin, username, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(profile_id, origin, username) DO NOTHING",
+            params![id, profile.to_string(), origin, username, at.to_rfc3339()],
+        )?;
+        Ok(self.conn.query_row(
+            "SELECT id, profile_id, origin, username, created_at, last_used_at, uses
+             FROM credentials WHERE profile_id = ?1 AND origin = ?2 AND username = ?3",
+            params![profile.to_string(), origin, username],
+            credential_row,
+        )?)
+    }
+
+    /// Forget a login; returns whether one existed.
+    pub fn remove_credential(&self, id: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .execute("DELETE FROM credentials WHERE id = ?1", [id])?
+            > 0)
+    }
+
+    /// Note that a login was filled just now.
+    pub fn touch_credential(&self, id: &str, at: Timestamp) -> Result<()> {
+        self.conn.execute(
+            "UPDATE credentials SET uses = uses + 1, last_used_at = ?2 WHERE id = ?1",
+            params![id, at.to_rfc3339()],
         )?;
         Ok(())
     }
@@ -1196,8 +1291,63 @@ fn tab_from_row(r: &Row<'_>) -> rusqlite::Result<Tab> {
     })
 }
 
+fn credential_row(row: &Row<'_>) -> rusqlite::Result<Credential> {
+    Ok(Credential {
+        id: row.get(0)?,
+        profile_id: row.get(1)?,
+        origin: row.get(2)?,
+        username: row.get(3)?,
+        created_at: row.get(4)?,
+        last_used_at: row.get(5)?,
+        uses: row.get(6)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn credentials_round_trip_per_profile_and_keep_their_id_on_resave() {
+        let store = Store::in_memory().unwrap();
+        let profile = store.ensure_default_profile().unwrap();
+        let now = Timestamp::now();
+        let first = store
+            .upsert_credential("id-1", profile.id, "https://github.com", "dale", now)
+            .unwrap();
+        assert_eq!(first.id, "id-1");
+        // Same site and username again: the row and id survive, the new id is dropped.
+        let again = store
+            .upsert_credential("id-2", profile.id, "https://github.com", "dale", now)
+            .unwrap();
+        assert_eq!(again.id, "id-1");
+        store
+            .upsert_credential("id-3", profile.id, "https://github.com", "eve", now)
+            .unwrap();
+        store.touch_credential("id-3", now).unwrap();
+        let by_site = store
+            .credentials_for(profile.id, "https://github.com")
+            .unwrap();
+        assert_eq!(
+            by_site
+                .iter()
+                .map(|c| c.username.as_str())
+                .collect::<Vec<_>>(),
+            ["eve", "dale"]
+        );
+        assert_eq!(by_site[0].uses, 1);
+        assert!(by_site[0].last_used_at.is_some());
+        assert!(
+            store
+                .credentials_for(profile.id, "https://example.org")
+                .unwrap()
+                .is_empty()
+        );
+        let other = ProfileId::new();
+        assert!(store.credentials(other).unwrap().is_empty());
+        assert!(store.remove_credential("id-1").unwrap());
+        assert!(!store.remove_credential("id-1").unwrap());
+        assert_eq!(store.credentials(profile.id).unwrap().len(), 1);
+    }
+
     use super::*;
 
     impl Store {
@@ -1944,6 +2094,7 @@ mod tests {
             0x1d6d_f725_f438_8a3c,
             0x0b4e_ecbb_d242_ffaf,
             0x99e5_fa52_17a9_ae16,
+            0x1340_2877_32bd_71cf,
         ];
         assert!(
             MIGRATIONS.len() >= SHIPPED.len(),

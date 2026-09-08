@@ -22,7 +22,7 @@ export const events = {
     once: (callback: EventCallback<string>) => generatedEvents.menuCommand(getCurrentWebview()).once(callback),
   },
 };
-export type { NavigationEntry, NavigationHistory } from "../generated/bindings";
+export type { NavigationEntry, NavigationHistory, Credential } from "../generated/bindings";
 export type { ExtensionInfo, ExtensionList };
 export type { Prefs, ClearRequest, Rule, RuleAction, PrivacyCategory, PrivacyEvent, PrivacyInfo, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RequestDetail, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, RecordOptions, RecordingResult, RecordingCapabilities, RecordingEvent, Microphone, MediaInfo, ExportRequest, KeptSegment, RecordingInfo, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions, SitePermission, PermissionList, Scope, Duration, PermissionDismissed, Decision, UpdateInfo, PermissionAsked, TabTier, DefaultBrowserStatus, Profile, ProfileId, ProfileDraft, SubtitleModel, SubtitleModelProgress, SubtitleCue, SubtitleState, ImportSource, ImportSummary } from "../generated/bindings";
 
@@ -177,6 +177,12 @@ export const ipc = {
   bookmarkRemove: async (url: string) => unwrap(await commands.bookmarkRemove(url)),
   bookmarkRename: async (url: string, title: string) => unwrap(await commands.bookmarkRename(url, title)),
   bookmarksSearch: async (query: string, limit = 20) => unwrap(await commands.bookmarksSearch(query, limit)),
+  passwordsList: async () => unwrap(await commands.passwordsList()),
+  passwordsForUrl: async (url: string) => unwrap(await commands.passwordsForUrl(url)),
+  passwordsSave: async (url: string, username: string, password: string) => unwrap(await commands.passwordsSave(url, username, password)),
+  passwordsReveal: async (id: string) => unwrap(await commands.passwordsReveal(id)),
+  passwordsDelete: async (id: string) => unwrap(await commands.passwordsDelete(id)),
+  passwordsUsed: async (id: string) => unwrap(await commands.passwordsUsed(id)),
   permissionSet: async (scope: Scope, origin: string, kind: string, decision: Decision) => unwrap(await commands.permissionSet(scope, origin, kind, decision)),
   permissionReply: async (tabId: string, requestId: string, decision: Decision, duration: Duration) => unwrap(await commands.permissionReply(tabId, requestId, decision, duration)),
   permissionsList: async () => unwrap(await commands.permissionsList()),

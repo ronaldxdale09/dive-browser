@@ -302,7 +302,7 @@ describe("Site permissions", () => {
 describe("private window", () => {
   it("lists only the sections private mode can use, and no import", async () => {
     expect(visibleSections(true).map((s) => s.id)).toEqual(["general", "appearance", "privacy", "developer", "shortcuts", "about"]);
-    expect(visibleSections(false)).toHaveLength(8);
+    expect(visibleSections(false)).toHaveLength(9);
     (window as Window & { __DIVE_PRIVATE__?: boolean }).__DIVE_PRIVATE__ = true;
     try {
       render(<SettingsDialog />);

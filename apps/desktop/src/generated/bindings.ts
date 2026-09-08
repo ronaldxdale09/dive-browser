@@ -109,6 +109,21 @@ export const commands = {
 	tabSetTier: (id: TabId, tier: TabTier) => typedError<null, AppError>(__TAURI_INVOKE("tab_set_tier", { id, tier })),
 	/**  Forget a bookmark by URL. */
 	bookmarkRemove: (url: string) => typedError<boolean, AppError>(__TAURI_INVOKE("bookmark_remove", { url })),
+	/**  Every login saved in the active profile. */
+	passwordsList: () => typedError<Credential[], AppError>(__TAURI_INVOKE("passwords_list")),
+	/**  Logins saved for the site of `url`, most used first. */
+	passwordsForUrl: (url: string) => typedError<Credential[], AppError>(__TAURI_INVOKE("passwords_for_url", { url })),
+	/**  Save a login for the site of `url` in the active profile. */
+	passwordsSave: (url: string, username: string, password: string) => typedError<Credential, AppError>(__TAURI_INVOKE("passwords_save", { url, username, password })),
+	/**  The password behind a saved login. */
+	passwordsReveal: (id: string) => typedError<string, AppError>(__TAURI_INVOKE("passwords_reveal", { id })),
+	/**  Forget a saved login. */
+	passwordsDelete: (id: string) => typedError<boolean, AppError>(__TAURI_INVOKE("passwords_delete", { id })),
+	/**
+	 *  Note that a saved login was just filled, so the site's most used login
+	 *  comes first next time.
+	 */
+	passwordsUsed: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("passwords_used", { id })),
 	/**
 	 *  Give a bookmark a new title, keeping its URL and creation time. A blank
 	 *  title is refused rather than erasing the one on record.
@@ -701,6 +716,28 @@ export type CoreEvent =
 { type: "profile_removed"; data: ProfileId } |
 /**  The active profile changed. */
 { type: "profile_activated"; data: ProfileId };
+
+/**
+ *  A saved login for one site in one profile. The password itself lives in
+ *  the OS keychain under the credential's id; this row is what the list
+ *  shows and what fill matches on.
+ */
+export type Credential = {
+	/**  Row id, also the keychain account name. */
+	id: string,
+	/**  The profile the login belongs to. */
+	profile_id: string,
+	/**  `scheme://host[:port]`, no path. */
+	origin: string,
+	/**  The account name as the site's form took it. */
+	username: string,
+	/**  RFC 3339. */
+	created_at: string,
+	/**  RFC 3339, when it was last filled. */
+	last_used_at: string | null,
+	/**  How many times it has been filled. */
+	uses: number,
+};
 
 /**  What the person decided for one origin and kind. */
 export type Decision =

@@ -453,6 +453,12 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_fill_video,
             tab_set_tier,
             bookmark_remove,
+            passwords_list,
+            passwords_for_url,
+            passwords_save,
+            passwords_reveal,
+            passwords_delete,
+            passwords_used,
             bookmark_rename,
             permission_set,
             permission_reply,
@@ -1892,6 +1898,62 @@ pub(crate) fn tab_set_tier(
     };
     state.bus.publish(CoreEvent::TabUpserted(tab));
     Ok(())
+}
+
+/// Every login saved in the active profile.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn passwords_list(state: State<'_, AppState>) -> AppResult<Vec<dive_core::Credential>> {
+    let profile = active_profile(&lock(&state.store), *lock(&state.active_workspace))?;
+    crate::passwords::list(&state, profile.id)
+}
+
+/// Logins saved for the site of `url`, most used first.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn passwords_for_url(
+    state: State<'_, AppState>,
+    url: String,
+) -> AppResult<Vec<dive_core::Credential>> {
+    let profile = active_profile(&lock(&state.store), *lock(&state.active_workspace))?;
+    crate::passwords::for_url(&state, profile.id, &url)
+}
+
+/// Save a login for the site of `url` in the active profile.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn passwords_save(
+    state: State<'_, AppState>,
+    url: String,
+    username: String,
+    password: String,
+) -> AppResult<dive_core::Credential> {
+    let profile = active_profile(&lock(&state.store), *lock(&state.active_workspace))?;
+    crate::passwords::save(&state, profile.id, &url, &username, &password)
+}
+
+/// The password behind a saved login.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn passwords_reveal(state: State<'_, AppState>, id: String) -> AppResult<String> {
+    let profile = active_profile(&lock(&state.store), *lock(&state.active_workspace))?;
+    crate::passwords::reveal(&state, profile.id, &id)
+}
+
+/// Note that a saved login was just filled, so the site's most used login
+/// comes first next time.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn passwords_used(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    crate::passwords::touch(&state, &id)
+}
+
+/// Forget a saved login.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn passwords_delete(state: State<'_, AppState>, id: String) -> AppResult<bool> {
+    let profile = active_profile(&lock(&state.store), *lock(&state.active_workspace))?;
+    crate::passwords::delete(&state, profile.id, &id)
 }
 
 /// Forget a bookmark by URL.

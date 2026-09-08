@@ -44,6 +44,7 @@ mod normal_window;
 mod openapi;
 mod overlay_geometry;
 mod pagescript;
+mod passwords;
 #[cfg(feature = "cef")]
 mod permission_probe;
 mod permissions;

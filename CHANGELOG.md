@@ -8,6 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- Saved logins: Settings › Passwords lists the logins kept in this profile, shows or copies a password on request, adds one by hand and forgets one. Passwords live in the macOS Keychain, never in Dive's own files. Saving from a page and filling forms follow next.
 - The page's corners are slightly rounded where it meets the rail and toolbar, following the Appearance corner setting (square under Sharp). The window behind the chrome is painted in the chrome's ground colour, so nothing black shows through corners or during a resize.
 
 ### Changed
