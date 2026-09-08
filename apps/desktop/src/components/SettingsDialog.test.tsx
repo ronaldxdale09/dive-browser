@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { useBrowser } from "../store/browser";
+import { useDefaultBrowser } from "../store/defaultBrowser";
 import { usePrivacy } from "../store/privacy";
 import { SettingsDialog, resolveSection, visibleSections } from "./SettingsDialog";
 import { groupPermissions } from "./settings/Privacy";
@@ -183,6 +184,15 @@ describe("SettingsDialog", () => {
 
     await waitFor(() => expect(usePrefs.getState().loaded).toBe(true));
     expect(usePrefs.getState().prefs.privacy_exceptions).toEqual([]);
+  });
+
+  it("offers the default-browser flow from General while Dive is not the default", () => {
+    useDefaultBrowser.setState({ status: { supported: true, is_default: false, current: "com.brave.Browser" } });
+    render(<SettingsDialog />);
+    expect(screen.getByText("They open in Brave.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Make default…" }));
+    expect(useBrowser.getState().open.defaultBrowser).toBe(true);
+    useDefaultBrowser.setState({ status: { supported: true, is_default: true, current: "com.dive.browser" } });
   });
 
   it("only offers a search URL for a custom engine, and warns when it has no {query}", async () => {

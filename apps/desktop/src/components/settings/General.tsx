@@ -1,5 +1,7 @@
 import { Button, Group, Row, Segmented, Select, Switch, TextInput } from "../SettingsFields";
 import { useBrowser } from "../../store/browser";
+import { useDefaultBrowser } from "../../store/defaultBrowser";
+import { prettyBundleId } from "../DefaultBrowserDialog";
 import { isPrivateWindow } from "../../lib/privateMode";
 import { KeepSitesActive } from "./KeepSitesActive";
 import { usePref } from "./usePref";
@@ -98,6 +100,7 @@ export function General() {
         )}
       </Group>
 
+      {!isPrivateWindow() && <DefaultBrowserRow onOpen={() => toggle("defaultBrowser", true)} />}
       {!isPrivateWindow() && (
       <Group title="Import">
         <Row
@@ -148,5 +151,20 @@ export function General() {
         />
       </Group>
     </>
+  );
+}
+
+/** Where links from other apps open, and the way to change it once the rail's offer has been rested. */
+function DefaultBrowserRow({ onOpen }: { onOpen: () => void }) {
+  const status = useDefaultBrowser((s) => s.status);
+  if (!status?.supported) return null;
+  return (
+    <Group title="Default browser">
+      <Row
+        label="Links from other apps"
+        hint={status.is_default ? "They open in Dive." : status.current ? `They open in ${prettyBundleId(status.current)}.` : "Dive is not the default browser."}
+        control={status.is_default ? null : <Button onClick={onOpen}>Make default…</Button>}
+      />
+    </Group>
   );
 }
