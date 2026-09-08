@@ -416,7 +416,10 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   crashedTabs: {},
   recordingTab: null,
   applyLoad: (load) => {
-    if (load.phase === "started") clearPrivacy(load.tab_id);
+    if (load.phase === "started") {
+      clearPrivacy(load.tab_id);
+      useNetwork.getState().navigated(load.tab_id, load.url);
+    }
     set((s) => reduceLoad(s, load));
   },
   applyCrash: (crash) => set((s) => reduceCrash(s, crash)),

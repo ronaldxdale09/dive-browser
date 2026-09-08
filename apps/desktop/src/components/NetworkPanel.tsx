@@ -119,6 +119,8 @@ const REPLAY_DOCK_HEIGHT = 440;
 export function NetworkPanel() {
   const activeTab = useBrowser((s) => s.activeTab);
   const rows = useNetwork(selectRequests(activeTab));
+  const preserve = useNetwork((s) => s.preserve);
+  const setPreserve = useNetwork((s) => s.setPreserve);
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [replaying, setReplaying] = useState<string | null>(null);
@@ -178,6 +180,10 @@ export function NetworkPanel() {
         />
         <span>{rows.length} requests</span>
         <span>{size(transferred)} transferred</span>
+        <label className="ml-auto flex items-center gap-1.5 text-ink-3 select-none">
+          <input type="checkbox" checked={preserve} onChange={(e) => setPreserve(e.target.checked)} className="accent-highlight" />
+          Preserve log
+        </label>
       </div>
       <div ref={scrollRef} data-testid="network-scroll" className="min-h-16 flex-1 overflow-auto font-mono text-[11.5px] leading-5">
         <table className="w-full border-collapse">

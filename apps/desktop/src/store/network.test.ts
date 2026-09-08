@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { fold, selectFrames, selectRequests, useNetwork } from "./network";
+import { beginsAwaitedPage, fold, resetNavigationWaits, rowsSinceNavigation, selectFrames, selectRequests, useNetwork } from "./network";
 import type { NetworkEvent } from "../lib/ipc";
 
 type SentEvent = Extract<NetworkEvent, { type: "sent" }>;
@@ -153,5 +153,74 @@ describe("network UI batches", () => {
     expect(selectRequests("t")(useNetwork.getState())).toHaveLength(1000);
     expect(selectFrames("t", "old")(useNetwork.getState())).toEqual([]);
     expect(useNetwork.getState().byTab.other).toBe(before);
+  });
+});
+
+describe("navigation", () => {
+  // Sent "just now" in wall-clock terms; the fixed 2023 wall time of `sent` reads as long ago.
+  const now = () => Date.now() / 1000;
+  const doc = (id: string, url: string, t: number, wall = now()): SentEvent => ({ ...sent(id, url, t), data: { ...sent(id, url, t).data, resource_type: "Document", wall_time: wall } });
+
+  it("keeps the newest document request and what followed it", () => {
+    let rows = fold(undefined, doc("1", "https://a.dev/", 1));
+    rows = fold(rows, sent("2", "https://a.dev/app.js", 2));
+    rows = fold(rows, doc("3", "https://a.dev/next", 3));
+    rows = fold(rows, sent("4", "https://a.dev/next.css", 4));
+    expect(rowsSinceNavigation(rows).map((r) => r.id)).toEqual(["3", "4"]);
+    // A first page, or a list without a document request, keeps everything.
+    expect(rowsSinceNavigation(rows.slice(0, 2)).map((r) => r.id)).toEqual(["1", "2"]);
+    expect(rowsSinceNavigation([rows[1]!, rows[3]!]).map((r) => r.id)).toEqual(["2", "4"]);
+  });
+
+  it("trims a tab's rows when its main frame starts loading, unless the log is preserved", () => {
+    resetNavigationWaits();
+    useNetwork.setState({ byTab: {}, frames: {}, preserve: false });
+    const s = useNetwork.getState();
+    s.apply(doc("1", "https://a.dev/", 1));
+    s.apply(sent("2", "https://a.dev/app.js", 2));
+    s.apply(doc("3", "https://a.dev/next", 3));
+    s.navigated("t", "https://a.dev/next");
+    expect(useNetwork.getState().byTab.t!.map((r) => r.id)).toEqual(["3"]);
+    s.apply(doc("4", "https://a.dev/again", 4));
+    s.setPreserve(true);
+    s.navigated("t", "https://a.dev/again");
+    expect(useNetwork.getState().byTab.t!.map((r) => r.id)).toEqual(["3", "4"]);
+  });
+
+  it("treats a reload as a new page even though the address is the same", () => {
+    resetNavigationWaits();
+    useNetwork.setState({ byTab: {}, frames: {}, preserve: false });
+    const s = useNetwork.getState();
+    // The page loaded a minute ago; its document has the address the reload announces.
+    s.apply(doc("1", "https://a.dev/json", 1, now() - 60));
+    s.apply(sent("2", "https://a.dev/favicon.ico", 2));
+    s.navigated("t", "https://a.dev/json");
+    expect(useNetwork.getState().byTab.t ?? []).toEqual([]);
+    s.apply(doc("3", "https://a.dev/json", 3));
+    s.apply(sent("4", "https://a.dev/favicon.ico", 4));
+    expect(useNetwork.getState().byTab.t!.map((r) => r.id)).toEqual(["3", "4"]);
+  });
+
+  it("waits for the document request when the load start arrives first", () => {
+    resetNavigationWaits();
+    useNetwork.setState({ byTab: {}, frames: {}, preserve: false });
+    const s = useNetwork.getState();
+    s.apply(doc("1", "https://a.dev/", 1));
+    s.apply(sent("2", "https://a.dev/app.js", 2));
+    // The engine says the main frame started loading /next; its request has
+    // not been seen, so the page that was left goes at once.
+    s.navigated("t", "https://a.dev/next");
+    expect(useNetwork.getState().byTab.t ?? []).toEqual([]);
+    expect(beginsAwaitedPage("t", sent("9", "https://a.dev/late.js", 2.5))).toBe(false);
+    expect(beginsAwaitedPage("t", doc("3", "https://a.dev/next", 3))).toBe(true);
+    s.apply(doc("3", "https://a.dev/next", 3));
+    s.apply(sent("4", "https://a.dev/next.css", 4));
+    expect(useNetwork.getState().byTab.t!.map((r) => r.id)).toEqual(["3", "4"]);
+    // Once served, a later document request (an iframe, say) does not clear the page.
+    s.apply(doc("5", "https://a.dev/frame", 5));
+    expect(useNetwork.getState().byTab.t!.map((r) => r.id)).toEqual(["3", "4", "5"]);
+    // A redirect lands on another address: the time window stands in, and it lapses.
+    s.navigated("t", "https://a.dev/moved");
+    expect(beginsAwaitedPage("t", doc("6", "https://a.dev/final", 6), Date.now() + 5000)).toBe(false);
   });
 });

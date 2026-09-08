@@ -27,6 +27,7 @@ bump may change behaviour.
 - The page's corners are slightly rounded where it meets the rail and toolbar, following the Appearance corner setting (square under Sharp). The window behind the chrome is painted in the chrome's ground colour, so nothing black shows through corners or during a resize.
 
 ### Changed
+- The Network panel shows the current page's requests: a navigation or reload clears the previous page's rows, as in DevTools, with a "Preserve log" checkbox to keep them across loads.
 - Settings › General › On launch names its third choice "Start screen" instead of "Nothing", since that is what it shows, and the home-page hint says the same.
 - The new-tab palette offers the site your letters begin first, with "Switch to tab" when it is open, then the search row, matching the address bar; its rows name a page by its address when the recorded title was blank.
 - Typing the first letters of a site you have open, bookmarked or visited ("exam" for example.com) puts that site first under the address bar, so Enter goes there instead of searching the web for the letters; a full address typed out still loads afresh. Pages whose recorded title was blank or "about:blank" are named by their address.

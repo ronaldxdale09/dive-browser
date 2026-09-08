@@ -19,6 +19,7 @@ const row = (i: number): RequestRow => ({
   error: null,
   startedAt: i,
   durationMs: 12,
+  sentAt: 1_700_000_000,
 });
 const rows = (n: number) => Array.from({ length: n }, (_, i) => row(i));
 
