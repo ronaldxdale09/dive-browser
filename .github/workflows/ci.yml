@@ -93,6 +93,10 @@ jobs:
       - name: Build the debug app bundle
         run: pnpm --filter @dive/desktop exec tauri build --debug --bundles app --config src-tauri/tauri.no-updater.conf.json
       - name: Live end-to-end check
+        # YouTube answers the runner's address with consent and bot pages, which
+        # says nothing about Dive; the playback step stays a local check.
+        env:
+          LIVE_SKIP_YOUTUBE: "1"
         run: scripts/live-check.sh
         env:
           DIVE_BIN: target/debug/bundle/macos/Dive.app/Contents/MacOS/dive-desktop
