@@ -29,6 +29,7 @@ bump may change behaviour.
 - The page's corners are slightly rounded where it meets the rail and toolbar, following the Appearance corner setting (square under Sharp). The window behind the chrome is painted in the chrome's ground colour, so nothing black shows through corners or during a resize.
 
 ### Changed
+- After Clear browsing data, the confirmation reads as a sentence with counts first ("Cleared 176 history entries and cookies. Restart Dive to finish the profiles that were not open.").
 - In a crowded tab strip the active tab keeps room for a few words of its title; the other tabs give way first.
 - An error status with no page behind it (a bare 500 or 503) gets its own error page, "The server answered with an error", instead of the raw Chromium code; so does a reply that is not HTTP at all. A 500 that carries a page still shows that page.
 - History rows in the Library show the time of day each page was last visited.

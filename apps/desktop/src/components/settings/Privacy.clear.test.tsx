@@ -7,7 +7,7 @@ import { Privacy } from "./Privacy";
 const initialPrefs = usePrefs.getState();
 
 beforeEach(() => {
-  vi.spyOn(ipc, "browsingDataClear").mockResolvedValue("Cleared history (3), form entries (2)");
+  vi.spyOn(ipc, "browsingDataClear").mockResolvedValue("Cleared 3 history entries and 2 form entries.");
 });
 
 afterEach(() => {
@@ -22,7 +22,7 @@ describe("Settings › Privacy › Clear browsing data", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Form entries in this profile" }));
     fireEvent.click(screen.getByRole("button", { name: "Clear now" }));
     await waitFor(() => expect(ipc.browsingDataClear).toHaveBeenCalledWith({ history: true, cookies: false, cache: false, site_data: false, forms: true }));
-    expect((await screen.findByRole("status")).textContent).toContain("form entries (2)");
+    expect((await screen.findByRole("status")).textContent).toContain("2 form entries");
     expect(screen.getByText(/Saved passwords are not touched here/)).toBeTruthy();
   });
 });

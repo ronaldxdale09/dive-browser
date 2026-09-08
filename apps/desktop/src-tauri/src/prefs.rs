@@ -775,7 +775,7 @@ pub async fn clear(state: &AppState, what: ClearRequest) -> AppResult<String> {
         let n = store.clear_history()?;
         store.clear_favicons()?;
         drop(store);
-        done.push(format!("history ({n})"));
+        done.push(counted(n, "history entry", "history entries"));
     }
     if what.forms {
         let store = crate::state::lock(&state.store);
@@ -786,7 +786,7 @@ pub async fn clear(state: &AppState, what: ClearRequest) -> AppResult<String> {
             .or_else(|| store.profiles().ok()?.into_iter().next().map(|p| p.id));
         if let Some(profile) = profile {
             let n = store.clear_form_entries(profile)?;
-            done.push(format!("form entries ({n})"));
+            done.push(counted(n, "form entry", "form entries"));
         }
     }
     let sessions: Vec<(String, CdpSession)> = {
@@ -855,7 +855,7 @@ pub async fn clear(state: &AppState, what: ClearRequest) -> AppResult<String> {
             .collect();
         queue_profile_clear(&profiles, what)?;
         Ok(format!(
-            "{}; restart Dive to finish every profile",
+            "{} Restart Dive to finish the profiles that were not open.",
             summary(&done)
         ))
     } else {
@@ -869,11 +869,17 @@ fn origin_of(url: &str) -> Option<String> {
     origin.is_tuple().then(|| origin.ascii_serialization())
 }
 
+/// "3 history entries", "1 form entry": the count first, as a person would say it.
+fn counted(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// "Cleared 3 history entries, cookies and cache." — a sentence, not a list dump.
 fn summary(done: &[String]) -> String {
-    if done.is_empty() {
-        "Nothing selected".to_owned()
-    } else {
-        format!("Cleared {}", done.join(", "))
+    match done {
+        [] => "Nothing selected.".to_owned(),
+        [only] => format!("Cleared {only}."),
+        [head @ .., last] => format!("Cleared {} and {last}.", head.join(", ")),
     }
 }
 
@@ -1093,6 +1099,24 @@ mod tests {
         );
         prefs.search_template = "https://s.dev/find?q={query}".into();
         assert_eq!(prefs.search_template(), "https://s.dev/find?q={query}");
+    }
+
+    #[test]
+    fn cleared_summary_reads_as_a_sentence() {
+        assert_eq!(super::summary(&[]), "Nothing selected.");
+        assert_eq!(super::summary(&["cookies".to_owned()]), "Cleared cookies.");
+        assert_eq!(
+            super::summary(&[
+                super::counted(3, "history entry", "history entries"),
+                "cookies".to_owned(),
+                "cache".to_owned()
+            ]),
+            "Cleared 3 history entries, cookies and cache."
+        );
+        assert_eq!(
+            super::counted(1, "form entry", "form entries"),
+            "1 form entry"
+        );
     }
 
     #[test]

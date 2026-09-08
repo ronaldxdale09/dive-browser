@@ -288,7 +288,7 @@ function ClearData() {
             {busy ? "Clearing…" : "Clear now"}
           </Button>
           {result && (
-            <><span role="status" className="text-[11px] text-ink-2">{result}</span>{result.includes("restart Dive") && <Button onClick={() => ipc.appRestart()}>Restart now</Button>}</>
+            <><span role="status" className="text-[11px] text-ink-2">{result}</span>{/restart dive/i.test(result) && <Button onClick={() => ipc.appRestart()}>Restart now</Button>}</>
           )}
         </div>
       </div>
