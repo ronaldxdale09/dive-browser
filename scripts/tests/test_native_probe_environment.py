@@ -92,3 +92,26 @@ else:
         self.assertTrue(records[0]['DIVE_DATA_DIR'])
         if sys.platform == 'darwin':
             self.assertEqual(records[0]['argv'], ['-ApplePersistenceIgnoreState', 'YES'])
+
+
+class ProcessSampleTests(unittest.TestCase):
+    def test_a_slow_or_missing_sample_tool_does_not_fail_the_probe(self):
+        sys.path.insert(0, str(SCRIPTS))
+        try:
+            import native_lifecycle_check as probe
+        finally:
+            sys.path.pop(0)
+        with tempfile.TemporaryDirectory() as directory:
+            fake_bin = Path(directory) / 'bin'
+            fake_bin.mkdir()
+            slow = fake_bin / 'sample'
+            slow.write_text('#!/bin/sh\nsleep 30\n')
+            slow.chmod(0o755)
+            original = os.environ.get('PATH', '')
+            os.environ['PATH'] = f'{fake_bin}:{original}'
+            try:
+                self.assertFalse(probe.sample_process(os.getpid(), Path(directory) / 'out.txt'))
+                os.environ['PATH'] = str(fake_bin.parent / 'nowhere')
+                self.assertFalse(probe.sample_process(os.getpid(), Path(directory) / 'out.txt'))
+            finally:
+                os.environ['PATH'] = original

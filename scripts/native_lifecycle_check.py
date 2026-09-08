@@ -15,6 +15,21 @@ from probe_process import run_probe
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def sample_process(pid: int, path: Path) -> bool:
+    """Retain a `sample` of a slow process for diagnosis.
+
+    This is evidence, not a verdict: a runner too loaded to finish the sample
+    in time, or without the tool at all, must not turn a passing lifecycle
+    run into a failure. The caller's own deadline still bounds a real hang.
+    """
+    try:
+        subprocess.run(['sample', str(pid), '1', '1', '-file', str(path)], capture_output=True, timeout=5)
+    except (subprocess.TimeoutExpired, OSError) as error:
+        print(f'process sample skipped: {error}', file=sys.stderr, flush=True)
+        return False
+    return True
+
+
 def main():
     binary = Path(os.environ['DIVE_BIN']).resolve()
     fingerprint = hashlib.sha256(binary.read_bytes()).hexdigest()
@@ -50,7 +65,7 @@ def main():
                 nonlocal sampled
                 if not sampled and sys.platform == 'darwin' and time.monotonic() - started > 10:
                     sampled = True
-                    subprocess.run(['sample', str(pid), '1', '1', '-file', str(log.with_suffix('.sample.txt'))], capture_output=True, timeout=5)
+                    sample_process(pid, log.with_suffix('.sample.txt'))
 
             elapsed = run_probe(binary, env, log, 60 if 'DIVE_CRASH_PROBE' in env else 30, inspect_hang)
             content = log.read_text(errors='replace')
