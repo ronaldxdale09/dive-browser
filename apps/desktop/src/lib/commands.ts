@@ -87,6 +87,14 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "bookmark.toggle": () => toggleBookmark(),
   "shortcuts.open": () => useBrowser.getState().toggle("shortcuts", true),
   "settings.open": () => useBrowser.getState().openSettings(),
+  "settings.general": () => useBrowser.getState().openSettings("general"),
+  "settings.appearance": () => useBrowser.getState().openSettings("appearance"),
+  "settings.privacy": () => useBrowser.getState().openSettings("privacy"),
+  "settings.passwords": () => useBrowser.getState().openSettings("passwords"),
+  "settings.developer": () => useBrowser.getState().openSettings("developer"),
+  "settings.agent": () => useBrowser.getState().openSettings("agent"),
+  "settings.subtitles": () => useBrowser.getState().openSettings("subtitles"),
+  "default-browser.open": () => useBrowser.getState().toggle("defaultBrowser", true),
   "about.open": () => useBrowser.getState().openSettings("about"),
   "tab.print": () => useBrowser.getState().print(),
   "tab.fillVideo": () => useBrowser.getState().fillVideo(),
@@ -154,7 +162,7 @@ function stepTab(delta: number) {
 }
 
 /** Commands a private window refuses; the menu and palette hide them too. */
-const PRIVATE_REFUSED = ["sidecar.toggle", "extensions.open", "workspace.new", "bookmark.toggle", "subtitles.open", "bookmarks.open", "history.open"];
+const PRIVATE_REFUSED = ["sidecar.toggle", "extensions.open", "workspace.new", "bookmark.toggle", "subtitles.open", "bookmarks.open", "history.open", "settings.passwords", "settings.agent", "settings.subtitles", "default-browser.open"];
 
 export function runCommand(id: string, source: "keyboard" | "native-menu" | "command" = "command"): void {
   traceInputCommand(id, source);
@@ -252,7 +260,7 @@ export const COMMAND_TITLES: Record<string, string> = {
   "simulator.toggle": "Device simulator",
   "subtitles.open": "Live subtitles",
   "recorder.toggle": "Record steps as a Playwright test",
-  "import.open": "Import bookmarks and history from another browser…",
+  "import.open": "Import from another browser: bookmarks, history, passwords, form entries…",
   "capture.fullpage": "Capture full page",
   "find.open": "Find in page",
   "address.focus": "Focus the address bar",
@@ -264,6 +272,14 @@ export const COMMAND_TITLES: Record<string, string> = {
   "bookmark.toggle": "Bookmark this page",
   "shortcuts.open": "Keyboard shortcuts",
   "settings.open": "Settings",
+  "settings.general": "Settings: General (startup, search, zoom)",
+  "settings.appearance": "Settings: Appearance (theme, accent, density)",
+  "settings.privacy": "Settings: Privacy (tracking, permissions, clear data)",
+  "settings.passwords": "Settings: Passwords & forms (saved logins, form entries, never saved)",
+  "settings.developer": "Settings: Developer (dev servers, dock)",
+  "settings.agent": "Settings: Agent (model providers, keys)",
+  "settings.subtitles": "Settings: Live subtitles",
+  "default-browser.open": "Make Dive the default browser…",
   "about.open": "About Dive",
   "tab.back": "Back",
   "tab.forward": "Forward",

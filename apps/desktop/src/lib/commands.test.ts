@@ -113,6 +113,13 @@ describe("command dispatch", () => {
     for (const id of Object.keys(UI_COMMANDS)) expect(COMMAND_TITLES[id], id).toBeTypeOf("string");
   });
 
+  it("reaches every Settings section and the default-browser offer from the palette", () => {
+    const ids = chromeCommands().map((c) => c.id);
+    for (const id of ["settings.passwords", "settings.privacy", "settings.appearance", "default-browser.open"]) expect(ids, id).toContain(id);
+    expect(COMMAND_TITLES["settings.passwords"]).toContain("form entries");
+    expect(COMMAND_TITLES["import.open"]).toContain("passwords");
+  });
+
   it("binds the library, cheatsheet, settings and print", () => {
     expect(SHORTCUTS["mod+y"]).toBe("history.open");
     expect(SHORTCUTS["mod+/"]).toBe("shortcuts.open");

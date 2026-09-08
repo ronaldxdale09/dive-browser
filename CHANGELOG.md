@@ -8,6 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- The command palette reaches every Settings section by name ("Settings: Passwords & forms …", "Settings: Privacy …") and the default-browser offer; the import command names passwords and form entries.
 - The "Saved …" notice after a download has a "Show in Finder" button and stays a little longer.
 - Clear browsing data can wipe the active profile's form entries; the cookies row is now "Cookies and signed-in sessions", and a note says saved passwords are managed under Passwords & forms instead.
 - The save-password card has "Never for this site": Dive stops offering to save there for this profile (it still fills what it knows), and Settings › Passwords & forms › Never saved lists those sites with an "Ask again" button.
