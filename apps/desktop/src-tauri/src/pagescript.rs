@@ -21,6 +21,7 @@ const FRAGMENTS: &[(&str, &str)] = &[
     ("locator.js", include_str!("inject/locator.js")),
     ("recorder.js", include_str!("inject/recorder.js")),
     ("credentials.js", include_str!("inject/credentials.js")),
+    ("forms.js", include_str!("inject/forms.js")),
     ("picker.js", include_str!("inject/picker.js")),
     ("component.js", include_str!("inject/component.js")),
     ("fill-tab.js", include_str!("inject/fill-tab.js")),

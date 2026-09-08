@@ -688,6 +688,13 @@ impl TabHost {
                     session_for_prefs.clone(),
                 )
                 .await;
+                crate::form_fill::attach(
+                    prefs_app.clone(),
+                    tab_id,
+                    credential_workspace,
+                    session_for_prefs.clone(),
+                )
+                .await;
                 crate::prefs::apply(&session_for_prefs, &prefs).await;
                 tracing::debug!(%tab_id, "browser preferences complete before navigation");
                 if let Err(e) = nav.navigate(url) {

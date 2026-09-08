@@ -26,6 +26,7 @@ mod extensions;
 mod favicon;
 mod filltab;
 mod find;
+mod form_fill;
 mod har;
 mod housekeeping;
 mod inspect;
