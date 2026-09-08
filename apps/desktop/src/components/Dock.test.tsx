@@ -4,7 +4,7 @@ import type { ConsoleEntry } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { useConsole } from "../store/console";
 import { useNetwork } from "../store/network";
-import { Dock } from "./Dock";
+import { Dock, stepPanel } from "./Dock";
 
 const entry = (i: number, text = `line ${i}`, level: ConsoleEntry["level"] = "info"): ConsoleEntry => ({
   tab_id: "tab-1",
@@ -66,7 +66,7 @@ describe("Dock console panel", () => {
   it("opens on the console and renders the active tab's entries", () => {
     push([entry(1, "first line"), entry(2, "second line", "error")]);
     render(<Dock />);
-    expect(screen.getByRole("button", { name: "Console" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Console" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByText("first line")).toBeTruthy();
     expect(screen.getByText("second line")).toBeTruthy();
     expect(screen.getByText("second line").parentElement?.className).toContain("text-danger");
@@ -147,9 +147,23 @@ describe("Dock console panel", () => {
     expect(screen.queryByText("theirs")).toBeNull();
   });
 
+  it("is a tablist: arrow keys move between panels and the panel names its tab", () => {
+    render(<Dock />);
+    const list = screen.getByRole("tablist", { name: "Dock panels" });
+    const console = screen.getByRole("tab", { name: "Console" });
+    console.focus();
+    fireEvent.keyDown(list, { key: "ArrowRight" });
+    expect(screen.getByRole("tab", { name: "Network" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe("dock-tab-network");
+    fireEvent.keyDown(list, { key: "End" });
+    expect(screen.getByRole("tab", { name: "Meta" }).getAttribute("aria-selected")).toBe("true");
+    expect(stepPanel("ArrowLeft", "console")).toBe("meta");
+    expect(stepPanel("Enter", "console")).toBeNull();
+  });
+
   it("switches to the network panel", () => {
     render(<Dock />);
-    fireEvent.click(screen.getByRole("button", { name: "Network" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Network" }));
     expect(screen.getByText("No requests yet.")).toBeTruthy();
     expect(screen.getByLabelText("Filter requests")).toBeTruthy();
   });
