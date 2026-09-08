@@ -64,13 +64,13 @@ export function DevicePicker() {
           <Icon icon={Smartphone} size={14} className="text-highlight" />
           <span className="text-sm font-medium">Device simulator</span>
           <span className="flex-1" />
-          <IconButton icon={X} label="Close" onClick={() => setOpen(false)} size={14} />
+          <IconButton icon={X} label="Close device simulator" onClick={() => setOpen(false)} size={14} />
         </div>
 
         <div className="px-4 pb-2">
           <label className="flex h-8 items-center gap-2 rounded-lg border border-line bg-surface-2 px-2.5 focus-within:border-line-2">
             <Icon icon={Search} size={13} className="text-ink-3" />
-            <input ref={search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search devices — name, or a size like 393x852" spellCheck={false} className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-ink-3" />
+            <input ref={search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search devices, or type a size like 393x852" spellCheck={false} className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-ink-3" />
           </label>
         </div>
 

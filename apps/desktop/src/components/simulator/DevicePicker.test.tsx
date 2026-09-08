@@ -111,7 +111,7 @@ describe("DevicePicker", () => {
 
   it("closes on Escape and on the close button", () => {
     render(<DevicePicker />);
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close device simulator" }));
     expect(usePicker.getState().open).toBe(false);
     act(() => usePicker.setState({ open: true }));
     fireEvent.keyDown(window, { key: "Escape" });
