@@ -88,7 +88,7 @@ describe("Toolbar", () => {
     vi.spyOn(events.menuCommand, "listen").mockResolvedValue(() => undefined);
     function NativeToolbar() { useShortcuts(); return <Toolbar />; }
     render(<NativeToolbar />);
-    const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
+    const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
     act(() => window.dispatchEvent(new Event("dive-native-focus-address")));
     expect(document.activeElement).toBe(input);
     expect(input.value).toBe(tab.url);
@@ -136,7 +136,7 @@ describe("Toolbar", () => {
     const url = "https://example.com/docs?q=hello#details";
     useBrowser.setState({ tabs: [{ ...tab, url }] });
     render(<Toolbar />);
-    const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
+    const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
     act(() => input.focus());
     expect(input.value).toBe(url);
     await waitFor(() => {
@@ -158,7 +158,7 @@ describe("Toolbar", () => {
   it("shows the address that failed to load, not the last one that worked", () => {
     useBrowser.setState({ navError: { [tab.id]: { url: "http://nonexistent.invalid/", error: "net::ERR_NAME_NOT_RESOLVED" } } });
     render(<Toolbar />);
-    const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
+    const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
     expect(input.value).toBe("nonexistent.invalid");
     expect(document.querySelector("[data-security]")?.getAttribute("data-security")).toBe("failed");
     act(() => useBrowser.setState({ navError: {} }));
@@ -168,7 +168,7 @@ describe("Toolbar", () => {
 
   it("keeps typed text during a page redirect and Escape restores the current address", () => {
     render(<Toolbar />);
-    const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
+    const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
     act(() => input.focus());
     fireEvent.change(input, { target: { value: "my unfinished search" } });
     act(() => useBrowser.setState({ tabs: [{ ...tab, url: "https://example.com/redirected" }] }));
@@ -181,7 +181,7 @@ describe("Toolbar", () => {
 
   it("resets the editable address when switching between tabs with the same URL", () => {
     render(<Toolbar />);
-    const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
+    const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
     act(() => input.focus());
     fireEvent.change(input, { target: { value: "old draft" } });
     act(() => useBrowser.setState({ tabs: [tab, { ...tab, id: "second" }], activeTab: "second" }));
@@ -215,7 +215,7 @@ describe("Toolbar", () => {
   it("finishes editing after Enter so the final navigation URL replaces the submitted text", async () => {
     vi.spyOn(ipc, "tabNavigate").mockResolvedValue(null);
     render(<Toolbar />);
-    const input = screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
+    const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
     act(() => input.focus());
     fireEvent.change(input, { target: { value: "example.com/start" } });
     fireEvent.submit(input.closest("form")!);

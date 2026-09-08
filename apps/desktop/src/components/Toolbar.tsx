@@ -164,6 +164,9 @@ export function Toolbar({ compact = false, singleAuxPanel = compact }: { compact
           placeholder="Search or enter address"
           spellCheck={false}
           autoComplete="off"
+          role="combobox"
+          aria-haspopup="listbox"
+          aria-expanded={rows.length > 0}
           aria-autocomplete="list"
           aria-controls={rows.length > 0 ? listId : undefined}
           aria-activedescendant={rows.length > 0 ? optionId(listId, highlight) : undefined}

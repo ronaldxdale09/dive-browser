@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 function address() {
-  return screen.getByRole("textbox", { name: "Address" }) as HTMLInputElement;
+  return screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
 }
 
 describe("address bar suggestions", () => {
@@ -53,8 +53,11 @@ describe("address bar suggestions", () => {
     // Focusing selects the current address; that alone asks nothing.
     expect(input.value).toBe(tab.url);
     expect(screen.queryByRole("listbox")).toBeNull();
+    expect(input.getAttribute("role")).toBe("combobox");
+    expect(input.getAttribute("aria-expanded")).toBe("false");
     fireEvent.change(input, { target: { value: "rust" } });
     const list = screen.getByRole("listbox", { name: "Address suggestions" });
+    expect(input.getAttribute("aria-expanded")).toBe("true");
     const rows = () => Array.from(list.querySelectorAll("[role='option']")).map((row) => row.textContent);
     expect(rows()[0]).toContain("Search");
     expect(rows()[1]).toContain("Learn Rust");
