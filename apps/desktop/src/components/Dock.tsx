@@ -172,7 +172,8 @@ const Row = memo(function Row({
     if (!entry.url || jumping) return;
     setJumping(true);
     try {
-      await jumpToSource(tabId, entry.url, entry.line, entry.column, preferredEditor);
+      const result = await jumpToSource(tabId, entry.url, entry.line, entry.column, preferredEditor);
+      if (!result.opened) useBrowser.getState().notify(result.reason, 5000);
     } finally {
       setJumping(false);
     }
