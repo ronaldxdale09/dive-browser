@@ -33,6 +33,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- Network panel rows can be reached with Tab and opened with Enter or Space.
 - The developer dock's panel switcher is a real tab list: arrow keys, Home and End move between panels, and each panel is announced by its tab.
 - Opening the agent puts focus in its composer, so ⌘J then typing works without a click.
 - The Protection and Downloads toolbar buttons announce their popover (expanded, not pressed), and the YouTube row in Protection keeps its label on one line with "Applies on youtube.com" beneath it.

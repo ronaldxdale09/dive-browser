@@ -91,6 +91,16 @@ describe("NetworkPanel", () => {
     expect(screen.queryByRole("button", { name: /Replay/ })).toBeNull();
   });
 
+  it("opens a row from the keyboard", () => {
+    useNetwork.setState({ byTab: { "tab-1": rows(3) } });
+    render(<NetworkPanel />);
+    const tr = screen.getByText("item-1").closest("tr")!;
+    expect(tr.getAttribute("tabindex")).toBe("0");
+    tr.focus();
+    fireEvent.keyDown(tr, { key: "Enter" });
+    expect(tr.getAttribute("aria-selected")).toBe("true");
+  });
+
   it("shows what the selected request sent and what came back", async () => {
     useNetwork.setState({ byTab: { "tab-1": rows(2) } });
     vi.spyOn(ipc, "requestDetail").mockResolvedValue({

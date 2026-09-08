@@ -87,9 +87,17 @@ const NetworkRow = memo(function NetworkRow({
     <tr
       ref={measure}
       data-index={index}
+      tabIndex={0}
       onClick={() => onSelect(r.id)}
+      onKeyDown={(e) => {
+        // Rows are reachable with Tab; Enter or Space opens the detail like a click.
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect(r.id);
+        }
+      }}
       aria-selected={selected}
-      className="cursor-default border-b border-line/60 hover:bg-surface-2 aria-selected:bg-surface-3"
+      className="cursor-default border-b border-line/60 outline-none hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-accent/60 focus-visible:ring-inset aria-selected:bg-surface-3"
     >
       <td className="max-w-[360px] truncate px-3 text-ink" title={r.url}>{name(r.url)}</td>
       <td className="px-2 text-ink-2">{r.method}</td>
