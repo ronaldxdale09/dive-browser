@@ -6,15 +6,15 @@ import { AI_SITES, AiLogo, AiShortcuts } from "./AiShortcuts";
 afterEach(() => cleanup());
 
 describe("AiShortcuts", () => {
-  it("opens each assistant in a new tab of the active workspace", () => {
-    const openTab = vi.fn().mockResolvedValue(undefined);
-    useBrowser.setState({ openTab });
+  it("opens each assistant, switching to its tab when one is open", () => {
+    const openOrSwitch = vi.fn().mockResolvedValue(undefined);
+    useBrowser.setState({ openOrSwitch });
     render(<AiShortcuts />);
     for (const site of AI_SITES) {
-      fireEvent.click(screen.getByRole("button", { name: `Open ${site.name} in a new tab` }));
-      expect(openTab).toHaveBeenCalledWith(site.url);
+      fireEvent.click(screen.getByRole("button", { name: `Open ${site.name}` }));
+      expect(openOrSwitch).toHaveBeenCalledWith(site.url);
     }
-    expect(openTab).toHaveBeenCalledTimes(AI_SITES.length);
+    expect(openOrSwitch).toHaveBeenCalledTimes(AI_SITES.length);
   });
 
   it("draws a brand glyph for every site", () => {

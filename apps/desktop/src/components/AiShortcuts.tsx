@@ -2,9 +2,9 @@ import { useBrowser } from "../store/browser";
 import { BrandLogo } from "./BrandLogo";
 
 /**
- * Quick access to the three assistants people reach for most. Each click opens
- * the site in a new tab of the active workspace, so a ChatGPT tab lands next
- * to the work it is for rather than replacing it.
+ * Quick access to the three assistants people reach for most. A click brings
+ * the assistant's tab to the front when one is open in this workspace, and
+ * otherwise opens one next to the work it is for rather than replacing it.
  *
  * The marks are the official brand logos from svgl.app in their own colours,
  * because a monochrome approximation of the OpenAI knot or the Gemini spark
@@ -28,7 +28,7 @@ export function AiLogo({ id, size = 16, className = "" }: { id: AiSite["id"]; si
 
 /** Row of assistant shortcuts shown at the top of the expanded rail. */
 export function AiShortcuts() {
-  const openTab = useBrowser((s) => s.openTab);
+  const openOrSwitch = useBrowser((s) => s.openOrSwitch);
   return (
     <div role="group" aria-label="AI shortcuts" className="shrink-0 pb-1">
       <p className="px-2 pb-1.5 text-[9.5px] font-medium tracking-[0.08em] text-ink-3 uppercase">AI shortcuts</p>
@@ -37,9 +37,9 @@ export function AiShortcuts() {
           <button
             key={site.id}
             type="button"
-            aria-label={`Open ${site.name} in a new tab`}
-            title={`${site.name} — opens in a new tab`}
-            onClick={() => void openTab(site.url)}
+            aria-label={`Open ${site.name}`}
+            title={`${site.name} — switches to its tab, or opens one`}
+            onClick={() => void openOrSwitch(site.url)}
             className="pressable flex h-10 flex-col items-center justify-center gap-1 rounded-lg text-ink-3 transition-[color,background-color,transform] hover:bg-surface-2 hover:text-ink"
           >
             <AiLogo id={site.id} size={14} />

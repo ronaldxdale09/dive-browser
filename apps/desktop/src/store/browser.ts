@@ -69,6 +69,8 @@ interface BrowserState {
   openSettings: (section?: SettingsSection, anchor?: string) => void;
   boot: () => Promise<void>;
   openTab: (url: string) => Promise<void>;
+  /** Bring an open tab on `url`'s site to the front, or open one when there is none. */
+  openOrSwitch: (url: string) => Promise<void>;
   closeTab: (id: string) => Promise<void>;
   /** A tab opened just to fetch a file has nothing to show once the download starts; close it. */
   closeIfOnlyDownload: (id: string, url: string) => Promise<void>;
@@ -126,6 +128,23 @@ export type NoticeAction = { label: string; run: () => void };
 export type ClosedTab = { url: string; title: string; workspace_id: string | null; index: number };
 /** Most closed tabs remembered for reopening. */
 export const CLOSED_TABS_LIMIT = 25;
+
+/** The first tab already on `url`'s host, so a shortcut can switch instead of piling up duplicates. */
+export function sameSiteTab(tabs: readonly Tab[], url: string): Tab | undefined {
+  let host = "";
+  try {
+    host = new URL(url).host;
+  } catch {
+    return undefined;
+  }
+  return tabs.find((t) => {
+    try {
+      return new URL(t.url).host === host;
+    } catch {
+      return false;
+    }
+  });
+}
 
 /** Where `id` sits in its workspace's strip, for putting a reopened tab back. */
 export function stripIndex(tabs: readonly Tab[], id: string): number {
@@ -440,6 +459,11 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     const ws = get().activeWorkspace;
     if (!ws) return;
     await run(set, () => ipc.tabOpen(ws, url));
+  },
+  openOrSwitch: async (url) => {
+    const existing = sameSiteTab(get().tabs, url);
+    if (existing) return get().activateTab(existing.id);
+    return get().openTab(url);
   },
   showHome: async () => {
     if (get().activeTab === null) return;

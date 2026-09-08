@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@tauri-apps/api/event";
-import { CLOSED_TABS_LIMIT, orderWithAt, reduceCrash, togglePanel, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, useBrowser, withoutRequest } from "./browser";
+import { CLOSED_TABS_LIMIT, orderWithAt, reduceCrash, sameSiteTab, togglePanel, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, useBrowser, withoutRequest } from "./browser";
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
 import type { PermissionAsked, PermissionDismissed, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
@@ -496,5 +496,20 @@ describe("togglePanel", () => {
     expect(togglePanel({ ...closed, menu: true, dock: true }, "dock", false).menu).toBe(true);
     // Navigation dialogs still replace each other.
     expect(togglePanel({ ...closed, palette: true, dock: true }, "settings", true)).toMatchObject({ palette: false, settings: true, dock: true });
+  });
+});
+
+describe("openOrSwitch", () => {
+  it("activates a tab already on the site, and opens one otherwise", async () => {
+    const activate = vi.spyOn(ipc, "tabActivate").mockResolvedValue(null as never);
+    const open = vi.spyOn(ipc, "tabOpen").mockResolvedValue({} as never);
+    useBrowser.setState({ activeWorkspace: "w1", activeTab: "a", tabs: [tab("a", "https://x.test/"), tab("c", "https://claude.ai/login")] });
+    await useBrowser.getState().openOrSwitch("https://claude.ai/");
+    expect(activate).toHaveBeenCalledWith("c");
+    expect(open).not.toHaveBeenCalled();
+    await useBrowser.getState().openOrSwitch("https://gemini.google.com/");
+    expect(open).toHaveBeenCalledWith("w1", "https://gemini.google.com/");
+    expect(sameSiteTab([tab("z", "not a url")], "https://a.test/")).toBeUndefined();
+    expect(sameSiteTab([tab("z", "https://a.test/")], "nope")).toBeUndefined();
   });
 });

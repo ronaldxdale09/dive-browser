@@ -36,6 +36,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- The ChatGPT, Claude and Gemini shortcuts switch to the assistant's tab when one is already open in the workspace instead of opening another.
 - The A11y panel announces the audit result ("1 violation · 14 passed · 0 to review") and its errors to assistive tech.
 - Network panel rows can be reached with Tab and opened with Enter or Space.
 - The developer dock's panel switcher is a real tab list: arrow keys, Home and End move between panels, and each panel is announced by its tab.
