@@ -63,7 +63,7 @@ export function ProfileStep() {
           onChange={(e) => setName(e.target.value)}
           placeholder={profile?.name ?? "Personal"}
           maxLength={40}
-          className="mt-1 h-10 w-full rounded-xl border border-line bg-surface-2 px-3 text-sm text-ink outline-none placeholder:text-ink-3 focus:border-line-2"
+          className="mt-1 h-10 w-full rounded-xl border border-line bg-surface-2 px-3 text-sm text-ink outline-none placeholder:text-ink-3 focus:border-highlight/60"
         />
       </label>
       <div className="mt-5 grid grid-cols-[1fr_auto] items-start gap-6">

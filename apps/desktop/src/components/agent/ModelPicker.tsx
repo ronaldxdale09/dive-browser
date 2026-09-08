@@ -134,7 +134,7 @@ export function ModelPicker({ onAddProvider }: { onAddProvider: () => void }) {
             onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
             aria-label="Model id"
             spellCheck={false}
-            className="mt-1.5 h-7 w-full rounded-lg border border-line bg-surface-2 px-2 font-mono text-[11px] text-ink outline-none focus:border-line-2"
+            className="mt-1.5 h-7 w-full rounded-lg border border-line bg-surface-2 px-2 font-mono text-[11px] text-ink outline-none focus:border-highlight/60"
           />
 
           <div className="mt-2 flex items-center gap-2 border-t border-line pt-2">

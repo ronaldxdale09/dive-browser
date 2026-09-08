@@ -198,7 +198,7 @@ function SizeInput({ label, value, onChange }: { label: string; value: number; o
       max={4096}
       value={value}
       onChange={(e) => onChange(Number(e.target.value))}
-      className="h-7 w-20 rounded-lg border border-line bg-surface-2 px-2 font-mono text-xs outline-none focus:border-line-2"
+      className="h-7 w-20 rounded-lg border border-line bg-surface-2 px-2 font-mono text-xs outline-none focus:border-highlight/60"
     />
   );
 }

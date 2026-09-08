@@ -255,7 +255,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
                   onChange={(e) => setBaseUrl(e.target.value)}
                   placeholder="https://api.example.com/v1"
                   spellCheck={false}
-                  className="h-8 w-full rounded-lg border border-line bg-surface-2 px-2.5 font-mono text-xs text-ink outline-none placeholder:text-ink-3 focus:border-line-2 transition-colors"
+                  className="h-8 w-full rounded-lg border border-line bg-surface-2 px-2.5 font-mono text-xs text-ink outline-none placeholder:text-ink-3 focus:border-highlight/60 transition-colors"
                 />
               </div>
             )}
@@ -280,7 +280,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
                     }
                     autoComplete="off"
                     spellCheck={false}
-                    className="h-8 w-full rounded-lg border border-line bg-surface-2 px-2.5 font-mono text-xs text-ink outline-none placeholder:text-ink-3 focus:border-line-2 transition-colors pr-16"
+                    className="h-8 w-full rounded-lg border border-line bg-surface-2 px-2.5 font-mono text-xs text-ink outline-none placeholder:text-ink-3 focus:border-highlight/60 transition-colors pr-16"
                   />
                   <div className="absolute right-1 flex items-center gap-0.5">
                     {key && (

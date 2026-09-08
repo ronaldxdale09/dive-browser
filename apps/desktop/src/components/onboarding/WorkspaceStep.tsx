@@ -64,7 +64,7 @@ export function WorkspaceStep() {
           onChange={(e) => setName(e.target.value)}
           placeholder={workspace?.name ?? "Home"}
           maxLength={40}
-          className="mt-1 h-10 w-full rounded-xl border border-line bg-surface-2 px-3 text-sm text-ink outline-none placeholder:text-ink-3 focus:border-line-2"
+          className="mt-1 h-10 w-full rounded-xl border border-line bg-surface-2 px-3 text-sm text-ink outline-none placeholder:text-ink-3 focus:border-highlight/60"
         />
       </label>
       <div className="mt-2 flex flex-wrap gap-1.5">

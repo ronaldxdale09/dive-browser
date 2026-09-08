@@ -5,7 +5,7 @@ import { useBrowser } from "../store/browser";
 import { DEFAULT_ACTIONS, newRule, selectRules, useRules } from "../store/rules";
 import { Icon, IconButton } from "./Icon";
 
-const FIELD = "h-6 rounded border border-line bg-surface-2 px-1.5 font-mono text-[11px] text-ink outline-none focus:border-line-2";
+const FIELD = "h-6 rounded border border-line bg-surface-2 px-1.5 font-mono text-[11px] text-ink outline-none focus:border-highlight/60";
 
 /** Toolbar slot: add a rule. */
 export function RulesTools() {

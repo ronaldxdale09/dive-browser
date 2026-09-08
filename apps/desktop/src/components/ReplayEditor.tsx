@@ -63,7 +63,7 @@ export function ReplayEditor({ tabId, requestId, onClose }: { tabId: string; req
     }
   };
 
-  const field = "w-full rounded-md border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink outline-none focus:border-line-2";
+  const field = "w-full rounded-md border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink outline-none focus:border-highlight/60";
   return (
     <div ref={dialog} role="dialog" aria-label="Replay request" className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto border-t border-line bg-surface-2 p-2 text-xs select-text">
       <div className="flex items-center gap-2">

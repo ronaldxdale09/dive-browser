@@ -126,7 +126,7 @@ function ConsolePanel() {
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Filter"
-          className="h-6 w-56 rounded-md border border-line bg-surface-2 px-2 text-[11px] outline-none placeholder:text-ink-3 focus:border-line-2"
+          className="h-6 w-56 rounded-md border border-line bg-surface-2 px-2 text-[11px] outline-none placeholder:text-ink-3 focus:border-highlight/60"
         />
       </div>
       <div

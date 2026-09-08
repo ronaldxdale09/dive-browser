@@ -72,7 +72,7 @@ export function WorkspaceDialog() {
             onChange={(e) => setName(e.target.value)}
             maxLength={40}
             placeholder="Client, Side project, Research…"
-            className="mt-1 h-9 w-full rounded-lg border border-line bg-surface-2 px-3 text-sm text-ink outline-none placeholder:text-ink-3 focus:border-line-2"
+            className="mt-1 h-9 w-full rounded-lg border border-line bg-surface-2 px-3 text-sm text-ink outline-none placeholder:text-ink-3 focus:border-highlight/60"
           />
         </label>
         <div className="mt-3 text-xs text-ink-2">Color</div>

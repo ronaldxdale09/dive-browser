@@ -153,7 +153,7 @@ export function RecordDialog() {
                   value={live.microphone ?? ""}
                   disabled={noMic}
                   onChange={(e) => setSettings({ microphone: e.target.value || null })}
-                  className="h-8 w-full appearance-none rounded-lg border border-line bg-surface-2 pr-2 pl-8 text-xs text-ink outline-none focus:border-line-2 disabled:opacity-50"
+                  className="h-8 w-full appearance-none rounded-lg border border-line bg-surface-2 pr-2 pl-8 text-xs text-ink outline-none focus:border-highlight/60 disabled:opacity-50"
                 >
                   <option value="">Off</option>
                   {mics.map((m) => (

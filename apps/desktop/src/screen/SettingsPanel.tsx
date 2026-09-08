@@ -373,7 +373,7 @@ function NoteSettings({ note }: { note: AnnotationRegion }) {
         <>
           <Card>
             <Label>Text</Label>
-            <textarea value={note.text ?? ""} onChange={(ev) => patch({ text: ev.target.value }, false)} onBlur={() => useEditor.getState().checkpoint()} rows={3} className="mt-2 w-full rounded-lg border border-line bg-surface p-2 text-xs text-ink outline-none focus:border-line-2" />
+            <textarea value={note.text ?? ""} onChange={(ev) => patch({ text: ev.target.value }, false)} onBlur={() => useEditor.getState().checkpoint()} rows={3} className="mt-2 w-full rounded-lg border border-line bg-surface p-2 text-xs text-ink outline-none focus:border-highlight/60" />
             <div className="mt-2 flex gap-1">
               {(["bold", "italic", "underline"] as const).map((k) => (
                 <button key={k} type="button" aria-pressed={note.style[k]} onClick={() => style({ [k]: !note.style[k] })} className="h-7 flex-1 rounded-md bg-surface text-[11px] text-ink-2 aria-pressed:bg-surface-3 aria-pressed:text-ink">

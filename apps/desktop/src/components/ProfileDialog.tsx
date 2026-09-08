@@ -68,11 +68,11 @@ function ProfileForm({ id }: { id: string | null }) {
 
         <label className="mt-4 block text-[11px] text-ink-2">
           Name
-          <input ref={nameField} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ronald" maxLength={40} required className="mt-1 h-9 w-full rounded-lg border border-line bg-surface-2 px-3 text-xs text-ink outline-none focus:border-line-2" />
+          <input ref={nameField} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ronald" maxLength={40} required className="mt-1 h-9 w-full rounded-lg border border-line bg-surface-2 px-3 text-xs text-ink outline-none focus:border-highlight/60" />
         </label>
         <label className="mt-3 block text-[11px] text-ink-2">
           Shown under the name <span className="text-ink-3">(optional)</span>
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Work · ronald@company.com" maxLength={80} className="mt-1 h-9 w-full rounded-lg border border-line bg-surface-2 px-3 text-xs text-ink outline-none focus:border-line-2" />
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Work · ronald@company.com" maxLength={80} className="mt-1 h-9 w-full rounded-lg border border-line bg-surface-2 px-3 text-xs text-ink outline-none focus:border-highlight/60" />
         </label>
 
         <p className="mt-4 text-[11px] text-ink-2">Face</p>

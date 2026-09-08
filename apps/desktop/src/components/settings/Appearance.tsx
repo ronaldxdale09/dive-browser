@@ -376,7 +376,7 @@ function HexInput({ id, label, value, onCommit }: { id: string; label: string; v
           e.currentTarget.blur();
         }
       }}
-      className="h-7 w-[84px] rounded-md border border-line bg-surface-2 px-2 font-mono text-[11px] text-ink outline-none select-text hover:border-line-2 focus:border-line-2"
+      className="h-7 w-[84px] rounded-md border border-line bg-surface-2 px-2 font-mono text-[11px] text-ink outline-none select-text hover:border-line-2 focus:border-highlight/60"
     />
   );
 }

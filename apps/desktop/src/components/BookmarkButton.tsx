@@ -123,7 +123,7 @@ export function BookmarkButton() {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               spellCheck={false}
-              className="h-7 w-full rounded-lg border border-line bg-surface-2 px-2 text-[12px] text-ink outline-none focus:border-line-2"
+              className="h-7 w-full rounded-lg border border-line bg-surface-2 px-2 text-[12px] text-ink outline-none focus:border-highlight/60"
             />
             <div className="mt-1 truncate px-0.5 font-mono text-[11px] text-ink-3" title={current.url}>
               {hostOf(current.url) || current.url}

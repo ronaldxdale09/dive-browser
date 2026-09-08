@@ -101,7 +101,7 @@ export function Select<T extends string>({
         disabled={disabled}
         value={value}
         onChange={(e) => onChange(e.target.value as T)}
-        className="h-8 appearance-none rounded-lg border border-line bg-surface-2 py-0 pr-7 pl-2.5 text-xs text-ink outline-none hover:border-line-2 focus:border-line-2 disabled:opacity-40"
+        className="h-8 appearance-none rounded-lg border border-line bg-surface-2 py-0 pr-7 pl-2.5 text-xs text-ink outline-none hover:border-line-2 focus:border-highlight/60 disabled:opacity-40"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>
@@ -178,7 +178,7 @@ export function TextInput({
           e.currentTarget.blur();
         }
       }}
-      className={`h-8 rounded-lg border border-line bg-surface-2 px-2.5 text-xs text-ink outline-none select-text placeholder:text-ink-3 hover:border-line-2 focus:border-line-2 ${mono ? "font-mono" : ""} ${width}`}
+      className={`h-8 rounded-lg border border-line bg-surface-2 px-2.5 text-xs text-ink outline-none select-text placeholder:text-ink-3 hover:border-line-2 focus:border-highlight/60 ${mono ? "font-mono" : ""} ${width}`}
     />
   );
 }
@@ -206,7 +206,7 @@ export function TextArea({
       placeholder={placeholder}
       spellCheck={false}
       onBlur={(e) => e.target.value !== value && onCommit(e.target.value)}
-      className="w-full resize-none rounded-lg border border-line bg-surface-2 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-ink outline-none select-text placeholder:text-ink-3 hover:border-line-2 focus:border-line-2"
+      className="w-full resize-none rounded-lg border border-line bg-surface-2 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-ink outline-none select-text placeholder:text-ink-3 hover:border-line-2 focus:border-highlight/60"
     />
   );
 }
