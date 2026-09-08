@@ -57,6 +57,7 @@ describe("Extensions", () => {
     fireEvent.click(screen.getByLabelText("Remove Fixture helper"));
     await waitFor(() => expect(ipc.extensionRemove).toHaveBeenCalledWith("fixture-id"));
     expect(screen.getByText("No extensions loaded")).toBeTruthy();
+    expect(screen.getByText(/Where to find one/).textContent).toContain("Extensions");
   });
 
   it("loads a directory selected by the native picker", async () => {
