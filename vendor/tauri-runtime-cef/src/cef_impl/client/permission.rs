@@ -12,7 +12,10 @@ use std::{
   time::{Duration, Instant},
 };
 
-const DEADLINE: Duration = Duration::from_secs(30);
+/// How long a prompt stays answerable. Long enough to read and think about;
+/// at 30 s the bar vanished while people were still deciding, and the page
+/// was told "denied", which sites remember. Navigation still cancels it.
+const DEADLINE: Duration = Duration::from_secs(5 * 60);
 type Answer = Box<dyn FnOnce(Option<bool>) + Send>;
 type Handler = Arc<dyn Fn(NativePermissionRequest) + Send + Sync>;
 type Cancel = Arc<dyn Fn(u64) + Send + Sync>;
@@ -316,7 +319,7 @@ impl PermissionBridge {
     let handler = self.state.lock().unwrap().handler.clone();
     if let Some(handler) = handler {
       let mut timeout = PermissionTask::new(self.clone(), request.id, None);
-      if cef::post_delayed_task(ThreadId::UI, Some(&mut timeout), 30_000) == 0 {
+      if cef::post_delayed_task(ThreadId::UI, Some(&mut timeout), DEADLINE.as_millis() as i64) == 0 {
         self.complete(request.id, None);
         return;
       }

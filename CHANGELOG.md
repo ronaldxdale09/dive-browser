@@ -54,6 +54,8 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Permission prompts stay answerable for five minutes instead of thirty seconds; the bar used to vanish while the reader was still deciding, and the page was told the request was denied.
+- A permission prompt for something that is always remembered (notifications) says so in words instead of showing a dropdown with a single choice.
 - The menu item is now "Clear browsing data…", matching the Settings group and Library button it opens, and Settings starts keyboard focus on the section it was opened to instead of General.
 - The tab strip's "+N" chip counted tabs that were plainly in view (it measured them from the window's edge instead of the strip's), so a private window with two tabs claimed one was hidden.
 - The menu's Zoom row names its shortcuts (⌘−, ⌘0, ⌘+) on hover; it was the one row without them.
