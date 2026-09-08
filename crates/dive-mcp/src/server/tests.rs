@@ -414,6 +414,27 @@ async fn a_wait_that_times_out_says_what_it_was_waiting_for() {
 }
 
 #[tokio::test]
+async fn a_blank_tab_id_means_the_active_tab() {
+    let server = DiveServer::new(Arc::new(seeded_fake()), Config::default());
+    let text = text_of(
+        &server
+            .page_text(Parameters(TabRef {
+                tab_id: Some(String::new()),
+            }))
+            .await
+            .expect("blank id falls back to the active tab"),
+    );
+    assert!(!text.is_empty());
+    let error = server
+        .page_text(Parameters(TabRef {
+            tab_id: Some("nope".into()),
+        }))
+        .await
+        .expect_err("a malformed id is refused");
+    assert!(error.message.contains("tabs_list"), "{error:?}");
+}
+
+#[tokio::test]
 async fn capabilities_report_the_grammar_and_whether_evaluate_is_on() {
     let closed = DiveServer::new(Arc::new(Fake::default()), Config::default());
     let reported: serde_json::Value =

@@ -57,10 +57,14 @@ impl<B: Browser> DiveServer<B> {
     }
 
     async fn resolve(&self, tab_id: Option<String>) -> Result<TabId, ErrorData> {
-        if let Some(id) = tab_id {
-            return id
-                .parse()
-                .map_err(|_| ErrorData::invalid_params(format!("bad tab id: {id}"), None));
+        // A blank id is how some clients say "the current tab".
+        if let Some(id) = tab_id.filter(|id| !id.trim().is_empty()) {
+            return id.parse().map_err(|_| {
+                ErrorData::invalid_params(
+                    format!("bad tab id {id}: pass an id from tabs_list, or leave tab_id out for the active tab"),
+                    None,
+                )
+            });
         }
         let tabs = self.browser.tabs().await?;
         let Some(tab) = tabs.iter().find(|t| t.active).or_else(|| tabs.first()) else {

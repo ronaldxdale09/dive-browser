@@ -19,7 +19,7 @@ const MAX_AGENT_SCREENSHOT_BYTES: usize = 8 * 1024 * 1024;
 /// wrong thing after any update; a locator is resolved when the action runs.
 #[allow(clippy::too_many_lines)] // Keeping the complete model-visible tool catalog together makes it auditable.
 pub fn specs() -> Vec<ToolSpec> {
-    let tab = json!({"type": "string", "description": "Tab id from tabs_list; omit for the current tab."});
+    let tab = json!({"type": "string", "description": "Only when working on another tab: its id from tabs_list. Leave it out for the current tab."});
     let locator = json!({
         "type": "string",
         "description": format!("Element locator. {}", dive_mcp::LOCATOR_GRAMMAR),
@@ -168,6 +168,30 @@ pub fn is_action(name: &str) -> bool {
     )
 }
 
+/// The `tab_id` argument, or `None` when it is absent or blank. Small models
+/// send `"tab_id": ""` for "the current tab"; that must not fail the call.
+fn tab_argument(input: &Value) -> Option<&str> {
+    input["tab_id"]
+        .as_str()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+}
+
+/// Which tab a call means. A real id wins; anything else falls back to the
+/// tab the agent is working on, because a string that is not an id at all is
+/// the model echoing the schema ("`any_tab_id_from_tabs_list`"), not a choice.
+fn resolve_tab(argument: Option<&str>, current: Option<TabId>) -> Result<TabId, String> {
+    match (argument.map(str::parse::<TabId>), current) {
+        (Some(Ok(id)), _) => Ok(id),
+        (Some(Err(_)) | None, Some(current)) => Ok(current),
+        (Some(Err(_)), None) => Err(format!(
+            "bad tab id {}: pass an id from tabs_list, or leave tab_id out for the current tab",
+            argument.unwrap_or_default()
+        )),
+        (None, None) => Err("no current tab".to_owned()),
+    }
+}
+
 /// Run one tool call against the browser.
 pub async fn run<B: Browser>(
     browser: &B,
@@ -234,12 +258,7 @@ async fn execute<B: Browser>(
     call: &ToolUse,
 ) -> Result<Value, String> {
     let input = &call.input;
-    let tab = || -> Result<TabId, String> {
-        match input["tab_id"].as_str() {
-            Some(id) => id.parse().map_err(|_| format!("bad tab id {id}")),
-            None => default_tab.ok_or_else(|| "no current tab".to_owned()),
-        }
-    };
+    let tab = || resolve_tab(tab_argument(input), default_tab);
     let text = |v: Value| {
         Ok(Value::String(
             serde_json::to_string_pretty(&v).unwrap_or_default(),
@@ -447,6 +466,36 @@ async fn execute<B: Browser>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_blank_tab_id_means_the_current_tab() {
+        use serde_json::json;
+        assert_eq!(super::tab_argument(&json!({"tab_id": ""})), None);
+        assert_eq!(super::tab_argument(&json!({"tab_id": "  "})), None);
+        assert_eq!(super::tab_argument(&json!({})), None);
+        assert_eq!(super::tab_argument(&json!({"tab_id": "abc"})), Some("abc"));
+    }
+
+    #[test]
+    fn a_string_that_is_not_an_id_means_the_current_tab() {
+        let current: dive_core::TabId = "01a08307-7720-7843-a80f-583734dbeecd".parse().unwrap();
+        let other: dive_core::TabId = "01a082ec-5bb7-7af3-9d1d-fad7b38a1c71".parse().unwrap();
+        assert_eq!(super::resolve_tab(None, Some(current)), Ok(current));
+        assert_eq!(
+            super::resolve_tab(Some("any_tab_id_from_tabs_list"), Some(current)),
+            Ok(current)
+        );
+        assert_eq!(
+            super::resolve_tab(Some(&other.to_string()), Some(current)),
+            Ok(other)
+        );
+        let error = super::resolve_tab(Some("nope"), None).unwrap_err();
+        assert!(error.contains("tabs_list"), "{error}");
+        assert_eq!(
+            super::resolve_tab(None, None).unwrap_err(),
+            "no current tab"
+        );
+    }
+
     #[test]
     fn the_agent_may_only_navigate_to_web_urls() {
         for ok in [
