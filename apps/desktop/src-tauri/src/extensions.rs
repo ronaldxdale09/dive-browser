@@ -206,15 +206,24 @@ fn string_array(value: Option<&serde_json::Value>) -> Vec<String> {
 }
 
 fn validate(directory: &Path) -> AppResult<ExtensionInfo> {
-    let root = directory
-        .canonicalize()
-        .map_err(|e| AppError::new(format!("cannot open extension directory: {e}")))?;
+    // These read verbatim in the Extensions panel, so they say what to do.
+    let root = directory.canonicalize().map_err(|_| {
+        AppError::new(format!(
+            "There is no folder at {}. Choose the folder that holds the extension's manifest.json.",
+            directory.display()
+        ))
+    })?;
     if !root.is_dir() {
-        return Err(AppError::new("extension path must be a directory"));
+        return Err(AppError::new(
+            "That is a file, not a folder. Choose the folder that holds the extension's manifest.json.",
+        ));
     }
     let manifest_path = root.join("manifest.json");
-    let metadata = fs::metadata(&manifest_path)
-        .map_err(|_| AppError::new("extension directory has no manifest.json"))?;
+    let metadata = fs::metadata(&manifest_path).map_err(|_| {
+        AppError::new(
+            "That folder has no manifest.json. Choose the folder that holds the extension's manifest.json, not the one above it.",
+        )
+    })?;
     if metadata.len() > MAX_MANIFEST_BYTES {
         return Err(AppError::new("extension manifest is larger than 1 MiB"));
     }
@@ -226,7 +235,9 @@ fn validate(directory: &Path) -> AppResult<ExtensionInfo> {
         .and_then(|v| u8::try_from(v).ok())
         .filter(|v| matches!(v, 2 | 3))
         .ok_or_else(|| {
-            AppError::new("only Chromium Manifest V2 and V3 extensions are supported")
+            AppError::new(
+                "The manifest has no manifest_version of 2 or 3, so this is not a Chromium extension Dive can load.",
+            )
         })?;
     if !manifest_paths_are_safe(&root, &manifest) {
         return Err(AppError::new(
@@ -438,7 +449,15 @@ mod tests {
     #[test]
     fn rejects_unknown_manifest_generations_and_missing_names() {
         let unknown = fixture(r#"{"manifest_version":4,"name":"Future","version":"1"}"#);
-        assert!(validate(&unknown).is_err());
+        let error = validate(&unknown).expect_err("manifest v4").to_string();
+        assert!(error.contains("manifest_version of 2 or 3"), "{error}");
+        let missing = unknown.join("nope");
+        let error = validate(&missing).expect_err("missing folder").to_string();
+        assert!(error.contains("There is no folder at"), "{error}");
+        let bare = unknown.join("bare");
+        fs::create_dir_all(&bare).unwrap();
+        let error = validate(&bare).expect_err("no manifest").to_string();
+        assert!(error.contains("has no manifest.json"), "{error}");
         let unnamed = fixture(r#"{"manifest_version":3,"version":"1"}"#);
         assert!(validate(&unnamed).is_err());
         fs::remove_dir_all(unknown).unwrap();
