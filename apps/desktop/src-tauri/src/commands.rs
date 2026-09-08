@@ -526,6 +526,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             layout_prepare_content_cover,
             layout_set_content_covered,
             layout_set_corner_radius,
+            window_set_background,
             layout_set_overlay_regions,
             layout_set_panes,
             tab_detach,
@@ -2741,6 +2742,23 @@ pub(crate) async fn layout_prepare_content_cover(
             }
         })
         .collect())
+}
+
+#[tauri::command]
+#[specta::specta]
+/// Paint the window itself in the chrome's ground colour, so what shows
+/// through a page view's rounded corners, or during a resize, is not black.
+pub(crate) fn window_set_background(app: AppHandle<Runtime>, hex: String) -> AppResult<()> {
+    use tauri::Manager as _;
+    let digits = hex.trim().trim_start_matches('#');
+    let parse = |i: usize| u8::from_str_radix(digits.get(i..i + 2).unwrap_or("zz"), 16);
+    let (6, Ok(r), Ok(g), Ok(b)) = (digits.len(), parse(0), parse(2), parse(4)) else {
+        return Err(AppError::new(format!("not a colour: {hex}")));
+    };
+    if let Some(window) = app.get_window(crate::MAIN_WINDOW) {
+        window.set_background_color(Some(tauri::utils::config::Color(r, g, b, 0xFF)))?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

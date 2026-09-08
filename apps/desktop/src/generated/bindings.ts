@@ -339,6 +339,11 @@ export const commands = {
 	 *  preference; zero makes them square again.
 	 */
 	layoutSetCornerRadius: (radius: number | null) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_corner_radius", { radius })),
+	/**
+	 *  Paint the window itself in the chrome's ground colour, so what shows
+	 *  through a page view's rounded corners, or during a resize, is not black.
+	 */
+	windowSetBackground: (hex: string) => typedError<null, AppError>(__TAURI_INVOKE("window_set_background", { hex })),
 	/**  Regions belong to trusted chrome and use CSS logical pixels. */
 	layoutSetOverlayRegions: (regions: Bounds[], active: boolean) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_overlay_regions", { regions, active })),
 	/**

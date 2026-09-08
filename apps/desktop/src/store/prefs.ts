@@ -223,12 +223,27 @@ export function applyAppearance(prefs: Prefs) {
   if (isDefaultAppearance(prefs)) {
     for (const name of THEME_VARS) root.style.removeProperty(name);
     root.style.removeProperty("font-size");
+    syncWindowBackground();
     return;
   }
   for (const [name, value] of themeCss(prefs, scheme)) root.style.setProperty(name, value);
   const scale = Math.min(1.3, Math.max(0.8, prefs.ui_scale || 1));
   if (scale === 1) root.style.removeProperty("font-size");
   else root.style.fontSize = `${16 * scale}px`;
+  syncWindowBackground();
+}
+
+// The window behind the chrome shows through a page's rounded corners and
+// during a resize; keep it the chrome's ground colour rather than black.
+let sentBackground: string | null = null;
+function syncWindowBackground() {
+  if (typeof getComputedStyle !== "function") return;
+  const ground = getComputedStyle(document.documentElement).getPropertyValue("--color-ground").trim();
+  if (!/^#[0-9a-f]{6}$/i.test(ground) || ground === sentBackground) return;
+  sentBackground = ground;
+  ipc.setWindowBackground(ground).catch(() => {
+    sentBackground = null;
+  });
 }
 
 /** Re-apply the palette when the OS scheme changes while following it. */

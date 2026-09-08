@@ -8,7 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
-- The page's corners are slightly rounded where it meets the rail and toolbar, following the Appearance corner setting (square under Sharp).
+- The page's corners are slightly rounded where it meets the rail and toolbar, following the Appearance corner setting (square under Sharp). The window behind the chrome is painted in the chrome's ground colour, so nothing black shows through corners or during a resize.
 
 ### Changed
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.

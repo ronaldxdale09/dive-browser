@@ -140,6 +140,7 @@ export const ipc = {
   prepareContentCover: async () => unwrap(await commands.layoutPrepareContentCover()),
   setContentCovered: async (covered: boolean) => unwrap(await commands.layoutSetContentCovered(covered)),
   setContentCornerRadius: async (radius: number) => unwrap(await commands.layoutSetCornerRadius(radius)),
+  setWindowBackground: async (hex: string) => unwrap(await commands.windowSetBackground(hex)),
   /** Show these tabs side by side; an empty list returns to a single page. */
   setPanes: async (panes: PaneBounds[]) => unwrap(await commands.layoutSetPanes(panes)),
   /** Tear a tab off into its own window, placed under `at` (window-relative logical px) when given. */

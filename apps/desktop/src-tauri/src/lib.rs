@@ -97,11 +97,12 @@ fn reopen_window(app: &tauri::AppHandle<Runtime>) {
         .get(MAIN_WINDOW)
         .or_else(|| windows.values().next())
         .cloned();
+    tracing::info!(found = window.is_some(), "dock reopen");
     match window {
         Some(window) => {
-            if window.is_minimized().unwrap_or(false) {
-                let _ = window.unminimize();
-            }
+            // Unconditional: the getter can lag the actual state, and
+            // unminimizing a window that is not minimized is harmless.
+            let _ = window.unminimize();
             let _ = window.show();
             let _ = window.set_focus();
         }
