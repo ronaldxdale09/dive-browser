@@ -62,7 +62,13 @@ describe("SettingsDialog", () => {
     expect(screen.getByText("⌘T")).toBeTruthy();
   });
 
-  it("lands a Delete browsing data request on its group inside Privacy", () => {
+  it("starts keyboard focus on the section it was opened to", () => {
+    useBrowser.getState().openSettings("privacy");
+    render(<SettingsDialog />);
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Privacy" }));
+  });
+
+  it("lands a Clear browsing data request on its group inside Privacy", () => {
     const scrolled = vi.fn();
     Element.prototype.scrollIntoView = scrolled;
     useBrowser.getState().openSettings("privacy", "clear-browsing-data");

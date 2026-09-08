@@ -64,7 +64,7 @@ export function SettingsDialog() {
   // Opened on whichever panel the caller asked for (`openSettings("about")`).
   const initial = useBrowser((s) => s.settingsSection);
   const [section, setSection] = useState<SectionId>(() => resolveSection(initial));
-  // "Delete browsing data…" lands on its group, not the top of Privacy.
+  // "Clear browsing data…" lands on its group, not the top of Privacy.
   const anchor = useBrowser((s) => s.settingsAnchor);
   useEffect(() => {
     if (!anchor) return;
@@ -84,7 +84,9 @@ export function SettingsDialog() {
   }, [load]);
   const { close, className } = useFadeClose(() => toggle("settings", false));
   const root = useRef<HTMLDivElement>(null);
-  useFocusTrap(root);
+  // Focus starts on the section that is showing, not always on General.
+  const selectedTab = useRef<HTMLButtonElement>(null);
+  useFocusTrap(root, { initialFocus: selectedTab });
 
   // Up and down move through the sections, as in any preferences window.
   const onNavKey = (e: React.KeyboardEvent) => {
@@ -118,6 +120,7 @@ export function SettingsDialog() {
             <button
               key={s.id}
               type="button"
+              ref={s.id === section ? selectedTab : undefined}
               role="tab"
               id={`settings-tab-${s.id}`}
               aria-selected={s.id === section}

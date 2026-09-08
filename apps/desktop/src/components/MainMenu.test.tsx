@@ -68,7 +68,7 @@ describe("MainMenu", () => {
 
   it("opens settings sections and closes itself", () => {
     render(<MainMenu />);
-    fireEvent.click(screen.getByRole("menuitem", { name: /Delete browsing data/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Clear browsing data/ }));
     expect(useBrowser.getState().open.settings).toBe(true);
     expect(useBrowser.getState().settingsSection).toBe("privacy");
   });

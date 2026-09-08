@@ -54,6 +54,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- The menu item is now "Clear browsing data…", matching the Settings group and Library button it opens, and Settings starts keyboard focus on the section it was opened to instead of General.
 - The tab strip's "+N" chip counted tabs that were plainly in view (it measured them from the window's edge instead of the strip's), so a private window with two tabs claimed one was hidden.
 - The menu's Zoom row names its shortcuts (⌘−, ⌘0, ⌘+) on hover; it was the one row without them.
 - Storage panel rows keep a stable order (by key, then domain and path); cookies came back in a different order on every refresh.
