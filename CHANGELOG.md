@@ -8,6 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- The Vitals panel says each rating in words beside the number, explains a missing INP ("no input yet"), and the LCP element line scrolls the page to that element and flashes it.
 - In the A11y panel each failing element is a button that scrolls the page to it and flashes an outline, and a rule's docs link opens as a Dive tab; a report now stays with the tab it was run on instead of following you to the next tab.
 - The Storage panel can delete a cookie or a local or session storage key from its row; the page sees the change at once.
 - Settings › Developer offers a ready `mcp.json` entry for Cursor and other JSON-configured MCP clients, with the token masked on screen and copied whole.

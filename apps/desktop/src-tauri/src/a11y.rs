@@ -87,10 +87,23 @@ pub async fn reveal(session: &CdpSession, selector: &str) -> AppResult<bool> {
 
 /// The page-side script for [`reveal`]. The selector travels as a JSON
 /// string literal so quotes and backslashes inside it cannot break out.
+/// The scroll is instant and the box sits in document coordinates, so a
+/// page with smooth scrolling cannot leave the outline where the element
+/// used to be.
 pub fn reveal_script(selector: &str) -> String {
     let literal = serde_json::to_string(selector).unwrap_or_else(|_| "\"\"".into());
     format!(
-        "(() => {{ const el = document.querySelector({literal}); if (!el) return false;          el.scrollIntoView({{block: 'center', inline: 'center'}});          const r = el.getBoundingClientRect(); const box = document.createElement('div');          box.setAttribute('data-dive-reveal', '');          box.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;box-sizing:border-box;' +            'border:2px solid #ff8a3d;border-radius:4px;box-shadow:0 0 0 4px rgba(255,138,61,.35);transition:opacity .4s ease;' +            `left:${{r.left - 4}}px;top:${{r.top - 4}}px;width:${{Math.max(r.width, 4) + 8}}px;height:${{Math.max(r.height, 4) + 8}}px`;          document.querySelectorAll('[data-dive-reveal]').forEach((n) => n.remove());          document.documentElement.appendChild(box);          setTimeout(() => {{ box.style.opacity = '0'; }}, 1400); setTimeout(() => box.remove(), 1900);          return true; }})()"
+        "(() => {{ const el = document.querySelector({literal}); if (!el) return false; \
+         el.scrollIntoView({{block: 'center', inline: 'center', behavior: 'instant'}}); \
+         const r = el.getBoundingClientRect(); const box = document.createElement('div'); \
+         box.setAttribute('data-dive-reveal', ''); \
+         box.style.cssText = 'position:absolute;pointer-events:none;z-index:2147483647;box-sizing:border-box;' + \
+           'border:2px solid #ff8a3d;border-radius:4px;box-shadow:0 0 0 4px rgba(255,138,61,.35);transition:opacity .4s ease;' + \
+           `left:${{r.left + window.scrollX - 4}}px;top:${{r.top + window.scrollY - 4}}px;width:${{Math.max(r.width, 4) + 8}}px;height:${{Math.max(r.height, 4) + 8}}px`; \
+         document.querySelectorAll('[data-dive-reveal]').forEach((n) => n.remove()); \
+         document.documentElement.appendChild(box); \
+         setTimeout(() => {{ box.style.opacity = '0'; }}, 1400); setTimeout(() => box.remove(), 1900); \
+         return true; }})()"
     )
 }
 
@@ -185,6 +198,7 @@ mod reveal_tests {
     fn the_selector_is_quoted_as_a_string_literal() {
         let script = reveal_script("a[href=\"x\"] > span");
         assert!(script.contains("document.querySelector(\"a[href=\\\"x\\\"] > span\")"));
-        assert!(script.contains("scrollIntoView"));
+        assert!(script.contains("behavior: 'instant'"));
+        assert!(script.contains("window.scrollY"));
     }
 }

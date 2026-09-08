@@ -17,7 +17,7 @@ describe("dock panels with no tab", () => {
     const tab = { id: "t1", workspace_id: "w", url: "https://example.com/", title: "Example", favicon: null, pinned: false, created_at: "", last_active_at: "", closed_at: null, position: 0 } as never;
     useBrowser.setState({ tabs: [tab], activeTab: "t1", loading: {} });
     render(<VitalsPanel />);
-    expect(await screen.findByText("LCP element: img.hero")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Show the LCP element img.hero in the page" })).toBeTruthy();
     act(() => useBrowser.setState({ tabs: [], activeTab: null }));
     expect(screen.getByText("Open a tab to measure its Web Vitals.")).toBeTruthy();
     expect(screen.queryByText("LCP element: img.hero")).toBeNull();
