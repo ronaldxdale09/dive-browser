@@ -98,6 +98,9 @@ jobs:
         env:
           DIVE_BIN: target/debug/bundle/macos/Dive.app/Contents/MacOS/dive-desktop
           LIVE_SKIP_YOUTUBE: "1"
+          # A shared virtual machine stalls for tens of milliseconds at a time;
+          # the 5 ms tail budget is for a real Mac (p50 on the runner is ~0.3 ms).
+          CDP_P95_BUDGET_MS: "25"
         run: scripts/live-check.sh
       - name: Native window close and restart
         run: python3 scripts/native_lifecycle_check.py
