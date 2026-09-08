@@ -153,7 +153,7 @@ describe("Content crash banner", () => {
   });
 });
 
-describe("Content permission banner", () => {
+describe("Content permission dialog", () => {
   const camera = { page_lifetime:true, request_id: "r1", tab_id: "t1", origin: "https://meet.test", kinds: ["camera"], scope: {profile_id:"p1",container_id:"c1"} };
 
   it("names what the page wants in plain words", () => {
@@ -166,19 +166,20 @@ describe("Content permission banner", () => {
     expect(describePermission("midi_sysex")).toBe("use midi sysex");
   });
 
-  it("asks above the page without covering it, and blocks", async () => {
+  it("asks in a dialog over the page with focus on Block, and blocks", async () => {
     useBrowser.setState({ permissionRequests: { t1: [camera] } });
-    const { container } = render(<Content />);
-    const banner = screen.getByRole("status");
-    expect(banner.textContent).toContain("https://meet.test");
-    expect(banner.textContent).toContain("wants to use your camera");
-    expect(contentCoverDepth()).toBe(0);
-    expect(container.firstElementChild!.firstElementChild).toBe(banner);
+    render(<Content />);
+    const dialog = screen.getByRole("dialog", { name: /meet\.test wants to use your camera/ });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    // The dialog sits above the native page, so the chrome covers it.
+    expect(contentCoverDepth()).toBe(1);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Block" })));
 
     fireEvent.click(screen.getByRole("button", { name: "Block" }));
     expect(ipc.permissionReply).toHaveBeenCalledWith("t1", "r1", "deny", "remember");
     await waitFor(() => expect(useBrowser.getState().permissionRequests).toEqual({}));
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(contentCoverDepth()).toBe(0);
   });
 
   it("resumes the original request with a page-only choice without reloading", async () => {
@@ -187,7 +188,7 @@ describe("Content permission banner", () => {
     fireEvent.change(screen.getByRole("combobox", {name:"Permission duration"}), {target:{value:"page"}});
     fireEvent.click(screen.getByRole("button", { name: "Allow" }));
     expect(ipc.permissionReply).toHaveBeenCalledWith("t1", "r1", "allow", "page");
-    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(ipc.tabReload).not.toHaveBeenCalled();
   });
 
@@ -214,9 +215,9 @@ describe("Content permission banner", () => {
   it("queues a second request behind the first and only speaks for the active tab", async () => {
     useBrowser.setState({ permissionRequests: { t1: [camera, { ...camera, request_id:"r2", kinds:["microphone"] }], other: [{ ...camera, tab_id:"other", request_id:"r3", origin:"https://x", kinds:["geolocation"] }] } });
     render(<Content />);
-    expect(screen.getByRole("status").textContent).toContain("camera");
+    expect(screen.getByRole("dialog").textContent).toContain("camera");
     fireEvent.click(screen.getByRole("button", { name: "Block" }));
-    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("microphone"));
-    expect(screen.getByRole("status").textContent).not.toContain("location");
+    await waitFor(() => expect(screen.getByRole("dialog").textContent).toContain("microphone"));
+    expect(screen.getByRole("dialog").textContent).not.toContain("location");
   });
 });

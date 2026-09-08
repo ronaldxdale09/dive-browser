@@ -6,6 +6,7 @@ import { ipc } from "../lib/ipc";
 import { createBoundsReporter, elementBounds } from "../lib/boundsReporter";
 import { describeNavError } from "../lib/navError";
 import { useContentPreview, useCoversContent } from "../lib/overlay";
+import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
 import type { PermissionRequest } from "../store/browser";
 import { Icon } from "./Icon";
@@ -63,7 +64,7 @@ export function Content() {
     // native view down instead of vanishing behind it.
     <div className="relative flex min-h-0 min-w-0 flex-col bg-surface">
       {activeTab && crash && <CrashBanner attempt={crash.attempt} recovering={crash.recovering} />}
-      {activeTab && <PermissionBanner key={`${activeTab}-${asked?.request_id ?? "none"}`} tabId={activeTab} request={asked} />}
+      {activeTab && <PermissionDialog key={`${activeTab}-${asked?.request_id ?? "none"}`} tabId={activeTab} request={asked} />}
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <div className="relative grid min-h-0 min-w-0 flex-1">
           {internal ? (
@@ -127,17 +128,24 @@ export function describePermission(kind: string): string {
 }
 
 /**
- * A page asked for a capability. A row above the page, like the crash notice:
- * the request must not hide what is asking. Allow remembers the decision but
- * the engine only applies it on the next load, so the row then offers one.
+ * A page asked for a capability. A dialog over the page rather than a bar
+ * squeezed under the address field: the question deserves the person's full
+ * attention, and the page stays visible beneath. Focus starts on Block, the
+ * safe answer; Allow is the primary action. There is no Escape: the page is
+ * waiting on a decision, and a dismissal would have to be recorded as one.
  * Keyed on the tab, so an answer given on one tab never lingers on another.
  */
-function PermissionBanner({ tabId, request }: { tabId: string; request: PermissionRequest | undefined }) {
+function PermissionDialog({ tabId, request }: { tabId: string; request: PermissionRequest | undefined }) {
   const decide = useBrowser((s) => s.decidePermission);
   const profile = useBrowser((s) => s.profiles.find((profile) => profile.id === request?.scope.profile_id)?.name ?? "this profile");
   const [duration, setDuration] = useState<"remember" | "page">("remember");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const block = useRef<HTMLButtonElement>(null);
+  const open = request !== undefined;
+  useCoversContent(open);
+  useFocusTrap(panel, { active: open, initialFocus: block });
   if (!request) return null;
   const answer = async (decision: "allow" | "deny") => {
     setBusy(true); setError(null);
@@ -145,31 +153,50 @@ function PermissionBanner({ tabId, request }: { tabId: string; request: Permissi
     catch (error) { setError(errorMessage(error)); }
     finally { setBusy(false); }
   };
+  const wants = request.kinds.map(describePermission).join(" and ");
   return (
-    <div role="status" className="flex min-h-9 shrink-0 flex-wrap items-center gap-2 border-b border-line bg-surface-2 px-3 py-1 text-xs text-ink-2">
-      <Icon icon={ShieldQuestion} size={13} className="shrink-0 text-ink-3" />
-      <span className="min-w-0 flex-1">
-        <span className="font-medium text-ink">{request.origin}</span> wants to {request.kinds.map(describePermission).join(" and ")}
-        <span className="ml-2 text-ink-3">{profile} · this container</span>
-      </span>
-      {request.page_lifetime ? (
-        <select aria-label="Permission duration" disabled={busy} value={duration} onChange={(e) => setDuration(e.target.value as "remember" | "page")} className="rounded-md border border-line-2 bg-surface-2 px-2 py-1 text-ink">
-          <option value="remember">Remember in this profile and container</option>
-          <option value="page">Until this page navigates or closes</option>
-        </select>
-      ) : (
-        // A one-option dropdown reads as a broken control; this kind of permission is always remembered.
-        <span className="text-ink-3" title="This permission is remembered; page-only access is unavailable.">
-          Remembered in this profile and container
-        </span>
-      )}
-      <button type="button" disabled={busy} onClick={() => void answer("deny")} className="flex h-6 items-center gap-1 rounded-md border border-line-2 px-2 text-ink hover:bg-surface-3 disabled:opacity-50">
-        <Icon icon={X} size={11} /> Block
-      </button>
-      <button type="button" disabled={busy} onClick={() => void answer("allow")} className="flex h-6 items-center gap-1 rounded-md bg-accent px-2 text-accent-ink hover:opacity-90 disabled:opacity-50">
-        <Icon icon={Check} size={11} /> Allow
-      </button>
-      {error && <span role="alert" className="w-full text-danger">{error}</span>}
+    <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-[1px]">
+      <div
+        ref={panel}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="permission-title"
+        className="surface-enter mx-auto mt-16 w-[460px] max-w-[calc(100vw-32px)] rounded-2xl border border-line-2 bg-surface p-4 text-xs shadow-2xl"
+      >
+        <div className="flex items-start gap-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-2">
+            <Icon icon={ShieldQuestion} size={17} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 id="permission-title" className="text-sm font-semibold text-ink">
+              <span className="break-all">{request.origin}</span> wants to {wants}
+            </h2>
+            <p className="mt-1 text-[11px] text-ink-3">{profile} · this container</p>
+          </div>
+        </div>
+        <div className="mt-4 flex items-center gap-2">
+          {request.page_lifetime ? (
+            <select aria-label="Permission duration" disabled={busy} value={duration} onChange={(e) => setDuration(e.target.value as "remember" | "page")} className="h-7 min-w-0 flex-1 rounded-md border border-line-2 bg-surface-2 px-2 text-ink">
+              <option value="remember">Remember in this profile and container</option>
+              <option value="page">Until this page navigates or closes</option>
+            </select>
+          ) : (
+            // A one-option dropdown reads as a broken control; this kind of permission is always remembered.
+            <span className="flex-1 text-ink-3" title="This permission is remembered; page-only access is unavailable.">
+              Remembered in this profile and container
+            </span>
+          )}
+        </div>
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <button ref={block} type="button" disabled={busy} onClick={() => void answer("deny")} className="flex h-8 items-center gap-1.5 rounded-lg border border-line-2 px-3 text-ink hover:bg-surface-3 disabled:opacity-50">
+            <Icon icon={X} size={12} /> Block
+          </button>
+          <button type="button" disabled={busy} onClick={() => void answer("allow")} className="flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 font-medium text-accent-ink hover:opacity-90 disabled:opacity-50">
+            <Icon icon={Check} size={12} /> Allow
+          </button>
+        </div>
+        {error && <p role="alert" className="mt-2 text-danger">{error}</p>}
+      </div>
     </div>
   );
 }
