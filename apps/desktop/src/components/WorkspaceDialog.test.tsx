@@ -24,4 +24,17 @@ describe("WorkspaceDialog", () => {
     // The choice is made at creation: no checkbox to flip here.
     expect(screen.queryByRole("checkbox")).toBeNull();
   });
+
+  it("shows the current colour and mark as selected even when they are not in the palette", () => {
+    // The first workspace is created by the core with its own colour and mark.
+    useBrowser.setState({ workspaces: [{ ...ws("home", "c1"), color: "#0F6E75", icon: "layers" }], editing: { id: "home" } });
+    render(<WorkspaceDialog />);
+    expect(screen.getByRole("radio", { name: "Current colour", checked: true })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "layers", checked: true })).toBeTruthy();
+    cleanup();
+    useBrowser.setState({ workspaces: [ws("home", "c1")], editing: { id: "home" } });
+    render(<WorkspaceDialog />);
+    expect(screen.getByRole("radio", { name: "Mint", checked: true })).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: "Current colour" })).toBeNull();
+  });
 });

@@ -35,7 +35,13 @@ export function WorkspaceDialog() {
   const { close, className } = useFadeClose(() => setEditing(null));
   if (!editing) return null;
   const icon = seed || seedFromName(name);
-  const seeds = [seedFromName(name), ...AVATAR_SEEDS.filter((s) => s !== seedFromName(name))].slice(0, 14);
+  // The current choices lead their rows even when they are not in the
+  // palette: the first workspace is created with its own colour and mark,
+  // and without this the dialog showed nothing selected.
+  const swatches = existing && !SWATCHES.includes(existing.color) ? [existing.color, ...SWATCHES] : SWATCHES;
+  const named = seedFromName(name);
+  const lead = [...new Set([...(existing?.icon ? [existing.icon] : []), named])];
+  const seeds = [...lead, ...AVATAR_SEEDS.filter((s) => !lead.includes(s))].slice(0, 14);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (existing) void update(existing.id, { name, color, icon });
@@ -77,14 +83,14 @@ export function WorkspaceDialog() {
         </label>
         <div className="mt-3 text-xs text-ink-2">Color</div>
         <div className="mt-1 flex gap-2" role="radiogroup" aria-label="Color">
-          {SWATCHES.map((c) => (
+          {swatches.map((c) => (
             <button
               key={c}
               type="button"
               role="radio"
               aria-checked={c === color}
-              aria-label={colorName(c)}
-              title={colorName(c)}
+              aria-label={SWATCHES.includes(c) ? colorName(c) : "Current colour"}
+              title={SWATCHES.includes(c) ? colorName(c) : "Current colour"}
               onClick={() => setColor(c)}
               className="size-6 rounded-full ring-offset-2 ring-offset-surface aria-checked:ring-2 aria-checked:ring-ink"
               style={{ background: c }}

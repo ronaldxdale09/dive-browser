@@ -54,6 +54,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Edit workspace shows the workspace's current colour and mark as selected; for the first workspace, whose colour and mark are not in the palette, nothing was selected.
 - The Keyboard shortcuts dialog and palette use the same names as the menu: "Record a video" (was "Record tab") and "Clear browsing data…" (was "Delete browsing data…").
 - Clicking a lit star opens "Edit bookmark" with the name the bookmark was saved under; it used to say "Bookmark added" and show the page's title, so a renamed bookmark looked unrenamed.
 - The Meta panel's social card says "og:image did not load" instead of showing a broken-image glyph, and an absent robots tag reads as the default (index, follow) rather than a red "missing".
