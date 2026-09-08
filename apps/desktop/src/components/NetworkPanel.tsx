@@ -49,6 +49,14 @@ function size(n: number | null) {
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
 }
 
+/** What the status column says: a rule or the blocklist stopping a request is not the page failing. */
+export function outcomeLabel(r: { error: string | null; status: number | null }): string {
+  if (r.error === "canceled") return "canceled";
+  if (r.error && /BLOCKED_BY_CLIENT|BLOCKED_BY_/i.test(r.error)) return "blocked";
+  if (r.error) return "failed";
+  return r.status === null ? "…" : String(r.status);
+}
+
 function statusClass(r: RequestRow) {
   if (r.error === "canceled") return "text-ink-3";
   if (r.error) return "text-danger";
@@ -82,7 +90,7 @@ const NetworkRow = memo(function NetworkRow({
     >
       <td className="max-w-[360px] truncate px-3 text-ink" title={r.url}>{name(r.url)}</td>
       <td className="px-2 text-ink-2">{r.method}</td>
-      <td className={`px-2 ${statusClass(r)}`}>{r.error === "canceled" ? "canceled" : r.error ? "failed" : (r.status ?? "…")}{r.fromCache ? " (cache)" : ""}</td>
+      <td className={`px-2 ${statusClass(r)}`} title={r.error ?? undefined}>{outcomeLabel(r)}{r.fromCache ? " (cache)" : ""}</td>
       <td className="px-2 text-ink-2">{r.resourceType.toLowerCase()}</td>
       <td className="px-2 text-right text-ink-2 tabular-nums">{size(r.size)}</td>
       <td className="px-3 text-right text-ink-2 tabular-nums">{r.durationMs === null ? "" : `${r.durationMs} ms`}</td>

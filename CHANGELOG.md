@@ -52,6 +52,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Network panel: a request stopped by a mock rule or the blocklist reads "blocked" instead of "failed", with the engine's reason in the tooltip.
 - The Protection popover no longer calls a site "Clean so far" while protection is paused there; it says nothing is blocked while paused.
 - Playwright step recorder: a navigation the engine reported twice no longer becomes two `goto` lines (and the one a click caused is dropped as intended), the test ends by checking the last address reached rather than `toHaveURL(/./)`, the header counts the steps actually kept, and stopping with nothing recorded says so.
 - Capture editor colour swatches are named (Red, Amber, …) for screen readers and tooltips instead of hex codes.

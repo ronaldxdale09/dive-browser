@@ -5,7 +5,7 @@ import { useBrowser } from "../store/browser";
 import { useNetwork } from "../store/network";
 import { useLayout } from "../store/layout";
 import type { RequestRow } from "../store/network";
-import { NetworkPanel } from "./NetworkPanel";
+import { NetworkPanel, outcomeLabel } from "./NetworkPanel";
 
 const row = (i: number): RequestRow => ({
   id: `r${i}`,
@@ -151,5 +151,15 @@ describe("NetworkPanel", () => {
     });
     expect(screen.getByText("2 requests")).toBeTruthy();
     expect(screen.queryByText("b.dev")).toBeNull();
+  });
+});
+
+describe("outcomeLabel", () => {
+  it("tells a blocked request from a failed one", () => {
+    expect(outcomeLabel({ error: "net::ERR_BLOCKED_BY_CLIENT", status: null })).toBe("blocked");
+    expect(outcomeLabel({ error: "net::ERR_CONNECTION_REFUSED", status: null })).toBe("failed");
+    expect(outcomeLabel({ error: "canceled", status: null })).toBe("canceled");
+    expect(outcomeLabel({ error: null, status: 404 })).toBe("404");
+    expect(outcomeLabel({ error: null, status: null })).toBe("…");
   });
 });
