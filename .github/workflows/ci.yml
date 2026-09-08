@@ -96,10 +96,9 @@ jobs:
         # YouTube answers the runner's address with consent and bot pages, which
         # says nothing about Dive; the playback step stays a local check.
         env:
+          DIVE_BIN: target/debug/bundle/macos/Dive.app/Contents/MacOS/dive-desktop
           LIVE_SKIP_YOUTUBE: "1"
         run: scripts/live-check.sh
-        env:
-          DIVE_BIN: target/debug/bundle/macos/Dive.app/Contents/MacOS/dive-desktop
       - name: Native window close and restart
         run: python3 scripts/native_lifecycle_check.py
         env:
