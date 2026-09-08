@@ -80,8 +80,22 @@ describe("CredentialPromptCard", () => {
     useCredentialPrompt.setState({ byTab: { t1: { ...save, kind: "pick", username: "", usernames: ["dale", "eve"], token: "" } } });
     render(<CredentialPromptCard tabId="t1" />);
     expect(screen.getByRole("dialog", { name: "Sign in to github.com as" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "eve" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "eve" }));
     await waitFor(() => expect(ipc.passwordsFill).toHaveBeenCalledWith("t1", "c2"));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("walks the saved logins with the arrow keys", () => {
+    useCredentialPrompt.setState({ byTab: { t1: { ...save, kind: "pick", username: "", usernames: ["dale", "eve"], token: "" } } });
+    render(<CredentialPromptCard tabId="t1" />);
+    const dale = screen.getByRole("menuitem", { name: "dale" });
+    const eve = screen.getByRole("menuitem", { name: "eve" });
+    expect(document.activeElement).toBe(dale);
+    fireEvent.keyDown(dale, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(eve);
+    fireEvent.keyDown(eve, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(dale);
+    fireEvent.keyDown(dale, { key: "End" });
+    expect(document.activeElement).toBe(eve);
   });
 });

@@ -28,7 +28,9 @@ export function CredentialPromptCard({ tabId }: { tabId: string | null }) {
   const open = prompt !== undefined;
   useEffect(() => void init(), [init]);
   useCoversContent(open);
-  useFocusTrap(panel, { active: open, initialFocus: primary, onEscape: () => prompt && dismiss(prompt.tab_id) });
+  // The pick list walks with ArrowUp / ArrowDown like a menu, so choosing
+  // the second login never needs the mouse.
+  useFocusTrap(panel, { active: open, initialFocus: primary, menu: prompt?.kind === "pick", onEscape: () => prompt && dismiss(prompt.tab_id) });
   if (!prompt) return null;
   const heading = prompt.kind === "pick" ? `Sign in to ${site(prompt.origin)} as` : prompt.kind === "update" ? `Update the password for ${site(prompt.origin)}?` : `Save the password for ${site(prompt.origin)}?`;
   return (
@@ -58,10 +60,10 @@ export function CredentialPromptCard({ tabId }: { tabId: string | null }) {
         </button>
       </div>
       {prompt.kind === "pick" ? (
-        <ul className="mt-2 flex flex-col gap-1" aria-label="Saved logins">
+        <ul role="menu" className="mt-2 flex flex-col gap-1" aria-label="Saved logins">
           {prompt.usernames.map((name, i) => (
-            <li key={name}>
-              <button ref={i === 0 ? primary : undefined} type="button" onClick={() => void pick(prompt, name)} className="w-full rounded-lg px-2.5 py-1.5 text-left text-ink hover:bg-surface-2">
+            <li key={name} role="none">
+              <button ref={i === 0 ? primary : undefined} type="button" role="menuitem" onClick={() => void pick(prompt, name)} className="w-full rounded-lg px-2.5 py-1.5 text-left text-ink hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none">
                 {name}
               </button>
             </li>
