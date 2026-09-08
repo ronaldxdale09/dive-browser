@@ -52,6 +52,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Playwright step recorder: a navigation the engine reported twice no longer becomes two `goto` lines (and the one a click caused is dropped as intended), the test ends by checking the last address reached rather than `toHaveURL(/./)`, the header counts the steps actually kept, and stopping with nothing recorded says so.
 - Capture editor colour swatches are named (Red, Amber, …) for screen readers and tooltips instead of hex codes.
 - Capture and recording file names carry the local time of day (as on the menu bar) instead of UTC.
 - A tab opened only to fetch a file now closes when the download ends rather than when it starts. Closing it at the start took the download's progress with it: the Downloads menu said "Downloading…" forever for a file that was already saved.

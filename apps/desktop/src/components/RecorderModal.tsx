@@ -33,7 +33,8 @@ export function RecorderModal() {
   const startUrl = startedAt || currentTab?.url || DEFAULT_START_URL;
   const pageName = startedOn || currentTab?.title;
   const title = pageName ? `flow on ${pageName}` : "recorded flow";
-  const spec = toPlaywrightSpec(recordedToSteps(steps), startUrl, title);
+  const kept = recordedToSteps(steps);
+  const spec = toPlaywrightSpec(kept, startUrl, title);
 
   const handleCopy = async () => {
     try {
@@ -77,7 +78,7 @@ export function RecorderModal() {
           </span>
           <div>
             <h2 className="text-xs font-semibold text-ink">Recorded Playwright Test</h2>
-            <p className="text-[11px] text-ink-3">{steps.length} interaction{steps.length === 1 ? "" : "s"} captured</p>
+            <p className="text-[11px] text-ink-3">{kept.length} step{kept.length === 1 ? "" : "s"} captured</p>
           </div>
           <span className="flex-1" />
           <button

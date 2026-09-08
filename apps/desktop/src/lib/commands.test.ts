@@ -83,6 +83,20 @@ describe("command dispatch", () => {
     expect(useRecorder.getState().isOpen).toBe(true);
     useRecorder.getState().clear();
   });
+  it("says so when a recording stops with nothing in it", async () => {
+    const { useRecorder } = await import("../store/recorder");
+    vi.spyOn(events.recorderEvent, "listen").mockResolvedValue(() => undefined);
+    vi.spyOn(ipc, "tabRecordStart").mockResolvedValue(null);
+    vi.spyOn(ipc, "tabRecordStop").mockResolvedValue([]);
+    const notify = vi.fn();
+    useBrowser.setState({ activeTab: "t1", tabs: [{ id: "t1", url: "https://example.com/", title: "Example Domain" } as unknown as Tab], notify });
+    await UI_COMMANDS["recorder.toggle"]!();
+    await UI_COMMANDS["recorder.toggle"]!();
+    expect(useRecorder.getState().isOpen).toBe(false);
+    expect(notify).toHaveBeenLastCalledWith("Nothing was recorded. Click or type on the page while recording.", 5000);
+    useRecorder.getState().clear();
+    useBrowser.setState({ notify: useBrowser.getInitialState().notify });
+  });
   it("every shortcut points at a chrome-side handler", () => {
     for (const id of Object.values(SHORTCUTS)) expect(UI_COMMANDS[id], id).toBeTypeOf("function");
   });

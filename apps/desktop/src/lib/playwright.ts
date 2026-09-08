@@ -6,6 +6,8 @@ export function toPlaywrightSpec(steps: Step[], startUrl: string | undefined, ti
   const lines: string[] = [];
   lines.push('import { test, expect } from "@playwright/test";', "", `test(${JSON.stringify(title)}, async ({ page }) => {`);
   if (startUrl) lines.push(`  await page.goto(${JSON.stringify(startUrl)});`);
+  // The last address the flow reached is what the test can check at the end.
+  let lastUrl = startUrl;
   for (const s of steps) {
     if (s.error) continue;
     let input: Record<string, unknown> = {};
@@ -27,13 +29,16 @@ export function toPlaywrightSpec(steps: Step[], startUrl: string | undefined, ti
         break;
       }
       case "tab_navigate":
-        if (typeof input["url"] === "string") lines.push(`  await page.goto(${JSON.stringify(input["url"])});`);
+        if (typeof input["url"] === "string") {
+          lines.push(`  await page.goto(${JSON.stringify(input["url"])});`);
+          lastUrl = input["url"];
+        }
         break;
       default:
         break;
     }
   }
-  lines.push("  await expect(page).toHaveURL(/./);", "});", "");
+  lines.push(`  await expect(page).toHaveURL(${lastUrl ? JSON.stringify(lastUrl) : "/./"});`, "});", "");
   return lines.join("\n");
 }
 
@@ -55,7 +60,10 @@ export function playwrightLocator(role: string, name: string): string {
  * address or the first step still is.
  */
 export function recordedToSteps(recorded: RecordedStep[]): Step[] {
-  const own = recorded.filter((r, i) => !(r.kind === "navigate" && i > 0 && recorded[i - 1]!.kind !== "navigate"));
+  // The engine reports one navigation more than once (the address change,
+  // then the commit); a repeat of the same address right after is one step.
+  const distinct = recorded.filter((r, i) => !(r.kind === "navigate" && i > 0 && recorded[i - 1]!.kind === "navigate" && recorded[i - 1]!.value === r.value));
+  const own = distinct.filter((r, i) => !(r.kind === "navigate" && i > 0 && distinct[i - 1]!.kind !== "navigate"));
   return own.map((r, i) => {
     const locator = r.role ? playwrightLocator(r.role, r.name) : null;
     if (r.kind === "navigate") return { id: `r${i}`, name: "tab_navigate", input: JSON.stringify({ url: r.value }), action: true, locator: null };
