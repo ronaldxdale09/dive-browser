@@ -51,6 +51,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Deleting an empty workspace asks "Delete X? It has no open tabs." instead of "close its 0 tabs?".
 - Profile and workspace dialogs name their colour swatches (Mint, Amber, …) for screen readers and tooltips instead of reading out hex codes.
 - Command palette: two tabs on the same page were one row to the keyboard, highlighted together and only the first reachable; each tab row is now distinct.
 - In windows narrower than 960 px, where only one of the dock, agent and picker shows at a time, the Developer dock button no longer lights up for a dock hidden behind the agent, and pressing it swaps the agent for the dock instead of doing nothing visible.

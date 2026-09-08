@@ -296,7 +296,7 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
         {confirming ? (
           <div className="px-2 pb-1">
             <p className="text-[11px] leading-relaxed text-ink-2">
-              Delete {workspace.name} and close its {count} {count === 1 ? "tab" : "tabs"}?
+              {count === 0 ? `Delete ${workspace.name}? It has no open tabs.` : `Delete ${workspace.name} and close its ${count} ${count === 1 ? "tab" : "tabs"}?`}
             </p>
             <div className="mt-2 flex gap-2">
               <button type="button" onClick={onClose} className="h-7 flex-1 rounded-full border border-line text-[11px] text-ink-2 hover:bg-surface-2">
