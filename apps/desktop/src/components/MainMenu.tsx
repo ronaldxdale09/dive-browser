@@ -207,19 +207,20 @@ function ZoomRow() {
         <Icon icon={Search} size={15} />
       </span>
       <span className="flex-1">Zoom</span>
-      <button type="button" aria-label="Zoom out" disabled={!active} onClick={() => void zoomStep(-1)} className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
+      <button type="button" aria-label="Zoom out" title="Zoom out (⌘−)" disabled={!active} onClick={() => void zoomStep(-1)} className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
         <Icon icon={Minus} size={14} />
       </button>
-      <button type="button" aria-label="Reset zoom" onClick={() => void zoomStep(0)} className="w-12 rounded-md py-1 text-center font-mono text-[12px] tabular-nums hover:bg-surface-2">
+      <button type="button" aria-label="Reset zoom" title="Reset zoom (⌘0)" onClick={() => void zoomStep(0)} className="w-12 rounded-md py-1 text-center font-mono text-[12px] tabular-nums hover:bg-surface-2">
         {Math.round(zoom * 100)}%
       </button>
-      <button type="button" aria-label="Zoom in" disabled={!active} onClick={() => void zoomStep(1)} className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
+      <button type="button" aria-label="Zoom in" title="Zoom in (⌘+)" disabled={!active} onClick={() => void zoomStep(1)} className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
         <Icon icon={Plus} size={14} />
       </button>
       <span className="mx-1 h-5 w-px bg-line-2" aria-hidden />
       <button
         type="button"
         aria-label={full ? "Leave full screen" : "Full screen"}
+        title={full ? "Leave full screen" : "Full screen"}
         aria-pressed={full}
         onClick={() => {
           const w = getCurrentWindow();
