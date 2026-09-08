@@ -92,6 +92,17 @@ describe("Dock console panel", () => {
     expect(mountedRows(container)).toHaveLength(3);
   });
 
+  it("filters by level and source too, and says when nothing matches", () => {
+    push([entry(1, "careful 42", "warn"), entry(2, "hello"), entry(3, "bad thing", "error")]);
+    const { container } = render(<Dock />);
+    fireEvent.change(screen.getByLabelText("Filter console"), { target: { value: "warn" } });
+    expect(mountedRows(container)).toHaveLength(1);
+    expect(screen.getByText("careful 42")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Filter console"), { target: { value: "zzz" } });
+    expect(screen.getByText("Nothing matches the filter.")).toBeTruthy();
+    expect(screen.queryByText("No console output yet.")).toBeNull();
+  });
+
   it("mounts only a window of rows for 500 entries", () => {
     push(Array.from({ length: 500 }, (_, i) => entry(i)));
     const { container } = render(<Dock />);

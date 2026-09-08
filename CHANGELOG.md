@@ -54,6 +54,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- The console filter also matches an entry's level and source, so typing "error", "warn" or "network" narrows to those lines; when nothing matches it says so instead of claiming there is no output.
 - The A11y panel explains each failing element with axe's own summary (for example the contrast ratio measured and the one expected) instead of listing bare selectors, and the Network panel shows a request's query string instead of a bare "?".
 - The device simulator's search placeholder no longer runs off the end of its box, and its close button is named "Close device simulator" for assistive tech.
 - The toolbar's Protection button is named "Protection paused on this site" while a site is paused, and the protection menu's footer note no longer truncates mid-sentence.

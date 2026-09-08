@@ -100,9 +100,11 @@ function ConsolePanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Whether the user was at the end the last time they scrolled; new output only pulls the view along then.
   const atBottom = useRef(true);
+  // The filter also matches the level and source, so "error" or "network"
+  // narrows to those lines the way a level picker would.
   const shown = useMemo(() => {
     const q = filter.toLowerCase();
-    return q ? entries.filter((e) => e.text.toLowerCase().includes(q)) : entries;
+    return q ? entries.filter((e) => `${e.level} ${e.source} ${e.text}`.toLowerCase().includes(q)) : entries;
   }, [entries, filter]);
 
   // The React Compiler is not in use here; the virtualizer's mutable instance is intended.
@@ -138,7 +140,9 @@ function ConsolePanel() {
         }}
         className="min-h-0 flex-1 select-text overflow-auto font-mono text-[11.5px] leading-5"
       >
-        {shown.length === 0 && <div className="px-3 py-2 text-ink-3">{activeTab ? "No console output yet." : "Open a tab to see its console."}</div>}
+        {shown.length === 0 && (
+          <div className="px-3 py-2 text-ink-3">{!activeTab ? "Open a tab to see its console." : entries.length > 0 ? "Nothing matches the filter." : "No console output yet."}</div>
+        )}
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {virtualizer.getVirtualItems().map((v) => {
             const e = shown[v.index]!;
