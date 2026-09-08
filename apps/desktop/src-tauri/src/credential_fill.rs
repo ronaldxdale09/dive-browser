@@ -203,7 +203,10 @@ async fn handle(
                         .collect()
                 })
                 .unwrap_or_default();
-            let origin = crate::passwords::origin_of(&field(&payload, "url")).unwrap_or_default();
+            // Without a site the chrome could not look the logins up again.
+            let Ok(origin) = crate::passwords::origin_of(&field(&payload, "url")) else {
+                return Ok(());
+            };
             let _ = CredentialPrompt {
                 tab_id,
                 kind: "pick".into(),

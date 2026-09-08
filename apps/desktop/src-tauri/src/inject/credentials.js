@@ -66,6 +66,7 @@
     },
   });
   let fillTarget = null;
+  let lastPick = 0;
   Object.defineProperty(window, "__diveCredentialsFill", {
     configurable: false,
     enumerable: false,
@@ -107,8 +108,12 @@
         if (!password.value) requestFill(password, candidates[0].id);
         return;
       }
+      // One ask per focus burst: clicking the chrome's card refocuses the
+      // page field, which must not open a second card.
+      if (Date.now() - lastPick < 3000) return;
+      lastPick = Date.now();
       fillTarget = password;
-      send({ kind: "pick", usernames: candidates.map((c) => c.username) });
+      send({ kind: "pick", url: location.href, usernames: candidates.map((c) => c.username) });
     },
     true,
   );
