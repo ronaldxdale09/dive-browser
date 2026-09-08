@@ -99,6 +99,21 @@ describe("Onboarding", () => {
     await waitFor(() => expect(usePrefs.getState().prefs).toMatchObject({ onboarded: true, block_trackers: true }));
   });
 
+  it("keeps the workspace's name when Continue is pressed with the field empty", async () => {
+    usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
+    render(<Onboarding />);
+    fireEvent.click(await screen.findByRole("button", { name: "Skip" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Start Dive/ }));
+    expect(await screen.findByRole("heading", { name: "Who's diving?" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByRole("heading", { name: /Bring your bookmarks/ });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByRole("heading", { name: "Your first workspace" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(updateWorkspace).toHaveBeenCalledWith("w1", expect.objectContaining({ name: "Home" })));
+    expect(await screen.findByRole("heading", { name: "What's inside" })).toBeTruthy();
+  });
+
   it("lets a step be skipped and walked back", async () => {
     usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
     act(() => useOnboarding.setState({ stage: "profile" }));

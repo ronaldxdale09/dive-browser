@@ -32,10 +32,13 @@ export function WorkspaceStep() {
   const seeds = [seedFromName(name), ...AVATAR_SEEDS.filter((s) => s !== seedFromName(name))].slice(0, 8);
 
   const submit = async () => {
-    if (!workspace || !name.trim()) return;
+    if (!workspace) return;
+    // The field shows the current name as its placeholder; leaving it empty
+    // keeps that name. Continue used to do nothing at all in that case.
+    const finalName = name.trim() || workspace.name;
     setSaving(true);
     try {
-      await update(workspace.id, { name: name.trim(), color, icon });
+      await update(workspace.id, { name: finalName, color, icon });
       next();
     } finally {
       setSaving(false);
@@ -95,7 +98,7 @@ export function WorkspaceStep() {
           </div>
         </div>
       </div>
-      <StepActions primary={saving ? "Saving…" : "Continue"} disabled={!name.trim() || saving} onPrimary={() => void submit()} skip={next} />
+      <StepActions primary={saving ? "Saving…" : "Continue"} disabled={saving} onPrimary={() => void submit()} skip={next} />
     </form>
   );
 }

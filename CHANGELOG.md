@@ -54,6 +54,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Onboarding's workspace step: Continue is no longer greyed out while the name field is empty; it keeps the name shown as the placeholder.
 - Onboarding's colour swatches are named (Mint, Amber…) for assistive tech instead of raw hex codes, and the face that follows your name is labelled as such.
 - In the profile and workspace dialogs, the face or mark that follows the name is labelled "from the name" instead of "someone" or a raw seed word.
 - Edit workspace shows the workspace's current colour and mark as selected; for the first workspace, whose colour and mark are not in the palette, nothing was selected.
