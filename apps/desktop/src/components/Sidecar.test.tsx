@@ -129,6 +129,11 @@ describe("Sidecar", () => {
     expect(screen.queryByText("Quick Actions")).toBeNull();
   });
 
+  it("puts focus in the composer when it opens", () => {
+    render(<Sidecar />);
+    expect(document.activeElement).toBe(screen.getByPlaceholderText("Ask, or direct the agent on this page…"));
+  });
+
   it("submits the composer to the store with the active tab", () => {
     render(<Sidecar />);
     const box = screen.getByPlaceholderText("Ask, or direct the agent on this page…") as HTMLTextAreaElement;

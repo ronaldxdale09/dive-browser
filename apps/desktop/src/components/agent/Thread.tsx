@@ -69,6 +69,11 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
 
+  // Opened with ⌘J or the toolbar: the person came here to type.
+  useEffect(() => {
+    textRef.current?.focus();
+  }, []);
+
   const submit = (text = draft) => {
     if (!text.trim() || busy) return;
     setDraft("");
