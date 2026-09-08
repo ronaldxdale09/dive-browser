@@ -147,6 +147,10 @@ export const commands = {
 } | null, AppError>(__TAURI_INVOKE("passwords_answer", { token, save })),
 	/**  Fill the chosen saved login into the tab's login form. */
 	passwordsFill: (tabId: TabId, id: string) => typedError<null, AppError>(__TAURI_INVOKE("passwords_fill", { tabId, id })),
+	/**  Ask for a password CSV export to import; `None` when the person cancels. */
+	passwordsPickCsv: () => __TAURI_INVOKE<string | null>("passwords_pick_csv"),
+	/**  Import the logins in a CSV export into the active profile. */
+	passwordsImportCsv: (path: string) => typedError<CsvImportSummary, AppError>(__TAURI_INVOKE("passwords_import_csv", { path })),
 	/**
 	 *  Give a bookmark a new title, keeping its URL and creation time. A blank
 	 *  title is refused rather than erasing the one on record.
@@ -779,6 +783,16 @@ export type CredentialPrompt = {
 	usernames: string[],
 	/**  Handle for answering a save or update; the password stays in the host. */
 	token: string,
+};
+
+/**  What a CSV import did. */
+export type CsvImportSummary = {
+	/**  Logins now saved that were not before. */
+	added: number,
+	/**  Rows whose site and username Dive already had. */
+	skipped: number,
+	/**  Rows without a usable site, username or password. */
+	unreadable: number,
 };
 
 /**  What the person decided for one origin and kind. */

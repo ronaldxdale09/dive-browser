@@ -109,9 +109,185 @@ fn owned(state: &AppState, profile: ProfileId, id: &str) -> AppResult<()> {
     }
 }
 
+/// One login read from a CSV export.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CsvLogin {
+    pub url: String,
+    pub username: String,
+    pub password: String,
+}
+
+/// What a CSV import did.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type,
+)]
+pub struct CsvImportSummary {
+    /// Logins now saved that were not before.
+    pub added: u32,
+    /// Rows whose site and username Dive already had.
+    pub skipped: u32,
+    /// Rows without a usable site, username or password.
+    pub unreadable: u32,
+}
+
+/// Split RFC 4180 CSV text into rows of fields: quoted fields, doubled
+/// quotes inside them, and CR LF or LF line ends. Blank lines are dropped.
+pub fn parse_csv(text: &str) -> Vec<Vec<String>> {
+    let mut rows = Vec::new();
+    let mut row = Vec::new();
+    let mut field = String::new();
+    let mut quoted = false;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if quoted {
+            match c {
+                '"' if chars.peek() == Some(&'"') => {
+                    chars.next();
+                    field.push('"');
+                }
+                '"' => quoted = false,
+                _ => field.push(c),
+            }
+            continue;
+        }
+        match c {
+            '"' if field.is_empty() => quoted = true,
+            ',' => row.push(std::mem::take(&mut field)),
+            '\r' => {}
+            '\n' => {
+                row.push(std::mem::take(&mut field));
+                if row.iter().any(|f| !f.trim().is_empty()) {
+                    rows.push(std::mem::take(&mut row));
+                } else {
+                    row.clear();
+                }
+            }
+            _ => field.push(c),
+        }
+    }
+    if !field.is_empty() || !row.is_empty() {
+        row.push(field);
+        if row.iter().any(|f| !f.trim().is_empty()) {
+            rows.push(row);
+        }
+    }
+    rows
+}
+
+/// Logins from a password CSV as Chrome, Safari, Firefox, Edge, 1Password
+/// and Bitwarden export it: the header names the columns, in any order.
+pub fn parse_password_csv(text: &str) -> AppResult<Vec<CsvLogin>> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let mut rows = parse_csv(text).into_iter();
+    let header = rows
+        .next()
+        .ok_or_else(|| AppError::new("the file is empty"))?;
+    let find = |names: &[&str]| {
+        header.iter().position(|h| {
+            let h = h.trim().to_ascii_lowercase();
+            names.iter().any(|n| h == *n)
+        })
+    };
+    let url = find(&[
+        "url",
+        "website",
+        "login_uri",
+        "web site",
+        "hostname",
+        "origin",
+        "site",
+        "uri",
+    ]);
+    let username = find(&[
+        "username",
+        "login_username",
+        "login",
+        "user",
+        "user name",
+        "email",
+    ]);
+    let password = find(&["password", "login_password", "pass"]);
+    let (Some(url), Some(username), Some(password)) = (url, username, password) else {
+        return Err(AppError::new(
+            "this does not look like a password export: it needs url, username and password columns",
+        ));
+    };
+    let cell =
+        |row: &[String], i: usize| row.get(i).map(|s| s.trim().to_owned()).unwrap_or_default();
+    Ok(rows
+        .map(|row| CsvLogin {
+            url: cell(&row, url),
+            username: cell(&row, username),
+            password: cell(&row, password),
+        })
+        .collect())
+}
+
+/// Save the logins of a CSV export into `profile`, leaving what is already
+/// there alone.
+pub fn import_csv(state: &AppState, profile: ProfileId, text: &str) -> AppResult<CsvImportSummary> {
+    let logins = parse_password_csv(text)?;
+    let known = list(state, profile)?;
+    let mut summary = CsvImportSummary::default();
+    for login in logins {
+        let Ok(origin) = origin_of(&login.url) else {
+            summary.unreadable += 1;
+            continue;
+        };
+        if login.username.is_empty() || login.password.is_empty() {
+            summary.unreadable += 1;
+            continue;
+        }
+        if known
+            .iter()
+            .any(|c| c.origin == origin && c.username == login.username)
+        {
+            summary.skipped += 1;
+            continue;
+        }
+        match save(state, profile, &origin, &login.username, &login.password) {
+            Ok(_) => summary.added += 1,
+            Err(_) => summary.unreadable += 1,
+        }
+    }
+    Ok(summary)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::origin_of;
+    use super::{origin_of, parse_csv, parse_password_csv};
+
+    #[test]
+    fn csv_handles_quotes_doubled_quotes_and_crlf() {
+        let rows = parse_csv("a,b\r\n\"x, y\",\"say \"\"hi\"\"\"\n\n,last");
+        assert_eq!(
+            rows,
+            vec![vec!["a", "b"], vec!["x, y", "say \"hi\""], vec!["", "last"]]
+        );
+    }
+
+    #[test]
+    fn password_exports_from_the_usual_places_are_understood() {
+        let chrome =
+            "name,url,username,password,note\nGitHub,https://github.com/login,dale,hunter2,\n";
+        let got = parse_password_csv(chrome).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(
+            (
+                got[0].url.as_str(),
+                got[0].username.as_str(),
+                got[0].password.as_str()
+            ),
+            ("https://github.com/login", "dale", "hunter2")
+        );
+        let bitwarden = "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp\n,,login,X,,,0,https://x.test,eve,pw,\n";
+        assert_eq!(parse_password_csv(bitwarden).unwrap()[0].username, "eve");
+        let safari =
+            "\u{feff}Title,URL,Username,Password,Notes,OTPAuth\nSite,https://s.test,me,secret,,\n";
+        assert_eq!(parse_password_csv(safari).unwrap()[0].password, "secret");
+        assert!(parse_password_csv("id,name\n1,x\n").is_err());
+        assert!(parse_password_csv("").is_err());
+    }
 
     #[test]
     fn origins_come_from_page_urls_and_bare_hosts() {

@@ -1,7 +1,7 @@
-import { Copy, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
+import { Copy, Eye, EyeOff, FileUp, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ipc } from "../../lib/ipc";
-import type { Credential } from "../../lib/ipc";
+import type { Credential, CsvImportSummary } from "../../lib/ipc";
 import { errorMessage } from "../../lib/errors";
 import { useBrowser } from "../../store/browser";
 import { Icon, IconButton } from "../Icon";
@@ -10,6 +10,14 @@ import { Button, Group } from "../SettingsFields";
 /** The site as the list shows it: the host, without the scheme. */
 export function siteLabel(origin: string): string {
   return origin.replace(/^https?:\/\//, "");
+}
+
+/** "Imported 12 logins, 3 already here, 1 unreadable" for the notice. */
+export function describeCsvImport(s: CsvImportSummary): string {
+  const parts = [`Imported ${s.added} ${s.added === 1 ? "login" : "logins"}`];
+  if (s.skipped) parts.push(`${s.skipped} already here`);
+  if (s.unreadable) parts.push(`${s.unreadable} unreadable`);
+  return parts.join(", ");
 }
 
 /**
@@ -21,7 +29,22 @@ export function Passwords() {
   const [items, setItems] = useState<Credential[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
   const notify = (text: string) => useBrowser.getState().notify(text, 3000);
+  const importCsv = async () => {
+    setImporting(true);
+    try {
+      const path = await ipc.passwordsPickCsv();
+      if (!path) return;
+      const summary = await ipc.passwordsImportCsv(path);
+      notify(describeCsvImport(summary));
+      load();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setImporting(false);
+    }
+  };
   const load = () => {
     ipc
       .passwordsList()
@@ -74,13 +97,23 @@ export function Passwords() {
               onError={setError}
             />
           ) : (
-            <Button onClick={() => setAdding(true)}>
-              <span className="inline-flex items-center gap-1.5">
-                <Icon icon={Plus} size={12} /> Add login
-              </span>
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={() => setAdding(true)}>
+                <span className="inline-flex items-center gap-1.5">
+                  <Icon icon={Plus} size={12} /> Add login
+                </span>
+              </Button>
+              <Button onClick={() => void importCsv()} disabled={importing}>
+                <span className="inline-flex items-center gap-1.5">
+                  <Icon icon={FileUp} size={12} /> {importing ? "Importing…" : "Import a CSV export…"}
+                </span>
+              </Button>
+            </div>
           )}
         </div>
+      </Group>
+      <Group title="Bringing passwords over" description="Chrome, Brave and Edge can be read directly from Import from another browser. Safari, Firefox and password managers export a CSV: Safari under File › Export › Passwords, Firefox under about:logins › Export, 1Password and Bitwarden from their export pages. Import it here, then delete the file: it holds every password in plain text.">
+        {null}
       </Group>
     </>
   );

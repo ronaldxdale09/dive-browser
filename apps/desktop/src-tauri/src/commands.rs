@@ -461,6 +461,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             passwords_used,
             passwords_answer,
             passwords_fill,
+            passwords_pick_csv,
+            passwords_import_csv,
             bookmark_rename,
             permission_set,
             permission_reply,
@@ -2002,6 +2004,31 @@ pub(crate) async fn passwords_fill(
     id: String,
 ) -> AppResult<()> {
     crate::credential_fill::fill_into(app, tab_id, id).await
+}
+
+/// Ask for a password CSV export to import; `None` when the person cancels.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn passwords_pick_csv() -> Option<String> {
+    rfd::AsyncFileDialog::new()
+        .set_title("Import passwords from a CSV export")
+        .add_filter("CSV", &["csv", "txt"])
+        .pick_file()
+        .await
+        .map(|file| file.path().to_string_lossy().into_owned())
+}
+
+/// Import the logins in a CSV export into the active profile.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn passwords_import_csv(
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<crate::passwords::CsvImportSummary> {
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| AppError::new(format!("could not read {path}: {e}")))?;
+    let profile = active_profile(&lock(&state.store), *lock(&state.active_workspace))?;
+    crate::passwords::import_csv(&state, profile.id, &text)
 }
 
 /// Forget a saved login.

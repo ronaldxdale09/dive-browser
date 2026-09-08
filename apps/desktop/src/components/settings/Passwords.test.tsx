@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Credential } from "../../lib/ipc";
 import { ipc } from "../../lib/ipc";
 import { useBrowser } from "../../store/browser";
-import { Passwords, siteLabel } from "./Passwords";
+import { Passwords, describeCsvImport, siteLabel } from "./Passwords";
 
 const login: Credential = { id: "c1", profile_id: "p1", origin: "https://github.com", username: "dale", created_at: "2026-09-08T00:00:00Z", last_used_at: null, uses: 0 };
 const initial = useBrowser.getState();
@@ -13,6 +13,8 @@ beforeEach(() => {
   vi.spyOn(ipc, "passwordsReveal").mockResolvedValue("hunter2");
   vi.spyOn(ipc, "passwordsDelete").mockResolvedValue(true);
   vi.spyOn(ipc, "passwordsSave").mockResolvedValue({ ...login, id: "c2", origin: "https://example.org", username: "eve" });
+  vi.spyOn(ipc, "passwordsPickCsv").mockResolvedValue("/tmp/passwords.csv");
+  vi.spyOn(ipc, "passwordsImportCsv").mockResolvedValue({ added: 2, skipped: 1, unreadable: 0 });
 });
 
 afterEach(() => {
@@ -44,6 +46,24 @@ describe("Settings › Passwords", () => {
     await waitFor(() => expect(ipc.passwordsDelete).toHaveBeenCalledWith("c1"));
     await waitFor(() => expect(screen.queryByText("github.com")).toBeNull());
     expect(useBrowser.getState().notice).toContain("Forgot the login for github.com");
+  });
+
+  it("imports a CSV export and reports what came in", async () => {
+    expect(describeCsvImport({ added: 1, skipped: 0, unreadable: 0 })).toBe("Imported 1 login");
+    expect(describeCsvImport({ added: 12, skipped: 3, unreadable: 1 })).toBe("Imported 12 logins, 3 already here, 1 unreadable");
+    render(<Passwords />);
+    fireEvent.click(await screen.findByRole("button", { name: /Import a CSV export/ }));
+    await waitFor(() => expect(ipc.passwordsImportCsv).toHaveBeenCalledWith("/tmp/passwords.csv"));
+    await waitFor(() => expect(useBrowser.getState().notice).toBe("Imported 2 logins, 1 already here"));
+    expect(ipc.passwordsList).toHaveBeenCalledTimes(2);
+  });
+
+  it("does nothing when the file picker is cancelled", async () => {
+    vi.mocked(ipc.passwordsPickCsv).mockResolvedValue(null);
+    render(<Passwords />);
+    fireEvent.click(await screen.findByRole("button", { name: /Import a CSV export/ }));
+    await waitFor(() => expect(ipc.passwordsPickCsv).toHaveBeenCalled());
+    expect(ipc.passwordsImportCsv).not.toHaveBeenCalled();
   });
 
   it("adds a login and lists it", async () => {
