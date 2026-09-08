@@ -67,6 +67,15 @@
   });
   let fillTarget = null;
   let lastPick = 0;
+  // Focus that follows a click or a key press is the person's; focus that
+  // arrives on its own (the chrome handing the page back after its card
+  // closes) must not ask again, or the card would never stay closed.
+  let lastInteraction = 0;
+  const noteInteraction = () => {
+    lastInteraction = Date.now();
+  };
+  document.addEventListener("pointerdown", noteInteraction, true);
+  document.addEventListener("keydown", noteInteraction, true);
   Object.defineProperty(window, "__diveCredentialsFill", {
     configurable: false,
     enumerable: false,
@@ -103,6 +112,7 @@
       const password = el.type === "password" ? el : passwordFields().find((p) => usernameFor(p) === el);
       if (!password) return;
       ask();
+      if (Date.now() - lastInteraction > 1500) return;
       if (!candidates || candidates.length === 0) return;
       if (candidates.length === 1) {
         if (!password.value) requestFill(password, candidates[0].id);

@@ -81,7 +81,14 @@ pub fn save(
 /// The password behind a login, for filling or showing.
 pub fn reveal(state: &AppState, profile: ProfileId, id: &str) -> AppResult<String> {
     owned(state, profile, id)?;
-    entry(id)?.get_password().map_err(AppError::new)
+    entry(id)?.get_password().map_err(|e| match e {
+        keyring_core::Error::NoEntry => AppError::new(
+            "The Keychain no longer has this password. Forget the login and save it again.",
+        ),
+        e => AppError::new(format!(
+            "The Keychain would not hand over this password: {e}"
+        )),
+    })
 }
 
 /// Forget a login and its password.
