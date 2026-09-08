@@ -110,6 +110,14 @@ export function WorkspaceDialog() {
             </button>
           ))}
         </div>
+        {existing && (
+          <p className="mt-4 flex items-center gap-1.5 text-[11px] text-ink-3">
+            <Icon icon={Shield} size={12} />
+            {workspaces.filter((other) => other.container_id === existing.container_id).length === 1
+              ? "Its own cookies and logins, chosen when it was created."
+              : "Shares cookies and logins with another workspace, chosen when it was created."}
+          </p>
+        )}
         {!existing && (
           <label className="mt-4 flex items-start gap-2 text-xs text-ink-2">
             <input type="checkbox" checked={separate} onChange={(e) => setSeparate(e.target.checked)} className="mt-0.5 accent-highlight" />
