@@ -49,13 +49,17 @@ export function A11yPanel() {
           <Icon icon={Play} size={11} /> {busy ? "Running…" : "Run audit"}
         </button>
         {report && (
-          <span>
-            {report.violations.length} violations · {report.passes} passed · {report.incomplete} to review
+          <span role="status">
+            {report.violations.length} {report.violations.length === 1 ? "violation" : "violations"} · {report.passes} passed · {report.incomplete} to review
           </span>
         )}
       </div>
       <div className="min-h-0 flex-1 overflow-auto px-3 py-1 text-xs select-text">
-        {error && <div className="py-2 text-danger">{error}</div>}
+        {error && (
+          <div role="alert" className="py-2 text-danger">
+            {error}
+          </div>
+        )}
         {!report && !error && <div className="py-2 text-ink-3">{activeTab ? "Run axe-core against the current page." : "Open a tab to audit it."}</div>}
         {report?.violations.length === 0 && <div className="py-2 text-ink-2">No violations found.</div>}
         {report?.violations.map((v) => (
