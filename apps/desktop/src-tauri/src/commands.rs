@@ -373,6 +373,18 @@ pub(crate) fn downloads_reveal(state: State<'_, AppState>, path: Option<String>)
 
 #[tauri::command]
 #[specta::specta]
+/// The MCP bearer token, for a client whose configuration cannot read a
+/// file (Cursor's mcp.json). The chrome is the only caller; pages never
+/// reach commands.
+pub(crate) fn mcp_token() -> AppResult<String> {
+    let path = crate::mcp::token_path();
+    let token = std::fs::read_to_string(&path)
+        .map_err(|e| AppError::new(format!("could not read the MCP token: {e}")))?;
+    Ok(token.trim().to_owned())
+}
+
+#[tauri::command]
+#[specta::specta]
 /// Give the page keyboard focus again, after a chrome surface such as the
 /// find bar closes; arrow keys and space then scroll the page as expected.
 pub(crate) fn tab_focus(app: AppHandle<Runtime>, id: TabId) -> AppResult<()> {
@@ -594,6 +606,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             downloads_reveal,
             downloads_open,
             tab_focus,
+            mcp_token,
             dev_servers,
             dev_servers_watch,
             history_search,

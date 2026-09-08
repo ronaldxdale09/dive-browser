@@ -8,6 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- Settings › Developer offers a ready `mcp.json` entry for Cursor and other JSON-configured MCP clients, with the token masked on screen and copied whole.
 - In the Downloads list, a saved file's name opens it with the app the system uses for that kind of file; Show still reveals it in the folder.
 - Settings › About opens with the Dive mark, the name, the version and the engine on one line, and the bundle now carries a copyright line, a description and the Developer Tools category, so Finder's Get Info and the App Store category are no longer blank.
 - Right-clicking a page shows a proper menu: Open Link in New Tab and Copy Link Address on links; Open Image in New Tab, Save Image As… and Copy Image Address on images; Copy and "Search the Web for …" on a selection; then Back, Forward, Reload, Save As…, Print…, Create QR Code for This Page, Ask the Agent About This Page, Device Simulator, View Page Source (opens the source in a tab) and Inspect. Text fields keep the editing menu.

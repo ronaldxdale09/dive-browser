@@ -445,6 +445,12 @@ export const commands = {
 	 *  find bar closes; arrow keys and space then scroll the page as expected.
 	 */
 	tabFocus: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_focus", { id })),
+	/**
+	 *  The MCP bearer token, for a client whose configuration cannot read a
+	 *  file (Cursor's mcp.json). The chrome is the only caller; pages never
+	 *  reach commands.
+	 */
+	mcpToken: () => typedError<string, AppError>(__TAURI_INVOKE("mcp_token")),
 	/**  Dev servers listening on localhost, discovered from the OS socket table. */
 	devServers: () => typedError<DevServer[], AppError>(__TAURI_INVOKE("dev_servers")),
 	/**  Enable or disable low-frequency dev-server change events while a panel is open. */
