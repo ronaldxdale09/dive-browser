@@ -414,6 +414,9 @@ describe("Toolbar", () => {
     expect(ipc.prefsSet).toHaveBeenCalledTimes(1);
     expect(ipc.tabReload).not.toHaveBeenCalled();
     expect(screen.getByText("Protection paused here")).toBeTruthy();
+    // Zero counts while paused are not a clean bill of health.
+    expect(screen.getByText("Nothing is blocked while paused")).toBeTruthy();
+    expect(screen.queryByText("Clean so far")).toBeNull();
   });
 
   it("removes only the active exact host when protection resumes", async () => {

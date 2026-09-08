@@ -52,6 +52,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- The Protection popover no longer calls a site "Clean so far" while protection is paused there; it says nothing is blocked while paused.
 - Playwright step recorder: a navigation the engine reported twice no longer becomes two `goto` lines (and the one a click caused is dropped as intended), the test ends by checking the last address reached rather than `toHaveURL(/./)`, the header counts the steps actually kept, and stopping with nothing recorded says so.
 - Capture editor colour swatches are named (Red, Amber, …) for screen readers and tooltips instead of hex codes.
 - Capture and recording file names carry the local time of day (as on the menu bar) instead of UTC.
