@@ -170,6 +170,24 @@ describe("optimistic switching", () => {
     expect(useBrowser.getState().activeTab).toBe("a");
   });
 
+  it("steps zoom twice on two quick steps, and puts a refused step back", async () => {
+    let first!: () => void;
+    vi.spyOn(ipc, "tabZoom").mockReturnValueOnce(new Promise<null>((r) => (first = () => r(null)))).mockResolvedValueOnce(null);
+    useBrowser.setState({ tabs: [tab("a")], activeTab: "a", zoom: {} });
+    const one = useBrowser.getState().zoomStep(1);
+    const two = useBrowser.getState().zoomStep(1);
+    expect(useBrowser.getState().zoom["a"]).toBe(1.25);
+    first();
+    await Promise.all([one, two]);
+    expect(ipc.tabZoom).toHaveBeenNthCalledWith(1, "a", 1.1);
+    expect(ipc.tabZoom).toHaveBeenNthCalledWith(2, "a", 1.25);
+
+    vi.spyOn(ipc, "tabZoom").mockRejectedValue(new Error("no such tab"));
+    await useBrowser.getState().zoomStep(1);
+    expect(useBrowser.getState().zoom["a"]).toBe(1.25);
+    expect(useBrowser.getState().error).toBe("no such tab");
+  });
+
   it("highlights the tab before the engine answers and keeps it when it agrees", async () => {
     let done!: () => void;
     vi.spyOn(ipc, "tabActivate").mockReturnValue(new Promise<null>((r) => (done = () => r(null))));

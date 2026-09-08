@@ -52,6 +52,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Two quick zoom steps (a double click on +, a held ⌘=) step twice instead of once: the level updates as soon as the step is asked for.
 - Copying a command in Settings announces "Copied" (the button also says so), and the find bar's match count is a live region read as "Match 2 of 5".
 - Privacy › Site permissions no longer says "Remembered for Personal · Personal" when the container carries the profile's own name.
 - General settings: a custom search URL saved without `{query}` now shows a warning that DuckDuckGo is being used until it is added, rather than a static hint.

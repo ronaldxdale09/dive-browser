@@ -485,9 +485,16 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     const current = get().zoom[id] ?? 1;
     const next = direction === 0 ? 1 : nextZoom(current, direction);
     if (next === current) return;
+    // Shown at once so a held key or a double click steps twice, not once
+    // from the same stale level; put back if the engine refuses.
+    set((s) => ({ zoom: { ...s.zoom, [id]: next } }));
     await run(set, async () => {
-      await ipc.tabZoom(id, next);
-      set((s) => ({ zoom: { ...s.zoom, [id]: next } }));
+      try {
+        await ipc.tabZoom(id, next);
+      } catch (e) {
+        set((s) => ({ zoom: { ...s.zoom, [id]: current } }));
+        throw e;
+      }
     });
   },
   capture: async (fullPage) => {
