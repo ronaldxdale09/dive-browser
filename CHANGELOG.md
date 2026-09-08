@@ -8,6 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- Clear browsing data can wipe the active profile's form entries; the cookies row is now "Cookies and signed-in sessions", and a note says saved passwords are managed under Passwords & forms instead.
 - The save-password card has "Never for this site": Dive stops offering to save there for this profile (it still fills what it knows), and Settings › Passwords & forms › Never saved lists those sites with an "Ask again" button.
 - Import from another browser lays its four switches out in two columns with Import on its own row, and every place that lists what comes over now says "bookmarks, history, passwords and form entries".
 - Settings › Passwords is now "Passwords & forms": saved logins, form entries, then the CSV import in its own "Bringing passwords over" group, whose note names every browser read directly (Firefox included).

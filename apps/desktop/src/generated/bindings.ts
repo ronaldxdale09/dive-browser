@@ -657,6 +657,8 @@ export type ClearRequest = {
 	 *  origins of open tabs.
 	 */
 	site_data: boolean,
+	/**  Form entries remembered in the active profile. */
+	forms?: boolean,
 };
 
 /**  Public description of a command, safe to send to the UI. */

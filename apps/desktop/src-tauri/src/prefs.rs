@@ -609,6 +609,9 @@ pub struct ClearRequest {
     /// `localStorage`, `sessionStorage`, `IndexedDB` and friends for the
     /// origins of open tabs.
     pub site_data: bool,
+    /// Form entries remembered in the active profile.
+    #[serde(default)]
+    pub forms: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -627,6 +630,7 @@ fn merge_clear(left: ClearRequest, right: ClearRequest) -> ClearRequest {
         cookies: left.cookies || right.cookies,
         cache: left.cache || right.cache,
         site_data: left.site_data || right.site_data,
+        forms: left.forms || right.forms,
     }
 }
 
@@ -759,6 +763,18 @@ pub async fn clear(state: &AppState, what: ClearRequest) -> AppResult<String> {
         drop(store);
         done.push(format!("history ({n})"));
     }
+    if what.forms {
+        let store = crate::state::lock(&state.store);
+        let active = *crate::state::lock(&state.active_workspace);
+        let profile = active
+            .and_then(|id| store.workspace(id).ok())
+            .map(|w| w.profile_id)
+            .or_else(|| store.profiles().ok()?.into_iter().next().map(|p| p.id));
+        if let Some(profile) = profile {
+            let n = store.clear_form_entries(profile)?;
+            done.push(format!("form entries ({n})"));
+        }
+    }
     let sessions: Vec<(String, CdpSession)> = {
         let host = crate::state::lock(&state.host);
         let store = crate::state::lock(&state.store);
@@ -878,6 +894,7 @@ mod tests {
                 cookies: true,
                 cache: false,
                 site_data: false,
+                forms: false,
             },
         );
         assert!(targets.iter().any(|path| path.ends_with("Network/Cookies")));
@@ -891,12 +908,14 @@ mod tests {
             cookies: false,
             cache: true,
             site_data: false,
+            forms: false,
         };
         let second = ClearRequest {
             history: false,
             cookies: true,
             cache: false,
             site_data: true,
+            forms: false,
         };
         assert_eq!(
             merge_clear(first, second),
@@ -904,7 +923,8 @@ mod tests {
                 history: true,
                 cookies: true,
                 cache: true,
-                site_data: true
+                site_data: true,
+                forms: false,
             }
         );
     }

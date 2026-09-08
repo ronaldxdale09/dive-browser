@@ -261,10 +261,10 @@ function ScopedSitePermissions() {
 }
 
 function ClearData() {
-  const [what, setWhat] = useState({ history: true, cookies: false, cache: false, site_data: false });
+  const [what, setWhat] = useState({ history: true, cookies: false, cache: false, site_data: false, forms: false });
   const [result, setResult] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const nothing = !what.history && !what.cookies && !what.cache && !what.site_data;
+  const nothing = !what.history && !what.cookies && !what.cache && !what.site_data && !what.forms;
   const clear = () => {
     setBusy(true);
     setResult(null);
@@ -278,9 +278,11 @@ function ClearData() {
     <Group id="clear-browsing-data" title="Clear browsing data" description="Open profiles clear immediately. Restart Dive after clearing cookies, cache, or site data to finish closed profiles and every stored origin.">
       <div className="flex flex-col gap-2 py-3">
         <Check label="Browsing history" checked={what.history} onChange={(history) => setWhat({ ...what, history })} />
-        <Check label="Cookies and logins" checked={what.cookies} onChange={(cookies) => setWhat({ ...what, cookies })} />
+        <Check label="Cookies and signed-in sessions" checked={what.cookies} onChange={(cookies) => setWhat({ ...what, cookies })} />
         <Check label="Cached files" checked={what.cache} onChange={(cache) => setWhat({ ...what, cache })} />
         <Check label="Site data (local storage, IndexedDB)" checked={what.site_data} onChange={(site_data) => setWhat({ ...what, site_data })} />
+        <Check label="Form entries in this profile" checked={what.forms} onChange={(forms) => setWhat({ ...what, forms })} />
+        <p className="text-[10.5px] text-ink-3">Saved passwords are not touched here; manage them under Passwords &amp; forms.</p>
         <div className="mt-1 flex items-center gap-3">
           <Button variant="danger" onClick={clear} disabled={busy || nothing}>
             {busy ? "Clearing…" : "Clear now"}
