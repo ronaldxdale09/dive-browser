@@ -119,7 +119,7 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
         <label className="flex items-center gap-2 text-xs text-ink">
           <Switch label="Bookmarks" checked={bookmarks} onChange={setBookmarks} />
           <Icon icon={Star} size={12} className="text-ink-3" /> Bookmarks
@@ -140,7 +140,8 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
             <Icon icon={TextCursorInput} size={12} className="text-ink-3" /> Form entries
           </label>
         )}
-        <span className="flex-1" />
+      </div>
+      <div className="mt-3 flex justify-end">
         <button type="button" disabled={!ready} onClick={() => void run()} className="pressable h-8 shrink-0 rounded-full bg-accent px-4 text-xs font-medium whitespace-nowrap text-accent-ink hover:brightness-110 disabled:opacity-40">
           {importing ? (
             <span className="inline-flex items-center gap-1.5">

@@ -39,7 +39,7 @@ export function ImportDialog() {
           </span>
           <div className="min-w-0">
             <h2 className="text-sm font-semibold">Import from another browser</h2>
-            <p className="text-[11px] text-ink-3">Bookmarks, history and passwords from a browser on this Mac.</p>
+            <p className="text-[11px] text-ink-3">Bookmarks, history, passwords and form entries from a browser on this Mac.</p>
           </div>
         </div>
         <div className="mt-4">
