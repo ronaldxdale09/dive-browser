@@ -260,7 +260,7 @@ export const COMMAND_TITLES: Record<string, string> = {
   "bookmarks.open": "Bookmarks",
   "history.open": "History",
   "downloads.open": "Downloads",
-  "browsing-data.open": "Delete browsing data…",
+  "browsing-data.open": "Clear browsing data…",
   "bookmark.toggle": "Bookmark this page",
   "shortcuts.open": "Keyboard shortcuts",
   "settings.open": "Settings",

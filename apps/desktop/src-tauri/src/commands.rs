@@ -607,7 +607,7 @@ pub fn register_builtin(registry: &dive_core::CommandRegistry) {
         ),
         (
             "screencast.toggle",
-            "Record tab",
+            "Record a video",
             Some("mod+shift+r"),
             CommandScope::Tab,
         ),
