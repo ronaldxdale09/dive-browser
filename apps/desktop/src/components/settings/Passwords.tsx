@@ -108,6 +108,7 @@ export function Passwords() {
           )}
         </div>
       </Group>
+      <NeverSaved />
       <FormEntries />
       <Group title="Bringing passwords over" description="Chrome, Brave, Edge, Arc, Vivaldi, Opera and Firefox are read directly by Import from another browser. Safari and password managers export a CSV: Safari under File › Export › Passwords, 1Password and Bitwarden from their export pages. Import it here, then delete the file: it holds every password in plain text.">
         <div className="py-2.5">
@@ -119,6 +120,44 @@ export function Passwords() {
         </div>
       </Group>
     </>
+  );
+}
+
+/** Sites this profile refused a save for, each one undoable. */
+function NeverSaved() {
+  const [sites, setSites] = useState<string[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    ipc
+      .passwordsNeverList()
+      .then(setSites)
+      .catch((e) => setError(errorMessage(e)));
+  }, []);
+  const allow = async (origin: string) => {
+    try {
+      await ipc.passwordsNeverRemove(origin);
+      setSites((list) => (list ?? []).filter((o) => o !== origin));
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  };
+  if (!sites?.length && !error) return null;
+  return (
+    <Group title="Never saved" description="Sites where you chose Never for this site. Dive fills what it already knows there but does not offer to save.">
+      {error && (
+        <p role="alert" className="py-2 text-[11px] text-danger">
+          {error}
+        </p>
+      )}
+      <ul className="divide-y divide-line/60">
+        {(sites ?? []).map((origin) => (
+          <li key={origin} className="flex items-center gap-2 py-2">
+            <span className="min-w-0 flex-1 truncate text-xs text-ink">{siteLabel(origin)}</span>
+            <Button onClick={() => void allow(origin)}>Ask again</Button>
+          </li>
+        ))}
+      </ul>
+    </Group>
   );
 }
 

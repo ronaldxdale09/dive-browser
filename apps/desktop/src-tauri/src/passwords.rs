@@ -113,6 +113,46 @@ pub fn delete(state: &AppState, profile: ProfileId, id: &str) -> AppResult<bool>
     Ok(crate::state::lock(&state.store).remove_credential(id)?)
 }
 
+fn never_key(profile: ProfileId) -> String {
+    format!("passwords.never.{profile}")
+}
+
+/// Sites this profile asked never to be offered a save for, as origins.
+pub fn never_list(state: &AppState, profile: ProfileId) -> AppResult<Vec<String>> {
+    let raw = crate::state::lock(&state.store).setting(&never_key(profile))?;
+    Ok(raw
+        .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
+        .unwrap_or_default())
+}
+
+fn write_never(state: &AppState, profile: ProfileId, list: &[String]) -> AppResult<()> {
+    let text = serde_json::to_string(list).map_err(AppError::new)?;
+    Ok(crate::state::lock(&state.store).set_setting(&never_key(profile), &text)?)
+}
+
+/// Stop offering to save logins for the site of `url` in this profile.
+pub fn never_add(state: &AppState, profile: ProfileId, url: &str) -> AppResult<String> {
+    let origin = origin_of(url)?;
+    let mut list = never_list(state, profile)?;
+    if !list.contains(&origin) {
+        list.push(origin.clone());
+        list.sort();
+        write_never(state, profile, &list)?;
+    }
+    Ok(origin)
+}
+
+/// Offer again for `origin`; returns whether it was on the list.
+pub fn never_remove(state: &AppState, profile: ProfileId, origin: &str) -> AppResult<bool> {
+    let mut list = never_list(state, profile)?;
+    let before = list.len();
+    list.retain(|o| o != origin);
+    if list.len() != before {
+        write_never(state, profile, &list)?;
+    }
+    Ok(list.len() != before)
+}
+
 /// Note a fill, for ordering when a site has several logins.
 pub fn touch(state: &AppState, id: &str) -> AppResult<()> {
     Ok(crate::state::lock(&state.store).touch_credential(id, Timestamp::now())?)

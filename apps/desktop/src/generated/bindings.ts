@@ -147,6 +147,12 @@ export const commands = {
 } | null, AppError>(__TAURI_INVOKE("passwords_answer", { token, save })),
 	/**  Fill the chosen saved login into the tab's login form. */
 	passwordsFill: (tabId: TabId, id: string) => typedError<null, AppError>(__TAURI_INVOKE("passwords_fill", { tabId, id })),
+	/**  Answer a save prompt with "never for this site"; returns the origin. */
+	passwordsNever: (token: string) => typedError<string, AppError>(__TAURI_INVOKE("passwords_never", { token })),
+	/**  Sites the active profile never wants a save offered for. */
+	passwordsNeverList: () => typedError<string[], AppError>(__TAURI_INVOKE("passwords_never_list")),
+	/**  Offer to save again for `origin`. */
+	passwordsNeverRemove: (origin: string) => typedError<boolean, AppError>(__TAURI_INVOKE("passwords_never_remove", { origin })),
 	/**  Ask for a password CSV export to import; `None` when the person cancels. */
 	passwordsPickCsv: () => __TAURI_INVOKE<string | null>("passwords_pick_csv"),
 	/**  Import the logins in a CSV export into the active profile. */

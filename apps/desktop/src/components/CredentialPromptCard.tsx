@@ -20,6 +20,7 @@ export function CredentialPromptCard({ tabId }: { tabId: string | null }) {
   const prompt = useCredentialPrompt((s) => (tabId ? s.byTab[tabId] : undefined));
   const init = useCredentialPrompt((s) => s.init);
   const answer = useCredentialPrompt((s) => s.answer);
+  const never = useCredentialPrompt((s) => s.never);
   const pick = useCredentialPrompt((s) => s.pick);
   const dismiss = useCredentialPrompt((s) => s.dismiss);
   const panel = useRef<HTMLDivElement>(null);
@@ -67,7 +68,12 @@ export function CredentialPromptCard({ tabId }: { tabId: string | null }) {
           ))}
         </ul>
       ) : (
-        <div className="mt-3 flex justify-end gap-2">
+        <div className="mt-3 flex items-center justify-end gap-2">
+          {prompt.kind === "save" && (
+            <button type="button" onClick={() => void never(prompt)} className="mr-auto h-7 rounded-lg px-2 text-ink-3 hover:bg-surface-2 hover:text-ink">
+              Never for this site
+            </button>
+          )}
           <button type="button" onClick={() => void answer(prompt, false)} className="h-7 rounded-lg px-2.5 text-ink-2 hover:bg-surface-2 hover:text-ink">
             Not now
           </button>

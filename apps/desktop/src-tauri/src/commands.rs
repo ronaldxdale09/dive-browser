@@ -461,6 +461,9 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             passwords_used,
             passwords_answer,
             passwords_fill,
+            passwords_never,
+            passwords_never_list,
+            passwords_never_remove,
             passwords_pick_csv,
             passwords_import_csv,
             forms_list,
@@ -1996,6 +1999,32 @@ pub(crate) fn passwords_answer(
     save: bool,
 ) -> AppResult<Option<dive_core::Credential>> {
     crate::credential_fill::answer(&state, &token, save)
+}
+
+/// Answer a save prompt with "never for this site"; returns the origin.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn passwords_never(state: State<'_, AppState>, token: String) -> AppResult<String> {
+    crate::credential_fill::never(&state, &token)
+}
+
+/// Sites the active profile never wants a save offered for.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn passwords_never_list(state: State<'_, AppState>) -> AppResult<Vec<String>> {
+    let profile = active_profile(&lock(&state.store), *lock(&state.active_workspace))?;
+    crate::passwords::never_list(&state, profile.id)
+}
+
+/// Offer to save again for `origin`.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn passwords_never_remove(
+    state: State<'_, AppState>,
+    origin: String,
+) -> AppResult<bool> {
+    let profile = active_profile(&lock(&state.store), *lock(&state.active_workspace))?;
+    crate::passwords::never_remove(&state, profile.id, &origin)
 }
 
 /// Fill the chosen saved login into the tab's login form.

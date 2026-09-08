@@ -222,55 +222,75 @@ async fn handle(
         // A private window fills what it knows but never offers to keep a
         // login: its store is in memory and the Keychain is not.
         "submitted" if !crate::private_session::is_private() => {
-            let url = field(&payload, "url");
-            let username = field(&payload, "username");
-            let password = field(&payload, "password");
-            if password.is_empty() {
-                return Ok(());
-            }
-            let origin = crate::passwords::origin_of(&url)?;
-            let known = crate::passwords::for_url(&state, profile, &url).unwrap_or_default();
-            let same_user = known.iter().find(|c| c.username == username);
-            let kind = match same_user {
-                Some(c) => {
-                    // Unchanged: nothing to ask, just note the use.
-                    if crate::passwords::reveal(&state, profile, &c.id)
-                        .ok()
-                        .as_deref()
-                        == Some(password.as_str())
-                    {
-                        let _ = crate::passwords::touch(&state, &c.id);
-                        return Ok(());
-                    }
-                    "update"
-                }
-                None => "save",
-            };
-            let token = dive_core::TabId::new().to_string();
-            with_pending(|m| {
-                m.retain(|_, p| p.url != url || p.username != username);
-                m.insert(
-                    token.clone(),
-                    PendingSave {
-                        profile,
-                        url,
-                        username: username.clone(),
-                        password,
-                    },
-                );
-            });
-            let _ = CredentialPrompt {
-                tab_id,
-                kind: kind.into(),
-                origin,
-                username,
-                usernames: Vec::new(),
-                token,
-            }
-            .emit(app);
+            submitted(app, tab_id, profile, &payload)?;
         }
         _ => {}
     }
+    Ok(())
+}
+
+/// A login was submitted: note the use, or ask the chrome to save or
+/// update it. The password waits in the host under a token.
+fn submitted(
+    app: &AppHandle<Runtime>,
+    tab_id: TabId,
+    profile: ProfileId,
+    payload: &Value,
+) -> AppResult<()> {
+    let state = app.state::<AppState>();
+
+    let url = field(payload, "url");
+    let username = field(payload, "username");
+    let password = field(payload, "password");
+    if password.is_empty() {
+        return Ok(());
+    }
+    let origin = crate::passwords::origin_of(&url)?;
+    if crate::passwords::never_list(&state, profile)
+        .unwrap_or_default()
+        .contains(&origin)
+    {
+        return Ok(());
+    }
+    let known = crate::passwords::for_url(&state, profile, &url).unwrap_or_default();
+    let same_user = known.iter().find(|c| c.username == username);
+    let kind = match same_user {
+        Some(c) => {
+            // Unchanged: nothing to ask, just note the use.
+            if crate::passwords::reveal(&state, profile, &c.id)
+                .ok()
+                .as_deref()
+                == Some(password.as_str())
+            {
+                let _ = crate::passwords::touch(&state, &c.id);
+                return Ok(());
+            }
+            "update"
+        }
+        None => "save",
+    };
+    let token = dive_core::TabId::new().to_string();
+    with_pending(|m| {
+        m.retain(|_, p| p.url != url || p.username != username);
+        m.insert(
+            token.clone(),
+            PendingSave {
+                profile,
+                url,
+                username: username.clone(),
+                password,
+            },
+        );
+    });
+    let _ = CredentialPrompt {
+        tab_id,
+        kind: kind.into(),
+        origin,
+        username,
+        usernames: Vec::new(),
+        token,
+    }
+    .emit(app);
     Ok(())
 }
 
@@ -329,6 +349,14 @@ pub fn answer(
         &pending.password,
     )
     .map(Some)
+}
+
+/// Let the submitted login go and stop asking for its site in this profile.
+pub fn never(state: &AppState, token: &str) -> AppResult<String> {
+    let Some(pending) = with_pending(|m| m.remove(token)) else {
+        return Err(AppError::new("that prompt has already been answered"));
+    };
+    crate::passwords::never_add(state, pending.profile, &pending.url)
 }
 
 /// Fill a chosen login into `tab`, for the pick prompt.

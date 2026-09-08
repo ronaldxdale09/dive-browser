@@ -15,6 +15,8 @@ beforeEach(() => {
   vi.spyOn(ipc, "passwordsSave").mockResolvedValue({ ...login, id: "c2", origin: "https://example.org", username: "eve" });
   vi.spyOn(ipc, "passwordsPickCsv").mockResolvedValue("/tmp/passwords.csv");
   vi.spyOn(ipc, "formsList").mockResolvedValue([]);
+  vi.spyOn(ipc, "passwordsNeverList").mockResolvedValue(["https://bank.example"]);
+  vi.spyOn(ipc, "passwordsNeverRemove").mockResolvedValue(true);
   vi.spyOn(ipc, "passwordsImportCsv").mockResolvedValue({ added: 2, skipped: 1, unreadable: 0 });
 });
 
@@ -79,5 +81,14 @@ describe("Settings › Passwords", () => {
     await waitFor(() => expect(ipc.passwordsSave).toHaveBeenCalledWith("example.org", "eve", "pw"));
     expect(await screen.findByText("example.org")).toBeTruthy();
     expect(screen.queryByRole("form", { name: "Add login" })).toBeNull();
+  });
+
+  it("lists sites never saved for and lets one ask again", async () => {
+    render(<Passwords />);
+    expect(await screen.findByText("bank.example")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Ask again" }));
+    expect(ipc.passwordsNeverRemove).toHaveBeenCalledWith("https://bank.example");
+    await waitFor(() => expect(screen.queryByText("bank.example")).toBeNull());
+    expect(screen.queryByText("Never saved")).toBeNull();
   });
 });

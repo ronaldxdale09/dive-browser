@@ -15,6 +15,8 @@ interface CredentialPromptStore {
   init: () => Promise<void>;
   /** Save or let go of the submitted login. */
   answer: (prompt: CredentialPrompt, save: boolean) => Promise<void>;
+  /** Let the login go and stop asking for this site in this profile. */
+  never: (prompt: CredentialPrompt) => Promise<void>;
   /** Fill the login with `username` into the prompt's tab. */
   pick: (prompt: CredentialPrompt, username: string) => Promise<void>;
   dismiss: (tabId: string) => void;
@@ -41,6 +43,15 @@ export const useCredentialPrompt = create<CredentialPromptStore>((set, get) => (
       const saved = await ipc.passwordsAnswer(prompt.token, save);
       const site = prompt.origin.replace(/^https?:\/\//, "");
       if (saved) useBrowser.getState().notify(prompt.kind === "update" ? `Updated the password for ${site}` : `Saved the login for ${site}`, 3000);
+    } catch (e) {
+      useBrowser.setState({ error: errorMessage(e) });
+    }
+  },
+  never: async (prompt) => {
+    get().dismiss(prompt.tab_id);
+    try {
+      const origin = await ipc.passwordsNever(prompt.token);
+      useBrowser.getState().notify(`Won't offer to save passwords for ${origin.replace(/^https?:\/\//, "")}. Change it under Settings › Passwords & forms.`, 4000);
     } catch (e) {
       useBrowser.setState({ error: errorMessage(e) });
     }
