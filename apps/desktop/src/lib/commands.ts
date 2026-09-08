@@ -232,7 +232,7 @@ export const COMMAND_TITLES: Record<string, string> = {
   "tab.fillVideo": "Fill tab with video",
   "tab.devtools": "Open DevTools",
   "report.compose": "Copy bug report",
-  "screencast.toggle": "Record tab",
+  "screencast.toggle": "Record a video",
   "zoom.in": "Zoom in",
   "zoom.out": "Zoom out",
   "zoom.reset": "Reset zoom",

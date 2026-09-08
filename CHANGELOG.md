@@ -52,6 +52,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- The menu, palette and shortcuts list call the same actions by the same names: "Copy bug report" (the menu said "Report a bug…", which suggested a form) and "Record a video" (the shortcuts list said "Record tab").
 - Deleting an empty workspace asks "Delete X? It has no open tabs." instead of "close its 0 tabs?".
 - Profile and workspace dialogs name their colour swatches (Mint, Amber, …) for screen readers and tooltips instead of reading out hex codes.
 - Command palette: two tabs on the same page were one row to the keyboard, highlighted together and only the first reachable; each tab row is now distinct.

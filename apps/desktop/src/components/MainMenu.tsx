@@ -284,7 +284,7 @@ function useMenu(close: () => void): Group[] {
         { id: "subtitles", label: "Live subtitles", icon: Captions, shortcut: "⌘⇧U", keywords: "captions transcribe video translate", disabled: !active, run: done(() => runCommand("subtitles.open")) },
         { id: "devtools", label: "DevTools", icon: Bug, shortcut: "⌘⌥I", disabled: !active, run: done(() => runCommand("tab.devtools")) },
         { id: "capture", label: "Capture full page", icon: Camera, shortcut: "⌘⇧S", keywords: "screenshot annotate", disabled: !active, run: done(() => runCommand("capture.fullpage")) },
-        { id: "report", label: "Report a bug…", icon: Wand2, shortcut: "⌘⇧B", keywords: "issue compose", disabled: !active, run: done(() => runCommand("report.compose")) },
+        { id: "report", label: "Copy bug report", icon: Wand2, shortcut: "⌘⇧B", keywords: "issue compose report a bug", disabled: !active, run: done(() => runCommand("report.compose")) },
       ],
     },
     {
