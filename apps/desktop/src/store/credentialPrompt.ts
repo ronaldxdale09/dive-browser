@@ -62,7 +62,23 @@ export const useCredentialPrompt = create<CredentialPromptStore>((set, get) => (
       const logins = await ipc.passwordsForUrl(prompt.origin);
       const login = logins.find((c) => c.username === username);
       if (!login) throw new Error(`No saved login for ${username}`);
-      await ipc.passwordsFill(prompt.tab_id, login.id);
+      try {
+        await ipc.passwordsFill(prompt.tab_id, login.id);
+      } catch (e) {
+        // A login whose Keychain item is gone can only be forgotten; offer
+        // that right here instead of sending the person to Settings.
+        if (!/keychain no longer/i.test(errorMessage(e))) throw e;
+        const site = prompt.origin.replace(/^https?:\/\//, "");
+        useBrowser.getState().notify(`The Keychain no longer has the password for ${username}.`, 8000, {
+          label: "Forget login",
+          run: () => {
+            void ipc
+              .passwordsDelete(login.id)
+              .then(() => useBrowser.getState().notify(`Forgot the login for ${username} on ${site}. Sign in again to save it.`, 4000))
+              .catch((err: unknown) => useBrowser.setState({ error: errorMessage(err) }));
+          },
+        });
+      }
     } catch (e) {
       useBrowser.setState({ error: errorMessage(e) });
     }

@@ -56,6 +56,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- Picking a saved login whose Keychain item has gone shows a notice with a "Forget login" action instead of an error that sends you to Settings.
 - The "Sign in as" card that offers several saved logins walks them with the arrow keys (and Home / End), and reads as a menu to assistive tech.
 - ⌘= / ⌘− / ⌘0 zoom the page while a menu, the palette or the find bar has focus, instead of waiting until it closes; ⌘⇧= and the keypad + zoom in too.
 - Crowded tab strips no longer show a single letter and an ellipsis beside each favicon; the active tab keeps its title, the rest show the icon alone.

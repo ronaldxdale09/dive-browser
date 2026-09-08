@@ -85,6 +85,19 @@ describe("CredentialPromptCard", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("offers to forget a login whose Keychain item is gone", async () => {
+    vi.spyOn(ipc, "passwordsFill").mockRejectedValue(new Error("The Keychain no longer has this password. Forget the login and save it again."));
+    const remove = vi.spyOn(ipc, "passwordsDelete").mockResolvedValue(true);
+    useCredentialPrompt.setState({ byTab: { t1: { ...save, kind: "pick", username: "", usernames: ["dale", "eve"], token: "" } } });
+    render(<CredentialPromptCard tabId="t1" />);
+    fireEvent.click(screen.getByRole("menuitem", { name: "eve" }));
+    await waitFor(() => expect(useBrowser.getState().notice).toContain("no longer has the password for eve"));
+    expect(useBrowser.getState().error).toBeNull();
+    useBrowser.getState().noticeAction?.run();
+    await waitFor(() => expect(remove).toHaveBeenCalledWith("c2"));
+    await waitFor(() => expect(useBrowser.getState().notice).toContain("Forgot the login for eve"));
+  });
+
   it("walks the saved logins with the arrow keys", () => {
     useCredentialPrompt.setState({ byTab: { t1: { ...save, kind: "pick", username: "", usernames: ["dale", "eve"], token: "" } } });
     render(<CredentialPromptCard tabId="t1" />);
