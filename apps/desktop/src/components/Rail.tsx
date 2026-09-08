@@ -128,6 +128,7 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
  */
 function DefaultBrowserButton({ expanded }: { expanded: boolean }) {
   const status = useDefaultBrowser((s) => s.status);
+  const declined = useDefaultBrowser((s) => s.declined);
   const refresh = useDefaultBrowser((s) => s.refresh);
   useEffect(() => {
     void refresh();
@@ -135,8 +136,9 @@ function DefaultBrowserButton({ expanded }: { expanded: boolean }) {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
-  // Once Dive is the default there is nothing to offer, so the row goes.
-  if (!status?.supported || status.is_default) return null;
+  // Once Dive is the default there is nothing to offer, so the row goes; a
+  // "Not now" rests it until the next launch rather than nagging.
+  if (!status?.supported || status.is_default || declined) return null;
   const title = "Make Dive the default browser";
   return (
     <button

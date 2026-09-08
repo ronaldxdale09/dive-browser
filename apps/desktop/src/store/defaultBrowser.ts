@@ -14,6 +14,9 @@ interface DefaultBrowserState {
   status: DefaultBrowserStatus | null;
   phase: DefaultBrowserPhase;
   error: string | null;
+  /** "Not now" was chosen this session: the rail stops offering until the next launch. */
+  declined: boolean;
+  decline: () => void;
   /** Re-read the status from the host. Returns it, or null when the host cannot say. */
   refresh: () => Promise<DefaultBrowserStatus | null>;
   /** Ask the system to make Dive the default; phase and error follow the result. */
@@ -25,6 +28,8 @@ export const useDefaultBrowser = create<DefaultBrowserState>((set) => ({
   status: null,
   phase: "idle",
   error: null,
+  declined: false,
+  decline: () => set({ declined: true }),
   refresh: async () => {
     try {
       const status = await ipc.defaultBrowserStatus();

@@ -10,7 +10,7 @@ const notDefault: DefaultBrowserStatus = { supported: true, is_default: false, c
 const isDefault: DefaultBrowserStatus = { supported: true, is_default: true, current: "com.dive.browser" };
 
 function openWith(status: DefaultBrowserStatus) {
-  useDefaultBrowser.setState({ status, phase: "idle", error: null });
+  useDefaultBrowser.setState({ status, phase: "idle", error: null, declined: false });
   useBrowser.getState().toggle("defaultBrowser", true);
 }
 
@@ -36,6 +36,9 @@ describe("DefaultBrowserDialog", () => {
     expect(screen.getByText("Currently: Safari")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Make default" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Not now" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    // Declining rests the rail's offer for this session.
+    expect(useDefaultBrowser.getState().declined).toBe(true);
   });
 
   it("says so when Dive is already the default", () => {

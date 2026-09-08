@@ -30,7 +30,7 @@ beforeEach(() => {
   usePrefs.setState({ prefs: { ...DEFAULT_PREFS, rail_expanded: true }, loaded: true });
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
   vi.spyOn(ipc, "defaultBrowserStatus").mockResolvedValue({ supported: true, is_default: false, current: "com.apple.Safari" });
-  useDefaultBrowser.setState({ status: null, phase: "idle", error: null });
+  useDefaultBrowser.setState({ status: null, phase: "idle", error: null, declined: false });
 });
 
 afterEach(() => {
@@ -96,6 +96,13 @@ describe("Rail", () => {
     expect(offer.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(offer.nextElementSibling).toBe(settings);
     expect(screen.queryByTestId("default-browser-badge")).toBeNull();
+  });
+
+  it("stops offering once the person has said Not now", async () => {
+    useDefaultBrowser.setState({ declined: true });
+    render(<Rail />);
+    await waitFor(() => expect(useDefaultBrowser.getState().status?.supported).toBe(true));
+    expect(screen.queryByRole("button", { name: "Make Dive the default browser" })).toBeNull();
   });
 
   it("hides the default-browser entry when the build cannot ask", async () => {

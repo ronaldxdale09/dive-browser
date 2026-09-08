@@ -43,6 +43,7 @@ export function DefaultBrowserDialog() {
   const phase = useDefaultBrowser((s) => s.phase);
   const error = useDefaultBrowser((s) => s.error);
   const refresh = useDefaultBrowser((s) => s.refresh);
+  const decline = useDefaultBrowser((s) => s.decline);
   const makeDefault = useDefaultBrowser((s) => s.makeDefault);
   const reset = useDefaultBrowser((s) => s.reset);
   // Set when the wait runs out; `start` clears it, and closing unmounts it.
@@ -55,6 +56,11 @@ export function DefaultBrowserDialog() {
     reset();
     toggle("defaultBrowser", false);
   });
+  // Declining rests the rail's offer for this session; the dialog stays reachable from Settings.
+  const notNow = () => {
+    decline();
+    close();
+  };
 
   // Poll while macOS has the floor. The interval and the deadline both go
   // when the phase moves on, so a stale poll can never flip the phase later.
@@ -133,7 +139,7 @@ export function DefaultBrowserDialog() {
     );
     actions = (
       <>
-        <button type="button" onClick={close} className={secondary}>
+        <button type="button" onClick={notNow} className={secondary}>
           Not now
         </button>
         <button ref={primary} type="button" onClick={start} className={primaryClass}>
@@ -149,7 +155,7 @@ export function DefaultBrowserDialog() {
     );
     actions = (
       <>
-        <button type="button" onClick={close} className={secondary}>
+        <button type="button" onClick={notNow} className={secondary}>
           Not now
         </button>
         <button ref={primary} type="button" onClick={start} className={primaryClass}>
@@ -164,7 +170,7 @@ export function DefaultBrowserDialog() {
       </p>
     );
     actions = (
-      <button type="button" onClick={close} className={secondary}>
+      <button type="button" onClick={notNow} className={secondary}>
         Not now
       </button>
     );
@@ -178,7 +184,7 @@ export function DefaultBrowserDialog() {
     );
     actions = (
       <>
-        <button type="button" onClick={close} className={secondary}>
+        <button type="button" onClick={notNow} className={secondary}>
           Not now
         </button>
         <button ref={primary} type="button" onClick={start} disabled={phase === "asking"} className={primaryClass}>

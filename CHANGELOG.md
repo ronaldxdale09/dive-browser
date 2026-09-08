@@ -53,6 +53,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Choosing "Not now" in the default-browser dialog rests the "Set as default" card in the workspace rail for the rest of the session instead of leaving it there to ask again immediately.
 - "All tabs" in the tab strip and Search tabs (⌘⇧A) open the palette with the open tabs listed first, not after the bookmarks.
 - Essential tabs, which show only their icon, carry their title as an accessible name.
 - The address bar is a proper combobox for assistive tech: it announces when its suggestion list opens and closes.
