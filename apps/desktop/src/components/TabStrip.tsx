@@ -309,10 +309,20 @@ function useHiddenTabs(ref: React.RefObject<HTMLDivElement | null>, count: numbe
   }, [ref, count]);
   useEffect(() => {
     const list = ref.current;
-    const tab = active ? [...(list?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])].find((el) => el.dataset["tabId"] === active) : null;
-    tab?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    if (!list) return;
+    const tab = active ? [...list.querySelectorAll<HTMLElement>('[role="tab"]')].find((el) => el.dataset["tabId"] === active) : null;
+    // Scroll the strip itself, never scrollIntoView: that also scrolls every
+    // scrollable ancestor, and once shifted the whole chrome to the left.
+    if (tab) list.scrollLeft = revealScrollLeft({ ...list.getBoundingClientRect(), scrollLeft: list.scrollLeft }, tab.getBoundingClientRect());
   }, [ref, active]);
   return hidden;
+}
+
+/** The strip's scrollLeft that brings `tab` fully into view with the least movement. */
+export function revealScrollLeft(list: { left: number; right: number; scrollLeft: number }, tab: { left: number; right: number }): number {
+  if (tab.left < list.left) return list.scrollLeft - (list.left - tab.left);
+  if (tab.right > list.right) return list.scrollLeft + (tab.right - list.right);
+  return list.scrollLeft;
 }
 
 /**

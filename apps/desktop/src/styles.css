@@ -95,7 +95,10 @@
 
 /* The chrome is a fixed frame, never a scrolling document: a tooltip
    parked past the window's edge must not let the whole chrome slide. */
-html, body, #root { height: 100%; margin: 0; overflow: hidden; }
+/* clip, not hidden: hidden still lets scrollIntoView and focus scroll the
+   document, and anything poking past the right edge then shifted the whole
+   chrome sideways. clip cannot be scrolled at all. */
+html, body, #root { height: 100%; margin: 0; overflow: clip; }
 :root { --dialog-fade: 120ms; }
 body {
   background: var(--color-ground);

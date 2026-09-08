@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { countOutOfView, essentialTabs, orderTabs, roveTab, splitAction, tabLabel, TabStrip } from "./TabStrip";
+import { countOutOfView, essentialTabs, revealScrollLeft, orderTabs, roveTab, splitAction, tabLabel, TabStrip } from "./TabStrip";
 import type { Tab } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { ipc } from "../lib/ipc";
@@ -142,6 +142,13 @@ describe("TabStrip controls", () => {
     expect(countOutOfView({ left: 500, right: 700 }, items)).toBe(2);
     // Rounding slack: a tab flush with the edge still counts as in view.
     expect(countOutOfView({ left: 400, right: 696.5 }, items)).toBe(0);
+  });
+
+  it("reveals a tab by scrolling the strip the least amount, and leaves a visible tab alone", () => {
+    const list = { left: 400, right: 700, scrollLeft: 120 };
+    expect(revealScrollLeft(list, { left: 450, right: 510 })).toBe(120);
+    expect(revealScrollLeft(list, { left: 380, right: 440 })).toBe(100);
+    expect(revealScrollLeft(list, { left: 680, right: 740 })).toBe(160);
   });
 
   it("offers a way to the tabs that scrolled out of view, none when they all fit", () => {
