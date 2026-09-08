@@ -16,7 +16,7 @@ class StartupBenchmarkTests(unittest.TestCase):
             root = Path(directory)
             scripts = root / 'scripts'
             scripts.mkdir()
-            for name in ('benchmark-startup.sh', 'startup_benchmark.py', 'probe_process.py'):
+            for name in ('benchmark-startup.sh', 'startup_benchmark.py', 'probe_process.py', 'loopback_server.py'):
                 if (SCRIPTS / name).exists():
                     shutil.copy2(SCRIPTS / name, scripts / name)
             fake = root / 'probe'

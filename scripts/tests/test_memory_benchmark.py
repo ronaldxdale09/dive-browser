@@ -17,7 +17,7 @@ class MemoryBenchmarkTests(unittest.TestCase):
             root = Path(directory)
             scripts = root / 'scripts'
             scripts.mkdir()
-            for name in ('benchmark-memory.sh', 'memory_benchmark.py', 'probe_process.py', 'startup_benchmark.py', 'memory-fixture.py'):
+            for name in ('benchmark-memory.sh', 'memory_benchmark.py', 'probe_process.py', 'startup_benchmark.py', 'memory-fixture.py', 'loopback_server.py'):
                 if (SCRIPTS / name).exists():
                     shutil.copy2(SCRIPTS / name, scripts / name)
             fake = root / 'probe'

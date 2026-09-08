@@ -13,6 +13,7 @@ tooling lives in `release/` and is described in [`../RELEASING.md`](../RELEASING
 | `native_lifecycle_check.py` | Popout window close, detach/reattach and quit ordering across four launches of one disposable profile, verifying sibling JavaScript keeps running. Runs in CI. |
 | `benchmark-startup.sh` / `startup_benchmark.py` | Cold and warm launch timings from the host's launch clock to first paint and usable controls. Runs in CI. |
 | `benchmark-memory.sh` / `memory_benchmark.py` / `memory-fixture.py` | Whole-process-tree RSS at baseline, after N fixture tabs, and after discard; fails if discard does not reclaim `MEM_MIN_RECLAIM_PCT`. Runs in CI. |
+| `loopback_server.py` | The loopback HTTP server every fixture uses; it skips the reverse DNS lookup that stalls `http.server` on GitHub's macOS runners. |
 | `probe_process.py` | Shared runner for the probes above: external deadlines, process-group cleanup, retained logs under `target/`. |
 | `mcp-call.py` | Call one MCP tool on a running instance (`--data-dir DIR --port PORT list \| call TOOL '{…}'`); reads the bearer token from `DIR/mcp-token`. |
 | `fetch_filter_check.py` | DivePrivacy request filtering against a known tracker host resolved only to loopback, on the exact bundle. |

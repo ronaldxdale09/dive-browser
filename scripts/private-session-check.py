@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from loopback_server import LoopbackServer
 
 class Fixture(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -31,7 +32,7 @@ def main():
     args = parser.parse_args()
     binary = args.binary.resolve(strict=True)
     args.output.mkdir(parents=True, exist_ok=True)
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Fixture)
+    server = LoopbackServer(('127.0.0.1', 0), Fixture)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     results = []
     with tempfile.TemporaryDirectory(prefix='dive-private-regression-') as root:

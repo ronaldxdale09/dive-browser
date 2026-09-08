@@ -17,7 +17,7 @@ class NativeProbeEnvironmentTests(unittest.TestCase):
             root = Path(directory)
             scripts = root / 'scripts'
             scripts.mkdir()
-            for name in (launcher, 'probe_process.py', 'mcp-call.py'):
+            for name in (launcher, 'probe_process.py', 'mcp-call.py', 'loopback_server.py'):
                 shutil.copy2(SCRIPTS / name, scripts / name)
             recorded = root / 'environments.jsonl'
             fake = root / 'probe'

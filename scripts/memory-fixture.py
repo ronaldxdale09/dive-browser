@@ -3,6 +3,7 @@
 
 import http.server
 import threading
+from loopback_server import LoopbackServer
 
 
 PAGE = b"""<!doctype html>
@@ -39,7 +40,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 def main():
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = LoopbackServer(("127.0.0.1", 0), Handler)
     port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(port, flush=True)

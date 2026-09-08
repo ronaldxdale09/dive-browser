@@ -64,7 +64,7 @@ class FetchFilterHarnessTests(unittest.TestCase):
         audio = probe.audio_bytes()
         with wave.open(io.BytesIO(audio)) as wav:
             self.assertEqual((wav.getnchannels(), wav.getsampwidth(), wav.getframerate(), wav.getnframes()), (1, 2, 8000, 800))
-        server = probe.ThreadingHTTPServer(('127.0.0.1', 0), probe.Handler)
+        server = probe.LoopbackServer(('127.0.0.1', 0), probe.Handler)
         server.counts, server.counts_lock = {}, threading.Lock()
         worker = threading.Thread(target=server.serve_forever, daemon=True)
         worker.start()

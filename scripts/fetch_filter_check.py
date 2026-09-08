@@ -4,7 +4,7 @@ import hashlib
 import io
 import json
 import os
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 import tempfile
 import threading
@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 import wave
 
 from probe_process import run_probe
+from loopback_server import LoopbackServer
 
 ROOT = Path(__file__).resolve().parent.parent
 PHASES = ('privacy', 'workspace', 'restored', 'off')
@@ -125,7 +126,7 @@ def main():
     digest = hashlib.sha256(binary.read_bytes()).hexdigest()
     evidence = ROOT / 'target' / f'fetch-filter-probe-{time.time_ns()}'
     evidence.mkdir(parents=True)
-    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server = LoopbackServer(('127.0.0.1', 0), Handler)
     server.counts, server.counts_lock = {}, threading.Lock()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

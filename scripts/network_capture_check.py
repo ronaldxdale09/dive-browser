@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 import re
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 import tempfile
 import threading
@@ -13,6 +13,7 @@ import time
 from urllib.parse import parse_qs, urlparse
 
 from probe_process import run_probe
+from loopback_server import LoopbackServer
 
 ROOT = Path(__file__).resolve().parent.parent
 PAGE = b'''<!doctype html><title>Dive capture fixture</title><p>Response capture</p><script>
@@ -75,7 +76,7 @@ def main():
     digest = hashlib.sha256(binary.read_bytes()).hexdigest()
     evidence = ROOT / 'target' / f'network-probe-{time.time_ns()}'
     evidence.mkdir(parents=True)
-    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server = LoopbackServer(('127.0.0.1', 0), Handler)
     server.large_cache = os.environ.get('DIVE_NETWORK_LARGE_CACHE') == '1'
     server.capture_counts = {}
     server.counts_lock = threading.Lock()
