@@ -21,6 +21,7 @@ bump may change behaviour.
 - The page's corners are slightly rounded where it meets the rail and toolbar, following the Appearance corner setting (square under Sharp). The window behind the chrome is painted in the chrome's ground colour, so nothing black shows through corners or during a resize.
 
 ### Changed
+- "Not now" on the default-browser offer rests the sidebar card for two weeks instead of until the next launch; Settings › General still offers it.
 - Address bar suggestions show host and path on the right ("localhost:8771/form.html") instead of the host alone, so two pages on one site can be told apart.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 

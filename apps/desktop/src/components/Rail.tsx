@@ -137,7 +137,8 @@ function DefaultBrowserButton({ expanded }: { expanded: boolean }) {
     return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
   // Once Dive is the default there is nothing to offer, so the row goes; a
-  // "Not now" rests it until the next launch rather than nagging.
+  // "Not now" rests it for a couple of weeks rather than nagging every
+  // launch. Settings › General keeps offering meanwhile.
   if (!status?.supported || status.is_default || declined) return null;
   const title = "Make Dive the default browser";
   return (

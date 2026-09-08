@@ -10,11 +10,37 @@ import { errorMessage } from "../lib/errors";
  */
 export type DefaultBrowserPhase = "idle" | "asking" | "waiting" | "done" | "error";
 
+/** How long a "Not now" rests the rail's offer. Settings › General offers it meanwhile. */
+export const DECLINE_REST_MS = 14 * 24 * 60 * 60 * 1000;
+const DECLINED_KEY = "dive.defaultBrowser.declinedUntil";
+
+/** Whether a stored "Not now" is still in force at `now`. */
+export function declinedAt(now: number, stored: string | null | undefined): boolean {
+  const until = Number(stored);
+  return Number.isFinite(until) && until > now;
+}
+
+function readDeclined(): boolean {
+  try {
+    return declinedAt(Date.now(), localStorage.getItem(DECLINED_KEY));
+  } catch {
+    return false;
+  }
+}
+
+function writeDeclined(until: number) {
+  try {
+    localStorage.setItem(DECLINED_KEY, String(until));
+  } catch {
+    // Storage unavailable: the decline still holds for this session.
+  }
+}
+
 interface DefaultBrowserState {
   status: DefaultBrowserStatus | null;
   phase: DefaultBrowserPhase;
   error: string | null;
-  /** "Not now" was chosen this session: the rail stops offering until the next launch. */
+  /** "Not now" was chosen recently: the rail stops offering for a couple of weeks. */
   declined: boolean;
   decline: () => void;
   /** Re-read the status from the host. Returns it, or null when the host cannot say. */
@@ -28,8 +54,11 @@ export const useDefaultBrowser = create<DefaultBrowserState>((set) => ({
   status: null,
   phase: "idle",
   error: null,
-  declined: false,
-  decline: () => set({ declined: true }),
+  declined: readDeclined(),
+  decline: () => {
+    writeDeclined(Date.now() + DECLINE_REST_MS);
+    set({ declined: true });
+  },
   refresh: async () => {
     try {
       const status = await ipc.defaultBrowserStatus();
