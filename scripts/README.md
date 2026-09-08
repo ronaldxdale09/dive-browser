@@ -9,7 +9,7 @@ tooling lives in `release/` and is described in [`../RELEASING.md`](../RELEASING
 
 | Script | What it checks |
 |---|---|
-| `live-check.sh` | The real app driven through its MCP server: tab open and read-back, popup/camera/PDF/localhost/offline paths, screenshot, idle discard and wake, renderer crash recovery, CDP round-trip budget. Runs in CI's `live` job. |
+| `live-check.sh` | The real app driven through its MCP server: tab open and read-back, popup/camera/PDF/localhost/offline paths, screenshot, idle discard and wake, renderer crash recovery, CDP round-trip budget. Runs in CI's `live` job. The camera and microphone fail-closed step needs macOS's own consent for the bundle, so it runs only with `LIVE_MEDIA_CONSENT=1`. |
 | `native_lifecycle_check.py` | Popout window close, detach/reattach and quit ordering across four launches of one disposable profile, verifying sibling JavaScript keeps running. Runs in CI. |
 | `benchmark-startup.sh` / `startup_benchmark.py` | Cold and warm launch timings from the host's launch clock to first paint and usable controls. Runs in CI. |
 | `benchmark-memory.sh` / `memory_benchmark.py` / `memory-fixture.py` | Whole-process-tree RSS at baseline, after N fixture tabs, and after discard; fails if discard does not reclaim `MEM_MIN_RECLAIM_PCT`. Runs in CI. |

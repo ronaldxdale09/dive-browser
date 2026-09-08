@@ -199,11 +199,19 @@ mcp call tab_activate "{\"tab_id\": \"${B_ID}\"}" >/dev/null
 
 # Native PermissionBridge allows 30 seconds for an undecided request.
 # Observe its real fail-closed deadline; do not change the browser policy.
-step "undecided camera and microphone requests fail closed"
-mcp call page_click "{\"tab_id\": \"${B_ID}\", \"locator\": \"role=button[name=\\\"Request camera\\\"]\"}" >/dev/null || fail "camera button could not be clicked"
-mcp call page_wait_for "{\"tab_id\": \"${B_ID}\", \"text\": \"camera request handled: NotAllowedError\", \"timeout_ms\": 35000}" >/dev/null || fail "undecided camera request did not fail closed"
-mcp call page_click "{\"tab_id\": \"${B_ID}\", \"locator\": \"role=button[name=\\\"Request microphone\\\"]\"}" >/dev/null || fail "microphone button could not be clicked"
-mcp call page_wait_for "{\"tab_id\": \"${B_ID}\", \"text\": \"microphone request handled: NotAllowedError\", \"timeout_ms\": 35000}" >/dev/null || fail "undecided microphone request did not fail closed"
+# macOS asks for its own camera and microphone consent before Chromium ever
+# reaches Dive's handler, and that system prompt cannot be answered on a CI
+# runner or for a freshly copied bundle, so the step runs only where that
+# consent has already been given (LIVE_MEDIA_CONSENT=1).
+if [[ "${LIVE_MEDIA_CONSENT:-0}" == "1" ]]; then
+    step "undecided camera and microphone requests fail closed"
+    mcp call page_click "{\"tab_id\": \"${B_ID}\", \"locator\": \"role=button[name=\\\"Request camera\\\"]\"}" >/dev/null || fail "camera button could not be clicked"
+    mcp call page_wait_for "{\"tab_id\": \"${B_ID}\", \"text\": \"camera request handled: NotAllowedError\", \"timeout_ms\": 35000}" >/dev/null || fail "undecided camera request did not fail closed"
+    mcp call page_click "{\"tab_id\": \"${B_ID}\", \"locator\": \"role=button[name=\\\"Request microphone\\\"]\"}" >/dev/null || fail "microphone button could not be clicked"
+    mcp call page_wait_for "{\"tab_id\": \"${B_ID}\", \"text\": \"microphone request handled: NotAllowedError\", \"timeout_ms\": 35000}" >/dev/null || fail "undecided microphone request did not fail closed"
+else
+    step "camera and microphone fail-closed check skipped: set LIVE_MEDIA_CONSENT=1 on a Mac that has granted this bundle camera and microphone access"
+fi
 
 step "PDF renders in its own tab"
 PDF=$(mcp call tab_open "{\"url\": \"${SITE}/sample.pdf\"}")
