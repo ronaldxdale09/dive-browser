@@ -222,7 +222,7 @@ fn source(known: &Known, dir: &Path, profile: Option<String>, access: Access) ->
         browser: known.browser.into(),
         name: known.name.into(),
         family: known.family,
-        passwords: known.family == Family::Chromium,
+        passwords: known.family != Family::Safari,
         profile,
         dir: dir.to_string_lossy().into_owned(),
         access,
@@ -442,6 +442,13 @@ pub fn harvest(
                     out.history = firefox_history(&db)?;
                 }
             }
+            if passwords
+                && let Some(key_db) = copied(dir, "key4.db", temp.path())?
+                && let Some(logins) = read_optional(&dir.join("logins.json"))?
+            {
+                let key = firefox_key(&key_db)?;
+                out.passwords = firefox_logins(&logins, &key)?;
+            }
         }
         Family::Safari => {
             if bookmarks && dir.join("Bookmarks.plist").exists() {
@@ -562,6 +569,218 @@ pub fn chromium_logins(db: &Path, key: &[u8; 16]) -> AppResult<Vec<ImportedLogin
             continue;
         };
         let Some(password) = decrypt_v10(&blob, key) else {
+            continue;
+        };
+        if password.is_empty() || username.trim().is_empty() {
+            continue;
+        }
+        out.push(ImportedLogin {
+            origin,
+            username,
+            password,
+        });
+    }
+    Ok(out)
+}
+
+// ---- Firefox: key4.db unlocks logins.json ----
+
+/// A DER element: tag and contents, enough to walk NSS's PKCS#5 structures.
+#[derive(Debug, Clone, Copy)]
+pub struct Der<'a> {
+    pub tag: u8,
+    pub body: &'a [u8],
+}
+
+/// Split `bytes` into its top-level DER elements.
+pub fn der_elements(mut bytes: &[u8]) -> Option<Vec<Der<'_>>> {
+    let mut out = Vec::new();
+    while !bytes.is_empty() {
+        let tag = *bytes.first()?;
+        let mut len = usize::from(*bytes.get(1)?);
+        let mut head = 2;
+        if len & 0x80 != 0 {
+            let n = len & 0x7f;
+            if n == 0 || n > 4 {
+                return None;
+            }
+            len = 0;
+            for i in 0..n {
+                len = (len << 8) | usize::from(*bytes.get(2 + i)?);
+            }
+            head += n;
+        }
+        let body = bytes.get(head..head + len)?;
+        out.push(Der { tag, body });
+        bytes = &bytes[head + len..];
+    }
+    Some(out)
+}
+
+impl Der<'_> {
+    fn children(&self) -> Option<Vec<Der<'_>>> {
+        (self.tag == 0x30)
+            .then(|| der_elements(self.body))
+            .flatten()
+    }
+    fn octets(&self) -> Option<&[u8]> {
+        (self.tag == 0x04).then_some(self.body)
+    }
+    fn integer(&self) -> Option<u32> {
+        (self.tag == 0x02 && self.body.len() <= 5).then(|| {
+            self.body
+                .iter()
+                .fold(0u32, |acc, b| (acc << 8) | u32::from(*b))
+        })
+    }
+}
+
+const OID_PBES2: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x05, 0x0d];
+const OID_AES256_CBC: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x01, 0x2a];
+const OID_DES_EDE3_CBC: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x03, 0x07];
+
+fn pbkdf2_sha256(password: &[u8], salt: &[u8], rounds: u32, out: &mut [u8]) {
+    use hmac::{Hmac, Mac};
+    type H = Hmac<sha2::Sha256>;
+    let mut block: u32 = 1;
+    let mut written = 0;
+    while written < out.len() {
+        let mut mac = H::new_from_slice(password).expect("hmac accepts any key length");
+        mac.update(salt);
+        mac.update(&block.to_be_bytes());
+        let mut u = mac.finalize().into_bytes();
+        let mut t = u;
+        for _ in 1..rounds {
+            let mut mac = H::new_from_slice(password).expect("hmac accepts any key length");
+            mac.update(&u);
+            u = mac.finalize().into_bytes();
+            for (a, b) in t.iter_mut().zip(u.iter()) {
+                *a ^= b;
+            }
+        }
+        let take = (out.len() - written).min(t.len());
+        out[written..written + take].copy_from_slice(&t[..take]);
+        written += take;
+        block += 1;
+    }
+}
+
+/// Decrypt one of NSS's PBES2 blobs (a `metaData` check or an `nssPrivate`
+/// key) with the profile's global salt and an empty primary password.
+pub fn nss_pbes2_decrypt(global_salt: &[u8], blob: &[u8]) -> Option<Vec<u8>> {
+    use aes::cipher::{BlockDecryptMut, KeyIvInit, block_padding::Pkcs7};
+    use sha1::Digest;
+    let top = der_elements(blob)?;
+    let outer = top.first()?.children()?;
+    let algo = outer.first()?.children()?;
+    if algo.first()?.body != OID_PBES2 {
+        return None;
+    }
+    let params = algo.get(1)?.children()?;
+    let kdf = params.first()?.children()?;
+    let kdf_params = kdf.get(1)?.children()?;
+    let salt = kdf_params.first()?.octets()?;
+    let rounds = kdf_params.get(1)?.integer()?;
+    let cipher = params.get(1)?.children()?;
+    if cipher.first()?.body != OID_AES256_CBC {
+        return None;
+    }
+    let iv_tail = cipher.get(1)?.octets()?;
+    let ciphertext = outer.get(1)?.octets()?;
+    // The password is SHA1(globalSalt + primaryPassword); the IV in the
+    // file is the last 14 bytes, prefixed with 04 0e as NSS does.
+    let mut hasher = sha1::Sha1::new();
+    hasher.update(global_salt);
+    let password = hasher.finalize();
+    let mut key = [0u8; 32];
+    pbkdf2_sha256(&password, salt, rounds.max(1), &mut key);
+    let mut iv = [0u8; 16];
+    iv[0] = 0x04;
+    iv[1] = 0x0e;
+    let tail = iv_tail.get(iv_tail.len().saturating_sub(14)..)?;
+    iv[2..2 + tail.len()].copy_from_slice(tail);
+    cbc::Decryptor::<aes::Aes256>::new((&key).into(), (&iv).into())
+        .decrypt_padded_vec_mut::<Pkcs7>(ciphertext)
+        .ok()
+}
+
+/// The 3DES key Firefox encrypts logins with, from a copy of `key4.db`.
+pub fn firefox_key(db: &Path) -> AppResult<[u8; 24]> {
+    let conn = open_ro(db)?;
+    let (global_salt, check): (Vec<u8>, Vec<u8>) = conn
+        .query_row(
+            "SELECT item1, item2 FROM metaData WHERE id = 'password'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|_| AppError::new("this Firefox profile has no password store"))?;
+    let verified = nss_pbes2_decrypt(&global_salt, &check)
+        .is_some_and(|plain| plain.starts_with(b"password-check"));
+    if !verified {
+        return Err(AppError::new(
+            "Firefox protects these logins with a primary password. Export them as a CSV from about:logins instead.",
+        ));
+    }
+    let mut stmt = conn
+        .prepare("SELECT a11 FROM nssPrivate WHERE a11 IS NOT NULL")
+        .map_err(AppError::new)?;
+    let blobs = stmt
+        .query_map([], |r| r.get::<_, Vec<u8>>(0))
+        .map_err(AppError::new)?;
+    for blob in blobs.flatten() {
+        if let Some(plain) = nss_pbes2_decrypt(&global_salt, &blob)
+            && plain.len() >= 24
+        {
+            let mut key = [0u8; 24];
+            key.copy_from_slice(&plain[..24]);
+            return Ok(key);
+        }
+    }
+    Err(AppError::new(
+        "the key that unlocks Firefox's logins was not found",
+    ))
+}
+
+/// Decrypt one `logins.json` field: base64 DER of key id, 3DES-CBC params
+/// and ciphertext.
+pub fn firefox_field(encoded: &str, key: &[u8; 24]) -> Option<String> {
+    use aes::cipher::{BlockDecryptMut, KeyIvInit, block_padding::Pkcs7};
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .ok()?;
+    let top = der_elements(&bytes)?;
+    let parts = top.first()?.children()?;
+    let algo = parts.get(1)?.children()?;
+    if algo.first()?.body != OID_DES_EDE3_CBC {
+        return None;
+    }
+    let iv = algo.get(1)?.octets()?;
+    let ciphertext = parts.get(2)?.octets()?;
+    let iv: &[u8; 8] = iv.try_into().ok()?;
+    let plain = cbc::Decryptor::<des::TdesEde3>::new(key.into(), iv.into())
+        .decrypt_padded_vec_mut::<Pkcs7>(ciphertext)
+        .ok()?;
+    String::from_utf8(plain).ok()
+}
+
+/// Saved logins from Firefox's `logins.json`, decrypted with `key`.
+pub fn firefox_logins(json: &str, key: &[u8; 24]) -> AppResult<Vec<ImportedLogin>> {
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| AppError::new(format!("logins.json: {e}")))?;
+    let mut out = Vec::new();
+    for login in value["logins"].as_array().into_iter().flatten() {
+        let Some(origin) = login["hostname"].as_str().and_then(dive_core::origin_of) else {
+            continue;
+        };
+        let username = login["encryptedUsername"]
+            .as_str()
+            .and_then(|f| firefox_field(f, key))
+            .unwrap_or_default();
+        let Some(password) = login["encryptedPassword"]
+            .as_str()
+            .and_then(|f| firefox_field(f, key))
+        else {
             continue;
         };
         if password.is_empty() || username.trim().is_empty() {
@@ -814,6 +1033,138 @@ fn query<T: rusqlite::types::FromSql>(
 
 #[cfg(test)]
 mod tests {
+    /// A tiny DER writer for the fixtures below.
+    #[allow(clippy::cast_possible_truncation)]
+    fn der(tag: u8, body: &[u8]) -> Vec<u8> {
+        let mut out = vec![tag];
+        if body.len() < 128 {
+            out.push(body.len() as u8);
+        } else {
+            let len = body.len();
+            out.push(0x82);
+            out.push((len >> 8) as u8);
+            out.push((len & 0xff) as u8);
+        }
+        out.extend_from_slice(body);
+        out
+    }
+    fn seq(parts: &[Vec<u8>]) -> Vec<u8> {
+        der(0x30, &parts.concat())
+    }
+
+    fn nss_pbes2_encrypt(global_salt: &[u8], plain: &[u8]) -> Vec<u8> {
+        use aes::cipher::{BlockEncryptMut, KeyIvInit, block_padding::Pkcs7};
+        use sha1::Digest;
+        let salt = b"0123456789abcdefabcd";
+        let iv14 = [7u8; 14];
+        let mut hasher = sha1::Sha1::new();
+        hasher.update(global_salt);
+        let password = hasher.finalize();
+        let mut key = [0u8; 32];
+        super::pbkdf2_sha256(&password, salt, 10, &mut key);
+        let mut iv = [0u8; 16];
+        iv[0] = 0x04;
+        iv[1] = 0x0e;
+        iv[2..].copy_from_slice(&iv14);
+        let ciphertext = cbc::Encryptor::<aes::Aes256>::new((&key).into(), (&iv).into())
+            .encrypt_padded_vec_mut::<Pkcs7>(plain);
+        let kdf = seq(&[
+            der(
+                0x06,
+                &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x05, 0x0c],
+            ),
+            seq(&[
+                der(0x04, salt),
+                der(0x02, &[10]),
+                der(0x02, &[32]),
+                seq(&[
+                    der(0x06, &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x09]),
+                    der(0x05, &[]),
+                ]),
+            ]),
+        ]);
+        let cipher = seq(&[der(0x06, super::OID_AES256_CBC), der(0x04, &iv14)]);
+        let algo = seq(&[der(0x06, super::OID_PBES2), seq(&[kdf, cipher])]);
+        seq(&[algo, der(0x04, &ciphertext)])
+    }
+
+    fn firefox_encrypt(plain: &str, key: &[u8; 24]) -> String {
+        use aes::cipher::{BlockEncryptMut, KeyIvInit, block_padding::Pkcs7};
+        use base64::Engine as _;
+        let iv = [3u8; 8];
+        let ciphertext = cbc::Encryptor::<des::TdesEde3>::new(key.into(), (&iv).into())
+            .encrypt_padded_vec_mut::<Pkcs7>(plain.as_bytes());
+        let der_blob = seq(&[
+            der(0x04, b"key-id"),
+            seq(&[der(0x06, super::OID_DES_EDE3_CBC), der(0x04, &iv)]),
+            der(0x04, &ciphertext),
+        ]);
+        base64::engine::general_purpose::STANDARD.encode(der_blob)
+    }
+
+    #[test]
+    fn firefox_logins_are_unlocked_through_key4() {
+        let global_salt = b"global-salt-bytes-16";
+        let key3des: [u8; 24] = *b"twenty-four-byte-3des-ky";
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("key4.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch("CREATE TABLE metaData (id TEXT, item1 BLOB, item2 BLOB); CREATE TABLE nssPrivate (a11 BLOB, a102 BLOB);").unwrap();
+        conn.execute(
+            "INSERT INTO metaData VALUES ('password', ?1, ?2)",
+            rusqlite::params![
+                global_salt.to_vec(),
+                nss_pbes2_encrypt(global_salt, b"password-check\x02\x02")
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO nssPrivate VALUES (?1, X'F8')",
+            [nss_pbes2_encrypt(global_salt, &key3des)],
+        )
+        .unwrap();
+        drop(conn);
+        let key = super::firefox_key(&db).unwrap();
+        assert_eq!(key, key3des);
+        let json = format!(
+            r#"{{"logins":[{{"hostname":"https://accounts.firefox.com","encryptedUsername":"{}","encryptedPassword":"{}"}},{{"hostname":"https://empty.test","encryptedUsername":"{}","encryptedPassword":"{}"}}]}}"#,
+            firefox_encrypt("dale", &key),
+            firefox_encrypt("hunter2", &key),
+            firefox_encrypt("", &key),
+            firefox_encrypt("x", &key)
+        );
+        let logins = super::firefox_logins(&json, &key).unwrap();
+        assert_eq!(logins.len(), 1);
+        assert_eq!(
+            (
+                logins[0].origin.as_str(),
+                logins[0].username.as_str(),
+                logins[0].password.as_str()
+            ),
+            ("https://accounts.firefox.com", "dale", "hunter2")
+        );
+    }
+
+    #[test]
+    fn a_primary_password_is_reported_rather_than_guessed() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("key4.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch("CREATE TABLE metaData (id TEXT, item1 BLOB, item2 BLOB); CREATE TABLE nssPrivate (a11 BLOB, a102 BLOB);").unwrap();
+        // Encrypted under a different salt: the check will not decrypt.
+        conn.execute(
+            "INSERT INTO metaData VALUES ('password', ?1, ?2)",
+            rusqlite::params![
+                b"salt-a".to_vec(),
+                nss_pbes2_encrypt(b"salt-b", b"password-check\x02\x02")
+            ],
+        )
+        .unwrap();
+        drop(conn);
+        let err = super::firefox_key(&db).unwrap_err();
+        assert!(err.to_string().contains("primary password"), "{err}");
+    }
+
     #[test]
     fn pbkdf2_matches_the_rfc_6070_vectors() {
         let mut out = [0u8; 20];

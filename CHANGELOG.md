@@ -8,7 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
-- Import from another browser now brings saved passwords too, from Chrome, Brave, Edge, Arc, Vivaldi, Opera and Chromium: a Passwords switch beside Bookmarks and History, decrypted with the browser's own key after macOS asks once to allow it, and stored in this profile's Keychain. Logins Dive already has are left alone.
+- Import from another browser now brings saved passwords too, from Firefox (logins.json unlocked through key4.db; a primary password is reported rather than guessed) and from Chrome, Brave, Edge, Arc, Vivaldi, Opera and Chromium: a Passwords switch beside Bookmarks and History, decrypted with the browser's own key after macOS asks once to allow it, and stored in this profile's Keychain. Logins Dive already has are left alone.
 - The menu has "Import from another browser…" beside Bookmarks and History; the import dialog was reachable only from Settings › General and the Library.
 - Settings › Passwords imports a CSV export, the way Safari, Firefox, 1Password and Bitwarden (and Chrome) hand passwords over: the columns are found by name in any order, logins already saved are skipped, and the notice says what came in.
 - Saved logins: Settings › Passwords lists the logins kept in this profile, shows or copies a password on request, adds one by hand and forgets one. Passwords live in the macOS Keychain, never in Dive's own files. Signing in to a site offers to save the login (or update a changed password) in a small card over the page; a site with one saved login is filled as soon as its form appears, and one with several asks which to use when a login field is focused.

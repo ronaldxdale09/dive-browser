@@ -157,7 +157,9 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
       )}
       <p className="mt-3 text-[10.5px] text-ink-3">
         {canPasswords && passwords
-          ? `Passwords go into this profile's Keychain; macOS will ask once to let Dive read ${current?.name ?? "the browser"}'s password key. Cookies and extensions stay behind.`
+          ? current?.family === "firefox"
+            ? "Passwords go into this profile's Keychain. Firefox logins guarded by a primary password cannot be read; export them as a CSV from about:logins instead. Cookies and extensions stay behind."
+            : `Passwords go into this profile's Keychain; macOS will ask once to let Dive read ${current?.name ?? "the browser"}'s password key. Cookies and extensions stay behind.`
           : "Cookies and extensions stay in the other browser."}
       </p>
     </div>

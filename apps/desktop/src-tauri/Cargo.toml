@@ -25,6 +25,8 @@ aes = "0.8"
 cbc = { version = "0.1", features = ["alloc"] }
 hmac = "0.12"
 sha1 = "0.10"
+# Firefox keeps saved logins 3DES-CBC encrypted under a key held in key4.db.
+des = "0.8"
 futures-util = "0.3"
 # Direct access to the same pinned native CEF types for safe discard.
 cef = { version = "=151.8.1", optional = true }
