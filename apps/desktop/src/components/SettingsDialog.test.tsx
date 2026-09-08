@@ -335,15 +335,12 @@ describe("About and updates", () => {
     expect(useBrowser.getState().open.settings).toBe(false);
   });
 
-  it("tells a dev build where updates go instead of claiming it is current", async () => {
+  it("tells a dev build where updates go and offers no check that would find nothing", async () => {
     useBrowser.getState().openSettings("about");
     render(<SettingsDialog />);
     await waitFor(() => expect(screen.getByText("Updates are delivered to release builds.")).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
-    await waitFor(() => expect(ipc.updateCheck).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Check for updates|Check again/ })).toBeNull();
     expect(screen.queryByText(/You're up to date/)).toBeNull();
-    expect(screen.getByText("Updates are delivered to release builds.")).toBeTruthy();
   });
 
   it("shows the MCP command with a short token path but copies the full one", async () => {
