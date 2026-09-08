@@ -240,6 +240,9 @@ const AssistantMessage = memo(function AssistantMessage({
       {m.reasoning && <Reasoning text={m.reasoning} live={Boolean(m.pending && !m.content)} />}
       {m.steps && <StepList steps={m.steps} />}
       {m.content && <Markdown text={m.content} onLink={onLink} />}
+      {!m.pending && !m.content && !m.error && !m.stopped && !m.reasoning && !(m.steps && m.steps.length > 0) && (
+        <p className="py-1 text-ink-3 italic">The model sent nothing back. Ask again, or pick a larger model.</p>
+      )}
       {waiting && (
         <span className="flex items-center gap-2 text-ink-3 py-1">
           <span className="relative flex size-2">

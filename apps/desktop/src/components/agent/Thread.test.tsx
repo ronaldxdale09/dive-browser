@@ -107,6 +107,12 @@ describe("Thread", () => {
     expect(screen.queryByText("Quick Actions")).toBeNull();
   });
 
+  it("says so when a finished reply carries no text, steps or error", () => {
+    useAgent.setState({ messages: [{ id: "u", role: "user", content: "hi" }, { id: "a", role: "assistant", content: "", usage: { input_tokens: 10, output_tokens: 3, cache_read_tokens: 0, cost_usd: null } as never }] });
+    render(<Thread onAddProvider={() => {}} />);
+    expect(screen.getByText(/The model sent nothing back/)).toBeTruthy();
+  });
+
   it("submits from the send button and from Enter, but not Shift+Enter", () => {
     render(<Thread onAddProvider={() => {}} />);
     const box = screen.getByPlaceholderText(placeholder) as HTMLTextAreaElement;
