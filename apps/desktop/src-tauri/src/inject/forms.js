@@ -57,7 +57,7 @@
       "background:#fff;border:1px solid rgba(0,0,0,.14);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16)}" +
       "li{padding:6px 10px;border-radius:5px;cursor:default;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
       "li[aria-selected=true]{background:#2b6ef2;color:#fff}" +
-      "@media(prefers-color-scheme:dark){ul{background:#2a2a2e;color:#f2f2f2;border-color:rgba(255,255,255,.14)}}";
+      ":host([data-dark]) ul{background:#2a2a2e;color:#f2f2f2;border-color:rgba(255,255,255,.14)}";
     listEl = document.createElement("ul");
     listEl.setAttribute("role", "listbox");
     listEl.addEventListener("mousedown", (e) => e.preventDefault()); // keep focus in the field
@@ -74,8 +74,18 @@
     items = [];
     selected = -1;
   };
+  // The list follows the page, not the OS: a light page gets a light list.
+  const pageIsDark = (el) => {
+    const scheme = getComputedStyle(el).colorScheme || "";
+    if (/dark/.test(scheme) && !/light/.test(scheme)) return true;
+    const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/.exec(getComputedStyle(el).backgroundColor || "");
+    if (!m || (m[4] !== undefined && Number(m[4]) < 0.5)) return false;
+    return 0.2126 * Number(m[1]) + 0.7152 * Number(m[2]) + 0.0722 * Number(m[3]) < 128;
+  };
   const place = () => {
     if (!target || !host) return;
+    if (pageIsDark(target)) host.setAttribute("data-dark", "");
+    else host.removeAttribute("data-dark");
     const r = target.getBoundingClientRect();
     host.style.left = Math.max(0, r.left) + "px";
     host.style.top = r.bottom + 2 + "px";

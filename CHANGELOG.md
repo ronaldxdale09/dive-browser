@@ -8,6 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- Settings › Passwords is now "Passwords & forms": saved logins, form entries, then the CSV import in its own "Bringing passwords over" group, whose note names every browser read directly (Firefox included).
 - Pages offer remembered form entries under a named text field as you type (arrow keys, Enter, Escape), and what a submitted form held is remembered in the profile. Private windows are offered entries but never add to them; passwords, card numbers and login usernames are left out.
 - Import from another browser now brings form entries (names, emails, addresses remembered while typing) from Chromium browsers and Firefox behind a "Form entries" switch; Settings › Passwords › Form entries lists them by field, forgets one or all. Card numbers and anything password-like are left behind.
 - Import from another browser now brings saved passwords too, from Firefox (logins.json unlocked through key4.db; a primary password is reported rather than guessed) and from Chrome, Brave, Edge, Arc, Vivaldi, Opera and Chromium: a Passwords switch beside Bookmarks and History, decrypted with the browser's own key after macOS asks once to allow it, and stored in this profile's Keychain. Logins Dive already has are left alone.

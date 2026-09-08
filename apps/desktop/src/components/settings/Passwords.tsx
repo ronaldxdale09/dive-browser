@@ -104,19 +104,20 @@ export function Passwords() {
                   <Icon icon={Plus} size={12} /> Add login
                 </span>
               </Button>
-              <Button onClick={() => void importCsv()} disabled={importing}>
-                <span className="inline-flex items-center gap-1.5">
-                  <Icon icon={FileUp} size={12} /> {importing ? "Importing…" : "Import a CSV export…"}
-                </span>
-              </Button>
             </div>
           )}
         </div>
       </Group>
-      <Group title="Bringing passwords over" description="Chrome, Brave and Edge can be read directly from Import from another browser. Safari, Firefox and password managers export a CSV: Safari under File › Export › Passwords, Firefox under about:logins › Export, 1Password and Bitwarden from their export pages. Import it here, then delete the file: it holds every password in plain text.">
-        {null}
-      </Group>
       <FormEntries />
+      <Group title="Bringing passwords over" description="Chrome, Brave, Edge, Arc, Vivaldi, Opera and Firefox are read directly by Import from another browser. Safari and password managers export a CSV: Safari under File › Export › Passwords, 1Password and Bitwarden from their export pages. Import it here, then delete the file: it holds every password in plain text.">
+        <div className="py-2.5">
+          <Button onClick={() => void importCsv()} disabled={importing}>
+            <span className="inline-flex items-center gap-1.5">
+              <Icon icon={FileUp} size={12} /> {importing ? "Importing…" : "Import a CSV export…"}
+            </span>
+          </Button>
+        </div>
+      </Group>
     </>
   );
 }

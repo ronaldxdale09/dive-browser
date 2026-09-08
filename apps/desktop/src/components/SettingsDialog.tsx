@@ -42,7 +42,7 @@ const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
   { id: "general", label: "General", icon: SlidersHorizontal },
   { id: "appearance", label: "Appearance", icon: PaletteIcon },
   { id: "privacy", label: "Privacy", icon: ShieldCheck },
-  { id: "passwords", label: "Passwords", icon: KeyRound },
+  { id: "passwords", label: "Passwords & forms", icon: KeyRound },
   { id: "developer", label: "Developer", icon: Plug },
   { id: "agent", label: "Agent", icon: AgentIcon as LucideIcon },
   { id: "subtitles", label: "Live subtitles", icon: Captions },
