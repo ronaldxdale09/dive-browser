@@ -120,9 +120,40 @@ wrap_request_handler! {
     drag_drop_state: Arc<Mutex<DragDropState>>,
     web_content_process_terminate_handler: Option<Arc<dyn Fn() + Send>>,
     permissions: Arc<crate::cef_impl::client::permission::PermissionBridge>,
+    page_actions: Arc<crate::cef_impl::client::ContextMenuBridge>,
   }
 
   impl RequestHandler {
+    /// A link opened with a middle click or a modifier click. Chromium asks
+    /// the embedder to place it; returning 0 would load it in this browser.
+    fn on_open_urlfrom_tab(
+      &self,
+      browser: Option<&mut Browser>,
+      _frame: Option<&mut Frame>,
+      target_url: Option<&CefString>,
+      target_disposition: WindowOpenDisposition,
+      _user_gesture: ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int {
+      let Some(action) = crate::cef_impl::client::action_for(target_disposition) else {
+        return 0;
+      };
+      let Some(url) = target_url.map(|u| u.to_string()).filter(|u| !u.is_empty()) else {
+        return 0;
+      };
+      let page_url = browser
+        .and_then(|b| b.main_frame())
+        .map(|f| CefString::from(&f.url()).to_string())
+        .unwrap_or_default();
+      let command = crate::cef_impl::client::ContextMenuCommand {
+        action,
+        page_url,
+        link_url: url,
+        source_url: String::new(),
+        selection: String::new(),
+      };
+      i32::from(self.page_actions.dispatch(command))
+    }
+
     fn on_render_process_terminated(
       &self,
       _browser: Option<&mut Browser>,

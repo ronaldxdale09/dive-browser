@@ -73,10 +73,13 @@ fn carry_out(
     };
     match command.action {
         ContextMenuAction::OpenLinkInNewTab => {
-            open_beside(&main, app, &state, tab_id, &command.link_url)
+            open_beside(&main, app, &state, tab_id, &command.link_url, true)
+        }
+        ContextMenuAction::OpenLinkInBackgroundTab => {
+            open_beside(&main, app, &state, tab_id, &command.link_url, false)
         }
         ContextMenuAction::OpenImageInNewTab => {
-            open_beside(&main, app, &state, tab_id, &command.source_url)
+            open_beside(&main, app, &state, tab_id, &command.source_url, true)
         }
         ContextMenuAction::CopyLink => copy(&command.link_url, "Copied the link"),
         ContextMenuAction::CopyImageAddress => {
@@ -89,14 +92,14 @@ fn carry_out(
                 state.prefs.get(&state).search_template(),
                 &command.selection,
             )?;
-            open_beside(&main, app, &state, tab_id, &url)
+            open_beside(&main, app, &state, tab_id, &url, true)
         }
         ContextMenuAction::QrCode => chrome(app, "share.open"),
         ContextMenuAction::AskAgent => chrome(app, "sidecar.open"),
         ContextMenuAction::DeviceSimulator => chrome(app, "simulator.toggle"),
         ContextMenuAction::ViewSource => {
             let url = source_url_for(&command.page_url)?;
-            open_beside(&main, app, &state, tab_id, &url)
+            open_beside(&main, app, &state, tab_id, &url, true)
         }
         ContextMenuAction::Inspect => crate::commands::with_view(&state, tab_id, |v| {
             v.open_devtools();
@@ -112,6 +115,7 @@ fn open_beside(
     state: &AppState,
     tab_id: TabId,
     url: &str,
+    activate: bool,
 ) -> AppResult<()> {
     if url.is_empty() {
         return Err(AppError::new("that item has no address"));
@@ -122,7 +126,7 @@ fn open_beside(
     }
     .or(*lock(&state.active_workspace))
     .ok_or_else(|| AppError::new("no workspace to open the tab in"))?;
-    crate::commands::open_tab(main, app, state, workspace, url)?;
+    crate::commands::open_tab_with(main, app, state, workspace, url, activate)?;
     Ok(())
 }
 

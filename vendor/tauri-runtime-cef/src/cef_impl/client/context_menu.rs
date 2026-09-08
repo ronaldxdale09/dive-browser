@@ -37,6 +37,9 @@ pub enum ContextMenuAction {
     DeviceSimulator,
     ViewSource,
     Inspect,
+    /// Not a menu item: a middle click or a modifier click on a link, which
+    /// Chromium reports as a request to open the address in a background tab.
+    OpenLinkInBackgroundTab,
 }
 
 impl ContextMenuAction {
@@ -71,6 +74,21 @@ impl ContextMenuAction {
 
 type Handler = Arc<dyn Fn(ContextMenuCommand) + Send + Sync>;
 
+/// The action Chromium's open-URL disposition asks for, if the application
+/// should handle it: a middle click wants a background tab, a shift click a
+/// new window (a tab that takes focus here), and a plain click nothing.
+pub fn action_for(disposition: WindowOpenDisposition) -> Option<ContextMenuAction> {
+    match disposition {
+        WindowOpenDisposition::NEW_BACKGROUND_TAB => {
+            Some(ContextMenuAction::OpenLinkInBackgroundTab)
+        }
+        WindowOpenDisposition::NEW_FOREGROUND_TAB
+        | WindowOpenDisposition::NEW_WINDOW
+        | WindowOpenDisposition::NEW_POPUP => Some(ContextMenuAction::OpenLinkInNewTab),
+        _ => None,
+    }
+}
+
 /// What the application can offer from the menu right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContextMenuOptions {
@@ -100,6 +118,21 @@ pub struct ContextMenuBridge {
 impl ContextMenuBridge {
     pub fn install(&self, handler: Handler) {
         *self.handler.lock().unwrap() = Some(handler);
+    }
+
+    /// Hand a command to the application from a CEF callback. The handler
+    /// runs on its own thread: it waits for the main thread, and this is the
+    /// main thread inside a CEF callback, so running it here would deadlock
+    /// (the menu path has the same shape and the same hand-off).
+    pub fn dispatch(&self, command: ContextMenuCommand) -> bool {
+        let handler = self.handler.lock().unwrap().clone();
+        match handler {
+            Some(handler) => {
+                std::thread::spawn(move || handler(command));
+                true
+            }
+            None => false,
+        }
     }
 
     pub fn set_options(&self, options: ContextMenuOptions) {
@@ -280,5 +313,28 @@ mod tests {
             assert!(action.id() >= cef::sys::cef_menu_id_t::MENU_ID_USER_FIRST as i32);
         }
         assert_eq!(ContextMenuAction::from_id(1), None);
+    }
+}
+
+#[cfg(test)]
+mod disposition_tests {
+    use super::*;
+
+    #[test]
+    fn dispositions_map_to_background_or_foreground_tabs() {
+        assert_eq!(
+            action_for(WindowOpenDisposition::NEW_BACKGROUND_TAB),
+            Some(ContextMenuAction::OpenLinkInBackgroundTab)
+        );
+        assert_eq!(
+            action_for(WindowOpenDisposition::NEW_FOREGROUND_TAB),
+            Some(ContextMenuAction::OpenLinkInNewTab)
+        );
+        assert_eq!(
+            action_for(WindowOpenDisposition::NEW_WINDOW),
+            Some(ContextMenuAction::OpenLinkInNewTab)
+        );
+        assert_eq!(action_for(WindowOpenDisposition::CURRENT_TAB), None);
+        assert_eq!(action_for(WindowOpenDisposition::SAVE_TO_DISK), None);
     }
 }

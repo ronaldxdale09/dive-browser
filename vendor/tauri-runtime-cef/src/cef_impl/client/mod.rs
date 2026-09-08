@@ -25,7 +25,7 @@ mod process;
 
 use context_menu::TauriCefContextMenuHandler;
 pub use context_menu::{
-    ContextMenuAction, ContextMenuBridge, ContextMenuCommand, ContextMenuOptions,
+    ContextMenuAction, ContextMenuBridge, ContextMenuCommand, ContextMenuOptions, action_for,
 };
 use display::TauriCefDisplayHandler;
 use download::TauriCefDownloadHandler;
@@ -110,6 +110,7 @@ wrap_client! {
         self.drag_drop_state.clone(),
         self.handlers.web_content_process_terminate_handler.clone(),
         self.handlers.permissions.clone(),
+        self.handlers.context_menu.clone(),
       ))
     }
 

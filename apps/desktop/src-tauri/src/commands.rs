@@ -1260,6 +1260,19 @@ pub fn open_tab(
     workspace_id: WorkspaceId,
     url: &str,
 ) -> AppResult<Tab> {
+    open_tab_with(main, app, state, workspace_id, url, true)
+}
+
+/// Open a tab, bringing it forward only when `activate` is set: a link
+/// opened with a middle click loads behind the page it came from.
+pub fn open_tab_with(
+    main: &MainThread,
+    app: &AppHandle<Runtime>,
+    state: &AppState,
+    workspace_id: WorkspaceId,
+    url: &str,
+    activate: bool,
+) -> AppResult<Tab> {
     let url = normalize_url_with(url, state.prefs.get(state).search_template())?;
     let (tab, container) = {
         let store = lock(&state.store);
@@ -1280,6 +1293,7 @@ pub fn open_tab(
         let mut host = lock(&state.host);
         match host.as_mut() {
             Some(host) => match host.open(main, app, &tab, &container) {
+                Ok(()) if !activate => Ok(()),
                 Ok(()) => host.activate(main, tab.id).map_err(|error| {
                     let _ = host.close(tab.id);
                     AppError::from(error)
@@ -1297,9 +1311,11 @@ pub fn open_tab(
         }
         return Err(error);
     }
-    lock(&state.store).set_setting(crate::state::ACTIVE_TAB, &tab.id.to_string())?;
     state.bus.publish(CoreEvent::TabUpserted(tab.clone()));
-    state.bus.publish(CoreEvent::TabActivated(tab.id));
+    if activate {
+        lock(&state.store).set_setting(crate::state::ACTIVE_TAB, &tab.id.to_string())?;
+        state.bus.publish(CoreEvent::TabActivated(tab.id));
+    }
     Ok(tab)
 }
 
