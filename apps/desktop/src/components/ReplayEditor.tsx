@@ -74,13 +74,13 @@ export function ReplayEditor({ tabId, requestId, onClose }: { tabId: string; req
       {error && <div role="alert" className="text-danger">{error}</div>}
       {draft && (
         <>
-          <div className="flex gap-2">
+          <div className="flex shrink-0 gap-2">
             <input aria-label="Method" value={draft.method} onChange={(e) => setDraft({ ...draft, method: e.target.value.toUpperCase() })} className={`${field} w-24`} />
             <input aria-label="URL" value={draft.url} onChange={(e) => setDraft({ ...draft, url: e.target.value })} className={field} />
           </div>
-          <textarea aria-label="Headers" value={headersText} onChange={(e) => setHeadersText(e.target.value)} rows={4} placeholder="Name: value" className={`${field} resize-y`} />
-          <textarea aria-label="Body" value={draft.body ?? ""} onChange={(e) => setDraft({ ...draft, body: e.target.value || null })} rows={3} placeholder="Body" className={`${field} resize-y`} />
-          <div className="flex items-center gap-3">
+          <textarea aria-label="Headers" value={headersText} onChange={(e) => setHeadersText(e.target.value)} rows={4} placeholder="Name: value" className={`${field} min-h-[4.5rem] shrink-0 resize-y`} />
+          <textarea aria-label="Body" value={draft.body ?? ""} onChange={(e) => setDraft({ ...draft, body: e.target.value || null })} rows={3} placeholder="Body" className={`${field} min-h-[3.5rem] shrink-0 resize-y`} />
+          <div className="flex shrink-0 items-center gap-3">
             <label className="flex items-center gap-1.5 text-ink-2">
               <input type="checkbox" checked={draft.with_cookies} onChange={(e) => setDraft({ ...draft, with_cookies: e.target.checked })} className="accent-highlight" />
               Send this tab's cookies

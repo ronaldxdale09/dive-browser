@@ -54,6 +54,7 @@ bump may change behaviour.
   the remembered choice is not on disk.
 
 ### Fixed
+- Network replay editor: the Headers and Body fields no longer collapse to a single line when the response arrives; the pane scrolls instead.
 - Text fields in the dock filters and Settings show a highlight border when focused, so keyboard focus is visible rather than a one-shade change of grey.
 - Jump-to-Source from a console row says so when nothing maps the script back to a file on disk, instead of handing the editor an http URL as a path and opening nothing.
 - With a Default zoom other than 100%, new tabs opened at that zoom but the chrome assumed 100%: no zoom badge, and the first ⌘+ shrank the page. The badge and the steps now start from the default; ⌘0 returns to it.
