@@ -8,6 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- Reopen closed tab (⌘⇧T, also in the menu): the tabs closed this session come back one at a time, in the workspace they were in. The shortcut was reserved but did nothing.
 - Library › History: each row has a Remove button (on hover or focus) that forgets that page, alongside the existing Clear browsing data.
 - Tab strip: when tabs scroll out of the strip (its scrollbar is hidden), a "+N" chip after the new-tab button says how many are out of view and opens tab search; the active tab is scrolled into view whenever it changes.
 - The Playwright recorder is reachable from the chrome: "Record steps as a

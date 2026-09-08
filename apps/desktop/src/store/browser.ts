@@ -35,6 +35,9 @@ interface BrowserState {
   activeTab: string | null;
   /** Tabs living in their own window rather than the main one. */
   detached: string[];
+  /** Tabs closed this session, oldest first; ⌘⇧T brings the last one back. */
+  closedTabs: ClosedTab[];
+  reopenClosedTab: () => Promise<void>;
   detachTab: (id: string, at: { x: number; y: number } | null) => Promise<void>;
   attachTab: (id: string) => Promise<void>;
   open: Record<Exclude<UiPanel, "extensions" | "import">, boolean> & { extensions?: boolean; import?: boolean };
@@ -113,6 +116,16 @@ interface BrowserState {
 }
 
 export type NavError = { url: string; error: string };
+export type ClosedTab = { url: string; title: string; workspace_id: string | null };
+/** Most closed tabs remembered for reopening. */
+export const CLOSED_TABS_LIMIT = 25;
+
+/** The closed-tab stack after `tab` went, or unchanged when there was nothing worth reopening. */
+export function rememberClosed(stack: ClosedTab[], tab: Pick<Tab, "url" | "title" | "workspace_id"> | undefined): ClosedTab[] {
+  if (!tab || !tab.url || tab.url === "about:blank") return stack;
+  const next = [...stack, { url: tab.url, title: tab.title, workspace_id: tab.workspace_id }];
+  return next.length > CLOSED_TABS_LIMIT ? next.slice(next.length - CLOSED_TABS_LIMIT) : next;
+}
 export type CrashState = { attempt: number; recovering: boolean };
 
 const NAVIGATION_DIALOGS = new Set<UiPanel>(["palette", "settings", "library", "shortcuts"]);
@@ -296,6 +309,21 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   tabs: [],
   activeTab: null,
   detached: [],
+  closedTabs: [],
+  reopenClosedTab: async () => {
+    const last = get().closedTabs.at(-1);
+    if (!last) {
+      get().notify("No closed tab to reopen.");
+      return;
+    }
+    set((s) => ({ closedTabs: s.closedTabs.slice(0, -1) }));
+    if (last.workspace_id && last.workspace_id !== get().activeWorkspace && get().workspaces.some((w) => w.id === last.workspace_id)) {
+      await get().activateWorkspace(last.workspace_id);
+    }
+    const ws = get().activeWorkspace;
+    if (!ws) return;
+    await run(set, () => ipc.tabOpen(ws, last.url));
+  },
   open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false },
   libraryTab: "bookmarks",
   openLibrary: (libraryTab) => set((s) => ({ libraryTab, open: togglePanel(s.open, "library", true) })),
@@ -590,9 +618,12 @@ export const useBrowser = create<BrowserState>((set, get) => ({
 
   toggle: (panel, value) => set((s) => ({ open: togglePanel(s.open, panel, value), ...(panel === "palette" ? { paletteFocus: "all" as const } : {}) })),
   applyEvent: (event) => {
+    // Remembered before the reducer forgets the tab.
+    const gone = event.type === "tab_closed" ? get().tabs.find((t) => t.id === event.data) : undefined;
     set((s) => reduceEvent(s, event));
     if (event.type === "tab_closed") {
       const id = event.data;
+      set((s) => ({ closedTabs: rememberClosed(s.closedTabs, gone) }));
       set((s) => ({ loading: without(s.loading, id), navError: without(s.navError, id), crashedTabs: without(s.crashedTabs, id), permissionRequests: without(s.permissionRequests, id) }));
       usePrivacy.getState().drop(id);
     }

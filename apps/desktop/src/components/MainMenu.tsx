@@ -26,6 +26,7 @@ import {
   Star,
   TextSearch,
   Trash2,
+  Undo2,
   Video,
   Wand2,
   X,
@@ -239,6 +240,7 @@ function ZoomRow() {
 function useMenu(close: () => void): Group[] {
   const active = useBrowser((s) => s.activeTab);
   const open = useBrowser((s) => s.open);
+  const closedTabs = useBrowser((s) => s.closedTabs.length);
   const detached = useBrowser((s) => s.detached);
   const recordingSteps = useRecorder((s) => s.recordingTab !== null);
   const [latest, setLatest] = useState<string | null>(null);
@@ -260,6 +262,7 @@ function useMenu(close: () => void): Group[] {
         { id: "window.private", label: "New private window", icon: Shield, shortcut: "⇧⌘N", keywords: "incognito private browsing", run: done(() => runCommand("window.private")) },
         { id: "window.new", label: "New window", icon: AppWindow, shortcut: "⌘N", run: done(() => runCommand("window.new")) },
         { id: "tab.new", label: "New tab", icon: SquarePlus, shortcut: "⌘T", run: done(() => runCommand("tab.new")) },
+        { id: "tab.reopen", label: "Reopen closed tab", icon: Undo2, shortcut: "⇧⌘T", keywords: "restore undo close", disabled: closedTabs === 0, run: done(() => runCommand("tab.reopen")) },
         { id: "workspace.new", label: "New workspace", icon: LayoutGrid, keywords: "container profile", run: done(() => runCommand("workspace.new")) },
         {
           id: "tab.detach",

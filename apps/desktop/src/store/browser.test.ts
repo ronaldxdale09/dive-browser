@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@tauri-apps/api/event";
-import { reduceCrash, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, tabHoldsOnly, useBrowser, withoutRequest } from "./browser";
+import { CLOSED_TABS_LIMIT, reduceCrash, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, useBrowser, withoutRequest } from "./browser";
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
 import type { PermissionAsked, PermissionDismissed, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
@@ -375,5 +375,52 @@ describe("notify", () => {
     vi.advanceTimersByTime(1);
     expect(useBrowser.getState().notice).toBeNull();
     vi.useRealTimers();
+  });
+});
+
+describe("reopening closed tabs", () => {
+  const initial = useBrowser.getState();
+  afterEach(() => {
+    useBrowser.setState(initial, true);
+    vi.restoreAllMocks();
+  });
+  const t = (id: string, url: string, workspace_id = "w1") => ({ id, workspace_id, url, title: id.toUpperCase(), favicon: null, tier: "today", position: 0, state: "active", last_active_at: "" }) as unknown as Tab;
+
+  it("remembers a closed page but not a blank tab, and keeps only the last few", () => {
+    expect(rememberClosed([], t("a", "about:blank"))).toEqual([]);
+    expect(rememberClosed([], t("a", ""))).toEqual([]);
+    expect(rememberClosed([], undefined)).toEqual([]);
+    const one = rememberClosed([], t("a", "https://a.test/"));
+    expect(one).toEqual([{ url: "https://a.test/", title: "A", workspace_id: "w1" }]);
+    let stack = one;
+    for (let i = 0; i < CLOSED_TABS_LIMIT + 5; i++) stack = rememberClosed(stack, t(`x${i}`, `https://x${i}.test/`));
+    expect(stack).toHaveLength(CLOSED_TABS_LIMIT);
+    expect(stack.at(-1)?.url).toBe(`https://x${CLOSED_TABS_LIMIT + 4}.test/`);
+  });
+
+  it("records the tab when the engine closes it, and reopens the last one in its workspace", async () => {
+    const open = vi.spyOn(ipc, "tabOpen").mockResolvedValue({} as never);
+    const activate = vi.spyOn(ipc, "workspaceActivate").mockResolvedValue(null as never);
+    useBrowser.setState({
+      tabs: [t("a", "https://a.test/", "w1"), t("b", "https://b.test/", "w2")],
+      activeTab: "a",
+      activeWorkspace: "w1",
+      workspaces: [{ id: "w1" }, { id: "w2" }] as unknown as Workspace[],
+    });
+    useBrowser.getState().applyEvent({ type: "tab_closed", data: "b" });
+    expect(useBrowser.getState().closedTabs).toEqual([{ url: "https://b.test/", title: "B", workspace_id: "w2" }]);
+    await useBrowser.getState().reopenClosedTab();
+    expect(activate).toHaveBeenCalledWith("w2");
+    expect(open).toHaveBeenCalledWith(expect.anything(), "https://b.test/");
+    expect(useBrowser.getState().closedTabs).toEqual([]);
+  });
+
+  it("says when there is nothing to reopen", async () => {
+    const notify = vi.fn();
+    useBrowser.setState({ closedTabs: [], notify });
+    const open = vi.spyOn(ipc, "tabOpen");
+    await useBrowser.getState().reopenClosedTab();
+    expect(notify).toHaveBeenCalledWith("No closed tab to reopen.");
+    expect(open).not.toHaveBeenCalled();
   });
 });

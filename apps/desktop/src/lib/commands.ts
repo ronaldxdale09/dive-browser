@@ -29,6 +29,7 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
     const { activeTab, closeTab } = useBrowser.getState();
     return activeTab ? closeTab(activeTab) : (isPrivateWindow() ? ipc.windowClose().then(() => undefined) : undefined);
   },
+  "tab.reopen": () => useBrowser.getState().reopenClosedTab(),
   "tab.pin": () => {
     const { tabs, activeTab, setPinned } = useBrowser.getState();
     const tab = tabs.find((t) => t.id === activeTab);
@@ -172,6 +173,7 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+t": "tab.new",
   "mod+w": "tab.close",
   "mod+shift+p": "tab.pin",
+  "mod+shift+t": "tab.reopen",
   // ⇧⌘N opens a private window; detaching a tab keeps the ⌥ variant.
   "mod+alt+n": "tab.detach",
   "mod+r": "tab.reload",
@@ -225,6 +227,7 @@ export const COMMAND_TITLES: Record<string, string> = {
   "tab.new": "New tab",
   "tab.close": "Close tab",
   "tab.pin": "Pin or unpin tab",
+  "tab.reopen": "Reopen closed tab",
   "tab.detach": "Move tab to its own window",
   "tab.reload": "Reload",
   "tab.home": "Home",
