@@ -513,3 +513,21 @@ describe("openOrSwitch", () => {
     expect(sameSiteTab([tab("z", "https://a.test/")], "nope")).toBeUndefined();
   });
 });
+
+describe("zoomStep", () => {
+  it("sends one zoom command at a time and follows up with the latest level", async () => {
+    let settle!: () => void;
+    const zoom = vi.spyOn(ipc, "tabZoom").mockImplementationOnce(() => new Promise<null>((r) => (settle = () => r(null)))).mockResolvedValue(null as never);
+    useBrowser.setState({ activeTab: "z1", tabs: [tab("z1")], zoom: {}, defaultZoom: 1 });
+    const first = useBrowser.getState().zoomStep(1);
+    const second = useBrowser.getState().zoomStep(1);
+    // The badge shows two steps at once; the engine has heard only the first.
+    expect(useBrowser.getState().zoomOf("z1")).toBe(1.25);
+    expect(zoom).toHaveBeenCalledTimes(1);
+    expect(zoom).toHaveBeenCalledWith("z1", 1.1);
+    settle();
+    await Promise.all([first, second]);
+    expect(zoom).toHaveBeenCalledTimes(2);
+    expect(zoom).toHaveBeenLastCalledWith("z1", 1.25);
+  });
+});

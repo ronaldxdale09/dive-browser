@@ -314,6 +314,9 @@ let unlistenDownload: (() => void) | null = null;
 let booting: Promise<void> | null = null;
 /** The one toast timer: a newer notice cancels the older one's clearing. */
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+/** Zoom commands on their way to the engine, one per tab, and the level to send next. */
+const zoomInFlight = new Map<string, Promise<void>>();
+const zoomWanted = new Map<string, number>();
 /** The workspace this chrome asked the engine for; its `workspace_activated` needs no refresh. */
 let requestedWorkspace: string | null = null;
 
@@ -594,14 +597,30 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     // Shown at once so a held key or a double click steps twice, not once
     // from the same stale level; put back if the engine refuses.
     set((s) => ({ zoom: { ...s.zoom, [id]: next } }));
-    await run(set, async () => {
-      try {
-        await ipc.tabZoom(id, next);
-      } catch (e) {
-        set((s) => ({ zoom: { ...s.zoom, [id]: current } }));
-        throw e;
-      }
-    });
+    // The engine applies zoom levels asynchronously, and two sent back to
+    // back can settle out of order (the badge said 125% over a page at
+    // 110%). One command is in flight per tab; a step that arrives
+    // meanwhile only records the level wanted, sent once the first settles.
+    zoomWanted.set(id, next);
+    if (zoomInFlight.has(id)) return;
+    const pump = async (): Promise<void> => {
+      const wanted = zoomWanted.get(id);
+      if (wanted === undefined) return;
+      zoomWanted.delete(id);
+      await run(set, async () => {
+        try {
+          await ipc.tabZoom(id, wanted);
+        } catch (e) {
+          set((s) => ({ zoom: { ...s.zoom, [id]: current } }));
+          zoomWanted.delete(id);
+          throw e;
+        }
+      });
+      return pump();
+    };
+    const flight = pump().finally(() => zoomInFlight.delete(id));
+    zoomInFlight.set(id, flight);
+    await flight;
   },
   capture: async (fullPage) => {
     const id = get().activeTab;

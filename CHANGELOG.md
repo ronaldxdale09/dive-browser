@@ -36,6 +36,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- Pressing ⌘+ twice quickly no longer leaves the badge at 125% over a page zoomed to 110%: zoom commands go to the engine one at a time, the latest level following once the previous settles.
 - The ChatGPT, Claude and Gemini shortcuts switch to the assistant's tab when one is already open in the workspace instead of opening another.
 - The A11y panel announces the audit result ("1 violation · 14 passed · 0 to review") and its errors to assistive tech.
 - Network panel rows can be reached with Tab and opened with Enter or Space.
