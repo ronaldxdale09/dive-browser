@@ -1113,7 +1113,31 @@ impl<T: UserEvent> WinitCefApp<T> {
                 let _ = tx.send(Ok(()));
             }
             #[cfg(any(debug_assertions, feature = "devtools"))]
-            WebviewMessage::OpenDevTools => child.host.show_dev_tools(None, None, None, None),
+            WebviewMessage::OpenDevTools => {
+                #[cfg(target_os = "macos")]
+                let bounds = child.devtools_bounds_now();
+                child.host.show_dev_tools(None, None, None, None);
+                // Chrome opens the window on its own schedule and at its own
+                // small default; poll briefly and move it once it exists.
+                #[cfg(target_os = "macos")]
+                if let Some(bounds) = bounds {
+                    let context = self.context.clone();
+                    std::thread::spawn(move || {
+                        for _ in 0..20 {
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            let (tx, rx) = mpsc::channel();
+                            let sent = context.run_on_main_thread(move || {
+                                let placed = objc2::MainThreadMarker::new()
+                                    .is_some_and(|mtm| crate::platform::macos::place_devtools_window(bounds, mtm));
+                                let _ = tx.send(placed);
+                            });
+                            if sent.is_err() || rx.recv().unwrap_or(true) {
+                                break;
+                            }
+                        }
+                    });
+                }
+            }
             #[cfg(any(debug_assertions, feature = "devtools"))]
             WebviewMessage::CloseDevTools => child.host.close_dev_tools(),
             #[cfg(any(debug_assertions, feature = "devtools"))]

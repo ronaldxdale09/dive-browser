@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: MIT
 
 use cef::ImplBrowserHost;
+use objc2::MainThreadMarker;
 use objc2::rc::Retained;
-use objc2_app_kit::{NSColor, NSView};
+use objc2_app_kit::{NSApplication, NSColor, NSView};
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 use tauri_runtime::dpi::{LogicalPosition, LogicalSize, Rect};
 use tauri_utils::config::Color;
@@ -13,7 +14,62 @@ use crate::{webview::AppWebview, window::AppWindow};
 
 use super::utils;
 
+/// Where a DevTools window opens, in top-left screen coordinates. It is a
+/// real working size (not CEF's 640×608 default), sits a little down and
+/// right of the page it inspects, and stays on the screen.
+pub(crate) fn devtools_bounds(page: (f64, f64, f64, f64), screen: (f64, f64)) -> (i32, i32, i32, i32) {
+    let (px, py, pw, ph) = page;
+    let (sw, sh) = screen;
+    let width = (pw * 0.7).max(960.0).min(sw);
+    let height = (ph * 0.85).max(700.0).min(sh);
+    let x = (px + 48.0).min((sw - width).max(0.0)).max(0.0);
+    let y = (py + 48.0).min((sh - height).max(0.0)).max(0.0);
+    (x.round() as i32, y.round() as i32, width.round() as i32, height.round() as i32)
+}
+
+/// Chrome sizes the DevTools window it opens (CEF's `WindowInfo` bounds
+/// are ignored in Chrome style), so the fresh window is moved after the
+/// fact. Only a window still at Chrome's small default is touched; one the
+/// person has sized is theirs. Returns whether a window was placed.
+pub(crate) fn place_devtools_window(bounds: (i32, i32, i32, i32), mtm: MainThreadMarker) -> bool {
+    let (x, y, width, height) = bounds;
+    let app = NSApplication::sharedApplication(mtm);
+    for window in app.windows().iter() {
+        if !window.title().to_string().starts_with("DevTools") {
+            continue;
+        }
+        let frame = window.frame();
+        if frame.size.width > 700.0 {
+            continue;
+        }
+        let screen_height = window.screen().map_or(0.0, |screen| screen.frame().size.height);
+        let rect = NSRect::new(
+            NSPoint::new(f64::from(x), screen_height - f64::from(y + height)),
+            NSSize::new(f64::from(width), f64::from(height)),
+        );
+        window.setFrame_display(rect, true);
+        return true;
+    }
+    false
+}
+
 impl AppWebview {
+    /// Where DevTools for this page should open, in top-left screen
+    /// coordinates; `None` when the page is not in a window on a screen.
+    pub(crate) fn devtools_bounds_now(&self) -> Option<(i32, i32, i32, i32)> {
+        let nsview = self.nsview();
+        let window = nsview.window()?;
+        let screen = window.screen()?;
+        let frame = window.frame();
+        let visible = screen.frame();
+        // AppKit measures from the bottom-left; the placement wants the top-left.
+        let top = visible.size.height - (frame.origin.y + frame.size.height);
+        Some(devtools_bounds(
+            (frame.origin.x, top, frame.size.width, frame.size.height),
+            (visible.size.width, visible.size.height),
+        ))
+    }
+
     pub(crate) fn nsview(&self) -> Retained<NSView> {
         let handle = self.host.window_handle();
         let view = handle.cast::<NSView>();
@@ -231,5 +287,22 @@ impl crate::webview::Webview {
         }
         CATransaction::commit();
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::devtools_bounds;
+
+    #[test]
+    fn devtools_opens_at_a_working_size_beside_the_page_and_on_screen() {
+        // A roomy window: 70% of its size, offset down and right.
+        assert_eq!(devtools_bounds((100.0, 50.0, 1600.0, 1000.0), (2560.0, 1440.0)), (148, 98, 1120, 850));
+        // A small window still gets a usable DevTools.
+        assert_eq!(devtools_bounds((0.0, 0.0, 800.0, 600.0), (2560.0, 1440.0)), (48, 48, 960, 700));
+        // Near the screen edge it is pulled back so it stays visible.
+        assert_eq!(devtools_bounds((1900.0, 900.0, 1400.0, 900.0), (2560.0, 1440.0)), (1580, 675, 980, 765));
+        // A screen smaller than the minimum: no larger than the screen.
+        assert_eq!(devtools_bounds((0.0, 0.0, 900.0, 600.0), (900.0, 600.0)), (0, 0, 900, 600));
     }
 }

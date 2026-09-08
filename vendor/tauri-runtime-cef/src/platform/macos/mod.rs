@@ -9,6 +9,7 @@ mod monitor;
 mod progress;
 mod utils;
 mod webview;
+pub(crate) use webview::place_devtools_window;
 mod window;
 
 pub use application::setup_application;
