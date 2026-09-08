@@ -346,7 +346,10 @@ export const useBrowser = create<BrowserState>((set, get) => ({
           useDownloads.getState().apply(d);
           const name = d.path.split("/").pop() ?? d.url;
           get().notify(d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : `Download failed: ${name}`, 5000);
-          if (d.status === "started" && d.tab) void get().closeIfOnlyDownload(d.tab, d.url);
+          // Closed once the file is on disk, not when it starts: the engine
+          // reports a download's end through the page it came from, so a
+          // page closed mid-download never says "Saved".
+          if (d.status !== "started" && d.tab) void get().closeIfOnlyDownload(d.tab, d.url);
         });
         await Promise.all([listenConsole(), listenNetwork(), listenPrivacy(), usePrivacy.getState().loadInfo()]);
         set({ ...fromSnapshot(await ipc.snapshot()), ready: true, error: null });

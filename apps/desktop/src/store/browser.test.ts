@@ -324,7 +324,7 @@ describe("a tab that only holds a download", () => {
     expect(tabHoldsOnly(history([zip]), zip)).toBe(true);
     expect(tabHoldsOnly(history(["https://example.com/downloads"]), zip)).toBe(false);
   });
-  it("closes once the download starts, and only then", async () => {
+  it("closes once the download has ended, and only a tab holding nothing else", async () => {
     const tab = { id: "t1", workspace_id: "w", url: "https://files.example.com/big.zip", title: "", favicon: null, pinned: false, created_at: "", last_active_at: "", closed_at: null, position: 0 } as unknown as Tab;
     useBrowser.setState({ tabs: [tab], activeTab: "t1" });
     vi.spyOn(ipc, "tabHistory").mockResolvedValue(history([]));
