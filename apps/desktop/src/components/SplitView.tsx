@@ -9,7 +9,7 @@ import { MAX_PANES, MIN_PANE, useLayout, type Split } from "../store/layout";
 import { Favicon } from "./Favicon";
 import { Icon } from "./Icon";
 import { paneId, zoneId } from "./TabDnd";
-import { tabLabel } from "./TabStrip";
+import { shorten, tabLabel } from "./TabStrip";
 
 const GAP = 6;
 
@@ -109,7 +109,7 @@ export function SplitView({ split, workspace }: { split: Split; workspace: strin
             tab={tab}
             active={id === active}
             last={i === split.tabs.length - 1}
-            divider={{ label: next ? `Resize “${tabLabel(tab)}” and “${tabLabel(next)}”` : "Resize panes", share: sizes[i] ?? 0, pair: (sizes[i] ?? 0) + (sizes[i + 1] ?? 0) }}
+            divider={{ label: next ? `Resize “${shorten(tabLabel(tab))}” and “${shorten(tabLabel(next))}”` : "Resize panes", share: sizes[i] ?? 0, pair: (sizes[i] ?? 0) + (sizes[i + 1] ?? 0) }}
             onActivate={() => void activate(id)}
             onClose={() => remove(workspace, id)}
             onResize={(e) => startResize(i, e)}

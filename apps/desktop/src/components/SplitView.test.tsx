@@ -13,7 +13,7 @@ const initialLayout = useLayout.getState();
 
 beforeEach(() => {
   vi.spyOn(ipc, "setPanes").mockResolvedValue(null);
-  useBrowser.setState({ tabs: [tab("a", "Docs"), tab("b", "App")], activeTab: "a", activateTab: vi.fn().mockResolvedValue(undefined) });
+  useBrowser.setState({ tabs: [tab("a", "Docs"), tab("b", "App with a very long title that goes on")], activeTab: "a", activateTab: vi.fn().mockResolvedValue(undefined) });
 });
 
 afterEach(() => {
@@ -42,7 +42,9 @@ describe("SplitView", () => {
         <SplitView split={{ tabs: ["a", "b"], sizes: [0.5, 0.5] }} workspace="ws" />
       </DndContext>,
     );
-    const divider = screen.getByRole("separator", { name: "Resize “Docs” and “App”" });
+    // A long title is shortened so the name stays sayable.
+    const divider = screen.getByRole("separator", { name: /^Resize “Docs” and “App with a very long/ });
+    expect(divider.getAttribute("aria-label")!.length).toBeLessThan(60);
     expect(divider.getAttribute("aria-valuenow")).toBe("50");
     expect(divider.getAttribute("aria-valuetext")).toBe("50% to the left pane");
     fireEvent.keyDown(divider, { key: "ArrowRight" });
@@ -59,9 +61,9 @@ describe("SplitView", () => {
         <SplitView split={{ tabs: ["a", "b"], sizes: [0.5, 0.5] }} workspace="ws" />
       </DndContext>,
     );
-    fireEvent.click(screen.getByText("App"));
+    fireEvent.click(screen.getByText(/^App with a very long/));
     expect(useBrowser.getState().activateTab).toHaveBeenCalledWith("b");
-    fireEvent.click(screen.getByRole("button", { name: "Close pane App" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Close pane App/ }));
     expect(remove).toHaveBeenCalledWith("ws", "b");
     expect(useBrowser.getState().tabs).toHaveLength(2);
   });

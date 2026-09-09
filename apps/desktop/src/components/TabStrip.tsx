@@ -61,7 +61,7 @@ export function splitAction(tab: Tab, active: string | null, split: Split | unde
   return partner ? { kind: "with", partner, index: 1, anchor: tab.id, label: name(partner) } : null;
 }
 
-function shorten(text: string, max = 22): string {
+export function shorten(text: string, max = 22): string {
   return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
 }
 
