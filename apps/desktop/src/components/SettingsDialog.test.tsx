@@ -377,7 +377,8 @@ describe("About and updates", () => {
     expect(shown.textContent).not.toContain("/tmp/dive/mcp-token");
     expect(shown.getAttribute("title")).toContain("/tmp/dive/mcp-token");
     fireEvent.click(screen.getByRole("button", { name: "Copy command" }));
-    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("$(cat '/tmp/dive/mcp-token')"));
+    // The host clipboard is tried first; outside the app it falls back to the page's.
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining("$(cat '/tmp/dive/mcp-token')")));
     // Copying is announced, not only shown as a changed icon.
     await waitFor(() => expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy());
     expect(screen.getByRole("status").textContent).toBe("Copied to the clipboard");

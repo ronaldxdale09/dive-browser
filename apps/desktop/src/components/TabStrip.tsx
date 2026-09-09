@@ -11,6 +11,7 @@ import { useCoversContent } from "../lib/overlay";
 import { chordsByCommand, formatChord } from "../lib/commands";
 import { clampFloatingPosition } from "../lib/floating";
 import { essentialTabs, orderTabs } from "../lib/tabOrder";
+import { copyText } from "../lib/clipboard";
 
 export { essentialTabs, orderTabs };
 
@@ -510,7 +511,7 @@ function EssentialTab({ tab: t, active, loading, onActivate, onMenu }: { tab: Ta
 async function copyAddress(url: string) {
   const { notify } = useBrowser.getState();
   try {
-    await navigator.clipboard.writeText(url);
+    await copyText(url);
     notify("Copied the address");
   } catch {
     notify("Could not copy: the clipboard is not available.");

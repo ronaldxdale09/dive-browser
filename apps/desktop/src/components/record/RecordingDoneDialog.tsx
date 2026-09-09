@@ -11,6 +11,7 @@ import { useBrowser } from "../../store/browser";
 import { useRecording } from "../../store/recording";
 import { Icon } from "../Icon";
 import { errorMessage } from "../../lib/errors";
+import { copyText } from "../../lib/clipboard";
 
 /**
  * The finished recording: watch it, find it, share its path, or throw it
@@ -92,7 +93,7 @@ export function RecordingDoneDialog() {
             icon={copied ? Check : Copy}
             label={copied ? "Copied" : "Copy path"}
             onClick={() => {
-              void navigator.clipboard.writeText(result.path).then(() => {
+              void copyText(result.path).then(() => {
                 setCopied(true);
                 setTimeout(() => setCopied(false), 1500);
               });

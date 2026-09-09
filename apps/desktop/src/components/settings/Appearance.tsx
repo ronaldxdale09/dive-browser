@@ -9,6 +9,7 @@ import { colorName } from "../../lib/profileAvatar";
 import type { Prefs } from "../../store/prefs";
 import { CUSTOM_PRESET_ID, PRESETS, contrastRatio, exportTheme, findPreset, importTheme, isHex, presetSeeds, resolveScheme } from "../../lib/theme";
 import type { Preset, Seeds } from "../../lib/theme";
+import { copyText } from "../../lib/clipboard";
 
 const ACCENTS = ["#7FD8C8", "#8FB8F0", "#B79CF0", "#F0B35E", "#E58C8C", "#9ED67B", "#E9E9E9"];
 
@@ -418,7 +419,7 @@ function Share({ prefs, set }: { prefs: Prefs; set: (patch: Partial<Prefs>) => v
   const clipboard = typeof navigator !== "undefined" ? navigator.clipboard : undefined;
   const copy = async () => {
     try {
-      await clipboard!.writeText(exportTheme(prefs));
+      await copyText(exportTheme(prefs));
       setStatus({ kind: "ok", text: "Theme copied. Paste it into another Dive to apply it." });
     } catch (e) {
       setStatus({ kind: "error", text: e instanceof Error ? e.message : "Could not reach the clipboard." });

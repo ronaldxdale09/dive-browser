@@ -2,6 +2,7 @@ import { Check as CheckIcon, Copy } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { Icon } from "../Icon";
+import { copyText } from "../../lib/clipboard";
 
 /**
  * A read-only command with a copy button. `display` is what the block shows
@@ -25,7 +26,7 @@ export function CopyBlock({ text, label = "Copy command", display }: { text: str
         title={copied ? "Copied" : label}
         disabled={!text}
         onClick={() => {
-          void navigator.clipboard.writeText(text).then(() => {
+          void copyText(text).then(() => {
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
           });

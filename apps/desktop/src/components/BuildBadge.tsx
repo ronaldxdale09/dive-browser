@@ -8,6 +8,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
+import { copyText } from "../lib/clipboard";
 
 /**
  * Which build this is: DEV for a checkout run through `tauri dev`, BETA for a
@@ -47,8 +48,7 @@ export function BuildBadge() {
   const summary = info ? `Dive ${info.version} (${label.toLowerCase()} build ${info.build.number}, built ${built ?? "unknown"})` : "";
 
   const copy = () => {
-    navigator.clipboard
-      .writeText(summary)
+    copyText(summary)
       .then(() => useBrowser.getState().notify("Build details copied"))
       .catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
   };

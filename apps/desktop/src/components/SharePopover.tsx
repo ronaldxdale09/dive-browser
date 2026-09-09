@@ -9,6 +9,7 @@ import { Tooltip } from "./Tooltip";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { errorMessage } from "../lib/errors";
+import { copyText } from "../lib/clipboard";
 
 /** Share button: the current URL rewritten to this machine's LAN address, as a QR code. */
 export function SharePopover() {
@@ -85,8 +86,7 @@ export function SharePopover() {
                   onClick={() => {
                     setError(null);
                     setCopying(true);
-                    void navigator.clipboard
-                      .writeText(info.lan_url)
+                    void copyText(info.lan_url)
                       .then(() => {
                         setCopied(true);
                         setTimeout(() => setCopied(false), 1500);

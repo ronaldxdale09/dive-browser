@@ -8,6 +8,7 @@ import { DEFAULT_START_URL } from "../lib/constants";
 import { useBrowser } from "../store/browser";
 import { useRecorder } from "../store/recorder";
 import { IconButton } from "./Icon";
+import { copyText } from "../lib/clipboard";
 
 export function RecorderModal() {
   const isOpen = useRecorder((s) => s.isOpen);
@@ -38,7 +39,7 @@ export function RecorderModal() {
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(spec);
+      await copyText(spec);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {

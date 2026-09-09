@@ -57,6 +57,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- Every copy in the chrome (tab address, share link, build details, MCP command, Playwright spec, password, recording path, theme) goes through the host clipboard, so it no longer fails with "Document is not focused" after clicking in the page.
 - Console rows say "warn" or "error" in words beside the message, and objects inside logged arrays show their fields (`[{a: 1, b: 2}]`) instead of `{…}`.
 - History and bookmarks belong to a profile, like logins and cookies already did: the Work profile no longer suggests or lists what was visited or starred in Personal, and clearing history clears only the profile you are in. Existing entries go to the first profile.
 - The divider between split panes is a real control: it names the two panes, reports the share as a percentage, takes focus, and moves in steps with ← and →.

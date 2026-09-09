@@ -7,6 +7,7 @@ import { useBrowser } from "../../store/browser";
 import { Icon, IconButton } from "../Icon";
 import { Button, Group } from "../SettingsFields";
 import { FormEntries } from "./FormEntries";
+import { copyText } from "../../lib/clipboard";
 
 /** The site as the list shows it: the host, without the scheme. */
 export function siteLabel(origin: string): string {
@@ -177,7 +178,7 @@ function LoginRow({ credential: c, onRemove, onError }: { credential: Credential
   const copy = async () => {
     try {
       const secret = shown ?? (await ipc.passwordsReveal(c.id));
-      await navigator.clipboard.writeText(secret);
+      await copyText(secret);
       useBrowser.getState().notify("Password copied", 2000);
     } catch (e) {
       onError(errorMessage(e));
