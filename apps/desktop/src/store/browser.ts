@@ -38,6 +38,8 @@ interface BrowserState {
   /** Tabs closed this session, oldest first; ⌘⇧T brings the last one back. */
   closedTabs: ClosedTab[];
   reopenClosedTab: () => Promise<void>;
+  /** Close every unpinned tab in the workspace but `keep`, with an Undo that brings them back. */
+  closeOtherTabs: (keep: string) => Promise<void>;
   detachTab: (id: string, at: { x: number; y: number } | null) => Promise<void>;
   attachTab: (id: string) => Promise<void>;
   open: Record<Exclude<UiPanel, "extensions" | "import">, boolean> & { extensions?: boolean; import?: boolean };
@@ -499,6 +501,22 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     if (!tabHoldsOnly(history, url)) return;
     if (!get().tabs.some((t) => t.id === id)) return;
     await get().closeTab(id);
+  },
+  closeOtherTabs: async (keep) => {
+    const kept = get().tabs.find((t) => t.id === keep);
+    const others = get().tabs.filter((t) => t.id !== keep && t.tier !== "pinned" && (!kept || t.workspace_id === kept.workspace_id));
+    if (others.length === 0) return;
+    // One at a time, so the closed-tab stack keeps their order and Undo puts them back the same way.
+    for (const t of others) await get().closeTab(t.id);
+    const n = others.length;
+    get().notify(`Closed ${n} ${n === 1 ? "tab" : "tabs"}`, 10000, {
+      label: "Undo",
+      run: () => {
+        void (async () => {
+          for (let i = 0; i < n; i++) await get().reopenClosedTab();
+        })();
+      },
+    });
   },
   closeTab: async (id) => {
     // Where the page was scrolled, so reopening it lands in the same place.

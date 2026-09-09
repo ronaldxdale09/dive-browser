@@ -81,6 +81,7 @@ export function TabStrip() {
   const openTab = useBrowser((s) => s.openTab);
   const toggle = useBrowser((s) => s.toggle);
   const openPalette = useBrowser((s) => s.openPalette);
+  const closeOthers = useBrowser((s) => s.closeOtherTabs);
   const setPinned = useBrowser((s) => s.setPinned);
   const setTier = useBrowser((s) => s.setTier);
   const detachTab = useBrowser((s) => s.detachTab);
@@ -137,6 +138,10 @@ export function TabStrip() {
           // Past the point where every tab is a bare favicon the list
           // scrolls; it must never spill over the feature bar beside it.
           className="scroll-hidden flex min-w-0 shrink items-center gap-1 overflow-x-auto"
+          // A plain wheel (or a vertical trackpad swipe) scrolls the strip sideways, as in Chrome.
+          onWheel={(e) => {
+            if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY;
+          }}
           role="tablist"
           ref={tablistRef}
           aria-label="Tabs"
@@ -228,7 +233,7 @@ export function TabStrip() {
             setMenu(null);
           }}
           onCloseOthers={() => {
-            for (const t of tabs) if (t.id !== menu.id && t.tier !== "pinned") void close(t.id);
+            void closeOthers(menu.id);
             setMenu(null);
           }}
         />

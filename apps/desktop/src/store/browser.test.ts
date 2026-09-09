@@ -470,6 +470,26 @@ describe("reopening closed tabs", () => {
     expect(restore).toHaveBeenCalledWith("b2", 0, 480);
   });
 
+  it("closes the other tabs one by one and offers to bring them all back", async () => {
+    vi.spyOn(ipc, "tabScrollPosition").mockResolvedValue(null);
+    const close = vi.spyOn(ipc, "tabClose").mockResolvedValue(null as never);
+    const open = vi.spyOn(ipc, "tabOpen").mockResolvedValue({ id: "n" } as never);
+    const pinned = { ...t("p", "https://p.test/"), tier: "pinned" } as Tab;
+    useBrowser.setState({ tabs: [t("a", "https://a.test/"), t("b", "https://b.test/"), t("c", "https://c.test/"), pinned], activeTab: "b", activeWorkspace: "w1", workspaces: [{ id: "w1" }] as unknown as Workspace[] });
+    const closing = useBrowser.getState().closeOtherTabs("b");
+    // The engine confirms each close.
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(2));
+    useBrowser.getState().applyEvent({ type: "tab_closed", data: "a" });
+    useBrowser.getState().applyEvent({ type: "tab_closed", data: "c" });
+    await closing;
+    expect(close.mock.calls.map((c) => c[0])).toEqual(["a", "c"]);
+    expect(useBrowser.getState().notice).toBe("Closed 2 tabs");
+    expect(useBrowser.getState().closedTabs.map((c) => c.url)).toEqual(["https://a.test/", "https://c.test/"]);
+    useBrowser.getState().noticeAction?.run();
+    await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(2));
+    expect(open.mock.calls.map((c) => c[1])).toEqual(["https://c.test/", "https://a.test/"]);
+  });
+
   it("puts a reopened tab back where it was in the strip", async () => {
     const open = vi.spyOn(ipc, "tabOpen").mockResolvedValue({ id: "b2" } as never);
     const reorder = vi.spyOn(ipc, "tabReorder").mockResolvedValue(null as never);
