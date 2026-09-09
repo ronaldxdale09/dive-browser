@@ -210,7 +210,7 @@ function RecordingHud({ compact }: { compact: boolean }) {
   return (
     <div role="group" aria-label={paused ? "Recording paused" : "Recording"} className={`flex h-7 items-center gap-1 rounded-lg pr-1 pl-2.5 text-[11.5px] ${paused ? "bg-surface-2 text-ink-2" : "bg-danger/15 text-ink"}`}>
       <span className={`size-2 rounded-full ${paused ? "bg-ink-3" : "bg-danger motion-safe:animate-pulse"}`} aria-hidden />
-      <span className="min-w-8 font-mono tabular-nums" aria-live="off">
+      <span role="timer" aria-label={`${recordingClock(elapsed)} recorded`} className="min-w-8 font-mono tabular-nums" aria-live="off">
         {recordingClock(elapsed)}
       </span>
       {paused && !compact && <span className="text-ink-3">paused</span>}

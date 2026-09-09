@@ -82,6 +82,8 @@ describe("FeatureBar", () => {
     expect(useBrowser.getState().recordingTab).toBe(tab.id);
     expect(screen.getByRole("button", { name: "Stop and save" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Pause recording" })).toBeTruthy();
+    // The running clock is a timer, so assistive tech knows a recording is in progress.
+    expect(screen.getByRole("timer").getAttribute("aria-label")).toMatch(/recorded$/);
 
     await act(() => useRecording.getState().pause());
     expect(screen.getByRole("button", { name: "Resume recording" })).toBeTruthy();
