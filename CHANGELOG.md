@@ -8,6 +8,7 @@ bump may change behaviour.
 ## [Unreleased]
 
 ### Added
+- The Network panel's request detail says what a workspace rule did to the request ("Header set by a rule: …", "Blocked by a rule", "Answered by a mock rule"), since the headers it lists are the ones the page sent.
 - The Network panel's request detail lays JSON bodies out, and offers "Copy as cURL" (method, the page's own headers, body) and "Copy body". Copies go through the host, so they work whichever view has focus.
 - An MCP call with an argument the tool does not declare (`id` for `tab_id`, `selector` for `locator`) is refused with the accepted names, instead of being dropped so the call quietly acts on the active tab.
 - The Vitals panel says each rating in words beside the number, explains a missing INP ("no input yet"), and the LCP element line scrolls the page to that element and flashes it.

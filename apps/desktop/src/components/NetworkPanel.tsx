@@ -286,6 +286,13 @@ function DetailPane({ tabId, requestId }: { tabId: string; requestId: string }) 
   return (
     <div className="grid max-h-[50%] shrink-0 grid-cols-2 gap-x-4 overflow-auto border-t border-line px-3 py-2 font-mono text-[11px] leading-5 select-text" data-testid="request-detail">
       <section aria-label="Request">
+        {detail.rewrites.length > 0 && (
+          <p className="mb-1.5 rounded-md border border-highlight/30 bg-highlight/10 px-2 py-1 text-[11px] text-ink" data-testid="rule-effects">
+            <span className="text-ink-3">Changed by a rule: </span>
+            {detail.rewrites.join(" · ")}
+            <span className="text-ink-3"> Headers below are as the page sent them.</span>
+          </p>
+        )}
         <div className="flex items-center gap-2">
           <h4 className="flex-1 text-[10px] tracking-wider text-ink-3 uppercase">Request headers</h4>
           <button type="button" onClick={() => void copy("cURL command", toCurl(detail))} className={chip} title="Copy this request as a cURL command">

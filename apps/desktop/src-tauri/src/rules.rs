@@ -439,6 +439,20 @@ async fn reset_interception(session: &CdpSession, rules: &[Rule], prefs: &Prefs)
     }
 }
 
+/// What a workspace rule did to a request, in words for the Network panel;
+/// `None` when the request went through untouched or was a privacy block
+/// (those are reported through `DivePrivacy`).
+pub fn rewrite_note(action: &InterceptAction) -> Option<String> {
+    match action {
+        InterceptAction::Block => Some("Blocked by a rule".into()),
+        InterceptAction::Mock { status, .. } => Some(format!("Answered by a mock rule ({status})")),
+        InterceptAction::Header { name, value } => {
+            Some(format!("Header set by a rule: {name}: {value}"))
+        }
+        InterceptAction::Continue | InterceptAction::PrivacyBlock { .. } => None,
+    }
+}
+
 async fn request_id_or_reset(
     session: &CdpSession,
     tab_id: TabId,
@@ -611,6 +625,13 @@ pub fn attach(
                     },
                 )
             };
+            if let Some(note) = rewrite_note(&action)
+                && let Some(network_id) = p["networkId"].as_str()
+            {
+                app.state::<AppState>()
+                    .buffers
+                    .note_rewrite(tab_id, network_id, &note);
+            }
             if let Some(category) =
                 execute_action(&session, &request_id, &p["request"]["headers"], &action).await
                 && let Err(e) = (PrivacyEvent::Blocked { tab_id, category }).emit(&app)

@@ -108,7 +108,7 @@ describe("NetworkPanel", () => {
     vi.spyOn(ipc, "requestDetail").mockResolvedValue({
       method: "GET", url: "https://a.dev/api/item-1", status: 200, mime_type: "application/json",
       request_headers: { accept: "application/json" }, request_body: null,
-      response_headers: { "content-type": "application/json" }, response_body: '{"ok":true}', response_body_note: null,
+      response_headers: { "content-type": "application/json" }, response_body: '{"ok":true}', response_body_note: null, rewrites: [],
     });
     render(<NetworkPanel />);
     fireEvent.click(screen.getByText("item-1").closest("tr")!);
@@ -123,11 +123,26 @@ describe("NetworkPanel", () => {
     await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('{\n  "ok": true\n}'));
   });
 
+  it("says what a workspace rule did to the request, since the headers shown are the page's own", async () => {
+    useNetwork.setState({ byTab: { "tab-1": rows(2) } });
+    vi.spyOn(ipc, "requestDetail").mockResolvedValue({
+      method: "GET", url: "https://a.dev/api/item-1", status: 200, mime_type: "application/json",
+      request_headers: { accept: "application/json" }, request_body: null,
+      response_headers: {}, response_body: null, response_body_note: null,
+      rewrites: ["Header set by a rule: X-Trace: abc"],
+    });
+    render(<NetworkPanel />);
+    fireEvent.click(screen.getByText("item-1").closest("tr")!);
+    const note = await screen.findByTestId("rule-effects");
+    expect(note.textContent).toContain("Header set by a rule: X-Trace: abc");
+    expect(note.textContent).toContain("as the page sent them");
+  });
+
   it("grows a short dock so the replay editor shows whole", () => {
     useNetwork.setState({ byTab: { "tab-1": rows(1) } });
     useLayout.setState({ dockHeight: 240 });
     vi.spyOn(ipc, "requestCaptured").mockResolvedValue({ method: "GET", url: "https://a.dev/api/item-0", headers: {}, body: null, with_cookies: true, captured_host: "a.dev" });
-    vi.spyOn(ipc, "requestDetail").mockResolvedValue({ method: "GET", url: "https://a.dev/api/item-0", status: 200, mime_type: "", request_headers: {}, request_body: null, response_headers: {}, response_body: null, response_body_note: null });
+    vi.spyOn(ipc, "requestDetail").mockResolvedValue({ method: "GET", url: "https://a.dev/api/item-0", status: 200, mime_type: "", request_headers: {}, request_body: null, response_headers: {}, response_body: null, response_body_note: null, rewrites: [] });
     render(<NetworkPanel />);
     fireEvent.click(screen.getByText("item-0").closest("tr")!);
     fireEvent.click(screen.getByRole("button", { name: /Replay/ }));

@@ -119,7 +119,14 @@ struct TabBuffers {
     /// Device last applied to the tab, so the next change can tell whether
     /// the user agent moved and a reload is due.
     device: Option<crate::emulate::Device>,
+    /// What workspace rules did to requests, by network request id, newest
+    /// last. The Network panel shows headers as the page sent them, so this
+    /// is how a rewrite becomes visible where the developer looks.
+    rewrites: VecDeque<(String, String)>,
 }
+
+/// Most rule effects remembered per tab.
+const REWRITES_KEPT: usize = 256;
 
 impl RequestSummary {
     /// A row with nothing known yet beyond the request line.
@@ -443,6 +450,30 @@ impl Buffers {
         });
     }
 
+    /// Remember that a workspace rule changed `request_id`, in words.
+    pub fn note_rewrite(&self, tab: TabId, request_id: &str, note: &str) {
+        self.with(|m| {
+            let list = &mut m.entry(tab).or_default().rewrites;
+            list.push_back((request_id.to_owned(), note.to_owned()));
+            while list.len() > REWRITES_KEPT {
+                list.pop_front();
+            }
+        });
+    }
+
+    /// What rules did to `request_id`, oldest first.
+    pub fn rewrites_for(&self, tab: TabId, request_id: &str) -> Vec<String> {
+        self.with(|m| {
+            m.get(&tab).map_or_else(Vec::new, |b| {
+                b.rewrites
+                    .iter()
+                    .filter(|(id, _)| id == request_id)
+                    .map(|(_, note)| note.clone())
+                    .collect()
+            })
+        })
+    }
+
     /// One request by id.
     pub fn request(&self, tab: TabId, request_id: &str) -> Option<RequestSummary> {
         self.with(|m| {
@@ -709,6 +740,34 @@ mod tests {
         assert!(
             b.requests(tab, NETWORK_CAP).is_empty(),
             "late capture cannot recreate a dropped tab"
+        );
+    }
+
+    #[test]
+    fn rule_effects_are_remembered_per_request_and_bounded() {
+        let buffers = Buffers::default();
+        let tab = TabId::new();
+        buffers.note_rewrite(tab, "r1", "Added header X-Test: 1");
+        buffers.note_rewrite(tab, "r1", "Blocked by a rule");
+        buffers.note_rewrite(tab, "r2", "Answered by a mock rule");
+        assert_eq!(
+            buffers.rewrites_for(tab, "r1"),
+            vec![
+                "Added header X-Test: 1".to_owned(),
+                "Blocked by a rule".to_owned()
+            ]
+        );
+        assert_eq!(
+            buffers.rewrites_for(tab, "r2"),
+            vec!["Answered by a mock rule".to_owned()]
+        );
+        assert!(buffers.rewrites_for(tab, "r3").is_empty());
+        for i in 0..REWRITES_KEPT + 10 {
+            buffers.note_rewrite(tab, &format!("x{i}"), "note");
+        }
+        assert!(
+            buffers.rewrites_for(tab, "r1").is_empty(),
+            "old effects fall off the end"
         );
     }
 

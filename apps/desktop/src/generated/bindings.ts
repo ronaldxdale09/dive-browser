@@ -1837,6 +1837,8 @@ export type RequestDetail = {
 	response_body: string | null,
 	/**  Why the body is absent, when it is. */
 	response_body_note: string | null,
+	/**  What workspace rules did to this request, in words. */
+	rewrites: string[],
 };
 
 /**  One rule; the first enabled match wins. */

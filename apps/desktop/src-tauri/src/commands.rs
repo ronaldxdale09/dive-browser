@@ -2852,6 +2852,8 @@ pub struct RequestDetail {
     pub response_body: Option<String>,
     /// Why the body is absent, when it is.
     pub response_body_note: Option<String>,
+    /// What workspace rules did to this request, in words.
+    pub rewrites: Vec<String>,
 }
 
 /// The captured request and response for the Network panel's detail pane.
@@ -2876,6 +2878,7 @@ pub(crate) fn request_detail(
         response_headers: r.response_headers,
         response_body: r.response_body,
         response_body_note: r.response_body_note,
+        rewrites: state.buffers.rewrites_for(tab_id, &request_id),
     })
 }
 
