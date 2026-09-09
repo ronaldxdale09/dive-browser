@@ -24,6 +24,7 @@ export const events = {
 };
 export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, CsvImportSummary, FormEntry, JsDialogAsked, JsDialogClosed } from "../generated/bindings";
 export type { ExtensionInfo, ExtensionList };
+export type { WebApp, WebAppProbe } from "../generated/bindings";
 export type { QuickLink, Prefs, ClearRequest, Rule, RuleAction, PrivacyCategory, PrivacyEvent, PrivacyInfo, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RequestDetail, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, RecordOptions, RecordingResult, RecordingCapabilities, RecordingEvent, Microphone, MediaInfo, ExportRequest, KeptSegment, RecordingInfo, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions, SitePermission, PermissionList, Scope, Duration, PermissionDismissed, Decision, UpdateInfo, PermissionAsked, TabTier, DefaultBrowserStatus, Profile, ProfileId, ProfileDraft, SubtitleModel, SubtitleModelProgress, SubtitleCue, SubtitleState, ImportSource, ImportSummary } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
@@ -66,6 +67,15 @@ export const ipc = {
   windowClose: async () => unwrap(await commands.windowClose()),
   windowPrivate: async () => unwrap(await commands.windowPrivate()),
   popoutReady: async (id: string) => unwrap(await commands.popoutReady(id)),
+  // Installed web apps.
+  webappProbe: async (id: string) => unwrap(await commands.webappProbe(id)),
+  webappInstall: async (id: string) => unwrap(await commands.webappInstall(id)),
+  webappsList: async () => unwrap(await commands.webappsList()),
+  webappOpen: async (appId: string) => unwrap(await commands.webappOpen(appId)),
+  webappUninstall: async (appId: string) => unwrap(await commands.webappUninstall(appId)),
+  webappForTab: async (id: string) => unwrap(await commands.webappForTab(id)),
+  webappForWindow: async (appId: string) => unwrap(await commands.webappForWindow(appId)),
+  webappIcon: async (appId: string) => unwrap(await commands.webappIcon(appId)),
   windowCommand: async (command: "tab.new" | "window.new") => unwrap(await commands.windowCommand(command)),
   workspaceActivate: async (id: string) => unwrap(await commands.workspaceActivate(id)),
   profilesList: async () => unwrap(await commands.profilesList()),

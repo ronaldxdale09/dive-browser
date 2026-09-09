@@ -75,6 +75,7 @@ mod titlebar;
 #[cfg(feature = "cef")]
 mod ui_probe;
 mod vitals;
+mod webapp;
 
 pub use error::AppError;
 pub use startup::StartupTimeline;
@@ -325,6 +326,14 @@ pub fn run() {
                 window.app_handle().exit(0);
                 return;
             }
+            if let Some(tab) = engine::popout_tab(window.label())
+                && matches!(
+                    event,
+                    tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Focused(false)
+                )
+            {
+                webapp::remember_app_window(window, tab);
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event
                 && let Some(tab) = engine::popout_tab(window.label())
             {
@@ -475,6 +484,13 @@ fn startup_urls(mut args: impl Iterator<Item = String>, from_env: &str) -> Vec<S
             // AppKit's per-launch preference consumes its own value. Neither
             // token is a destination handed to the browser.
             let _ = args.next();
+        } else if let Some(id) = arg.strip_prefix("--app=") {
+            // An installed web app's launcher asks for its window by manifest
+            // id. It travels the handoff as a pseudo-URL so the protocol and
+            // its tests stay as they are.
+            if !id.trim().is_empty() {
+                urls.push(format!("{}{}", webapp::LAUNCH_PREFIX, id.trim()));
+            }
         } else if !arg.starts_with("--") && !arg.starts_with("-psn_") && !arg.trim().is_empty() {
             urls.push(arg);
         }
@@ -502,6 +518,17 @@ fn open_startup_urls(app: &tauri::App<Runtime>) {
         return;
     };
     for url in urls {
+        if let Some(id) = url.strip_prefix(webapp::LAUNCH_PREFIX) {
+            match webapp::open_by_id(&main, app.handle(), &state, id) {
+                Ok(tab) => {
+                    tracing::info!(%tab, id, "opened an installed app at startup");
+                }
+                Err(e) => {
+                    tracing::warn!(id, "could not open an installed app at startup: {e}");
+                }
+            }
+            continue;
+        }
         match commands::open_tab(&main, app.handle(), &state, workspace, &url) {
             Ok(tab) => tracing::info!(%tab.id, url, "opened startup tab"),
             Err(e) => tracing::warn!(url, "failed to open startup tab: {e}"),
@@ -618,6 +645,17 @@ fn open_handed_urls(app: &tauri::AppHandle<Runtime>, urls: Vec<String>) {
             return;
         };
         for url in urls {
+            if let Some(id) = url.strip_prefix(webapp::LAUNCH_PREFIX) {
+                match webapp::open_by_id(&main, &handle, &state, id) {
+                    Ok(tab) => {
+                        tracing::info!(%tab, id, "opened an installed app from its launcher");
+                    }
+                    Err(e) => {
+                        tracing::warn!(id, "could not open an installed app: {e}");
+                    }
+                }
+                continue;
+            }
             match commands::open_tab(&main, &handle, &state, workspace, &url) {
                 Ok(tab) => tracing::info!(%tab.id, url, "opened a link handed by the system"),
                 Err(e) => tracing::warn!(url, "could not open a handed link: {e}"),
@@ -924,6 +962,28 @@ fn restore_session(app: &tauri::App<Runtime>) {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn startup_urls_turn_an_app_flag_into_a_launch_url() {
+        let urls = startup_urls(
+            [
+                "--app=https://mail.example/app",
+                "https://x.example",
+                "--app=",
+                "--other",
+            ]
+            .map(String::from)
+            .into_iter(),
+            "",
+        );
+        assert_eq!(
+            urls,
+            vec![
+                "dive-app://https://mail.example/app".to_owned(),
+                "https://x.example".to_owned()
+            ]
+        );
+    }
+
+    #[test]
     fn startup_urls_ignore_appkit_override_pairs_and_launch_services_tokens() {
         let args = [
             "-ApplePersistenceIgnoreState",
@@ -962,7 +1022,7 @@ mod tests {
             ]
         );
     }
-    use super::{Startup, startup_plan};
+    use super::{Startup, startup_plan, startup_urls};
 
     #[test]
     fn a_home_start_with_no_home_page_lands_on_the_welcome_screen() {

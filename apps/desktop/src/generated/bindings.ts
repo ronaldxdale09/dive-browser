@@ -23,6 +23,86 @@ export const commands = {
 	windowClose: () => typedError<null, AppError>(__TAURI_INVOKE("window_close")),
 	/**  Only the current registered popout chrome can acknowledge its readiness. */
 	popoutReady: (id: TabId) => typedError<boolean, AppError>(__TAURI_INVOKE("popout_ready", { id })),
+	/**  Whether the page in `id` can be installed, and as what. */
+	webappProbe: (id: TabId) => typedError<WebAppProbe, AppError>(__TAURI_INVOKE("webapp_probe", { id })),
+	/**
+	 *  Install the app the page in `id` describes, then move that page into the
+	 *  app's window, the way Chrome does: the tab you were on becomes the app.
+	 */
+	webappInstall: (id: TabId) => typedError<WebApp, AppError>(__TAURI_INVOKE("webapp_install", { id })),
+	/**  Installed apps for the current profile, most recently opened first. */
+	webappsList: () => typedError<WebApp[], AppError>(__TAURI_INVOKE("webapps_list")),
+	/**  Open an installed app from the chrome. */
+	webappOpen: (appId: string) => typedError<TabId, AppError>(__TAURI_INVOKE("webapp_open", { appId })),
+	/**
+	 *  Uninstall an app. A window it has open becomes an ordinary tab again
+	 *  rather than being closed under the person.
+	 */
+	webappUninstall: (appId: string) => typedError<null, AppError>(__TAURI_INVOKE("webapp_uninstall", { appId })),
+	/**  The installed app whose scope covers the page in `id`, if any. */
+	webappForTab: (id: TabId) => typedError<{
+	/**  The manifest `id`, or the start URL when the manifest gives none. */
+	id: string,
+	/**  The manifest `name`. */
+	name: string,
+	/**  The manifest `short_name`, for the Dock and tight spaces. */
+	short_name: string,
+	/**  Where the app opens. */
+	start_url: string,
+	/**  URL prefix the app owns; leaving it shows the page as a plain site. */
+	scope: string,
+	/**  `standalone`, `minimal-ui` or `fullscreen`. */
+	display: string,
+	/**  Chrome colour the manifest asks for, when it does. */
+	theme_color: string | null,
+	/**  Splash/background colour the manifest asks for, when it does. */
+	background_color: string | null,
+	/**  PNG icon on disk, made at install time. */
+	icon_path: string,
+	/**  The manifest this came from, for reinstall and diagnostics. */
+	manifest_url: string,
+	/**  RFC 3339 install time. */
+	created_at: string,
+	/**  RFC 3339 time the app was last opened, once it has been. */
+	last_opened_at: string | null,
+	/**  Last windowed frame as JSON (`{"x","y","width","height"}`), or empty. */
+	bounds: string,
+} | null, AppError>(__TAURI_INVOKE("webapp_for_tab", { id })),
+	/**  The installed app an app window is showing, by manifest id. */
+	webappForWindow: (appId: string) => typedError<{
+	/**  The manifest `id`, or the start URL when the manifest gives none. */
+	id: string,
+	/**  The manifest `name`. */
+	name: string,
+	/**  The manifest `short_name`, for the Dock and tight spaces. */
+	short_name: string,
+	/**  Where the app opens. */
+	start_url: string,
+	/**  URL prefix the app owns; leaving it shows the page as a plain site. */
+	scope: string,
+	/**  `standalone`, `minimal-ui` or `fullscreen`. */
+	display: string,
+	/**  Chrome colour the manifest asks for, when it does. */
+	theme_color: string | null,
+	/**  Splash/background colour the manifest asks for, when it does. */
+	background_color: string | null,
+	/**  PNG icon on disk, made at install time. */
+	icon_path: string,
+	/**  The manifest this came from, for reinstall and diagnostics. */
+	manifest_url: string,
+	/**  RFC 3339 install time. */
+	created_at: string,
+	/**  RFC 3339 time the app was last opened, once it has been. */
+	last_opened_at: string | null,
+	/**  Last windowed frame as JSON (`{"x","y","width","height"}`), or empty. */
+	bounds: string,
+} | null, AppError>(__TAURI_INVOKE("webapp_for_window", { appId })),
+	/**
+	 *  An installed app's icon as a `data:` URL, the way bookmarks carry their
+	 *  favicon. Read through IPC rather than the asset protocol: the data root
+	 *  can live anywhere (`DIVE_DATA_DIR`), so no static asset scope covers it.
+	 */
+	webappIcon: (appId: string) => typedError<string | null, AppError>(__TAURI_INVOKE("webapp_icon", { appId })),
 	workspaceActivate: (id: WorkspaceId) => typedError<null, AppError>(__TAURI_INVOKE("workspace_activate", { id })),
 	/**  Every profile, in switcher order. */
 	profilesList: () => typedError<Profile[], AppError>(__TAURI_INVOKE("profiles_list")),
@@ -2227,6 +2307,70 @@ export type Vitals = {
 	transfer_size: number | null,
 	/**  Element description of the LCP candidate, when known. */
 	lcp_element: string | null,
+};
+
+/**  A web app installed from its manifest, opened in a window of its own. */
+export type WebApp = {
+	/**  The manifest `id`, or the start URL when the manifest gives none. */
+	id: string,
+	/**  The manifest `name`. */
+	name: string,
+	/**  The manifest `short_name`, for the Dock and tight spaces. */
+	short_name: string,
+	/**  Where the app opens. */
+	start_url: string,
+	/**  URL prefix the app owns; leaving it shows the page as a plain site. */
+	scope: string,
+	/**  `standalone`, `minimal-ui` or `fullscreen`. */
+	display: string,
+	/**  Chrome colour the manifest asks for, when it does. */
+	theme_color: string | null,
+	/**  Splash/background colour the manifest asks for, when it does. */
+	background_color: string | null,
+	/**  PNG icon on disk, made at install time. */
+	icon_path: string,
+	/**  The manifest this came from, for reinstall and diagnostics. */
+	manifest_url: string,
+	/**  RFC 3339 install time. */
+	created_at: string,
+	/**  RFC 3339 time the app was last opened, once it has been. */
+	last_opened_at: string | null,
+	/**  Last windowed frame as JSON (`{"x","y","width","height"}`), or empty. */
+	bounds: string,
+};
+
+/**  What the page's manifest says, once checked against the install rules. */
+export type WebAppProbe = {
+	/**  Whether every rule passed. */
+	installable: boolean,
+	/**  Which rule failed, when one did. */
+	reason?: string | null,
+	/**  Manifest `id`, or the start URL. */
+	id?: string | null,
+	/**  Manifest `name`. */
+	name?: string | null,
+	/**  Manifest `short_name`. */
+	short_name?: string | null,
+	/**  Absolute start URL. */
+	start_url?: string | null,
+	/**  Absolute scope prefix. */
+	scope?: string | null,
+	/**  Display mode. */
+	display?: string | null,
+	/**  Manifest `theme_color`. */
+	theme_color?: string | null,
+	/**  Manifest `background_color`. */
+	background_color?: string | null,
+	/**  The icon chosen for install, absolute. */
+	icon_url?: string | null,
+	/**  That icon's declared size in pixels. */
+	icon_size?: number | null,
+	/**  Where the manifest was read from. */
+	manifest_url?: string | null,
+	/**  Manifest `description`, trimmed. */
+	description?: string | null,
+	/**  Set when an installed app already covers this page. */
+	installed?: WebApp | null,
 };
 
 /**  Request and response shape a provider speaks. */

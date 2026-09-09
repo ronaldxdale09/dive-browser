@@ -18,6 +18,8 @@ import component from "../../src-tauri/src/inject/component.js?raw";
 import cssPath from "../../src-tauri/src/inject/css-path.js?raw";
 import locator from "../../src-tauri/src/inject/locator.js?raw";
 import markdown from "../../src-tauri/src/inject/markdown.js?raw";
+import webapp from "../../src-tauri/src/inject/webapp.js?raw";
+import webappIcon from "../../src-tauri/src/inject/webapp-icon.js?raw";
 import picker from "../../src-tauri/src/inject/picker.js?raw";
 import reactContext from "../../src-tauri/src/inject/react-context.js?raw";
 import recorder from "../../src-tauri/src/inject/recorder.js?raw";
@@ -34,6 +36,8 @@ const FRAGMENTS: Record<string, string> = {
   "picker.js": picker,
   "component.js": component,
   "markdown.js": markdown,
+  "webapp.js": webapp,
+  "webapp-icon.js": webappIcon,
 };
 
 const DIRECTIVE = "// @dive-include ";

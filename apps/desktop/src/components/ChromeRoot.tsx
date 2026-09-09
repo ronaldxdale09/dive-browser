@@ -2,21 +2,25 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 /** Load only this window's chrome without an initial Suspense retry delay. */
-export function ChromeRoot({ tabId }: { tabId: string | null }) {
+export function ChromeRoot({ tabId, appId = null }: { tabId: string | null; appId?: string | null }) {
   const [content, setContent] = useState<ReactNode>(null);
   const [failure, setFailure] = useState<{ error: unknown } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const load = tabId
-      ? import("./Popout").then(({ Popout }) => <Popout tabId={tabId} />)
-      : import("../App").then(({ App }) => <App />);
+    // An installed app's window names the app as well as the tab, and gets
+    // the app chrome instead of the popout's tab strip.
+    const load = tabId && appId
+      ? import("./AppWindow").then(({ AppWindow }) => <AppWindow tabId={tabId} appId={appId} />)
+      : tabId
+        ? import("./Popout").then(({ Popout }) => <Popout tabId={tabId} />)
+        : import("../App").then(({ App }) => <App />);
     void load.then(
       (node) => { if (!cancelled) setContent(node); },
       (error: unknown) => { if (!cancelled) setFailure({ error }); },
     );
     return () => { cancelled = true; };
-  }, [tabId]);
+  }, [tabId, appId]);
 
   // Throw during rendering so the existing recovery boundary handles failed
   // imports too. Retrying remounts this component and requests the module again.

@@ -143,6 +143,27 @@ const MIGRATIONS: &[&str] = &[
         SELECT COALESCE((SELECT id FROM profiles ORDER BY position, created_at LIMIT 1), ''), url, title, created_at FROM bookmarks;
     DROP TABLE bookmarks;
     ALTER TABLE bookmarks_new RENAME TO bookmarks;",
+    // v13: installed web apps. One row per app per profile, keyed by the
+    // manifest id (Chrome's key too), so reinstalling from a changed start
+    // URL updates the app rather than duplicating it. `bounds` is the last
+    // windowed frame as JSON, or empty before the app has been opened.
+    "CREATE TABLE web_apps (
+        profile_id TEXT NOT NULL,
+        id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        short_name TEXT NOT NULL,
+        start_url TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        display TEXT NOT NULL,
+        theme_color TEXT,
+        background_color TEXT,
+        icon_path TEXT NOT NULL,
+        manifest_url TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_opened_at TEXT,
+        bounds TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (profile_id, id)
+    );",
 ];
 
 /// Setting that names the active workspace; the store reads it to know
@@ -219,6 +240,55 @@ pub struct Bookmark {
     pub created_at: String,
     /// The site's remembered icon as a `data:` URL, when one is known.
     pub favicon: Option<String>,
+}
+
+fn web_app_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WebApp> {
+    Ok(WebApp {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        short_name: row.get(2)?,
+        start_url: row.get(3)?,
+        scope: row.get(4)?,
+        display: row.get(5)?,
+        theme_color: row.get(6)?,
+        background_color: row.get(7)?,
+        icon_path: row.get(8)?,
+        manifest_url: row.get(9)?,
+        created_at: row.get(10)?,
+        last_opened_at: row.get(11)?,
+        bounds: row.get(12)?,
+    })
+}
+
+/// A web app installed from its manifest, opened in a window of its own.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct WebApp {
+    /// The manifest `id`, or the start URL when the manifest gives none.
+    pub id: String,
+    /// The manifest `name`.
+    pub name: String,
+    /// The manifest `short_name`, for the Dock and tight spaces.
+    pub short_name: String,
+    /// Where the app opens.
+    pub start_url: String,
+    /// URL prefix the app owns; leaving it shows the page as a plain site.
+    pub scope: String,
+    /// `standalone`, `minimal-ui` or `fullscreen`.
+    pub display: String,
+    /// Chrome colour the manifest asks for, when it does.
+    pub theme_color: Option<String>,
+    /// Splash/background colour the manifest asks for, when it does.
+    pub background_color: Option<String>,
+    /// PNG icon on disk, made at install time.
+    pub icon_path: String,
+    /// The manifest this came from, for reinstall and diagnostics.
+    pub manifest_url: String,
+    /// RFC 3339 install time.
+    pub created_at: String,
+    /// RFC 3339 time the app was last opened, once it has been.
+    pub last_opened_at: Option<String>,
+    /// Last windowed frame as JSON (`{"x","y","width","height"}`), or empty.
+    pub bounds: String,
 }
 
 /// A saved login for one site in one profile. The password itself lives in
@@ -993,6 +1063,98 @@ impl Store {
             b.favicon = self.site_favicon(&b.url);
         }
         Ok(found)
+    }
+
+    /// Install or update a web app for the current profile.
+    pub fn add_web_app(&self, app: &WebApp) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO web_apps (profile_id, id, name, short_name, start_url, scope, display,
+                theme_color, background_color, icon_path, manifest_url, created_at, last_opened_at, bounds)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+             ON CONFLICT(profile_id, id) DO UPDATE SET
+                name = excluded.name, short_name = excluded.short_name,
+                start_url = excluded.start_url, scope = excluded.scope, display = excluded.display,
+                theme_color = excluded.theme_color, background_color = excluded.background_color,
+                icon_path = excluded.icon_path, manifest_url = excluded.manifest_url",
+            params![
+                self.scope()?,
+                app.id,
+                app.name,
+                app.short_name,
+                app.start_url,
+                app.scope,
+                app.display,
+                app.theme_color,
+                app.background_color,
+                app.icon_path,
+                app.manifest_url,
+                app.created_at,
+                app.last_opened_at,
+                app.bounds,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Installed web apps for the current profile, most recently opened first.
+    pub fn list_web_apps(&self) -> Result<Vec<WebApp>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, short_name, start_url, scope, display, theme_color, background_color,
+                    icon_path, manifest_url, created_at, last_opened_at, bounds
+             FROM web_apps WHERE profile_id = ?1
+             ORDER BY COALESCE(last_opened_at, created_at) DESC, name",
+        )?;
+        let rows = stmt.query_map(params![self.scope()?], web_app_row)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// One installed web app, by manifest id.
+    pub fn web_app(&self, id: &str) -> Result<Option<WebApp>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, short_name, start_url, scope, display, theme_color, background_color,
+                    icon_path, manifest_url, created_at, last_opened_at, bounds
+             FROM web_apps WHERE profile_id = ?1 AND id = ?2",
+        )?;
+        let mut rows = stmt.query_map(params![self.scope()?, id], web_app_row)?;
+        rows.next().transpose().map_err(Into::into)
+    }
+
+    /// The installed app whose scope covers `url`, if any. The longest scope
+    /// wins when several nest, the way Chrome resolves it.
+    pub fn web_app_for_url(&self, url: &str) -> Result<Option<WebApp>> {
+        Ok(self
+            .list_web_apps()?
+            .into_iter()
+            .filter(|app| url.starts_with(&app.scope))
+            .max_by_key(|app| app.scope.len()))
+    }
+
+    /// Remove an installed web app. Returns whether there was one.
+    pub fn remove_web_app(&self, id: &str) -> Result<bool> {
+        let changed = self.conn.execute(
+            "DELETE FROM web_apps WHERE profile_id = ?1 AND id = ?2",
+            params![self.scope()?, id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Record that an app was opened now.
+    pub fn touch_web_app(&self, id: &str, at: Timestamp) -> Result<()> {
+        self.conn.execute(
+            "UPDATE web_apps SET last_opened_at = ?3 WHERE profile_id = ?1 AND id = ?2",
+            params![self.scope()?, id, at.to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// Remember an app window's last windowed frame.
+    pub fn set_web_app_bounds(&self, id: &str, bounds: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE web_apps SET bounds = ?3 WHERE profile_id = ?1 AND id = ?2",
+            params![self.scope()?, id, bounds],
+        )?;
+        Ok(())
     }
 
     /// Bring bookmarks in from another browser. A URL already bookmarked
@@ -2590,5 +2752,92 @@ mod tests {
         // The same import again adds nothing.
         assert_eq!(store.import_history(&items).unwrap(), 0);
         assert_eq!(store.search_history("test", 10).unwrap().len(), 2);
+    }
+
+    fn sample_app(id: &str, scope: &str) -> WebApp {
+        WebApp {
+            id: id.into(),
+            name: "Example".into(),
+            short_name: "Ex".into(),
+            start_url: format!("{scope}start"),
+            scope: scope.into(),
+            display: "standalone".into(),
+            theme_color: Some("#112233".into()),
+            background_color: None,
+            icon_path: "/tmp/icon.png".into(),
+            manifest_url: format!("{scope}manifest.json"),
+            created_at: "2026-09-10T00:00:00Z".into(),
+            last_opened_at: None,
+            bounds: String::new(),
+        }
+    }
+
+    #[test]
+    fn web_apps_install_update_and_remove() {
+        let store = Store::in_memory().unwrap();
+        let app = sample_app("https://a.example/", "https://a.example/");
+        store.add_web_app(&app).unwrap();
+        assert_eq!(store.list_web_apps().unwrap(), vec![app.clone()]);
+
+        // Reinstalling the same id updates in place rather than duplicating.
+        let renamed = WebApp {
+            name: "Example 2".into(),
+            ..app.clone()
+        };
+        store.add_web_app(&renamed).unwrap();
+        let listed = store.list_web_apps().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "Example 2");
+
+        assert!(store.remove_web_app(&app.id).unwrap());
+        assert!(!store.remove_web_app(&app.id).unwrap());
+        assert!(store.list_web_apps().unwrap().is_empty());
+    }
+
+    #[test]
+    fn web_app_for_url_picks_the_longest_matching_scope() {
+        let store = Store::in_memory().unwrap();
+        store
+            .add_web_app(&sample_app("root", "https://a.example/"))
+            .unwrap();
+        store
+            .add_web_app(&sample_app("mail", "https://a.example/mail/"))
+            .unwrap();
+        let hit = store
+            .web_app_for_url("https://a.example/mail/inbox")
+            .unwrap()
+            .unwrap();
+        assert_eq!(hit.id, "mail");
+        let root = store
+            .web_app_for_url("https://a.example/docs")
+            .unwrap()
+            .unwrap();
+        assert_eq!(root.id, "root");
+        assert!(
+            store
+                .web_app_for_url("https://b.example/")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn web_app_open_time_and_bounds_persist() {
+        let store = Store::in_memory().unwrap();
+        store
+            .add_web_app(&sample_app("x", "https://x.example/"))
+            .unwrap();
+        store.touch_web_app("x", Timestamp::now()).unwrap();
+        store.set_web_app_bounds("x", "{\"x\":1}").unwrap();
+        let app = store.web_app("x").unwrap().unwrap();
+        assert!(app.last_opened_at.is_some());
+        assert_eq!(app.bounds, "{\"x\":1}");
+        // Bookkeeping survives a reinstall of the same id.
+        store
+            .add_web_app(&sample_app("x", "https://x.example/"))
+            .unwrap();
+        let again = store.web_app("x").unwrap().unwrap();
+        assert!(again.last_opened_at.is_some());
+        assert_eq!(again.bounds, "{\"x\":1}");
     }
 }

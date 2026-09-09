@@ -46,6 +46,7 @@ Dive is a native macOS browser built on the Chromium Embedded Framework, with a 
 - **DiveScreen.** Record any tab as video or GIF, then crop, zoom and add cursor effects to make a clip that looks like a product demo.
 - **Workspaces and profiles.** Separate cookies, tabs and mock rules per project, switchable with a keystroke. Profiles keep whole identities apart. Private windows run in their own process.
 - **Light on memory.** Idle tabs drop their Chromium process and keep their place; everything restores on click.
+- **Sites as apps.** When a page's manifest passes Chrome's install rules, an install button appears beside the address. The tab becomes the app's own window — no tabs, no address bar, the app's icon in the title bar — and a launcher lands in `~/Applications/Dive Apps` for Spotlight and the Dock. Leave the app's scope and a thin bar offers the site back in Dive.
 
 ## Screenshots
 

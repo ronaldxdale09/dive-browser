@@ -1,5 +1,8 @@
 import { titleOf } from "../lib/omnibox";
-import { Clapperboard, Download, FolderOpen, History, Search, Star, Trash2, Wand2, X } from "lucide-react";
+import { AppWindow, Clapperboard, Download, FolderOpen, History, LayoutGrid, Search, Star, Trash2, Wand2, X } from "lucide-react";
+import { useWebAppIcon } from "../lib/useWebAppIcon";
+import { WEBAPPS_CHANGED, useWebApps } from "../store/webapps";
+import type { WebApp } from "../lib/ipc";
 import { BOOKMARKS_CHANGED } from "../lib/commands";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -22,12 +25,13 @@ import { Icon, IconButton } from "./Icon";
 /** How many rows each list loads; the filter box narrows from there. */
 export const LIBRARY_LIMIT = 200;
 
-type LibraryTab = "bookmarks" | "history" | "downloads" | "recordings";
+type LibraryTab = "bookmarks" | "history" | "downloads" | "recordings" | "apps";
 const TABS: { id: LibraryTab; label: string; icon: typeof Star }[] = [
   { id: "bookmarks", label: "Bookmarks", icon: Star },
   { id: "history", label: "History", icon: History },
   { id: "downloads", label: "Downloads", icon: Download },
   { id: "recordings", label: "Recordings", icon: Clapperboard },
+  { id: "apps", label: "Apps", icon: LayoutGrid },
 ];
 
 /** Bookmarks and history in one dialog: ⌘Y. */
@@ -89,7 +93,7 @@ export function Library() {
           <IconButton icon={X} label="Close library" onClick={close} />
         </header>
         <div role="tabpanel" id={`library-panel-${tab}`} aria-labelledby={`library-tab-${tab}`} className="min-h-0 flex-1 overflow-y-auto p-2">
-          {tab === "bookmarks" ? <Bookmarks query={query} onOpened={close} /> : tab === "history" ? <HistoryList query={query} onOpened={close} /> : tab === "downloads" ? <DownloadsList query={query} /> : <Recordings query={query} onOpened={close} />}
+          {tab === "bookmarks" ? <Bookmarks query={query} onOpened={close} /> : tab === "history" ? <HistoryList query={query} onOpened={close} /> : tab === "downloads" ? <DownloadsList query={query} /> : tab === "apps" ? <Apps query={query} onOpened={close} /> : <Recordings query={query} onOpened={close} />}
         </div>
       </div>
     </div>
@@ -474,5 +478,60 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
       ))}
     </ul>
     </>
+  );
+}
+
+/** Installed web apps: open one in its window, or take it back out. */
+function Apps({ query, onOpened }: { query: string; onOpened: () => void }) {
+  const apps = useWebApps((s) => s.apps);
+  const loaded = useWebApps((s) => s.loaded);
+  const load = useWebApps((s) => s.load);
+  const open = useWebApps((s) => s.open);
+  const uninstall = useWebApps((s) => s.uninstall);
+  useEffect(() => {
+    void load();
+    window.addEventListener(WEBAPPS_CHANGED, load);
+    return () => window.removeEventListener(WEBAPPS_CHANGED, load);
+  }, [load]);
+  const shown = apps.filter((app) => matches(query, app.name, app.start_url));
+  if (!loaded) return null;
+  if (shown.length === 0) {
+    return (
+      <p className="px-3 py-8 text-center text-xs text-ink-3">
+        {apps.length === 0 ? "No installed apps yet. Sites that offer one show an install button beside the address." : "Nothing matches."}
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-0.5">
+      {shown.map((app) => (
+        <AppRow key={app.id} app={app} onOpen={() => { onOpened(); void open(app.id); }} onRemove={() => void uninstall(app.id)} />
+      ))}
+    </div>
+  );
+}
+
+function AppRow({ app, onOpen, onRemove }: { app: WebApp; onOpen: () => void; onRemove: () => void }) {
+  const icon = useWebAppIcon(app.id);
+  return (
+    <div className="group flex items-center gap-1">
+      <button type="button" onClick={onOpen} className="flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
+        {icon ? (
+          <img src={icon} alt="" width={20} height={20} className="size-5 shrink-0 rounded-md" />
+        ) : (
+          <Icon icon={AppWindow} size={16} className="shrink-0 text-ink-3" />
+        )}
+        <span className="truncate text-ink">{app.name}</span>
+        <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(app.start_url)}</span>
+      </button>
+      <button
+        type="button"
+        aria-label={`Uninstall ${app.name}`}
+        onClick={onRemove}
+        className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100"
+      >
+        <Icon icon={Trash2} size={13} />
+      </button>
+    </div>
   );
 }

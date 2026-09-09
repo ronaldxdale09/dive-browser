@@ -314,6 +314,8 @@ pub struct TabHost {
     /// Tabs torn off into their own window. Their views are children of that
     /// window, not the main one, so the main layout leaves them alone.
     popouts: HashMap<TabId, Popout>,
+    /// Popouts that are installed-app windows, by the app they show.
+    app_windows: HashMap<TabId, String>,
     /// Tabs whose page is one of Dive's own (`dive://…`), drawn by the chrome
     /// in the content area: they have no native view at all.
     internal: std::collections::HashSet<TabId>,
@@ -420,6 +422,19 @@ fn scopeguard_destroy(window: Window<Runtime>) -> DestroyOnDrop {
     DestroyOnDrop(Some(window))
 }
 
+/// How an installed web app's window differs from a torn-off tab's: it is
+/// titled after the app, opens at the frame it last had, and its chrome is
+/// the app chrome rather than the popout's tab strip.
+#[derive(Debug, Clone)]
+pub struct AppWindowSpec {
+    /// The installed app's manifest id, carried to the chrome in the URL.
+    pub id: String,
+    /// Window title.
+    pub name: String,
+    /// The last windowed frame, when the app has been opened before.
+    pub bounds: Option<WindowBounds>,
+}
+
 /// Window label for the `seq`th popout, holding `id`.
 fn popout_label(seq: u64, id: TabId) -> String {
     format!("pop-{seq}-{id}")
@@ -445,6 +460,7 @@ impl TabHost {
             corner_radius: 0.0,
             panes: Vec::new(),
             popouts: HashMap::new(),
+            app_windows: HashMap::new(),
             internal: std::collections::HashSet::new(),
         }
     }
@@ -999,12 +1015,14 @@ impl TabHost {
     /// Tear `id` off into its own window at `at` (logical, relative to the
     /// main window's origin), keeping the page exactly as it is: the native
     /// view is reparented, not recreated.
+    #[allow(clippy::too_many_lines)] // One place builds the window, its chrome and the reparent, in the order that keeps a failure from stranding a view.
     pub fn detach(
         &mut self,
         app: &AppHandle<Runtime>,
         id: TabId,
         title: &str,
         at: Option<(f64, f64)>,
+        web_app: Option<&AppWindowSpec>,
     ) -> tauri::Result<()> {
         if self.popouts.contains_key(&id) {
             return Ok(());
@@ -1014,12 +1032,23 @@ impl TabHost {
             .get(&id)
             .cloned()
             .ok_or(tauri::Error::WebviewNotFound)?;
-        let width = self.bounds.width.clamp(480.0, 1100.0);
-        let height = (self.bounds.height + POPOUT_CHROME_HEIGHT).clamp(360.0, 900.0);
+        // An app window comes back at the frame it last had; a torn-off tab
+        // is sized from the page it came from.
+        let remembered = web_app.and_then(|spec| spec.bounds.as_ref());
+        let width = remembered.map_or_else(
+            || self.bounds.width.clamp(480.0, 1100.0),
+            |b| b.width.clamp(360.0, 2400.0),
+        );
+        let height = remembered.map_or_else(
+            || (self.bounds.height + POPOUT_CHROME_HEIGHT).clamp(360.0, 900.0),
+            |b| b.height.clamp(240.0, 1600.0),
+        );
         let seq = POPOUT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let chrome = popout_chrome_label(seq, id);
         let mut builder = tauri::window::WindowBuilder::new(app, popout_label(seq, id))
-            .title(if crate::private_session::is_private() {
+            .title(if let Some(spec) = web_app {
+                spec.name.as_str()
+            } else if crate::private_session::is_private() {
                 "Dive — Private Window"
             } else if title.is_empty() {
                 "Dive"
@@ -1034,7 +1063,9 @@ impl TabHost {
             .visible(false)
             .inner_size(width, height)
             .min_inner_size(360.0, 240.0);
-        if let Some((x, y)) = at {
+        if let Some(b) = remembered {
+            builder = builder.position(b.x.max(0.0), b.y.max(0.0));
+        } else if let Some((x, y)) = at {
             let scale = self.window.scale_factor()?;
             let origin = self.window.outer_position()?.to_logical::<f64>(scale);
             // The pointer sits on the tab pill it dragged; put the window so
@@ -1059,7 +1090,17 @@ impl TabHost {
         let chrome_view = window.add_child(
             private_chrome(WebviewBuilder::new(
                 chrome.clone(),
-                WebviewUrl::App(format!("index.html?popout={id}").into()),
+                WebviewUrl::App(
+                    match web_app {
+                        Some(spec) => format!(
+                            "index.html?popout={id}&app={}",
+                            url::form_urlencoded::byte_serialize(spec.id.as_bytes())
+                                .collect::<String>()
+                        ),
+                        None => format!("index.html?popout={id}"),
+                    }
+                    .into(),
+                ),
             ))
             .on_navigation(move |url| {
                 crate::ipc_security::allowed_chrome_navigation(url, chrome_dev_url.as_ref())
@@ -1095,6 +1136,11 @@ impl TabHost {
                 covered: false,
             },
         );
+        if let Some(spec) = web_app {
+            self.app_windows.insert(id, spec.id.clone());
+        } else {
+            self.app_windows.remove(&id);
+        }
         self.panes.retain(|p| p.tab != id);
         if self.active == Some(id) {
             self.active = None;
@@ -1122,7 +1168,7 @@ impl TabHost {
             refresh_new_tab_shortcut(view, &self.window);
             view.hide()?;
         }
-        let Some(popout) = self.popouts.remove(&id) else {
+        let Some(popout) = self.forget_popout(id) else {
             return Ok(());
         };
         self.live_overlays.remove(&popout.chrome);
@@ -1152,6 +1198,25 @@ impl TabHost {
     }
 
     /// Whether `id` is shown in its own window.
+    /// Drop a popout's bookkeeping, including any app it was showing.
+    fn forget_popout(&mut self, id: TabId) -> Option<Popout> {
+        self.app_windows.remove(&id);
+        self.popouts.remove(&id)
+    }
+
+    /// The installed app a popout shows, when it is an app window.
+    pub fn app_for_tab(&self, id: TabId) -> Option<&str> {
+        self.app_windows.get(&id).map(String::as_str)
+    }
+
+    /// The tab currently showing installed app `app_id`, if it has a window.
+    pub fn tab_for_app(&self, app_id: &str) -> Option<TabId> {
+        self.app_windows
+            .iter()
+            .find(|(_, app)| app.as_str() == app_id)
+            .map(|(tab, _)| *tab)
+    }
+
     pub fn is_detached(&self, id: TabId) -> bool {
         self.popouts.contains_key(&id)
     }
@@ -1209,8 +1274,13 @@ impl TabHost {
         chrome.set_focus()
     }
 
+    /// Raise a popout window and put the keyboard in its page. Shown and
+    /// unminimized first: an installed app relaunched from the Dock while
+    /// its window sits in the Dock should come back, not merely be focused.
     pub fn focus_popout(&self, id: TabId) -> tauri::Result<()> {
         if let Some(p) = self.popouts.get(&id) {
+            p.window.show()?;
+            p.window.unminimize()?;
             p.window.set_focus()?;
             if let Some(view) = self.views.get(&id) {
                 let _ = view.set_focus();
@@ -1313,7 +1383,7 @@ impl TabHost {
             session.close();
         }
         self.views.remove(&id);
-        if let Some(popout) = self.popouts.remove(&id) {
+        if let Some(popout) = self.forget_popout(id) {
             self.live_overlays.remove(&popout.chrome);
             let _ = popout.window.destroy();
         }
@@ -1565,23 +1635,31 @@ pub fn remember_window_bounds_throttled(window: &Window<Runtime>) {
 }
 
 /// Store the main window's current frame so the next launch opens there.
-/// A full-screen frame is not one to come back to; the last windowed frame
-/// stays on record instead.
-pub fn remember_window_bounds(window: &Window<Runtime>) {
+/// A window's frame in logical pixels, or `None` while it is full screen or
+/// minimized: neither is a frame to come back to.
+pub fn windowed_bounds(window: &Window<Runtime>) -> Option<WindowBounds> {
     if window.is_fullscreen().unwrap_or(false) || window.is_minimized().unwrap_or(false) {
-        return;
+        return None;
     }
     let scale = window.scale_factor().unwrap_or(1.0);
     let (Ok(pos), Ok(size)) = (window.outer_position(), window.inner_size()) else {
-        return;
+        return None;
     };
     let pos = pos.to_logical::<f64>(scale);
     let size = size.to_logical::<f64>(scale);
-    let bounds = WindowBounds {
+    Some(WindowBounds {
         x: pos.x,
         y: pos.y,
         width: size.width,
         height: size.height,
+    })
+}
+
+/// A full-screen frame is not one to come back to; the last windowed frame
+/// stays on record instead.
+pub fn remember_window_bounds(window: &Window<Runtime>) {
+    let Some(bounds) = windowed_bounds(window) else {
+        return;
     };
     let state = window.app_handle().state::<AppState>();
     if let Err(e) = crate::state::lock(&state.store).set_setting(WINDOW_BOUNDS, &bounds.serialize())

@@ -136,6 +136,9 @@ describe("script composition", () => {
         __MAX_FIELD__: "10",
         __ROLE__: '"button"',
         __MARKDOWN_CAP__: "1000",
+        __MIN_ICON__: "192",
+        __ICON_URL__: '"https://x/i.png"',
+        __SIZE__: "512",
       });
       expect(script.startsWith("(function () {"), name).toBe(true);
       expect(script.trimEnd().endsWith("})()"), name).toBe(true);

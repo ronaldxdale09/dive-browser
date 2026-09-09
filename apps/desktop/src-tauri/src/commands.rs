@@ -532,6 +532,14 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             window_exit_private,
             window_close,
             popout_ready,
+            crate::webapp::webapp_probe,
+            crate::webapp::webapp_install,
+            crate::webapp::webapps_list,
+            crate::webapp::webapp_open,
+            crate::webapp::webapp_uninstall,
+            crate::webapp::webapp_for_tab,
+            crate::webapp::webapp_for_window,
+            crate::webapp::webapp_icon,
             workspace_activate,
             profiles_list,
             profile_create,
@@ -865,7 +873,7 @@ pub(crate) fn window_open_local(app: AppHandle<Runtime>) -> AppResult<()> {
         let workspace =
             (*lock(&state.active_workspace)).ok_or_else(|| AppError::new("no active workspace"))?;
         let tab = open_tab(main, app, state, workspace, "about:blank")?;
-        detach_tab(main, app, state, tab.id, None)?;
+        detach_tab(main, app, state, tab.id, None, None)?;
         lock(&state.host)
             .as_mut()
             .ok_or_else(|| AppError::new("engine not ready"))?
@@ -1659,7 +1667,7 @@ pub(crate) fn ui_state_set(
 /// and native views may only be created, shown or moved from the main
 /// thread, so engine-facing commands hop there. Call this before taking any
 /// lock the closure will need, or the hop waits on itself.
-fn on_main<T: Send + 'static>(
+pub(crate) fn on_main<T: Send + 'static>(
     app: &AppHandle<Runtime>,
     f: impl FnOnce(&MainThread, &AppHandle<Runtime>, &AppState) -> AppResult<T> + Send + 'static,
 ) -> AppResult<T> {
@@ -3081,7 +3089,7 @@ pub(crate) async fn tab_a11y_reveal(
     crate::a11y::reveal(&session, &selector).await
 }
 
-fn cdp_for(state: &AppState, id: TabId) -> AppResult<dive_cdp::CdpSession> {
+pub(crate) fn cdp_for(state: &AppState, id: TabId) -> AppResult<dive_cdp::CdpSession> {
     lock(&state.host)
         .as_ref()
         .and_then(|h| h.cdp(id))
@@ -3298,16 +3306,17 @@ pub(crate) fn tab_detach(
     at: Option<(f64, f64)>,
 ) -> AppResult<()> {
     on_main(&app, move |main, app, state| {
-        detach_tab(main, app, state, id, at)
+        detach_tab(main, app, state, id, at, None)
     })
 }
 
-fn detach_tab(
+pub(crate) fn detach_tab(
     main: &MainThread,
     app: &AppHandle<Runtime>,
     state: &AppState,
     id: TabId,
     at: Option<(f64, f64)>,
+    web_app: Option<&crate::engine::AppWindowSpec>,
 ) -> AppResult<()> {
     let (was_active, workspace) = {
         let mut host = lock(&state.host);
@@ -3317,7 +3326,7 @@ fn detach_tab(
         let store = lock(&state.store);
         let tab = ensure_view(main, app, state, host, &store, id)?;
         let was_active = host.active() == Some(id);
-        host.detach(app, id, &tab.title, at)?;
+        host.detach(app, id, &tab.title, at, web_app)?;
         (
             was_active,
             tab.workspace_id.or(*lock(&state.active_workspace)),

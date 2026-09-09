@@ -9,7 +9,7 @@ import { errorMessage } from "../lib/errors";
 
 export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser" | "subtitles" | "import" | "apps";
 /** The sections of the library dialog. */
-export type LibraryTab = "bookmarks" | "history" | "downloads" | "recordings";
+export type LibraryTab = "bookmarks" | "history" | "downloads" | "recordings" | "apps";
 
 /** The panels of the settings dialog; `openSettings` can land on any of them. */
 export type SettingsSection = "general" | "appearance" | "privacy" | "passwords" | "downloads" | "developer" | "agent" | "subtitles" | "shortcuts" | "about";
