@@ -1,4 +1,4 @@
-import { ArrowDownLeft, ArrowUpRight, Ban, FileDown, FileJson, Repeat } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Ban, Copy, FileDown, FileJson, Repeat, Terminal } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
@@ -13,6 +13,8 @@ import { Icon, IconButton } from "./Icon";
 import { ReplayEditor } from "./ReplayEditor";
 import { AgentIcon } from "./agent/AgentIcon";
 import { errorMessage } from "../lib/errors";
+import { prettyJson, toCurl } from "../lib/curl";
+import { copyText } from "../lib/clipboard";
 
 export function NetworkTools() {
   const activeTab = useBrowser((s) => s.activeTab);
@@ -267,13 +269,29 @@ function DetailPane({ tabId, requestId }: { tabId: string; requestId: string }) 
       alive = false;
     };
   }, [tabId, requestId]);
+  const notify = useBrowser((s) => s.notify);
+  const copy = async (label: string, text: string) => {
+    try {
+      await copyText(text);
+      notify(`${label} copied`);
+    } catch (e) {
+      notify(`Could not copy: ${errorMessage(e)}`, 4000);
+    }
+  };
   if (error) return <div className="border-t border-line px-3 py-2 font-mono text-[11px] text-ink-3">{error}</div>;
   if (!detail) return null;
-  const body = detail.response_body ?? detail.response_body_note ?? (detail.status === null ? "No response yet." : "Body not kept: only JSON responses within the buffer budget are.");
+  // A JSON body reads as JSON: laid out, not one long line.
+  const body = detail.response_body ? prettyJson(detail.response_body) : (detail.response_body_note ?? (detail.status === null ? "No response yet." : "Body not kept: only JSON responses within the buffer budget are."));
+  const chip = "flex h-5 items-center gap-1 rounded-full border border-line px-1.5 font-sans text-[10px] text-ink-2 hover:bg-surface-3 hover:text-ink";
   return (
     <div className="grid max-h-[50%] shrink-0 grid-cols-2 gap-x-4 overflow-auto border-t border-line px-3 py-2 font-mono text-[11px] leading-5 select-text" data-testid="request-detail">
       <section aria-label="Request">
-        <h4 className="text-[10px] tracking-wider text-ink-3 uppercase">Request headers</h4>
+        <div className="flex items-center gap-2">
+          <h4 className="flex-1 text-[10px] tracking-wider text-ink-3 uppercase">Request headers</h4>
+          <button type="button" onClick={() => void copy("cURL command", toCurl(detail))} className={chip} title="Copy this request as a cURL command">
+            <Icon icon={Terminal} size={10} /> Copy as cURL
+          </button>
+        </div>
         <Headers headers={detail.request_headers} />
         {detail.request_body && (
           <>
@@ -285,7 +303,14 @@ function DetailPane({ tabId, requestId }: { tabId: string; requestId: string }) 
       <section aria-label="Response">
         <h4 className="text-[10px] tracking-wider text-ink-3 uppercase">Response headers</h4>
         <Headers headers={detail.response_headers} />
-        <h4 className="mt-2 text-[10px] tracking-wider text-ink-3 uppercase">Response body</h4>
+        <div className="mt-2 flex items-center gap-2">
+          <h4 className="flex-1 text-[10px] tracking-wider text-ink-3 uppercase">Response body</h4>
+          {detail.response_body && (
+            <button type="button" onClick={() => void copy("Response body", body)} className={chip} title="Copy the response body">
+              <Icon icon={Copy} size={10} /> Copy body
+            </button>
+          )}
+        </div>
         <pre className={`whitespace-pre-wrap break-all ${detail.response_body ? "text-ink-2" : "text-ink-3"}`}>{body}</pre>
       </section>
     </div>

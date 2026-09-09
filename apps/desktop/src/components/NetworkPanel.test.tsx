@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
@@ -114,7 +114,13 @@ describe("NetworkPanel", () => {
     fireEvent.click(screen.getByText("item-1").closest("tr")!);
     expect(await screen.findByText("accept:")).toBeTruthy();
     expect(screen.getByText("content-type:")).toBeTruthy();
-    expect(screen.getByText('{"ok":true}')).toBeTruthy();
+    // JSON is laid out, and both the request and the body can be copied.
+    expect(screen.getByText((_, el) => el?.tagName === "PRE" && el.textContent === '{\n  "ok": true\n}')).toBeTruthy();
+    const writeText = vi.spyOn(ipc, "clipboardWriteText").mockResolvedValue(null);
+    fireEvent.click(screen.getByRole("button", { name: "Copy as cURL" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("curl 'https://a.dev/api/item-1' \\\n  -H 'accept: application/json'"));
+    fireEvent.click(screen.getByRole("button", { name: "Copy body" }));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('{\n  "ok": true\n}'));
   });
 
   it("grows a short dock so the replay editor shows whole", () => {

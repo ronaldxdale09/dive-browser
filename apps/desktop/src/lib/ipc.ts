@@ -154,6 +154,7 @@ export const ipc = {
   prefsGet: () => commands.prefsGet(),
   prefsSet: async (prefs: Prefs) => unwrap(await commands.prefsSet(prefs)),
   pagesScheme: async (scheme: "dark" | "light") => unwrap(await commands.pagesScheme(scheme)),
+  clipboardWriteText: async (text: string) => unwrap(await commands.clipboardWriteText(text)),
   browsingDataClear: async (what: ClearRequest) => unwrap(await commands.browsingDataClear(what)),
   downloadsReveal: async (path: string | null) => unwrap(await commands.downloadsReveal(path)),
   downloadsOpen: async (path: string) => unwrap(await commands.downloadsOpen(path)),

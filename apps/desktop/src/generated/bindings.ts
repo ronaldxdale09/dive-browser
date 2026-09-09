@@ -437,6 +437,12 @@ export const commands = {
 	 *  pages are told the theme, every open tab is told this at once.
 	 */
 	pagesScheme: (scheme: string) => typedError<null, AppError>(__TAURI_INVOKE("pages_scheme", { scheme })),
+	/**
+	 *  Put text on the system clipboard. Goes through the host rather than the
+	 *  page's clipboard API, which refuses when the chrome document is not the
+	 *  focused one (the person may have just clicked the page).
+	 */
+	clipboardWriteText: (text: string) => typedError<null, AppError>(__TAURI_INVOKE("clipboard_write_text", { text })),
 	/**  Delete browsing data; returns a one-line summary of what went. */
 	browsingDataClear: (what: ClearRequest) => typedError<string, AppError>(__TAURI_INVOKE("browsing_data_clear", { what })),
 	/**  Show a download in the system file manager, or the downloads folder when `path` is `None`. */

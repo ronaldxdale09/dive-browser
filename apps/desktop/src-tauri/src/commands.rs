@@ -635,6 +635,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             prefs_get,
             prefs_set,
             pages_scheme,
+            clipboard_write_text,
             browsing_data_clear,
             downloads_reveal,
             downloads_open,
@@ -2416,6 +2417,18 @@ pub(crate) async fn tab_capture(
 ) -> AppResult<String> {
     let path = capture_tab(&state, id, full_page).await?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// Put text on the system clipboard. Goes through the host rather than the
+/// page's clipboard API, which refuses when the chrome document is not the
+/// focused one (the person may have just clicked the page).
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn clipboard_write_text(text: String) -> AppResult<()> {
+    arboard::Clipboard::new()
+        .map_err(AppError::new)?
+        .set_text(text)
+        .map_err(AppError::new)
 }
 
 /// Put PNG bytes on the system clipboard as an image.
