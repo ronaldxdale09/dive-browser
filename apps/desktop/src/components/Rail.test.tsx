@@ -99,14 +99,50 @@ describe("Rail", () => {
     expect(useBrowser.getState().editing).toEqual({ id: personal.id });
   });
 
-  it("offers to make Dive the default browser, just above Settings", async () => {
+  it("offers to make Dive the default browser above the profile and Settings, and can be put away", async () => {
     render(<Rail />);
     const offer = await screen.findByRole("button", { name: "Make Dive the default browser" });
     expect(offer.textContent).toContain("Set as default");
     const settings = screen.getByRole("button", { name: "Settings" });
     expect(offer.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(offer.nextElementSibling).toBe(settings);
     expect(screen.queryByTestId("default-browser-badge")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    expect(useDefaultBrowser.getState().declined).toBe(true);
+    expect(screen.queryByRole("button", { name: "Make Dive the default browser" })).toBeNull();
+  });
+
+  it("lists the workspace's tabs under the workspaces, marks the current one, and closes from the row", () => {
+    const activate = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    useBrowser.setState({
+      activeTab: "t2",
+      activateTab: activate,
+      closeTab: close,
+      tabs: [
+        { id: "t1", workspace_id: personal.id, tier: "today", url: "https://a.test/", title: "Alpha", favicon: null, position: 1, state: "active", last_active_at: "" },
+        { id: "t2", workspace_id: personal.id, tier: "today", url: "https://b.test/", title: "Beta", favicon: null, position: 0, state: "active", last_active_at: "" },
+        { id: "t3", workspace_id: null, tier: "essential", url: "https://mail.test/", title: "Mail", favicon: null, position: 0, state: "active", last_active_at: "" },
+      ],
+    });
+    render(<Rail />);
+    const list = screen.getByRole("region", { name: "Tabs" });
+    const names = Array.from(list.querySelectorAll("li > button:first-child")).map((b) => b.getAttribute("aria-label"));
+    expect(names).toEqual(["Mail, essential", "Beta", "Alpha"]);
+    expect(screen.getByRole("button", { name: "Beta" }).getAttribute("aria-current")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Alpha" }));
+    expect(activate).toHaveBeenCalledWith("t1");
+    fireEvent.click(screen.getByRole("button", { name: "Close Alpha" }));
+    expect(close).toHaveBeenCalledWith("t1");
+  });
+
+  it("shows the profile switcher at the foot of the rail, opening upward", () => {
+    useBrowser.setState({ profiles: [{ id: "profile-1", name: "Ronald", avatar: "wave", color: "#7FD8C8", note: "", container_id: "container-1", position: 0, created_at: "" }], activeProfile: "profile-1" });
+    render(<Rail />);
+    const chip = screen.getByRole("button", { name: "Profile: Ronald" });
+    const settings = screen.getByRole("button", { name: "Settings" });
+    expect(chip.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(chip);
+    expect(screen.getByRole("menu", { name: "Profiles" }).className).toContain("bottom-full");
   });
 
   it("stops offering once the person has said Not now", async () => {

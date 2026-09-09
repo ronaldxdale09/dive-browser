@@ -3,7 +3,6 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { Rail, RAIL_WIDTH } from "./components/Rail";
 import { TabStrip } from "./components/TabStrip";
 import { TabDnd } from "./components/TabDnd";
-import { ProfileChip } from "./components/ProfileChip";
 import { ProfileDialog } from "./components/ProfileDialog";
 import { FeatureBar } from "./components/FeatureBar";
 import { Toolbar } from "./components/Toolbar";
@@ -114,10 +113,11 @@ export function App() {
       className="grid h-full grid-rows-[40px_44px_minmax(0,1fr)] bg-ground text-ink"
       style={{ gridTemplateColumns: `${railWidth}px minmax(0,1fr)` }}
     >
-      {/* Title-bar row: the workspace you are in, then its tabs, beside the
-          traffic lights (overlay title bar). */}
+      {/* Title-bar row: the tabs, beside the traffic lights (overlay title
+          bar). Who you are browsing as sits at the foot of the rail, under
+          the workspaces it owns. */}
       <header className="col-span-2 row-start-1 flex items-center gap-2 pl-[84px]">
-        {isPrivateWindow() ? <span className="px-2 font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span> : <ProfileChip />}
+        {isPrivateWindow() && <span className="px-2 font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
         <div className="h-full min-w-0 flex-1">
           <TabStrip />
         </div>

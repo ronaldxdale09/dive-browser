@@ -1,6 +1,6 @@
 import { isPrivateWindow } from "../lib/privateMode";
 import { prettyUrl } from "../lib/prettyUrl";
-import { Bug, Camera, Captions, House, ScrollText, LoaderCircle, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, TriangleAlert, X, Menu } from "lucide-react";
+import { Captions, CodeXml, House, ScrollText, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, TriangleAlert, X, Menu } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FOCUS_ADDRESS } from "../lib/commands";
@@ -37,8 +37,6 @@ export function Toolbar({ compact = false, singleAuxPanel = compact }: { compact
   const reload = useBrowser((s) => s.reload);
   const stop = useBrowser((s) => s.stop);
   const homepage = usePrefs((s) => s.prefs.homepage.trim());
-  const capture = useBrowser((s) => s.capture);
-  const capturing = useBrowser((s) => s.capturing);
   const devtools = useBrowser((s) => s.devtools);
   const toggle = useBrowser((s) => s.toggle);
   const open = useBrowser((s) => s.open);
@@ -182,24 +180,26 @@ export function Toolbar({ compact = false, singleAuxPanel = compact }: { compact
           <SharePopover />
           <SubtitlesIndicator />
           <RecorderIndicator />
-          {!isPrivateWindow() && <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />}
-          <span className={capturing ? "animate-spin motion-reduce:animate-none" : undefined}><IconButton icon={capturing ? LoaderCircle : Camera} label={capturing ? "Capturing full page" : "Capture full page"} shortcut="⌘⇧S" disabled={!current || capturing} onClick={() => void capture(true)} /></span>
-          <IconButton icon={Bug} label="Open DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
           <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={dockShown} onClick={toggleDock} />
+          <IconButton icon={CodeXml} label="DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
+          {!isPrivateWindow() && <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />}
           <DownloadsMenu compact />
         </ToolbarMore>
       ) : (
         <>
+          {/* Three groups, left to right: the page (bookmark, share), the
+              developer surfaces (dock, DevTools, extensions), then what is
+              about the browser itself (downloads, privacy, menu). */}
           <ZoomBadge />
           {!isPrivateWindow() && <BookmarkButton />}
           <SharePopover />
-          <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />
           <SubtitlesIndicator />
           <RecorderIndicator />
-          {!isPrivateWindow() && <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />}
-          <span className={capturing ? "animate-spin motion-reduce:animate-none" : undefined}><IconButton icon={capturing ? LoaderCircle : Camera} label={capturing ? "Capturing full page" : "Capture full page"} shortcut="⌘⇧S" disabled={!current || capturing} onClick={() => void capture(true)} /></span>
-          <IconButton icon={Bug} label="Open DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
+          <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />
           <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={dockShown} onClick={toggleDock} />
+          <IconButton icon={CodeXml} label="DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
+          {!isPrivateWindow() && <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />}
+          <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />
           <DownloadsMenu compact />
         </>
       )}

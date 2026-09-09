@@ -18,6 +18,52 @@ use crate::state::{AppState, lock};
 /// Key holding the JSON blob in the settings table.
 const KEY: &str = "prefs";
 
+/// A site pinned at the top of the rail.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct QuickLink {
+    /// Short label under the icon.
+    pub name: String,
+    /// Where it goes; `http` or `https` only.
+    pub url: String,
+}
+
+/// The most a rail can pin before it stops being quick.
+pub const MAX_QUICK_LINKS: usize = 12;
+
+fn default_quick_links() -> Vec<QuickLink> {
+    [
+        ("ChatGPT", "https://chatgpt.com/"),
+        ("Claude", "https://claude.ai/"),
+        ("Gemini", "https://gemini.google.com/"),
+    ]
+    .into_iter()
+    .map(|(name, url)| QuickLink {
+        name: name.into(),
+        url: url.into(),
+    })
+    .collect()
+}
+
+/// Trim, drop links without a web address or a name, and cap the count.
+/// A name longer than a rail row is cut rather than refused.
+fn normalize_quick_links(links: Vec<QuickLink>) -> Vec<QuickLink> {
+    let mut seen = std::collections::HashSet::new();
+    links
+        .into_iter()
+        .map(|l| QuickLink {
+            name: l.name.trim().chars().take(24).collect(),
+            url: l.url.trim().to_owned(),
+        })
+        .filter(|l| {
+            !l.name.is_empty()
+                && (l.url.starts_with("https://") || l.url.starts_with("http://"))
+                && url::Url::parse(&l.url).is_ok_and(|u| u.host_str().is_some())
+                && seen.insert(l.url.clone())
+        })
+        .take(MAX_QUICK_LINKS)
+        .collect()
+}
+
 /// Every preference, with the defaults a fresh profile starts on. Stored blobs
 /// from older builds are merged with [`Prefs::default`] when they are loaded.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -64,6 +110,10 @@ pub struct Prefs {
     pub devtools_on_open: bool,
     /// Workspace rail shows names and tab counts rather than marks alone.
     pub rail_expanded: bool,
+    /// Sites pinned at the top of the rail: a click switches to their tab or
+    /// opens one. Starts as the three assistants people reach for most.
+    #[serde(default = "default_quick_links")]
+    pub quick_links: Vec<QuickLink>,
     /// Provider the agent talks to; a `dive_agent::Provider` id.
     pub agent_provider: String,
     /// Model the agent talks to, in the provider's naming.
@@ -202,6 +252,7 @@ impl Default for Prefs {
             download_dir: String::new(),
             devtools_on_open: false,
             rail_expanded: true,
+            quick_links: default_quick_links(),
             agent_provider: dive_agent::Provider::Anthropic.id_str().to_owned(),
             agent_model: dive_agent::DEFAULT_MODEL.to_owned(),
             agent_reasoning: "default".into(),
@@ -320,6 +371,7 @@ impl Prefs {
             .take(MAX_PATTERNS)
             .collect();
         self.privacy_exceptions = normalize_privacy_exceptions(self.privacy_exceptions);
+        self.quick_links = normalize_quick_links(self.quick_links);
         let provider = if let Some(provider) = dive_agent::Provider::parse(&self.agent_provider) {
             provider
         } else {
@@ -1286,5 +1338,57 @@ mod tests {
         drop(first);
         entered_rx.await.expect("second transaction entered");
         second.await.expect("second transaction task");
+    }
+}
+
+#[cfg(test)]
+mod quick_link_tests {
+    use super::*;
+
+    #[test]
+    fn quick_links_start_as_the_three_assistants_and_are_cleaned_on_save() {
+        assert_eq!(
+            Prefs::default()
+                .quick_links
+                .iter()
+                .map(|l| l.name.as_str())
+                .collect::<Vec<_>>(),
+            ["ChatGPT", "Claude", "Gemini"]
+        );
+        let cleaned = normalize_quick_links(vec![
+            QuickLink {
+                name: "  Linear ".into(),
+                url: " https://linear.app/ ".into(),
+            },
+            QuickLink {
+                name: String::new(),
+                url: "https://nameless.test/".into(),
+            },
+            QuickLink {
+                name: "File".into(),
+                url: "file:///etc/passwd".into(),
+            },
+            QuickLink {
+                name: "Again".into(),
+                url: "https://linear.app/".into(),
+            },
+        ]);
+        assert_eq!(cleaned.len(), 1);
+        assert_eq!(cleaned[0].name, "Linear");
+        assert_eq!(cleaned[0].url, "https://linear.app/");
+    }
+
+    #[test]
+    fn an_older_blob_without_quick_links_gets_the_defaults() {
+        let loaded: Prefs = serde_json::from_value(
+            serde_json::to_value(Prefs::default())
+                .map(|mut v| {
+                    v.as_object_mut().unwrap().remove("quick_links");
+                    v
+                })
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(loaded.quick_links.len(), 3);
     }
 }

@@ -58,20 +58,35 @@ describe("FeatureBar", () => {
     expect(useBrowser.getState().settingsSection).toBe("about");
   });
 
-  it("names record, the emulator and the agent, and keeps a tooltip on each", () => {
+  it("names capture, the emulator and the agent, and keeps a tooltip on each", () => {
     render(<FeatureBar />);
-    for (const word of ["Record", "Mobile", "Agent"]) expect(screen.getAllByText(word).length).toBeGreaterThan(0);
+    for (const word of ["Capture", "Mobile", "Agent"]) expect(screen.getAllByText(word).length).toBeGreaterThan(0);
     // Page actions live beside the URL, not up here.
-    expect(screen.queryByText("Capture")).toBeNull();
     expect(screen.queryByText("Downloads")).toBeNull();
-    const record = screen.getByRole("button", { name: "Record a tab as video or GIF" });
-    const tooltip = document.getElementById(record.getAttribute("aria-describedby") ?? "");
+    const capture = screen.getByRole("button", { name: /^Capture: record/ });
+    const tooltip = document.getElementById(capture.getAttribute("aria-describedby") ?? "");
     expect(tooltip?.getAttribute("role")).toBe("tooltip");
+  });
+
+  it("offers a screenshot and a recording from one Capture menu", async () => {
+    vi.spyOn(ipc, "tabCapture").mockResolvedValue("/tmp/capture.png");
+    vi.spyOn(ipc, "tabOpen").mockResolvedValue(tab);
+    render(<FeatureBar />);
+    fireEvent.click(screen.getByRole("button", { name: /^Capture: record/ }));
+    const menu = screen.getByRole("menu", { name: "Capture" });
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: /Record video or GIF/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Screenshot the full page/ }));
+    expect(menu.isConnected).toBe(false);
+    await waitFor(() => expect(ipc.tabCapture).toHaveBeenCalledWith(tab.id, true));
+    await waitFor(() => expect(ipc.tabOpen).toHaveBeenCalledWith(tab.workspace_id, expect.stringContaining("dive://capture?src=%2Ftmp%2Fcapture.png")));
+    // A capture under way is one control, disabled, until the page is saved.
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Capture: record/ })).toBeTruthy());
   });
 
   it("opens the setup dialog, then shows the recording's controls once it runs", async () => {
     render(<FeatureBar />);
-    fireEvent.click(screen.getByRole("button", { name: "Record a tab as video or GIF" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Capture: record/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Record video or GIF/ }));
     expect(useRecording.getState().phase).toBe("setup");
     expect(useRecording.getState().tab).toBe(tab.id);
 
@@ -92,7 +107,7 @@ describe("FeatureBar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Discard recording" }));
     await waitFor(() => expect(useRecording.getState().phase).toBe("idle"));
     expect(useBrowser.getState().recordingTab).toBeNull();
-    expect(screen.getByRole("button", { name: "Record a tab as video or GIF" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Capture: record/ })).toBeTruthy();
   });
 
   it("opens the device menu, agent and all-tabs surfaces", () => {
@@ -122,20 +137,20 @@ describe("FeatureBar", () => {
 
     render(<FeatureBar />);
     const agent = () => screen.getByRole("button", { name: "Agent" });
-    expect(screen.getByText("Record")).toBeTruthy();
+    expect(screen.getByText("Capture")).toBeTruthy();
     expect(agent().textContent).toContain("Agent");
 
     resize(COLLAPSE_BELOW - 100);
-    expect(screen.queryByText("Record")).toBeNull();
+    expect(screen.queryByText("Capture")).toBeNull();
     expect(screen.queryByText("Mobile")).toBeNull();
     expect(agent().textContent).not.toContain("Agent");
     // Every action is still there by name.
-    expect(screen.getByRole("button", { name: "Record a tab as video or GIF" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Capture: record/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Device simulator" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Agent" })).toBeTruthy();
 
     resize(COLLAPSE_BELOW + 300);
-    expect(screen.getByText("Record")).toBeTruthy();
+    expect(screen.getByText("Capture")).toBeTruthy();
     expect(agent().textContent).toContain("Agent");
     vi.unstubAllGlobals();
   });

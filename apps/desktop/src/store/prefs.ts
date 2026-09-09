@@ -34,6 +34,11 @@ export const DEFAULT_PREFS: Prefs = {
   download_dir: "",
   devtools_on_open: false,
   rail_expanded: true,
+  quick_links: [
+    { name: "ChatGPT", url: "https://chatgpt.com/" },
+    { name: "Claude", url: "https://claude.ai/" },
+    { name: "Gemini", url: "https://gemini.google.com/" },
+  ],
   agent_provider: "anthropic",
   agent_model: "claude-opus-5",
   agent_reasoning: "default",

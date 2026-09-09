@@ -3,7 +3,7 @@ import { AvatarImage } from "./AvatarImage";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowRight, Globe, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Settings2, Shield, SquarePlus, Trash2 } from "lucide-react";
+import { ArrowRight, Globe, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, Settings2, Shield, SquarePlus, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { useBrowser } from "../store/browser";
@@ -13,11 +13,16 @@ import { useDefaultBrowser } from "../store/defaultBrowser";
 import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
-import { AiShortcuts } from "./AiShortcuts";
+import { QuickLinks } from "./QuickLinks";
+import { ProfileChip } from "./ProfileChip";
+import { Favicon } from "./Favicon";
+import { essentialTabs, orderTabs } from "../lib/tabOrder";
+import { runCommand } from "../lib/commands";
+import { useMemo } from "react";
 import { clampFloatingPosition } from "../lib/floating";
 
 /** Rail width in each mode; App.tsx sizes the grid column from these. */
-export const RAIL_WIDTH = { collapsed: 52, expanded: 208 };
+export const RAIL_WIDTH = { collapsed: 52, expanded: 232 };
 
 /**
  * Left rail: the list of workspaces, and the only place they are created,
@@ -53,10 +58,10 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
 
   return (
     <nav aria-label="Workspaces" className={`flex h-full flex-col gap-1 px-2 pt-2 pb-2 ${expanded ? "" : "items-center"}`}>
-      {expanded && !isPrivateWindow() && <AiShortcuts />}
+      {expanded && !isPrivateWindow() && <QuickLinks />}
       {expanded && (
         <div className="flex h-6 items-center gap-1 pr-0.5 pl-2">
-          <span className="text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">Workspaces</span>
+          <span className="text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">Workspaces</span>
           <span className="flex-1" />
           <RailButton icon={PanelLeftClose} label="Collapse workspaces" onClick={() => void update({ rail_expanded: false })} />
         </div>
@@ -64,7 +69,7 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
       {/* Scrolls rather than clips: past about a dozen workspaces the rail runs
           out of height, and a mark sliced in half is worse than one that has to
           be scrolled to. Settings stays pinned below it either way. */}
-      <div className={`scroll-hidden flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto ${expanded ? "gap-1" : "items-center gap-2"}`}>
+      <div className={`scroll-hidden flex min-h-0 flex-col overflow-x-hidden overflow-y-auto ${expanded ? "max-h-[45%] shrink-0 gap-1" : "flex-1 items-center gap-2"}`}>
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
           <SortableContext items={workspaces.map((w) => w.id)} strategy={verticalListSortingStrategy}>
             {workspaces.map((w, i) => (
@@ -98,8 +103,10 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
           {expanded && "New workspace"}
         </button>}
       </div>
+      {expanded ? <TabList /> : <span className="flex-1" aria-hidden />}
       {!expanded && !forceCollapsed && <RailButton icon={PanelLeftOpen} label="Expand workspaces" onClick={() => void update({ rail_expanded: true })} />}
       {!isPrivateWindow() && <DefaultBrowserButton expanded={expanded} />}
+      {!isPrivateWindow() && <ProfileChip variant={expanded ? "row" : "avatar"} placement="above" />}
       <button
         type="button"
         aria-label="Settings"
@@ -129,6 +136,7 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
 function DefaultBrowserButton({ expanded }: { expanded: boolean }) {
   const status = useDefaultBrowser((s) => s.status);
   const declined = useDefaultBrowser((s) => s.declined);
+  const decline = useDefaultBrowser((s) => s.decline);
   const refresh = useDefaultBrowser((s) => s.refresh);
   useEffect(() => {
     void refresh();
@@ -141,34 +149,97 @@ function DefaultBrowserButton({ expanded }: { expanded: boolean }) {
   // launch. Settings › General keeps offering meanwhile.
   if (!status?.supported || status.is_default || declined) return null;
   const title = "Make Dive the default browser";
+  const open = () => useBrowser.getState().toggle("defaultBrowser", true);
+  if (!expanded) {
+    return (
+      <button type="button" aria-label={title} title={title} onClick={open} className="group grid h-[var(--row-h)] w-9 shrink-0 place-items-center rounded-full text-accent transition-colors hover:bg-accent/14">
+        <span className="relative grid size-7 place-items-center">
+          <Icon icon={Globe} size={14} />
+          <span className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-accent" aria-hidden />
+        </span>
+      </button>
+    );
+  }
   return (
-    <button
-      type="button"
-      aria-label={title}
-      title={title}
-      onClick={() => useBrowser.getState().toggle("defaultBrowser", true)}
-      className={
-        expanded
-          ? "group flex h-11 shrink-0 items-center gap-2.5 rounded-xl border border-accent/25 bg-accent/8 px-2 text-left text-xs text-ink transition-colors hover:border-accent/45 hover:bg-accent/14"
-          : "group grid h-[var(--row-h)] w-9 shrink-0 place-items-center rounded-full text-accent transition-colors hover:bg-accent/14"
-      }
-    >
-      <span className={expanded ? "grid size-7 shrink-0 place-items-center rounded-lg bg-accent/15 text-accent" : "relative grid size-7 place-items-center"}>
-        <Icon icon={Globe} size={14} />
-        {!expanded && <span className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-accent" aria-hidden />}
-      </span>
-      {expanded && (
-        <>
-          <span className="flex min-w-0 flex-1 flex-col leading-tight">
-            <span className="truncate text-[12px] font-medium">Set as default</span>
-            <span className="truncate text-[10.5px] text-ink-3">Open links in Dive</span>
-          </span>
-          <span className="grid size-5 shrink-0 place-items-center rounded-full text-ink-3 transition-colors group-hover:bg-accent group-hover:text-accent-ink" aria-hidden>
-            <Icon icon={ArrowRight} size={11} />
-          </span>
-        </>
-      )}
-    </button>
+    <div role="group" aria-label="Default browser" className="group relative flex h-11 shrink-0 items-center rounded-xl border border-accent/25 bg-accent/8 transition-colors hover:border-accent/45 hover:bg-accent/14">
+      <button type="button" aria-label={title} onClick={open} className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-xl px-2 text-left text-xs text-ink">
+        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent/15 text-accent">
+          <Icon icon={Globe} size={14} />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col leading-tight">
+          <span className="truncate text-[12px] font-medium">Set as default</span>
+          <span className="truncate text-[10.5px] text-ink-3">Open links in Dive</span>
+        </span>
+        <span className="grid size-5 shrink-0 place-items-center rounded-full text-ink-3 transition-colors group-hover:bg-accent group-hover:text-accent-ink" aria-hidden>
+          <Icon icon={ArrowRight} size={11} />
+        </span>
+      </button>
+      {/* The card is an offer, not furniture: one click puts it away for a
+          couple of weeks, and it leaves for good once Dive is the default. */}
+      <button
+        type="button"
+        aria-label="Not now"
+        title="Not now (asks again in two weeks)"
+        onClick={decline}
+        className="absolute -top-1.5 -right-1.5 grid size-5 place-items-center rounded-full border border-line-2 bg-surface text-ink-3 opacity-0 shadow transition-opacity group-hover:opacity-100 hover:text-ink focus-visible:opacity-100"
+      >
+        <Icon icon={X} size={10} />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The active workspace's tabs, as a list: the part of the rail that earns
+ * its width. Essentials and pinned tabs come first, as in the strip; the
+ * current tab is marked, and any row closes from its own control.
+ */
+function TabList() {
+  const all = useBrowser((s) => s.tabs);
+  const active = useBrowser((s) => s.activeTab);
+  const loading = useBrowser((s) => s.loading);
+  const activate = useBrowser((s) => s.activateTab);
+  const close = useBrowser((s) => s.closeTab);
+  const tabs = useMemo(() => [...essentialTabs(all), ...orderTabs(all)], [all]);
+  return (
+    <section aria-label="Tabs" className="flex min-h-0 flex-1 flex-col">
+      <div className="flex h-6 shrink-0 items-center gap-1 pr-0.5 pl-2">
+        <span className="text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">Tabs</span>
+        {tabs.length > 0 && <span className="font-mono text-[10px] text-ink-3 tabular-nums">{tabs.length}</span>}
+        <span className="flex-1" />
+        <RailButton icon={Plus} label="New tab" onClick={() => runCommand("tab.new")} />
+      </div>
+      <ul className="scroll-hidden flex min-h-0 flex-1 flex-col gap-px overflow-x-hidden overflow-y-auto">
+        {tabs.map((t) => {
+          const current = t.id === active;
+          const title = t.title || t.url || "New tab";
+          return (
+            <li key={t.id} className="group/tab relative shrink-0">
+              <button
+                type="button"
+                aria-current={current ? "true" : undefined}
+                aria-label={t.tier === "essential" ? `${title}, essential` : title}
+                title={t.url}
+                onClick={() => void activate(t.id)}
+                className={`flex h-7 w-full items-center gap-2 rounded-md pr-7 pl-2 text-left text-[11.5px] transition-colors ${current ? "bg-surface-3 text-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"} ${t.state === "discarded" ? "opacity-60" : ""}`}
+              >
+                <Favicon src={t.favicon} size={13} className={loading[t.id] ? "animate-pulse" : ""} />
+                <span className="min-w-0 flex-1 truncate">{title}</span>
+                {(t.tier === "essential" || t.tier === "pinned") && <Icon icon={Pin} size={10} className="shrink-0 text-ink-3" />}
+              </button>
+              <button
+                type="button"
+                aria-label={`Close ${title}`}
+                onClick={() => void close(t.id)}
+                className={`absolute top-1/2 right-1 grid size-5 -translate-y-1/2 place-items-center rounded-full text-ink-3 transition-opacity hover:bg-surface-3 hover:text-ink focus-visible:opacity-100 ${current ? "" : "opacity-0 group-hover/tab:opacity-100"}`}
+              >
+                <Icon icon={X} size={11} />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
@@ -234,7 +305,7 @@ function WorkspaceRow({
       }}
       className={
         expanded
-          ? `relative flex h-[var(--row-h)] shrink-0 items-center gap-2.5 rounded-lg px-2 transition-colors ${active ? "bg-surface-3 text-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"}`
+          ? `group relative flex h-[var(--row-h)] shrink-0 items-center gap-2.5 rounded-lg px-2 transition-colors ${active ? "bg-surface-3 text-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"}`
           : `relative grid h-[var(--row-h)] w-9 shrink-0 place-items-center rounded-full transition-[background-color,box-shadow,transform] ${active ? "bg-surface-3 ring-1 ring-line-2" : "hover:bg-surface-2"}`
       }
     >
@@ -248,7 +319,10 @@ function WorkspaceRow({
         className={`size-7 shrink-0 rounded-[10px] transition-opacity ${active ? "" : "opacity-60"}`}
       />
       {expanded && <span className="min-w-0 flex-1 truncate text-xs">{w.name}</span>}
-      {expanded && separate && <Icon icon={Shield} size={11} className="shrink-0 text-ink-3" />}
+      {/* The cookie-jar mark says "own cookies", which matters when choosing a
+          workspace, not while glancing at the list: it shows for the active row
+          and under the pointer, and the tooltip spells it out. */}
+      {expanded && separate && <Icon icon={Shield} size={11} className={`shrink-0 text-ink-3 transition-opacity ${active ? "" : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"}`} />}
       {expanded && count > 0 && <span className="shrink-0 font-mono text-[10px] text-ink-3 tabular-nums">{count}</span>}
       {/* Inset from the window edge: the row is centred in the rail, so
           `-left-2` put this at x=0, where it read as a sliced-off sliver

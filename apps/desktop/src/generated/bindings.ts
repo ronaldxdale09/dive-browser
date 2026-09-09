@@ -1515,6 +1515,11 @@ export type Prefs = {
 	devtools_on_open: boolean,
 	/**  Workspace rail shows names and tab counts rather than marks alone. */
 	rail_expanded: boolean,
+	/**
+	 *  Sites pinned at the top of the rail: a click switches to their tab or
+	 *  opens one. Starts as the three assistants people reach for most.
+	 */
+	quick_links?: QuickLink[],
 	/**  Provider the agent talks to; a `dive_agent::Provider` id. */
 	agent_provider: string,
 	/**  Model the agent talks to, in the provider's naming. */
@@ -1710,6 +1715,14 @@ export type ProviderInfo = {
 	default_model: string,
 	/**  One line for the picker. */
 	note: string,
+};
+
+/**  A site pinned at the top of the rail. */
+export type QuickLink = {
+	/**  Short label under the icon. */
+	name: string,
+	/**  Where it goes; `http` or `https` only. */
+	url: string,
 };
 
 /**  What the person asked for in the recording dialog. */

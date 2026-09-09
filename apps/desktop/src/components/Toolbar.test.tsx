@@ -251,8 +251,7 @@ describe("Toolbar", () => {
       "Reload",
       "Bookmark this page",
       "Share to another device",
-      "Capture full page",
-      "Open DevTools",
+      "DevTools",
       "Developer dock",
       "Downloads",
       "Extensions",
@@ -274,7 +273,7 @@ describe("Toolbar", () => {
     expect(useBrowser.getState().open.extensions).toBe(true);
   });
 
-  it("routes clicks to navigation, bookmark, capture and DevTools actions", async () => {
+  it("routes clicks to navigation, bookmark and DevTools actions", async () => {
     render(<Toolbar />);
     await waitFor(() => expect((screen.getByRole("button", { name: "Back" }) as HTMLButtonElement).disabled).toBe(false));
 
@@ -282,36 +281,17 @@ describe("Toolbar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Forward" }));
     fireEvent.click(screen.getByRole("button", { name: "Reload" }));
     fireEvent.click(screen.getByRole("button", { name: "Bookmark this page" }));
-    fireEvent.click(screen.getByRole("button", { name: "Capture full page" }));
-    fireEvent.click(screen.getByRole("button", { name: "Open DevTools" }));
+    fireEvent.click(screen.getByRole("button", { name: "DevTools" }));
 
     await waitFor(() => {
       expect(ipc.tabBack).toHaveBeenCalledWith(tab.id);
       expect(ipc.tabForward).toHaveBeenCalledWith(tab.id);
       expect(ipc.tabReload).toHaveBeenCalledWith(tab.id);
       expect(ipc.bookmarkToggle).toHaveBeenCalledWith(tab.id);
-      expect(ipc.tabCapture).toHaveBeenCalledWith(tab.id, true);
       expect(ipc.tabDevtools).toHaveBeenCalledWith(tab.id);
-      expect(ipc.tabOpen).toHaveBeenCalledWith(
-        tab.workspace_id,
-        "dive://capture?src=%2Ftmp%2Fcapture.png&url=https%3A%2F%2Fexample.com%2Fdocs&title=Example",
-      );
     });
-  });
-
-  it("shows capture progress and ignores a second capture request", async () => {
-    let finish!: (path: string) => void;
-    vi.mocked(ipc.tabCapture).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
-    render(<Toolbar />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Capture full page" }));
-    const progress = await screen.findByRole("button", { name: "Capturing full page" });
-    expect((progress as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(progress);
-    expect(ipc.tabCapture).toHaveBeenCalledTimes(1);
-
-    await act(async () => finish("/tmp/capture.png"));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Capture full page" })).toBeTruthy());
+    // Screenshots moved up to the title bar's Capture menu, beside recording.
+    expect(screen.queryByRole("button", { name: /capture/i })).toBeNull();
   });
 
   it("shows that steps are being recorded and stops on a click", async () => {
@@ -603,10 +583,10 @@ describe("Toolbar", () => {
   it("moves secondary actions into a tray in compact chrome", () => {
     render(<Toolbar compact />);
 
-    expect(screen.queryByRole("button", { name: "Capture full page" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "DevTools" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "More page actions" }));
     expect(screen.getByRole("dialog", { name: "Page actions" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Capture full page" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open DevTools" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Developer dock" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "DevTools" })).toBeTruthy();
   });
 });

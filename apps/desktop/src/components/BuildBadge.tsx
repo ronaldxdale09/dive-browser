@@ -8,6 +8,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
+import { Tooltip } from "./Tooltip";
 import { copyText } from "../lib/clipboard";
 
 /**
@@ -40,10 +41,12 @@ export function BuildBadge() {
   const channel = info?.build.channel ?? (import.meta.env.DEV ? "dev" : "beta");
   const dev = channel === "dev";
   const label = dev ? "DEV" : "BETA";
+  // Amber, not red: red beside a Capture control reads as "recording", and
+  // a development build is a note, not an alarm.
   const tone = dev
-    ? "border-danger/40 bg-danger/15 text-danger hover:bg-danger/25 aria-expanded:bg-danger/25"
+    ? "border-warn/40 bg-warn/15 text-warn hover:bg-warn/25 aria-expanded:bg-warn/25"
     : "border-highlight/40 bg-highlight/15 text-highlight hover:bg-highlight/25 aria-expanded:bg-highlight/25";
-  const dot = dev ? "bg-danger" : "bg-highlight";
+  const dot = dev ? "bg-warn" : "bg-highlight";
   const built = info ? formatBuilt(info.build.built_at ?? 0) : null;
   const summary = info ? `Dive ${info.version} (${label.toLowerCase()} build ${info.build.number}, built ${built ?? "unknown"})` : "";
 
@@ -55,22 +58,24 @@ export function BuildBadge() {
 
   return (
     <div ref={ref} className="relative">
-      <button
-        type="button"
-        aria-label={`${dev ? "Development" : "Beta"} build`}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className={`pressable flex h-5 shrink-0 items-center gap-1.5 rounded-full border px-2 font-mono text-[10px] font-semibold tracking-[0.12em] transition-[color,background-color,transform] ${tone}`}
-      >
-        <span className={`size-1.5 rounded-full ${dot}`} aria-hidden />
-        {label}
-      </button>
+      <Tooltip label={dev ? "Development build · details" : "Beta release · details"} side="bottom" align="end">
+        <button
+          type="button"
+          aria-label={`${dev ? "Development" : "Beta"} build`}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          className={`pressable flex h-5 shrink-0 items-center gap-1.5 rounded-full border px-2 font-mono text-[10px] font-semibold tracking-[0.12em] transition-[color,background-color,transform] ${tone}`}
+        >
+          <span className={`size-1.5 rounded-full ${dot}`} aria-hidden />
+          {label}
+        </button>
+      </Tooltip>
       {open && (
         <div ref={panel} role="dialog" aria-label="Build details" className="absolute right-0 z-50 mt-1.5 w-64 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl">
           <div className="flex items-center gap-2 px-2 pt-1 pb-1.5">
             <span className={`size-1.5 rounded-full ${dot}`} aria-hidden />
-            <span className="text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">{dev ? "Development build" : "Beta release"}</span>
+            <span className="text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">{dev ? "Development build" : "Beta release"}</span>
           </div>
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 px-2 py-1">
             <Fact label="Version" value={info?.version} />
