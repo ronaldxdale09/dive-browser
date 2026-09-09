@@ -80,6 +80,7 @@ export function TabStrip() {
   const close = useBrowser((s) => s.closeTab);
   const openTab = useBrowser((s) => s.openTab);
   const toggle = useBrowser((s) => s.toggle);
+  const openPalette = useBrowser((s) => s.openPalette);
   const setPinned = useBrowser((s) => s.setPinned);
   const setTier = useBrowser((s) => s.setTier);
   const detachTab = useBrowser((s) => s.detachTab);
@@ -172,7 +173,7 @@ export function TabStrip() {
           title={`${hidden} more ${hidden === 1 ? "tab" : "tabs"} out of view · Search tabs (${formatChord(chordsByCommand()["tabs.search"] ?? "")})`}
           data-tauri-drag-region="false"
           onMouseDown={(e) => e.stopPropagation()}
-          onClick={() => toggle("palette", true)}
+          onClick={() => openPalette("tabs")}
           className="pressable h-6 shrink-0 rounded-full bg-surface-2 px-2 font-mono text-[10.5px] text-ink-2 tabular-nums hover:bg-surface-3 hover:text-ink"
         >
           +{hidden}

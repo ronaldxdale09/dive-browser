@@ -98,6 +98,26 @@ describe("tab context menu", () => {
 });
 
 describe("crowded strip", () => {
+  it("opens the tab search, not the plain palette, from the out-of-view badge", () => {
+    const many = Array.from({ length: 8 }, (_, i) => ({ ...tab, id: `t${i}`, position: i, title: `Tab ${i}` }));
+    const openPalette = vi.fn();
+    useBrowser.setState({ tabs: many, activeTab: "t3", activeWorkspace: "w1", openPalette });
+    // jsdom lays nothing out; pretend the last tabs sit past the strip's right edge.
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      // Each tab wrapper is 100px wide in a 600px strip, so the last two poke past its edge.
+      const wrapper = this.getAttribute("role") === "presentation";
+      const index = wrapper && this.parentElement ? Array.from(this.parentElement.children).indexOf(this) : -1;
+      const left = index >= 0 ? index * 100 : 0;
+      const right = index >= 0 ? left + 90 : 600;
+      return { left, right, width: right - left, height: 30, top: 0, bottom: 30, x: left, y: 0, toJSON: () => ({}) } as DOMRect;
+    });
+    render(<TabStrip />);
+    const badge = screen.getByRole("button", { name: /out of view/ });
+    rect.mockRestore();
+    fireEvent.click(badge);
+    expect(openPalette).toHaveBeenCalledWith("tabs");
+  });
+
   it("keeps the active tab wide enough for a few words while the others give way", () => {
     const many = Array.from({ length: 8 }, (_, i) => ({ ...tab, id: `t${i}`, position: i, title: `Tab ${i}` }));
     useBrowser.setState({ tabs: many, activeTab: "t3", activeWorkspace: "w1" });

@@ -151,7 +151,7 @@ export function Palette() {
       <Command
         label="Command palette"
         role="dialog"
-        aria-label="New tab"
+        aria-label={tabsFirst ? "Search tabs" : "New tab"}
         aria-modal="true"
         shouldFilter={!!query}
         filter={paletteFilter}
@@ -165,7 +165,7 @@ export function Palette() {
             ref={input}
             value={query}
             onValueChange={setQuery}
-            placeholder="Search, enter a URL, or run a command"
+            placeholder={tabsFirst ? "Search open tabs, or enter a URL" : "Search, enter a URL, or run a command"}
             className="h-12 w-full bg-transparent text-sm outline-none placeholder:text-ink-3"
           />
         </div>
