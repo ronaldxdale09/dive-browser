@@ -57,6 +57,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- An essential tab tells assistive tech it is essential and its tooltip says it appears in every workspace; console level and repeat tags no longer stretch to the height of a multi-line message.
 - "Close other tabs" says how many it closed and offers Undo, which brings them all back in order; a plain mouse wheel over the tab strip scrolls it sideways.
 - The "+N" badge on a crowded tab strip opens the tab search (open tabs first, "Search open tabs" in the field) instead of the plain new-tab palette.
 - The Console folds a run of identical lines into one row with a "×N" count, so a polling loop's repeats no longer push the line that matters off screen.

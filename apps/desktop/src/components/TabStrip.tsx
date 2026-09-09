@@ -494,8 +494,8 @@ function EssentialTab({ tab: t, active, loading, onActivate, onMenu }: { tab: Ta
         e.preventDefault();
         onMenu(e.clientX, e.clientY);
       }}
-      title={label(t)}
-      aria-label={label(t)}
+      title={`${label(t)} (essential, in every workspace)`}
+      aria-label={`${label(t)}, essential`}
       data-essential
       data-tauri-drag-region="false"
       onMouseDown={(e) => e.stopPropagation()}

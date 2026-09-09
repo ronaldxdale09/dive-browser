@@ -274,9 +274,9 @@ const Row = memo(function Row({
     >
       <span className="w-14 shrink-0 text-ink-3">{entry.source}</span>
       {/* Colour alone must not carry the level: a warning and an error say so. */}
-      {(entry.level === "warn" || entry.level === "error") && <span className="shrink-0 rounded bg-current/10 px-1 text-[10px] uppercase">{entry.level}</span>}
+      {(entry.level === "warn" || entry.level === "error") && <span className="shrink-0 self-start rounded bg-current/10 px-1 text-[10px] uppercase">{entry.level}</span>}
       {entry.repeats > 1 && (
-        <span className="shrink-0 rounded-full bg-surface-3 px-1.5 text-[10px] text-ink-2" title={`${entry.repeats} identical lines in a row`} aria-label={`${entry.repeats} times`}>
+        <span className="shrink-0 self-start rounded-full bg-surface-3 px-1.5 text-[10px] text-ink-2" title={`${entry.repeats} identical lines in a row`} aria-label={`${entry.repeats} times`}>
           ×{entry.repeats}
         </span>
       )}

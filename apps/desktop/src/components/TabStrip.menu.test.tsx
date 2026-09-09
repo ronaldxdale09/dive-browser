@@ -97,6 +97,16 @@ describe("tab context menu", () => {
   });
 });
 
+describe("essential tabs", () => {
+  it("say they are essential, so a screen reader can tell them from the workspace's tabs", () => {
+    const essential = { ...tab, id: "e1", title: "Mail", tier: "essential", workspace_id: null } as unknown as typeof tab;
+    useBrowser.setState({ tabs: [essential, { ...tab, id: "t1", title: "Docs" }], activeTab: "t1", activeWorkspace: "w1" });
+    render(<TabStrip />);
+    expect(screen.getByRole("tab", { name: "Mail, essential" }).getAttribute("title")).toBe("Mail (essential, in every workspace)");
+    expect(screen.getByRole("tab", { name: /^Docs/ })).toBeTruthy();
+  });
+});
+
 describe("crowded strip", () => {
   it("opens the tab search, not the plain palette, from the out-of-view badge", () => {
     const many = Array.from({ length: 8 }, (_, i) => ({ ...tab, id: `t${i}`, position: i, title: `Tab ${i}` }));
