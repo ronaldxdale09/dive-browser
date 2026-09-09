@@ -242,6 +242,24 @@ describe("Toolbar", () => {
     expect(document.activeElement).not.toBe(input);
   });
 
+  it("reads the site first: host in ink, path dimmed, and a glyph that says what the connection is", async () => {
+    useBrowser.setState({ tabs: [{ ...tab, url: "https://www.youtube.com/watch?v=abc" }] });
+    render(<Toolbar />);
+    const glyph = screen.getByRole("img", { name: "Secure connection" });
+    expect(glyph.getAttribute("data-security")).toBe("secure");
+    const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
+    expect(input.value).toBe("www.youtube.com/watch?v=abc");
+    // The visible layer splits what the input holds whole.
+    expect(screen.getByText("www.youtube.com").className).toContain("text-ink");
+    expect(screen.getByText("/watch?v=abc").className).toContain("text-ink-3");
+    act(() => input.focus());
+    expect(input.className).toContain("text-ink");
+    expect(screen.queryByText("/watch?v=abc")).toBeNull();
+    act(() => useBrowser.setState({ tabs: [{ ...tab, url: "http://localhost:3000/" }] }));
+    act(() => input.blur());
+    expect(screen.getByRole("img", { name: /plain http/ })).toBeTruthy();
+  });
+
   it("associates every button around the address field with a custom tooltip", () => {
     render(<Toolbar />);
 

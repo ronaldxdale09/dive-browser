@@ -1,6 +1,6 @@
 import { isPrivateWindow } from "../lib/privateMode";
-import { prettyUrl } from "../lib/prettyUrl";
-import { Captions, House, ScrollText, Lock, MoreHorizontal, RotateCw, Search, TriangleAlert, X, Menu } from "lucide-react";
+import { prettyUrl, splitAddress } from "../lib/prettyUrl";
+import { Captions, Globe, House, ScrollText, Lock, MoreHorizontal, RotateCw, Search, TriangleAlert, X, Menu } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FOCUS_ADDRESS } from "../lib/commands";
@@ -109,9 +109,30 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
           finishEditing();
         }}
       >
-        <span data-security={!current ? "none" : failed ? "failed" : secure ? "secure" : "none"} className="grid shrink-0 place-items-center">
-          <Icon icon={current ? (failed ? TriangleAlert : secure ? Lock : Search) : Search} size={13} className={failed ? "text-warn" : "text-ink-3"} />
-        </span>
+        {/* The glyph says what kind of thing the bar holds: a search when
+            it is empty, a lock for https, a globe for plain http, a warning
+            for a page that did not load. Each explains itself on hover. */}
+        {(() => {
+          const kind = !current ? "none" : failed ? "failed" : secure ? "secure" : "plain";
+          const glyph = kind === "failed" ? TriangleAlert : kind === "secure" ? Lock : kind === "plain" ? Globe : Search;
+          const meaning = kind === "failed" ? "This page could not be loaded" : kind === "secure" ? "Secure connection" : kind === "plain" ? "Not secure: this page uses plain http" : "Search or enter an address";
+          return (
+            <Tooltip label={meaning} side="bottom" align="start">
+              <span role="img" aria-label={meaning} data-security={kind === "plain" ? "none" : kind} className="grid shrink-0 place-items-center">
+                <Icon icon={glyph} size={13} className={kind === "failed" ? "text-warn" : "text-ink-3"} />
+              </span>
+            </Tooltip>
+          );
+        })()}
+        {/* At rest the host is set in ink and the path in a quieter tone, so a
+            glance reads the site; the input underneath keeps the whole text
+            for selection, copying and assistive tech. */}
+        {!editing && current && display && (
+          <span aria-hidden className="pointer-events-none absolute inset-y-0 left-[34px] right-3 flex items-center overflow-hidden text-[13px] whitespace-nowrap">
+            <span className="text-ink">{splitAddress(url).host}</span>
+            <span className="truncate text-ink-3">{splitAddress(url).rest}</span>
+          </span>
+        )}
         <input
           ref={inputRef}
           aria-label="Address"
@@ -145,7 +166,7 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
           aria-autocomplete="list"
           aria-controls={rows.length > 0 ? listId : undefined}
           aria-activedescendant={rows.length > 0 ? optionId(listId, highlight) : undefined}
-          className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
+          className={`min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-ink-3 ${!editing && current && display ? "text-transparent" : "text-ink"}`}
         />
         <AddressSuggestions id={listId} rows={rows} highlight={highlight} onHighlight={setHighlight} onPick={pick} />
       </form>

@@ -13,3 +13,19 @@ export function prettyUrl(url: string): string {
     return url;
   }
 }
+
+/**
+ * The resting address in two parts, so the bar can set the host in ink and
+ * the path in a quieter tone: the site is what a glance should read.
+ */
+export function splitAddress(url: string): { host: string; rest: string } {
+  const shown = prettyUrl(url);
+  if (url.startsWith("dive://")) return { host: shown, rest: "" };
+  try {
+    const u = new URL(url);
+    if ((u.protocol === "http:" || u.protocol === "https:") && shown.startsWith(u.host)) return { host: u.host, rest: shown.slice(u.host.length) };
+  } catch {
+    // Not a URL: shown whole.
+  }
+  return { host: shown, rest: "" };
+}
