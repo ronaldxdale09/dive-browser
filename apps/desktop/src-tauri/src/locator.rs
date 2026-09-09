@@ -256,6 +256,61 @@ pub async fn component(session: &CdpSession, locator: &str) -> Result<Value, Fai
     component_held(session, locator).await
 }
 
+/// Choose an option on the held element, which has to be a `<select>`.
+/// `value` wins over `label`; the result says what was chosen, or which
+/// options exist when nothing matched.
+pub async fn select_held(
+    session: &CdpSession,
+    value: Option<&str>,
+    label: Option<&str>,
+) -> Result<Value, Failure> {
+    let expression = format!(
+        r"(() => {{
+  const el = window.__diveHeld;
+  if (!el || el.tagName !== 'SELECT') return {{ error: 'not_select', tag: el ? el.tagName.toLowerCase() : null }};
+  const want = {value};
+  const wantLabel = {label};
+  const options = Array.from(el.options);
+  const norm = (s) => s.trim().toLowerCase();
+  let option = null;
+  if (want !== null) option = options.find((o) => o.value === want) || null;
+  else if (wantLabel !== null) option = options.find((o) => norm(o.label) === norm(wantLabel) || norm(o.text) === norm(wantLabel)) || null;
+  if (!option) return {{ error: 'no_option', options: options.slice(0, 50).map((o) => ({{ value: o.value, label: o.label, disabled: o.disabled }})) }};
+  if (option.disabled) return {{ error: 'disabled', value: option.value, label: option.label }};
+  el.focus();
+  const before = el.value;
+  el.value = option.value;
+  const changed = el.value !== before;
+  if (changed) {{
+    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+  }}
+  return {{ value: option.value, label: option.label, changed }};
+}})()",
+        value = json!(value),
+        label = json!(label),
+    );
+    eval(session, expression).await
+}
+
+/// Remember the element under a viewport point as `window.__diveHeld`.
+pub async fn component_hold_at(session: &CdpSession, x: f64, y: f64) -> Result<(), Failure> {
+    let held = eval(
+        session,
+        format!(
+            "window.__diveHeld = document.elementFromPoint({x}, {y}); Boolean(window.__diveHeld)"
+        ),
+    )
+    .await?;
+    if held.as_bool() == Some(true) {
+        Ok(())
+    } else {
+        Err(Failure::NotFound {
+            locator: format!("point({x}, {y})"),
+        })
+    }
+}
+
 /// The React component underneath a viewport point.
 pub async fn component_at(session: &CdpSession, x: f64, y: f64) -> Result<Value, Failure> {
     eval(

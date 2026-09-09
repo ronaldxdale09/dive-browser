@@ -230,6 +230,29 @@ pub struct ScrollParams {
     pub delta_y: f64,
 }
 
+/// Move through a tab's history, or reload it.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct HistoryParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// `back`, `forward` or `reload`.
+    pub action: String,
+}
+
+/// Choose an option in a `<select>`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SelectParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// Which select element.
+    #[serde(flatten)]
+    pub target: Target,
+    /// The option's `value` attribute.
+    pub value: Option<String>,
+    /// The option's visible text, matched whole and case-insensitively when `value` is not given.
+    pub label: Option<String>,
+}
+
 /// Answer the JavaScript dialog a page has open.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub struct DialogParams {

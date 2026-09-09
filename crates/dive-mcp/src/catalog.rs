@@ -5,7 +5,9 @@ use dive_core::TabId;
 
 use crate::browser::{Browser, TabInfo};
 use crate::error::BrowserError;
-use crate::params::{AppearanceParams, DialogParams, ResizeParams, Target, WaitForParams};
+use crate::params::{
+    AppearanceParams, DialogParams, ResizeParams, SelectParams, Target, WaitForParams,
+};
 use crate::server::DiveServer;
 
 /// One tool as the server advertises it. The single source of the tool
@@ -151,6 +153,30 @@ impl Browser for NoBrowser {
         _target: Target,
         _delta_x: f64,
         _delta_y: f64,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn history(
+        &self,
+        _tab: TabId,
+        _action: String,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_hover(
+        &self,
+        _tab: TabId,
+        _target: Target,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_select(
+        &self,
+        _tab: TabId,
+        _params: SelectParams,
     ) -> Result<serde_json::Value, BrowserError> {
         Err(BrowserError::Other("no browser behind the catalog".into()))
     }

@@ -207,6 +207,37 @@ pub async fn click_at(
     Ok(())
 }
 
+/// Move the pointer to a point and leave it there, for hover menus,
+/// tooltips and `:hover` styles.
+pub async fn hover_at(
+    session: &CdpSession,
+    app: Option<&AppHandle<Runtime>>,
+    tab: TabId,
+    x: f64,
+    y: f64,
+    label: &str,
+    visible: bool,
+) -> AppResult<()> {
+    announce(
+        app,
+        &AgentPointer {
+            tab_id: tab,
+            phase: "move".into(),
+            x,
+            y,
+            label: label.to_owned(),
+        },
+        visible,
+    )
+    .await;
+    let [moved, _, _] = mouse_events(x, y);
+    session
+        .call("Input.dispatchMouseEvent", moved)
+        .await
+        .map_err(AppError::new)?;
+    Ok(())
+}
+
 fn mouse_events(x: f64, y: f64) -> [serde_json::Value; 3] {
     [
         json!({

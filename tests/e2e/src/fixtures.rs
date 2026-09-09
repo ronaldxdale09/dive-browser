@@ -37,8 +37,8 @@ use dive_core::model::{
 };
 use dive_core::store::Store;
 use dive_mcp::{
-    AppearanceParams, Browser, BrowserError, DialogParams, ResizeParams, TabInfo, Target,
-    WaitForParams,
+    AppearanceParams, Browser, BrowserError, DialogParams, ResizeParams, SelectParams, TabInfo,
+    Target, WaitForParams,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -518,6 +518,30 @@ impl Browser for TestFakeBrowser {
         delta_y: f64,
     ) -> Result<serde_json::Value, BrowserError> {
         Ok(json!({ "delta_x": delta_x, "delta_y": delta_y }))
+    }
+
+    async fn history(
+        &self,
+        _tab: TabId,
+        action: String,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({ "action": action }))
+    }
+
+    async fn page_hover(
+        &self,
+        _tab: TabId,
+        _target: Target,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({ "hovered": true }))
+    }
+
+    async fn page_select(
+        &self,
+        _tab: TabId,
+        _params: SelectParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({ "selected": true }))
     }
 
     async fn page_dialog(

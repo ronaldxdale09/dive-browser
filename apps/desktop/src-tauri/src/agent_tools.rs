@@ -5,7 +5,9 @@
 use base64::Engine as _;
 use dive_agent::{ToolResult, ToolSpec, ToolUse};
 use dive_core::TabId;
-use dive_mcp::{AppearanceParams, Browser, DialogParams, ResizeParams, Target, WaitForParams};
+use dive_mcp::{
+    AppearanceParams, Browser, DialogParams, ResizeParams, SelectParams, Target, WaitForParams,
+};
 use serde_json::{Value, json};
 
 const MAX_AGENT_SCREENSHOT_BYTES: usize = 8 * 1024 * 1024;
@@ -73,6 +75,21 @@ pub fn specs() -> Vec<ToolSpec> {
             "page_wait_for",
             "Wait until every condition given holds: a locator matches, text appears, the URL contains a fragment, loading finishes. Call this after anything that starts work instead of guessing how long it takes.".into(),
             obj(json!({"tab_id": tab, "locator": locator, "text": {"type": "string"}, "url_includes": {"type": "string"}, "load": {"type": "boolean"}, "timeout_ms": {"type": "integer"}}), &[]),
+        ),
+        spec(
+            "page_hover",
+            "Move the pointer over an element without clicking: hover menus, tooltips, :hover styles. Same locator, ref or x/y as page_click.".into(),
+            obj(json!({"tab_id": tab, "locator": locator, "ref": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}}), &[]),
+        ),
+        spec(
+            "page_select",
+            "Choose an option in a <select> dropdown by value or visible label; clicking a native dropdown opens a menu that cannot be seen.".into(),
+            obj(json!({"tab_id": tab, "locator": locator, "ref": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "value": {"type": "string"}, "label": {"type": "string"}}), &[]),
+        ),
+        spec(
+            "tab_history",
+            "Go back, go forward or reload the tab; then page_wait_for load true.".into(),
+            obj(json!({"tab_id": tab, "action": {"type": "string", "enum": ["back", "forward", "reload"]}}), &["action"]),
         ),
         spec(
             "page_dialog",
@@ -167,6 +184,9 @@ pub fn is_action(name: &str) -> bool {
             | "page_appearance"
             | "page_throttle"
             | "page_dialog"
+            | "page_hover"
+            | "page_select"
+            | "tab_history"
             | "tab_navigate"
             | "tab_activate"
             | "tab_close"
@@ -369,6 +389,27 @@ async fn execute<B: Browser>(
                 .await
                 .map_err(err)?,
         ),
+        "page_hover" => text(
+            browser
+                .page_hover(tab()?, target_of(input))
+                .await
+                .map_err(err)?,
+        ),
+        "page_select" => text(
+            browser
+                .page_select(
+                    tab()?,
+                    SelectParams {
+                        tab_id: None,
+                        target: target_of(input),
+                        value: input["value"].as_str().map(str::to_owned),
+                        label: input["label"].as_str().map(str::to_owned),
+                    },
+                )
+                .await
+                .map_err(err)?,
+        ),
+        "tab_history" => text(browser.history(tab()?, s("action")?).await.map_err(err)?),
         "page_dialog" => text(
             browser
                 .page_dialog(

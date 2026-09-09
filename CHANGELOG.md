@@ -11,6 +11,7 @@ A hundred hands-on passes over the daily surfaces, each driven live on a test pr
 
 ### Added
 - Pages' `alert`, `confirm`, `prompt` and leave-page questions show as a card over the page instead of a native modal, so a `confirm()` no longer freezes every window, the MCP server and the agent. Enter accepts, Escape cancels, and a prompt opens with the cursor in its field. Over MCP and for the agent, `page_inspect` reports an open dialog under `dialog`, the new `page_dialog` tool answers it (OK or Cancel, with text for a prompt), and the input tools say which dialog is open instead of timing out.
+- Three more MCP and agent tools: `tab_history` (back, forward, reload), `page_select` (choose a `<select>` option by value or visible label, with the page's input and change events; a wrong option lists the ones that exist) and `page_hover` (move the pointer without clicking, for hover menus and tooltips).
 - The Network panel's request detail says what a workspace rule did to the request ("Header set by a rule: …", "Blocked by a rule", "Answered by a mock rule"), since the headers it lists are the ones the page sent.
 - The Network panel's request detail lays JSON bodies out, and offers "Copy as cURL" (method, the page's own headers, body) and "Copy body". Copies go through the host, so they work whichever view has focus.
 - An MCP call with an argument the tool does not declare (`id` for `tab_id`, `selector` for `locator`) is refused with the accepted names, instead of being dropped so the call quietly acts on the active tab.

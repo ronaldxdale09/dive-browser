@@ -6,7 +6,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::BrowserError;
-use crate::params::{AppearanceParams, DialogParams, ResizeParams, Target, WaitForParams};
+use crate::params::{
+    AppearanceParams, DialogParams, ResizeParams, SelectParams, Target, WaitForParams,
+};
 
 /// What a tool caller gets to know about a tab.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -96,6 +98,20 @@ pub trait Browser: Send + Sync + 'static {
         target: Target,
         delta_x: f64,
         delta_y: f64,
+    ) -> Result<serde_json::Value, BrowserError>;
+    /// Go back, go forward or reload; `action` is one of those words.
+    async fn history(&self, tab: TabId, action: String) -> Result<serde_json::Value, BrowserError>;
+    /// Move the pointer over an element without clicking.
+    async fn page_hover(
+        &self,
+        tab: TabId,
+        target: Target,
+    ) -> Result<serde_json::Value, BrowserError>;
+    /// Choose an option in a `<select>` by value or visible label.
+    async fn page_select(
+        &self,
+        tab: TabId,
+        params: SelectParams,
     ) -> Result<serde_json::Value, BrowserError>;
     /// Answer the dialog (`alert`, `confirm`, `prompt`, `beforeunload`) the
     /// page has open, which blocks the page's script until it is answered.

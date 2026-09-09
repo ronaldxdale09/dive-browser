@@ -195,6 +195,30 @@ impl Browser for Fake {
     ) -> Result<serde_json::Value, BrowserError> {
         Ok(serde_json::json!({"delta_x": delta_x, "delta_y": delta_y}))
     }
+    async fn history(
+        &self,
+        _tab: TabId,
+        action: String,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"action": action}))
+    }
+
+    async fn page_hover(
+        &self,
+        _tab: TabId,
+        target: Target,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"hovered": target.locator}))
+    }
+
+    async fn page_select(
+        &self,
+        _tab: TabId,
+        params: SelectParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"selected": params.value.or(params.label)}))
+    }
+
     async fn page_dialog(
         &self,
         _tab: TabId,

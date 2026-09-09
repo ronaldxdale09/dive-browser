@@ -17,9 +17,9 @@ use crate::browser::Browser;
 use crate::error::BrowserError;
 use crate::params::{
     AppearanceParams, BodyParams, ClickParams, ComponentParams, DialogParams, EvaluateParams,
-    LOCATOR_GRAMMAR, LocateParams, MAX_WAIT_MS, NavigateParams, OpenParams, PressParams,
-    ResizeParams, RulesParams, ScreenshotParams, ScrollParams, TabRef, TailParams, ThrottleParams,
-    TypeParams, WaitForParams,
+    HistoryParams, LOCATOR_GRAMMAR, LocateParams, MAX_WAIT_MS, NavigateParams, OpenParams,
+    PressParams, ResizeParams, RulesParams, ScreenshotParams, ScrollParams, SelectParams, TabRef,
+    TailParams, ThrottleParams, TypeParams, WaitForParams,
 };
 
 #[cfg(test)]
@@ -166,6 +166,19 @@ impl<B: Browser> DiveServer<B> {
         Ok(CallToolResult::success(vec![ContentBlock::text("ok")]))
     }
 
+    /// Back, forward, reload.
+    #[tool(
+        name = "tab_history",
+        description = "Go back or forward in a tab's history, or reload it: action is 'back', 'forward' or 'reload'. Follow it with page_wait_for load:true; reload is how to see a change after page_throttle or rules_set."
+    )]
+    async fn tab_history(
+        &self,
+        Parameters(p): Parameters<HistoryParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id).await?;
+        json_result(&self.browser.history(tab, p.action).await?)
+    }
+
     /// Page text.
     #[tool(
         name = "page_text",
@@ -301,6 +314,32 @@ impl<B: Browser> DiveServer<B> {
         json_result(&self.browser.page_click(tab, p.target).await?)
     }
 
+    /// Hover.
+    #[tool(
+        name = "page_hover",
+        description = "Move the pointer over an element without clicking, to open a hover menu, reveal a tooltip or trigger a :hover style. Takes the same locator, ref or x/y as page_click. Follow it with page_inspect or page_screenshot to see what appeared."
+    )]
+    async fn page_hover(
+        &self,
+        Parameters(p): Parameters<ClickParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id).await?;
+        json_result(&self.browser.page_hover(tab, p.target).await?)
+    }
+
+    /// Select.
+    #[tool(
+        name = "page_select",
+        description = "Choose an option in a <select> dropdown by value or by its visible label, firing the input and change events the page listens for. Clicking a native dropdown opens a menu CDP cannot see, so use this instead. Custom dropdowns built from divs are clicked like anything else."
+    )]
+    async fn page_select(
+        &self,
+        Parameters(p): Parameters<SelectParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id.clone()).await?;
+        json_result(&self.browser.page_select(tab, p).await?)
+    }
+
     /// Type.
     #[tool(
         name = "page_type",
@@ -430,7 +469,7 @@ impl<B: Browser> DiveServer<B> {
     /// Throttle the network.
     #[tool(
         name = "page_throttle",
-        description = "Throttle a tab's network to check loading behaviour: 'offline', 'slow-3g', 'fast-3g', or 'none' to clear it. Combine with tab_navigate (to the same address) and page_wait_for to see what a slow connection actually renders."
+        description = "Throttle a tab's network to check loading behaviour: 'offline', 'slow-3g', 'fast-3g', or 'none' to clear it. Combine with tab_history reload and page_wait_for to see what a slow connection actually renders."
     )]
     async fn page_throttle(
         &self,

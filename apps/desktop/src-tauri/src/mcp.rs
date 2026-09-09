@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use dive_cdp::CdpSession;
 use dive_core::TabId;
 use dive_mcp::{
-    Addressed, AppearanceParams, Browser, BrowserError, DialogParams, ResizeParams, TabInfo,
-    Target, WaitForParams,
+    Addressed, AppearanceParams, Browser, BrowserError, DialogParams, ResizeParams, SelectParams,
+    TabInfo, Target, WaitForParams,
 };
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager};
@@ -381,7 +381,7 @@ impl AppBrowser {
                 let label = if found.name.is_empty() {
                     found.tag.clone()
                 } else {
-                    format!("{} {:?}", found.role, found.name)
+                    format!("{} {:?}", found.role, found.name).trim().to_owned()
                 };
                 Ok((found.x, found.y, label))
             }
@@ -424,7 +424,9 @@ impl AppBrowser {
                 } else {
                     locator::focus_any(session, &selector).await?
                 };
-                Ok(Some(format!("{} {:?}", found.role, found.name)))
+                Ok(Some(
+                    format!("{} {:?}", found.role, found.name).trim().to_owned(),
+                ))
             }
             Addressed::Ref(reference) => {
                 let node = self.node_for(tab, &reference)?;
@@ -961,6 +963,116 @@ impl Browser for AppBrowser {
             tokio::time::sleep(std::time::Duration::from_millis(SCROLL_SETTLE_MS)).await;
             let page = locator::page(&session, 0).await?;
             Ok(json!({"scroll": page["scroll"], "scroll_height": page["scroll_height"]}))
+        })
+        .await
+    }
+
+    async fn history(&self, tab: TabId, action: String) -> Result<Value, BrowserError> {
+        let action = match action.trim().to_ascii_lowercase().as_str() {
+            "back" => "back",
+            "forward" => "forward",
+            "reload" | "refresh" => "reload",
+            _ => {
+                return Err(BrowserError::BadRequest(
+                    "action must be back, forward or reload".into(),
+                ));
+            }
+        };
+        self.ensure_view(tab).await?;
+        self.tracked(tab, "tab_history", Some(action.into()), async {
+            self.on_main(move |app| {
+                let state = app.state::<AppState>();
+                let step: fn(&tauri::Webview<Runtime>) -> tauri::Result<()> = match action {
+                    "back" => tauri::Webview::go_back,
+                    "forward" => tauri::Webview::go_forward,
+                    _ => tauri::Webview::reload,
+                };
+                crate::commands::with_view(&state, tab, step).map_err(|e| other(e.message))
+            })
+            .await??;
+            Ok(json!({
+                "action": action,
+                "hint": "Call page_wait_for with load:true before reading the page.",
+            }))
+        })
+        .await
+    }
+
+    async fn page_hover(&self, tab: TabId, target: Target) -> Result<Value, BrowserError> {
+        let session = self.action_session_for(tab).await?;
+        let described = target.locator.clone().or_else(|| target.r#ref.clone());
+        self.tracked(
+            tab,
+            "page_hover",
+            described,
+            self.or_dialog(
+                tab,
+                async {
+                    let (x, y, label) = self.point_for(tab, &session, &target).await?;
+                    automation::hover_at(
+                        &session,
+                        Some(&self.app),
+                        tab,
+                        x,
+                        y,
+                        &label,
+                        self.on_screen(tab),
+                    )
+                    .await
+                    .map_err(|e| other(e.message))?;
+                    Ok(json!({"hovering": label, "x": x, "y": y, "hint": "The pointer stays here until the next input; call page_inspect or page_screenshot to see what appeared."}))
+                },
+                |dialog| Ok(dialog_opened(dialog, "Hovering")),
+            ),
+        )
+        .await
+    }
+
+    async fn page_select(&self, tab: TabId, params: SelectParams) -> Result<Value, BrowserError> {
+        if params.value.is_none() && params.label.is_none() {
+            return Err(BrowserError::BadRequest(
+                "give value (the option's value attribute) or label (its visible text)".into(),
+            ));
+        }
+        let session = self.action_session_for(tab).await?;
+        let target = params.target;
+        let described = target.locator.clone().or_else(|| target.r#ref.clone());
+        self.tracked(tab, "page_select", described.clone(), async {
+            let named = match target.resolve()? {
+                Addressed::Locator(selector) => {
+                    locator::hold(&session, &selector).await?;
+                    selector
+                }
+                Addressed::Ref(_) | Addressed::Point { .. } => {
+                    let (x, y, label) = self.point_for(tab, &session, &target).await?;
+                    locator::component_hold_at(&session, x, y).await?;
+                    label
+                }
+            };
+            let outcome =
+                locator::select_held(&session, params.value.as_deref(), params.label.as_deref())
+                    .await?;
+            match outcome["error"].as_str() {
+                Some("not_select") => Err(BrowserError::BadRequest(format!(
+                    "{named} is a <{}>, not a <select>; a custom dropdown is clicked like anything else",
+                    outcome["tag"].as_str().unwrap_or("?")
+                ))),
+                Some("no_option") => Err(BrowserError::BadRequest(format!(
+                    "{named} has no option {}; its options are {}",
+                    params.value.or(params.label).map(|s| format!("{s:?}")).unwrap_or_default(),
+                    outcome["options"]
+                ))),
+                Some("disabled") => Err(BrowserError::NotAllowed {
+                    operation: "page_select".into(),
+                    reason: format!("option {} is disabled", outcome["label"]),
+                }),
+                _ => Ok(json!({
+                    "selected": named,
+                    "value": outcome["value"],
+                    "label": outcome["label"],
+                    "changed": outcome["changed"],
+                })),
+            }
         })
         .await
     }
