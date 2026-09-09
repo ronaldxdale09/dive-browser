@@ -76,7 +76,7 @@ export function Shortcuts() {
   const areas = groupShortcuts(SHORTCUTS, known);
 
   return (
-    <div ref={root} className={`fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-[2px] ${className}`} onMouseDown={close}>
+    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 grid place-items-center ${className}`} onMouseDown={close}>
       <div
         role="dialog"
         aria-modal="true"

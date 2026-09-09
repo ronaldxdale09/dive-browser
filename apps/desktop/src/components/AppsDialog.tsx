@@ -7,11 +7,20 @@ import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
-import { BuildBadge } from "./BuildBadge";
 import { AgentIcon } from "./agent/AgentIcon";
 import { Icon, IconButton } from "./Icon";
 
-const COLUMNS = 3;
+/**
+ * How many cards share a row right now. The grid is `auto-fill`, so the
+ * count comes from the resolved template; where a layout engine does not
+ * resolve it (tests), three is the desktop answer.
+ */
+function columnsOf(grid: HTMLElement | null): number {
+  const row = grid?.querySelector<HTMLElement>("[data-shelf]");
+  const resolved = row ? getComputedStyle(row).gridTemplateColumns : "";
+  const count = resolved.split(" ").filter((part) => part.endsWith("px")).length;
+  return count > 0 ? count : 3;
+}
 
 /**
  * The Apps launcher: Dive's tools on one screen, under the shelf each
@@ -45,7 +54,8 @@ export function AppsDialog() {
     const cards = Array.from(grid.current?.querySelectorAll<HTMLButtonElement>("[data-app]:not(:disabled)") ?? []);
     const i = cards.findIndex((c) => c === document.activeElement);
     if (i === -1) return;
-    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : e.key === "ArrowDown" ? COLUMNS : e.key === "ArrowUp" ? -COLUMNS : e.key === "Home" ? -i : e.key === "End" ? cards.length - 1 - i : 0;
+    const columns = columnsOf(grid.current);
+    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : e.key === "ArrowDown" ? columns : e.key === "ArrowUp" ? -columns : e.key === "Home" ? -i : e.key === "End" ? cards.length - 1 - i : 0;
     if (!step) return;
     const next = cards[Math.max(0, Math.min(cards.length - 1, i + step))];
     if (next) {
@@ -55,8 +65,11 @@ export function AppsDialog() {
   };
 
   return (
-    <div ref={root} className={`fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-[2px] ${className}`} onMouseDown={close}>
-      <div role="dialog" aria-modal="true" aria-label="Apps" onMouseDown={(e) => e.stopPropagation()} className="flex max-h-[86vh] w-[780px] max-w-[94vw] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl">
+    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 grid place-items-center ${className}`} onMouseDown={close}>
+      {/* Sized to its content and to the window: three cards across on a
+          desktop, two below 900px, one below 640px, never taller than the
+          window leaves room for. */}
+      <div role="dialog" aria-modal="true" aria-label="Apps" onMouseDown={(e) => e.stopPropagation()} className="flex max-h-[min(86vh,720px)] w-[min(780px,calc(100vw-48px))] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4">
           <span className="grid size-8 place-items-center rounded-lg bg-accent/15 text-accent">
             <Icon icon={LayoutGrid} size={16} />
@@ -87,18 +100,17 @@ export function AppsDialog() {
               </button>
             )}
           </label>
-          <BuildBadge />
           <IconButton icon={X} label="Close apps" onClick={close} />
         </header>
         <div ref={grid} onKeyDown={onGridKey} className="min-h-0 flex-1 overflow-y-auto p-4">
           {shown.length === 0 ? (
             <p className="py-12 text-center text-xs text-ink-3">No app called “{query.trim()}”. Commands like find, print and settings live in the menu and the command palette (⌘K).</p>
           ) : (
-            <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-6">
               {shelves.map((shelf) => (
                 <section key={shelf.id} aria-label={shelf.name}>
                   <h3 className="mb-2 px-1 text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">{shelf.name}</h3>
-                  <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${COLUMNS}, minmax(0, 1fr))` }}>
+                  <div data-shelf className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
                     {shelf.apps.map((app) => (
                       <AppCard key={app.id} app={app} disabled={Boolean(app.needsTab && !activeTab)} onLaunch={launch} />
                     ))}
@@ -122,7 +134,7 @@ function AppCard({ app, disabled, onLaunch }: { app: AppEntry; disabled: boolean
       disabled={disabled}
       title={disabled ? `${app.name} needs an open tab` : undefined}
       onClick={() => onLaunch(app)}
-      className="group flex items-start gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:border-line-2 hover:bg-surface-2 focus-visible:border-accent focus-visible:outline-none disabled:opacity-45"
+      className="group flex items-start gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:border-line-2 hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-highlight focus-visible:ring-inset focus-visible:outline-none disabled:opacity-45"
     >
       <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-2 transition-colors group-hover:bg-surface-3 group-hover:text-ink">
         {app.id === "agent" ? <AgentIcon size={18} className="text-highlight" /> : <Icon icon={app.icon} size={18} />}

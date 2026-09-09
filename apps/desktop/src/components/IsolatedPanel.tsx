@@ -21,7 +21,7 @@ function Unavailable({ label, modal, onClose }: Omit<Props, "children">) {
     if (!modal && document.activeElement === document.body) close.current?.focus({ preventScroll: true });
   }, [modal]);
   const contents = <><p role="alert">{label} is unavailable. You can keep browsing.</p><button ref={close} type="button" onClick={onClose} aria-label={`Close ${label}`} className="mt-3 min-h-9 rounded-lg border border-line-2 px-3 text-sm text-ink hover:bg-surface-3">Close</button></>;
-  return modal ? <div ref={root} className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 backdrop-blur-[2px]">
+  return modal ? <div ref={root} className="overlay-backdrop fixed inset-0 z-50 grid place-items-center p-4">
     <div role="dialog" aria-modal="true" aria-label={`${label} unavailable`} className="w-full max-w-sm rounded-2xl border border-line-2 bg-surface p-5 text-sm text-ink-2 shadow-2xl">{contents}</div>
   </div> : <div className="grid h-full min-h-0 min-w-0 place-content-center overflow-auto bg-surface p-4 text-sm text-ink-2">{contents}</div>;
 }

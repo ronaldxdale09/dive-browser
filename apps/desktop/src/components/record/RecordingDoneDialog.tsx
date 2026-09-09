@@ -41,7 +41,7 @@ export function RecordingDoneDialog() {
   const fail = (e: unknown) => useBrowser.setState({ error: errorMessage(e) });
 
   return (
-    <div ref={root} className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] ${className}`} onMouseDown={close}>
+    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 ${className}`} onMouseDown={close}>
       <div
         role="dialog"
         aria-modal="true"

@@ -38,7 +38,7 @@ export function Extensions() {
   };
 
   return (
-    <div ref={root} className={`fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-[2px] ${className}`} onMouseDown={close}>
+    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 grid place-items-center ${className}`} onMouseDown={close}>
       <div role="dialog" aria-modal="true" aria-label="Extensions" onMouseDown={(event) => event.stopPropagation()} className="flex h-[min(680px,88vh)] w-[760px] max-w-[94vw] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-4">
           <span className="grid size-8 place-items-center rounded-lg bg-accent/10 text-accent"><Icon icon={Puzzle} size={17} /></span>
