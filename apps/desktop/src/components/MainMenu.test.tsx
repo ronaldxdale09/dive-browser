@@ -39,7 +39,7 @@ describe("MainMenu", () => {
       expect(labels.some((l) => l.startsWith("Bookmarks"))).toBe(false);
       expect(labels.some((l) => l.startsWith("History"))).toBe(false);
       expect(labels.some((l) => l.startsWith("Downloads"))).toBe(true);
-      expect(labels.some((l) => l.startsWith("Developer dock"))).toBe(true);
+      expect(labels.some((l) => l.startsWith("Apps"))).toBe(true);
     } finally {
       Reflect.deleteProperty(window, "__DIVE_PRIVATE__");
     }
@@ -47,9 +47,11 @@ describe("MainMenu", () => {
 
   it("lists the browser's pages and features with their shortcuts", () => {
     render(<MainMenu />);
-    for (const name of ["New tab", "Bookmarks", "History", "Downloads", "Recordings", "Settings", "Device simulator", "Record a video", "Live subtitles", "Print…"]) {
+    for (const name of ["New tab", "Bookmarks", "History", "Downloads", "Recordings", "Settings", "Apps", "Print…"]) {
       expect(screen.getByRole("menuitem", { name: new RegExp(name.replace("…", "")) })).toBeTruthy();
     }
+    // The tools are in Apps, not listed here a second time.
+    for (const tool of ["Device simulator", "Record a video", "Live subtitles", "Developer dock", "DevTools"]) expect(screen.queryByRole("menuitem", { name: new RegExp(tool) })).toBeNull();
     expect(screen.getByText("⌘T")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Zoom in" })).toBeTruthy();
   });

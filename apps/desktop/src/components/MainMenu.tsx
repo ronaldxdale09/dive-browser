@@ -3,9 +3,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   AppWindow,
   Shield,
-  Bug,
-  Camera,
-  Captions,
   ChevronRight,
   Clapperboard,
   Download,
@@ -13,21 +10,18 @@ import {
   History,
   Keyboard,
   LayoutGrid,
+  Info,
   Maximize,
   Minus,
-  PanelBottom,
   Plus,
   Printer,
   Search,
-  ScrollText,
   Settings2,
-  Smartphone,
   SquarePlus,
   Star,
   TextSearch,
   Trash2,
   Undo2,
-  Video,
   Wand2,
   X,
   Import,
@@ -42,10 +36,6 @@ import { useFocusTrap } from "../lib/useFocusTrap";
 import { screenUrl } from "./internal/InternalPage";
 import { useImportVideo } from "../screen/importVideo";
 import { useBrowser } from "../store/browser";
-import { useRecording } from "../store/recording";
-import { useRecorder } from "../store/recorder";
-import { usePicker } from "../store/simulator";
-import { AgentIcon } from "./agent/AgentIcon";
 import { Icon } from "./Icon";
 
 /**
@@ -141,7 +131,7 @@ export function MainMenu() {
             onChange={(e) => {
               setQuery(e.target.value);
               setCursor(0);
-            }} placeholder="Search features and pages" spellCheck={false} className="min-w-0 flex-1 bg-transparent text-xs text-ink outline-none placeholder:text-ink-3" />
+            }} placeholder="Search the menu" spellCheck={false} className="min-w-0 flex-1 bg-transparent text-xs text-ink outline-none placeholder:text-ink-3" />
           {query && (
             <button
               type="button"
@@ -244,7 +234,6 @@ function useMenu(close: () => void): Group[] {
   const open = useBrowser((s) => s.open);
   const closedTabs = useBrowser((s) => s.closedTabs.length);
   const detached = useBrowser((s) => s.detached);
-  const recordingSteps = useRecorder((s) => s.recordingTab !== null);
   const [latest, setLatest] = useState<string | null>(null);
   useEffect(() => {
     void ipc
@@ -277,19 +266,11 @@ function useMenu(close: () => void): Group[] {
       ],
     },
     {
-      id: "dive",
+      id: "apps",
       items: [
-        { id: "record", label: "Record a video", icon: Video, shortcut: "⌘⇧R", keywords: "screen recording gif capture loom", disabled: !active, run: done(() => useRecording.getState().openSetup()) },
-        { id: "recorder", label: recordingSteps ? "Stop recording steps" : "Record steps as a Playwright test", icon: ScrollText, keywords: "playwright test spec e2e steps macro", disabled: !active && !recordingSteps, run: done(() => runCommand("recorder.toggle")) },
-        { id: "divescreen", label: "Edit latest recording in DiveScreen", icon: Clapperboard, keywords: "editor zoom trim video", disabled: !latest, run: done(() => (latest ? b().openTab(screenUrl(latest)) : undefined)) },
-        { id: "divescreen.open", label: "Open a video in DiveScreen", icon: Film, keywords: "import mp4 mov webm mkv gif file editor", run: done(() => useImportVideo.getState().open().then(() => undefined)) },
-        { id: "simulator", label: "Device simulator", icon: Smartphone, shortcut: "⌘⇧M", keywords: "mobile phone responsive emulate", disabled: !active, run: done(() => usePicker.getState().toggle()) },
-        { id: "agent", label: "Agent", glyph: <AgentIcon size={15} className="text-highlight" />, shortcut: "⌘J", keywords: "ai assistant sidecar chat", run: done(() => b().toggle("sidecar")) },
-        { id: "dock", label: "Developer dock", icon: PanelBottom, shortcut: "⌘⇧D", keywords: "console network vitals storage", run: done(() => b().toggle("dock")) },
-        { id: "subtitles", label: "Live subtitles", icon: Captions, shortcut: "⌘⇧U", keywords: "captions transcribe video translate", disabled: !active, run: done(() => runCommand("subtitles.open")) },
-        { id: "devtools", label: "DevTools", icon: Bug, shortcut: "⌘⌥I", disabled: !active, run: done(() => runCommand("tab.devtools")) },
-        { id: "capture", label: "Capture full page", icon: Camera, shortcut: "⌘⇧S", keywords: "screenshot annotate", disabled: !active, run: done(() => runCommand("capture.fullpage")) },
-        { id: "report", label: "Copy bug report", icon: Wand2, shortcut: "⌘⇧B", keywords: "issue compose report a bug", disabled: !active, run: done(() => runCommand("report.compose")) },
+        // The tools themselves live in Apps, one screen with a line on each;
+        // the menu points there once instead of listing them a second time.
+        { id: "apps", label: "Apps", icon: LayoutGrid, shortcut: "⌘⇧Space", more: true, keywords: "divescreen agent simulator dock devtools extensions privacy passwords subtitles tools features", run: done(() => runCommand("apps.open")) },
       ],
     },
     {
@@ -299,6 +280,8 @@ function useMenu(close: () => void): Group[] {
         { id: "history", label: "History", icon: History, shortcut: "⌘Y", more: true, keywords: "visited recent", run: () => b().openLibrary("history") },
         { id: "downloads", label: "Downloads", icon: Download, shortcut: "⌘⇧J", more: true, keywords: "files saved", run: () => b().openLibrary("downloads") },
         { id: "recordings", label: "Recordings", icon: Clapperboard, more: true, keywords: "videos gifs captures", run: () => b().openLibrary("recordings") },
+        { id: "divescreen", label: "Edit latest recording in DiveScreen", icon: Clapperboard, keywords: "editor zoom trim video", disabled: !latest, run: done(() => (latest ? b().openTab(screenUrl(latest)) : undefined)) },
+        { id: "divescreen.open", label: "Open a video in DiveScreen…", icon: Film, keywords: "import mp4 mov webm mkv gif file editor", run: done(() => useImportVideo.getState().open().then(() => undefined)) },
         { id: "import", label: "Import from another browser…", icon: Import, keywords: "chrome brave safari firefox bookmarks passwords migrate", run: done(() => runCommand("import.open")) },
         { id: "clear", label: "Clear browsing data…", icon: Trash2, keywords: "cookies cache privacy clear delete", run: done(() => b().openSettings("privacy", "clear-browsing-data")) },
       ],
@@ -309,6 +292,7 @@ function useMenu(close: () => void): Group[] {
       items: [
         { id: "print", label: "Print…", icon: Printer, shortcut: "⌘P", disabled: !active, run: done(() => runCommand("tab.print")) },
         { id: "find", label: "Find in page", icon: TextSearch, shortcut: "⌘F", disabled: !active, run: done(() => b().toggle("find", true)) },
+        { id: "report", label: "Copy bug report", icon: Wand2, shortcut: "⌘⇧B", keywords: "issue compose report a bug", disabled: !active, run: done(() => runCommand("report.compose")) },
         { id: "palette", label: "Command palette", icon: Search, shortcut: "⌘K", keywords: "search everything", run: done(() => b().toggle("palette", true)) },
       ],
     },
@@ -316,7 +300,7 @@ function useMenu(close: () => void): Group[] {
       id: "app",
       items: [
         { id: "shortcuts", label: "Keyboard shortcuts", icon: Keyboard, shortcut: "⌘/", more: true, run: done(() => b().toggle("shortcuts", true)) },
-        { id: "help", label: "About Dive", icon: Bug, keywords: "help version", run: done(() => b().openSettings("about")) },
+        { id: "help", label: "About Dive", icon: Info, keywords: "help version", run: done(() => b().openSettings("about")) },
         { id: "settings", label: "Settings", icon: Settings2, shortcut: "⌘,", active: open.settings, run: done(() => b().openSettings()) } as Item & { active?: boolean },
       ],
     },
