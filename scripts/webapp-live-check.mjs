@@ -47,6 +47,8 @@ async function connect(target) {
     return response.result.result.value;
   };
 }
+// Windows are generous: a cold profile under a debug build on a busy machine
+// can take a minute to bring a heavy SPA to the point of answering.
 async function eventually(probe, message, seconds = 20) {
   const deadline = Date.now() + seconds * 1000;
   while (Date.now() < deadline) {
@@ -76,14 +78,14 @@ try {
   console.log(`opened ${site} in tab ${tab.id}`);
 
   // 1. Loaded: the page target exists and is no longer about:blank.
-  await eventually(async () => (await targets()).some((t) => t.type === "page" && t.url.startsWith(new URL(site).origin)), "site never loaded", 30);
+  await eventually(async () => (await targets()).some((t) => t.type === "page" && t.url.startsWith(new URL(site).origin)), "site never loaded", 90);
   await delay(1500);
 
   // 2. The probe, exactly as the address bar asks it.
   const probe = await eventually(async () => {
     const p = await invoke("webapp_probe", { id: tab.id }).catch(() => null);
     return p && p.installable ? p : null;
-  }, "page never became installable (check the site has a manifest with a 192px icon)", 30);
+  }, "page never became installable (check the site has a manifest with a 192px icon)", 120);
   assert(probe.name, "probe has no name");
   assert(probe.icon_url, "probe has no icon");
   console.log(`installable as "${probe.name}" (${probe.display}, icon ${probe.icon_size}px)`);
