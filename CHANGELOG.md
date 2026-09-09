@@ -7,6 +7,8 @@ bump may change behaviour.
 
 ## [Unreleased]
 
+A hundred hands-on passes over the daily surfaces, each driven live on a test profile. In short: profiles now keep their own history and bookmarks; reopened and woken tabs come back where they were scrolled; every copy in the chrome works whichever view has focus; the dock's Network, Console, A11y, Vitals and Rules panels say more and hide less; DevTools opens at a useful size; the tab strip, split view, popouts and the first run behave under keyboard and assistive tech; and the agent and MCP tools stop failing on a small model's imprecise arguments.
+
 ### Added
 - The Network panel's request detail says what a workspace rule did to the request ("Header set by a rule: …", "Blocked by a rule", "Answered by a mock rule"), since the headers it lists are the ones the page sent.
 - The Network panel's request detail lays JSON bodies out, and offers "Copy as cURL" (method, the page's own headers, body) and "Copy body". Copies go through the host, so they work whichever view has focus.
