@@ -131,6 +131,29 @@ const ROW_HEIGHT = 25;
 /** Below this many pixels from the end, the user counts as reading the newest output. */
 const BOTTOM_SLACK = 8;
 
+/** A console row with how many identical lines in a row it stands for. */
+export type ShownRow = ConsoleRow & { repeats: number };
+
+/**
+ * Fold a run of identical lines (same text, level, source and place) into
+ * one row with a count, the way DevTools does, so a polling loop's twentieth
+ * "Failed to load resource" does not push the line that matters off screen.
+ * The row keeps the first line's id and the last line's timestamp.
+ */
+export function coalesce(rows: readonly ConsoleRow[]): ShownRow[] {
+  const out: ShownRow[] = [];
+  for (const row of rows) {
+    const last = out[out.length - 1];
+    if (last && last.text === row.text && last.level === row.level && last.source === row.source && last.url === row.url && last.line === row.line) {
+      last.repeats += 1;
+      last.timestamp = row.timestamp;
+    } else {
+      out.push({ ...row, repeats: 1 });
+    }
+  }
+  return out;
+}
+
 function ConsolePanel() {
   const activeTab = useBrowser((s) => s.activeTab);
   const entries = useConsole(selectEntries(activeTab));
@@ -144,7 +167,7 @@ function ConsolePanel() {
   // narrows to those lines the way a level picker would.
   const shown = useMemo(() => {
     const q = filter.toLowerCase();
-    return q ? entries.filter((e) => `${e.level} ${e.source} ${e.text}`.toLowerCase().includes(q)) : entries;
+    return coalesce(q ? entries.filter((e) => `${e.level} ${e.source} ${e.text}`.toLowerCase().includes(q)) : entries);
   }, [entries, filter]);
 
   // The React Compiler is not in use here; the virtualizer's mutable instance is intended.
@@ -221,7 +244,7 @@ const Row = memo(function Row({
   start,
   measure,
 }: {
-  entry: ConsoleRow;
+  entry: ShownRow;
   tabId: string | null;
   index: number;
   start: number;
@@ -252,6 +275,11 @@ const Row = memo(function Row({
       <span className="w-14 shrink-0 text-ink-3">{entry.source}</span>
       {/* Colour alone must not carry the level: a warning and an error say so. */}
       {(entry.level === "warn" || entry.level === "error") && <span className="shrink-0 rounded bg-current/10 px-1 text-[10px] uppercase">{entry.level}</span>}
+      {entry.repeats > 1 && (
+        <span className="shrink-0 rounded-full bg-surface-3 px-1.5 text-[10px] text-ink-2" title={`${entry.repeats} identical lines in a row`} aria-label={`${entry.repeats} times`}>
+          ×{entry.repeats}
+        </span>
+      )}
       <span className="min-w-0 flex-1 break-words whitespace-pre-wrap">{entry.text}</span>
       {loc && (
         <button

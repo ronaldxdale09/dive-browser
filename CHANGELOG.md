@@ -57,6 +57,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- The Console folds a run of identical lines into one row with a "×N" count, so a polling loop's repeats no longer push the line that matters off screen.
 - Reopening a closed tab (⌘⇧T) puts the page back where it was scrolled, not at the top. The same restore now works for tabs waking from sleep: it waited for the blank start document's load and scrolled that, and gave up when the view's devtools session was not there yet.
 - Every copy in the chrome (tab address, share link, build details, MCP command, Playwright spec, password, recording path, theme) goes through the host clipboard, so it no longer fails with "Document is not focused" after clicking in the page.
 - Console rows say "warn" or "error" in words beside the message, and objects inside logged arrays show their fields (`[{a: 1, b: 2}]`) instead of `{…}`.

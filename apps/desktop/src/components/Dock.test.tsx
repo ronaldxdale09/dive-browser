@@ -142,6 +142,15 @@ describe("Dock console panel", () => {
     expect(scrollTo).toHaveBeenCalled();
   });
 
+  it("folds a run of identical lines into one row with a count", () => {
+    push([entry(1, "Failed to load resource", "error"), entry(2, "Failed to load resource", "error"), entry(3, "Failed to load resource", "error"), entry(4, "other"), entry(5, "Failed to load resource", "error")]);
+    const { container } = render(<Dock />);
+    // Three in a row become one; the later repeat after "other" stands alone.
+    expect(mountedRows(container)).toHaveLength(3);
+    expect(screen.getByLabelText("3 times").textContent).toBe("×3");
+    expect(screen.queryByLabelText("1 times")).toBeNull();
+  });
+
   it("ignores console output for other tabs", () => {
     push([entry(1, "mine")]);
     render(<Dock />);
