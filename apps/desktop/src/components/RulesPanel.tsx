@@ -1,5 +1,5 @@
 import { Plus, Trash2 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { Rule, RuleAction } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { DEFAULT_ACTIONS, newRule, selectRules, useRules } from "../store/rules";
@@ -24,6 +24,18 @@ export function RulesPanel() {
   useEffect(() => {
     if (workspace) void load(workspace);
   }, [workspace, load]);
+  // A rule just added is the last one; its pattern is what the person types next.
+  const list = useRef<HTMLDivElement>(null);
+  const count = useRef(rules.length);
+  useEffect(() => {
+    const grew = rules.length > count.current;
+    count.current = rules.length;
+    if (!grew) return;
+    const inputs = list.current?.querySelectorAll<HTMLInputElement>('input[aria-label="URL pattern"]');
+    const last = inputs?.[inputs.length - 1];
+    last?.focus();
+    last?.select();
+  }, [rules.length]);
   if (!workspace) return null;
 
   const update = (id: string, patch: Partial<Rule>) => void save(workspace, rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -38,11 +50,11 @@ export function RulesPanel() {
     );
   }
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
+    <div ref={list} className="min-h-0 flex-1 overflow-auto">
       {rules.map((r) => (
         <div key={r.id} className="flex flex-col gap-1.5 border-b border-line px-3 py-2">
           <div className="flex items-center gap-2">
-            <input type="checkbox" aria-label="Enabled" checked={r.enabled} onChange={(e) => update(r.id, { enabled: e.target.checked })} className="accent-ink" />
+            <input type="checkbox" aria-label="Enabled" title={r.enabled ? "On. Untick to keep the rule without applying it." : "Off. Tick once the pattern is ready."} checked={r.enabled} onChange={(e) => update(r.id, { enabled: e.target.checked })} className="accent-ink" />
             <input aria-label="URL pattern" value={r.pattern} onChange={(e) => update(r.id, { pattern: e.target.value })} className={`${FIELD} min-w-0 flex-1`} spellCheck={false} />
             <select
               aria-label="Action"

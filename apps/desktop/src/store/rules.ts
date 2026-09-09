@@ -17,8 +17,12 @@ export const DEFAULT_ACTIONS: Record<RuleAction["kind"], RuleAction> = {
   header: { kind: "header", name: "X-Debug", value: "1" },
 };
 
+/**
+ * A rule to fill in. It starts off: a rule that is live the moment it appears
+ * would block every API call in the workspace before the pattern is typed.
+ */
 export function newRule(): Rule {
-  return { id: crypto.randomUUID(), pattern: "https://*/api/*", enabled: true, action: DEFAULT_ACTIONS.block };
+  return { id: crypto.randomUUID(), pattern: "https://*/api/*", enabled: false, action: DEFAULT_ACTIONS.block };
 }
 
 export const useRules = create<RulesState>((set, get) => ({

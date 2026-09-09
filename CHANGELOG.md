@@ -57,6 +57,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- A new rule in the Rules panel starts off and puts the cursor in its URL pattern; it used to go live at once as a block on `https://*/api/*` before anything was typed.
 - A tab in its own window explains a failed page load the way the main window does (title, what to check, the code, Retry) instead of a red strip with the raw `net::ERR_…` code.
 - An essential tab tells assistive tech it is essential and its tooltip says it appears in every workspace; console level and repeat tags no longer stretch to the height of a multi-line message.
 - "Close other tabs" says how many it closed and offers Undo, which brings them all back in order; a plain mouse wheel over the tab strip scrolls it sideways.
