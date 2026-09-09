@@ -12,6 +12,10 @@ fn git(args: &[&str]) -> Option<String> {
 }
 
 fn main() {
+    // Naming any trigger turns off cargo's "rerun on any change" default, so
+    // the chrome bundle the binary embeds has to be named too: without it a
+    // rebuilt `dist` shipped stale inside a binary cargo thought was current.
+    println!("cargo:rerun-if-changed=../dist");
     println!("cargo:rerun-if-changed=../../../.git/HEAD");
     println!("cargo:rerun-if-changed=../../../.git/refs");
     let commit = git(&["rev-parse", "--short=9", "HEAD"]).unwrap_or_else(|| "unknown".into());

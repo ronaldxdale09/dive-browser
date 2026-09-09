@@ -151,7 +151,7 @@ export function Palette() {
       <Command
         label="Command palette"
         role="dialog"
-        aria-label={tabsFirst ? "Search tabs" : "New tab"}
+        aria-label={tabsFirst ? "Search tabs" : "Command palette"}
         aria-modal="true"
         shouldFilter={!!query}
         filter={paletteFilter}
@@ -197,19 +197,8 @@ export function Palette() {
               </Command.Item>
             </Command.Group>
           )}
-          {tabsFirst && tabGroup}
-          {shownBookmarks.length > 0 && (
-            <Command.Group heading="Bookmarks">
-              {shownBookmarks.map((b) => (
-                <Command.Item key={b.url} value={`bookmark ${titleOf(b)} ${b.url}`} onSelect={() => void go(b.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
-                  <Favicon src={b.favicon} size={14} fallback={Star} fallbackClassName="text-highlight" />
-                  <span className="truncate">{titleOf(b)}</span>
-                  <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(b.url)}</span>
-                </Command.Item>
-              ))}
-            </Command.Group>
-          )}
-          {!tabsFirst && tabGroup}
+          {/* Open tabs come first: the thing most likely wanted is already open. */}
+          {tabGroup}
           {servers.length > 0 && (
             <Command.Group heading="Local servers">
               {servers.map((d) => (
@@ -233,6 +222,17 @@ export function Palette() {
               ))}
             </Command.Group>
           )}
+          {shownBookmarks.length > 0 && (
+            <Command.Group heading="Bookmarks">
+              {shownBookmarks.map((b) => (
+                <Command.Item key={b.url} value={`bookmark ${titleOf(b)} ${b.url}`} onSelect={() => void go(b.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
+                  <Favicon src={b.favicon} size={14} fallback={Star} fallbackClassName="text-highlight" />
+                  <span className="truncate">{titleOf(b)}</span>
+                  <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(b.url)}</span>
+                </Command.Item>
+              ))}
+            </Command.Group>
+          )}
           <Command.Group heading="Commands">
             {cmds.map((c) => (
               <Command.Item
@@ -251,6 +251,11 @@ export function Palette() {
             ))}
           </Command.Group>
         </Command.List>
+        <div aria-hidden className="flex h-8 items-center gap-4 border-t border-line px-4 text-[11px] text-ink-3">
+          <span><kbd className="font-mono">↑↓</kbd> move</span>
+          <span><kbd className="font-mono">↵</kbd> open</span>
+          <span><kbd className="font-mono">esc</kbd> close</span>
+        </div>
       </Command>
     </div>
   );

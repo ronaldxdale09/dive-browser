@@ -98,7 +98,7 @@ describe("Palette", () => {
 
     render(<Palette />);
 
-    expect(screen.getByRole("dialog", { name: "New tab" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
     expect(screen.getByPlaceholderText("Search, enter a URL, or run a command")).toBeTruthy();
     await waitFor(() => expect(screen.getByText("Example docs")).toBeTruthy());
     expect(screen.getAllByText("History")).toHaveLength(2);

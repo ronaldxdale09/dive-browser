@@ -192,7 +192,7 @@ button:not(:disabled):active,
 
 /* cmdk */
 [cmdk-item][data-selected="true"] { background: var(--color-surface-3); }
-[cmdk-group-heading] { padding: 6px 12px 4px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
+[cmdk-group-heading] { padding: 8px 12px 4px; font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
 
 /* Welcome screen ground; the animated character field is rendered separately. */
 .welcome {
