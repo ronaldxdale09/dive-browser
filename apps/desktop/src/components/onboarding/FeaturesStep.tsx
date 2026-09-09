@@ -1,6 +1,7 @@
 import { Bot, Clapperboard, Globe, LayoutGrid, PanelBottom, ShieldCheck } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useState, useRef } from "react";
+import { FOCUS_ADDRESS } from "../../lib/commands";
 import { useDefaultBrowser } from "../../store/defaultBrowser";
 import { useOnboarding } from "../../store/onboarding";
 import { usePrefs } from "../../store/prefs";
@@ -49,6 +50,8 @@ export function FeaturesStep() {
   const done = async () => {
     if (protect !== blockTrackers) await update({ block_trackers: protect });
     await finish();
+    // The first thing after setup is typing somewhere to go.
+    window.dispatchEvent(new CustomEvent(FOCUS_ADDRESS));
   };
 
   return (

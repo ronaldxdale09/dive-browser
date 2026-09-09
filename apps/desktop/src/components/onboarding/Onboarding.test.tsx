@@ -7,6 +7,7 @@ import { useDefaultBrowser } from "../../store/defaultBrowser";
 import { useOnboarding } from "../../store/onboarding";
 import { DEFAULT_PREFS, usePrefs } from "../../store/prefs";
 import { Onboarding } from "./Onboarding";
+import { FOCUS_ADDRESS } from "../../lib/commands";
 
 vi.mock("./IntroScene", () => ({
   IntroScene: () => {
@@ -96,9 +97,14 @@ describe("Onboarding", () => {
     expect(within(screen.getByRole("list", { name: "Features" })).getAllByRole("listitem")).toHaveLength(4);
     expect(screen.getByRole("switch", { name: "Block ads and trackers" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("button", { name: "Set as default" })).toBeTruthy();
+    const focusAddress = vi.fn();
+    window.addEventListener(FOCUS_ADDRESS, focusAddress);
     fireEvent.click(screen.getByRole("button", { name: "Start browsing" }));
 
     await waitFor(() => expect(useOnboarding.getState().stage).toBeNull());
+    // Setup hands over to the address bar, so the first keystroke goes somewhere.
+    await waitFor(() => expect(focusAddress).toHaveBeenCalled());
+    window.removeEventListener(FOCUS_ADDRESS, focusAddress);
     await waitFor(() => expect(usePrefs.getState().prefs).toMatchObject({ onboarded: true, block_trackers: true }));
   });
 
