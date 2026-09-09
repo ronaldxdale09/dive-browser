@@ -94,20 +94,50 @@ export function SplitView({ split, workspace }: { split: Split; workspace: strin
     window.addEventListener("pointerup", up);
   };
 
+  // Arrow keys on a divider move it a step, for anyone who does not drag.
+  const nudge = (i: number, direction: 1 | -1) => resize(workspace, nudgedSizes(split.sizes, i, direction));
+
   return (
     <div ref={root} role="group" aria-label="Split view" className="grid min-h-0 min-w-0 bg-ground p-1" style={{ gridTemplateColumns: columns(sizes) }}>
       {split.tabs.map((id, i) => {
         const tab = tabs.find((t) => t.id === id);
         if (!tab) return null;
+        const next = tabs.find((t) => t.id === split.tabs[i + 1]);
         return (
-          <PaneAndDivider key={id} tab={tab} active={id === active} last={i === split.tabs.length - 1} onActivate={() => void activate(id)} onClose={() => remove(workspace, id)} onResize={(e) => startResize(i, e)} register={(el) => register(id, el)} />
+          <PaneAndDivider
+            key={id}
+            tab={tab}
+            active={id === active}
+            last={i === split.tabs.length - 1}
+            divider={{ label: next ? `Resize “${tabLabel(tab)}” and “${tabLabel(next)}”` : "Resize panes", share: sizes[i] ?? 0, pair: (sizes[i] ?? 0) + (sizes[i + 1] ?? 0) }}
+            onActivate={() => void activate(id)}
+            onClose={() => remove(workspace, id)}
+            onResize={(e) => startResize(i, e)}
+            onNudge={(direction) => nudge(i, direction)}
+            register={(el) => register(id, el)}
+          />
         );
       })}
     </div>
   );
 }
 
-function PaneAndDivider({ tab, active, last, onActivate, onClose, onResize, register }: { tab: Tab; active: boolean; last: boolean; onActivate: () => void; onClose: () => void; onResize: (e: React.PointerEvent<HTMLDivElement>) => void; register: (el: HTMLDivElement | null) => void }) {
+/** How much a divider moves per arrow key, as a fraction of the split. */
+export const NUDGE = 0.05;
+
+/** The sizes after divider `i` moves one step right (1) or left (-1). Pure, so it is testable without a DOM. */
+export function nudgedSizes(sizes: number[], i: number, direction: 1 | -1): number[] {
+  const first = sizes[i] ?? 0;
+  const pair = first + (sizes[i + 1] ?? 0);
+  // Rounded to a thousandth so repeated steps do not drift into float noise.
+  const round = (n: number) => Math.round(n * 1000) / 1000;
+  const left = round(Math.min(Math.max(first + direction * NUDGE, MIN_PANE), pair - MIN_PANE));
+  return sizes.map((s, j) => (j === i ? left : j === i + 1 ? round(pair - left) : s));
+}
+
+type Divider = { label: string; share: number; pair: number };
+
+function PaneAndDivider({ tab, active, last, divider, onActivate, onClose, onResize, onNudge, register }: { tab: Tab; active: boolean; last: boolean; divider: Divider; onActivate: () => void; onClose: () => void; onResize: (e: React.PointerEvent<HTMLDivElement>) => void; onNudge: (direction: 1 | -1) => void; register: (el: HTMLDivElement | null) => void }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: paneId(tab.id) });
   const preview = useContentPreview(tab.id);
   return (
@@ -134,7 +164,26 @@ function PaneAndDivider({ tab, active, last, onActivate, onClose, onResize, regi
           {preview && <img aria-hidden src={preview} className="pointer-events-none absolute inset-0 size-full object-fill" />}
         </div>
       </section>
-      {!last && <div role="separator" aria-orientation="vertical" onPointerDown={onResize} className="cursor-col-resize rounded-full hover:bg-line-2" style={{ width: GAP }} />}
+      {!last && (
+        <div
+          role="separator"
+          tabIndex={0}
+          aria-orientation="vertical"
+          aria-label={divider.label}
+          aria-valuenow={Math.round((divider.share / Math.max(divider.pair, 0.0001)) * 100)}
+          aria-valuemin={Math.round((MIN_PANE / Math.max(divider.pair, 0.0001)) * 100)}
+          aria-valuemax={100 - Math.round((MIN_PANE / Math.max(divider.pair, 0.0001)) * 100)}
+          aria-valuetext={`${Math.round((divider.share / Math.max(divider.pair, 0.0001)) * 100)}% to the left pane`}
+          onPointerDown={onResize}
+          onKeyDown={(e) => {
+            if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+            e.preventDefault();
+            onNudge(e.key === "ArrowRight" ? 1 : -1);
+          }}
+          className="cursor-col-resize rounded-full outline-none hover:bg-line-2 focus-visible:bg-highlight"
+          style={{ width: GAP }}
+        />
+      )}
     </>
   );
 }

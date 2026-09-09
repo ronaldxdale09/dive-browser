@@ -56,6 +56,7 @@ bump may change behaviour.
 - A page's permission request (camera, location, notifications…) is asked in a dialog over the page instead of a bar under the address field. Focus starts on Block; Allow is the primary action.
 
 ### Fixed
+- The divider between split panes is a real control: it names the two panes, reports the share as a percentage, takes focus, and moves in steps with ← and →.
 - "Tell pages the theme" now passes on the scheme the chrome is actually drawn in, so a light-only template such as Paper with the mode on System gives pages a light scheme too; it used to say nothing unless the mode was set by hand.
 - Settings › Passwords & forms labels remembered fields in words ("full name", "postal code") instead of raw names like FULLNAME.
 - DevTools opens at a working size (about 70% of the Dive window, at least 960×700) just down and right of the page, instead of Chromium's 640×608 default in the corner of the screen.
