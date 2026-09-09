@@ -1006,9 +1006,10 @@ mod tests {
         );
         session.close();
         // The route notices the closed session on its own tick; a loaded test
-        // machine can take a while to get there, so wait for it rather than
-        // for a fixed moment.
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        // machine (the whole suite, clippy alongside) can take a while to get
+        // there, so wait for it rather than for a fixed moment. The budget
+        // only bounds a genuine failure.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
         while !input.lock().unwrap().ended && std::time::Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }

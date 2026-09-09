@@ -123,8 +123,10 @@ describe("BookmarkButton", () => {
 
   it("closes on Escape and on an outside press, keeping the bookmark", async () => {
     await openPopover();
+    // The dismiss listeners attach in an effect after the dialog appears; let it flush.
+    await act(async () => {});
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
-    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Edit bookmark" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Edit bookmark" }));
