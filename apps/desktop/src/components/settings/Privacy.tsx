@@ -277,7 +277,7 @@ function ClearData() {
   return (
     <Group id="clear-browsing-data" title="Clear browsing data" description="Open profiles clear immediately. Restart Dive after clearing cookies, cache, or site data to finish closed profiles and every stored origin.">
       <div className="flex flex-col gap-2 py-3">
-        <Check label="Browsing history" checked={what.history} onChange={(history) => setWhat({ ...what, history })} />
+        <Check label="Browsing history in this profile" checked={what.history} onChange={(history) => setWhat({ ...what, history })} />
         <Check label="Cookies and signed-in sessions" checked={what.cookies} onChange={(cookies) => setWhat({ ...what, cookies })} />
         <Check label="Cached files" checked={what.cache} onChange={(cache) => setWhat({ ...what, cache })} />
         <Check label="Site data (local storage, IndexedDB)" checked={what.site_data} onChange={(site_data) => setWhat({ ...what, site_data })} />

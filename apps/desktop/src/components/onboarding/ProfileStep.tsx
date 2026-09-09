@@ -52,7 +52,7 @@ export function ProfileStep() {
         <div className="min-w-0">
           <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">{stepLabel("profile")}</p>
           <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em]">Who's diving?</h2>
-          <p className="mt-0.5 text-xs text-ink-3">A profile keeps its own cookies, logins and workspaces. Add more later for work and clients.</p>
+          <p className="mt-0.5 text-xs text-ink-3">A profile keeps its own cookies, logins, history, bookmarks and workspaces. Add more later for work and clients.</p>
         </div>
       </div>
       <label className="mt-6 block text-[11px] text-ink-2">

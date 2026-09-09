@@ -109,7 +109,7 @@ export function ProfileChip() {
             </span>
             New profile…
           </button>
-          <p className="px-2.5 pt-2 pb-1.5 text-[10.5px] leading-snug text-ink-3">Each profile keeps its own cookies, logins and workspaces, like a separate person using Dive.</p>
+          <p className="px-2.5 pt-2 pb-1.5 text-[10.5px] leading-snug text-ink-3">Each profile keeps its own cookies, logins, history, bookmarks and workspaces, like a separate person using Dive.</p>
         </div>
       )}
     </div>
