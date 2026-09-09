@@ -127,7 +127,27 @@ const MIGRATIONS: &[&str] = &[
         UNIQUE(profile_id, field, value)
     );
     CREATE INDEX form_entries_field ON form_entries(profile_id, field);",
+    // v12: history and bookmarks belong to a profile, like logins do. Rows
+    // from before are given to the first profile, which is where they were made.
+    "ALTER TABLE history ADD COLUMN profile_id TEXT NOT NULL DEFAULT '';
+    UPDATE history SET profile_id = COALESCE((SELECT id FROM profiles ORDER BY position, created_at LIMIT 1), '');
+    CREATE INDEX history_profile ON history(profile_id, visited_at);
+    CREATE TABLE bookmarks_new (
+        profile_id TEXT NOT NULL,
+        url TEXT NOT NULL,
+        title TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (profile_id, url)
+    );
+    INSERT INTO bookmarks_new (profile_id, url, title, created_at)
+        SELECT COALESCE((SELECT id FROM profiles ORDER BY position, created_at LIMIT 1), ''), url, title, created_at FROM bookmarks;
+    DROP TABLE bookmarks;
+    ALTER TABLE bookmarks_new RENAME TO bookmarks;",
 ];
+
+/// Setting that names the active workspace; the store reads it to know
+/// which profile history and bookmarks belong to right now.
+pub const ACTIVE_WORKSPACE_SETTING: &str = "active_workspace";
 
 /// Copy an existing database aside when this build is about to migrate it,
 /// so a migration that goes wrong is recoverable by hand. Returns the copy's
@@ -717,14 +737,37 @@ impl Store {
         }
     }
 
+    // ----- profile scope -----
+
+    /// The profile history and bookmarks are read and written for: the one
+    /// owning the active workspace, else the first profile, else "" (a
+    /// database with no profiles yet, as in tests).
+    fn scope(&self) -> Result<String> {
+        if let Some(active) = self.setting(ACTIVE_WORKSPACE_SETTING)?
+            && let Ok(id) = active.parse::<WorkspaceId>()
+            && let Ok(workspace) = self.workspace(id)
+        {
+            return Ok(workspace.profile_id.to_string());
+        }
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT id FROM profiles ORDER BY position, created_at LIMIT 1",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?
+            .unwrap_or_default())
+    }
+
     // ----- bookmarks -----
 
     /// Add or refresh a bookmark.
     pub fn add_bookmark(&self, url: &str, title: &str, at: Timestamp) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO bookmarks (url, title, created_at) VALUES (?1, ?2, ?3)
-             ON CONFLICT(url) DO UPDATE SET title = CASE WHEN excluded.title != '' THEN excluded.title ELSE bookmarks.title END",
-            params![url, title, at.to_rfc3339()],
+            "INSERT INTO bookmarks (profile_id, url, title, created_at) VALUES (?4, ?1, ?2, ?3)
+             ON CONFLICT(profile_id, url) DO UPDATE SET title = CASE WHEN excluded.title != '' THEN excluded.title ELSE bookmarks.title END",
+            params![url, title, at.to_rfc3339(), self.scope()?],
         )?;
         Ok(())
     }
@@ -903,17 +946,21 @@ impl Store {
 
     /// Remove a bookmark; returns whether one existed.
     pub fn remove_bookmark(&self, url: &str) -> Result<bool> {
-        Ok(self
-            .conn
-            .execute("DELETE FROM bookmarks WHERE url = ?1", [url])?
-            > 0)
+        Ok(self.conn.execute(
+            "DELETE FROM bookmarks WHERE url = ?1 AND profile_id = ?2",
+            params![url, self.scope()?],
+        )? > 0)
     }
 
     /// Whether `url` is bookmarked.
     pub fn is_bookmarked(&self, url: &str) -> Result<bool> {
         Ok(self
             .conn
-            .query_row("SELECT 1 FROM bookmarks WHERE url = ?1", [url], |_| Ok(()))
+            .query_row(
+                "SELECT 1 FROM bookmarks WHERE url = ?1 AND profile_id = ?2",
+                params![url, self.scope()?],
+                |_| Ok(()),
+            )
             .optional()?
             .is_some())
     }
@@ -923,11 +970,15 @@ impl Store {
         let like = format!("%{}%", like_escape(query.trim()));
         let mut stmt = self.conn.prepare(
             "SELECT url, title, created_at FROM bookmarks
-             WHERE url LIKE ?1 ESCAPE '\\' OR title LIKE ?1 ESCAPE '\\'
+             WHERE profile_id = ?3 AND (url LIKE ?1 ESCAPE '\\' OR title LIKE ?1 ESCAPE '\\')
              ORDER BY created_at DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(
-            params![like, i64::try_from(limit).unwrap_or(i64::MAX)],
+            params![
+                like,
+                i64::try_from(limit).unwrap_or(i64::MAX),
+                self.scope()?
+            ],
             |r| {
                 Ok(Bookmark {
                     url: r.get(0)?,
@@ -950,11 +1001,13 @@ impl Store {
         let tx = self.conn.unchecked_transaction()?;
         let mut added = 0;
         {
+            let scope = self.scope()?;
             let mut stmt = tx.prepare(
-                "INSERT OR IGNORE INTO bookmarks (url, title, created_at) VALUES (?1, ?2, ?3)",
+                "INSERT OR IGNORE INTO bookmarks (profile_id, url, title, created_at) VALUES (?4, ?1, ?2, ?3)",
             )?;
             for item in items {
-                added += stmt.execute(params![item.url, item.title, item.at.to_rfc3339()])?;
+                added +=
+                    stmt.execute(params![item.url, item.title, item.at.to_rfc3339(), scope])?;
             }
         }
         tx.commit()?;
@@ -968,13 +1021,15 @@ impl Store {
         let tx = self.conn.unchecked_transaction()?;
         let mut added = 0;
         {
+            let scope = self.scope()?;
             let mut stmt = tx.prepare(
-                "INSERT INTO history (url, title, visited_at)
-                 SELECT ?1, ?2, ?3
-                 WHERE NOT EXISTS (SELECT 1 FROM history WHERE url = ?1 AND visited_at = ?3)",
+                "INSERT INTO history (profile_id, url, title, visited_at)
+                 SELECT ?4, ?1, ?2, ?3
+                 WHERE NOT EXISTS (SELECT 1 FROM history WHERE profile_id = ?4 AND url = ?1 AND visited_at = ?3)",
             )?;
             for item in items {
-                added += stmt.execute(params![item.url, item.title, item.at.to_rfc3339()])?;
+                added +=
+                    stmt.execute(params![item.url, item.title, item.at.to_rfc3339(), scope])?;
             }
         }
         tx.commit()?;
@@ -987,11 +1042,12 @@ impl Store {
     /// "about:blank" is never filed as a title: it names the empty document, not the page.
     pub fn record_visit(&self, url: &str, title: &str, at: Timestamp) -> Result<()> {
         let title = if title == "about:blank" { "" } else { title };
+        let scope = self.scope()?;
         let recent: Option<i64> = self
             .conn
             .query_row(
-                "SELECT id FROM history WHERE url = ?1 ORDER BY visited_at DESC LIMIT 1",
-                [url],
+                "SELECT id FROM history WHERE url = ?1 AND profile_id = ?2 ORDER BY visited_at DESC LIMIT 1",
+                params![url, scope],
                 |r| r.get(0),
             )
             .optional()?;
@@ -1015,8 +1071,8 @@ impl Store {
             return Ok(());
         }
         self.conn.execute(
-            "INSERT INTO history (url, title, visited_at) VALUES (?1, ?2, ?3)",
-            params![url, title, at.to_rfc3339()],
+            "INSERT INTO history (profile_id, url, title, visited_at) VALUES (?4, ?1, ?2, ?3)",
+            params![url, title, at.to_rfc3339(), scope],
         )?;
         Ok(())
     }
@@ -1041,14 +1097,17 @@ impl Store {
 
     /// Forget every visit to one URL; returns how many rows went.
     pub fn remove_history(&self, url: &str) -> Result<usize> {
-        Ok(self
-            .conn
-            .execute("DELETE FROM history WHERE url = ?1", [url])?)
+        Ok(self.conn.execute(
+            "DELETE FROM history WHERE url = ?1 AND profile_id = ?2",
+            params![url, self.scope()?],
+        )?)
     }
 
-    /// Delete every visit; returns how many rows went.
+    /// Delete every visit of this profile; returns how many rows went.
     pub fn clear_history(&self) -> Result<usize> {
-        Ok(self.conn.execute("DELETE FROM history", [])?)
+        Ok(self
+            .conn
+            .execute("DELETE FROM history WHERE profile_id = ?1", [self.scope()?])?)
     }
 
     /// Forget every cached site icon. Icons record which origins were
@@ -1060,8 +1119,8 @@ impl Store {
     /// Delete visits older than `cutoff`; returns how many rows went.
     pub fn prune_history(&self, cutoff: Timestamp) -> Result<usize> {
         Ok(self.conn.execute(
-            "DELETE FROM history WHERE visited_at < ?1",
-            [cutoff.to_rfc3339()],
+            "DELETE FROM history WHERE visited_at < ?1 AND profile_id = ?2",
+            params![cutoff.to_rfc3339(), self.scope()?],
         )?)
     }
 
@@ -1080,11 +1139,15 @@ impl Store {
         let fetch = limit.saturating_mul(4).clamp(limit, 200);
         let mut stmt = self.conn.prepare(
             "SELECT url, MAX(title), MAX(visited_at), COUNT(*) FROM history
-             WHERE url LIKE ?1 ESCAPE '\\' OR title LIKE ?1 ESCAPE '\\'
+             WHERE profile_id = ?3 AND (url LIKE ?1 ESCAPE '\\' OR title LIKE ?1 ESCAPE '\\')
              GROUP BY url ORDER BY MAX(visited_at) DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(
-            params![like, i64::try_from(fetch).unwrap_or(i64::MAX)],
+            params![
+                like,
+                i64::try_from(fetch).unwrap_or(i64::MAX),
+                self.scope()?
+            ],
             |r| {
                 Ok(HistoryEntry {
                     url: r.get(0)?,
@@ -1997,6 +2060,80 @@ mod tests {
     }
 
     #[test]
+    fn history_and_bookmarks_belong_to_the_active_profile() {
+        let store = Store::in_memory().unwrap();
+        let now = Timestamp::now();
+        // Two profiles, each with a workspace; the active workspace decides the scope.
+        let (personal, work) = (ProfileId::new(), ProfileId::new());
+        for (profile, name, position) in [(personal, "Personal", 0), (work, "Work", 1)] {
+            store
+                .conn
+                .execute(
+                    "INSERT INTO containers (id, name, cache_dir) VALUES (?1, ?2, ?3)",
+                    params![profile.to_string(), name, format!("c-{name}")],
+                )
+                .unwrap();
+            store
+                .conn
+                .execute(
+                    "INSERT INTO profiles (id, name, color, avatar, container_id, position, created_at)
+                     VALUES (?1, ?2, '#000', 'a', ?1, ?3, ?4)",
+                    params![profile.to_string(), name, position, now.to_rfc3339()],
+                )
+                .unwrap();
+        }
+        let ws_of = |profile: ProfileId| {
+            let id = WorkspaceId::new();
+            store
+                .conn
+                .execute(
+                    "INSERT INTO workspaces (id, name, color, icon, container_id, profile_id, position, created_at)
+                     VALUES (?1, 'w', '#000', 'i', ?2, ?2, 0, ?3)",
+                    params![id.to_string(), profile.to_string(), now.to_rfc3339()],
+                )
+                .unwrap();
+            id
+        };
+        let (ws_personal, ws_work) = (ws_of(personal), ws_of(work));
+
+        store
+            .set_setting(ACTIVE_WORKSPACE_SETTING, &ws_personal.to_string())
+            .unwrap();
+        store
+            .record_visit("https://deque.test/rule", "Deque", now)
+            .unwrap();
+        store
+            .add_bookmark("https://deque.test/rule", "Deque", now)
+            .unwrap();
+        assert_eq!(store.search_history("deque", 10).unwrap().len(), 1);
+        assert!(store.is_bookmarked("https://deque.test/rule").unwrap());
+
+        store
+            .set_setting(ACTIVE_WORKSPACE_SETTING, &ws_work.to_string())
+            .unwrap();
+        assert!(
+            store.search_history("deque", 10).unwrap().is_empty(),
+            "Work must not see Personal's visits"
+        );
+        assert!(store.search_bookmarks("deque", 10).unwrap().is_empty());
+        assert!(!store.is_bookmarked("https://deque.test/rule").unwrap());
+        store
+            .record_visit("https://corp.test/", "Corp", now)
+            .unwrap();
+        assert_eq!(
+            store.clear_history().unwrap(),
+            1,
+            "clearing history clears only this profile"
+        );
+
+        store
+            .set_setting(ACTIVE_WORKSPACE_SETTING, &ws_personal.to_string())
+            .unwrap();
+        assert_eq!(store.search_history("", 10).unwrap().len(), 1);
+        assert!(store.remove_bookmark("https://deque.test/rule").unwrap());
+    }
+
+    #[test]
     fn history_dedupes_and_searches() {
         let store = Store::in_memory().unwrap();
         let t0 = Timestamp::now();
@@ -2345,6 +2482,7 @@ mod tests {
             0x99e5_fa52_17a9_ae16,
             0x1340_2877_32bd_71cf,
             0x755e_bc0a_ec8c_b672,
+            0x4b69_716e_99b1_89aa,
         ];
         assert!(
             MIGRATIONS.len() >= SHIPPED.len(),

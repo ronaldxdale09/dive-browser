@@ -16,8 +16,8 @@ pub use model::{
     Workspace, WorkspaceId,
 };
 pub use store::{
-    Bookmark, Credential, FormEntry, HistoryEntry, ImportedEntry, ImportedFormEntry, Store,
-    origin_of,
+    ACTIVE_WORKSPACE_SETTING, Bookmark, Credential, FormEntry, HistoryEntry, ImportedEntry,
+    ImportedFormEntry, Store, origin_of,
 };
 
 /// Convenience alias used throughout the crate.

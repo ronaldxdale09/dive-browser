@@ -151,7 +151,7 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
 }
 
 /// Setting keys used for session restore.
-pub const ACTIVE_WORKSPACE: &str = "active_workspace";
+pub const ACTIVE_WORKSPACE: &str = dive_core::ACTIVE_WORKSPACE_SETTING;
 /// Setting keys used for session restore.
 pub const ACTIVE_TAB: &str = "active_tab";
 
