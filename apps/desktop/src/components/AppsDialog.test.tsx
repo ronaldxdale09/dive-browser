@@ -30,15 +30,14 @@ describe("AppsDialog", () => {
     expect(useBrowser.getState().open.dock).toBe(true);
   });
 
-  it("filters by category and by search, and Enter opens the first match", async () => {
+  it("shelves the apps, searches across shelves, and Enter opens the first match", async () => {
     render(<AppsDialog />);
-    fireEvent.click(screen.getByRole("tab", { name: "Developer" }));
-    expect(screen.queryByRole("button", { name: /^DiveScreen/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /^Device simulator/ })).toBeTruthy();
+    expect(screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"))).toEqual(["Capture", "On the page", "Developer", "Yours"]);
+    // Commands are not apps: the menu and the palette keep them.
+    for (const notAnApp of [/^Find in page/, /^Settings/, /^Private window/, /^Bookmarks/]) expect(screen.queryByRole("button", { name: notAnApp })).toBeNull();
     const search = screen.getByRole("textbox", { name: "Search apps" });
     fireEvent.change(search, { target: { value: "simul" } });
-    // A search looks across every shelf.
-    expect(screen.getByRole("tab", { name: "All" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"))).toEqual(["Developer"]);
     expect(screen.getAllByRole("button", { name: /^(Device simulator|DiveScreen|Screenshot)/ }).length).toBe(1);
     fireEvent.keyDown(search, { key: "Enter" });
     expect(usePicker.getState().open).toBe(true);
@@ -49,9 +48,9 @@ describe("AppsDialog", () => {
     useBrowser.setState({ activeTab: null });
     render(<AppsDialog />);
     expect((screen.getByRole("button", { name: /^Screenshot/ }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: /^Bookmarks/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: /^Library/ }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Search apps" }), { key: "ArrowDown" });
-    expect((document.activeElement as HTMLElement).getAttribute("data-app")).toBe("recordings");
+    expect((document.activeElement as HTMLElement).getAttribute("data-app")).toBe("agent");
   });
 
   it("walks the grid with the arrow keys", () => {
@@ -61,6 +60,7 @@ describe("AppsDialog", () => {
     expect(first.getAttribute("data-app")).toBe("divescreen");
     fireEvent.keyDown(first, { key: "ArrowRight" });
     expect((document.activeElement as HTMLElement).getAttribute("data-app")).toBe("screenshot");
+    // Down moves a row within the flattened grid of cards, across shelves.
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     expect((document.activeElement as HTMLElement).getAttribute("data-app")).toBe(appsFor()[1 + 3]!.id);
   });
@@ -70,6 +70,7 @@ describe("AppsDialog", () => {
     expect(ids).not.toContain("agent");
     expect(ids).not.toContain("passwords");
     expect(ids).toContain("dock");
+    expect(ids).not.toContain("library");
     expect(searchApps(appsFor(false), "loom").map((a) => a.id)).toEqual(["divescreen"]);
   });
 });

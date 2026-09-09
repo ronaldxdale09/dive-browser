@@ -1,29 +1,24 @@
 import { LayoutGrid, Search, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { APP_CATEGORIES, appsFor, chordOf, launchApp, registerAppAction, searchApps } from "../lib/apps";
-import type { AppCategory, AppEntry } from "../lib/apps";
+import { APP_CATEGORIES, appsFor, chordOf, launchApp, searchApps } from "../lib/apps";
+import type { AppEntry } from "../lib/apps";
 import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
-import { useImportVideo } from "../screen/importVideo";
 import { BuildBadge } from "./BuildBadge";
 import { AgentIcon } from "./agent/AgentIcon";
 import { Icon, IconButton } from "./Icon";
 
-// Cards that open a place rather than run a registry command.
-registerAppAction("recordings.open", () => useBrowser.getState().openLibrary("recordings"));
-registerAppAction("divescreen.import", () => void useImportVideo.getState().open());
-
 const COLUMNS = 3;
 
 /**
- * The Apps launcher: every feature Dive has, on one screen, with a line on
- * what each is for and the shortcut that reaches it. A person who has never
- * opened a menu can learn the product here; a person who has can type two
- * letters and press Enter. The bar above keeps only the two things used
- * all day, the agent and this.
+ * The Apps launcher: Dive's tools on one screen, under the shelf each
+ * belongs to, with a line on what each is for and the shortcut that
+ * reaches it. A person who has never opened a menu can learn the product
+ * here; a person who has can type two letters and press Enter. The bar
+ * above keeps only the two things used all day, the agent and this.
  */
 export function AppsDialog() {
   const toggle = useBrowser((s) => s.toggle);
@@ -35,10 +30,10 @@ export function AppsDialog() {
   useCoversContent(true);
   useFocusTrap(root, { initialFocus: field, onEscape: close });
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState<AppCategory | "all">("all");
   const all = useMemo(() => appsFor(), []);
-  // A search looks across every shelf: the person asked for a name, not a category.
-  const shown = useMemo(() => searchApps(all, query).filter((a) => query.trim() || category === "all" || a.category === category), [all, query, category]);
+  const shown = useMemo(() => searchApps(all, query), [all, query]);
+  // Shelves keep their order; a search just empties the ones nothing matched.
+  const shelves = APP_CATEGORIES.map((c) => ({ ...c, apps: shown.filter((a) => a.category === c.id) })).filter((c) => c.apps.length > 0);
 
   const launch = (app: AppEntry) => {
     close();
@@ -74,10 +69,7 @@ export function AppsDialog() {
               aria-label="Search apps"
               placeholder="Search apps…"
               value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                if (e.target.value.trim()) setCategory("all");
-              }}
+              onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && shown[0]) {
                   e.preventDefault();
@@ -98,58 +90,50 @@ export function AppsDialog() {
           <BuildBadge />
           <IconButton icon={X} label="Close apps" onClick={close} />
         </header>
-        <div role="tablist" aria-label="Categories" className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-line px-4 py-2">
-          {[{ id: "all" as const, name: "All" }, ...APP_CATEGORIES].map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              role="tab"
-              aria-selected={category === c.id}
-              onClick={() => {
-                setQuery("");
-                setCategory(c.id);
-              }}
-              className={`h-7 shrink-0 rounded-full px-3 text-[11.5px] transition-colors ${category === c.id ? "bg-surface-3 text-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"}`}
-            >
-              {c.name}
-            </button>
-          ))}
-        </div>
         <div ref={grid} onKeyDown={onGridKey} className="min-h-0 flex-1 overflow-y-auto p-4">
           {shown.length === 0 ? (
-            <p className="py-12 text-center text-xs text-ink-3">Nothing called “{query.trim()}”. Try the command palette (⌘K) for tabs and addresses.</p>
+            <p className="py-12 text-center text-xs text-ink-3">No app called “{query.trim()}”. Commands like find, print and settings live in the menu and the command palette (⌘K).</p>
           ) : (
-            <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${COLUMNS}, minmax(0, 1fr))` }}>
-              {shown.map((app) => {
-                const chord = chordOf(app);
-                const disabled = app.needsTab && !activeTab;
-                return (
-                  <button
-                    key={app.id}
-                    type="button"
-                    data-app={app.id}
-                    disabled={disabled}
-                    title={disabled ? `${app.name} needs an open tab` : undefined}
-                    onClick={() => launch(app)}
-                    className="group flex items-start gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:border-line-2 hover:bg-surface-2 focus-visible:border-accent focus-visible:outline-none disabled:opacity-45"
-                  >
-                    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-2 transition-colors group-hover:bg-surface-3 group-hover:text-ink">
-                      {app.id === "agent" ? <AgentIcon size={18} className="text-highlight" /> : <Icon icon={app.icon} size={18} />}
-                    </span>
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="flex items-center gap-2">
-                        <span className="truncate text-[12.5px] font-medium text-ink">{app.name}</span>
-                        {chord && <kbd className="ml-auto shrink-0 font-mono text-[9.5px] text-ink-3">{chord}</kbd>}
-                      </span>
-                      <span className="line-clamp-2 text-[11px] leading-snug text-ink-3">{app.blurb}</span>
-                    </span>
-                  </button>
-                );
-              })}
+            <div className="flex flex-col gap-5">
+              {shelves.map((shelf) => (
+                <section key={shelf.id} aria-label={shelf.name}>
+                  <h3 className="mb-2 px-1 text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">{shelf.name}</h3>
+                  <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${COLUMNS}, minmax(0, 1fr))` }}>
+                    {shelf.apps.map((app) => (
+                      <AppCard key={app.id} app={app} disabled={Boolean(app.needsTab && !activeTab)} onLaunch={launch} />
+                    ))}
+                  </div>
+                </section>
+              ))}
             </div>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function AppCard({ app, disabled, onLaunch }: { app: AppEntry; disabled: boolean; onLaunch: (app: AppEntry) => void }) {
+  const chord = chordOf(app);
+  return (
+    <button
+      type="button"
+      data-app={app.id}
+      disabled={disabled}
+      title={disabled ? `${app.name} needs an open tab` : undefined}
+      onClick={() => onLaunch(app)}
+      className="group flex items-start gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:border-line-2 hover:bg-surface-2 focus-visible:border-accent focus-visible:outline-none disabled:opacity-45"
+    >
+      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-2 transition-colors group-hover:bg-surface-3 group-hover:text-ink">
+        {app.id === "agent" ? <AgentIcon size={18} className="text-highlight" /> : <Icon icon={app.icon} size={18} />}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex items-center gap-2">
+          <span className="truncate text-[12.5px] font-medium text-ink">{app.name}</span>
+          {chord && <kbd className="ml-auto shrink-0 font-mono text-[9.5px] text-ink-3">{chord}</kbd>}
+        </span>
+        <span className="line-clamp-2 text-[11px] leading-snug text-ink-3">{app.blurb}</span>
+      </span>
+    </button>
   );
 }
