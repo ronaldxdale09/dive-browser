@@ -126,7 +126,7 @@ describe("Setup", () => {
   it("renders onboarding hero when no keys are configured", () => {
     render(<Setup canGoBack={false} onDone={() => {}} />);
     expect(screen.getByText("Connect a model provider")).toBeTruthy();
-    expect(screen.getByText(/inspect DOM elements/)).toBeTruthy();
+    expect(screen.getByText(/a model you choose/)).toBeTruthy();
     expect(screen.getByText(/stored in macOS Keychain/)).toBeTruthy();
   });
 

@@ -13,6 +13,7 @@ import type { Suggestion } from "../lib/omnibox";
 import { DownloadsMenu } from "./DownloadsMenu";
 import { useDownloads } from "../store/downloads";
 import { ProtectionMenu } from "./ProtectionMenu";
+import { InstallAppButton } from "./InstallAppButton";
 import { MainMenu } from "./MainMenu";
 import { Tooltip } from "./Tooltip";
 import { useCoversContent } from "../lib/overlay";
@@ -170,6 +171,12 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
         />
         <AddressSuggestions id={listId} rows={rows} highlight={highlight} onHighlight={setHighlight} onPick={pick} />
       </form>
+      {/* Right of the address, where Brave and Chrome keep them: what this
+          page can become (an installed app) and what is being done to it
+          (protection). Both stay visible in the compact layout; the tray
+          below holds the rest. */}
+      <InstallAppButton />
+      <ProtectionMenu compact />
       {compact ? (
         <ToolbarMore>
           <ZoomBadge />
@@ -199,16 +206,16 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
 }
 
 /**
- * The controls that are about the browser rather than the page: privacy
- * and the menu. They close the bar, whichever bar that is, so the menu is
- * always in the corner where every browser keeps it.
+ * The control that is about the browser rather than the page: the menu. It
+ * closes the bar, whichever bar that is, so it is always in the corner where
+ * every browser keeps it. Protection moved beside the address, since it is
+ * about the page in front of you.
  */
 export function BrowserActions() {
   const open = useBrowser((s) => s.open);
   const toggle = useBrowser((s) => s.toggle);
   return (
     <div className="relative flex shrink-0 items-center gap-1">
-      <ProtectionMenu compact />
       <IconButton icon={Menu} label="Menu" active={open.menu} onClick={() => toggle("menu")} tooltipAlign="end" />
       {open.menu && <MainMenu />}
     </div>

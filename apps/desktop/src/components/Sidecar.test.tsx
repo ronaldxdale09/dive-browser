@@ -111,7 +111,7 @@ describe("Sidecar", () => {
     expect(useAgent.getState().refreshKeys).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { name: "Agent" })).toBeTruthy();
     expect(screen.getByText("Anthropic")).toBeTruthy();
-    expect(screen.getByPlaceholderText("Ask, or direct the agent on this page…")).toBeTruthy();
+    expect(screen.getByPlaceholderText("Ask about this page, or say what to do…")).toBeTruthy();
     expect(screen.queryByText("Connect a model provider")).toBeNull();
   });
 
@@ -126,17 +126,17 @@ describe("Sidecar", () => {
     expect(screen.getByText("What is this page?")).toBeTruthy();
     expect(screen.getByText("docs")).toBeTruthy();
     expect(screen.getByText(/1\.2k in · 40 out/)).toBeTruthy();
-    expect(screen.queryByText("Quick Actions")).toBeNull();
+    expect(screen.queryByText("Try one of these")).toBeNull();
   });
 
   it("puts focus in the composer when it opens", () => {
     render(<Sidecar />);
-    expect(document.activeElement).toBe(screen.getByPlaceholderText("Ask, or direct the agent on this page…"));
+    expect(document.activeElement).toBe(screen.getByPlaceholderText("Ask about this page, or say what to do…"));
   });
 
   it("submits the composer to the store with the active tab", () => {
     render(<Sidecar />);
-    const box = screen.getByPlaceholderText("Ask, or direct the agent on this page…") as HTMLTextAreaElement;
+    const box = screen.getByPlaceholderText("Ask about this page, or say what to do…") as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "Explain the console errors" } });
     fireEvent.keyDown(box, { key: "Enter" });
     expect(useAgent.getState().send).toHaveBeenCalledWith("Explain the console errors", "tab-1");
@@ -157,13 +157,13 @@ describe("Sidecar", () => {
     useAgent.setState({ keyed: [] });
     render(<Sidecar />);
     expect(screen.getByText("Connect a model provider")).toBeTruthy();
-    expect(screen.queryByPlaceholderText("Ask, or direct the agent on this page…")).toBeNull();
+    expect(screen.queryByPlaceholderText("Ask about this page, or say what to do…")).toBeNull();
   });
 
   it("renders nothing but the frame until the catalog has loaded", () => {
     useAgent.setState({ loaded: false });
     render(<Sidecar />);
-    expect(screen.queryByPlaceholderText("Ask, or direct the agent on this page…")).toBeNull();
+    expect(screen.queryByPlaceholderText("Ask about this page, or say what to do…")).toBeNull();
     expect(screen.queryByText("Connect a model provider")).toBeNull();
   });
 });

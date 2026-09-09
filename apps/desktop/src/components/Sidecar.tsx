@@ -9,12 +9,9 @@ import { Setup } from "./agent/Setup";
 import { Thread } from "./agent/Thread";
 
 /**
- * Right-docked agent panel.
- * Designed with OpenAI & Anthropic polish:
- * - Bespoke Agent icon with radiant soft mint container
- * - Live model & readiness indicator
- * - Seamless conversation and step timeline
- * - Integrated animated onboarding and key management
+ * The agent's panel, docked to the right of the page: a header naming the
+ * provider in use, then either the conversation or, until a provider is
+ * ready, the setup screen.
  */
 export function Sidecar() {
   const init = useAgent((s) => s.init);

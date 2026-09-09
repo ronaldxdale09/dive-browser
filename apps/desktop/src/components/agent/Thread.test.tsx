@@ -37,7 +37,7 @@ const initialAgent = useAgent.getState();
 const initialBrowser = useBrowser.getState();
 const initialPrefs = usePrefs.getState();
 const scrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView");
-const placeholder = "Ask, or direct the agent on this page…";
+const placeholder = "Ask about this page, or say what to do…";
 
 beforeEach(() => {
   Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, writable: true, value: vi.fn() });
@@ -72,15 +72,15 @@ afterEach(() => {
 describe("Thread", () => {
   it("starts with quick actions that send their prompt for the active tab", () => {
     render(<Thread onAddProvider={() => {}} />);
-    expect(screen.getByText("Quick Actions")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Summarize page/ }));
+    expect(screen.getByText("Try one of these")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Summarize this page/ }));
     expect(useAgent.getState().send).toHaveBeenCalledWith(expect.stringMatching(/^Summarize this page/), "tab-1");
   });
 
   it("disables quick actions and changes the prompt without a tab", () => {
     useBrowser.setState({ tabs: [], activeTab: null });
     render(<Thread onAddProvider={() => {}} />);
-    expect((screen.getByRole("button", { name: /Summarize page/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /Summarize this page/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByPlaceholderText("Open a tab, then ask…")).toBeTruthy();
   });
 
@@ -104,7 +104,7 @@ describe("Thread", () => {
     fireEvent.click(screen.getByRole("button", { name: "Change model or key" }));
     expect(openSettings).toHaveBeenCalledWith("agent");
     expect(screen.getByText("Thinking…")).toBeTruthy();
-    expect(screen.queryByText("Quick Actions")).toBeNull();
+    expect(screen.queryByText("Try one of these")).toBeNull();
   });
 
   it("says so when a finished reply carries no text, steps or error", () => {

@@ -8,7 +8,6 @@ import { useBrowser } from "../../store/browser";
 import { usePrefs } from "../../store/prefs";
 import { Favicon } from "../Favicon";
 import { Icon } from "../Icon";
-import { AgentIcon } from "./AgentIcon";
 import { ModelPicker } from "./ModelPicker";
 import { StepList } from "./StepList";
 
@@ -21,26 +20,26 @@ interface Suggestion {
 /** Things worth asking a browser agent about the page in front of you. */
 const SUGGESTIONS: Suggestion[] = [
   {
-    label: "Summarize page",
-    hint: "Overview, architecture & key elements",
+    label: "Summarize this page",
+    hint: "What it is and what it does",
     prompt:
       "Summarize this page for me: what it is, what it does, and anything a developer or designer should notice.",
   },
   {
-    label: "Debug errors",
-    hint: "Console issues & failed requests",
+    label: "Find what is broken",
+    hint: "Console errors and failed requests",
     prompt:
       "Look at the console errors and failed requests on this page. For each real problem, tell me the likely cause and a concrete fix.",
   },
   {
-    label: "Responsive audit",
-    hint: "Phone, tablet & desktop viewports",
+    label: "Check it on a phone",
+    hint: "Layout at phone and tablet widths",
     prompt:
       "Check this page at phone, tablet and desktop sizes. Report anything that breaks, overflows or hides content, with the viewport it happens at.",
   },
   {
-    label: "Accessibility audit",
-    hint: "Contrast, ARIA labels & keyboard traps",
+    label: "Check accessibility",
+    hint: "Contrast, names and keyboard traps",
     prompt:
       "Review this page's accessibility: missing labels, contrast problems, keyboard traps, heading structure. Give specific fixes.",
   },
@@ -86,36 +85,25 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
     <>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-3 py-3 select-text">
         {messages.length === 0 && (
-          <div className="flex flex-1 flex-col justify-center gap-4 py-4 animate-agent-slide-up">
-            {/* Centered Welcome */}
-            <div className="flex flex-col items-center text-center px-4">
-              <AgentIcon size={22} className="text-highlight mb-2" />
-              <h3 className="text-xs font-semibold text-ink">Dive Browser Agent</h3>
-              <p className="mt-1 max-w-[280px] text-[11px] leading-relaxed text-ink-3">
-                Inspect DOM elements, analyze network calls, test responsive viewports, and automate workflows.
-              </p>
-            </div>
-
-            {/* Clean Text-First Quick Starters */}
-            <div className="space-y-1.5 pt-1">
-              <span className="block text-[10px] font-medium uppercase tracking-wider text-ink-3 px-1">
-                Quick Actions
-              </span>
-              <div className="space-y-1">
+          <div className="flex flex-1 flex-col justify-end gap-4 py-2 animate-agent-slide-up">
+            {/* The header already says "Agent"; this says what to do with it,
+                in one plain sentence, and offers a few starts. */}
+            <p className="px-1 text-xs leading-relaxed text-ink-2">
+              {activeTab ? "Ask about the page you are on, or tell the agent what to do in it." : "Open a tab, then ask about it or tell the agent what to do in it."}
+            </p>
+            <div className="flex flex-col gap-1.5">
+              <span className="px-1 text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">Try one of these</span>
+              <div className="flex flex-col gap-1">
                 {SUGGESTIONS.map((s) => (
                   <button
                     key={s.label}
                     type="button"
                     disabled={!activeTab}
                     onClick={() => submit(s.prompt)}
-                    className="group flex w-full items-center justify-between rounded-lg border border-line bg-surface-2/40 px-2.5 py-1.5 text-left transition-colors hover:border-line-2 hover:bg-surface-2 disabled:opacity-40"
+                    className="group flex w-full flex-col items-start gap-0.5 rounded-lg border border-line bg-surface-2/40 px-3 py-2 text-left transition-colors hover:border-line-2 hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-highlight focus-visible:ring-inset focus-visible:outline-none disabled:opacity-40"
                   >
-                    <span className="text-xs font-medium text-ink-2 group-hover:text-ink transition-colors">
-                      {s.label}
-                    </span>
-                    <span className="text-[10px] text-ink-3 truncate ml-2">
-                      {s.hint}
-                    </span>
+                    <span className="text-xs font-medium text-ink">{s.label}</span>
+                    <span className="text-[11px] text-ink-3">{s.hint}</span>
                   </button>
                 ))}
               </div>
@@ -142,19 +130,14 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
               type="button"
               onClick={() => void update({ agent_include_page: !includePage })}
               aria-pressed={includePage}
-              title={
-                includePage
-                  ? "Page context is included with each message. Click to send only prompt."
-                  : "Page context is off. Click to include tab DOM, title, URL and console."
-              }
-              className={`flex h-6 min-w-0 max-w-[65%] items-center gap-1.5 rounded-full border px-2 text-[10.5px] transition-[color,background-color,border-color,box-shadow,opacity] ${
-                includePage
-                  ? "border-line-2 bg-surface-3 text-ink shadow-2xs"
-                  : "border-dashed border-line text-ink-3 line-through opacity-70"
+              title={includePage ? "The page goes with each message. Click to send only what you type." : "The page is not sent. Click to include its text, address and console."}
+              className={`flex h-6 min-w-0 max-w-[65%] items-center gap-1.5 rounded-full border px-2 text-[11px] transition-[color,background-color,border-color,box-shadow,opacity] ${
+                includePage ? "border-line-2 bg-surface-3 text-ink shadow-2xs" : "border-dashed border-line text-ink-3"
               }`}
             >
               <Favicon src={current.favicon} size={11} fallback={Globe} />
               <span className="truncate">{current.title || current.url}</span>
+              {!includePage && <span className="shrink-0 text-ink-3">off</span>}
             </button>
           )}
 
@@ -162,7 +145,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
             <button
               type="button"
               onClick={() => (alwaysAutoApprove ? useBrowser.getState().openSettings("agent") : setSessionAutoApprove(false))}
-              className="flex h-6 items-center gap-1 rounded-full bg-highlight-soft px-2 text-[10.5px] text-highlight ring-1 ring-highlight/20"
+              className="flex h-6 items-center gap-1 rounded-full bg-highlight-soft px-2 text-[11px] text-highlight ring-1 ring-highlight/20"
               title={alwaysAutoApprove ? "Act without asking is on in Settings. Click to change it." : "Every action is being approved for this session. Click to require confirmation."}
             >
               <Icon icon={ShieldOff} size={10} /> {alwaysAutoApprove ? "Acts without asking" : "Auto-approve on"}
@@ -183,9 +166,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
               }
             }}
             rows={Math.min(6, Math.max(1, draft.split("\n").length))}
-            placeholder={
-              activeTab ? "Ask, or direct the agent on this page…" : "Open a tab, then ask…"
-            }
+            placeholder={activeTab ? "Ask about this page, or say what to do…" : "Open a tab, then ask…"}
             className="max-h-40 w-full resize-none bg-transparent text-xs leading-relaxed text-ink outline-none placeholder:text-ink-3"
           />
 

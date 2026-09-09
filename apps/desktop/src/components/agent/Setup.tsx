@@ -15,12 +15,9 @@ const TOP_PROVIDERS: { id: Provider; badge?: string }[] = [
 ];
 
 /**
- * Clean, developer-centric provider configuration for Dive Agent.
- * Follows 2026 IDE agent patterns (Kilo Code, Cline, Anthropic Console):
- * - High-density, single-screen layout with zero decorative icon slop
- * - Direct provider selector with 1-click top tier access
- * - Monospace credentials input with OS Keychain storage
- * - Clear verification feedback
+ * Choosing the model the agent talks to: a provider, and for the cloud
+ * ones a key that goes into the Keychain. Verifies the key before it is
+ * relied on, and says plainly what went wrong when it cannot.
  */
 export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () => void }) {
   const providers = useAgent((s) => s.providers);
@@ -154,7 +151,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
           <div className="space-y-1 rounded-xl border border-line bg-surface-2/40 p-3">
             <h3 className="text-xs font-semibold text-ink">Connect a model provider</h3>
             <p className="text-[11px] leading-relaxed text-ink-2">
-              Select an AI model provider to inspect DOM elements, analyze network traffic, and automate page tasks.
+              The agent reads and operates the page with a model you choose: a cloud provider with your own key, or a local one such as Ollama.
             </p>
           </div>
         )}
@@ -162,11 +159,11 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
         {/* Provider Selection */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-[10.5px] font-medium text-ink-3 uppercase tracking-wider">
+            <span className="text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">
               Provider
             </span>
             {hasKey && (
-              <span className="text-[10.5px] text-highlight font-medium">
+              <span className="text-[11px] font-medium text-highlight">
                 {info?.needs_key ? "Connected" : "Ready"}
               </span>
             )}
@@ -189,7 +186,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
                   }`}
                 >
                   <span className="text-xs font-medium truncate w-full">{providers.find((p) => p.id === tp.id)?.name}</span>
-                  <span className="text-[9.5px] text-ink-3 mt-0.5">
+                  <span className="mt-0.5 text-[11px] text-ink-3">
                     {tp.badge || "Cloud"}
                   </span>
                 </button>
