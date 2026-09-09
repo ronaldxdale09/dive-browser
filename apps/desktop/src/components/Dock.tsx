@@ -250,6 +250,8 @@ const Row = memo(function Row({
       className={`flex gap-3 border-b border-line/60 px-3 py-0.5 ${LEVEL_STYLE[entry.level]}`}
     >
       <span className="w-14 shrink-0 text-ink-3">{entry.source}</span>
+      {/* Colour alone must not carry the level: a warning and an error say so. */}
+      {(entry.level === "warn" || entry.level === "error") && <span className="shrink-0 rounded bg-current/10 px-1 text-[10px] uppercase">{entry.level}</span>}
       <span className="min-w-0 flex-1 break-words whitespace-pre-wrap">{entry.text}</span>
       {loc && (
         <button

@@ -241,8 +241,13 @@ fn preview_text(preview: &Value) -> Option<String> {
     let items: Vec<String> = properties
         .iter()
         .map(|p| {
+            // The engine nests one level of preview inside a property; showing
+            // it turns `{user: {…}}` into `{user: {name: "Dale", roles: Array(2)}}`.
             let value = match (p["type"].as_str(), p["value"].as_str()) {
                 (Some("string"), Some(v)) => format!("{v:?}"),
+                (Some("object"), _) if p.get("valuePreview").is_some() => {
+                    preview_text(&p["valuePreview"]).unwrap_or_else(|| "{…}".to_owned())
+                }
                 (Some("object"), Some("Object")) => "{…}".to_owned(),
                 (_, Some(v)) => v.to_owned(),
                 _ => p["type"].as_str().unwrap_or("?").to_owned(),
@@ -289,6 +294,16 @@ mod tests {
             "preview":{"type":"object","subtype":"error","description":"Error: boom\n    at a.js:1","overflow":false,
             "properties":[{"name":"stack","type":"string","value":"Error: boom\n    at a.js:1"},{"name":"message","type":"string","value":"boom"}]}});
         assert_eq!(remote_object_text(&error), "Error: boom\n    at a.js:1");
+        // A nested preview is shown instead of {…}, one level down; deeper stays folded.
+        let nested = json!({"type":"object","description":"Object","preview":{"type":"object","overflow":false,
+            "properties":[{"name":"user","type":"object","value":"Object","valuePreview":{"type":"object","overflow":false,
+                "properties":[{"name":"name","type":"string","value":"Dale"},{"name":"roles","type":"object","subtype":"array","value":"Array(2)"},
+                              {"name":"deep","type":"object","value":"Object"}]}},
+                          {"name":"count","type":"number","value":"3"}]}});
+        assert_eq!(
+            remote_object_text(&nested),
+            "{user: {name: \"Dale\", roles: Array(2), deep: {…}}, count: 3}"
+        );
         // No preview (a buffered message replayed later): the description still stands.
         assert_eq!(
             remote_object_text(&json!({"type":"object","description":"Object"})),

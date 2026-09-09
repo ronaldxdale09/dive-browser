@@ -95,6 +95,9 @@ describe("Dock console panel", () => {
   it("filters by level and source too, and says when nothing matches", () => {
     push([entry(1, "careful 42", "warn"), entry(2, "hello"), entry(3, "bad thing", "error")]);
     const { container } = render(<Dock />);
+    // Warnings and errors say their level in words, not only in colour.
+    expect(screen.getByText("warn")).toBeTruthy();
+    expect(screen.getByText("error")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Filter console"), { target: { value: "warn" } });
     expect(mountedRows(container)).toHaveLength(1);
     expect(screen.getByText("careful 42")).toBeTruthy();
