@@ -68,6 +68,8 @@ export function planDrop(args: {
   viewport: { width: number; height: number };
   /** Bottom edge of the tab strip's row; a release below it has left the strip. */
   stripBottom: number;
+  /** Right edge of a vertical tab list; when given, a release to its right has left the list. */
+  stripRight?: number;
 }): DropPlan {
   const { dragged, fromPane, over, ordered, pointer, viewport } = args;
   const tab = tabOf(dragged);
@@ -84,7 +86,8 @@ export function planDrop(args: {
   // boundary. The stripBottom value already includes a small wobble margin.
   if (!over && pointer && !fromPane) {
     const out = pointer.x < -OUTSIDE || pointer.y < -OUTSIDE || pointer.x > viewport.width + OUTSIDE || pointer.y > viewport.height + OUTSIDE;
-    if (out || pointer.y > args.stripBottom) return { kind: "detach", tab, at: pointer };
+    const left = args.stripRight === undefined ? pointer.y > args.stripBottom : pointer.x > args.stripRight;
+    if (out || left) return { kind: "detach", tab, at: pointer };
   }
   return { kind: "none" };
 }
@@ -111,16 +114,26 @@ const collision: CollisionDetection = (args) => {
   if (rects.length) {
     const top = Math.min(...rects.map((r) => r.top)) - STRIP_SLACK;
     const bottom = Math.max(...rects.map((r) => r.bottom)) + STRIP_SLACK;
-    if (p.y < top || p.y > bottom) return [];
+    const left = Math.min(...rects.map((r) => r.left)) - STRIP_SLACK;
+    const right = Math.max(...rects.map((r) => r.right)) + STRIP_SLACK;
+    // A list down the rail is left by moving sideways, a strip across the
+    // title bar by moving down; which one this is shows in its shape.
+    const vertical = bottom - top > right - left;
+    if (vertical ? p.x < left || p.x > right : p.y < top || p.y > bottom) return [];
   }
   return closestCenter({ ...args, droppableContainers: strip });
 };
 
-/** Where the strip's row ends, with the same slack the collision rule allows. */
-function stripBottom(): number {
-  const tabs = Array.from(document.querySelectorAll<HTMLElement>('[role="tablist"] [role="tab"]'));
-  const bottom = Math.max(0, ...tabs.map((t) => t.getBoundingClientRect().bottom));
-  return bottom + STRIP_SLACK;
+/** Where the tab list ends, with the same slack the collision rule allows: the row's bottom, or a rail list's right edge. */
+function stripEdges(): { stripBottom: number; stripRight?: number } {
+  const rects = Array.from(document.querySelectorAll<HTMLElement>('[role="tablist"] [role="tab"]')).map((t) => t.getBoundingClientRect());
+  const bottom = Math.max(0, ...rects.map((r) => r.bottom));
+  if (!rects.length) return { stripBottom: bottom + STRIP_SLACK };
+  const top = Math.min(...rects.map((r) => r.top));
+  const left = Math.min(...rects.map((r) => r.left));
+  const right = Math.max(...rects.map((r) => r.right));
+  const vertical = bottom - top > right - left;
+  return vertical ? { stripBottom: bottom + STRIP_SLACK, stripRight: right + STRIP_SLACK } : { stripBottom: bottom + STRIP_SLACK };
 }
 
 function pointerAt(e: DragEndEvent): { x: number; y: number } | null {
@@ -149,7 +162,7 @@ export function TabDnd({ children }: { children: ReactNode }) {
       ordered: orderTabs(browser.tabs).map((t) => t.id),
       pointer: pointerAt(e),
       viewport: { width: window.innerWidth, height: window.innerHeight },
-      stripBottom: stripBottom(),
+      ...stripEdges(),
     });
     void apply(plan);
   };

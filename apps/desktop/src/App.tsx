@@ -114,13 +114,18 @@ export function App() {
       style={{ gridTemplateColumns: `${railWidth}px minmax(0,1fr)` }}
     >
       {/* Title-bar row: the tabs, beside the traffic lights (overlay title
-          bar). Who you are browsing as sits at the foot of the rail, under
-          the workspaces it owns. */}
+          bar), unless the expanded rail is listing them, in which case the
+          row is the window's drag handle. Who you are browsing as sits at
+          the foot of the rail, under the workspaces it owns. */}
       <header className="col-span-2 row-start-1 flex items-center gap-2 pl-[84px]">
         {isPrivateWindow() && <span className="px-2 font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
-        <div className="h-full min-w-0 flex-1">
-          <TabStrip />
-        </div>
+        {effectiveRailExpanded ? (
+          <div className="h-full min-w-0 flex-1" data-tauri-drag-region="true" />
+        ) : (
+          <div className="h-full min-w-0 flex-1">
+            <TabStrip />
+          </div>
+        )}
         <FeatureBar compact={responsive.collapseRail} />
       </header>
       <div className="relative col-start-1 row-span-2 row-start-2 bg-ground">

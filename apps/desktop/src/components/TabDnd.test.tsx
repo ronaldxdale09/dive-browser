@@ -25,6 +25,12 @@ describe("planDrop", () => {
     expect(planDrop({ dragged: "a", fromPane: false, over: null, ordered, pointer: { x: 600, y: 300 }, viewport, stripBottom })).toEqual({ kind: "detach", tab: "a", at: { x: 600, y: 300 } });
   });
 
+  it("treats a rail list the same way, only sideways: past its right edge opens a window, below it does not", () => {
+    const rail = { stripBottom: 700, stripRight: 240 };
+    expect(planDrop({ dragged: "a", fromPane: false, over: null, ordered, pointer: { x: 600, y: 300 }, viewport, ...rail })).toEqual({ kind: "detach", tab: "a", at: { x: 600, y: 300 } });
+    expect(planDrop({ dragged: "a", fromPane: false, over: null, ordered, pointer: { x: 120, y: 760 }, viewport, ...rail })).toEqual({ kind: "none" });
+  });
+
   it("does nothing for a wobble inside the strip, or a pane let go off any zone", () => {
     expect(planDrop({ dragged: "a", fromPane: false, over: null, ordered, pointer: { x: 600, y: 30 }, viewport, stripBottom })).toEqual({ kind: "none" });
     expect(planDrop({ dragged: "a", fromPane: false, over: "a", ordered, pointer: { x: 60, y: 20 }, viewport, stripBottom })).toEqual({ kind: "none" });

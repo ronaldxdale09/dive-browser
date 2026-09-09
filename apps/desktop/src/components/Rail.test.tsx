@@ -126,13 +126,17 @@ describe("Rail", () => {
     });
     render(<Rail />);
     const list = screen.getByRole("region", { name: "Tabs" });
-    const names = Array.from(list.querySelectorAll("li > button:first-child")).map((b) => b.getAttribute("aria-label"));
+    const names = Array.from(list.querySelectorAll('[role="tab"]')).map((b) => b.getAttribute("aria-label"));
     expect(names).toEqual(["Mail, essential", "Beta", "Alpha"]);
-    expect(screen.getByRole("button", { name: "Beta" }).getAttribute("aria-current")).toBe("true");
-    fireEvent.click(screen.getByRole("button", { name: "Alpha" }));
+    expect(screen.getByRole("tablist", { name: "Tabs" }).getAttribute("aria-orientation")).toBe("vertical");
+    expect(screen.getByRole("tab", { name: "Beta" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("tab", { name: "Alpha" }));
     expect(activate).toHaveBeenCalledWith("t1");
-    fireEvent.click(screen.getByRole("button", { name: "Close Alpha" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Alpha" }).parentElement!.querySelector("[data-close-tab]")!);
     expect(close).toHaveBeenCalledWith("t1");
+    // The tab menu works here too.
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "Alpha" }));
+    expect(screen.getByRole("menuitem", { name: /Close tab/ })).toBeTruthy();
   });
 
   it("shows the profile switcher at the foot of the rail, opening upward", () => {

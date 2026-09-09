@@ -1,4 +1,4 @@
-import { SortableContext, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
+import { SortableContext, horizontalListSortingStrategy, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AppWindow, Columns2, CopyPlus, Link, Loader2, Moon, Pin, Plus, Star, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -67,11 +67,14 @@ export function shorten(text: string, max = 22): string {
 }
 
 /**
- * Comet-style top strip: pill tabs, right-click to pin. Dragging is handled
- * by the `TabDnd` context around the whole chrome: within the strip a drag
- * reorders, onto the page it splits, past the window it opens a window.
+ * The workspace's tabs: pill tabs across the title bar, or rows down the
+ * rail when it is expanded (`orientation="vertical"`), never both at once.
+ * Right-click for the tab menu. Dragging is handled by the `TabDnd` context
+ * around the whole chrome: within the list a drag reorders, onto the page
+ * it splits, past the window it opens a window.
  */
-export function TabStrip() {
+export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizontal" | "vertical" }) {
+  const vertical = orientation === "vertical";
   const all = useBrowser((s) => s.tabs);
   const active = useBrowser((s) => s.activeTab);
   const detached = useBrowser((s) => s.detached);
@@ -94,8 +97,12 @@ export function TabStrip() {
   const paneIds = new Set((split?.tabs ?? []).filter((id) => !detached.includes(id)));
   const essentials = useMemo(() => essentialTabs(all), [all]);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
-  const [tablistRef, narrow] = useNarrowTabs(tabs.length);
-  const hidden = useHiddenTabs(tablistRef, tabs.length, active);
+  const [tablistRef, measuredNarrow] = useNarrowTabs(tabs.length);
+  const hiddenAcross = useHiddenTabs(tablistRef, tabs.length, active);
+  // Rows down the rail are as wide as the rail: they never lose their titles,
+  // and they scroll rather than hide.
+  const narrow: Narrow = vertical ? { title: false, close: false } : measuredNarrow;
+  const hidden = vertical ? 0 : hiddenAcross;
   // Roving tabindex: one tab is in the Tab order at a time, the focused one
   // if any, else the active one. The arrow keys move focus without activating.
   const [focused, setFocused] = useState<string | null>(null);
@@ -108,28 +115,29 @@ export function TabStrip() {
   const stop = tabs.some((t) => t.id === focused) ? focused : active;
 
   return (
-    <div className="flex h-full items-center gap-[var(--ui-gap)] pr-2 pl-2" onClick={() => menu && setMenu(null)}>
+    <div className={vertical ? "flex h-full min-h-0 flex-col gap-1" : "flex h-full items-center gap-[var(--ui-gap)] pr-2 pl-2"} onClick={() => menu && setMenu(null)}>
       {essentials.length > 0 && (
         <>
           {/* Essentials: icon-only and present in every workspace. Not
               sortable -- their order is the engine's -- and set apart by a
               hairline so they read as a fixture, not the first few tabs. */}
-          <div role="tablist" aria-label="Essentials" className="flex shrink-0 items-center gap-1">
+          <div role="tablist" aria-label="Essentials" aria-orientation={vertical ? "vertical" : undefined} className={vertical ? "flex shrink-0 flex-col gap-px" : "flex shrink-0 items-center gap-1"}>
             {essentials.map((t) => (
               <EssentialTab
                 key={t.id}
                 tab={t}
                 active={t.id === active}
                 loading={loading[t.id] === true}
+                vertical={vertical}
                 onActivate={() => void activate(t.id)}
                 onMenu={(x, y) => setMenu({ id: t.id, x, y })}
               />
             ))}
           </div>
-          <span className="mx-0.5 h-4 w-px shrink-0 bg-line-2" aria-hidden data-testid="essentials-divider" />
+          <span className={vertical ? "mx-2 my-0.5 h-px shrink-0 bg-line-2" : "mx-0.5 h-4 w-px shrink-0 bg-line-2"} aria-hidden data-testid="essentials-divider" />
         </>
       )}
-      <SortableContext items={tabs.map((t) => t.id)} strategy={horizontalListSortingStrategy}>
+      <SortableContext items={tabs.map((t) => t.id)} strategy={vertical ? verticalListSortingStrategy : horizontalListSortingStrategy}>
         {/* Tabs share the row the way Chrome's do: each starts at a
             comfortable intrinsic width and they shrink together as more open, down to
             a favicon alone. The list itself shrinks with them, so whatever
@@ -137,14 +145,15 @@ export function TabStrip() {
         <div
           // Past the point where every tab is a bare favicon the list
           // scrolls; it must never spill over the feature bar beside it.
-          className="scroll-hidden flex min-w-0 shrink items-center gap-1 overflow-x-auto"
+          className={vertical ? "scroll-hidden flex min-h-0 flex-1 flex-col gap-px overflow-x-hidden overflow-y-auto" : "scroll-hidden flex min-w-0 shrink items-center gap-1 overflow-x-auto"}
           // A plain wheel (or a vertical trackpad swipe) scrolls the strip sideways, as in Chrome.
           onWheel={(e) => {
-            if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY;
+            if (!vertical && Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY;
           }}
           role="tablist"
           ref={tablistRef}
           aria-label="Tabs"
+          aria-orientation={vertical ? "vertical" : undefined}
           onKeyDown={(e) => {
             const next = roveTab(e.key, e.currentTarget, e.target);
             if (!next) return;
@@ -161,6 +170,7 @@ export function TabStrip() {
               detached={detached.includes(t.id)}
               inSplit={paneIds.has(t.id) && paneIds.size >= 2}
               narrow={narrow}
+              vertical={vertical}
               inTabOrder={t.id === stop || (stop === null && t === tabs[0])}
               onFocus={onTabFocus}
               onActivate={onTabActivate}
@@ -170,7 +180,7 @@ export function TabStrip() {
           ))}
         </div>
       </SortableContext>
-      <IconButton icon={Plus} label="New tab" onClick={() => toggle("palette", true)} />
+      {!vertical && <IconButton icon={Plus} label="New tab" onClick={() => toggle("palette", true)} />}
       {hidden > 0 && (
         <button
           type="button"
@@ -184,7 +194,7 @@ export function TabStrip() {
           +{hidden}
         </button>
       )}
-      <div className="min-w-3 flex-1 self-stretch" data-tauri-drag-region="true" />
+      {!vertical && <div className="min-w-3 flex-1 self-stretch" data-tauri-drag-region="true" />}
       {menu && (
         <TabMenu
           x={menu.x}
@@ -253,7 +263,9 @@ export function roveTab(key: string, list: HTMLElement, target: EventTarget | nu
   const i = tabs.indexOf(target);
   if (i === -1 || tabs.length === 0) return null;
   const last = tabs.length - 1;
-  const j = key === "ArrowRight" ? (i === last ? 0 : i + 1) : key === "ArrowLeft" ? (i === 0 ? last : i - 1) : key === "Home" ? 0 : key === "End" ? last : -1;
+  const forward = key === "ArrowRight" || key === "ArrowDown";
+  const back = key === "ArrowLeft" || key === "ArrowUp";
+  const j = forward ? (i === last ? 0 : i + 1) : back ? (i === 0 ? last : i - 1) : key === "Home" ? 0 : key === "End" ? last : -1;
   return j === -1 ? null : (tabs[j] ?? null);
 }
 
@@ -351,7 +363,7 @@ export function revealScrollLeft(list: { left: number; right: number; scrollLeft
  * One tab in the strip. Memoised: the strip re-renders on every load-state
  * tick of any tab, and each tab only needs its own boolean.
  */
-const SortableTab = memo(function SortableTab({ tab: t, active, loading, detached, inSplit, narrow, inTabOrder, onFocus: focusTab, onActivate: activateTab, onClose: closeTab, onMenu: openMenu }: { tab: Tab; active: boolean; loading: boolean; detached: boolean; inSplit: boolean; narrow: Narrow; inTabOrder: boolean; onFocus: (id: string) => void; onActivate: (id: string) => void; onClose: (id: string) => void; onMenu: (id: string, x: number, y: number) => void }) {
+const SortableTab = memo(function SortableTab({ tab: t, active, loading, detached, inSplit, narrow, vertical = false, inTabOrder, onFocus: focusTab, onActivate: activateTab, onClose: closeTab, onMenu: openMenu }: { tab: Tab; active: boolean; loading: boolean; detached: boolean; inSplit: boolean; narrow: Narrow; vertical?: boolean; inTabOrder: boolean; onFocus: (id: string) => void; onActivate: (id: string) => void; onClose: (id: string) => void; onMenu: (id: string, x: number, y: number) => void }) {
   // The active tab keeps its title however crowded the strip gets; only the
   // others fall back to a bare favicon.
   const bare = narrow.title && !active;
@@ -364,7 +376,9 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
   // becomes an invisible placeholder so the strip does not show a second,
   // half-opacity copy moving underneath it.
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 };
-  const pinned = t.tier === "pinned";
+  // Down the rail a pinned tab keeps its title: a column of icons says
+  // less than a row of them, and the rail has the width.
+  const pinned = t.tier === "pinned" && !vertical;
   const sleeping = t.state === "discarded";
   return (
     <div
@@ -381,7 +395,7 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
       // A crowded strip squeezes every tab alike, and the active one also
       // holds its close button, so its title went first. It keeps room for a
       // few words; the others give way, as in every browser's strip.
-      className={`tab-item group flex h-[calc(var(--row-h)-4px)] cursor-pointer items-center text-xs transition-colors ${pinned ? "w-9 shrink-0 justify-center" : `${active ? "min-w-32" : "min-w-9"} w-56 max-w-56 shrink ${bare ? "justify-center" : ""}`} ${sleeping || detached ? "opacity-55 hover:opacity-100" : ""}`}
+      className={`tab-item group flex cursor-pointer items-center text-xs transition-colors ${vertical ? "h-7 w-full shrink-0" : `h-[calc(var(--row-h)-4px)] ${pinned ? "w-9 shrink-0 justify-center" : `${active ? "min-w-32" : "min-w-9"} w-56 max-w-56 shrink ${bare ? "justify-center" : ""}`}`} ${sleeping || detached ? "opacity-55 hover:opacity-100" : ""}`}
       data-active={active || undefined}
       title={detached ? `${label(t)} (in its own window)` : sleeping ? `${label(t)} (sleeping, click to wake)` : pinned ? label(t) : undefined}
       data-sleeping={sleeping || undefined}
@@ -423,7 +437,7 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
         data-pinned={pinned || undefined}
         // Icon-only tabs still answer "which one is this?" on hover.
         title={pinned || bare ? label(t) : undefined}
-        className={`flex h-full min-w-0 flex-1 items-center gap-2 rounded-lg bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-highlight focus-visible:ring-inset ${pinned || bare ? "justify-center px-0" : "px-2.5"}`}
+        className={`flex h-full min-w-0 flex-1 items-center gap-2 rounded-lg bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-highlight focus-visible:ring-inset ${pinned || bare ? "justify-center px-0" : vertical ? "px-2" : "px-2.5"}`}
       >
         {/* A pinned tab is icon-only, so the site's own mark is the only thing
             left to tell it apart; the pin itself moves to a corner dot. */}
@@ -442,6 +456,11 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
           )}
         </span>
         {!pinned && !bare && <span className="truncate">{label(t)}</span>}
+        {vertical && t.tier === "pinned" && (
+          <span className="grid shrink-0 place-items-center text-ink-3" aria-label="Pinned">
+            <Icon icon={Pin} size={10} />
+          </span>
+        )}
         {sleeping && !pinned && (
           <span className="grid shrink-0 place-items-center text-ink-3" aria-label="Sleeping">
             <Icon icon={Moon} size={11} />
@@ -478,7 +497,7 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
 });
 
 /** An essential in the rail: the site's icon, and nothing else, in every workspace. */
-function EssentialTab({ tab: t, active, loading, onActivate, onMenu }: { tab: Tab; active: boolean; loading: boolean; onActivate: () => void; onMenu: (x: number, y: number) => void }) {
+function EssentialTab({ tab: t, active, loading, vertical = false, onActivate, onMenu }: { tab: Tab; active: boolean; loading: boolean; vertical?: boolean; onActivate: () => void; onMenu: (x: number, y: number) => void }) {
   return (
     <div
       role="tab"
@@ -500,14 +519,20 @@ function EssentialTab({ tab: t, active, loading, onActivate, onMenu }: { tab: Ta
       data-tauri-drag-region="false"
       onMouseDown={(e) => e.stopPropagation()}
       data-active={active || undefined}
-      className="tab-item grid h-[calc(var(--row-h)-4px)] w-8 shrink-0 cursor-pointer place-items-center text-xs transition-colors"
+      className={vertical ? "tab-item flex h-7 w-full shrink-0 cursor-pointer items-center gap-2 px-2 text-xs transition-colors" : "tab-item grid h-[calc(var(--row-h)-4px)] w-8 shrink-0 cursor-pointer place-items-center text-xs transition-colors"}
     >
       {loading ? (
         <span className="grid place-items-center text-ink-2 motion-safe:animate-spin motion-reduce:animate-none" aria-label="Loading" role="img">
-          <Icon icon={Loader2} size={16} />
+          <Icon icon={Loader2} size={vertical ? 14 : 16} />
         </span>
       ) : (
-        <Favicon src={t.favicon} size={16} />
+        <Favicon src={t.favicon} size={vertical ? 14 : 16} />
+      )}
+      {vertical && <span className="min-w-0 flex-1 truncate">{label(t)}</span>}
+      {vertical && (
+        <span className="grid shrink-0 place-items-center text-ink-3" aria-hidden>
+          <Icon icon={Pin} size={10} />
+        </span>
       )}
     </div>
   );

@@ -3,7 +3,7 @@ import { AvatarImage } from "./AvatarImage";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowRight, Globe, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, Settings2, Shield, SquarePlus, Trash2, X } from "lucide-react";
+import { ArrowRight, Globe, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Settings2, Shield, SquarePlus, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { useBrowser } from "../store/browser";
@@ -15,10 +15,8 @@ import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { QuickLinks } from "./QuickLinks";
 import { ProfileChip } from "./ProfileChip";
-import { Favicon } from "./Favicon";
-import { essentialTabs, orderTabs } from "../lib/tabOrder";
+import { TabStrip } from "./TabStrip";
 import { runCommand } from "../lib/commands";
-import { useMemo } from "react";
 import { clampFloatingPosition } from "../lib/floating";
 
 /** Rail width in each mode; App.tsx sizes the grid column from these. */
@@ -190,55 +188,22 @@ function DefaultBrowserButton({ expanded }: { expanded: boolean }) {
 }
 
 /**
- * The active workspace's tabs, as a list: the part of the rail that earns
- * its width. Essentials and pinned tabs come first, as in the strip; the
- * current tab is marked, and any row closes from its own control.
+ * The active workspace's tabs, down the rail: the part of the rail that
+ * earns its width. The same strip as the title bar's, turned on its side,
+ * so reordering, the tab menu and drag-to-split all work here; the title
+ * bar shows no tabs while this does.
  */
 function TabList() {
-  const all = useBrowser((s) => s.tabs);
-  const active = useBrowser((s) => s.activeTab);
-  const loading = useBrowser((s) => s.loading);
-  const activate = useBrowser((s) => s.activateTab);
-  const close = useBrowser((s) => s.closeTab);
-  const tabs = useMemo(() => [...essentialTabs(all), ...orderTabs(all)], [all]);
+  const count = useBrowser((s) => s.tabs.length);
   return (
     <section aria-label="Tabs" className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-6 shrink-0 items-center gap-1 pr-0.5 pl-2">
         <span className="text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">Tabs</span>
-        {tabs.length > 0 && <span className="font-mono text-[10px] text-ink-3 tabular-nums">{tabs.length}</span>}
+        {count > 0 && <span className="font-mono text-[10px] text-ink-3 tabular-nums">{count}</span>}
         <span className="flex-1" />
         <RailButton icon={Plus} label="New tab" onClick={() => runCommand("tab.new")} />
       </div>
-      <ul className="scroll-hidden flex min-h-0 flex-1 flex-col gap-px overflow-x-hidden overflow-y-auto">
-        {tabs.map((t) => {
-          const current = t.id === active;
-          const title = t.title || t.url || "New tab";
-          return (
-            <li key={t.id} className="group/tab relative shrink-0">
-              <button
-                type="button"
-                aria-current={current ? "true" : undefined}
-                aria-label={t.tier === "essential" ? `${title}, essential` : title}
-                title={t.url}
-                onClick={() => void activate(t.id)}
-                className={`flex h-7 w-full items-center gap-2 rounded-md pr-7 pl-2 text-left text-[11.5px] transition-colors ${current ? "bg-surface-3 text-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"} ${t.state === "discarded" ? "opacity-60" : ""}`}
-              >
-                <Favicon src={t.favicon} size={13} className={loading[t.id] ? "animate-pulse" : ""} />
-                <span className="min-w-0 flex-1 truncate">{title}</span>
-                {(t.tier === "essential" || t.tier === "pinned") && <Icon icon={Pin} size={10} className="shrink-0 text-ink-3" />}
-              </button>
-              <button
-                type="button"
-                aria-label={`Close ${title}`}
-                onClick={() => void close(t.id)}
-                className={`absolute top-1/2 right-1 grid size-5 -translate-y-1/2 place-items-center rounded-full text-ink-3 transition-opacity hover:bg-surface-3 hover:text-ink focus-visible:opacity-100 ${current ? "" : "opacity-0 group-hover/tab:opacity-100"}`}
-              >
-                <Icon icon={X} size={11} />
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      <TabStrip orientation="vertical" />
     </section>
   );
 }
