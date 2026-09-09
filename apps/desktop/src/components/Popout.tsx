@@ -17,6 +17,7 @@ import { useTabHistory } from "../lib/useTabHistory";
 import { isMac, shortcutFor } from "../lib/commands";
 import { selectAllInChromeField } from "../lib/chromeEditing";
 import { errorMessage } from "../lib/errors";
+import { NavErrorPanel } from "./Content";
 
 /** Keep commands in a detached window on the same visible error path as the main chrome. */
 function run(action: Promise<unknown>) {
@@ -32,6 +33,8 @@ function run(action: Promise<unknown>) {
 export function Popout({ tabId }: { tabId: string }) {
   const { tab, loading, ready } = usePopoutPage(tabId);
   const error = useBrowser((state) => state.error);
+  // A failed document request shows the same explanation as the main window.
+  const navError = useBrowser((state) => state.navError[tabId]);
   const loadPrefs = usePrefs((s) => s.load);
   const url = tab?.url ?? "";
   // A window that has not gone anywhere yet is blank, not "about:blank":
@@ -254,7 +257,10 @@ export function Popout({ tabId }: { tabId: string }) {
           <button type="button" aria-label="Dismiss error" onClick={() => useBrowser.setState({ error: null })} className="grid size-5 shrink-0 place-items-center rounded hover:bg-surface-2"><Icon icon={X} size={13} /></button>
         </div>}
       </div>
-      <div ref={body} className="relative min-h-0 flex-1 bg-surface">{privateStart && <PrivateWelcome onBrowse={() => { inputRef.current?.focus(); inputRef.current?.select(); }} />}</div>
+      <div ref={body} className="relative min-h-0 flex-1 bg-surface">
+        {privateStart && <PrivateWelcome onBrowse={() => { inputRef.current?.focus(); inputRef.current?.select(); }} />}
+        {navError && <NavErrorPanel url={navError.url} error={navError.error} onRetry={() => run(ipc.tabReload(tabId))} />}
+      </div>
     </div>
   );
 }

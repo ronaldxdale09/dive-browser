@@ -208,10 +208,11 @@ function PermissionDialog({ tabId, request }: { tabId: string; request: Permissi
  * native view paints above the chrome, so this hides the page while it is
  * up; a retry or a new navigation takes it down.
  */
-function NavErrorPanel({ url, error }: { url: string; error: string }) {
+export function NavErrorPanel({ url, error, onRetry }: { url: string; error: string; onRetry?: () => void }) {
   useCoversContent(true);
   const reload = useBrowser((s) => s.reload);
   const navigate = useBrowser((s) => s.navigate);
+  const retry = onRetry ?? (() => void reload());
   const text = describeNavError(error, url);
   const offline = /ERR_INTERNET_DISCONNECTED/.test(error);
   // A host that does not exist is often a typo for one that does.
@@ -230,7 +231,7 @@ function NavErrorPanel({ url, error }: { url: string; error: string }) {
         </p>
         <p className="font-mono text-[11px] text-ink-3">{error}</p>
         <div className="mt-1 flex flex-wrap items-center gap-2">
-          <button type="button" onClick={() => void reload()} className="flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-sm text-accent-ink hover:opacity-90">
+          <button type="button" onClick={retry} className="flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-sm text-accent-ink hover:opacity-90">
             <Icon icon={RotateCw} size={13} /> Retry
           </button>
           {term && (

@@ -40,7 +40,9 @@ export function usePopoutPage(tabId: string) {
     void events.tabLoad.listen(({ payload }) => {
       if (!live || payload.tab_id !== tabId) return;
       setPage((old) => ({ id: tabId, tab: old.id === tabId ? old.tab : null, ready: old.id === tabId && old.ready, loading: payload.phase === "started" }));
-      if (payload.phase === "failed") report(payload.error ?? "This page could not be loaded.");
+      // The store keeps the load state (and a failed document's error), so the
+      // window explains a failure the way the main window does, not as a raw code.
+      useBrowser.getState().applyLoad(payload);
     }).then((stop) => { if (live) stops.push(stop); else stop(); }).catch(report);
     return () => { live = false; stops.forEach((stop) => stop()); };
   }, [tabId]);

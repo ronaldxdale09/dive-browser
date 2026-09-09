@@ -1,7 +1,7 @@
 import { prettyUrl } from "../lib/prettyUrl";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Tab } from "../lib/ipc";
+import type { Tab, TabLoad } from "../lib/ipc";
 import { events, ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { usePrefs } from "../store/prefs";
@@ -67,6 +67,27 @@ describe("detached Dive window", () => {
     expect(windowTab.getAttribute("data-tauri-drag-region")).toBe("false");
     expect(screen.getByRole("navigation", { name: "Browser controls" })).toBeTruthy();
     expect(container.querySelectorAll('[data-tauri-drag-region="true"]')).toHaveLength(1);
+  });
+
+  it("explains a failed page load the way the main window does, with its own retry", async () => {
+    const reload = vi.spyOn(ipc, "tabReload").mockResolvedValue(null as never);
+    let onLoad: ((e: { payload: TabLoad }) => void) | null = null;
+    vi.spyOn(events.tabLoad, "listen").mockImplementation(async (callback) => {
+      onLoad = callback as typeof onLoad;
+      return () => undefined;
+    });
+    render(<Popout tabId={tab.id} />);
+    await waitFor(() => expect(onLoad).not.toBeNull());
+    act(() => onLoad!({ payload: { tab_id: tab.id, phase: "failed", url: "http://localhost:5180/", error: "net::ERR_CONNECTION_REFUSED" } }));
+    const panel = await screen.findByRole("alert", { name: "Connection refused" });
+    expect(panel.textContent).toContain("net::ERR_CONNECTION_REFUSED");
+    // No raw code in the generic banner.
+    expect(useBrowser.getState().error).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(reload).toHaveBeenCalledWith(tab.id);
+    // The next navigation takes the panel down.
+    act(() => onLoad!({ payload: { tab_id: tab.id, phase: "started", url: "http://localhost:5180/", error: null } }));
+    expect(screen.queryByRole("alert", { name: "Connection refused" })).toBeNull();
   });
 
   it("surfaces rejected toolbar commands instead of dropping them", async () => {
