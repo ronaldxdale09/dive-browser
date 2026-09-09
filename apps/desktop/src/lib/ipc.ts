@@ -22,7 +22,7 @@ export const events = {
     once: (callback: EventCallback<string>) => generatedEvents.menuCommand(getCurrentWebview()).once(callback),
   },
 };
-export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, CsvImportSummary, FormEntry } from "../generated/bindings";
+export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, CsvImportSummary, FormEntry, JsDialogAsked, JsDialogClosed } from "../generated/bindings";
 export type { ExtensionInfo, ExtensionList };
 export type { Prefs, ClearRequest, Rule, RuleAction, PrivacyCategory, PrivacyEvent, PrivacyInfo, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RequestDetail, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, RecordOptions, RecordingResult, RecordingCapabilities, RecordingEvent, Microphone, MediaInfo, ExportRequest, KeptSegment, RecordingInfo, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions, SitePermission, PermissionList, Scope, Duration, PermissionDismissed, Decision, UpdateInfo, PermissionAsked, TabTier, DefaultBrowserStatus, Profile, ProfileId, ProfileDraft, SubtitleModel, SubtitleModelProgress, SubtitleCue, SubtitleState, ImportSource, ImportSummary } from "../generated/bindings";
 
@@ -202,6 +202,7 @@ export const ipc = {
   passwordsImportCsv: async (path: string) => unwrap(await commands.passwordsImportCsv(path)),
   permissionSet: async (scope: Scope, origin: string, kind: string, decision: Decision) => unwrap(await commands.permissionSet(scope, origin, kind, decision)),
   permissionReply: async (tabId: string, requestId: string, decision: Decision, duration: Duration) => unwrap(await commands.permissionReply(tabId, requestId, decision, duration)),
+  jsDialogAnswer: async (tabId: string, dialogId: string, accept: boolean, text: string | null) => unwrap(await commands.jsDialogAnswer(tabId, dialogId, accept, text)),
   permissionsList: async () => unwrap(await commands.permissionsList()),
   extensionsList: async () => unwrap(await commands.extensionsList()),
   extensionPick: () => commands.extensionPick(),

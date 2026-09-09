@@ -63,6 +63,8 @@ pub struct AppState {
     pub activity: std::sync::Arc<crate::activity::Registry>,
     /// Native permission requests and page-lifetime decisions.
     pub permissions: crate::permissions::Registry,
+    /// JavaScript dialogs pages have open, answered from the chrome or MCP.
+    pub js_dialogs: crate::js_dialog::Registry,
     /// Live-subtitle transcription sessions per tab.
     pub subtitles: crate::subtitles::Registry,
 }
@@ -143,6 +145,7 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
         crashes: crate::crash::Registry::default(),
         activity: std::sync::Arc::default(),
         permissions: crate::permissions::Registry::default(),
+        js_dialogs: crate::js_dialog::Registry::default(),
         subtitles: crate::subtitles::Registry::default(),
     };
     crate::commands::register_builtin(&state.commands);

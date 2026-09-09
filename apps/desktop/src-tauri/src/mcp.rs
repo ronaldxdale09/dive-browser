@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use dive_cdp::CdpSession;
 use dive_core::TabId;
 use dive_mcp::{
-    Addressed, AppearanceParams, Browser, BrowserError, ResizeParams, TabInfo, Target,
-    WaitForParams,
+    Addressed, AppearanceParams, Browser, BrowserError, DialogParams, ResizeParams, TabInfo,
+    Target, WaitForParams,
 };
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager};
@@ -260,7 +260,25 @@ impl AppBrowser {
     /// discarded.
     async fn session_for(&self, tab: TabId) -> Result<ToolSession, BrowserError> {
         self.ensure_view(tab).await?;
+        self.refuse_while_dialog(tab)?;
         self.session(tab)
+    }
+
+    /// A page inside `alert()` or `confirm()` answers no CDP call at all:
+    /// its main thread is parked in the dialog, so a read would only time
+    /// out after 30 s. Say what is open instead.
+    fn refuse_while_dialog(&self, tab: TabId) -> Result<(), BrowserError> {
+        match self.state().js_dialogs.open(tab) {
+            Some(dialog) => Err(BrowserError::NotAllowed {
+                operation: "reading the page".into(),
+                reason: format!(
+                    "the page has a {} dialog open ({:?}) and answers nothing until it is closed; page_inspect shows it, page_dialog answers it",
+                    dialog.kind,
+                    dialog.message.chars().take(120).collect::<String>()
+                ),
+            }),
+            None => Ok(()),
+        }
     }
 
     /// A session that can accept real input. CEF stops acknowledging `Input`
@@ -270,6 +288,18 @@ impl AppBrowser {
         self.ensure_view(tab).await?;
         if !self.on_screen(tab) {
             self.activate(tab).await?;
+        }
+        // A JavaScript dialog pauses the page's script and swallows input;
+        // say which one is open and how to answer it.
+        if let Some(dialog) = self.state().js_dialogs.open(tab) {
+            return Err(BrowserError::NotAllowed {
+                operation: "page input".into(),
+                reason: format!(
+                    "the page has a {} dialog open ({:?}); answer it with page_dialog first",
+                    dialog.kind,
+                    dialog.message.chars().take(120).collect::<String>()
+                ),
+            });
         }
         // Input to a page hidden under a chrome dialog never arrives; say so
         // now rather than after a 30 s round-trip timeout.
@@ -292,6 +322,29 @@ impl AppBrowser {
             .as_ref()
             .and_then(crate::engine::TabHost::active)
             == Some(tab)
+    }
+
+    /// Run an input action, but stop waiting the moment the page opens a
+    /// JavaScript dialog: the page's script is paused inside it, so the CDP
+    /// input call would only time out. `on_dialog` turns the dialog into
+    /// the tool's result instead.
+    async fn or_dialog<T>(
+        &self,
+        tab: TabId,
+        work: impl std::future::Future<Output = Result<T, BrowserError>>,
+        on_dialog: impl FnOnce(&crate::js_dialog::JsDialogAsked) -> Result<T, BrowserError>,
+    ) -> Result<T, BrowserError> {
+        tokio::pin!(work);
+        loop {
+            tokio::select! {
+                outcome = &mut work => return outcome,
+                () = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                    if let Some(dialog) = self.state().js_dialogs.open(tab) {
+                        return on_dialog(&dialog);
+                    }
+                }
+            }
+        }
     }
 
     /// Record an action on the tab's timeline around `work`, so
@@ -484,6 +537,20 @@ fn keep_last<T>(items: &mut Vec<T>, keep: usize) {
     }
 }
 
+/// What an input tool returns when the action opened a dialog instead of
+/// finishing: the dialog, and what to do about it.
+fn dialog_opened(dialog: &crate::js_dialog::JsDialogAsked, action: &str) -> Value {
+    json!({
+        "dialog": {
+            "kind": dialog.kind,
+            "message": dialog.message,
+            "default_value": dialog.default_value,
+            "origin": dialog.origin,
+        },
+        "hint": format!("{action} opened a dialog and the page is waiting on it. Answer it with page_dialog (accept true or false, text for a prompt), then carry on."),
+    })
+}
+
 fn other(e: impl std::fmt::Display) -> BrowserError {
     BrowserError::Other(e.to_string())
 }
@@ -578,8 +645,7 @@ impl Browser for AppBrowser {
     }
 
     async fn page_text(&self, tab: TabId) -> Result<String, BrowserError> {
-        self.ensure_view(tab).await?;
-        let session = self.session(tab)?;
+        let session = self.session_for(tab).await?;
         let result = session
             .call(
                 "Runtime.evaluate",
@@ -601,8 +667,7 @@ impl Browser for AppBrowser {
     }
 
     async fn page_markdown(&self, tab: TabId) -> Result<String, BrowserError> {
-        self.ensure_view(tab).await?;
-        let session = self.session(tab)?;
+        let session = self.session_for(tab).await?;
         let script = crate::pagescript::build(
             "markdown.js",
             &[("__MARKDOWN_CAP__", PAGE_TEXT_CAP.to_string())],
@@ -645,8 +710,7 @@ impl Browser for AppBrowser {
     }
 
     async fn page_state(&self, tab: TabId) -> Result<String, BrowserError> {
-        self.ensure_view(tab).await?;
-        let session = self.session(tab)?;
+        let session = self.session_for(tab).await?;
         let tree = session
             .call("Accessibility.getFullAXTree", json!({}))
             .await
@@ -670,6 +734,28 @@ impl Browser for AppBrowser {
     }
 
     async fn page_inspect(&self, tab: TabId) -> Result<Value, BrowserError> {
+        self.ensure_view(tab).await?;
+        if let Some(dialog) = self.state().js_dialogs.open(tab) {
+            // Nothing in the page can be read until this is answered, so the
+            // report is the dialog and what the tab was doing.
+            let known = self
+                .tabs()
+                .await?
+                .into_iter()
+                .find(|t| t.id == tab.to_string());
+            return Ok(json!({
+                "url": known.as_ref().map(|t| t.url.clone()),
+                "title": known.map(|t| t.title),
+                "dialog": {
+                    "kind": dialog.kind,
+                    "message": dialog.message,
+                    "default_value": dialog.default_value,
+                    "origin": dialog.origin,
+                },
+                "actions": self.state().buffers.timeline(tab, INSPECT_DIAGNOSTIC_CAP),
+                "hint": "The page is paused in this dialog and cannot be read or clicked until it is answered. Call page_dialog with accept true or false (and text for a prompt), then page_inspect again.",
+            }));
+        }
         let session = self.session_for(tab).await?;
         let page = locator::page(&session, crate::snapshot::MAX_TEXT).await?;
         let elements = locator::elements(&session, INSPECT_ELEMENT_CAP).await?;
@@ -730,6 +816,12 @@ impl Browser for AppBrowser {
             "failed_requests": failed,
             "request_count": total_requests,
             "actions": state.buffers.timeline(tab, INSPECT_DIAGNOSTIC_CAP),
+            "dialog": state.js_dialogs.open(tab).map(|d| json!({
+                "kind": d.kind,
+                "message": d.message,
+                "default_value": d.default_value,
+                "origin": d.origin,
+            })),
             "hint": "Each element carries the locator that addresses it. Call page_screenshot when layout matters, network_list for the full request log, console_tail for the whole console.",
         }))
     }
@@ -737,21 +829,30 @@ impl Browser for AppBrowser {
     async fn page_click(&self, tab: TabId, target: Target) -> Result<Value, BrowserError> {
         let session = self.action_session_for(tab).await?;
         let described = target.locator.clone().or_else(|| target.r#ref.clone());
-        self.tracked(tab, "page_click", described, async {
-            let (x, y, label) = self.point_for(tab, &session, &target).await?;
-            automation::click_at(
-                &session,
-                Some(&self.app),
+        self.tracked(
+            tab,
+            "page_click",
+            described,
+            self.or_dialog(
                 tab,
-                x,
-                y,
-                &label,
-                self.on_screen(tab),
-            )
-            .await
-            .map_err(|e| other(e.message))?;
-            Ok(json!({"clicked": label, "x": x, "y": y}))
-        })
+                async {
+                    let (x, y, label) = self.point_for(tab, &session, &target).await?;
+                    automation::click_at(
+                        &session,
+                        Some(&self.app),
+                        tab,
+                        x,
+                        y,
+                        &label,
+                        self.on_screen(tab),
+                    )
+                    .await
+                    .map_err(|e| other(e.message))?;
+                    Ok(json!({"clicked": label, "x": x, "y": y}))
+                },
+                |dialog| Ok(dialog_opened(dialog, "The click")),
+            ),
+        )
         .await
     }
 
@@ -770,7 +871,7 @@ impl Browser for AppBrowser {
         }
         let session = self.action_session_for(tab).await?;
         let described = target.locator.clone().or_else(|| target.r#ref.clone());
-        self.tracked(tab, "page_type", described, async {
+        self.tracked(tab, "page_type", described, self.or_dialog(tab, async {
             let label = self
                 .focus_for(tab, &session, &target, true)
                 .await?
@@ -779,7 +880,7 @@ impl Browser for AppBrowser {
                 .await
                 .map_err(|e| other(e.message))?;
             Ok(json!({"typed_into": label, "characters": text.chars().count(), "submitted": submit}))
-        })
+        }, |dialog| Ok(dialog_opened(dialog, "Typing"))))
         .await
     }
 
@@ -791,15 +892,36 @@ impl Browser for AppBrowser {
         modifiers: Vec<String>,
     ) -> Result<(), BrowserError> {
         let session = self.action_session_for(tab).await?;
-        self.tracked(tab, "page_press", Some(key.clone()), async {
-            // Focusing is optional: pressing Escape to dismiss a dialog has
-            // no element to aim at.
-            self.focus_for(tab, &session, &target, false).await?;
-            let mask = automation::modifier_mask(&modifiers).map_err(|e| other(e.message))?;
-            automation::press(&session, &key, mask)
-                .await
-                .map_err(|e| other(e.message))
-        })
+        self.tracked(
+            tab,
+            "page_press",
+            Some(key.clone()),
+            self.or_dialog(
+                tab,
+                async {
+                    // Focusing is optional: pressing Escape to dismiss a dialog has
+                    // no element to aim at.
+                    self.focus_for(tab, &session, &target, false).await?;
+                    let mask =
+                        automation::modifier_mask(&modifiers).map_err(|e| other(e.message))?;
+                    automation::press(&session, &key, mask)
+                        .await
+                        .map_err(|e| other(e.message))
+                },
+                |dialog| {
+                    // The trait gives a key press nothing to say, so the dialog
+                    // is reported the one way it can be: as the reason it stopped.
+                    Err(BrowserError::NotAllowed {
+                        operation: "page_press".into(),
+                        reason: format!(
+                            "the key opened a {} dialog ({:?}); answer it with page_dialog",
+                            dialog.kind,
+                            dialog.message.chars().take(120).collect::<String>()
+                        ),
+                    })
+                },
+            ),
+        )
         .await
     }
 
@@ -839,6 +961,34 @@ impl Browser for AppBrowser {
             tokio::time::sleep(std::time::Duration::from_millis(SCROLL_SETTLE_MS)).await;
             let page = locator::page(&session, 0).await?;
             Ok(json!({"scroll": page["scroll"], "scroll_height": page["scroll_height"]}))
+        })
+        .await
+    }
+
+    async fn page_dialog(&self, tab: TabId, params: DialogParams) -> Result<Value, BrowserError> {
+        self.ensure_view(tab).await?;
+        let accept = params.accept.unwrap_or(true);
+        let text = params.text;
+        let label = if accept { "accept" } else { "dismiss" };
+        self.tracked(tab, "page_dialog", Some(label.into()), async {
+            let answered = self
+                .on_main(move |app| {
+                    let state = app.state::<AppState>();
+                    let Some(dialog) = state.js_dialogs.open(tab) else {
+                        return Err(BrowserError::BadRequest(
+                            "the page has no dialog open; page_inspect shows one under 'dialog' when it does".into(),
+                        ));
+                    };
+                    crate::js_dialog::answer(app, &state, tab, &dialog.dialog_id, accept, text)
+                        .map_err(|e| other(e.message))
+                })
+                .await??;
+            Ok(json!({
+                "kind": answered.kind,
+                "message": answered.message,
+                "accepted": accept,
+                "hint": "The page's script has resumed. Call page_inspect or page_wait_for to see what it did next.",
+            }))
         })
         .await
     }
@@ -1280,8 +1430,7 @@ impl Browser for AppBrowser {
                 "expression is over the {EVALUATE_EXPRESSION_CAP} character limit"
             )));
         }
-        self.ensure_view(tab).await?;
-        let session = self.session(tab)?;
+        let session = self.session_for(tab).await?;
         let result = session
             .call(
                 "Runtime.evaluate",

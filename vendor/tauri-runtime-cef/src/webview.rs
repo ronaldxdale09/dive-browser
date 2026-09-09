@@ -30,7 +30,9 @@ use crate::window::AppWindow;
 
 pub use crate::reserved_shortcut_native::NativeNewTabTarget;
 pub use browser_client::permission::{NativePermissionRequest, PermissionContext};
-pub use browser_client::{ContextMenuAction, ContextMenuCommand, ContextMenuOptions};
+pub use browser_client::{
+    ContextMenuAction, ContextMenuCommand, ContextMenuOptions, JsDialogKind, JsDialogRequest,
+};
 
 // Weak ownership: the context is released with the last live webview, before
 // CEF shutdown. A data directory is only a grouping key for incognito views;
@@ -48,6 +50,7 @@ pub struct Webview {
     browser: cef::Browser,
     permissions: Arc<browser_client::permission::PermissionBridge>,
     context_menu: Arc<browser_client::ContextMenuBridge>,
+    js_dialog: Arc<browser_client::JsDialogBridge>,
     shortcut_target: std::sync::Weak<crate::reserved_shortcut_native::NewTabTarget>,
     shortcut_binding: Arc<crate::reserved_shortcut_native::NativeShortcutBinding>,
 }
@@ -57,6 +60,7 @@ impl Webview {
         browser: cef::Browser,
         permissions: Arc<browser_client::permission::PermissionBridge>,
         context_menu: Arc<browser_client::ContextMenuBridge>,
+        js_dialog: Arc<browser_client::JsDialogBridge>,
         shortcut_target: std::sync::Weak<crate::reserved_shortcut_native::NewTabTarget>,
         shortcut_binding: Arc<crate::reserved_shortcut_native::NativeShortcutBinding>,
     ) -> Self {
@@ -64,6 +68,7 @@ impl Webview {
             browser,
             permissions,
             context_menu,
+            js_dialog,
             shortcut_target,
             shortcut_binding,
         }
@@ -82,6 +87,22 @@ impl Webview {
         handler: impl Fn(browser_client::ContextMenuCommand) + Send + Sync + 'static,
     ) {
         self.context_menu.install(Arc::new(handler));
+    }
+
+    /// Take over the page's JavaScript dialogs: `handler` receives each one,
+    /// `reset` hears which pending ones the page withdrew. Without a handler
+    /// CEF shows a native modal that blocks the whole process.
+    pub fn set_js_dialog_handler(
+        &self,
+        handler: impl Fn(browser_client::JsDialogRequest) + Send + Sync + 'static,
+        reset: impl Fn(Vec<u64>) + Send + Sync + 'static,
+    ) {
+        self.js_dialog.install(Arc::new(handler), Arc::new(reset));
+    }
+
+    /// Answer a dialog from `set_js_dialog_handler`; false when it is gone.
+    pub fn answer_js_dialog(&self, id: u64, accept: bool, text: Option<String>) -> bool {
+        self.js_dialog.answer(id, accept, text)
     }
 
     /// A weak target handle: valid only while this exact native view remains alive.
@@ -355,6 +376,7 @@ pub(crate) struct AppWebview {
     pub(crate) shortcut_binding: Arc<crate::reserved_shortcut_native::NativeShortcutBinding>,
     pub(crate) permissions: Arc<browser_client::permission::PermissionBridge>,
     pub(crate) context_menu: Arc<browser_client::ContextMenuBridge>,
+    pub(crate) js_dialog: Arc<browser_client::JsDialogBridge>,
     pub(crate) webview_id: u32,
     pub(crate) label: String,
     pub(crate) browser: cef::Browser,
@@ -586,11 +608,13 @@ impl<T: UserEvent> WinitCefApp<T> {
         let web_content_process_terminate_handler: Option<Arc<dyn Fn() + Send>> = None;
         let permissions = Arc::new(browser_client::permission::PermissionBridge::default());
         let context_menu = Arc::new(browser_client::ContextMenuBridge::default());
+        let js_dialog = Arc::new(browser_client::JsDialogBridge::default());
         let shortcut_binding =
             Arc::new(crate::reserved_shortcut_native::NativeShortcutBinding::default());
         let handlers = browser_client::TauriCefBrowserClientHandlers {
             permissions: permissions.clone(),
             context_menu: context_menu.clone(),
+            js_dialog: js_dialog.clone(),
             shortcut_binding: shortcut_binding.clone(),
             ipc_handler: pending.ipc_handler.map(Arc::from),
             on_page_load_handler,
@@ -746,6 +770,7 @@ impl<T: UserEvent> WinitCefApp<T> {
                         shortcut_binding,
                         permissions,
                         context_menu,
+                        js_dialog,
                         webview_id,
                         label,
                         browser,
@@ -990,6 +1015,7 @@ impl<T: UserEvent> WinitCefApp<T> {
                 child.browser.clone(),
                 child.permissions.clone(),
                 child.context_menu.clone(),
+                child.js_dialog.clone(),
                 Arc::downgrade(&child.shortcut_target),
                 child.shortcut_binding.clone(),
             )),

@@ -14,6 +14,7 @@ use crate::{
 };
 
 mod context_menu;
+pub(crate) mod js_dialog;
 mod display;
 mod download;
 mod drag;
@@ -37,12 +38,15 @@ pub(crate) use drag::{
 use keyboard::TauriCefKeyboardHandler;
 use life_span::TauriCefChildLifeSpanHandler;
 use load::TauriCefLoadHandler;
+use js_dialog::TauriCefJsDialogHandler;
+pub use js_dialog::{JsDialogBridge, JsDialogKind, JsDialogRequest};
 use permission::TauriCefPermissionHandler;
 pub(crate) use process::TauriCefBrowserProcessHandler;
 
 pub(crate) struct TauriCefBrowserClientHandlers<T: UserEvent> {
     pub(crate) permissions: Arc<permission::PermissionBridge>,
     pub(crate) context_menu: Arc<ContextMenuBridge>,
+    pub(crate) js_dialog: Arc<JsDialogBridge>,
     pub(crate) shortcut_binding: Arc<crate::reserved_shortcut_native::NativeShortcutBinding>,
     pub(crate) ipc_handler: Option<Arc<ipc::IpcHandler<T>>>,
     pub(crate) on_page_load_handler: Option<Arc<tauri_runtime::webview::OnPageLoadHandler>>,
@@ -61,6 +65,7 @@ impl<T: UserEvent> Clone for TauriCefBrowserClientHandlers<T> {
         Self {
             permissions: self.permissions.clone(),
             context_menu: self.context_menu.clone(),
+            js_dialog: self.js_dialog.clone(),
             shortcut_binding: self.shortcut_binding.clone(),
             ipc_handler: self.ipc_handler.clone(),
             on_page_load_handler: self.on_page_load_handler.clone(),
@@ -154,6 +159,10 @@ wrap_client! {
 
     fn keyboard_handler(&self) -> Option<KeyboardHandler> {
       Some(TauriCefKeyboardHandler::new(self.devtools_enabled, self.handlers.shortcut_binding.clone()))
+    }
+
+    fn jsdialog_handler(&self) -> Option<JsdialogHandler> {
+      Some(TauriCefJsDialogHandler::new(self.handlers.js_dialog.clone()))
     }
 
     fn permission_handler(&self) -> Option<PermissionHandler> {

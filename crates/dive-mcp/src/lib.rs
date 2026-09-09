@@ -17,8 +17,9 @@ pub use error::BrowserError;
 pub use http::{Handle, serve};
 pub use params::{
     Addressed, AppearanceParams, BodyParams, ClickParams, ComponentParams, DEFAULT_WAIT_MS,
-    EvaluateParams, LOCATOR_GRAMMAR, LocateParams, MAX_LOCATOR_CHARS, MAX_REF_CHARS, MAX_WAIT_MS,
-    NavigateParams, OpenParams, PressParams, ResizeParams, RulesParams, ScreenshotParams,
-    ScrollParams, TabRef, TailParams, Target, ThrottleParams, TypeParams, WaitForParams,
+    DialogParams, EvaluateParams, LOCATOR_GRAMMAR, LocateParams, MAX_LOCATOR_CHARS, MAX_REF_CHARS,
+    MAX_WAIT_MS, NavigateParams, OpenParams, PressParams, ResizeParams, RulesParams,
+    ScreenshotParams, ScrollParams, TabRef, TailParams, Target, ThrottleParams, TypeParams,
+    WaitForParams,
 };
 pub use server::{Config, DiveServer};

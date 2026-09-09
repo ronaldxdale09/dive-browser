@@ -195,6 +195,14 @@ impl Browser for Fake {
     ) -> Result<serde_json::Value, BrowserError> {
         Ok(serde_json::json!({"delta_x": delta_x, "delta_y": delta_y}))
     }
+    async fn page_dialog(
+        &self,
+        _tab: TabId,
+        params: DialogParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"answered": params.accept.unwrap_or(true), "text": params.text}))
+    }
+
     async fn page_wait_for(
         &self,
         _tab: TabId,
@@ -711,4 +719,43 @@ async fn token_and_origin_are_enforced() {
         200
     );
     handle.shutdown();
+}
+
+#[tokio::test]
+async fn page_dialog_defaults_to_accepting_and_passes_prompt_text() {
+    let server = DiveServer::new(Arc::new(Fake::default()), Config::default());
+    server
+        .tab_open(Parameters(OpenParams {
+            url: "https://a.dev".into(),
+        }))
+        .await
+        .unwrap();
+    let accepted = server
+        .page_dialog(Parameters(DialogParams::default()))
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_str(&text_of(&accepted)).unwrap();
+    assert_eq!(body["answered"], true);
+    let dismissed = server
+        .page_dialog(Parameters(DialogParams {
+            tab_id: None,
+            accept: Some(false),
+            text: Some("dale".into()),
+        }))
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_str(&text_of(&dismissed)).unwrap();
+    assert_eq!(body["answered"], false);
+    assert_eq!(body["text"], "dale");
+    // The catalog carries it, with the same parameter names the server accepts.
+    let entry = tool_catalog()
+        .into_iter()
+        .find(|t| t.name == "page_dialog")
+        .expect("page_dialog in the catalog");
+    let props = &entry.input_schema["properties"];
+    assert!(
+        props.get("accept").is_some()
+            && props.get("text").is_some()
+            && props.get("tab_id").is_some()
+    );
 }

@@ -5,7 +5,7 @@
 use base64::Engine as _;
 use dive_agent::{ToolResult, ToolSpec, ToolUse};
 use dive_core::TabId;
-use dive_mcp::{AppearanceParams, Browser, ResizeParams, Target, WaitForParams};
+use dive_mcp::{AppearanceParams, Browser, DialogParams, ResizeParams, Target, WaitForParams};
 use serde_json::{Value, json};
 
 const MAX_AGENT_SCREENSHOT_BYTES: usize = 8 * 1024 * 1024;
@@ -73,6 +73,11 @@ pub fn specs() -> Vec<ToolSpec> {
             "page_wait_for",
             "Wait until every condition given holds: a locator matches, text appears, the URL contains a fragment, loading finishes. Call this after anything that starts work instead of guessing how long it takes.".into(),
             obj(json!({"tab_id": tab, "locator": locator, "text": {"type": "string"}, "url_includes": {"type": "string"}, "load": {"type": "boolean"}, "timeout_ms": {"type": "integer"}}), &[]),
+        ),
+        spec(
+            "page_dialog",
+            "Answer the JavaScript dialog the page has open (alert, confirm, prompt or a leave-page question); page_inspect shows it under dialog. accept true presses OK or Leave, false Cancel or Stay; text is what a prompt receives.".into(),
+            obj(json!({"tab_id": tab, "accept": {"type": "boolean"}, "text": {"type": "string"}}), &[]),
         ),
         spec(
             "page_locate",
@@ -161,6 +166,7 @@ pub fn is_action(name: &str) -> bool {
             | "page_resize"
             | "page_appearance"
             | "page_throttle"
+            | "page_dialog"
             | "tab_navigate"
             | "tab_activate"
             | "tab_close"
@@ -358,6 +364,19 @@ async fn execute<B: Browser>(
                         url_includes: input["url_includes"].as_str().map(str::to_owned),
                         load: input["load"].as_bool().unwrap_or(false),
                         timeout_ms: input["timeout_ms"].as_u64(),
+                    },
+                )
+                .await
+                .map_err(err)?,
+        ),
+        "page_dialog" => text(
+            browser
+                .page_dialog(
+                    tab()?,
+                    DialogParams {
+                        tab_id: None,
+                        accept: input["accept"].as_bool(),
+                        text: input["text"].as_str().map(str::to_owned),
                     },
                 )
                 .await

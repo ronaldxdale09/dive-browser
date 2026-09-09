@@ -712,6 +712,8 @@ impl TabHost {
         Self::round_view(&view, self.corner_radius);
         #[cfg(feature = "cef")]
         crate::page_menu::attach(app, tab_id, &view);
+        #[cfg(feature = "cef")]
+        crate::js_dialog::attach(app, tab_id, &view);
         self.views.insert(tab_id, view);
         Ok(())
     }
@@ -1299,11 +1301,9 @@ impl TabHost {
             view.close()?;
         }
         self.forget_closed(id);
-        self.window
-            .app_handle()
-            .state::<AppState>()
-            .activity
-            .drop_tab(id);
+        let state = self.window.app_handle().state::<AppState>();
+        state.activity.drop_tab(id);
+        state.js_dialogs.forget_tab(id);
         Ok(())
     }
 

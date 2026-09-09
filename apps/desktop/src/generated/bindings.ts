@@ -172,6 +172,8 @@ export const commands = {
 	permissionSet: (scope: Scope, origin: string, kind: string, decision: Decision) => typedError<null, AppError>(__TAURI_INVOKE("permission_set", { scope, origin, kind, decision })),
 	/**  Resolve the original native request; its opaque ID carries trusted provenance. */
 	permissionReply: (tabId: TabId, requestId: string, decision: Decision, duration: Duration) => typedError<null, AppError>(__TAURI_INVOKE("permission_reply", { tabId, requestId, decision, duration })),
+	/**  Answer a page's JavaScript dialog (`JsDialogAsked`); the page's script resumes. */
+	jsDialogAnswer: (tabId: TabId, dialogId: string, accept: boolean, text: string | null) => typedError<null, AppError>(__TAURI_INVOKE("js_dialog_answer", { tabId, dialogId, accept, text })),
 	/**  Remembered permissions in the active profile and container. */
 	permissionsList: () => typedError<PermissionList, AppError>(__TAURI_INVOKE("permissions_list")),
 	/**  List installed extensions. */
@@ -530,6 +532,8 @@ export const events = {
 	devServersChanged: makeEvent<DevServersChanged>("dev-servers-changed"),
 	downloadNotice: makeEvent<DownloadNotice>("download-notice"),
 	inspectEvent: makeEvent<InspectEvent>("inspect-event"),
+	jsDialogAsked: makeEvent<JsDialogAsked>("js-dialog-asked"),
+	jsDialogClosed: makeEvent<JsDialogClosed>("js-dialog-closed"),
 	menuCommand: makeEvent<MenuCommand>("menu-command"),
 	networkEvent: makeEvent<NetworkEvent>("network-event"),
 	permissionAsked: makeEvent<PermissionAsked>("permission-asked"),
@@ -1140,6 +1144,28 @@ export type InspectorSnapshot_Serialize = {
 	changes: StyleChange_Serialize[],
 	/**  Prompt-ready summary for handing the finding to an agent. */
 	description: string | null,
+};
+
+/**  A dialog a page has open. Answering it resumes the page's script. */
+export type JsDialogAsked = {
+	tab_id: TabId,
+	/**  Opaque; pass it back to `js_dialog_answer`. */
+	dialog_id: string,
+	/**  `alert`, `confirm`, `prompt` or `beforeunload`. */
+	kind: string,
+	/**  The page's origin, empty for `beforeunload`. */
+	origin: string,
+	message: string,
+	/**  A prompt's suggested text. */
+	default_value: string,
+	/**  A `beforeunload` raised by a reload rather than a navigation. */
+	is_reload: boolean,
+};
+
+/**  A dialog went away: answered, or withdrawn by the page moving on. */
+export type JsDialogClosed = {
+	tab_id: TabId,
+	dialog_id: string,
 };
 
 /**  One stretch of the source kept in the export, in order. */

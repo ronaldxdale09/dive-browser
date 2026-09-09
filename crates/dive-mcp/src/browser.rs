@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::BrowserError;
-use crate::params::{AppearanceParams, ResizeParams, Target, WaitForParams};
+use crate::params::{AppearanceParams, DialogParams, ResizeParams, Target, WaitForParams};
 
 /// What a tool caller gets to know about a tab.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -96,6 +96,13 @@ pub trait Browser: Send + Sync + 'static {
         target: Target,
         delta_x: f64,
         delta_y: f64,
+    ) -> Result<serde_json::Value, BrowserError>;
+    /// Answer the dialog (`alert`, `confirm`, `prompt`, `beforeunload`) the
+    /// page has open, which blocks the page's script until it is answered.
+    async fn page_dialog(
+        &self,
+        tab: TabId,
+        params: DialogParams,
     ) -> Result<serde_json::Value, BrowserError>;
     /// Wait until every supplied condition holds, or time out.
     async fn page_wait_for(

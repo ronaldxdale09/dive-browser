@@ -16,9 +16,10 @@ use serde::Serialize;
 use crate::browser::Browser;
 use crate::error::BrowserError;
 use crate::params::{
-    AppearanceParams, BodyParams, ClickParams, ComponentParams, EvaluateParams, LOCATOR_GRAMMAR,
-    LocateParams, MAX_WAIT_MS, NavigateParams, OpenParams, PressParams, ResizeParams, RulesParams,
-    ScreenshotParams, ScrollParams, TabRef, TailParams, ThrottleParams, TypeParams, WaitForParams,
+    AppearanceParams, BodyParams, ClickParams, ComponentParams, DialogParams, EvaluateParams,
+    LOCATOR_GRAMMAR, LocateParams, MAX_WAIT_MS, NavigateParams, OpenParams, PressParams,
+    ResizeParams, RulesParams, ScreenshotParams, ScrollParams, TabRef, TailParams, ThrottleParams,
+    TypeParams, WaitForParams,
 };
 
 #[cfg(test)]
@@ -365,6 +366,19 @@ impl<B: Browser> DiveServer<B> {
         json_result(&self.browser.page_wait_for(tab, p).await?)
     }
 
+    /// Answer an open JavaScript dialog.
+    #[tool(
+        name = "page_dialog",
+        description = "Answer the JavaScript dialog a page has open: alert, confirm, prompt or a beforeunload question. The page's script is paused until it is answered, and page_click, page_type and the other input tools refuse to run while one is open. page_inspect reports the open dialog under 'dialog' with its kind and message. accept:true presses OK or Leave (the default), accept:false presses Cancel or Stay; text is what a prompt receives."
+    )]
+    async fn page_dialog(
+        &self,
+        Parameters(p): Parameters<DialogParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id.clone()).await?;
+        json_result(&self.browser.page_dialog(tab, p).await?)
+    }
+
     /// Describe every match for a locator.
     #[tool(
         name = "page_locate",
@@ -416,7 +430,7 @@ impl<B: Browser> DiveServer<B> {
     /// Throttle the network.
     #[tool(
         name = "page_throttle",
-        description = "Throttle a tab's network to check loading behaviour: 'offline', 'slow-3g', 'fast-3g', or 'none' to clear it. Combine with page_reload and page_wait_for to see what a slow connection actually renders."
+        description = "Throttle a tab's network to check loading behaviour: 'offline', 'slow-3g', 'fast-3g', or 'none' to clear it. Combine with tab_navigate (to the same address) and page_wait_for to see what a slow connection actually renders."
     )]
     async fn page_throttle(
         &self,

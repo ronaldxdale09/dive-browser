@@ -37,7 +37,8 @@ use dive_core::model::{
 };
 use dive_core::store::Store;
 use dive_mcp::{
-    AppearanceParams, Browser, BrowserError, ResizeParams, TabInfo, Target, WaitForParams,
+    AppearanceParams, Browser, BrowserError, DialogParams, ResizeParams, TabInfo, Target,
+    WaitForParams,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -517,6 +518,14 @@ impl Browser for TestFakeBrowser {
         delta_y: f64,
     ) -> Result<serde_json::Value, BrowserError> {
         Ok(json!({ "delta_x": delta_x, "delta_y": delta_y }))
+    }
+
+    async fn page_dialog(
+        &self,
+        _tab: TabId,
+        _params: DialogParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({ "accepted": true }))
     }
 
     async fn page_wait_for(

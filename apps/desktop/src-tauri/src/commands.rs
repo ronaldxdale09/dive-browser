@@ -585,6 +585,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             bookmark_rename,
             permission_set,
             permission_reply,
+            js_dialog_answer,
             permissions_list,
             crate::extensions::extensions_list,
             crate::extensions::extension_pick,
@@ -714,6 +715,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::permissions::PermissionAsked,
             crate::credential_fill::CredentialPrompt,
             crate::permissions::PermissionDismissed,
+            crate::js_dialog::JsDialogAsked,
+            crate::js_dialog::JsDialogClosed,
             crate::privacy::PrivacyEvent,
             crate::subtitles::SubtitleModelProgress,
             crate::subtitles::SubtitleCue,
@@ -2296,6 +2299,23 @@ pub(crate) fn permission_reply(
         crate::permissions::reply(state, tab_id, &request_id, decision, duration)
     })
 }
+/// Answer a page's JavaScript dialog (`JsDialogAsked`); the page's script resumes.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn js_dialog_answer(
+    app: AppHandle<Runtime>,
+    webview: tauri::Webview<Runtime>,
+    tab_id: TabId,
+    dialog_id: String,
+    accept: bool,
+    text: Option<String>,
+) -> AppResult<()> {
+    on_main(&app, move |_, app, state| {
+        crate::permissions::require_chrome(&webview)?;
+        crate::js_dialog::answer(app, state, tab_id, &dialog_id, accept, text).map(|_| ())
+    })
+}
+
 /// Remembered permissions in the active profile and container.
 #[tauri::command]
 #[specta::specta]

@@ -230,6 +230,17 @@ pub struct ScrollParams {
     pub delta_y: f64,
 }
 
+/// Answer the JavaScript dialog a page has open.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct DialogParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// `true` presses OK (or Leave); `false` presses Cancel (or Stay). Default true.
+    pub accept: Option<bool>,
+    /// What to enter in a `prompt()`; ignored by the other kinds.
+    pub text: Option<String>,
+}
+
 /// Wait until the page satisfies every condition given.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub struct WaitForParams {
