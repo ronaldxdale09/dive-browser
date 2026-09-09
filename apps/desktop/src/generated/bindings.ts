@@ -443,6 +443,16 @@ export const commands = {
 	 *  focused one (the person may have just clicked the page).
 	 */
 	clipboardWriteText: (text: string) => typedError<null, AppError>(__TAURI_INVOKE("clipboard_write_text", { text })),
+	/**
+	 *  Where a tab's page is scrolled, for remembering a tab about to close.
+	 *  `None` when the page cannot say in time.
+	 */
+	tabScrollPosition: (id: TabId) => typedError<[number, number] | null, AppError>(__TAURI_INVOKE("tab_scroll_position", { id })),
+	/**
+	 *  Scroll a freshly opened tab to where its closed predecessor was, once its
+	 *  page has loaded.
+	 */
+	tabRestoreScroll: (id: TabId, x: number, y: number) => typedError<null, AppError>(__TAURI_INVOKE("tab_restore_scroll", { id, x, y })),
 	/**  Delete browsing data; returns a one-line summary of what went. */
 	browsingDataClear: (what: ClearRequest) => typedError<string, AppError>(__TAURI_INVOKE("browsing_data_clear", { what })),
 	/**  Show a download in the system file manager, or the downloads folder when `path` is `None`. */

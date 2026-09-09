@@ -294,6 +294,40 @@ pub(crate) fn prefs_get(state: State<'_, AppState>) -> crate::prefs::Prefs {
     state.prefs.get(&state)
 }
 
+/// Where a tab's page is scrolled, for remembering a tab about to close.
+/// `None` when the page cannot say in time.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_scroll_position(
+    state: State<'_, AppState>,
+    id: TabId,
+) -> AppResult<Option<(i32, i32)>> {
+    let Ok(session) = cdp_for(&state, id) else {
+        return Ok(None);
+    };
+    Ok(crate::housekeeping::page_scroll(&session).await)
+}
+
+/// Scroll a freshly opened tab to where its closed predecessor was, once its
+/// page has loaded.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_restore_scroll(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: TabId,
+    x: i32,
+    y: i32,
+) -> AppResult<()> {
+    {
+        let store = lock(&state.store);
+        let tab = store.tab(id)?;
+        store.set_scroll(id, &tab.url, x, y)?;
+    }
+    crate::housekeeping::restore_scroll(app, id);
+    Ok(())
+}
+
 /// The chrome reports the scheme it is drawn in ("dark" | "light"). When
 /// pages are told the theme, every open tab is told this at once.
 #[tauri::command]
@@ -636,6 +670,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             prefs_set,
             pages_scheme,
             clipboard_write_text,
+            tab_scroll_position,
+            tab_restore_scroll,
             browsing_data_clear,
             downloads_reveal,
             downloads_open,

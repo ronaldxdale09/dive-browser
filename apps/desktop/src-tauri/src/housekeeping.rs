@@ -17,6 +17,9 @@ pub const DEFAULT_EVERY: Duration = Duration::from_secs(60);
 const PAGE_QUESTION: Duration = Duration::from_millis(400);
 /// How long a waking page may take to load before its scroll is restored anyway.
 const WAKE_LOAD: Duration = Duration::from_secs(20);
+/// How long a scroll restore waits for a fresh view's devtools session.
+const SESSION_WAIT_STEP: Duration = Duration::from_millis(100);
+const SESSION_WAIT_TRIES: u32 = 50;
 
 /// How long a `Today` tab may sit unfocused before it is discarded.
 /// `DIVE_MAX_IDLE_SECS` overrides it so a harness can force a sweep.
@@ -370,24 +373,57 @@ async fn evaluate(session: &dive_cdp::CdpSession, expr: &str) -> Option<serde_js
     reply.get("result")?.get("value").cloned()
 }
 
-/// After `tab` wakes from a discard, scroll it back to where it was once its
-/// page has loaded. Spawned right after the view is recreated, so the wait
-/// starts before the first navigation goes out.
+/// Where the page is scrolled right now, or `None` when it does not answer
+/// within the usual page-question budget (a hung or closing page).
+pub async fn page_scroll(session: &dive_cdp::CdpSession) -> Option<(i32, i32)> {
+    let value = evaluate(
+        session,
+        "[Math.round(window.scrollX), Math.round(window.scrollY)]",
+    )
+    .await?;
+    let xy = value.as_array()?;
+    let at = |i: usize| {
+        xy.get(i)?
+            .as_i64()
+            .map(|n| i32::try_from(n).unwrap_or(i32::MAX))
+    };
+    Some((at(0)?, at(1)?))
+}
+
+/// After `tab` wakes from a discard (or comes back from the closed-tab
+/// stack), scroll it back to where it was once its page has loaded. A page
+/// that has already finished loading is scrolled at once.
 pub fn restore_scroll(app: AppHandle<Runtime>, tab: TabId) {
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
-        let (session, target) = {
-            let session = lock(&state.host).as_ref().and_then(|h| h.cdp(tab));
+        let target = {
             let store = lock(&state.store);
-            let target = store
-                .tab(tab)
-                .ok()
-                .and_then(|t| store.scroll(t.id, &t.url).ok().flatten());
-            (session, target)
+            store.tab(tab).ok().and_then(|t| {
+                store
+                    .scroll(t.id, &t.url)
+                    .ok()
+                    .flatten()
+                    .map(|xy| (t.url, xy))
+            })
         };
-        let (Some(session), Some((x, y))) = (session, target) else {
+        let Some((url, (x, y))) = target else {
             return;
         };
+        // The view was just created; its devtools session comes a moment
+        // later. Giving up at once here is how a restore quietly did nothing.
+        let mut session = None;
+        for _ in 0..SESSION_WAIT_TRIES {
+            session = lock(&state.host).as_ref().and_then(|h| h.cdp(tab));
+            if session.is_some() {
+                break;
+            }
+            tokio::time::sleep(SESSION_WAIT_STEP).await;
+        }
+        let Some(session) = session else {
+            tracing::debug!(%tab, "no devtools session for scroll restore");
+            return;
+        };
+        tracing::debug!(%tab, x, y, "scroll restore: session ready");
         if (x, y) == (0, 0) {
             return;
         }
@@ -395,18 +431,70 @@ pub fn restore_scroll(app: AppHandle<Runtime>, tab: TabId) {
         if let Err(e) = session.call0("Page.enable").await {
             tracing::debug!(%tab, "Page.enable before scroll restore failed: {e}");
         }
+        // The load may already be over (a fast local page, or a reopen that
+        // ran ahead of this task); then the wait would only add a delay. The
+        // document must be the tab's page, though: a fresh view answers
+        // "complete" for its initial blank document, and scrolling that is
+        // undone the moment the real page arrives.
+        let ready = evaluate(
+            &session,
+            "document.readyState === 'complete' ? location.href : ''",
+        )
+        .await;
+        tracing::debug!(%tab, ?ready, %url, "scroll restore: readiness");
+        if ready.as_ref().and_then(|v| v.as_str()) == Some(url.as_str()) {
+            let done = scroll_until_it_holds(&session, x, y).await;
+            tracing::debug!(%tab, done, "scroll restore: scrolled at once");
+            return;
+        }
+        // Wait for the load of the tab's page, not the initial blank
+        // document's: a fresh view fires a load event for about:blank first,
+        // and scrolling that is undone when the real page arrives.
         let loaded = async {
             loop {
                 match events.recv().await {
-                    Ok(ev) if ev.method == "Page.loadEventFired" => break,
+                    Ok(ev) if ev.method == "Page.loadEventFired" => {
+                        // The page, or wherever it redirected to; not the blank start.
+                        let here = evaluate(&session, "location.href").await;
+                        match here.as_ref().and_then(|v| v.as_str()) {
+                            Some("about:blank") | None => {}
+                            Some(_) => break,
+                        }
+                    }
                     Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         };
-        let _ = tokio::time::timeout(WAKE_LOAD, loaded).await;
-        let _ = evaluate(&session, &format!("window.scrollTo({x}, {y}); true")).await;
+        let waited = tokio::time::timeout(WAKE_LOAD, loaded).await;
+        let done = scroll_until_it_holds(&session, x, y).await;
+        tracing::debug!(%tab, timed_out = waited.is_err(), done, "scroll restore: scrolled after load");
     });
+}
+
+/// How long a restore keeps trying while the page grows to its full height.
+const SCROLL_SETTLE: Duration = Duration::from_millis(250);
+const SCROLL_TRIES: u32 = 12;
+
+/// Scroll to `(x, y)` and check it took. A page whose content arrives after
+/// load (lazy sections, client-side rendering) is too short to scroll at
+/// first, so this tries again for a few seconds, like Chrome's own restore.
+async fn scroll_until_it_holds(session: &dive_cdp::CdpSession, x: i32, y: i32) -> bool {
+    for _ in 0..SCROLL_TRIES {
+        let landed = evaluate(
+            session,
+            &format!("window.scrollTo({x}, {y}); [Math.round(window.scrollX), Math.round(window.scrollY)]"),
+        )
+        .await;
+        let at = |i: usize| landed.as_ref()?.as_array()?.get(i)?.as_i64();
+        if at(0).is_some_and(|sx| (sx - i64::from(x)).abs() <= 1)
+            && at(1).is_some_and(|sy| (sy - i64::from(y)).abs() <= 1)
+        {
+            return true;
+        }
+        tokio::time::sleep(SCROLL_SETTLE).await;
+    }
+    false
 }
 
 #[cfg(test)]

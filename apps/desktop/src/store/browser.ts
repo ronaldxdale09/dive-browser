@@ -125,9 +125,11 @@ interface BrowserState {
 
 export type NavError = { url: string; error: string };
 export type NoticeAction = { label: string; run: () => void };
-export type ClosedTab = { url: string; title: string; workspace_id: string | null; index: number };
+export type ClosedTab = { url: string; title: string; workspace_id: string | null; index: number; scroll?: [number, number] };
 /** Most closed tabs remembered for reopening. */
 export const CLOSED_TABS_LIMIT = 25;
+/** Scroll offsets of tabs the chrome is closing, keyed by tab id, until their tab_closed arrives. */
+const scrollOfClosing = new Map<string, [number, number]>();
 
 /** The first tab already on `url`'s host, so a shortcut can switch instead of piling up duplicates. */
 export function sameSiteTab(tabs: readonly Tab[], url: string): Tab | undefined {
@@ -162,9 +164,11 @@ export function orderWithAt(tabs: readonly Tab[], workspaceId: string, id: strin
 }
 
 /** The closed-tab stack after `tab` went, or unchanged when there was nothing worth reopening. */
-export function rememberClosed(stack: ClosedTab[], tab: Pick<Tab, "url" | "title" | "workspace_id"> | undefined, index = -1): ClosedTab[] {
+export function rememberClosed(stack: ClosedTab[], tab: Pick<Tab, "url" | "title" | "workspace_id"> | undefined, index = -1, scroll?: [number, number]): ClosedTab[] {
   if (!tab || !tab.url || tab.url === "about:blank") return stack;
-  const next = [...stack, { url: tab.url, title: tab.title, workspace_id: tab.workspace_id, index }];
+  const entry: ClosedTab = { url: tab.url, title: tab.title, workspace_id: tab.workspace_id, index };
+  if (scroll && (scroll[0] !== 0 || scroll[1] !== 0)) entry.scroll = scroll;
+  const next = [...stack, entry];
   return next.length > CLOSED_TABS_LIMIT ? next.slice(next.length - CLOSED_TABS_LIMIT) : next;
 }
 export type CrashState = { attempt: number; recovering: boolean };
@@ -375,6 +379,8 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     const ws = get().activeWorkspace;
     if (!ws) return;
     const opened = await run(set, () => ipc.tabOpen(ws, last.url));
+    // Scrolled to where it was, once the page is back.
+    if (opened?.id && last.scroll) await ipc.tabRestoreScroll(opened.id, last.scroll[0], last.scroll[1]).catch(() => undefined);
     // Back where it was, not at the end of the strip.
     if (opened?.id && last.index >= 0 && last.workspace_id === ws) {
       const ordered = orderWithAt(get().tabs, ws, opened.id, last.index);
@@ -495,6 +501,10 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     await get().closeTab(id);
   },
   closeTab: async (id) => {
+    // Where the page was scrolled, so reopening it lands in the same place.
+    // Asked before the close; the answer is picked up by the tab_closed event.
+    const scroll = await ipc.tabScrollPosition(id).catch(() => null);
+    if (scroll) scrollOfClosing.set(id, scroll);
     await run(set, () => ipc.tabClose(id));
     useConsole.getState().drop(id);
     useNetwork.getState().drop(id);
@@ -733,7 +743,9 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     }
     if (event.type === "tab_closed") {
       const id = event.data;
-      set((s) => ({ closedTabs: rememberClosed(s.closedTabs, gone, goneIndex) }));
+      const scroll = scrollOfClosing.get(id);
+      scrollOfClosing.delete(id);
+      set((s) => ({ closedTabs: rememberClosed(s.closedTabs, gone, goneIndex, scroll) }));
       set((s) => ({ loading: without(s.loading, id), navError: without(s.navError, id), crashedTabs: without(s.crashedTabs, id), permissionRequests: without(s.permissionRequests, id) }));
       usePrivacy.getState().drop(id);
     }

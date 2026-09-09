@@ -453,6 +453,23 @@ describe("reopening closed tabs", () => {
     expect(useBrowser.getState().closedTabs).toEqual([]);
   });
 
+  it("remembers where a closed page was scrolled and puts the reopened tab back there", async () => {
+    vi.spyOn(ipc, "tabScrollPosition").mockResolvedValue([0, 480]);
+    vi.spyOn(ipc, "tabClose").mockResolvedValue(null as never);
+    const open = vi.spyOn(ipc, "tabOpen").mockResolvedValue({ id: "b2" } as never);
+    const restore = vi.spyOn(ipc, "tabRestoreScroll").mockResolvedValue(null as never);
+    useBrowser.setState({ tabs: [t("a", "https://a.test/"), t("b", "https://b.test/")], activeTab: "a", activeWorkspace: "w1", workspaces: [{ id: "w1" }] as unknown as Workspace[] });
+    await useBrowser.getState().closeTab("b");
+    useBrowser.getState().applyEvent({ type: "tab_closed", data: "b" });
+    expect(useBrowser.getState().closedTabs[0]?.scroll).toEqual([0, 480]);
+    // A page at the top carries no offset.
+    expect(rememberClosed([], t("c", "https://c.test/"), 0, [0, 0])[0]).not.toHaveProperty("scroll");
+    useBrowser.setState({ tabs: [t("a", "https://a.test/"), t("b2", "https://b.test/")] });
+    await useBrowser.getState().reopenClosedTab();
+    expect(open).toHaveBeenCalledWith("w1", "https://b.test/");
+    expect(restore).toHaveBeenCalledWith("b2", 0, 480);
+  });
+
   it("puts a reopened tab back where it was in the strip", async () => {
     const open = vi.spyOn(ipc, "tabOpen").mockResolvedValue({ id: "b2" } as never);
     const reorder = vi.spyOn(ipc, "tabReorder").mockResolvedValue(null as never);
