@@ -94,3 +94,16 @@ An isolated CEF152.0.5 / Chromium152.0.7977.54 bundle passed the expanded native
 An Accessibility-based foreground diagnostic is a separate workload: its Chrome/Brave memory results were substantially higher than earlier runs, and that incomplete batch is not a default-browser score. An AppKit-only helper now validates the exact owned executable and requires the target PID to be foreground; a new diagnostic is checking that approach. Do not replace the verified table above with partial or rescued samples.
 
 A separate 8 ms CEF fallback timer trial showed no visible reload advantage and increased measured idle CPU in completed samples; it was rejected. CPU counters were calibrated against getrusage and now include the Apple Silicon Mach timebase conversion. Working vendor source and default local bundles remain restored to the qualified implementation.
+
+## Session restore (2026-09-09, debug build)
+
+A cold relaunch of the loop's test profile (22 tabs across three workspaces, one essential tab, the Home workspace active), measured from the process start with the chrome driven over CDP. Debug build on the same M5; a release build is faster, so these are upper bounds.
+
+| Milestone | Time |
+| --- | ---: |
+| Chrome reachable | 1.1 s |
+| Tab strip shows every restored tab | 1.6 s |
+| Active tab's page loaded | under 4 s |
+| Restored background tab woken by a click (local page) | 0.3 s |
+
+Only the active tab gets a renderer at launch; the other 21 wait for a click, which is why ten-tab RAM stays low. Everything came back as it was: workspace, essential tab, order, and per-profile history.
