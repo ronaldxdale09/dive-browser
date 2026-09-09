@@ -5,7 +5,7 @@ import { TabStrip } from "./components/TabStrip";
 import { TabDnd } from "./components/TabDnd";
 import { ProfileDialog } from "./components/ProfileDialog";
 import { FeatureBar } from "./components/FeatureBar";
-import { Toolbar } from "./components/Toolbar";
+import { BrowserActions, Toolbar } from "./components/Toolbar";
 import { Content } from "./components/Content";
 import { FindBar } from "./components/FindBar";
 import { Splash } from "./components/Splash";
@@ -96,6 +96,9 @@ export function App() {
 
   const effectiveRailExpanded = railExpanded && !responsive.collapseRail;
   const railWidth = effectiveRailExpanded ? RAIL_WIDTH.expanded : RAIL_WIDTH.collapsed;
+  // The expanded rail lists the tabs, so the title bar has nothing of its
+  // own to show and folds into the toolbar.
+  const oneBar = effectiveRailExpanded;
   const showSidecar = open.sidecar && !(responsive.singleAuxPanel && pickerOpen);
   // On compact windows one auxiliary surface gets the available space. The
   // agent wins while explicitly open; the dock preference is left intact and
@@ -110,40 +113,67 @@ export function App() {
   return (
     <TabDnd>
     <div
-      className="grid h-full grid-rows-[40px_44px_minmax(0,1fr)] bg-ground text-ink"
-      style={{ gridTemplateColumns: `${railWidth}px minmax(0,1fr)` }}
+      // Two shapes. With the rail listing the tabs there is one bar: the
+      // rail is a full-height column with the traffic lights at its top, and
+      // the main column has a single row of navigation, address, page
+      // actions and the feature cluster. With the rail collapsed the tabs
+      // need a row of their own across the top, above the toolbar.
+      className={`grid h-full bg-ground text-ink ${oneBar ? "grid-rows-[44px_minmax(0,1fr)]" : "grid-rows-[40px_44px_minmax(0,1fr)]"}`}
+      // `--chrome-top`: where the chrome ends and a panel hung from it (the
+      // main menu) begins, whichever shape the bar is in.
+      style={{ gridTemplateColumns: `${railWidth}px minmax(0,1fr)`, "--chrome-top": oneBar ? "46px" : "86px" } as React.CSSProperties}
     >
-      {/* Title-bar row: the tabs, beside the traffic lights (overlay title
-          bar), unless the expanded rail is listing them, in which case the
-          row is the window's drag handle. Who you are browsing as sits at
-          the foot of the rail, under the workspaces it owns. */}
-      <header className="col-span-2 row-start-1 flex items-center gap-2 pl-[84px]">
-        {isPrivateWindow() && <span className="px-2 font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
-        {effectiveRailExpanded ? (
-          <div className="h-full min-w-0 flex-1" data-tauri-drag-region="true" />
-        ) : (
+      {!oneBar && (
+        <header className="col-span-2 row-start-1 flex items-center gap-2 pl-[84px]">
+          {isPrivateWindow() && <span className="px-2 font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
           <div className="h-full min-w-0 flex-1">
             <TabStrip />
           </div>
+          <FeatureBar compact={responsive.collapseRail} />
+        </header>
+      )}
+      <div className={`relative col-start-1 bg-ground ${oneBar ? "row-span-2 row-start-1" : "row-span-2 row-start-2"}`}>
+        {/* A full-height rail starts under the traffic lights: that strip is
+            the window's handle, and the rail's own content begins below it. */}
+        {oneBar && (
+          <div className="flex h-10 items-center justify-end pr-3" data-tauri-drag-region="true">
+            {isPrivateWindow() && <span className="font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
+          </div>
         )}
-        <FeatureBar compact={responsive.collapseRail} />
-      </header>
-      <div className="relative col-start-1 row-span-2 row-start-2 bg-ground">
-        <Rail forceCollapsed={responsive.collapseRail} />
-        {/* The rail cannot reach the title bar -- the traffic lights own that
-            corner -- so a plain right border begins as a hairline hanging in
-            mid-air under the tab strip. Fading it in over the first few pixels
-            lets the edge arrive instead of looking sheared off. */}
+        <div className={oneBar ? "h-[calc(100%-40px)]" : "h-full"}>
+          <Rail forceCollapsed={responsive.collapseRail} />
+        </div>
+        {/* A rail that stops short of the title bar -- the traffic lights own
+            that corner -- would begin its right border as a hairline hanging
+            in mid-air under the tab strip. Fading it in over the first few
+            pixels lets the edge arrive instead of looking sheared off. */}
         <span
           aria-hidden
           className="pointer-events-none absolute inset-y-0 right-0 w-px"
-          style={{ background: "linear-gradient(to bottom, transparent, var(--color-line) 20px)" }}
+          style={{ background: oneBar ? "var(--color-line)" : "linear-gradient(to bottom, transparent, var(--color-line) 20px)" }}
         />
       </div>
-      <nav aria-label="Browser controls" className="col-start-2 row-start-2 min-w-0">
-        <Toolbar compact={responsive.compactToolbar} singleAuxPanel={responsive.singleAuxPanel} />
-      </nav>
-      <main className="col-start-2 row-start-3 grid min-h-0 min-w-0 bg-line" style={{ gridTemplateColumns: showSidecar ? `minmax(0,1fr) auto ${shownSidecarWidth}px` : "minmax(0,1fr)" }}>
+      {oneBar ? (
+        <header className="col-start-2 row-start-1 flex min-w-0 items-center">
+          {/* Left to right: navigation and the address, the page's actions,
+              the feature cluster, then the browser's own controls in the
+              corner where every browser keeps its menu. */}
+          <nav aria-label="Browser controls" className="h-full min-w-0 flex-1">
+            <Toolbar compact={responsive.compactToolbar} singleAuxPanel={responsive.singleAuxPanel} trailing={false} />
+          </nav>
+          <span className="mr-1 h-4 w-px shrink-0 bg-line-2" aria-hidden />
+          <FeatureBar compact={responsive.collapseRail} />
+          <span className="mr-1 h-4 w-px shrink-0 bg-line-2" aria-hidden />
+          <div className="pr-2">
+            <BrowserActions />
+          </div>
+        </header>
+      ) : (
+        <nav aria-label="Browser controls" className="col-start-2 row-start-2 min-w-0">
+          <Toolbar compact={responsive.compactToolbar} singleAuxPanel={responsive.singleAuxPanel} />
+        </nav>
+      )}
+      <main className={`col-start-2 grid min-h-0 min-w-0 bg-line ${oneBar ? "row-start-2" : "row-start-3"}`} style={{ gridTemplateColumns: showSidecar ? `minmax(0,1fr) auto ${shownSidecarWidth}px` : "minmax(0,1fr)" }}>
         <div
           className="relative grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] bg-line"
           style={{ gridTemplateRows: `${open.find ? "44px " : ""}minmax(0,1fr)${showDock ? ` auto ${shownDockHeight}px` : ""}` }}

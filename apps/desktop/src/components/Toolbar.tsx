@@ -29,7 +29,7 @@ import { NavigationButtons } from "./NavigationButtons";
  * and the picker shows at a time; the dock button then swaps them rather
  * than toggling a dock nobody can see.
  */
-export function Toolbar({ compact = false, singleAuxPanel = compact }: { compact?: boolean; singleAuxPanel?: boolean }) {
+export function Toolbar({ compact = false, singleAuxPanel = compact, trailing = true }: { compact?: boolean; singleAuxPanel?: boolean; /** Render the browser's own controls (downloads, privacy, menu) at the end; off when the bar places them after the feature cluster. */ trailing?: boolean }) {
   const tabs = useBrowser((s) => s.tabs);
   const activeTab = useBrowser((s) => s.activeTab);
   const navigate = useBrowser((s) => s.navigate);
@@ -203,10 +203,25 @@ export function Toolbar({ compact = false, singleAuxPanel = compact }: { compact
           <DownloadsMenu compact />
         </>
       )}
+      {trailing && <BrowserActions />}
+      {loading && <LoadingLine />}
+    </div>
+  );
+}
+
+/**
+ * The controls that are about the browser rather than the page: privacy
+ * and the menu. They close the bar, whichever bar that is, so the menu is
+ * always in the corner where every browser keeps it.
+ */
+export function BrowserActions() {
+  const open = useBrowser((s) => s.open);
+  const toggle = useBrowser((s) => s.toggle);
+  return (
+    <div className="relative flex shrink-0 items-center gap-1">
       <ProtectionMenu compact />
       <IconButton icon={Menu} label="Menu" active={open.menu} onClick={() => toggle("menu")} tooltipAlign="end" />
       {open.menu && <MainMenu />}
-      {loading && <LoadingLine />}
     </div>
   );
 }

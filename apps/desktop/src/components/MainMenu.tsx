@@ -130,7 +130,7 @@ export function MainMenu() {
         aria-label="Menu"
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={onKey}
-        className="absolute top-[86px] right-3 flex max-h-[calc(100vh-100px)] w-[340px] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
+        className="absolute top-[var(--chrome-top,86px)] right-3 flex max-h-[calc(100vh-100px)] w-[340px] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
       >
         <label className="m-2 flex h-9 shrink-0 items-center gap-2 rounded-xl border border-line bg-surface-2 px-2.5 focus-within:border-line-2">
           <Icon icon={Search} size={13} className="shrink-0 text-ink-3" />
