@@ -11,6 +11,7 @@ import type { Workspace } from "../lib/ipc";
 import { usePrefs } from "../store/prefs";
 import { useDefaultBrowser } from "../store/defaultBrowser";
 import { Icon } from "./Icon";
+import { RailTooltip } from "./RailTooltip";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { QuickLinks } from "./QuickLinks";
@@ -60,7 +61,7 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
           state the rail is in, so the hand goes to the same place both ways. */}
       {!forceCollapsed && (
         <div className={`flex h-7 shrink-0 items-center ${expanded ? "justify-end pr-0.5" : "justify-center"}`}>
-          <RailButton icon={expanded ? PanelLeftClose : PanelLeftOpen} label={expanded ? "Collapse workspaces" : "Expand workspaces"} onClick={() => void update({ rail_expanded: !expanded })} />
+          <RailButton icon={expanded ? PanelLeftClose : PanelLeftOpen} label={expanded ? "Collapse the rail" : "Expand the rail"} onClick={() => void update({ rail_expanded: !expanded })} />
         </div>
       )}
       {expanded && !isPrivateWindow() && <QuickLinks />}
@@ -89,10 +90,9 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
             ))}
           </SortableContext>
         </DndContext>
-        {!isPrivateWindow() && <button
+        {!isPrivateWindow() && <RailTooltip label="New workspace" shortcut="⌥⇧⌘N"><button
           type="button"
           aria-label="New workspace"
-          title="New workspace (⌥⇧⌘N)"
           onClick={() => setEditing({ id: null })}
           className={
             expanded
@@ -104,15 +104,14 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
             <Icon icon={Plus} size={14} />
           </span>
           {expanded && "New workspace"}
-        </button>}
+        </button></RailTooltip>}
       </div>
       {expanded ? <TabList /> : <span className="flex-1" aria-hidden />}
       {!isPrivateWindow() && <DefaultBrowserButton expanded={expanded} />}
       {!isPrivateWindow() && <ProfileChip variant={expanded ? "row" : "avatar"} placement="above" />}
-      <button
+      <RailTooltip label="Settings" shortcut="⌘,"><button
         type="button"
         aria-label="Settings"
-        title="Settings"
         onClick={() => useBrowser.getState().toggle("settings", true)}
         className={
           expanded
@@ -124,7 +123,7 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
           <Icon icon={Settings2} />
         </span>
         {expanded && "Settings"}
-      </button>
+      </button></RailTooltip>
       {menu && <WorkspaceMenu id={menu.id} x={menu.x} y={menu.y} onClose={() => setMenu(null)} />}
     </nav>
   );
@@ -154,12 +153,14 @@ function DefaultBrowserButton({ expanded }: { expanded: boolean }) {
   const open = () => useBrowser.getState().toggle("defaultBrowser", true);
   if (!expanded) {
     return (
-      <button type="button" aria-label={title} title={title} onClick={open} className="group grid h-[var(--row-h)] w-9 shrink-0 place-items-center rounded-full text-accent transition-colors hover:bg-accent/14">
-        <span className="relative grid size-7 place-items-center">
-          <Icon icon={Globe} size={14} />
-          <span className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-accent" aria-hidden />
-        </span>
-      </button>
+      <RailTooltip label={title}>
+        <button type="button" aria-label={title} onClick={open} className="group grid h-[var(--row-h)] w-9 shrink-0 place-items-center rounded-full text-accent transition-colors hover:bg-accent/14">
+          <span className="relative grid size-7 place-items-center">
+            <Icon icon={Globe} size={14} />
+            <span className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-accent" aria-hidden />
+          </span>
+        </button>
+      </RailTooltip>
     );
   }
   return (
@@ -212,17 +213,13 @@ function TabList() {
   );
 }
 
-function RailButton({ icon, label, onClick }: { icon: LucideIcon; label: string; onClick: () => void }) {
+function RailButton({ icon, label, shortcut, onClick }: { icon: LucideIcon; label: string; shortcut?: string; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      className="grid size-6 shrink-0 place-items-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink"
-    >
-      <Icon icon={icon} size={14} />
-    </button>
+    <RailTooltip label={label} shortcut={shortcut}>
+      <button type="button" aria-label={label} onClick={onClick} className="grid size-6 shrink-0 place-items-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink">
+        <Icon icon={icon} size={14} />
+      </button>
+    </RailTooltip>
   );
 }
 
@@ -250,7 +247,7 @@ function WorkspaceRow({
   const shortcut = index < 9 ? ` (⌘${index + 1})` : "";
   const summary = `${w.name} — ${count} ${count === 1 ? "tab" : "tabs"}${separate ? ", own cookies" : ""}${shortcut}`;
 
-  return (
+  const row = (
     <div
       ref={setNodeRef}
       style={style}
@@ -259,7 +256,6 @@ function WorkspaceRow({
       role="button"
       tabIndex={0}
       aria-pressed={active}
-      title={summary}
       aria-label={summary}
       onClick={onActivate}
       onKeyDown={(e) => {
@@ -304,6 +300,14 @@ function WorkspaceRow({
         </span>
       )}
     </div>
+  );
+  // Expanded, the row says everything; collapsed, the mark explains itself
+  // on hover the way every other glyph in the chrome does.
+  if (expanded) return row;
+  return (
+    <RailTooltip label={`${w.name} · ${count} ${count === 1 ? "tab" : "tabs"}${separate ? " · own cookies" : ""}`} shortcut={index < 9 ? `⌘${index + 1}` : undefined}>
+      {row}
+    </RailTooltip>
   );
 }
 

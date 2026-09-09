@@ -69,13 +69,25 @@ describe("Rail", () => {
     const update = vi.fn().mockResolvedValue(undefined);
     usePrefs.setState({ update });
     render(<Rail />);
-    fireEvent.click(screen.getByRole("button", { name: "Collapse workspaces" }));
+    fireEvent.click(screen.getByRole("button", { name: "Collapse the rail" }));
     expect(update).toHaveBeenCalledWith({ rail_expanded: false });
 
     usePrefs.setState({ prefs: { ...DEFAULT_PREFS, rail_expanded: false } });
     await waitFor(() => expect(screen.queryByText("Workspaces")).toBeNull());
     expect(screen.queryByText("Personal")).toBeNull();
-    expect(screen.getByRole("button", { name: /^Personal — 3 tabs/ })).toBeTruthy();
+    const mark = screen.getByRole("button", { name: /^Personal — 3 tabs/ });
+    // A bare mark explains itself on hover with the name, the count and the
+    // chord, drawn above the scrolling list rather than clipped by it.
+    expect(mark.getAttribute("title")).toBeNull();
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    fireEvent.mouseEnter(mark.parentElement!);
+    const tip = screen.getByRole("tooltip");
+    expect(tip.textContent).toContain("Personal · 3 tabs");
+    expect(tip.textContent).toContain("⌘1");
+    expect(tip.parentElement).toBe(document.body);
+    fireEvent.mouseLeave(mark.parentElement!);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(screen.getByRole("button", { name: "Expand the rail" })).toBeTruthy();
   });
 
   it("confirms before deleting a workspace and its tabs", () => {
