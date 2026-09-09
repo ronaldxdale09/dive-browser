@@ -1,6 +1,6 @@
 import { isPrivateWindow } from "../lib/privateMode";
 import { prettyUrl } from "../lib/prettyUrl";
-import { Captions, CodeXml, House, ScrollText, Lock, MoreHorizontal, PanelBottom, Puzzle, RotateCw, Search, TriangleAlert, X, Menu } from "lucide-react";
+import { Captions, House, ScrollText, Lock, MoreHorizontal, RotateCw, Search, TriangleAlert, X, Menu } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FOCUS_ADDRESS } from "../lib/commands";
@@ -11,12 +11,12 @@ import { BookmarkButton } from "./BookmarkButton";
 import { AddressSuggestions, optionId, useAddressSuggestions } from "./AddressSuggestions";
 import type { Suggestion } from "../lib/omnibox";
 import { DownloadsMenu } from "./DownloadsMenu";
+import { useDownloads } from "../store/downloads";
 import { ProtectionMenu } from "./ProtectionMenu";
 import { MainMenu } from "./MainMenu";
 import { Tooltip } from "./Tooltip";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
-import { usePicker } from "../store/simulator";
 import { useSubtitles } from "../store/subtitles";
 import { useRecorder } from "../store/recorder";
 import { runCommand } from "../lib/commands";
@@ -24,12 +24,7 @@ import { usePrefs } from "../store/prefs";
 import { NavigationButtons } from "./NavigationButtons";
 
 /** Navigation row: nav icons, the omnibox pill and, as glyphs, the actions that act on the page. */
-/**
- * `singleAuxPanel` is the window's rule that only one of the dock, the agent
- * and the picker shows at a time; the dock button then swaps them rather
- * than toggling a dock nobody can see.
- */
-export function Toolbar({ compact = false, singleAuxPanel = compact, trailing = true }: { compact?: boolean; singleAuxPanel?: boolean; /** Render the browser's own controls (downloads, privacy, menu) at the end; off when the bar places them after the feature cluster. */ trailing?: boolean }) {
+export function Toolbar({ compact = false, trailing = true }: { compact?: boolean; singleAuxPanel?: boolean; /** Render the browser's own controls (downloads, privacy, menu) at the end; off when the bar places them after the feature cluster. */ trailing?: boolean }) {
   const tabs = useBrowser((s) => s.tabs);
   const activeTab = useBrowser((s) => s.activeTab);
   const navigate = useBrowser((s) => s.navigate);
@@ -37,11 +32,6 @@ export function Toolbar({ compact = false, singleAuxPanel = compact, trailing = 
   const reload = useBrowser((s) => s.reload);
   const stop = useBrowser((s) => s.stop);
   const homepage = usePrefs((s) => s.prefs.homepage.trim());
-  const devtools = useBrowser((s) => s.devtools);
-  const toggle = useBrowser((s) => s.toggle);
-  const open = useBrowser((s) => s.open);
-  const pickerOpen = usePicker((s) => s.open);
-  const setPickerOpen = usePicker((s) => s.setOpen);
   const loading = useBrowser((s) => (s.activeTab ? s.loading[s.activeTab] === true : false));
   const current = tabs.find((t) => t.id === activeTab);
   const failedUrl = useBrowser((s) => (s.activeTab ? s.navError[s.activeTab]?.url : undefined));
@@ -77,20 +67,6 @@ export function Toolbar({ compact = false, singleAuxPanel = compact, trailing = 
     finishEditing();
     if (row.kind === "tab") void activateTab(row.tabId);
     else void navigate(row.url);
-  };
-  const dockShown = open.dock && !(singleAuxPanel && (open.sidecar || pickerOpen));
-  const toggleDock = () => {
-    if (!singleAuxPanel) {
-      toggle("dock");
-      return;
-    }
-    if (open.dock && !open.sidecar && !pickerOpen) {
-      toggle("dock", false);
-      return;
-    }
-    setPickerOpen(false);
-    toggle("sidecar", false);
-    toggle("dock", true);
   };
   // Cmd+L, from the menu or the palette.
   useEffect(() => {
@@ -180,27 +156,19 @@ export function Toolbar({ compact = false, singleAuxPanel = compact, trailing = 
           <SharePopover />
           <SubtitlesIndicator />
           <RecorderIndicator />
-          <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={dockShown} onClick={toggleDock} />
-          <IconButton icon={CodeXml} label="DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
-          {!isPrivateWindow() && <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />}
-          <DownloadsMenu compact />
+          <DownloadsIndicator />
         </ToolbarMore>
       ) : (
         <>
-          {/* Three groups, left to right: the page (bookmark, share), the
-              developer surfaces (dock, DevTools, extensions), then what is
-              about the browser itself (downloads, privacy, menu). */}
+          {/* Beside the address: what acts on this page (bookmark, share)
+              and what is happening to it (zoom, subtitles, a recording of
+              steps, a download). Everything else lives in Apps. */}
           <ZoomBadge />
           {!isPrivateWindow() && <BookmarkButton />}
           <SharePopover />
           <SubtitlesIndicator />
           <RecorderIndicator />
-          <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />
-          <IconButton icon={PanelBottom} label="Developer dock" shortcut="⌘⇧D" active={dockShown} onClick={toggleDock} />
-          <IconButton icon={CodeXml} label="DevTools" shortcut="⌘⌥I" disabled={!current} onClick={() => void devtools()} />
-          {!isPrivateWindow() && <IconButton icon={Puzzle} label="Extensions" active={open.extensions ?? false} onClick={() => toggle("extensions")} />}
-          <span className="mx-1 h-4 w-px bg-line-2" aria-hidden />
-          <DownloadsMenu compact />
+          <DownloadsIndicator />
         </>
       )}
       {trailing && <BrowserActions />}
@@ -303,6 +271,16 @@ function SubtitlesIndicator() {
   const toggle = useBrowser((s) => s.toggle);
   if (!active) return null;
   return <IconButton icon={Captions} label="Live subtitles on" shortcut="⌘⇧U" active={!open} onClick={() => toggle("subtitles", true)} />;
+}
+
+/**
+ * Downloads sit in the bar only while there is something to show: a file
+ * saving, or ones saved this session. Otherwise the Library has them.
+ */
+function DownloadsIndicator() {
+  const any = useDownloads((s) => s.items.length > 0);
+  if (!any) return null;
+  return <DownloadsMenu compact />;
 }
 
 /** Shown while steps are being recorded in the current tab; a click stops and opens the spec. */

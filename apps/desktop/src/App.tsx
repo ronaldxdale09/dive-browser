@@ -6,6 +6,7 @@ import { TabDnd } from "./components/TabDnd";
 import { ProfileDialog } from "./components/ProfileDialog";
 import { FeatureBar } from "./components/FeatureBar";
 import { BrowserActions, Toolbar } from "./components/Toolbar";
+import { AppsDialog } from "./components/AppsDialog";
 import { Content } from "./components/Content";
 import { FindBar } from "./components/FindBar";
 import { Splash } from "./components/Splash";
@@ -159,7 +160,7 @@ export function App() {
               the feature cluster, then the browser's own controls in the
               corner where every browser keeps its menu. */}
           <nav aria-label="Browser controls" className="h-full min-w-0 flex-1">
-            <Toolbar compact={responsive.compactToolbar} singleAuxPanel={responsive.singleAuxPanel} trailing={false} />
+            <Toolbar compact={responsive.compactToolbar} trailing={false} />
           </nav>
           <span className="mr-1 h-4 w-px shrink-0 bg-line-2" aria-hidden />
           <FeatureBar compact={responsive.collapseRail} />
@@ -170,7 +171,7 @@ export function App() {
         </header>
       ) : (
         <nav aria-label="Browser controls" className="col-start-2 row-start-2 min-w-0">
-          <Toolbar compact={responsive.compactToolbar} singleAuxPanel={responsive.singleAuxPanel} />
+          <Toolbar compact={responsive.compactToolbar} />
         </nav>
       )}
       <main className={`col-start-2 grid min-h-0 min-w-0 bg-line ${oneBar ? "row-start-2" : "row-start-3"}`} style={{ gridTemplateColumns: showSidecar ? `minmax(0,1fr) auto ${shownSidecarWidth}px` : "minmax(0,1fr)" }}>
@@ -219,6 +220,7 @@ export function App() {
         {open.settings && <SettingsDialog />}
         {open.library && <Library />}
         {open.shortcuts && <Shortcuts />}
+        {open.apps && <AppsDialog />}
         {open.defaultBrowser && <DefaultBrowserDialog />}
         {open.subtitles && <Subtitles />}
         {open.import && <ImportDialog />}

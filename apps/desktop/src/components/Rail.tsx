@@ -55,13 +55,18 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
   };
 
   return (
-    <nav aria-label="Workspaces" className={`flex h-full flex-col gap-1 px-2 pt-2 pb-2 ${expanded ? "" : "items-center"}`}>
+    <nav aria-label="Workspaces" className={`flex h-full flex-col gap-1 px-2 pt-1 pb-2 ${expanded ? "" : "items-center"}`}>
+      {/* The collapse control keeps one home, the top of the rail, whichever
+          state the rail is in, so the hand goes to the same place both ways. */}
+      {!forceCollapsed && (
+        <div className={`flex h-7 shrink-0 items-center ${expanded ? "justify-end pr-0.5" : "justify-center"}`}>
+          <RailButton icon={expanded ? PanelLeftClose : PanelLeftOpen} label={expanded ? "Collapse workspaces" : "Expand workspaces"} onClick={() => void update({ rail_expanded: !expanded })} />
+        </div>
+      )}
       {expanded && !isPrivateWindow() && <QuickLinks />}
       {expanded && (
         <div className="flex h-6 items-center gap-1 pr-0.5 pl-2">
           <span className="text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">Workspaces</span>
-          <span className="flex-1" />
-          <RailButton icon={PanelLeftClose} label="Collapse workspaces" onClick={() => void update({ rail_expanded: false })} />
         </div>
       )}
       {/* Scrolls rather than clips: past about a dozen workspaces the rail runs
@@ -102,7 +107,6 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
         </button>}
       </div>
       {expanded ? <TabList /> : <span className="flex-1" aria-hidden />}
-      {!expanded && !forceCollapsed && <RailButton icon={PanelLeftOpen} label="Expand workspaces" onClick={() => void update({ rail_expanded: true })} />}
       {!isPrivateWindow() && <DefaultBrowserButton expanded={expanded} />}
       {!isPrivateWindow() && <ProfileChip variant={expanded ? "row" : "avatar"} placement="above" />}
       <button

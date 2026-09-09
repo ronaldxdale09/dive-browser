@@ -79,6 +79,8 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
     if (useRecorder.getState().recordingTab === tab) useBrowser.getState().notify("Recording steps. Use the page, then choose Stop recording steps.", 5000);
   },
   "import.open": () => useBrowser.getState().toggle("import", true),
+  "apps.open": () => useBrowser.getState().toggle("apps", true),
+  "extensions.open": () => useBrowser.getState().toggle("extensions", true),
   "capture.fullpage": () => useBrowser.getState().capture(true),
   "find.open": () => useBrowser.getState().toggle("find", true),
   "library.open": () => useBrowser.getState().toggle("library", true),
@@ -194,6 +196,7 @@ export function runCommand(id: string, source: "keyboard" | "native-menu" | "com
 /** Default chords, parsed from the same notation Rust reports ("mod+shift+s"). */
 export const SHORTCUTS: Record<string, string> = {
   "mod+k": "palette.open",
+  "mod+shift+space": "apps.open",
   "mod+shift+a": "tabs.search",
   "mod+n": "window.new",
   "mod+t": "tab.new",
@@ -249,6 +252,8 @@ export const SHORTCUTS: Record<string, string> = {
  */
 export const COMMAND_TITLES: Record<string, string> = {
   "palette.open": "Command palette",
+  "apps.open": "Apps: everything Dive can do",
+  "extensions.open": "Extensions",
   "tabs.search": "Search tabs",
   "window.new": "New window",
   "window.private": "New private window",

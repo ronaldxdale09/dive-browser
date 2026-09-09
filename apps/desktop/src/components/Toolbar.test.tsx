@@ -251,10 +251,6 @@ describe("Toolbar", () => {
       "Reload",
       "Bookmark this page",
       "Share to another device",
-      "DevTools",
-      "Developer dock",
-      "Downloads",
-      "Extensions",
       "Protection",
     ];
 
@@ -267,13 +263,7 @@ describe("Toolbar", () => {
     }
   });
 
-  it("opens the extension manager from the page-action toolbar", () => {
-    render(<Toolbar />);
-    fireEvent.click(screen.getByRole("button", { name: "Extensions" }));
-    expect(useBrowser.getState().open.extensions).toBe(true);
-  });
-
-  it("routes clicks to navigation, bookmark and DevTools actions", async () => {
+  it("routes clicks to navigation and bookmark actions", async () => {
     render(<Toolbar />);
     await waitFor(() => expect((screen.getByRole("button", { name: "Back" }) as HTMLButtonElement).disabled).toBe(false));
 
@@ -281,17 +271,16 @@ describe("Toolbar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Forward" }));
     fireEvent.click(screen.getByRole("button", { name: "Reload" }));
     fireEvent.click(screen.getByRole("button", { name: "Bookmark this page" }));
-    fireEvent.click(screen.getByRole("button", { name: "DevTools" }));
 
     await waitFor(() => {
       expect(ipc.tabBack).toHaveBeenCalledWith(tab.id);
       expect(ipc.tabForward).toHaveBeenCalledWith(tab.id);
       expect(ipc.tabReload).toHaveBeenCalledWith(tab.id);
       expect(ipc.bookmarkToggle).toHaveBeenCalledWith(tab.id);
-      expect(ipc.tabDevtools).toHaveBeenCalledWith(tab.id);
     });
-    // Screenshots moved up to the title bar's Capture menu, beside recording.
-    expect(screen.queryByRole("button", { name: /capture/i })).toBeNull();
+    // The developer surfaces, capture and downloads live in Apps now; the
+    // bar beside the address is for the page alone.
+    for (const gone of ["DevTools", "Developer dock", "Extensions", "Downloads", /capture/i]) expect(screen.queryByRole("button", { name: gone })).toBeNull();
   });
 
   it("shows that steps are being recorded and stops on a click", async () => {
@@ -314,24 +303,10 @@ describe("Toolbar", () => {
     expect(screen.queryByRole("button", { name: "Live subtitles on" })).toBeNull();
   });
 
-  it("opens the share dialog and the developer dock", () => {
+  it("opens the share dialog", () => {
     render(<Toolbar />);
     fireEvent.click(screen.getByRole("button", { name: "Share to another device" }));
     expect(screen.getByRole("dialog", { name: "Share" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Developer dock" }));
-    expect(useBrowser.getState().open.dock).toBe(true);
-  });
-
-  it("swaps the agent for the dock when the window shows one panel at a time", () => {
-    useBrowser.setState({ open: { ...useBrowser.getState().open, dock: true, sidecar: true } });
-    render(<Toolbar singleAuxPanel />);
-    // The dock is open but hidden behind the agent: the button is not lit.
-    const dock = screen.getByRole("button", { name: "Developer dock" });
-    expect(dock.getAttribute("aria-pressed")).toBe("false");
-    fireEvent.click(dock);
-    expect(useBrowser.getState().open.sidecar).toBe(false);
-    expect(useBrowser.getState().open.dock).toBe(true);
-    expect(screen.getByRole("button", { name: "Developer dock" }).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("lists downloads and reveals a finished one", () => {
@@ -583,10 +558,10 @@ describe("Toolbar", () => {
   it("moves secondary actions into a tray in compact chrome", () => {
     render(<Toolbar compact />);
 
-    expect(screen.queryByRole("button", { name: "DevTools" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Share to another device" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "More page actions" }));
     expect(screen.getByRole("dialog", { name: "Page actions" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Developer dock" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "DevTools" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Share to another device" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Bookmark this page" })).toBeTruthy();
   });
 });

@@ -1,18 +1,13 @@
 import { isPrivateWindow } from "../lib/privateMode";
 import { PrivateBadge } from "./PrivateMode";
-import { AlertTriangle, ArrowDownToLine, Camera, ChevronDown, Loader2, LoaderCircle, Pause, Play, Square, Video, X } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, LayoutGrid, Loader2, Pause, Play, Square, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useDismiss } from "../lib/useDismiss";
-import { useCoversContent } from "../lib/overlay";
-import { useFocusTrap } from "../lib/useFocusTrap";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import { useBrowser } from "../store/browser";
 import { useUpdates } from "../store/updates";
 import { elapsedSeconds, useRecording } from "../store/recording";
 import { recordingClock } from "../lib/recordingFormat";
-import { BuildBadge } from "./BuildBadge";
-import { DeviceMenu } from "./DeviceMenu";
 import { Icon, IconButton } from "./Icon";
 import { Tooltip } from "./Tooltip";
 import { AgentIcon } from "./agent/AgentIcon";
@@ -46,26 +41,31 @@ function useNarrow(ref: RefObject<HTMLElement | null>): boolean {
 }
 
 /**
- * The title-bar action cluster: the features people reach for by name —
- * capture (a recording or a screenshot), the device emulator, the agent.
+ * The bar's feature cluster: the two things reached for all day, the agent
+ * and the Apps launcher that holds everything else, plus whatever is
+ * happening right now (a recording's controls, an update waiting).
  */
 export function FeatureBar({ compact = false }: { compact?: boolean }) {
-  const openPalette = useBrowser((s) => s.openPalette);
   const ref = useRef<HTMLDivElement>(null);
   const measuredNarrow = useNarrow(ref);
   const narrow = compact || measuredNarrow;
 
   return (
     <div ref={ref} data-narrow={narrow || undefined} className="flex h-full shrink-0 items-center gap-0.5 pr-2">
-      <CaptureAction compact={narrow} />
-      {narrow ? <DeviceMenu /> : <DeviceMenu label="Mobile" />}
-      {!isPrivateWindow() && <AgentAction compact={narrow} />}
-      <span className="mx-1.5 h-4 w-px bg-line-2" aria-hidden />
+      <RecordingStatus compact={narrow} />
       {!isPrivateWindow() && <UpdatePill compact={narrow} />}
-      {isPrivateWindow() ? <PrivateBadge /> : <BuildBadge />}
-      <IconButton icon={ChevronDown} label="All tabs" onClick={() => openPalette("tabs")} size={14} tooltipAlign="end" tooltipSide="bottom" />
+      {isPrivateWindow() && <PrivateBadge />}
+      {!isPrivateWindow() && <AgentAction compact={narrow} />}
+      <AppsAction compact={narrow} />
     </div>
   );
+}
+
+/** Opens the Apps launcher. */
+function AppsAction({ compact }: { compact: boolean }) {
+  const open = useBrowser((s) => s.open.apps ?? false);
+  const toggle = useBrowser((s) => s.toggle);
+  return <FeatureButton icon={LayoutGrid} label="Apps" tip="Apps: everything Dive can do" shortcut="⌘⇧Space" hasPopup="dialog" active={open} iconOnly={compact} onClick={() => toggle("apps", true)} />;
 }
 
 /**
@@ -147,74 +147,13 @@ export function FeatureButton({
   );
 }
 
-/**
- * Capture: one control for the two ways of taking the page away with you,
- * a recording (video or GIF) and a full-page screenshot. While a recording
- * runs it turns into the recording's controls (time, pause, stop, discard)
- * so they are always on screen without covering the page.
- */
-function CaptureAction({ compact }: { compact: boolean }) {
-  const active = useBrowser((s) => s.activeTab);
-  const capture = useBrowser((s) => s.capture);
-  const capturing = useBrowser((s) => s.capturing);
+/** While a recording runs, its controls sit here so they are always on screen. */
+function RecordingStatus({ compact }: { compact: boolean }) {
   const phase = useRecording((s) => s.phase);
-  const openSetup = useRecording((s) => s.openSetup);
-  const [open, setOpen] = useState(false);
-  const dismiss = useCallback(() => setOpen(false), []);
-  const root = useRef<HTMLDivElement>(null);
-  const menu = useRef<HTMLDivElement>(null);
-  useCoversContent(open);
-  useFocusTrap(menu, { active: open, menu: true, onEscape: dismiss });
-  useDismiss(root, open, dismiss);
   if (phase === "starting" || phase === "countdown" || phase === "recording" || phase === "paused" || phase === "finishing") {
     return <RecordingHud compact={compact} />;
   }
-  const item = "flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent";
-  return (
-    <div ref={root} className="relative">
-      <FeatureButton
-        icon={capturing ? LoaderCircle : Camera}
-        label="Capture"
-        tip={capturing ? "Capturing the page…" : "Capture: record a video or GIF, or screenshot the page"}
-        disabled={!active}
-        iconOnly={compact}
-        hasPopup="menu"
-        active={open}
-        onClick={() => setOpen((o) => !o)}
-      />
-      {open && (
-        <div ref={menu} role="menu" aria-label="Capture" className="surface-enter absolute top-full left-0 z-50 mt-1 w-60 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl">
-          <button
-            type="button"
-            role="menuitem"
-            className={item}
-            onClick={() => {
-              dismiss();
-              openSetup();
-            }}
-          >
-            <Icon icon={Video} size={13} />
-            <span className="flex-1">Record video or GIF</span>
-            <kbd className="font-mono text-[9px] text-ink-3">⌘⇧R</kbd>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className={item}
-            disabled={capturing}
-            onClick={() => {
-              dismiss();
-              void capture(true);
-            }}
-          >
-            <Icon icon={Camera} size={13} />
-            <span className="flex-1">Screenshot the full page</span>
-            <kbd className="font-mono text-[9px] text-ink-3">⌘⇧S</kbd>
-          </button>
-        </div>
-      )}
-    </div>
-  );
+  return null;
 }
 
 /** The live controls of a recording in progress. */
