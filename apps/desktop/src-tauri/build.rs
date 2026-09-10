@@ -12,6 +12,18 @@ fn git(args: &[&str]) -> Option<String> {
 }
 
 fn main() {
+    // `whisper_enabled` rather than the bare feature: whisper.cpp cannot be
+    // built for Windows-on-ARM (ggml refuses MSVC there), so the dependency
+    // is absent on that target even when the feature is on. Expressing that
+    // once here keeps the condition out of eight call sites.
+    println!("cargo::rustc-check-cfg=cfg(whisper_enabled)");
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let buildable = !(target_os == "windows" && target_arch == "aarch64");
+    if std::env::var_os("CARGO_FEATURE_WHISPER").is_some() && buildable {
+        println!("cargo::rustc-cfg=whisper_enabled");
+    }
+
     // Naming any trigger turns off cargo's "rerun on any change" default, so
     // the chrome bundle the binary embeds has to be named too: without it a
     // rebuilt `dist` shipped stale inside a binary cargo thought was current.

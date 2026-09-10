@@ -112,21 +112,30 @@ square corners on a child view are unremarkable there.
 5. The eyedropper, which is new code rather than a port.
 6. CI on `windows-latest` and a signed installer.
 
-## Live subtitles do not build on Windows-on-ARM
+## Live subtitles on Windows-on-ARM
 
-`whisper-rs-sys` builds whisper.cpp with CMake, and ggml's own CMakeLists
-stops with "MSVC is not supported for ARM, use clang". It is an ARM problem
-rather than a Windows one: the x64 build we would actually ship compiles with
-MSVC fine, and this only shows up because the development VM is
-Windows-on-ARM.
+`whisper-rs-sys` builds whisper.cpp with CMake, and ggml stops with "MSVC is
+not supported for ARM, use clang". It is an ARM problem rather than a Windows
+one: the x64 build we would ship compiles with MSVC fine, and this only
+appears because the development VM is Windows-on-ARM.
 
-Live subtitles are an optional cargo feature, so the port builds without
-them:
+The obvious fix does not work. ggml's test is
 
-    cargo check -p dive-desktop --no-default-features --features cef
+    if (MSVC AND NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
 
-Fixing it properly means pointing whisper's CMake at clang-cl on ARM. That is
-its own self-contained job and should not sit in front of the port.
+which clang-cl satisfies, but `CMAKE_GENERATOR_TOOLSET=ClangCL` cannot reach
+it: the `cmake` crate already passes `-Thost=x64` for Visual Studio
+generators and adds a second `-T` for the environment variable, which CMake
+rejects. And the Tauri CLI has no `--no-default-features`, so the feature
+cannot simply be turned off for one build either.
+
+So the target decides instead. `whisper-rs` is not a dependency at all on
+`windows-aarch64`, and `build.rs` emits a `whisper_enabled` cfg only when the
+feature is on *and* the target can have it. The eight gates in
+`subtitles.rs` follow that cfg rather than the bare feature, and the
+`not(...)` fallbacks it already had do the rest. macOS and Windows x64 are
+unaffected -- verified by checking the build script still emits
+`whisper_enabled` there and that `whisper-rs` is still linked.
 
 ## What already works
 

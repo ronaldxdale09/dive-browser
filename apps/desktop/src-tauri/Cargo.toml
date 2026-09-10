@@ -67,8 +67,14 @@ arboard = { version = "3", default-features = false, features = ["image-data"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 gif = "0.13"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
-whisper-rs = { version = "0.14", optional = true }
 adblock = { version = "0.13.3", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
+
+# whisper.cpp builds through CMake, and ggml refuses to be built for ARM by
+# MSVC. Windows-on-ARM is a development platform here rather than one we
+# ship, so the dependency is simply absent there; see `whisper_enabled` in
+# build.rs for the matching gate on the code.
+[target.'cfg(not(all(target_os = "windows", target_arch = "aarch64")))'.dependencies]
+whisper-rs = { version = "0.14", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "1", features = ["keychain"] }

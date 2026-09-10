@@ -544,7 +544,7 @@ pub async fn start(
     let path = model_file(&model_id)
         .filter(|p| p.is_file())
         .ok_or_else(|| format!("model {model_id} is not downloaded"))?;
-    #[cfg(feature = "whisper")]
+    #[cfg(whisper_enabled)]
     if language != "auto" && whisper_rs::get_lang_id(&language).is_none() {
         return Err("Unsupported subtitle language".into());
     }
@@ -763,12 +763,12 @@ pub fn is_running(app: &AppHandle<Runtime>, tab: TabId) -> bool {
     app.state::<AppState>().subtitles.is_running(tab)
 }
 
-#[cfg(feature = "whisper")]
+#[cfg(whisper_enabled)]
 type LocalContext = whisper_rs::WhisperState;
-#[cfg(not(feature = "whisper"))]
+#[cfg(not(whisper_enabled))]
 type LocalContext = ();
 
-#[cfg(feature = "whisper")]
+#[cfg(whisper_enabled)]
 fn load_context(path: &std::path::Path) -> Result<LocalContext, String> {
     let ctx = whisper_rs::WhisperContext::new_with_params(
         &path.to_string_lossy(),
@@ -779,7 +779,7 @@ fn load_context(path: &std::path::Path) -> Result<LocalContext, String> {
         .map_err(|e| format!("could not create transcription state: {e}"))
 }
 
-#[cfg(feature = "whisper")]
+#[cfg(whisper_enabled)]
 fn transcribe(
     state: &mut LocalContext,
     audio: &[f32],
@@ -822,12 +822,12 @@ fn transcribe(
     Ok((text.trim().to_owned(), detected.to_owned()))
 }
 
-#[cfg(not(feature = "whisper"))]
+#[cfg(not(whisper_enabled))]
 fn load_context(_path: &std::path::Path) -> Result<LocalContext, String> {
     Err("this build was compiled without the local transcription engine".into())
 }
 
-#[cfg(not(feature = "whisper"))]
+#[cfg(not(whisper_enabled))]
 fn transcribe(
     _ctx: &mut LocalContext,
     _audio: &[f32],
@@ -1118,7 +1118,7 @@ mod tests {
     /// Opt-in real local inference, using a 16 kHz mono PCM WAV fixture.
     #[test]
     #[ignore = "requires DIVE_SUBTITLE_TEST_MODEL and DIVE_SUBTITLE_TEST_WAV"]
-    #[cfg(feature = "whisper")]
+    #[cfg(whisper_enabled)]
     fn local_model_transcribes_real_audio() {
         let expected_language =
             std::env::var("DIVE_SUBTITLE_EXPECT_LANGUAGE").unwrap_or_else(|_| "en".into());
