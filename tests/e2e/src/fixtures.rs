@@ -662,4 +662,28 @@ impl Browser for TestFakeBrowser {
     ) -> Result<serde_json::Value, BrowserError> {
         Ok(json!({"dragged": params.from, "onto": params.to}))
     }
+
+    async fn page_storage_get(
+        &self,
+        _tab: TabId,
+        _params: dive_mcp::StorageGetParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({"cookies": [], "local": {}, "session": {}}))
+    }
+
+    async fn page_storage_set(
+        &self,
+        _tab: TabId,
+        params: dive_mcp::StorageSetParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({"cookies": params.cookies.map_or(0, |c| c.len())}))
+    }
+
+    async fn page_storage_clear(
+        &self,
+        _tab: TabId,
+        _params: dive_mcp::StorageClearParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({"cleared": true}))
+    }
 }

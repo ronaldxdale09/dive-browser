@@ -19,8 +19,8 @@ use crate::params::{
     AppearanceParams, BodyParams, ClickParams, ComponentParams, DialogParams, DragParams,
     EvaluateParams, FillFormParams, HistoryParams, LOCATOR_GRAMMAR, LocateParams, MAX_WAIT_MS,
     NavigateParams, OpenParams, PressParams, ResizeParams, RulesParams, ScreenshotParams,
-    ScrollParams, SelectParams, TabRef, TailParams, ThrottleParams, TypeParams, UploadParams,
-    WaitForParams,
+    ScrollParams, SelectParams, StorageClearParams, StorageGetParams, StorageSetParams, TabRef,
+    TailParams, ThrottleParams, TypeParams, UploadParams, WaitForParams,
 };
 
 #[cfg(test)]
@@ -378,6 +378,45 @@ impl<B: Browser> DiveServer<B> {
     ) -> Result<CallToolResult, ErrorData> {
         let tab = self.resolve(p.tab_id.clone()).await?;
         json_result(&self.browser.page_drag(tab, p).await?)
+    }
+
+    /// Read stored state.
+    #[tool(
+        name = "page_storage",
+        description = "Everything this site keeps on this machine, in one call: its cookies, its localStorage and its sessionStorage. Pass include to narrow it. The shape it returns is the shape page_storage_set takes, so a signed-in session can be read once here and restored later or in another tab without going through the login again."
+    )]
+    async fn page_storage(
+        &self,
+        Parameters(p): Parameters<StorageGetParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id.clone()).await?;
+        json_result(&self.browser.page_storage_get(tab, p).await?)
+    }
+
+    /// Write stored state.
+    #[tool(
+        name = "page_storage_set",
+        description = "Add or replace cookies, localStorage and sessionStorage for this page, in one call. Takes what page_storage returns, so restoring a session is a round trip. Cookies default to the page's own host and to path /. The page is not reloaded: navigate or reload afterwards for it to read the new state."
+    )]
+    async fn page_storage_set(
+        &self,
+        Parameters(p): Parameters<StorageSetParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id.clone()).await?;
+        json_result(&self.browser.page_storage_set(tab, p).await?)
+    }
+
+    /// Clear stored state.
+    #[tool(
+        name = "page_storage_clear",
+        description = "Throw away this page's cookies, localStorage and sessionStorage, or the subset named in clear. Use it to test a first visit, or a signed-out state, without a fresh profile."
+    )]
+    async fn page_storage_clear(
+        &self,
+        Parameters(p): Parameters<StorageClearParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id.clone()).await?;
+        json_result(&self.browser.page_storage_clear(tab, p).await?)
     }
 
     /// Type.

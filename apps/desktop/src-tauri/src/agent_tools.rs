@@ -102,6 +102,21 @@ pub fn specs() -> Vec<ToolSpec> {
             obj(json!({"tab_id": tab, "from": locator, "to": locator}), &["from", "to"]),
         ),
         spec(
+            "page_storage",
+            "Everything this site keeps on this machine in one call: cookies, localStorage and sessionStorage. What it returns is what page_storage_set takes, so a signed-in session can be read once and restored later without logging in again.".into(),
+            obj(json!({"tab_id": tab, "include": {"type": "array", "items": {"type": "string", "enum": ["cookies", "local", "session"]}}}), &[]),
+        ),
+        spec(
+            "page_storage_set",
+            "Add or replace cookies, localStorage and sessionStorage for this page. The page reads them on its next load, so reload afterwards.".into(),
+            obj(json!({"tab_id": tab, "cookies": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}, "value": {"type": "string"}, "domain": {"type": "string"}, "path": {"type": "string"}, "expires": {"type": "number"}, "http_only": {"type": "boolean"}, "secure": {"type": "boolean"}, "same_site": {"type": "string"}}, "required": ["name", "value"]}}, "local": {"type": "object", "additionalProperties": {"type": "string"}}, "session": {"type": "object", "additionalProperties": {"type": "string"}}}), &[]),
+        ),
+        spec(
+            "page_storage_clear",
+            "Throw away this page's cookies, localStorage and sessionStorage, or the subset named in clear. Use it to check a first visit or a signed-out state.".into(),
+            obj(json!({"tab_id": tab, "clear": {"type": "array", "items": {"type": "string", "enum": ["cookies", "local", "session"]}}}), &[]),
+        ),
+        spec(
             "tab_history",
             "Go back, go forward or reload the tab; then page_wait_for load true.".into(),
             obj(json!({"tab_id": tab, "action": {"type": "string", "enum": ["back", "forward", "reload"]}}), &["action"]),
@@ -204,6 +219,8 @@ pub fn is_action(name: &str) -> bool {
             | "page_fill_form"
             | "page_upload"
             | "page_drag"
+            | "page_storage_set"
+            | "page_storage_clear"
             | "tab_history"
             | "tab_navigate"
             | "tab_activate"
@@ -455,6 +472,46 @@ async fn execute<B: Browser>(
                         from: input["from"].as_str().map(str::to_owned),
                         to: input["to"].as_str().map(str::to_owned),
                     },
+                )
+                .await
+                .map_err(err)?,
+        ),
+        "page_storage" => text(
+            browser
+                .page_storage_get(
+                    tab()?,
+                    serde_json::from_value(json!({"include": input["include"].clone()})).map_err(
+                        |e| format!("include must be a list of cookies/local/session: {e}"),
+                    )?,
+                )
+                .await
+                .map_err(err)?,
+        ),
+        "page_storage_set" => text(
+            browser
+                .page_storage_set(
+                    tab()?,
+                    serde_json::from_value(json!({
+                        "cookies": input["cookies"].clone(),
+                        "local": input["local"].clone(),
+                        "session": input["session"].clone(),
+                    }))
+                    .map_err(|e| {
+                        format!(
+                            "cookies, local and session must be the shape page_storage returns: {e}"
+                        )
+                    })?,
+                )
+                .await
+                .map_err(err)?,
+        ),
+        "page_storage_clear" => text(
+            browser
+                .page_storage_clear(
+                    tab()?,
+                    serde_json::from_value(json!({"clear": input["clear"].clone()})).map_err(
+                        |e| format!("clear must be a list of cookies/local/session: {e}"),
+                    )?,
                 )
                 .await
                 .map_err(err)?,

@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::BrowserError;
 use crate::params::{
-    AppearanceParams, DialogParams, DragParams, FillFormParams, ResizeParams, SelectParams, Target,
-    UploadParams, WaitForParams,
+    AppearanceParams, DialogParams, DragParams, FillFormParams, ResizeParams, SelectParams,
+    StorageClearParams, StorageGetParams, StorageSetParams, Target, UploadParams, WaitForParams,
 };
 
 /// What a tool caller gets to know about a tab.
@@ -191,5 +191,23 @@ pub trait Browser: Send + Sync + 'static {
         &self,
         tab: TabId,
         params: DragParams,
+    ) -> Result<serde_json::Value, BrowserError>;
+    /// Read the cookies and web storage a site keeps for this page.
+    async fn page_storage_get(
+        &self,
+        tab: TabId,
+        params: StorageGetParams,
+    ) -> Result<serde_json::Value, BrowserError>;
+    /// Write cookies and web storage the page will read back.
+    async fn page_storage_set(
+        &self,
+        tab: TabId,
+        params: StorageSetParams,
+    ) -> Result<serde_json::Value, BrowserError>;
+    /// Throw away cookies and web storage for this page.
+    async fn page_storage_clear(
+        &self,
+        tab: TabId,
+        params: StorageClearParams,
     ) -> Result<serde_json::Value, BrowserError>;
 }

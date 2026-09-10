@@ -324,6 +324,30 @@ impl Browser for Fake {
     ) -> Result<serde_json::Value, BrowserError> {
         Ok(serde_json::json!({"dragged": params.from, "onto": params.to}))
     }
+
+    async fn page_storage_get(
+        &self,
+        _tab: TabId,
+        _params: crate::params::StorageGetParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"cookies": [], "local": {}, "session": {}}))
+    }
+
+    async fn page_storage_set(
+        &self,
+        _tab: TabId,
+        _params: crate::params::StorageSetParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"set": true}))
+    }
+
+    async fn page_storage_clear(
+        &self,
+        _tab: TabId,
+        _params: crate::params::StorageClearParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"cleared": true}))
+    }
 }
 
 #[test]

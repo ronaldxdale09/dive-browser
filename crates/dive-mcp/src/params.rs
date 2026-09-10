@@ -296,6 +296,76 @@ pub struct DragParams {
     pub to: Option<String>,
 }
 
+/// One cookie, as the browser holds it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct Cookie {
+    /// Name.
+    pub name: String,
+    /// Value.
+    pub value: String,
+    /// Host it belongs to. Defaults to the page's own host when setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    /// Path it is sent for. Defaults to `/`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Expiry as a Unix timestamp in seconds. Absent means a session cookie.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires: Option<f64>,
+    /// Not readable by page scripts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_only: Option<bool>,
+    /// Sent over https only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secure: Option<bool>,
+    /// `Strict`, `Lax` or `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub same_site: Option<String>,
+}
+
+/// Which kinds of stored state a call applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum StorageKind {
+    /// Cookies for the page's origin.
+    Cookies,
+    /// `window.localStorage`.
+    Local,
+    /// `window.sessionStorage`.
+    Session,
+}
+
+/// Read the state a site keeps on this machine.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct StorageGetParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// Which kinds to read. All three when omitted.
+    pub include: Option<Vec<StorageKind>>,
+}
+
+/// Write state a site will read back.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct StorageSetParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// Cookies to add or replace.
+    pub cookies: Option<Vec<Cookie>>,
+    /// `localStorage` keys to add or replace.
+    pub local: Option<std::collections::BTreeMap<String, String>>,
+    /// `sessionStorage` keys to add or replace.
+    pub session: Option<std::collections::BTreeMap<String, String>>,
+}
+
+/// Throw stored state away.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct StorageClearParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// Which kinds to clear. All three when omitted.
+    pub clear: Option<Vec<StorageKind>>,
+}
+
 /// Answer the JavaScript dialog a page has open.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub struct DialogParams {

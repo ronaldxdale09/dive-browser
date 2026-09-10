@@ -564,6 +564,126 @@ fn dialog_opened(dialog: &crate::js_dialog::JsDialogAsked, action: &str) -> Valu
     })
 }
 
+/// One cookie in the shape `Network.setCookies` wants.
+///
+/// A cookie with neither a domain nor a URL is rejected outright, so the
+/// page's own URL stands in for a missing domain: "a cookie for this page" is
+/// what a caller who left it out meant, and it is the only guess that is ever
+/// right. Path defaults to `/` for the same reason -- a cookie scoped to the
+/// current path only would not be sent from anywhere else on the site, which
+/// is never what restoring a session wanted.
+fn cdp_cookie(cookie: &dive_mcp::Cookie, page_url: &str) -> Value {
+    let mut entry = serde_json::Map::new();
+    entry.insert("name".into(), json!(cookie.name));
+    entry.insert("value".into(), json!(cookie.value));
+    match &cookie.domain {
+        Some(domain) => entry.insert("domain".into(), json!(domain)),
+        None => entry.insert("url".into(), json!(page_url)),
+    };
+    entry.insert(
+        "path".into(),
+        json!(cookie.path.clone().unwrap_or_else(|| "/".into())),
+    );
+    if let Some(expires) = cookie.expires {
+        entry.insert("expires".into(), json!(expires));
+    }
+    if let Some(http_only) = cookie.http_only {
+        entry.insert("httpOnly".into(), json!(http_only));
+    }
+    if let Some(secure) = cookie.secure {
+        entry.insert("secure".into(), json!(secure));
+    }
+    if let Some(same_site) = &cookie.same_site {
+        entry.insert("sameSite".into(), json!(same_site));
+    }
+    Value::Object(entry)
+}
+
+/// The page's own URL, for scoping cookie reads and writes to this site.
+async fn page_url(session: &ToolSession) -> Result<String, BrowserError> {
+    let value = session
+        .call(
+            "Runtime.evaluate",
+            json!({"expression": "location.href", "returnByValue": true}),
+        )
+        .await
+        .map_err(|e| other(e.to_string()))?;
+    value["result"]["value"]
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| other("the page did not say what its URL is"))
+}
+
+/// `localStorage` or `sessionStorage` as a flat object.
+async fn read_web_storage(session: &ToolSession, which: &str) -> Result<Value, BrowserError> {
+    let expression = format!(
+        "(() => {{ try {{ const s = window.{which}Storage; const out = {{}}; for (let i = 0; i < s.length; i++) {{ const k = s.key(i); out[k] = s.getItem(k); }} return out; }} catch (e) {{ return {{ __error: String(e && e.message || e) }}; }} }})()"
+    );
+    let value = session
+        .call(
+            "Runtime.evaluate",
+            json!({"expression": expression, "returnByValue": true}),
+        )
+        .await
+        .map_err(|e| other(e.to_string()))?;
+    let out = value["result"]["value"].clone();
+    // A page on an opaque origin, or one with storage blocked, throws on
+    // access rather than returning nothing; that is worth saying plainly
+    // instead of reporting an empty store the caller would believe.
+    if let Some(problem) = out["__error"].as_str() {
+        return Err(BrowserError::BadRequest(format!(
+            "this page cannot use {which}Storage: {problem}"
+        )));
+    }
+    Ok(out)
+}
+
+/// Add or replace keys in `localStorage` or `sessionStorage`.
+async fn write_web_storage(
+    session: &ToolSession,
+    which: &str,
+    values: &std::collections::BTreeMap<String, String>,
+) -> Result<(), BrowserError> {
+    let payload = serde_json::to_string(values).map_err(other)?;
+    let expression = format!(
+        "(() => {{ try {{ const s = window.{which}Storage; const v = {payload}; for (const k of Object.keys(v)) s.setItem(k, v[k]); return null; }} catch (e) {{ return String(e && e.message || e); }} }})()"
+    );
+    let value = session
+        .call(
+            "Runtime.evaluate",
+            json!({"expression": expression, "returnByValue": true}),
+        )
+        .await
+        .map_err(|e| other(e.to_string()))?;
+    if let Some(problem) = value["result"]["value"].as_str() {
+        return Err(BrowserError::BadRequest(format!(
+            "this page cannot use {which}Storage: {problem}"
+        )));
+    }
+    Ok(())
+}
+
+/// Empty `localStorage` or `sessionStorage`, reporting how much went.
+async fn clear_web_storage(session: &ToolSession, which: &str) -> Result<u64, BrowserError> {
+    let expression = format!(
+        "(() => {{ try {{ const s = window.{which}Storage; const n = s.length; s.clear(); return n; }} catch {{ return -1; }} }})()"
+    );
+    let value = session
+        .call(
+            "Runtime.evaluate",
+            json!({"expression": expression, "returnByValue": true}),
+        )
+        .await
+        .map_err(|e| other(e.to_string()))?;
+    // A page that cannot touch storage has nothing to clear, which is not a
+    // failure: the caller asked for it to be empty and it is.
+    Ok(value["result"]["value"]
+        .as_i64()
+        .unwrap_or(0)
+        .max(0)
+        .unsigned_abs())
+}
+
 fn other(e: impl std::fmt::Display) -> BrowserError {
     BrowserError::Other(e.to_string())
 }
@@ -1722,6 +1842,127 @@ impl Browser for AppBrowser {
         .await
     }
 
+    async fn page_storage_get(
+        &self,
+        tab: TabId,
+        params: dive_mcp::StorageGetParams,
+    ) -> Result<Value, BrowserError> {
+        use dive_mcp::StorageKind;
+        let wanted = params.include.unwrap_or_else(|| {
+            vec![
+                StorageKind::Cookies,
+                StorageKind::Local,
+                StorageKind::Session,
+            ]
+        });
+        let session = self.session_for(tab).await?;
+        let mut out = serde_json::Map::new();
+        if wanted.contains(&StorageKind::Cookies) {
+            // Scoped to the page's own URL rather than the whole jar: an
+            // agent asking about this page should not be handed every cookie
+            // the profile holds for every site it has ever visited.
+            let url = page_url(&session).await?;
+            let answer = session
+                .call("Network.getCookies", json!({"urls": [url]}))
+                .await
+                .map_err(|e| other(e.to_string()))?;
+            out.insert("cookies".into(), answer["cookies"].clone());
+        }
+        for (kind, name) in [
+            (StorageKind::Local, "local"),
+            (StorageKind::Session, "session"),
+        ] {
+            if !wanted.contains(&kind) {
+                continue;
+            }
+            out.insert(name.into(), read_web_storage(&session, name).await?);
+        }
+        Ok(Value::Object(out))
+    }
+
+    async fn page_storage_set(
+        &self,
+        tab: TabId,
+        params: dive_mcp::StorageSetParams,
+    ) -> Result<Value, BrowserError> {
+        let session = self.session_for(tab).await?;
+        let mut set = serde_json::Map::new();
+        if let Some(cookies) = params.cookies {
+            let url = page_url(&session).await?;
+            let prepared: Vec<Value> = cookies.iter().map(|c| cdp_cookie(c, &url)).collect();
+            session
+                .call("Network.setCookies", json!({"cookies": prepared}))
+                .await
+                .map_err(|e| other(e.to_string()))?;
+            set.insert("cookies".into(), json!(prepared.len()));
+        }
+        for (name, values) in [("local", params.local), ("session", params.session)] {
+            let Some(values) = values else { continue };
+            let count = values.len();
+            write_web_storage(&session, name, &values).await?;
+            set.insert(name.into(), json!(count));
+        }
+        if set.is_empty() {
+            return Err(BrowserError::BadRequest(
+                "give cookies, local or session: there is nothing to set".into(),
+            ));
+        }
+        Ok(json!({"set": Value::Object(set), "note": "the page reads this on its next load"}))
+    }
+
+    async fn page_storage_clear(
+        &self,
+        tab: TabId,
+        params: dive_mcp::StorageClearParams,
+    ) -> Result<Value, BrowserError> {
+        use dive_mcp::StorageKind;
+        let wanted = params.clear.unwrap_or_else(|| {
+            vec![
+                StorageKind::Cookies,
+                StorageKind::Local,
+                StorageKind::Session,
+            ]
+        });
+        let session = self.session_for(tab).await?;
+        let mut cleared = Vec::new();
+        if wanted.contains(&StorageKind::Cookies) {
+            // Only this page's cookies: clearing the whole jar would sign the
+            // person out of every site they are in, which is never what a
+            // tool call about one page meant.
+            let url = page_url(&session).await?;
+            let answer = session
+                .call("Network.getCookies", json!({"urls": [url]}))
+                .await
+                .map_err(|e| other(e.to_string()))?;
+            let empty = Vec::new();
+            let cookies = answer["cookies"].as_array().unwrap_or(&empty);
+            for cookie in cookies {
+                let Some(name) = cookie["name"].as_str() else {
+                    continue;
+                };
+                session
+                    .call(
+                        "Network.deleteCookies",
+                        json!({"name": name, "url": url, "domain": cookie["domain"], "path": cookie["path"]}),
+                    )
+                    .await
+                    .map_err(|e| other(e.to_string()))?;
+            }
+            cleared.push(json!({"cookies": cookies.len()}));
+        }
+        for (kind, name) in [
+            (StorageKind::Local, "local"),
+            (StorageKind::Session, "session"),
+        ] {
+            if !wanted.contains(&kind) {
+                continue;
+            }
+            let count = clear_web_storage(&session, name).await?;
+            cleared.push(json!({name: count}));
+        }
+        Ok(json!({"cleared": cleared}))
+    }
+
     async fn console_tail(&self, tab: TabId, limit: usize) -> Result<Value, BrowserError> {
         serde_json::to_value(self.state().buffers.console_tail(tab, limit)).map_err(other)
     }
@@ -1883,6 +2124,60 @@ fn load_or_create_token() -> std::io::Result<String> {
 #[cfg(test)]
 mod tool_session_tests {
     use super::*;
+
+    #[test]
+    fn a_cookie_with_no_domain_is_scoped_to_the_page_that_asked_for_it() {
+        // Neither a domain nor a URL is rejected outright, so leaving the
+        // domain out has to mean "this page" rather than "everywhere".
+        let cookie = dive_mcp::Cookie {
+            name: "sid".into(),
+            value: "abc".into(),
+            ..dive_mcp::Cookie::default()
+        };
+        let prepared = cdp_cookie(&cookie, "https://example.com/app");
+        assert_eq!(prepared["url"], "https://example.com/app");
+        assert!(prepared.get("domain").is_none());
+        // Not the page's own path: a session cookie scoped to /app would not
+        // be sent from anywhere else on the site.
+        assert_eq!(prepared["path"], "/");
+    }
+
+    #[test]
+    fn a_cookie_that_names_its_domain_keeps_it_and_carries_its_flags() {
+        let cookie = dive_mcp::Cookie {
+            name: "sid".into(),
+            value: "abc".into(),
+            domain: Some(".example.com".into()),
+            path: Some("/admin".into()),
+            expires: Some(1_800_000_000.0),
+            http_only: Some(true),
+            secure: Some(true),
+            same_site: Some("Lax".into()),
+        };
+        let prepared = cdp_cookie(&cookie, "https://example.com/");
+        assert_eq!(prepared["domain"], ".example.com");
+        assert!(prepared.get("url").is_none());
+        assert_eq!(prepared["path"], "/admin");
+        assert_eq!(prepared["expires"], 1_800_000_000.0);
+        assert_eq!(prepared["httpOnly"], true);
+        assert_eq!(prepared["secure"], true);
+        assert_eq!(prepared["sameSite"], "Lax");
+    }
+
+    #[test]
+    fn flags_left_out_are_left_out_rather_than_sent_as_false() {
+        // Sending httpOnly:false for a cookie the caller said nothing about
+        // would quietly strip the flag from a cookie being restored.
+        let cookie = dive_mcp::Cookie {
+            name: "a".into(),
+            value: "b".into(),
+            ..dive_mcp::Cookie::default()
+        };
+        let prepared = cdp_cookie(&cookie, "https://example.com/");
+        for absent in ["httpOnly", "secure", "sameSite", "expires"] {
+            assert!(prepared.get(absent).is_none(), "{absent} should be absent");
+        }
+    }
 
     #[test]
     fn waits_retry_only_known_navigation_errors_on_live_sessions() {
