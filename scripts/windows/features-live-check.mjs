@@ -10,10 +10,20 @@
 // on disk or in the registry rather than for a command that did not throw.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 const port = process.env.DIVE_CHECK_CDP_PORT || "9343";
+
+// Written straight to disk rather than through console.log. Node buffers a
+// redirected stdout, so a log read while the script is stuck stops several
+// lines short of where it actually is -- which points the investigation at
+// the wrong call entirely.
+const trace = process.env.DIVE_CHECK_TRACE;
+const say = (line) => {
+  console.log(line);
+  if (trace) appendFileSync(trace, `${line}\n`);
+};
 
 async function connect() {
   const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
@@ -41,10 +51,10 @@ const invoke = async (command, args = {}, ms) => {
   const started = Date.now();
   // A whole line, not a prefix: redirected to a file, a partial write sits in
   // the buffer, and the log then stops one call earlier than the hang.
-  console.log(`  -> ${command}`);
+  say(`  -> ${command}`);
   const m = await ev(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)},${JSON.stringify(args)}).then(d=>({ok:d})).catch(e=>({err:String(e&&e.message||e)}))`, ms);
   const v = m.result?.result?.value;
-  console.log(`     ${command} took ${Date.now() - started}ms`);
+  say(`     ${command} took ${Date.now() - started}ms`);
   if (!v || v.err) throw Error(`${command}: ${v?.err ?? "no reply"}`);
   return v.ok;
 };
@@ -61,7 +71,7 @@ const ps = (script) =>
   await invoke("agent_key_set", { provider, key: secret });
   const present = await invoke("agent_key_present", { provider });
   assert.equal(present, true, "the key was saved and then could not be found");
-  console.log("credential store: saved and read back ✓");
+  say("credential store: saved and read back ✓");
 }
 
 // --- default browser -------------------------------------------------------
@@ -72,7 +82,7 @@ const ps = (script) =>
   const status = await invoke("default_browser_status");
   assert.equal(status.supported, true, "Windows reported as unsupported");
   assert.equal(typeof status.is_default, "boolean");
-  console.log(`default browser: supported, currently ${status.current ?? "unset"} ✓`);
+  say(`default browser: supported, currently ${status.current ?? "unset"} ✓`);
 }
 
 // --- web app launcher ------------------------------------------------------
@@ -89,7 +99,7 @@ const ps = (script) =>
   );
   const listed = ps(`Get-ChildItem -LiteralPath '${start}' -Filter *.lnk | ForEach-Object { $_.Name }`);
   assert(listed.length > 0, `nothing was written to ${start}`);
-  console.log(`web app launcher: ${listed.split(/\r?\n/).join(", ")} ✓`);
+  say(`web app launcher: ${listed.split(/\r?\n/).join(", ")} ✓`);
 
   // And the shortcut has to actually point at Dive with this app's id.
   const first = listed.split(/\r?\n/)[0];
@@ -99,12 +109,12 @@ const ps = (script) =>
   );
   assert(/dive-desktop\.exe/i.test(target), `shortcut does not run Dive: ${target}`);
   assert(/--app=/.test(target), `shortcut carries no app id: ${target}`);
-  console.log(`  -> ${target}`);
+  say(`  -> ${target}`);
 
   await invoke("webapp_uninstall", { appId: app.id });
   assert(
     !existsSync(join(start, first)),
     "uninstall left the shortcut behind",
   );
-  console.log("web app launcher: removed on uninstall ✓");
+  say("web app launcher: removed on uninstall ✓");
 }
