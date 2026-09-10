@@ -55,6 +55,14 @@ function Get-Zip($url, $dest) {
     Remove-Item $tmp -Force
 }
 
+# A fresh Windows refuses to run .ps1 files at all, and pnpm ships as one.
+# Without this the first `pnpm install` fails with a security error -- and if
+# it is running detached, fails silently.
+if ((Get-ExecutionPolicy -Scope LocalMachine) -in "Restricted", "Undefined") {
+    Set-ExecutionPolicy -Scope LocalMachine RemoteSigned -Force
+    Say "execution policy set to RemoteSigned"
+}
+
 $isArm = $env:PROCESSOR_ARCHITECTURE -eq "ARM64"
 $rustTarget = if ($isArm) { "aarch64-pc-windows-msvc" } else { "x86_64-pc-windows-msvc" }
 Say "Windows $env:PROCESSOR_ARCHITECTURE, target $rustTarget"
