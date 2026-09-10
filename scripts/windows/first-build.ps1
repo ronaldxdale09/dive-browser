@@ -24,6 +24,10 @@ if (-not (Test-Path $repo)) {
   git -C $repo pull --ff-only 2>&1 | Add-Content $log
 }
 Set-Location $repo
+# Windows will not replace a binary that is still open, so a build after a
+# test run fails on "failed to remove file dive-desktop.exe" rather than on
+# anything to do with the code.
+Get-Process dive-desktop -ErrorAction SilentlyContinue | Stop-Process -Force
 Say "pnpm install"
 pnpm install --frozen-lockfile 2>&1 | Add-Content $log
 Say "cargo check (downloads CEF ~1GB, builds the C++ wrapper -- slow)"
