@@ -125,11 +125,15 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
             </Tooltip>
           );
         })()}
+        {/* The input and the text drawn over it share one box, so the resting
+            address ends exactly where the field does -- before the actions in
+            the pill rather than underneath them. */}
+        <span className="relative flex min-w-0 flex-1 items-center">
         {/* At rest the host is set in ink and the path in a quieter tone, so a
             glance reads the site; the input underneath keeps the whole text
             for selection, copying and assistive tech. */}
         {!editing && current && display && (
-          <span aria-hidden className="pointer-events-none absolute inset-y-0 left-[34px] right-3 flex items-center overflow-hidden text-[13px] whitespace-nowrap">
+          <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center overflow-hidden text-[13px] whitespace-nowrap">
             <span className="text-ink">{splitAddress(url).host}</span>
             <span className="truncate text-ink-3">{splitAddress(url).rest}</span>
           </span>
@@ -169,31 +173,33 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
           aria-activedescendant={rows.length > 0 ? optionId(listId, highlight) : undefined}
           className={`min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-ink-3 ${!editing && current && display ? "text-transparent" : "text-ink"}`}
         />
+        </span>
+        {/* Inside the pill, at its right edge, as Brave and Chrome keep
+            them: what this page can become (an installed app), what is being
+            done to it (protection) and what you can do with it (save it,
+            send it). They belong to the address they sit on, and out here
+            they read as browser controls instead. */}
+        <span className="ml-1 flex shrink-0 items-center gap-0.5">
+          <InstallAppButton />
+          <ProtectionMenu compact />
+          {!isPrivateWindow() && <BookmarkButton />}
+          <SharePopover />
+        </span>
         <AddressSuggestions id={listId} rows={rows} highlight={highlight} onHighlight={setHighlight} onPick={pick} />
       </form>
-      {/* Right of the address, where Brave and Chrome keep them: what this
-          page can become (an installed app) and what is being done to it
-          (protection). Both stay visible in the compact layout; the tray
-          below holds the rest. */}
-      <InstallAppButton />
-      <ProtectionMenu compact />
       {compact ? (
         <ToolbarMore>
           <ZoomBadge />
-          {!isPrivateWindow() && <BookmarkButton />}
-          <SharePopover />
           <SubtitlesIndicator />
           <RecorderIndicator />
           <DownloadsIndicator />
         </ToolbarMore>
       ) : (
         <>
-          {/* Beside the address: what acts on this page (bookmark, share)
-              and what is happening to it (zoom, subtitles, a recording of
-              steps, a download). Everything else lives in Apps. */}
+          {/* Beside the address: what is happening to the page rather than
+              what acts on it -- zoom, subtitles, a recording of steps, a
+              download. Everything else lives in Apps. */}
           <ZoomBadge />
-          {!isPrivateWindow() && <BookmarkButton />}
-          <SharePopover />
           <SubtitlesIndicator />
           <RecorderIndicator />
           <DownloadsIndicator />

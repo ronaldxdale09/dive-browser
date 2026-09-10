@@ -573,13 +573,22 @@ describe("Toolbar", () => {
     expect(screen.queryByRole("button", { name: "Stop loading" })).toBeNull();
   });
 
-  it("moves secondary actions into a tray in compact chrome", () => {
+  it("keeps the page's own actions in the address field, even in compact chrome", () => {
+    // Bookmark, share and protection act on the address they sit on, so they
+    // stay in the pill at every width rather than hiding in a tray.
     render(<Toolbar compact />);
 
-    expect(screen.queryByRole("button", { name: "Share to another device" })).toBeNull();
+    const field = screen.getByRole("combobox", { name: "Address" }).closest("form");
+    for (const name of ["Bookmark this page", "Share to another device"]) {
+      const button = screen.getByRole("button", { name });
+      expect(field?.contains(button)).toBe(true);
+    }
+  });
+
+  it("moves what is merely happening to the page into a tray in compact chrome", () => {
+    render(<Toolbar compact />);
+
     fireEvent.click(screen.getByRole("button", { name: "More page actions" }));
     expect(screen.getByRole("dialog", { name: "Page actions" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Share to another device" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Bookmark this page" })).toBeTruthy();
   });
 });

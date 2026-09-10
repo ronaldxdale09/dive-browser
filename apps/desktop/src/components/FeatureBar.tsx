@@ -1,6 +1,6 @@
 import { isPrivateWindow } from "../lib/privateMode";
 import { PrivateBadge } from "./PrivateMode";
-import { AlertTriangle, ArrowDownToLine, LayoutGrid, Loader2, Pause, Play, Square, X } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, LayoutGrid, Loader2, Pause, Play, Plug, Square, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
@@ -11,6 +11,7 @@ import { recordingClock } from "../lib/recordingFormat";
 import { Icon, IconButton } from "./Icon";
 import { Tooltip } from "./Tooltip";
 import { AgentIcon } from "./agent/AgentIcon";
+import { McpDialog } from "./McpDialog";
 import { usePicker } from "../store/simulator";
 
 /**
@@ -56,8 +57,43 @@ export function FeatureBar({ compact = false }: { compact?: boolean }) {
       {!isPrivateWindow() && <UpdatePill compact={narrow} />}
       {isPrivateWindow() && <PrivateBadge />}
       {!isPrivateWindow() && <AgentAction compact={narrow} />}
+      {!isPrivateWindow() && <McpAction compact={narrow} />}
       <AppsAction compact={narrow} />
     </div>
+  );
+}
+
+/**
+ * Beside the agent, because it answers the question the agent raises: this
+ * browser can be driven by *your* agent too. A dialog rather than a settings
+ * page -- connecting is a one-time copy, and burying it in Developer meant
+ * nobody found it.
+ */
+function McpAction({ compact }: { compact: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Tooltip label="Connect an agent: drive Dive from Claude Code, Cursor or Codex" side="bottom" align="end">
+        <button
+          type="button"
+          aria-label="Connect an agent"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          onClick={() => setOpen(true)}
+          className={
+            compact
+              ? `pressable relative ml-0.5 grid size-7 place-items-center rounded-full transition-[color,background-color,transform] ${open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-3 hover:text-ink"}`
+              : `pressable ml-0.5 flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] font-medium transition-[color,background-color,transform] ${
+                  open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
+                }`
+          }
+        >
+          <Icon icon={Plug} size={compact ? 15 : 13} />
+          {!compact && "MCP"}
+        </button>
+      </Tooltip>
+      {open && <McpDialog onClose={() => setOpen(false)} />}
+    </>
   );
 }
 
