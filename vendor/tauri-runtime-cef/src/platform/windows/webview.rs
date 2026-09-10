@@ -189,6 +189,10 @@ impl crate::webview::Webview {
             return false;
         };
         let hwnd = HWND(host.window_handle().0 as _);
+        log::info!(
+            "overlay mask: hwnd={:?} active={active} holes={holes:?}",
+            hwnd.0
+        );
         if !active {
             // No region is "all of it", and the chrome drops back beneath the
             // pages so they take the clicks again.
@@ -234,6 +238,9 @@ impl crate::webview::Webview {
         // The region belongs to the window once this succeeds, so it must not
         // be deleted here; on failure it would leak, so it is freed instead.
         let applied = unsafe { SetWindowRgn(hwnd, Some(region), true) } != 0;
+        log::info!(
+            "overlay mask: window {width}x{height} scale={scale} applied={applied}"
+        );
         if !applied {
             unsafe {
                 let _ = DeleteObject(region.into());
