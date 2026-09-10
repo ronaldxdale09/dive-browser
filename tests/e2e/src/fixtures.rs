@@ -686,4 +686,12 @@ impl Browser for TestFakeBrowser {
     ) -> Result<serde_json::Value, BrowserError> {
         Ok(json!({"cleared": true}))
     }
+
+    async fn page_mouse(
+        &self,
+        _tab: TabId,
+        params: dive_mcp::MouseParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({"steps": params.steps.len()}))
+    }
 }

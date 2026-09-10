@@ -18,9 +18,9 @@ use crate::error::BrowserError;
 use crate::params::{
     AppearanceParams, BodyParams, ClickParams, ComponentParams, DialogParams, DragParams,
     EvaluateParams, FillFormParams, HistoryParams, LOCATOR_GRAMMAR, LocateParams, MAX_WAIT_MS,
-    NavigateParams, OpenParams, PressParams, ResizeParams, RulesParams, ScreenshotParams,
-    ScrollParams, SelectParams, StorageClearParams, StorageGetParams, StorageSetParams, TabRef,
-    TailParams, ThrottleParams, TypeParams, UploadParams, WaitForParams,
+    MouseParams, NavigateParams, OpenParams, PressParams, ResizeParams, RulesParams,
+    ScreenshotParams, ScrollParams, SelectParams, StorageClearParams, StorageGetParams,
+    StorageSetParams, TabRef, TailParams, ThrottleParams, TypeParams, UploadParams, WaitForParams,
 };
 
 #[cfg(test)]
@@ -417,6 +417,19 @@ impl<B: Browser> DiveServer<B> {
     ) -> Result<CallToolResult, ErrorData> {
         let tab = self.resolve(p.tab_id.clone()).await?;
         json_result(&self.browser.page_storage_clear(tab, p).await?)
+    }
+
+    /// A pointer gesture.
+    #[tool(
+        name = "page_mouse",
+        description = "Play a pointer gesture at viewport coordinates: steps is a list of {action, x, y} where action is move, down, up, click or wheel. The whole gesture goes in one call, so drawing on a canvas, dragging a map, or working a custom slider is one round trip rather than one per event. Use page_click for anything a locator can name -- this is for the things it cannot: canvases, maps, drawings, sliders with no accessible value. A wheel step takes delta_x and delta_y; any step takes delay_ms to pause after it."
+    )]
+    async fn page_mouse(
+        &self,
+        Parameters(p): Parameters<MouseParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id.clone()).await?;
+        json_result(&self.browser.page_mouse(tab, p).await?)
     }
 
     /// Type.

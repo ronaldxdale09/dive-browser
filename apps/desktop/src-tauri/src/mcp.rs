@@ -43,6 +43,12 @@ const TYPE_TEXT_CAP: usize = 256 * 1024;
 const FILL_FIELD_CAP: usize = 40;
 /// Files one `page_upload` may attach.
 const UPLOAD_FILE_CAP: usize = 20;
+/// Steps one `page_mouse` gesture may have. Enough for a signature or a long
+/// drag; past it the caller wants a script, not a gesture.
+const GESTURE_STEP_CAP: usize = 200;
+/// How long a gesture's own pauses may add up to. The call blocks for that
+/// whole time, so it has to stay well inside a client's patience.
+const GESTURE_DELAY_CAP_MS: u64 = 10_000;
 /// Largest string condition accepted by `page_wait_for`.
 const WAIT_TEXT_CAP: usize = 8 * 1024;
 /// Largest wheel delta accepted in one action.
@@ -562,6 +568,44 @@ fn dialog_opened(dialog: &crate::js_dialog::JsDialogAsked, action: &str) -> Valu
         },
         "hint": format!("{action} opened a dialog and the page is waiting on it. Answer it with page_dialog (accept true or false, text for a prompt), then carry on."),
     })
+}
+
+/// The button a gesture step means, or why it is not one.
+fn mouse_button(named: Option<&str>) -> Result<String, String> {
+    match named.unwrap_or("left") {
+        button @ ("left" | "right" | "middle") => Ok(button.to_owned()),
+        other => Err(format!("button is left, right or middle, not {other:?}")),
+    }
+}
+
+/// Where a gesture step happens.
+///
+/// A step with no coordinates happens wherever the last one left the pointer,
+/// which is what makes `[move, down, move, move, up]` read as a drag. That
+/// only works once something has said where the pointer is, so the first step
+/// has to carry a position, and a point outside the viewport is refused
+/// rather than sent: the page never sees such an event, so the gesture would
+/// simply appear to do nothing.
+fn gesture_point(
+    step: &dive_mcp::MouseStep,
+    previous: Option<(f64, f64)>,
+    view: locator::Viewport,
+) -> Result<(f64, f64), String> {
+    match (step.x, step.y) {
+        (Some(x), Some(y)) => {
+            if x < 0.0 || y < 0.0 || x > view.width || y > view.height {
+                return Err(format!(
+                    "({x}, {y}) is outside the {}x{} viewport",
+                    view.width, view.height
+                ));
+            }
+            Ok((x, y))
+        }
+        (None, None) => previous.ok_or_else(|| {
+            "the pointer has no position yet, so this step needs x and y".to_owned()
+        }),
+        _ => Err("give both x and y, or neither".to_owned()),
+    }
 }
 
 /// One cookie in the shape `Network.setCookies` wants.
@@ -1963,6 +2007,119 @@ impl Browser for AppBrowser {
         Ok(json!({"cleared": cleared}))
     }
 
+    async fn page_mouse(
+        &self,
+        tab: TabId,
+        params: dive_mcp::MouseParams,
+    ) -> Result<Value, BrowserError> {
+        use dive_mcp::MouseAction;
+        if params.steps.is_empty() {
+            return Err(BrowserError::BadRequest(
+                "give at least one step: [{action:'move', x, y}]".into(),
+            ));
+        }
+        if params.steps.len() > GESTURE_STEP_CAP {
+            return Err(BrowserError::BadRequest(format!(
+                "a gesture may have at most {GESTURE_STEP_CAP} steps"
+            )));
+        }
+        let total_delay: u64 = params.steps.iter().filter_map(|s| s.delay_ms).sum();
+        if total_delay > GESTURE_DELAY_CAP_MS {
+            return Err(BrowserError::BadRequest(format!(
+                "the pauses in this gesture add up to {total_delay}ms, over the {GESTURE_DELAY_CAP_MS}ms limit"
+            )));
+        }
+        let session = self.action_session_for(tab).await?;
+        let described = Some(format!("{} steps", params.steps.len()));
+        let on_screen = self.on_screen(tab);
+        self.tracked(tab, "page_mouse", described, self.or_dialog(tab, async {
+            let view = locator::viewport(&session).await?;
+            // The pointer has to start somewhere. Nothing is known about where
+            // it is when the gesture begins, so a step that gives no
+            // coordinates before any step has is a mistake worth naming.
+            let mut at: Option<(f64, f64)> = None;
+            let mut held: Option<String> = None;
+            for (index, step) in params.steps.iter().enumerate() {
+                let button = mouse_button(step.button.as_deref())
+                    .map_err(|e| BrowserError::BadRequest(format!("step {}: {e}", index + 1)))?;
+                let (x, y) = gesture_point(step, at, view)
+                    .map_err(|e| BrowserError::BadRequest(format!("step {}: {e}", index + 1)))?;
+                at = Some((x, y));
+                let buttons = i32::from(held.is_some());
+                let event = match step.action {
+                    MouseAction::Move => json!({
+                        "type": "mouseMoved", "x": x, "y": y,
+                        "button": held.clone().unwrap_or_else(|| "none".into()),
+                        "buttons": buttons, "pointerType": "mouse"
+                    }),
+                    MouseAction::Down => {
+                        held = Some(button.clone());
+                        json!({"type": "mousePressed", "x": x, "y": y, "button": button, "buttons": 1, "clickCount": 1, "pointerType": "mouse"})
+                    }
+                    MouseAction::Up => {
+                        held = None;
+                        json!({"type": "mouseReleased", "x": x, "y": y, "button": button, "buttons": 0, "clickCount": 1, "pointerType": "mouse"})
+                    }
+                    MouseAction::Click => {
+                        // Down and up are sent as one step so the caller does
+                        // not have to remember to release; CEF needs a turn of
+                        // the event loop between them or Blink produces no
+                        // DOM click at all.
+                        session
+                            .call("Input.dispatchMouseEvent", json!({"type": "mousePressed", "x": x, "y": y, "button": button, "buttons": 1, "clickCount": 1, "pointerType": "mouse"}))
+                            .await
+                            .map_err(|e| other(e.to_string()))?;
+                        tokio::time::sleep(std::time::Duration::from_millis(16)).await;
+                        json!({"type": "mouseReleased", "x": x, "y": y, "button": button, "buttons": 0, "clickCount": 1, "pointerType": "mouse"})
+                    }
+                    MouseAction::Wheel => json!({
+                        "type": "mouseWheel", "x": x, "y": y,
+                        "deltaX": step.delta_x.unwrap_or(0.0),
+                        "deltaY": step.delta_y.unwrap_or(0.0),
+                        "button": "none", "buttons": buttons, "pointerType": "mouse"
+                    }),
+                };
+                // The page's own cursor follows the gesture, so a drag across
+                // a canvas can be watched rather than only inferred from what
+                // it left behind. Only for a tab someone is looking at: on a
+                // background tab it is a round trip per step for nobody.
+                if on_screen {
+                    automation::track_cursor(
+                        &session,
+                        tab,
+                        x,
+                        y,
+                        if matches!(step.action, MouseAction::Click | MouseAction::Down) {
+                            "click"
+                        } else {
+                            "move"
+                        },
+                    )
+                    .await;
+                }
+                session
+                    .call("Input.dispatchMouseEvent", event)
+                    .await
+                    .map_err(|e| other(e.to_string()))?;
+                if let Some(pause) = step.delay_ms {
+                    tokio::time::sleep(std::time::Duration::from_millis(pause)).await;
+                }
+            }
+            // A button left down would keep the page in a drag for as long as
+            // the tab lives, which no caller means to do.
+            if let Some(button) = held {
+                let (x, y) = at.unwrap_or((0.0, 0.0));
+                session
+                    .call("Input.dispatchMouseEvent", json!({"type": "mouseReleased", "x": x, "y": y, "button": button, "buttons": 0, "clickCount": 1, "pointerType": "mouse"}))
+                    .await
+                    .map_err(|e| other(e.to_string()))?;
+            }
+            let (x, y) = at.unwrap_or((0.0, 0.0));
+            Ok(json!({"played": params.steps.len(), "pointer": {"x": x, "y": y}}))
+        }, |dialog| Ok(dialog_opened(dialog, "The gesture"))))
+        .await
+    }
+
     async fn console_tail(&self, tab: TabId, limit: usize) -> Result<Value, BrowserError> {
         serde_json::to_value(self.state().buffers.console_tail(tab, limit)).map_err(other)
     }
@@ -2124,6 +2281,74 @@ fn load_or_create_token() -> std::io::Result<String> {
 #[cfg(test)]
 mod tool_session_tests {
     use super::*;
+
+    fn step(action: dive_mcp::MouseAction, x: Option<f64>, y: Option<f64>) -> dive_mcp::MouseStep {
+        dive_mcp::MouseStep {
+            action,
+            x,
+            y,
+            button: None,
+            delta_x: None,
+            delta_y: None,
+            delay_ms: None,
+        }
+    }
+
+    const VIEW: locator::Viewport = locator::Viewport {
+        width: 800.0,
+        height: 600.0,
+    };
+
+    #[test]
+    fn a_step_with_no_coordinates_happens_where_the_last_one_left_the_pointer() {
+        // This is what makes move/down/move/move/up read as one drag rather
+        // than as five unrelated events.
+        let held = step(dive_mcp::MouseAction::Down, None, None);
+        assert_eq!(
+            gesture_point(&held, Some((10.0, 20.0)), VIEW),
+            Ok((10.0, 20.0))
+        );
+    }
+
+    #[test]
+    fn the_first_step_has_to_say_where_it_is() {
+        let held = step(dive_mcp::MouseAction::Down, None, None);
+        let problem = gesture_point(&held, None, VIEW).expect_err("no position yet");
+        assert!(problem.contains("needs x and y"), "{problem}");
+    }
+
+    #[test]
+    fn a_point_outside_the_viewport_is_refused_rather_than_silently_lost() {
+        // The page never receives an event outside its viewport, so sending
+        // one would look exactly like a gesture that did nothing.
+        for (x, y) in [(900.0, 10.0), (10.0, 700.0), (-1.0, 10.0), (10.0, -1.0)] {
+            let moved = step(dive_mcp::MouseAction::Move, Some(x), Some(y));
+            assert!(
+                gesture_point(&moved, None, VIEW).is_err(),
+                "({x}, {y}) should be refused"
+            );
+        }
+        // The far corner is inside it.
+        let corner = step(dive_mcp::MouseAction::Move, Some(800.0), Some(600.0));
+        assert_eq!(gesture_point(&corner, None, VIEW), Ok((800.0, 600.0)));
+    }
+
+    #[test]
+    fn half_a_coordinate_is_a_mistake_rather_than_a_default() {
+        // Treating a lone x as "keep the old y" would silently move the
+        // pointer somewhere the caller never named.
+        let half = step(dive_mcp::MouseAction::Move, Some(10.0), None);
+        assert!(gesture_point(&half, Some((1.0, 2.0)), VIEW).is_err());
+    }
+
+    #[test]
+    fn buttons_are_named_or_refused() {
+        assert_eq!(mouse_button(None), Ok("left".into()));
+        for named in ["left", "right", "middle"] {
+            assert_eq!(mouse_button(Some(named)), Ok(named.to_owned()));
+        }
+        assert!(mouse_button(Some("sideways")).is_err());
+    }
 
     #[test]
     fn a_cookie_with_no_domain_is_scoped_to_the_page_that_asked_for_it() {

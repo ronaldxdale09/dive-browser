@@ -296,6 +296,57 @@ pub struct DragParams {
     pub to: Option<String>,
 }
 
+/// What one step of a pointer gesture does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum MouseAction {
+    /// Move the pointer, dragging if a button is held.
+    Move,
+    /// Press and hold a button where the pointer is.
+    Down,
+    /// Release a held button.
+    Up,
+    /// A press and release in place.
+    Click,
+    /// Turn the wheel.
+    Wheel,
+}
+
+/// One step of a pointer gesture.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct MouseStep {
+    /// What this step does.
+    pub action: MouseAction,
+    /// Viewport x in CSS pixels. Required for the first `move`; otherwise the
+    /// pointer stays where the last step left it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<f64>,
+    /// Viewport y in CSS pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<f64>,
+    /// `left`, `right` or `middle`. Left when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub button: Option<String>,
+    /// Horizontal wheel movement for a `wheel` step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delta_x: Option<f64>,
+    /// Vertical wheel movement for a `wheel` step. Positive scrolls down.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delta_y: Option<f64>,
+    /// Pause after this step, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delay_ms: Option<u64>,
+}
+
+/// A pointer gesture, as a sequence of steps.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct MouseParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// The steps, played in order.
+    pub steps: Vec<MouseStep>,
+}
+
 /// One cookie, as the browser holds it.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct Cookie {

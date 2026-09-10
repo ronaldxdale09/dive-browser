@@ -102,6 +102,11 @@ pub fn specs() -> Vec<ToolSpec> {
             obj(json!({"tab_id": tab, "from": locator, "to": locator}), &["from", "to"]),
         ),
         spec(
+            "page_mouse",
+            "Play a pointer gesture at viewport coordinates: steps is a list of {action, x, y} where action is move, down, up, click or wheel. The whole gesture is one call. Use page_click for anything a locator can name; this is for what it cannot -- canvases, maps, drawings, sliders with no accessible value.".into(),
+            obj(json!({"tab_id": tab, "steps": {"type": "array", "items": {"type": "object", "properties": {"action": {"type": "string", "enum": ["move", "down", "up", "click", "wheel"]}, "x": {"type": "number"}, "y": {"type": "number"}, "button": {"type": "string", "enum": ["left", "right", "middle"]}, "delta_x": {"type": "number"}, "delta_y": {"type": "number"}, "delay_ms": {"type": "integer"}}, "required": ["action"], "additionalProperties": false}}}), &["steps"]),
+        ),
+        spec(
             "page_storage",
             "Everything this site keeps on this machine in one call: cookies, localStorage and sessionStorage. What it returns is what page_storage_set takes, so a signed-in session can be read once and restored later without logging in again.".into(),
             obj(json!({"tab_id": tab, "include": {"type": "array", "items": {"type": "string", "enum": ["cookies", "local", "session"]}}}), &[]),
@@ -219,6 +224,7 @@ pub fn is_action(name: &str) -> bool {
             | "page_fill_form"
             | "page_upload"
             | "page_drag"
+            | "page_mouse"
             | "page_storage_set"
             | "page_storage_clear"
             | "tab_history"
@@ -472,6 +478,16 @@ async fn execute<B: Browser>(
                         from: input["from"].as_str().map(str::to_owned),
                         to: input["to"].as_str().map(str::to_owned),
                     },
+                )
+                .await
+                .map_err(err)?,
+        ),
+        "page_mouse" => text(
+            browser
+                .page_mouse(
+                    tab()?,
+                    serde_json::from_value(json!({"steps": input["steps"].clone()}))
+                        .map_err(|e| format!("steps must be a list of {{action, x, y}}: {e}"))?,
                 )
                 .await
                 .map_err(err)?,

@@ -348,6 +348,14 @@ impl Browser for Fake {
     ) -> Result<serde_json::Value, BrowserError> {
         Ok(serde_json::json!({"cleared": true}))
     }
+
+    async fn page_mouse(
+        &self,
+        _tab: TabId,
+        params: crate::params::MouseParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"steps": params.steps.len()}))
+    }
 }
 
 #[test]

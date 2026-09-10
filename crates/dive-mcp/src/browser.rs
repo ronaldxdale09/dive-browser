@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::BrowserError;
 use crate::params::{
-    AppearanceParams, DialogParams, DragParams, FillFormParams, ResizeParams, SelectParams,
-    StorageClearParams, StorageGetParams, StorageSetParams, Target, UploadParams, WaitForParams,
+    AppearanceParams, DialogParams, DragParams, FillFormParams, MouseParams, ResizeParams,
+    SelectParams, StorageClearParams, StorageGetParams, StorageSetParams, Target, UploadParams,
+    WaitForParams,
 };
 
 /// What a tool caller gets to know about a tab.
@@ -209,5 +210,12 @@ pub trait Browser: Send + Sync + 'static {
         &self,
         tab: TabId,
         params: StorageClearParams,
+    ) -> Result<serde_json::Value, BrowserError>;
+    /// Play a pointer gesture: moves, presses, releases and wheel turns, in
+    /// order, at viewport coordinates.
+    async fn page_mouse(
+        &self,
+        tab: TabId,
+        params: MouseParams,
     ) -> Result<serde_json::Value, BrowserError>;
 }

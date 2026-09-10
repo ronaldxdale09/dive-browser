@@ -149,13 +149,62 @@ pub fn key_events(key: &str, modifiers: u8) -> AppResult<(Value, Value)> {
 ///
 /// Animating a background tab would cost every automated run a fifth of a
 /// second per click for nobody's benefit.
-async fn announce(app: Option<&AppHandle<Runtime>>, hint: &AgentPointer, visible: bool) {
+///
+/// The cursor is drawn by the page, for the same reason the edge glow is: the
+/// chrome is a native view that paints opaquely over the page, so it has
+/// nowhere to put a pointer that appears to be *on* the content. The page's
+/// own overlay glides it there while this pause runs, so the movement is
+/// already finished by the time the input is dispatched -- the watching costs
+/// nothing beyond a pause that was here anyway.
+async fn announce(
+    session: &CdpSession,
+    app: Option<&AppHandle<Runtime>>,
+    hint: &AgentPointer,
+    visible: bool,
+) {
     if let Some(app) = app {
         let _ = hint.emit(app);
     }
-    if visible {
-        tokio::time::sleep(std::time::Duration::from_millis(CURSOR_TRAVEL_MS)).await;
+    if !visible {
+        return;
     }
+    show_cursor(session, hint).await;
+    tokio::time::sleep(std::time::Duration::from_millis(CURSOR_TRAVEL_MS)).await;
+}
+
+/// Move the page's virtual cursor to a bare point, without the travel pause.
+/// Gestures set their own pace, so the cursor follows rather than leads.
+pub async fn track_cursor(session: &CdpSession, tab: TabId, x: f64, y: f64, phase: &str) {
+    show_cursor(
+        session,
+        &AgentPointer {
+            tab_id: tab,
+            phase: phase.to_owned(),
+            x,
+            y,
+            label: String::new(),
+        },
+    )
+    .await;
+}
+
+/// Move the page's virtual cursor. Best effort: a page that has navigated
+/// since the overlay was installed simply has no cursor to move, and an
+/// action must never fail over its own decoration.
+async fn show_cursor(session: &CdpSession, hint: &AgentPointer) {
+    let expression = format!(
+        "window.__diveAgentOverlay && window.__diveAgentOverlay.cursor({x}, {y}, {phase}, {label})",
+        x = hint.x,
+        y = hint.y,
+        phase = serde_json::to_string(&hint.phase).unwrap_or_else(|_| "\"move\"".into()),
+        label = serde_json::to_string(&hint.label).unwrap_or_else(|_| "null".into()),
+    );
+    let _ = session
+        .call(
+            "Runtime.evaluate",
+            json!({"expression": expression, "returnByValue": true}),
+        )
+        .await;
 }
 
 /// Click at a viewport coordinate.
@@ -169,6 +218,7 @@ pub async fn click_at(
     visible: bool,
 ) -> AppResult<()> {
     announce(
+        session,
         app,
         &AgentPointer {
             tab_id: tab,
@@ -181,6 +231,7 @@ pub async fn click_at(
     )
     .await;
     announce(
+        session,
         app,
         &AgentPointer {
             tab_id: tab,
@@ -219,6 +270,7 @@ pub async fn hover_at(
     visible: bool,
 ) -> AppResult<()> {
     announce(
+        session,
         app,
         &AgentPointer {
             tab_id: tab,
@@ -261,6 +313,7 @@ pub async fn drag_between(
     let (x0, y0) = from;
     let (x1, y1) = to;
     announce(
+        session,
         app,
         &AgentPointer {
             tab_id: tab,
@@ -290,6 +343,7 @@ pub async fn drag_between(
         tokio::time::sleep(std::time::Duration::from_millis(16)).await;
     }
     announce(
+        session,
         app,
         &AgentPointer {
             tab_id: tab,

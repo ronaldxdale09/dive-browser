@@ -6,8 +6,9 @@ use dive_core::TabId;
 use crate::browser::{Browser, TabInfo};
 use crate::error::BrowserError;
 use crate::params::{
-    AppearanceParams, DialogParams, DragParams, FillFormParams, ResizeParams, SelectParams,
-    StorageClearParams, StorageGetParams, StorageSetParams, Target, UploadParams, WaitForParams,
+    AppearanceParams, DialogParams, DragParams, FillFormParams, MouseParams, ResizeParams,
+    SelectParams, StorageClearParams, StorageGetParams, StorageSetParams, Target, UploadParams,
+    WaitForParams,
 };
 use crate::server::DiveServer;
 
@@ -314,6 +315,14 @@ impl Browser for NoBrowser {
         &self,
         _tab: TabId,
         _params: StorageClearParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_mouse(
+        &self,
+        _tab: TabId,
+        _params: MouseParams,
     ) -> Result<serde_json::Value, BrowserError> {
         Err(BrowserError::Other("no browser behind the catalog".into()))
     }
