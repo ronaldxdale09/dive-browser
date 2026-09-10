@@ -710,6 +710,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
         ])
         .events(collect_events![
             crate::automation::AgentPointer,
+            crate::agent_presence::AgentPresence,
             crate::crash::TabCrashed,
             crate::devservers::DevServersChanged,
             crate::inspect::InspectEvent,

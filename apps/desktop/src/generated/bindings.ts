@@ -635,6 +635,7 @@ export const commands = {
 /** Events */
 export const events = {
 	agentPointer: makeEvent<AgentPointer>("agent-pointer"),
+	agentPresence: makeEvent<AgentPresence>("agent-presence"),
 	consoleEntry: makeEvent<ConsoleEntry>("console-entry"),
 	credentialPrompt: makeEvent<CredentialPrompt>("credential-prompt"),
 	devServersChanged: makeEvent<DevServersChanged>("dev-servers-changed"),
@@ -695,6 +696,14 @@ export type AgentPointer = {
 	y: number | null,
 	/**  What is being acted on, for the label beside the cursor. */
 	label: string,
+};
+
+/**  A tab an agent started or stopped driving. */
+export type AgentPresence = {
+	/**  The tab being driven. */
+	tab_id: TabId,
+	/**  Whether an agent is working in it right now. */
+	driving: boolean,
 };
 
 /**  A failure reported to the chrome as a plain message. */

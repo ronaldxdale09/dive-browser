@@ -13,6 +13,7 @@ import { Tooltip } from "./Tooltip";
 import { AgentIcon } from "./agent/AgentIcon";
 import { McpDialog } from "./McpDialog";
 import { usePicker } from "../store/simulator";
+import { useConnectHint } from "../store/connectHint";
 
 /**
  * Below this many pixels of title bar, the labelled buttons drop their words.
@@ -76,6 +77,13 @@ export function FeatureBar({ compact = false }: { compact?: boolean }) {
  */
 function McpAction({ compact }: { compact: boolean }) {
   const [open, setOpen] = useState(false);
+  const seen = useConnectHint((s) => s.seen);
+  const markSeen = useConnectHint((s) => s.markSeen);
+  // A light passes over it every few seconds until it has been opened once.
+  // The sweep is a mask over the button's own contents rather than a colour
+  // change, so the label stays legible while it moves and the button does
+  // not shift or resize -- a bar that jumps is worse than one nobody notices.
+  const hinting = !seen && !open;
   return (
     <>
       <Tooltip label="Connect an agent: drive Dive from Claude Code, Cursor or Codex" side="bottom" align="end">
@@ -84,11 +92,15 @@ function McpAction({ compact }: { compact: boolean }) {
           aria-label="Connect an agent"
           aria-haspopup="dialog"
           aria-expanded={open}
-          onClick={() => setOpen(true)}
+          data-hinting={hinting || undefined}
+          onClick={() => {
+            markSeen();
+            setOpen(true);
+          }}
           className={
             compact
-              ? `pressable relative ml-0.5 grid size-7 place-items-center rounded-full transition-[color,background-color,transform] ${open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-3 hover:text-ink"}`
-              : `pressable ml-0.5 flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] font-medium transition-[color,background-color,transform] ${
+              ? `pressable dive-shimmer relative ml-0.5 grid size-7 place-items-center rounded-full transition-[color,background-color,transform] ${open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-3 hover:text-ink"}`
+              : `pressable dive-shimmer relative ml-0.5 flex h-7 items-center gap-1.5 overflow-hidden rounded-lg px-2.5 text-[11.5px] font-medium transition-[color,background-color,transform] ${
                   open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
                 }`
           }

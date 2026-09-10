@@ -29,6 +29,7 @@ import { scheduleBootCheck } from "./store/updates";
 import { bootSubtitles } from "./store/subtitles";
 import { useRecording } from "./store/recording";
 import { useRecorder } from "./store/recorder";
+import { listenForAgentPresence } from "./store/agentPresence";
 
 const Sidecar = lazy(() => import("./components/Sidecar").then(({ Sidecar }) => ({ default: Sidecar })));
 const Dock = lazy(() => import("./components/Dock").then(({ Dock }) => ({ default: Dock })));
@@ -74,6 +75,8 @@ export function App() {
   useEffect(() => { if (!isPrivateWindow()) return scheduleBootCheck(); }, []);
   // Subscribe once to the live-subtitles events.
   useEffect(() => void bootSubtitles(), []);
+  // And once to "an agent is driving this tab", which marks the tab list.
+  useEffect(() => listenForAgentPresence(), []);
   // Which panels were open last time is remembered here rather than in the
   // browser store, whose `open` map is per-window state. Applied once at
   // boot, then followed.

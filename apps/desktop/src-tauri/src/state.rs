@@ -61,6 +61,9 @@ pub struct AppState {
     pub crashes: crate::crash::Registry,
     /// Native receipt generations and pending activity for safe discard.
     pub activity: std::sync::Arc<crate::activity::Registry>,
+    /// Tabs an agent is driving right now, for the chrome's mark and the
+    /// page's edge glow.
+    pub agent_presence: std::sync::Arc<crate::agent_presence::Registry>,
     /// Native permission requests and page-lifetime decisions.
     pub permissions: crate::permissions::Registry,
     /// JavaScript dialogs pages have open, answered from the chrome or MCP.
@@ -144,6 +147,7 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
         inspector: crate::inspect::Registry::default(),
         crashes: crate::crash::Registry::default(),
         activity: std::sync::Arc::default(),
+        agent_presence: std::sync::Arc::default(),
         permissions: crate::permissions::Registry::default(),
         js_dialogs: crate::js_dialog::Registry::default(),
         subtitles: crate::subtitles::Registry::default(),

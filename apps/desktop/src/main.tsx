@@ -7,6 +7,7 @@ import "./styles.css";
 import { isPrivateWindow } from "./lib/privateMode";
 import { loadUiStorage } from "./lib/uiStorage";
 import { useLayout } from "./store/layout";
+import { useConnectHint } from "./store/connectHint";
 import { useRecording } from "./store/recording";
 import { rememberedModel, useSubtitles } from "./store/subtitles";
 
@@ -28,7 +29,9 @@ if (!popout) {
 // The chrome's own state comes from the profile store (see `uiStorage`);
 // the persisted stores hydrate from it before the first paint.
 void loadUiStorage()
-  .then(() => Promise.all([useLayout.persist.rehydrate(), useRecording.persist.rehydrate()]))
+  .then(() =>
+    Promise.all([useLayout.persist.rehydrate(), useRecording.persist.rehydrate(), useConnectHint.persist.rehydrate()]),
+  )
   .then(() => useSubtitles.setState({ model: rememberedModel() }))
   .catch(() => undefined)
   .finally(() => {

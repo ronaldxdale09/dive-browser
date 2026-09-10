@@ -31,6 +31,7 @@ const FRAGMENTS: &[(&str, &str)] = &[
     ("webapp-icon.js", include_str!("inject/webapp-icon.js")),
     ("stack.js", include_str!("inject/stack.js")),
     ("color.js", include_str!("inject/color.js")),
+    ("agent_glow.js", include_str!("inject/agent_glow.js")),
 ];
 
 /// Cap on include depth, so a cycle is a test failure rather than a hang.
@@ -160,6 +161,7 @@ mod tests {
                 ("__MIN_ICON__", "192".into()),
                 ("__ICON_URL__", "\"https://x/i.png\"".into()),
                 ("__SIZE__", "512".into()),
+                ("__ON__", "true".into()),
             ];
             let script = build(name, &values);
             assert!(script.starts_with("(function () {"), "{name} not wrapped");

@@ -362,9 +362,15 @@ impl AppBrowser {
         work: impl std::future::Future<Output = Result<T, BrowserError>>,
     ) -> Result<T, BrowserError> {
         let id = self.state().buffers.begin_action(tab, action, target);
+        // Everything an agent does to a page comes through here, whether it
+        // is the sidecar's own run or an MCP client on the other end of the
+        // server, so this is where "something is driving this tab" is known.
+        let presence = std::sync::Arc::clone(&self.state().agent_presence);
+        presence.begin(&self.app, tab);
         let outcome = work.await;
         let error = outcome.as_ref().err().map(ToString::to_string);
         self.state().buffers.end_action(tab, &id, error);
+        presence.end(&self.app, tab);
         outcome
     }
 

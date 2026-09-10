@@ -4,6 +4,7 @@
 mod a11y;
 mod activity;
 mod agent;
+mod agent_presence;
 mod agent_tools;
 mod automation;
 mod ax;

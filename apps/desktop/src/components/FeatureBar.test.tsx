@@ -8,6 +8,7 @@ import { useRecording } from "../store/recording";
 import { COLLAPSE_BELOW, FeatureBar } from "./FeatureBar";
 import { usePicker } from "./simulator/DevicePicker";
 import { useUpdates } from "../store/updates";
+import { useConnectHint } from "../store/connectHint";
 
 const tab: Tab = {
   id: "tab-1",
@@ -133,5 +134,34 @@ describe("FeatureBar", () => {
     expect(screen.getByText("Apps")).toBeTruthy();
     expect(agent().textContent).toContain("Agent");
     vi.unstubAllGlobals();
+  });
+});
+
+describe("the Connect button's hint", () => {
+  beforeEach(() => useConnectHint.getState().reset());
+
+  it("shimmers until it has been opened, then stops for good", () => {
+    // Nobody goes looking for this button, so it asks to be noticed once.
+    render(<FeatureBar />);
+    fireEvent.click(screen.getByRole("button", { name: "Connect an agent" }));
+    expect(useConnectHint.getState().seen).toBe(true);
+
+    // A later window, or a later launch: the hint is spent, not repeated.
+    cleanup();
+    render(<FeatureBar />);
+    expect(screen.getByRole("button", { name: "Connect an agent" }).getAttribute("data-hinting")).toBeNull();
+  });
+
+  it("shimmers on a first run, before anything has been opened", () => {
+    render(<FeatureBar />);
+    expect(screen.getByRole("button", { name: "Connect an agent" }).getAttribute("data-hinting")).toBe("true");
+  });
+
+  it("hints without changing the button's box, so the bar cannot jump", () => {
+    render(<FeatureBar />);
+    const button = screen.getByRole("button", { name: "Connect an agent" });
+    // The sweep is a pseudo-element on this class; nothing about the layout
+    // is conditional on hinting.
+    expect(button.className).toContain("dive-shimmer");
   });
 });

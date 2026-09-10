@@ -1389,6 +1389,7 @@ impl TabHost {
         self.forget_closed(id);
         let state = self.window.app_handle().state::<AppState>();
         state.activity.drop_tab(id);
+        state.agent_presence.forget(id);
         state.js_dialogs.forget_tab(id);
         Ok(())
     }

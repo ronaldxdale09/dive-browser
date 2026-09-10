@@ -6,6 +6,8 @@ import { useBrowser } from "../store/browser";
 import { MAX_PANES, useLayout, type Split } from "../store/layout";
 import type { Tab } from "../lib/ipc";
 import { Favicon } from "./Favicon";
+import { DrivingMark } from "./agent/DrivingMark";
+import { useIsDriven } from "../store/agentPresence";
 import { Icon, IconButton } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
 import { chordsByCommand, formatChord } from "../lib/commands";
@@ -367,6 +369,7 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
   // The active tab keeps its title however crowded the strip gets; only the
   // others fall back to a bare favicon.
   const bare = narrow.title && !active;
+  const driven = useIsDriven(t.id);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id });
   const onFocus = () => focusTab(t.id);
   const onActivate = () => activateTab(t.id);
@@ -411,7 +414,7 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
         data-tauri-drag-region="false"
         role="tab"
         id={`dive-tab-${t.id}`}
-        aria-label={detached ? `${label(t)}, in its own window` : sleeping ? `${label(t)}, sleeping` : label(t)}
+        aria-label={driven ? `${label(t)}, an agent is working in it` : detached ? `${label(t)}, in its own window` : sleeping ? `${label(t)}, sleeping` : label(t)}
         aria-keyshortcuts={!pinned ? "Delete" : undefined}
         aria-selected={active}
         tabIndex={inTabOrder ? 0 : -1}
@@ -442,7 +445,12 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
         {/* A pinned tab is icon-only, so the site's own mark is the only thing
             left to tell it apart; the pin itself moves to a corner dot. */}
         <span className="relative grid shrink-0 place-items-center">
-          {loading ? (
+          {/* Being driven outranks loading: an agent's own navigation spins
+              the loader, and "a page is loading" is the less surprising of
+              the two things to be told. */}
+          {driven ? (
+            <DrivingMark size={pinned ? 16 : 14} />
+          ) : loading ? (
             <span className="grid place-items-center text-ink-2 motion-safe:animate-spin motion-reduce:animate-none" aria-label="Loading" role="img">
               <Icon icon={Loader2} size={pinned ? 16 : 14} />
             </span>

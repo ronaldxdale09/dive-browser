@@ -312,6 +312,45 @@ button:not(:disabled):active,
   backdrop-filter: blur(5px) saturate(.72);
 }
 
+/* A light passing over a control that has not been found yet.
+   Painted as a pseudo-element above the button's own contents, so the label
+   stays put and stays readable: nothing about the button's box changes, only
+   what is lit. It rests far longer than it sweeps -- a hint that is always
+   moving stops being a hint and becomes a bar that will not sit still. */
+@keyframes dive-shimmer-sweep {
+  0%   { transform: translateX(-140%); }
+  26%  { transform: translateX(140%); }
+  100% { transform: translateX(140%); }
+}
+.dive-shimmer[data-hinting] {
+  position: relative;
+}
+.dive-shimmer[data-hinting]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in srgb, var(--color-highlight) 45%, transparent) 50%,
+    transparent 70%
+  );
+  /* 26% of seven seconds is a light that takes the better part of two
+     seconds to cross, then waits five before coming back. Slow enough to be
+     watched rather than caught out of the corner of an eye. */
+  animation: dive-shimmer-sweep 7s cubic-bezier(.33, 0, .5, 1) infinite;
+}
+/* The button still has to be findable without motion, so what remains is a
+   steady tint rather than nothing at all. */
+@media (prefers-reduced-motion: reduce) {
+  .dive-shimmer[data-hinting]::after {
+    animation: none;
+    background: color-mix(in srgb, var(--color-highlight) 12%, transparent);
+  }
+}
+
 /* Small surfaces arrive quickly and settle without animating layout. */
 @keyframes surface-in {
   from { opacity: 0; transform: translateY(3px) scale(.985); }

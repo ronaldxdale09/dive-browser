@@ -22,6 +22,7 @@ import webapp from "../../src-tauri/src/inject/webapp.js?raw";
 import webappIcon from "../../src-tauri/src/inject/webapp-icon.js?raw";
 import stack from "../../src-tauri/src/inject/stack.js?raw";
 import color from "../../src-tauri/src/inject/color.js?raw";
+import agentGlow from "../../src-tauri/src/inject/agent_glow.js?raw";
 import picker from "../../src-tauri/src/inject/picker.js?raw";
 import reactContext from "../../src-tauri/src/inject/react-context.js?raw";
 import recorder from "../../src-tauri/src/inject/recorder.js?raw";
@@ -42,6 +43,7 @@ const FRAGMENTS: Record<string, string> = {
   "webapp-icon.js": webappIcon,
   "stack.js": stack,
   "color.js": color,
+  "agent_glow.js": agentGlow,
 };
 
 const DIRECTIVE = "// @dive-include ";

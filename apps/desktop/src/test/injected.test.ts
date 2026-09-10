@@ -137,6 +137,7 @@ describe("script composition", () => {
         __ROLE__: '"button"',
         __MARKDOWN_CAP__: "1000",
         __MODE__: '"palette"',
+        __ON__: "true",
         __MIN_ICON__: "192",
         __ICON_URL__: '"https://x/i.png"',
         __SIZE__: "512",
