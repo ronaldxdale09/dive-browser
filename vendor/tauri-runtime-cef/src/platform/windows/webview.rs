@@ -148,6 +148,29 @@ impl AppWebview {
         self.set_z_order_pinned(true);
     }
 
+    pub(crate) fn apply_physical_bounds(
+        &self,
+        _scale: f64,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    ) {
+        unsafe {
+            let _ = SetWindowPos(
+                self.hwnd(),
+                None,
+                x,
+                y,
+                width,
+                height,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+    }
+}
+
+impl crate::webview::Webview {
     /// Let the chrome paint over the page everywhere except `holes`.
     ///
     /// The Windows counterpart of the macOS layer mask. There the chrome is
@@ -161,7 +184,11 @@ impl AppWebview {
     /// `holes` are the page rectangles that must stay visible, in the
     /// chrome's own logical coordinates, as the macOS side takes them.
     pub fn set_chrome_overlay_mask(&self, holes: &[[f64; 4]], active: bool) -> bool {
-        let hwnd = self.hwnd();
+        use cef::ImplBrowser;
+        let Some(host) = self.browser().host() else {
+            return false;
+        };
+        let hwnd = HWND(host.window_handle().0 as _);
         if !active {
             // No region is "all of it", and the chrome drops back beneath the
             // pages so they take the clicks again.
@@ -213,28 +240,18 @@ impl AppWebview {
             }
             return false;
         }
-        self.raise_to_top();
-        true
-    }
-
-    pub(crate) fn apply_physical_bounds(
-        &self,
-        _scale: f64,
-        x: i32,
-        y: i32,
-        width: i32,
-        height: i32,
-    ) {
+        // Above the pages, so what it paints is what shows through.
         unsafe {
             let _ = SetWindowPos(
-                self.hwnd(),
-                None,
-                x,
-                y,
-                width,
-                height,
-                SWP_NOZORDER | SWP_NOACTIVATE,
+                hwnd,
+                Some(HWND_TOP),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             );
         }
+        true
     }
 }
