@@ -1,6 +1,7 @@
 import { isPrivateWindow } from "./lib/privateMode";
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Rail, RAIL_WIDTH } from "./components/Rail";
+import { Rail, RAIL_WIDTH, RailToggle } from "./components/Rail";
+import { Wordmark } from "./components/Wordmark";
 import { TabStrip } from "./components/TabStrip";
 import { TabDnd } from "./components/TabDnd";
 import { ProfileDialog } from "./components/ProfileDialog";
@@ -137,12 +138,24 @@ export function App() {
         {/* A full-height rail starts under the traffic lights: that strip is
             the window's handle, and the rail's own content begins below it. */}
         {oneBar && (
-          <div className="flex h-10 items-center justify-end pr-3" data-tauri-drag-region="true">
-            {isPrivateWindow() && <span className="font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
+          <div className="flex h-10 items-center gap-1.5 pr-2 pl-[84px]" data-tauri-drag-region="true">
+            {/* With the rail wide there is room past the traffic lights for
+                the collapse control and the name, on one row, the way every
+                sidebar app does it. A narrow rail is all traffic lights up
+                here, so it keeps its own control below. */}
+            {effectiveRailExpanded && (
+              <>
+                <span data-tauri-drag-region="false" onMouseDown={(e) => e.stopPropagation()} className="shrink-0">
+                  <RailToggle expanded />
+                </span>
+                <Wordmark />
+              </>
+            )}
+            {!effectiveRailExpanded && isPrivateWindow() && <span className="ml-auto font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
           </div>
         )}
         <div className={oneBar ? "h-[calc(100%-40px)]" : "h-full"}>
-          <Rail forceCollapsed={responsive.collapseRail} />
+          <Rail forceCollapsed={responsive.collapseRail} toggle={!(oneBar && effectiveRailExpanded)} />
         </div>
         {/* A rail that stops short of the title bar -- the traffic lights own
             that corner -- would begin its right border as a hairline hanging

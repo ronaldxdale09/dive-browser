@@ -5,7 +5,7 @@ import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { useDefaultBrowser } from "../store/defaultBrowser";
-import { Rail } from "./Rail";
+import { Rail, RailToggle } from "./Rail";
 
 const personal: Workspace = {
   id: "ws-1",
@@ -88,6 +88,14 @@ describe("Rail", () => {
     fireEvent.mouseLeave(mark.parentElement!);
     expect(screen.queryByRole("tooltip")).toBeNull();
     expect(screen.getByRole("button", { name: "Expand the rail" })).toBeTruthy();
+  });
+
+  it("leaves its inline collapse control out when the title strip hosts it", () => {
+    render(<Rail toggle={false} />);
+    expect(screen.queryByRole("button", { name: /the rail$/ })).toBeNull();
+    // The strip renders the same control on its own.
+    render(<RailToggle expanded />);
+    expect(screen.getByRole("button", { name: "Collapse the rail" })).toBeTruthy();
   });
 
   it("confirms before deleting a workspace and its tabs", () => {

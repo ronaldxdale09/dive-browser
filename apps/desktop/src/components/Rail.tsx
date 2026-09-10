@@ -32,7 +32,17 @@ export const RAIL_WIDTH = { collapsed: 52, expanded: 232 };
  * workspace is a set of tabs with, optionally, its own logins, and none of
  * that is guessable from a coloured circle.
  */
-export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
+/**
+ * The rail's collapse control on its own, so the title strip above the rail
+ * can host it beside the traffic lights when there is room; the rail then
+ * leaves its inline copy out (`toggle={false}`).
+ */
+export function RailToggle({ expanded }: { expanded: boolean }) {
+  const update = usePrefs((s) => s.update);
+  return <RailButton icon={expanded ? PanelLeftClose : PanelLeftOpen} label={expanded ? "Collapse the rail" : "Expand the rail"} onClick={() => void update({ rail_expanded: !expanded })} />;
+}
+
+export function Rail({ forceCollapsed = false, toggle = true }: { forceCollapsed?: boolean; /** Render the collapse control inline at the top; off when the title strip hosts it. */ toggle?: boolean }) {
   const all = useBrowser((s) => s.workspaces);
   const activeProfile = useBrowser((s) => s.activeProfile);
   // The rail is the active profile's: other profiles' workspaces wait
@@ -44,7 +54,6 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
   const setEditing = useBrowser((s) => s.setEditing);
   const preferredExpanded = usePrefs((s) => s.prefs.rail_expanded);
   const expanded = preferredExpanded && !forceCollapsed;
-  const update = usePrefs((s) => s.update);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -59,9 +68,9 @@ export function Rail({ forceCollapsed = false }: { forceCollapsed?: boolean }) {
     <nav aria-label="Workspaces" className={`flex h-full flex-col gap-1 px-2 pt-1 pb-2 ${expanded ? "" : "items-center"}`}>
       {/* The collapse control keeps one home, the top of the rail, whichever
           state the rail is in, so the hand goes to the same place both ways. */}
-      {!forceCollapsed && (
+      {!forceCollapsed && toggle && (
         <div className={`flex h-7 shrink-0 items-center ${expanded ? "justify-end pr-0.5" : "justify-center"}`}>
-          <RailButton icon={expanded ? PanelLeftClose : PanelLeftOpen} label={expanded ? "Collapse the rail" : "Expand the rail"} onClick={() => void update({ rail_expanded: !expanded })} />
+          <RailToggle expanded={expanded} />
         </div>
       )}
       {expanded && !isPrivateWindow() && <QuickLinks />}
