@@ -2,7 +2,7 @@
   "name": "@dive/desktop",
   "private": true,
   "license": "MIT",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
