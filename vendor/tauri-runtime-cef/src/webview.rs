@@ -671,7 +671,16 @@ impl<T: UserEvent> WinitCefApp<T> {
             .next()
             .unwrap_or(cef::RuntimeStyle::DEFAULT);
 
+        log::info!(
+            "cef webview {:?}: bounds {}x{} at ({}, {}), scale {scale}, style {cef_runtime_style:?}",
+            pending.label,
+            bounds.width,
+            bounds.height,
+            bounds.x,
+            bounds.y,
+        );
         let mut window_info = cef::WindowInfo::default().set_as_child(parent, &bounds);
+        log::info!("cef webview {:?}: window info ready", pending.label);
         window_info.runtime_style = cef_runtime_style;
         let settings = browser_settings_from_webview_attributes(&pending.webview_attributes);
 
@@ -711,6 +720,7 @@ impl<T: UserEvent> WinitCefApp<T> {
                 // Create with an inert document so the BrowserHost exists before the real
                 // navigation; the real URL is loaded once the document-start script is set.
                 let initial_url = CefString::from(INITIAL_LOAD_URL);
+                log::info!("cef webview {label:?}: creating browser");
                 let Some(browser) = cef::browser_host_create_browser_sync(
                     Some(&window_info),
                     Some(&mut client),
