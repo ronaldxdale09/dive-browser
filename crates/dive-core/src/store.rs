@@ -2645,6 +2645,7 @@ mod tests {
             0x1340_2877_32bd_71cf,
             0x755e_bc0a_ec8c_b672,
             0x4b69_716e_99b1_89aa,
+            0xb4db_2559_061e_f61e,
         ];
         assert!(
             MIGRATIONS.len() >= SHIPPED.len(),
