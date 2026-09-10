@@ -253,6 +253,49 @@ pub struct SelectParams {
     pub label: Option<String>,
 }
 
+/// One field of a form, and what to put in it.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct FormField {
+    /// Which control. A locator, as everywhere else.
+    pub locator: String,
+    /// What to put in it: the text for a field, the option's value or visible
+    /// label for a `<select>`, and "true"/"false" for a checkbox or radio.
+    pub value: String,
+}
+
+/// Fill a whole form in one call.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct FillFormParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// The fields, filled in the order given.
+    pub fields: Vec<FormField>,
+    /// Press Enter in the last field when every field is filled.
+    pub submit: Option<bool>,
+}
+
+/// Attach files to a file input.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct UploadParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// The `<input type="file">`, as a locator.
+    pub locator: Option<String>,
+    /// Absolute paths of the files to attach. An empty list clears the input.
+    pub paths: Vec<String>,
+}
+
+/// Drag one element onto another.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct DragParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// What to pick up, as a locator.
+    pub from: Option<String>,
+    /// Where to drop it, as a locator.
+    pub to: Option<String>,
+}
+
 /// Answer the JavaScript dialog a page has open.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub struct DialogParams {

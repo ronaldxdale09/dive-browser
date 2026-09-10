@@ -38,6 +38,11 @@ const EVALUATE_EXPRESSION_CAP: usize = 64_000;
 const PAGE_TEXT_CAP: usize = 256 * 1024;
 /// Largest text insertion accepted in one action.
 const TYPE_TEXT_CAP: usize = 256 * 1024;
+/// Fields one `page_fill_form` may fill. Past this it is a page to script,
+/// not a form to fill, and one huge call reports failure too coarsely.
+const FILL_FIELD_CAP: usize = 40;
+/// Files one `page_upload` may attach.
+const UPLOAD_FILE_CAP: usize = 20;
 /// Largest string condition accepted by `page_wait_for`.
 const WAIT_TEXT_CAP: usize = 8 * 1024;
 /// Largest wheel delta accepted in one action.
@@ -1497,6 +1502,218 @@ impl Browser for AppBrowser {
         Ok(crate::snapshot::to_json(&crate::snapshot::diff(
             &older, &newer,
         )))
+    }
+
+    async fn page_fill_form(
+        &self,
+        tab: TabId,
+        params: dive_mcp::FillFormParams,
+    ) -> Result<Value, BrowserError> {
+        if params.fields.is_empty() {
+            return Err(BrowserError::BadRequest(
+                "give at least one field: [{locator, value}]".into(),
+            ));
+        }
+        if params.fields.len() > FILL_FIELD_CAP {
+            return Err(BrowserError::BadRequest(format!(
+                "fill at most {FILL_FIELD_CAP} fields at a time"
+            )));
+        }
+        let session = self.action_session_for(tab).await?;
+        let submit = params.submit.unwrap_or(false);
+        let described = Some(format!("{} fields", params.fields.len()));
+        self.tracked(tab, "page_fill_form", described, self.or_dialog(tab, async {
+            let mut filled = Vec::new();
+            let last = params.fields.len() - 1;
+            for (index, field) in params.fields.iter().enumerate() {
+                if field.value.chars().count() > TYPE_TEXT_CAP {
+                    return Err(BrowserError::BadRequest(format!(
+                        "the value for {} is over the {TYPE_TEXT_CAP} character limit",
+                        field.locator
+                    )));
+                }
+                // Held first, so the kind decides how the value is applied.
+                // A form is a mix of text fields, dropdowns and checkboxes,
+                // and asking the caller to sort them out per field would
+                // defeat the point of filling the form in one call.
+                locator::hold(&session, &field.locator).await?;
+                let kind = locator::kind_held(&session).await?;
+                let how = kind["kind"].as_str().unwrap_or("text");
+                match how {
+                    "select" => {
+                        // A value that is not an option's `value` is tried as
+                        // its visible label, which is what a caller reading
+                        // the page would have to hand. The engine reports a
+                        // miss in the payload rather than as an error, so it
+                        // has to be read out of the answer -- otherwise a
+                        // dropdown that matched nothing would be reported as
+                        // filled and the form would submit with it empty.
+                        let mut chosen =
+                            locator::select_held(&session, Some(&field.value), None).await?;
+                        if chosen["error"].is_string() {
+                            chosen = locator::select_held(&session, None, Some(&field.value))
+                                .await?;
+                        }
+                        if let Some(problem) = chosen["error"].as_str() {
+                            let options = chosen["options"]
+                                .as_array()
+                                .map(|o| {
+                                    o.iter()
+                                        .filter_map(|opt| opt["label"].as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                })
+                                .unwrap_or_default();
+                            return Err(BrowserError::BadRequest(match problem {
+                                "disabled" => format!("{}: that option is disabled", field.locator),
+                                _ => format!(
+                                    "{}: no option {:?}; its options are {options}",
+                                    field.locator, field.value
+                                ),
+                            }));
+                        }
+                        filled.push(json!({"locator": field.locator, "as": "select", "value": chosen["value"], "label": chosen["label"]}));
+                    }
+                    "checked" => {
+                        let want = matches!(
+                            field.value.trim().to_ascii_lowercase().as_str(),
+                            "true" | "yes" | "on" | "1" | "checked"
+                        );
+                        let outcome = locator::set_checked_held(&session, want).await?;
+                        filled.push(json!({"locator": field.locator, "as": "checkbox", "checked": outcome["checked"]}));
+                    }
+                    "file" => {
+                        return Err(BrowserError::BadRequest(format!(
+                            "{} is a file input; attach files with page_upload",
+                            field.locator
+                        )));
+                    }
+                    _ => {
+                        locator::focus(&session, &field.locator).await?;
+                        // Enter goes in the last field only, once the rest of
+                        // the form holds what it should.
+                        let press_enter = submit && index == last;
+                        automation::type_text(&session, &field.value, true, press_enter)
+                            .await
+                            .map_err(|e| other(e.message))?;
+                        filled.push(json!({"locator": field.locator, "as": "text", "characters": field.value.chars().count()}));
+                    }
+                }
+            }
+            Ok(json!({"filled": filled, "submitted": submit}))
+        }, |dialog| Ok(dialog_opened(dialog, "Filling the form"))))
+        .await
+    }
+
+    async fn page_upload(
+        &self,
+        tab: TabId,
+        params: dive_mcp::UploadParams,
+    ) -> Result<Value, BrowserError> {
+        let locator = params
+            .locator
+            .ok_or_else(|| BrowserError::BadRequest("give locator: the file input".into()))?;
+        if params.paths.len() > UPLOAD_FILE_CAP {
+            return Err(BrowserError::BadRequest(format!(
+                "attach at most {UPLOAD_FILE_CAP} files at a time"
+            )));
+        }
+        // Checked here rather than left to Chromium, which accepts a missing
+        // path in silence and leaves the input empty.
+        for path in &params.paths {
+            let p = std::path::Path::new(path);
+            if !p.is_absolute() {
+                return Err(BrowserError::BadRequest(format!(
+                    "{path} is not an absolute path"
+                )));
+            }
+            if !p.is_file() {
+                return Err(BrowserError::BadRequest(format!("no file at {path}")));
+            }
+        }
+        let session = self.action_session_for(tab).await?;
+        self.tracked(tab, "page_upload", Some(locator.clone()), async {
+            locator::hold(&session, &locator).await?;
+            let kind = locator::kind_held(&session).await?;
+            if kind["kind"].as_str() != Some("file") {
+                return Err(BrowserError::BadRequest(format!(
+                    "{locator} is a <{}>, not a file input; a picker opened by a click cannot be driven",
+                    kind["tag"].as_str().unwrap_or("?")
+                )));
+            }
+            // DOM.setFileInputFiles needs the node itself, so the held
+            // element is handed back unserialised for its object id.
+            let held = session
+                .call(
+                    "Runtime.evaluate",
+                    json!({"expression": "window.__diveHeld", "returnByValue": false}),
+                )
+                .await
+                .map_err(|e| other(e.to_string()))?;
+            let object_id = held["result"]["objectId"]
+                .as_str()
+                .ok_or_else(|| other("the file input went away before the files could be attached"))?
+                .to_owned();
+            session
+                .call(
+                    "DOM.setFileInputFiles",
+                    json!({"files": params.paths, "objectId": object_id}),
+                )
+                .await
+                .map_err(|e| other(e.to_string()))?;
+            Ok(json!({"attached_to": locator, "files": params.paths}))
+        })
+        .await
+    }
+
+    async fn page_drag(
+        &self,
+        tab: TabId,
+        params: dive_mcp::DragParams,
+    ) -> Result<Value, BrowserError> {
+        let from = params
+            .from
+            .ok_or_else(|| BrowserError::BadRequest("give from: what to pick up".into()))?;
+        let to = params
+            .to
+            .ok_or_else(|| BrowserError::BadRequest("give to: where to drop it".into()))?;
+        let session = self.action_session_for(tab).await?;
+        let described = Some(format!("{from} → {to}"));
+        self.tracked(
+            tab,
+            "page_drag",
+            described,
+            self.or_dialog(
+                tab,
+                async {
+                    let start = locator::point(&session, &from).await?;
+                    // Resolved one at a time: picking the source up can move the
+                    // destination, so the drop point is read from the page as it is
+                    // once the drag is under way rather than from how it looked
+                    // before.
+                    let end = locator::point(&session, &to).await?;
+                    automation::drag_between(
+                        &session,
+                        Some(&self.app),
+                        tab,
+                        (start.x, start.y),
+                        (end.x, end.y),
+                        &format!("{} → {}", start.describe(), end.describe()),
+                        self.on_screen(tab),
+                    )
+                    .await
+                    .map_err(|e| other(e.message))?;
+                    Ok(json!({
+                        "dragged": from,
+                        "onto": to,
+                        "from": {"x": start.x, "y": start.y},
+                        "to": {"x": end.x, "y": end.y},
+                    }))
+                },
+                |dialog| Ok(dialog_opened(dialog, "The drag")),
+            ),
+        )
+        .await
     }
 
     async fn console_tail(&self, tab: TabId, limit: usize) -> Result<Value, BrowserError> {

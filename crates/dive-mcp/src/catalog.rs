@@ -6,7 +6,8 @@ use dive_core::TabId;
 use crate::browser::{Browser, TabInfo};
 use crate::error::BrowserError;
 use crate::params::{
-    AppearanceParams, DialogParams, ResizeParams, SelectParams, Target, WaitForParams,
+    AppearanceParams, DialogParams, DragParams, FillFormParams, ResizeParams, SelectParams, Target,
+    UploadParams, WaitForParams,
 };
 use crate::server::DiveServer;
 
@@ -266,6 +267,30 @@ impl Browser for NoBrowser {
     }
 
     async fn page_diff(&self, _tab: TabId) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_fill_form(
+        &self,
+        _tab: TabId,
+        _params: FillFormParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_upload(
+        &self,
+        _tab: TabId,
+        _params: UploadParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_drag(
+        &self,
+        _tab: TabId,
+        _params: DragParams,
+    ) -> Result<serde_json::Value, BrowserError> {
         Err(BrowserError::Other("no browser behind the catalog".into()))
     }
 }

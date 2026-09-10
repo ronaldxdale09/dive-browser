@@ -238,6 +238,73 @@ pub async fn hover_at(
     Ok(())
 }
 
+/// Drag from one point to another with the button held.
+///
+/// The press, the moves and the release are separate events with a real
+/// pause between them, because that is the shape drag libraries listen for:
+/// one that jumps straight from press to release at the destination reads as
+/// a click, and one with no delay is often dropped as a stray pointer event.
+/// Native HTML5 drag-and-drop is a different mechanism and is not driven
+/// here; pointer-based dragging is what the JavaScript libraries use.
+pub async fn drag_between(
+    session: &CdpSession,
+    app: Option<&AppHandle<Runtime>>,
+    tab: TabId,
+    from: (f64, f64),
+    to: (f64, f64),
+    label: &str,
+    visible: bool,
+) -> AppResult<()> {
+    /// Enough intermediate moves for a distance threshold to be crossed and
+    /// for the dragged thing to be seen travelling.
+    const STEPS: u32 = 10;
+    let (x0, y0) = from;
+    let (x1, y1) = to;
+    announce(
+        app,
+        &AgentPointer {
+            tab_id: tab,
+            phase: "move".into(),
+            x: x0,
+            y: y0,
+            label: label.to_owned(),
+        },
+        visible,
+    )
+    .await;
+    let send = |event: serde_json::Value| async {
+        session
+            .call("Input.dispatchMouseEvent", event)
+            .await
+            .map(|_| ())
+            .map_err(AppError::new)
+    };
+    send(json!({"type": "mouseMoved", "x": x0, "y": y0, "button": "none", "buttons": 0, "pointerType": "mouse"})).await?;
+    send(json!({"type": "mousePressed", "x": x0, "y": y0, "button": "left", "buttons": 1, "clickCount": 1, "pointerType": "mouse"})).await?;
+    tokio::time::sleep(std::time::Duration::from_millis(32)).await;
+    for step in 1..=STEPS {
+        let t = f64::from(step) / f64::from(STEPS);
+        let x = x0 + (x1 - x0) * t;
+        let y = y0 + (y1 - y0) * t;
+        send(json!({"type": "mouseMoved", "x": x, "y": y, "button": "left", "buttons": 1, "pointerType": "mouse"})).await?;
+        tokio::time::sleep(std::time::Duration::from_millis(16)).await;
+    }
+    announce(
+        app,
+        &AgentPointer {
+            tab_id: tab,
+            phase: "click".into(),
+            x: x1,
+            y: y1,
+            label: label.to_owned(),
+        },
+        false,
+    )
+    .await;
+    send(json!({"type": "mouseReleased", "x": x1, "y": y1, "button": "left", "buttons": 0, "clickCount": 1, "pointerType": "mouse"})).await?;
+    Ok(())
+}
+
 fn mouse_events(x: f64, y: f64) -> [serde_json::Value; 3] {
     [
         json!({

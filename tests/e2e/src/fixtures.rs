@@ -631,4 +631,35 @@ impl Browser for TestFakeBrowser {
     async fn page_diff(&self, _tab: TabId) -> Result<serde_json::Value, BrowserError> {
         Ok(json!({ "summary": "no differences" }))
     }
+
+    async fn page_fill_form(
+        &self,
+        _tab: TabId,
+        params: dive_mcp::FillFormParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({
+            "filled": params
+                .fields
+                .iter()
+                .map(|f| json!({"locator": f.locator, "value": f.value}))
+                .collect::<Vec<_>>(),
+            "submitted": params.submit.unwrap_or(false),
+        }))
+    }
+
+    async fn page_upload(
+        &self,
+        _tab: TabId,
+        params: dive_mcp::UploadParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({"attached_to": params.locator, "files": params.paths}))
+    }
+
+    async fn page_drag(
+        &self,
+        _tab: TabId,
+        params: dive_mcp::DragParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({"dragged": params.from, "onto": params.to}))
+    }
 }

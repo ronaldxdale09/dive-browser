@@ -16,10 +16,11 @@ use serde::Serialize;
 use crate::browser::Browser;
 use crate::error::BrowserError;
 use crate::params::{
-    AppearanceParams, BodyParams, ClickParams, ComponentParams, DialogParams, EvaluateParams,
-    HistoryParams, LOCATOR_GRAMMAR, LocateParams, MAX_WAIT_MS, NavigateParams, OpenParams,
-    PressParams, ResizeParams, RulesParams, ScreenshotParams, ScrollParams, SelectParams, TabRef,
-    TailParams, ThrottleParams, TypeParams, WaitForParams,
+    AppearanceParams, BodyParams, ClickParams, ComponentParams, DialogParams, DragParams,
+    EvaluateParams, FillFormParams, HistoryParams, LOCATOR_GRAMMAR, LocateParams, MAX_WAIT_MS,
+    NavigateParams, OpenParams, PressParams, ResizeParams, RulesParams, ScreenshotParams,
+    ScrollParams, SelectParams, TabRef, TailParams, ThrottleParams, TypeParams, UploadParams,
+    WaitForParams,
 };
 
 #[cfg(test)]
@@ -338,6 +339,45 @@ impl<B: Browser> DiveServer<B> {
     ) -> Result<CallToolResult, ErrorData> {
         let tab = self.resolve(p.tab_id.clone()).await?;
         json_result(&self.browser.page_select(tab, p).await?)
+    }
+
+    /// Fill a whole form.
+    #[tool(
+        name = "page_fill_form",
+        description = "Fill several fields in one call: fields is a list of {locator, value}, filled in the order given. Handles text fields, <select> dropdowns and checkboxes -- for a checkbox or radio pass \"true\" or \"false\". Prefer this over repeated page_type: it is one round trip for the whole form, and it stops at the first field that fails and tells you which one."
+    )]
+    async fn page_fill_form(
+        &self,
+        Parameters(p): Parameters<FillFormParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id.clone()).await?;
+        json_result(&self.browser.page_fill_form(tab, p).await?)
+    }
+
+    /// Attach files.
+    #[tool(
+        name = "page_upload",
+        description = "Attach files to an <input type=\"file\">, as choosing them in the picker would, firing the change event the page listens for. paths are absolute paths on this machine; an empty list clears the input. A file picker opened by a click cannot be driven, so upload through the input itself."
+    )]
+    async fn page_upload(
+        &self,
+        Parameters(p): Parameters<UploadParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id.clone()).await?;
+        json_result(&self.browser.page_upload(tab, p).await?)
+    }
+
+    /// Drag.
+    #[tool(
+        name = "page_drag",
+        description = "Drag the element from matches onto the element to matches, holding the pointer down and moving in steps, as reordering a list or moving a card needs. This drives pointer events, which is what drag libraries listen for; pages using native HTML5 drag-and-drop may not respond."
+    )]
+    async fn page_drag(
+        &self,
+        Parameters(p): Parameters<DragParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id.clone()).await?;
+        json_result(&self.browser.page_drag(tab, p).await?)
     }
 
     /// Type.

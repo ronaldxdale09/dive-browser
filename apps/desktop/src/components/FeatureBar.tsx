@@ -68,6 +68,11 @@ export function FeatureBar({ compact = false }: { compact?: boolean }) {
  * browser can be driven by *your* agent too. A dialog rather than a settings
  * page -- connecting is a one-time copy, and burying it in Developer meant
  * nobody found it.
+ *
+ * Labelled for what it does rather than for the protocol it speaks. "MCP"
+ * names the standard precisely and belongs in the dialog, where the agent
+ * needs the word; on a button beside Agent and Apps it says nothing about
+ * what pressing it achieves.
  */
 function McpAction({ compact }: { compact: boolean }) {
   const [open, setOpen] = useState(false);
@@ -89,7 +94,7 @@ function McpAction({ compact }: { compact: boolean }) {
           }
         >
           <Icon icon={Plug} size={compact ? 15 : 13} />
-          {!compact && "MCP"}
+          {!compact && "Connect"}
         </button>
       </Tooltip>
       {open && <McpDialog onClose={() => setOpen(false)} />}

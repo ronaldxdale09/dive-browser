@@ -60,3 +60,49 @@ describe("useCoversContent", () => {
     expect(ipc.setContentCovered).toHaveBeenLastCalledWith(false);
   });
 });
+
+describe("live overlays versus a modal", () => {
+  /** A dialog that declares itself modal, as every real one does. */
+  function Modal() {
+    useCoversContent(true);
+    return createElement("div", { role: "dialog", "aria-modal": "true" }, "modal");
+  }
+  /** A menu: an overlay that is not modal. */
+  function Menu() {
+    useCoversContent(true);
+    return createElement("div", { role: "menu" }, "menu");
+  }
+
+  beforeEach(() => {
+    (window as Window & { __DIVE_LIVE_OVERLAYS__?: boolean }).__DIVE_LIVE_OVERLAYS__ = true;
+    vi.spyOn(ipc, "setOverlayRegions").mockResolvedValue(null);
+  });
+  afterEach(() => {
+    delete (window as Window & { __DIVE_LIVE_OVERLAYS__?: boolean }).__DIVE_LIVE_OVERLAYS__;
+  });
+
+  it("leaves the page live under a menu, so it keeps playing", async () => {
+    render(createElement(Menu));
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenCalled());
+    expect(ipc.prepareContentCover).not.toHaveBeenCalled();
+    expect(ipc.setContentCovered).not.toHaveBeenCalled();
+  });
+
+  it("freezes the page under a modal, so the backdrop has something to blur", async () => {
+    // The native mask is a rectangle over a view CSS cannot reach: no blur is
+    // possible against it, and a rounded panel sits in a square of chrome.
+    // A capture inside the chrome is a real surface, so both work.
+    render(createElement(Modal));
+    await waitFor(() => expect(ipc.setContentCovered).toHaveBeenLastCalledWith(true));
+    expect(ipc.prepareContentCover).toHaveBeenCalledTimes(1);
+  });
+
+  it("switches a live page to frozen when a modal opens over a menu", async () => {
+    const view = render(createElement("div", null, createElement(Menu, { key: "m" })));
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenCalled());
+
+    view.rerender(createElement("div", null, createElement(Menu, { key: "m" }), createElement(Modal, { key: "d" })));
+    await waitFor(() => expect(ipc.setContentCovered).toHaveBeenLastCalledWith(true));
+    expect(ipc.prepareContentCover).toHaveBeenCalledTimes(1);
+  });
+});

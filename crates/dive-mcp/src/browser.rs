@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::BrowserError;
 use crate::params::{
-    AppearanceParams, DialogParams, ResizeParams, SelectParams, Target, WaitForParams,
+    AppearanceParams, DialogParams, DragParams, FillFormParams, ResizeParams, SelectParams, Target,
+    UploadParams, WaitForParams,
 };
 
 /// What a tool caller gets to know about a tab.
@@ -172,4 +173,23 @@ pub trait Browser: Send + Sync + 'static {
     async fn page_snapshot(&self, tab: TabId) -> Result<String, BrowserError>;
     /// Snapshot now and compare with the previous snapshot.
     async fn page_diff(&self, tab: TabId) -> Result<serde_json::Value, BrowserError>;
+    /// Fill several fields in one call, in order, stopping at the first that
+    /// fails. One round trip for a whole form instead of one per field.
+    async fn page_fill_form(
+        &self,
+        tab: TabId,
+        params: FillFormParams,
+    ) -> Result<serde_json::Value, BrowserError>;
+    /// Attach files to a file input, as choosing them in the picker would.
+    async fn page_upload(
+        &self,
+        tab: TabId,
+        params: UploadParams,
+    ) -> Result<serde_json::Value, BrowserError>;
+    /// Drag one element onto another with the pointer held down.
+    async fn page_drag(
+        &self,
+        tab: TabId,
+        params: DragParams,
+    ) -> Result<serde_json::Value, BrowserError>;
 }

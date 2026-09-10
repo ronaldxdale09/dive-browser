@@ -87,6 +87,21 @@ pub fn specs() -> Vec<ToolSpec> {
             obj(json!({"tab_id": tab, "locator": locator, "ref": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "value": {"type": "string"}, "label": {"type": "string"}}), &[]),
         ),
         spec(
+            "page_fill_form",
+            "Fill several fields in one call: fields is a list of {locator, value}, filled in order. Handles text fields, dropdowns and checkboxes; for a checkbox pass \"true\" or \"false\". Prefer this over repeated page_type -- one round trip for the whole form.".into(),
+            obj(json!({"tab_id": tab, "fields": {"type": "array", "items": {"type": "object", "properties": {"locator": locator, "value": {"type": "string"}}, "required": ["locator", "value"], "additionalProperties": false}}, "submit": {"type": "boolean", "description": "Press Enter in the last field once the form is filled."}}), &["fields"]),
+        ),
+        spec(
+            "page_upload",
+            "Attach files to an <input type=\"file\">, as the picker would. paths are absolute paths on this machine. A picker opened by a click cannot be driven, so go through the input.".into(),
+            obj(json!({"tab_id": tab, "locator": locator, "paths": {"type": "array", "items": {"type": "string"}}}), &["paths"]),
+        ),
+        spec(
+            "page_drag",
+            "Drag one element onto another with the pointer held down: reorder a list, move a card, set a slider. Drives pointer events, which is what drag libraries listen for.".into(),
+            obj(json!({"tab_id": tab, "from": locator, "to": locator}), &["from", "to"]),
+        ),
+        spec(
             "tab_history",
             "Go back, go forward or reload the tab; then page_wait_for load true.".into(),
             obj(json!({"tab_id": tab, "action": {"type": "string", "enum": ["back", "forward", "reload"]}}), &["action"]),
@@ -186,6 +201,9 @@ pub fn is_action(name: &str) -> bool {
             | "page_dialog"
             | "page_hover"
             | "page_select"
+            | "page_fill_form"
+            | "page_upload"
+            | "page_drag"
             | "tab_history"
             | "tab_navigate"
             | "tab_activate"
@@ -392,6 +410,52 @@ async fn execute<B: Browser>(
         "page_hover" => text(
             browser
                 .page_hover(tab()?, target_of(input))
+                .await
+                .map_err(err)?,
+        ),
+        "page_fill_form" => text(
+            browser
+                .page_fill_form(
+                    tab()?,
+                    serde_json::from_value(json!({
+                        "fields": input["fields"].clone(),
+                        "submit": input["submit"].clone(),
+                    }))
+                    .map_err(|e| format!("fields must be a list of {{locator, value}}: {e}"))?,
+                )
+                .await
+                .map_err(err)?,
+        ),
+        "page_upload" => text(
+            browser
+                .page_upload(
+                    tab()?,
+                    dive_mcp::UploadParams {
+                        tab_id: None,
+                        locator: input["locator"].as_str().map(str::to_owned),
+                        paths: input["paths"]
+                            .as_array()
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(|v| v.as_str().map(str::to_owned))
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                    },
+                )
+                .await
+                .map_err(err)?,
+        ),
+        "page_drag" => text(
+            browser
+                .page_drag(
+                    tab()?,
+                    dive_mcp::DragParams {
+                        tab_id: None,
+                        from: input["from"].as_str().map(str::to_owned),
+                        to: input["to"].as_str().map(str::to_owned),
+                    },
+                )
                 .await
                 .map_err(err)?,
         ),

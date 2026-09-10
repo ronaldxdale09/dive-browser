@@ -300,6 +300,30 @@ impl Browser for Fake {
     async fn page_diff(&self, _tab: TabId) -> Result<serde_json::Value, BrowserError> {
         Ok(serde_json::json!({"summary": "no differences"}))
     }
+
+    async fn page_fill_form(
+        &self,
+        _tab: TabId,
+        params: crate::params::FillFormParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"filled": params.fields.len()}))
+    }
+
+    async fn page_upload(
+        &self,
+        _tab: TabId,
+        params: crate::params::UploadParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"files": params.paths.len()}))
+    }
+
+    async fn page_drag(
+        &self,
+        _tab: TabId,
+        params: crate::params::DragParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"dragged": params.from, "onto": params.to}))
+    }
 }
 
 #[test]

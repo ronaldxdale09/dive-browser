@@ -111,6 +111,18 @@ pub struct Found {
     pub count: u32,
 }
 
+impl Found {
+    /// The shortest honest name for the match, for saying what was acted on.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        if self.name.is_empty() {
+            self.tag.clone()
+        } else {
+            format!("{} {:?}", self.role, self.name)
+        }
+    }
+}
+
 /// The page's viewport in CSS pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
 pub struct Viewport {
@@ -291,6 +303,55 @@ pub async fn select_held(
         label = json!(label),
     );
     eval(session, expression).await
+}
+
+/// What kind of control the held element is, so a form filler knows whether
+/// a value means text, an option or a checked state.
+pub async fn kind_held(session: &CdpSession) -> Result<Value, Failure> {
+    eval(
+        session,
+        r"(() => {
+  const el = window.__diveHeld;
+  if (!el) return { kind: 'none' };
+  const tag = el.tagName.toLowerCase();
+  const type = (el.getAttribute('type') || '').toLowerCase();
+  if (tag === 'select') return { kind: 'select', tag, type };
+  if (tag === 'input' && (type === 'checkbox' || type === 'radio')) {
+    return { kind: 'checked', tag, type, checked: Boolean(el.checked) };
+  }
+  if (tag === 'input' && type === 'file') return { kind: 'file', tag, type };
+  return { kind: 'text', tag, type };
+})()"
+            .to_owned(),
+    )
+    .await
+}
+
+/// Set the held checkbox or radio to `want`, firing the events a page listens
+/// for. Reports whether anything actually changed.
+pub async fn set_checked_held(session: &CdpSession, want: bool) -> Result<Value, Failure> {
+    eval(
+        session,
+        format!(
+            r"(() => {{
+  const el = window.__diveHeld;
+  if (!el) return {{ error: 'not_found' }};
+  const want = {want};
+  if (el.checked === want) return {{ checked: want, changed: false }};
+  // A click rather than a property set: a radio group and every framework
+  // that listens for the click keep their own state that way.
+  el.click();
+  if (el.checked !== want) {{
+    el.checked = want;
+    el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+  }}
+  return {{ checked: Boolean(el.checked), changed: true }};
+}})()",
+            want = json!(want)
+        ),
+    )
+    .await
 }
 
 /// Remember the element under a viewport point as `window.__diveHeld`.

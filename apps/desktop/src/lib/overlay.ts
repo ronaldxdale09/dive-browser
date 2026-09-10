@@ -17,6 +17,9 @@ import { ipc } from "./ipc";
  */
 let depth = 0;
 let covered = false;
+/** A capture is in flight. Without this a second overlay opening while the
+ * first is still capturing would freeze the page twice. */
+let covering = false;
 let generation = 0;
 let stopLive: (() => void) | null = null;
 let liveQueue = Promise.resolve();
@@ -42,18 +45,23 @@ function afterPaint(): Promise<void> {
 }
 
 async function cover(token: number) {
+  covering = true;
   let frozen: Awaited<ReturnType<typeof ipc.prepareContentCover>> = [];
   try {
     frozen = await ipc.prepareContentCover();
   } catch {
     // The dialog must remain usable even when a renderer cannot be captured.
   }
-  if (depth === 0 || token !== generation) return;
+  if (depth === 0 || token !== generation) {
+    covering = false;
+    return;
+  }
   publish(Object.fromEntries(frozen.map((preview) => [preview.tab_id, preview.data_url])));
   // Let React commit the frozen viewport before removing the native surface.
   await afterPaint();
   if (depth === 0 || token !== generation) return;
   covered = true;
+  covering = false;
   await ipc.setContentCovered(true).catch(() => undefined);
 }
 
@@ -96,32 +104,85 @@ function beginLive() {
   return () => { stopped = true; cancelAnimationFrame(frame); sendLive([], false); };
 }
 
+/**
+ * Whether anything on screen right now is a modal dialog.
+ *
+ * Read from the DOM rather than declared at the call site, so a dialog is
+ * treated as one by virtue of saying it is one. Effects run after commit, so
+ * by the time an overlay acquires, its element is already here.
+ */
+function modalIsOpen() {
+  return document.querySelector('[aria-modal="true"]') !== null;
+}
+
+/**
+ * Freeze the page rather than keep it live.
+ *
+ * A modal dims and blurs everything behind it, and neither is possible
+ * against a native page view: it is a sibling of the chrome, not part of its
+ * compositing, so `backdrop-filter` has nothing to work on and the mask that
+ * lets chrome overlap it is a plain rectangle -- which is why a rounded panel
+ * used to sit in a square of chrome background. Capturing the page and
+ * showing the capture inside the chrome puts those pixels where CSS can
+ * reach them, so the blur is real and the corners are the panel's own.
+ *
+ * Only modals: a menu or a suggestion list must leave the page playing.
+ */
+function wantsFrozen() {
+  return !liveOverlaysAvailable() || modalIsOpen();
+}
+
+/** Put the page in whichever state the overlays now on screen call for. */
+function sync() {
+  if (depth === 0) {
+    if (stopLive) {
+      stopLive();
+      stopLive = null;
+    }
+    generation += 1;
+    const token = generation;
+    covering = false;
+    if (covered) {
+      covered = false;
+      void ipc
+        .setContentCovered(false)
+        .catch(() => undefined)
+        .finally(() => {
+          // A later overlay may already have captured and covered the page.
+          if (depth === 0 && token === generation) publish({});
+        });
+    } else {
+      publish({});
+    }
+    return;
+  }
+  if (wantsFrozen()) {
+    // A modal opened over a live overlay: drop the mask before capturing, or
+    // the capture races a page the chrome is still punching holes through.
+    if (stopLive) {
+      stopLive();
+      stopLive = null;
+    }
+    if (!covered && !covering) {
+      generation += 1;
+      void cover(generation);
+    }
+    return;
+  }
+  if (!stopLive) {
+    generation += 1;
+    stopLive = beginLive();
+  }
+}
+
 function acquire() {
   depth += 1;
-  if (depth !== 1) return;
-  generation += 1;
-  if (liveOverlaysAvailable()) { stopLive = beginLive(); return; }
-  void cover(generation);
+  sync();
 }
 
 function release() {
   depth = Math.max(0, depth - 1);
-  if (depth !== 0) return;
-  if (stopLive) { stopLive(); stopLive = null; publish({}); return; }
-  generation += 1;
-  const token = generation;
-  if (covered) {
-    covered = false;
-    void ipc
-      .setContentCovered(false)
-      .catch(() => undefined)
-      .finally(() => {
-        // A later overlay may already have captured and covered the page.
-        if (depth === 0 && token === generation) publish({});
-      });
-  } else {
-    publish({});
-  }
+  sync();
 }
 
 /** Keep chrome overlays above native pages while `active`. */
