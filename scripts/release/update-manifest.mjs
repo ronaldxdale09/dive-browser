@@ -21,7 +21,8 @@ import { basename } from 'node:path'
 /** Platform keys the Tauri updater understands, for the targets Dive builds. */
 export const PLATFORM_KEYS = {
   'aarch64-apple-darwin': 'darwin-aarch64',
-  'x86_64-apple-darwin': 'darwin-x86_64'
+  'x86_64-apple-darwin': 'darwin-x86_64',
+  'x86_64-pc-windows-msvc': 'windows-x86_64'
 }
 
 function required(value, what) {
@@ -30,20 +31,28 @@ function required(value, what) {
   return text
 }
 
+/** What each platform's updater archive is named, by Tauri's own convention. */
+const ARCHIVE_SUFFIX = { darwin: '.tar.gz', windows: '.nsis.zip' }
+
 /**
  * A one-platform manifest fragment.
  *
- * `archive` is the path to the updater tarball and `signature` its detached
+ * `archive` is the path to the updater archive and `signature` its detached
  * signature's contents — not a path, because an empty file is exactly the
  * failure this is here to catch.
+ *
+ * The archive's extension is checked against the platform rather than fixed:
+ * the updater downloads whatever this URL names, so a `.dmg` or a `-setup.exe`
+ * here produces a manifest that only fails on a user's machine.
  */
 export function buildManifest({ version, target, archive, signature, notes, pubDate, baseUrl }) {
   const platform = PLATFORM_KEYS[required(target, 'a build target')]
   if (!platform) throw new Error(`No updater platform key for target ${target}.`)
 
   const file = basename(required(archive, 'an updater archive'))
-  if (!file.endsWith('.tar.gz')) {
-    throw new Error(`Updater archive must be a .tar.gz, got ${file}.`)
+  const suffix = ARCHIVE_SUFFIX[platform.split('-')[0]]
+  if (!file.endsWith(suffix)) {
+    throw new Error(`Updater archive for ${platform} must be a ${suffix}, got ${file}.`)
   }
 
   return {

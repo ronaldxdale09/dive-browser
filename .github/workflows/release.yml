@@ -198,9 +198,92 @@ jobs:
           path: out/*
           if-no-files-found: error
 
+  build-windows:
+    name: Build Windows (x86_64)
+    needs: preflight
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache CEF binaries
+        uses: actions/cache@v4
+        with:
+          path: .cef
+          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Stamp release version
+        run: node scripts/release/stamp-versions.mjs "${{ needs.preflight.outputs.version }}"
+
+      # NSIS, not WiX: WiX is the Tauri default on Windows and its candle step
+      # is the one part of this that cannot run on an ARM machine, so the
+      # bundle target is named rather than left to `all`.
+      - name: Build app and updater artifacts
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          DIVE_UPDATER_PUBKEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DIVE_UPDATER_PUBKEY:-}" ] || [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "::error::Updater signing keys are not configured." \
+                 "Set TAURI_SIGNING_PUBLIC_KEY and TAURI_SIGNING_PRIVATE_KEY" \
+                 "(see scripts/release/setup-signing-secrets.sh)."
+            exit 1
+          fi
+          pnpm --filter @dive/desktop exec tauri build --bundles nsis \
+            --config "{\"plugins\":{\"updater\":{\"pubkey\":\"$DIVE_UPDATER_PUBKEY\"}}}"
+
+      - name: Build update manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p out
+          cp target/release/bundle/nsis/*-setup.exe out/
+          cp target/release/bundle/nsis/*-setup.nsis.zip out/
+          cp target/release/bundle/nsis/*-setup.nsis.zip.sig out/
+
+          archives=(out/*.nsis.zip)
+          signatures=(out/*.nsis.zip.sig)
+          if [ "${#archives[@]}" -ne 1 ] || [ "${#signatures[@]}" -ne 1 ]; then
+            echo "::error::Expected one updater archive and one signature," \
+                 "found ${#archives[@]} and ${#signatures[@]}."
+            exit 1
+          fi
+
+          node scripts/release/update-manifest.mjs build \
+            --version "${{ needs.preflight.outputs.version }}" \
+            --target x86_64-pc-windows-msvc \
+            --archive "${archives[0]}" \
+            --signature-file "${signatures[0]}" \
+            --notes "${{ needs.preflight.outputs.name }}" \
+            --base-url "${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.preflight.outputs.tag }}" \
+            --out out/manifest-x86_64-pc-windows-msvc.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: out/*
+          if-no-files-found: error
+
+
   release:
     name: Publish release
-    needs: [preflight, build]
+    needs: [preflight, build, build-windows]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -215,7 +298,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: macos-*
+          pattern: "{macos,windows}-*"
           merge-multiple: true
           path: assets
 
@@ -226,7 +309,7 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/release/update-manifest.mjs merge assets/manifest-*.json \
-            --expect-platforms darwin-aarch64 \
+            --expect-platforms darwin-aarch64,windows-x86_64 \
             --out assets/latest.json
           rm -f assets/manifest-*.json
 
@@ -246,6 +329,9 @@ jobs:
             assets/*.dmg
             assets/*.tar.gz
             assets/*.tar.gz.sig
+            assets/*-setup.exe
+            assets/*.nsis.zip
+            assets/*.nsis.zip.sig
           fail_on_unmatched_files: true
 
       # Against the release as GitHub stored it: the only state users are

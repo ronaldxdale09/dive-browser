@@ -207,8 +207,27 @@ describe('update-manifest', () => {
   })
 
   it('rejects a target with no updater platform key', () => {
-    expect(() => buildManifest({ ...base, target: 'x86_64-pc-windows-msvc' })).toThrow(/platform key/)
-    expect(Object.values(PLATFORM_KEYS)).toEqual(['darwin-aarch64', 'darwin-x86_64'])
+    expect(() => buildManifest({ ...base, target: 'x86_64-unknown-linux-gnu' })).toThrow(/platform key/)
+    expect(Object.values(PLATFORM_KEYS)).toEqual([
+      'darwin-aarch64',
+      'darwin-x86_64',
+      'windows-x86_64'
+    ])
+  })
+
+  it('wants each platform\'s own archive shape, not one fixed extension', () => {
+    const win = { ...base, target: 'x86_64-pc-windows-msvc' }
+    // What Tauri's NSIS updater bundle is actually called.
+    expect(
+      buildManifest({ ...win, archive: '/build/Dive_1.2.3_x64-setup.nsis.zip' })
+        .platforms['windows-x86_64'].url
+    ).toMatch(/Dive_1\.2\.3_x64-setup\.nsis\.zip$/)
+    // The installer itself is not the updater archive, and saying so here is
+    // the difference between a failed build and a broken update.
+    expect(() => buildManifest({ ...win, archive: '/build/Dive_1.2.3_x64-setup.exe' })).toThrow(
+      /nsis\.zip/
+    )
+    expect(() => buildManifest({ ...win, archive: '/build/Dive.app.tar.gz' })).toThrow(/nsis\.zip/)
   })
 
   it('merges one platform per architecture into a single manifest', () => {
