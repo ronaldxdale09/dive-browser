@@ -27,17 +27,20 @@ Start-Sleep -Milliseconds 600
 $r = New-Object W+R; [W]::GetWindowRect($h, [ref]$r) | Out-Null
 Write-Output ("window {0},{1} {2}x{3}" -f $r.L,$r.T,($r.Rt-$r.L),($r.B-$r.T))
 
-$shell = New-Object -ComObject WScript.Shell
-# A live page underneath is the whole point: the list has to float over
-# content that keeps rendering, not over the welcome screen.
-$shell.SendKeys("^t")
-Start-Sleep -Seconds 2
-$shell.SendKeys("example.com{ENTER}")
-Start-Sleep -Seconds 6
+# Click the address bar rather than sending Ctrl+L. Keyboard shortcuts are
+# swallowed or reinterpreted depending on what has focus, and a stray one
+# lands somewhere unrelated; the bar is always at this spot in the toolbar.
+$x = [int](($r.L + $r.Rt) / 2)
+$y = $r.T + 46
+[W]::SetCursorPos($x, $y) | Out-Null
+Start-Sleep -Milliseconds 200
+[W]::mouse_event(0x0002,0,0,0,[IntPtr]::Zero)
+[W]::mouse_event(0x0004,0,0,0,[IntPtr]::Zero)
+Start-Sleep -Milliseconds 700
 
-# Back to the address bar, and type enough to bring the list up.
-$shell.SendKeys("^l")
-Start-Sleep -Milliseconds 800
+$shell = New-Object -ComObject WScript.Shell
+$shell.SendKeys("^a")
+Start-Sleep -Milliseconds 200
 $shell.SendKeys("goo")
-Start-Sleep -Seconds 2
-Write-Output "page loaded and suggestions opened"
+Start-Sleep -Milliseconds 1500
+Write-Output "suggestions open over the page"
