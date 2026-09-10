@@ -855,7 +855,7 @@ impl TabHost {
     }
 
     fn update_overlay_mask(&self, chrome: &str, active: bool) -> tauri::Result<()> {
-        #[cfg(all(feature = "cef", target_os = "macos"))]
+        #[cfg(all(feature = "cef", any(target_os = "macos", target_os = "windows")))]
         {
             let page_ids = if chrome == CHROME_LABEL {
                 self.on_screen()
@@ -891,7 +891,7 @@ impl TabHost {
                 })?;
             }
         }
-        #[cfg(not(all(feature = "cef", target_os = "macos")))]
+        #[cfg(not(all(feature = "cef", any(target_os = "macos", target_os = "windows"))))]
         let _ = (chrome, active);
         Ok(())
     }
@@ -1905,7 +1905,10 @@ fn forward_events(app: AppHandle<Runtime>, mut rx: tokio::sync::broadcast::Recei
 /// off-the-record profiles do not enable extensions. The chrome keeps its
 /// own state through the `ui_state_*` commands instead of web storage.
 fn private_chrome(builder: WebviewBuilder<Runtime>) -> WebviewBuilder<Runtime> {
-    #[cfg(all(feature = "cef", target_os = "macos"))]
+    // Set wherever a native overlay mask exists, which is what lets a menu
+    // float over a page that keeps playing. Without it the chrome falls back
+    // to freezing the page and showing a capture.
+    #[cfg(all(feature = "cef", any(target_os = "macos", target_os = "windows")))]
     let builder = builder.initialization_script(
         "Object.defineProperty(window, '__DIVE_LIVE_OVERLAYS__', {value:true});",
     );

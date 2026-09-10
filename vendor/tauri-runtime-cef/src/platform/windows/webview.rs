@@ -7,13 +7,14 @@ use tauri_runtime::dpi::{PhysicalPosition, PhysicalSize, Rect};
 use tauri_utils::config::Color;
 use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
-    Graphics::Gdi::MapWindowPoints,
+    Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, MapWindowPoints, RGN_DIFF},
     UI::Shell::{DefSubclassProc, SetWindowSubclass},
     UI::WindowsAndMessaging::{
-        DestroyWindow, GetParent, GetWindowRect, HWND_TOP, SW_HIDE, SW_SHOW, SWP_NOACTIVATE,
-        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetParent, SetWindowPos, ShowWindow, WINDOWPOS,
-        WM_WINDOWPOSCHANGING,
+        DestroyWindow, GetParent, GetWindowRect, HWND_BOTTOM, HWND_TOP, SW_HIDE, SW_SHOW,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetParent, SetWindowPos, SetWindowRgn,
+        ShowWindow, WINDOWPOS, WM_WINDOWPOSCHANGING,
     },
+    UI::HiDpi::GetDpiForWindow,
 };
 
 use crate::{webview::AppWebview, window::AppWindow};
@@ -143,6 +144,75 @@ impl AppWebview {
         };
 
         self.set_z_order_pinned(true);
+    }
+
+    /// Let the chrome paint over the page everywhere except `holes`.
+    ///
+    /// The Windows counterpart of the macOS layer mask. There the chrome is
+    /// one view above the pages with a `CAShapeLayer` punched through it;
+    /// here the chrome is a sibling HWND, and a window region does the same
+    /// job -- the window is drawn and hit-tested only inside its region, so
+    /// subtracting the holes leaves the page reachable through them. Clipping
+    /// hit-testing as well as painting is the point: a click outside an
+    /// overlay has to reach the page beneath it.
+    ///
+    /// `holes` are the page rectangles that must stay visible, in the
+    /// chrome's own logical coordinates, as the macOS side takes them.
+    pub fn set_chrome_overlay_mask(&self, holes: &[[f64; 4]], active: bool) -> bool {
+        let hwnd = self.hwnd();
+        if !active {
+            // No region is "all of it", and the chrome drops back beneath the
+            // pages so they take the clicks again.
+            unsafe {
+                let _ = SetWindowRgn(hwnd, None, true);
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_BOTTOM),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
+            }
+            return true;
+        }
+
+        let mut rect = RECT::default();
+        if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() {
+            return false;
+        }
+        let (width, height) = (rect.right - rect.left, rect.bottom - rect.top);
+        // The window is sized in physical pixels; the holes arrive logical.
+        let dpi = unsafe { GetDpiForWindow(hwnd) };
+        let scale = if dpi == 0 { 1.0 } else { f64::from(dpi) / 96.0 };
+        let px = |v: f64| (v * scale).round() as i32;
+
+        let region = unsafe { CreateRectRgn(0, 0, width, height) };
+        if region.is_invalid() {
+            return false;
+        }
+        for [x, y, w, h] in holes {
+            let hole = unsafe { CreateRectRgn(px(*x), px(*y), px(x + w), px(y + h)) };
+            if hole.is_invalid() {
+                continue;
+            }
+            unsafe {
+                CombineRgn(Some(region), Some(region), Some(hole), RGN_DIFF);
+                let _ = DeleteObject(hole.into());
+            }
+        }
+        // The region belongs to the window once this succeeds, so it must not
+        // be deleted here; on failure it would leak, so it is freed instead.
+        let applied = unsafe { SetWindowRgn(hwnd, Some(region), true) } != 0;
+        if !applied {
+            unsafe {
+                let _ = DeleteObject(region.into());
+            }
+            return false;
+        }
+        self.raise_to_top();
+        true
     }
 
     pub(crate) fn apply_physical_bounds(
