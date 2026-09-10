@@ -356,6 +356,14 @@ impl Browser for Fake {
     ) -> Result<serde_json::Value, BrowserError> {
         Ok(serde_json::json!({"steps": params.steps.len()}))
     }
+
+    async fn page_expect(
+        &self,
+        _tab: TabId,
+        params: crate::params::ExpectParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"ok": true, "checked": params.checks.len()}))
+    }
 }
 
 #[test]

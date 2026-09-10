@@ -17,8 +17,8 @@ use crate::browser::Browser;
 use crate::error::BrowserError;
 use crate::params::{
     AppearanceParams, BodyParams, ClickParams, ComponentParams, DialogParams, DragParams,
-    EvaluateParams, FillFormParams, HistoryParams, LOCATOR_GRAMMAR, LocateParams, MAX_WAIT_MS,
-    MouseParams, NavigateParams, OpenParams, PressParams, ResizeParams, RulesParams,
+    EvaluateParams, ExpectParams, FillFormParams, HistoryParams, LOCATOR_GRAMMAR, LocateParams,
+    MAX_WAIT_MS, MouseParams, NavigateParams, OpenParams, PressParams, ResizeParams, RulesParams,
     ScreenshotParams, ScrollParams, SelectParams, StorageClearParams, StorageGetParams,
     StorageSetParams, TabRef, TailParams, ThrottleParams, TypeParams, UploadParams, WaitForParams,
 };
@@ -430,6 +430,19 @@ impl<B: Browser> DiveServer<B> {
     ) -> Result<CallToolResult, ErrorData> {
         let tab = self.resolve(p.tab_id.clone()).await?;
         json_result(&self.browser.page_mouse(tab, p).await?)
+    }
+
+    /// Check the page.
+    #[tool(
+        name = "page_expect",
+        description = "Check several things about the page at once and get told about every one that does not hold, not just the first. Each check is one of: visible (a locator matches something a person can see), hidden, text (the page shows it), no_text, value ({locator, equals}), count ({locator, equals|at_least|at_most}), url_includes, title_includes. Give timeout_ms to keep re-checking until they all hold, which is the right way to assert after an action that takes a moment. A failure names what was actually there, so a wrong assertion is one call to diagnose rather than several."
+    )]
+    async fn page_expect(
+        &self,
+        Parameters(p): Parameters<ExpectParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id.clone()).await?;
+        json_result(&self.browser.page_expect(tab, p).await?)
     }
 
     /// Type.

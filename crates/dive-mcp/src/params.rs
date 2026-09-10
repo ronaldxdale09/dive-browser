@@ -296,6 +296,73 @@ pub struct DragParams {
     pub to: Option<String>,
 }
 
+/// A value a field is expected to hold.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ValueCheck {
+    /// Which field.
+    pub locator: String,
+    /// What it should hold, matched exactly.
+    pub equals: String,
+}
+
+/// How many elements a locator is expected to match.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct CountCheck {
+    /// Which elements.
+    pub locator: String,
+    /// Exactly this many.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equals: Option<u32>,
+    /// At least this many.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at_least: Option<u32>,
+    /// At most this many.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at_most: Option<u32>,
+}
+
+/// One thing that should be true of the page. Give exactly one field.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct ExpectCheck {
+    /// This locator matches something a person can see.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible: Option<String>,
+    /// This locator matches nothing visible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<String>,
+    /// The page shows this text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// The page does not show this text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_text: Option<String>,
+    /// A field holds a value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<ValueCheck>,
+    /// A locator matches a number of elements.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<CountCheck>,
+    /// The address contains this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url_includes: Option<String>,
+    /// The title contains this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_includes: Option<String>,
+}
+
+/// Check several things about the page at once.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct ExpectParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// The things that should be true. All of them are reported, not just
+    /// the first that is not.
+    pub checks: Vec<ExpectCheck>,
+    /// Keep re-checking for up to this long before giving up. Omit for a
+    /// single look at the page as it is right now.
+    pub timeout_ms: Option<u64>,
+}
+
 /// What one step of a pointer gesture does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]

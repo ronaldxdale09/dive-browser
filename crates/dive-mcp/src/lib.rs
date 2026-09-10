@@ -16,12 +16,12 @@ pub use catalog::{CatalogEntry, tool_catalog};
 pub use error::BrowserError;
 pub use http::{Handle, serve};
 pub use params::{
-    Addressed, AppearanceParams, BodyParams, ClickParams, ComponentParams, Cookie, DEFAULT_WAIT_MS,
-    DialogParams, DragParams, EvaluateParams, FillFormParams, FormField, HistoryParams,
-    LOCATOR_GRAMMAR, LocateParams, MAX_LOCATOR_CHARS, MAX_REF_CHARS, MAX_WAIT_MS, MouseAction,
-    MouseParams, MouseStep, NavigateParams, OpenParams, PressParams, ResizeParams, RulesParams,
-    ScreenshotParams, ScrollParams, SelectParams, StorageClearParams, StorageGetParams,
-    StorageKind, StorageSetParams, TabRef, TailParams, Target, ThrottleParams, TypeParams,
-    UploadParams, WaitForParams,
+    Addressed, AppearanceParams, BodyParams, ClickParams, ComponentParams, Cookie, CountCheck,
+    DEFAULT_WAIT_MS, DialogParams, DragParams, EvaluateParams, ExpectCheck, ExpectParams,
+    FillFormParams, FormField, HistoryParams, LOCATOR_GRAMMAR, LocateParams, MAX_LOCATOR_CHARS,
+    MAX_REF_CHARS, MAX_WAIT_MS, MouseAction, MouseParams, MouseStep, NavigateParams, OpenParams,
+    PressParams, ResizeParams, RulesParams, ScreenshotParams, ScrollParams, SelectParams,
+    StorageClearParams, StorageGetParams, StorageKind, StorageSetParams, TabRef, TailParams,
+    Target, ThrottleParams, TypeParams, UploadParams, WaitForParams,
 };
 pub use server::{Config, DiveServer};

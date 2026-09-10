@@ -27,6 +27,7 @@ ground, that is the reason.
 | Evaluate JS | `browser_evaluate` | `page_evaluate` (off unless enabled) |
 | Dialogs | `browser_handle_dialog` | `page_dialog` |
 | Viewport | `browser_resize` | `page_resize`, `page_devices` |
+| Assertions | 4 tools (`browser_verify_element_visible`, `browser_verify_list_visible`, `browser_verify_text_visible`, `browser_verify_value`) | 1 tool (`page_expect`) that checks visibility, text, values, counts, URL and title together, reports *every* check that did not hold rather than stopping at the first, says what was actually there, and can wait for them |
 | Locator help | `browser_generate_locator` | `page_locate` |
 | Route / mock | `browser_route`, `browser_unroute`, `browser_route_list` | `rules_set`, `rules_list` |
 | Offline / conditions | `browser_network_state_set` | `page_throttle` |
@@ -55,6 +56,5 @@ Nothing on this list has an equivalent in Playwright MCP.
 - PDF save (`browser_pdf_save`)
 - Raw keyboard primitives beyond `page_press`
 - Tracing and video (`browser_start_tracing`, `browser_start_video`, `browser_start_recording`)
-- Assertion tools (`browser_verify_*`)
 - Highlighting and annotation (`browser_highlight`, `browser_annotate`)
 - Browserbase's ground: isolated parallel contexts, and session reuse across processes

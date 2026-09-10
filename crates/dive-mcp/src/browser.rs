@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::BrowserError;
 use crate::params::{
-    AppearanceParams, DialogParams, DragParams, FillFormParams, MouseParams, ResizeParams,
-    SelectParams, StorageClearParams, StorageGetParams, StorageSetParams, Target, UploadParams,
-    WaitForParams,
+    AppearanceParams, DialogParams, DragParams, ExpectParams, FillFormParams, MouseParams,
+    ResizeParams, SelectParams, StorageClearParams, StorageGetParams, StorageSetParams, Target,
+    UploadParams, WaitForParams,
 };
 
 /// What a tool caller gets to know about a tab.
@@ -217,5 +217,12 @@ pub trait Browser: Send + Sync + 'static {
         &self,
         tab: TabId,
         params: MouseParams,
+    ) -> Result<serde_json::Value, BrowserError>;
+    /// Check several things about the page at once, reporting every one that
+    /// does not hold rather than only the first.
+    async fn page_expect(
+        &self,
+        tab: TabId,
+        params: ExpectParams,
     ) -> Result<serde_json::Value, BrowserError>;
 }

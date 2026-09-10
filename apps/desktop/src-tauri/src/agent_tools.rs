@@ -102,6 +102,11 @@ pub fn specs() -> Vec<ToolSpec> {
             obj(json!({"tab_id": tab, "from": locator, "to": locator}), &["from", "to"]),
         ),
         spec(
+            "page_expect",
+            "Check several things about the page at once; every check that does not hold is reported, not just the first. A check is one of: visible, hidden, text, no_text, value {locator, equals}, count {locator, equals|at_least|at_most}, url_includes, title_includes. Give timeout_ms to keep re-checking until they hold. A failure says what was actually there.".into(),
+            obj(json!({"tab_id": tab, "checks": {"type": "array", "items": {"type": "object", "properties": {"visible": locator, "hidden": locator, "text": {"type": "string"}, "no_text": {"type": "string"}, "value": {"type": "object", "properties": {"locator": locator, "equals": {"type": "string"}}, "required": ["locator", "equals"]}, "count": {"type": "object", "properties": {"locator": locator, "equals": {"type": "integer"}, "at_least": {"type": "integer"}, "at_most": {"type": "integer"}}, "required": ["locator"]}, "url_includes": {"type": "string"}, "title_includes": {"type": "string"}}, "additionalProperties": false}}, "timeout_ms": {"type": "integer"}}), &["checks"]),
+        ),
+        spec(
             "page_mouse",
             "Play a pointer gesture at viewport coordinates: steps is a list of {action, x, y} where action is move, down, up, click or wheel. The whole gesture is one call. Use page_click for anything a locator can name; this is for what it cannot -- canvases, maps, drawings, sliders with no accessible value.".into(),
             obj(json!({"tab_id": tab, "steps": {"type": "array", "items": {"type": "object", "properties": {"action": {"type": "string", "enum": ["move", "down", "up", "click", "wheel"]}, "x": {"type": "number"}, "y": {"type": "number"}, "button": {"type": "string", "enum": ["left", "right", "middle"]}, "delta_x": {"type": "number"}, "delta_y": {"type": "number"}, "delay_ms": {"type": "integer"}}, "required": ["action"], "additionalProperties": false}}}), &["steps"]),
@@ -478,6 +483,21 @@ async fn execute<B: Browser>(
                         from: input["from"].as_str().map(str::to_owned),
                         to: input["to"].as_str().map(str::to_owned),
                     },
+                )
+                .await
+                .map_err(err)?,
+        ),
+        "page_expect" => text(
+            browser
+                .page_expect(
+                    tab()?,
+                    serde_json::from_value(json!({
+                        "checks": input["checks"].clone(),
+                        "timeout_ms": input["timeout_ms"].clone(),
+                    }))
+                    .map_err(|e| {
+                        format!("checks must be a list of single-condition objects: {e}")
+                    })?,
                 )
                 .await
                 .map_err(err)?,

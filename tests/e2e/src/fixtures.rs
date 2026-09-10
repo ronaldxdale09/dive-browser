@@ -694,4 +694,12 @@ impl Browser for TestFakeBrowser {
     ) -> Result<serde_json::Value, BrowserError> {
         Ok(json!({"steps": params.steps.len()}))
     }
+
+    async fn page_expect(
+        &self,
+        _tab: TabId,
+        params: dive_mcp::ExpectParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({"ok": true, "checked": params.checks.len()}))
+    }
 }

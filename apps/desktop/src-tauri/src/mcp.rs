@@ -49,6 +49,12 @@ const GESTURE_STEP_CAP: usize = 200;
 /// How long a gesture's own pauses may add up to. The call blocks for that
 /// whole time, so it has to stay well inside a client's patience.
 const GESTURE_DELAY_CAP_MS: u64 = 10_000;
+/// Checks one `page_expect` may make.
+const EXPECT_CHECK_CAP: usize = 20;
+/// How long between re-checks while `page_expect` is waiting.
+const EXPECT_POLL_MS: u64 = 120;
+/// How many matches a visibility check looks at. Past this the answer is the
+/// same either way: something is visible.
 /// Largest string condition accepted by `page_wait_for`.
 const WAIT_TEXT_CAP: usize = 8 * 1024;
 /// Largest wheel delta accepted in one action.
@@ -568,6 +574,137 @@ fn dialog_opened(dialog: &crate::js_dialog::JsDialogAsked, action: &str) -> Valu
         },
         "hint": format!("{action} opened a dialog and the page is waiting on it. Answer it with page_dialog (accept true or false, text for a prompt), then carry on."),
     })
+}
+
+/// Run one check and say whether it held, and what was there if it did not.
+///
+/// The "what was there" half is the point: an assertion that fails without
+/// saying what it found instead costs another call to diagnose, and an agent
+/// writing a test will make that call every time.
+async fn run_check(
+    session: &ToolSession,
+    check: &dive_mcp::ExpectCheck,
+) -> Result<Value, BrowserError> {
+    let named = |what: String, passed: bool, actual: String| {
+        Ok(json!({"check": what, "passed": passed, "actual": actual}))
+    };
+    if let Some(locator) = &check.visible {
+        let seen = visible_matches(session, locator).await?;
+        let matched = locator::count(session, locator).await?;
+        return named(
+            format!("visible {locator:?}"),
+            seen > 0,
+            if matched > 0 {
+                // Told apart deliberately: "it is not there" and "it is there
+                // but nobody can see it" call for different fixes.
+                format!(
+                    "{matched} {} match but none are visible",
+                    plural(matched as usize, "element")
+                )
+            } else {
+                "nothing matches it".to_owned()
+            },
+        );
+    }
+    if let Some(locator) = &check.hidden {
+        let seen = visible_matches(session, locator).await?;
+        return named(
+            format!("hidden {locator:?}"),
+            seen == 0,
+            format!("{seen} {} still visible", plural(seen, "element")),
+        );
+    }
+    if let Some(text) = &check.text {
+        let found = locator::contains_text(session, text).await?;
+        return named(
+            format!("text {text:?}"),
+            found,
+            "the page does not show it".into(),
+        );
+    }
+    if let Some(text) = &check.no_text {
+        let found = locator::contains_text(session, text).await?;
+        return named(
+            format!("no_text {text:?}"),
+            !found,
+            "the page still shows it".into(),
+        );
+    }
+    if let Some(want) = &check.value {
+        locator::hold(session, &want.locator).await?;
+        let held = session
+            .call(
+                "Runtime.evaluate",
+                json!({"expression": "(() => { const el = window.__diveHeld; if (!el) return null; return el.value !== undefined ? String(el.value) : el.textContent; })()", "returnByValue": true}),
+            )
+            .await
+            .map_err(|e| other(e.to_string()))?;
+        let actual = held["result"]["value"].as_str().unwrap_or("");
+        return named(
+            format!("value of {:?} is {:?}", want.locator, want.equals),
+            actual == want.equals,
+            format!("it holds {actual:?}"),
+        );
+    }
+    if let Some(want) = &check.count {
+        let seen = locator::count(session, &want.locator).await?;
+        let passed = want.equals.is_none_or(|n| seen == n)
+            && want.at_least.is_none_or(|n| seen >= n)
+            && want.at_most.is_none_or(|n| seen <= n);
+        if want.equals.is_none() && want.at_least.is_none() && want.at_most.is_none() {
+            return Err(BrowserError::BadRequest(
+                "a count check needs equals, at_least or at_most".into(),
+            ));
+        }
+        return named(
+            format!("count of {:?}", want.locator),
+            passed,
+            format!("{seen} match"),
+        );
+    }
+    if let Some(want) = &check.url_includes {
+        let page = locator::page(session, 0).await?;
+        let url = page["url"].as_str().unwrap_or("");
+        return named(
+            format!("url includes {want:?}"),
+            url.contains(want.as_str()),
+            format!("the address is {url:?}"),
+        );
+    }
+    if let Some(want) = &check.title_includes {
+        let page = locator::page(session, 0).await?;
+        let title = page["title"].as_str().unwrap_or("");
+        return named(
+            format!("title includes {want:?}"),
+            title.contains(want.as_str()),
+            format!("the title is {title:?}"),
+        );
+    }
+    Err(BrowserError::BadRequest(
+        "each check needs exactly one of visible, hidden, text, no_text, value, count, url_includes or title_includes".into(),
+    ))
+}
+
+/// How many elements a locator matches that a person could actually see.
+///
+/// Matching is not the same as being visible: a menu that is in the DOM but
+/// collapsed matches its locator, and asserting on that would pass while the
+/// person sees nothing. The engine's own `visible=true` filter decides, so
+/// "visible" means here exactly what it means to a click.
+async fn visible_matches(session: &ToolSession, locator: &str) -> Result<usize, BrowserError> {
+    // `>>` scopes the next step inside the last, so this is "of the things
+    // that match, the ones that are visible" rather than a second locator.
+    let count = locator::count(session, &format!("{locator} >> visible=true")).await?;
+    Ok(count as usize)
+}
+
+/// "1 element" / "2 elements", so a failure reads as a sentence.
+fn plural(count: usize, word: &str) -> String {
+    if count == 1 {
+        word.to_owned()
+    } else {
+        format!("{word}s")
+    }
 }
 
 /// The button a gesture step means, or why it is not one.
@@ -2118,6 +2255,70 @@ impl Browser for AppBrowser {
             Ok(json!({"played": params.steps.len(), "pointer": {"x": x, "y": y}}))
         }, |dialog| Ok(dialog_opened(dialog, "The gesture"))))
         .await
+    }
+
+    async fn page_expect(
+        &self,
+        tab: TabId,
+        params: dive_mcp::ExpectParams,
+    ) -> Result<Value, BrowserError> {
+        if params.checks.is_empty() {
+            return Err(BrowserError::BadRequest(
+                "give at least one check: [{visible: 'role=button'}]".into(),
+            ));
+        }
+        if params.checks.len() > EXPECT_CHECK_CAP {
+            return Err(BrowserError::BadRequest(format!(
+                "check at most {EXPECT_CHECK_CAP} things at a time"
+            )));
+        }
+        let timeout = std::time::Duration::from_millis(
+            params.timeout_ms.unwrap_or(0).min(dive_mcp::MAX_WAIT_MS),
+        );
+        let session = self.session_for(tab).await?;
+        let deadline = std::time::Instant::now() + timeout;
+        let mut results;
+        loop {
+            results = Vec::with_capacity(params.checks.len());
+            for check in &params.checks {
+                results.push(run_check(&session, check).await?);
+            }
+            if results.iter().all(|r| r["passed"] == Value::Bool(true))
+                || std::time::Instant::now() >= deadline
+            {
+                break;
+            }
+            // Re-check rather than watch for a change: a check may be about
+            // anything, and polling is the only thing that answers all of
+            // them the same way.
+            tokio::time::sleep(std::time::Duration::from_millis(EXPECT_POLL_MS)).await;
+        }
+        let failed: Vec<&Value> = results
+            .iter()
+            .filter(|r| r["passed"] != Value::Bool(true))
+            .collect();
+        if failed.is_empty() {
+            return Ok(json!({"ok": true, "checked": results.len()}));
+        }
+        // An error rather than a quiet `ok: false`: an assertion that did not
+        // hold is the whole point of the call, and a caller that skims the
+        // answer must not read past it.
+        let lines: Vec<String> = failed
+            .iter()
+            .map(|r| {
+                format!(
+                    "{} — {}",
+                    r["check"].as_str().unwrap_or("?"),
+                    r["actual"].as_str().unwrap_or("did not hold")
+                )
+            })
+            .collect();
+        Err(BrowserError::BadRequest(format!(
+            "{} of {} checks did not hold:\n  {}",
+            failed.len(),
+            results.len(),
+            lines.join("\n  ")
+        )))
     }
 
     async fn console_tail(&self, tab: TabId, limit: usize) -> Result<Value, BrowserError> {
