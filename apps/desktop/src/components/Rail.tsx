@@ -3,7 +3,9 @@ import { AvatarImage } from "./AvatarImage";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowRight, Globe, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Settings2, Shield, SquarePlus, Trash2, X } from "lucide-react";
+import { ArrowDownToLine, ArrowRight, Globe, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Settings2, Shield, SquarePlus, Trash2, X } from "lucide-react";
+import { BuildBadge } from "./BuildBadge";
+import { useUpdates } from "../store/updates";
 import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { useBrowser } from "../store/browser";
@@ -118,21 +120,7 @@ export function Rail({ forceCollapsed = false, toggle = true }: { forceCollapsed
       {expanded ? <TabList /> : <span className="flex-1" aria-hidden />}
       {!isPrivateWindow() && <DefaultBrowserButton expanded={expanded} />}
       {!isPrivateWindow() && <ProfileChip variant={expanded ? "row" : "avatar"} placement="above" />}
-      <RailTooltip label="Settings" shortcut="⌘,"><button
-        type="button"
-        aria-label="Settings"
-        onClick={() => useBrowser.getState().toggle("settings", true)}
-        className={
-          expanded
-            ? "flex h-[var(--row-h)] shrink-0 items-center gap-2.5 rounded-lg px-2 text-xs text-ink-3 hover:bg-surface-2 hover:text-ink"
-            : "grid h-[var(--row-h)] w-9 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink"
-        }
-      >
-        <span className="grid size-7 shrink-0 place-items-center">
-          <Icon icon={Settings2} />
-        </span>
-        {expanded && "Settings"}
-      </button></RailTooltip>
+      <RailFooter expanded={expanded} />
       {menu && <WorkspaceMenu id={menu.id} x={menu.x} y={menu.y} onClose={() => setMenu(null)} />}
     </nav>
   );
@@ -219,6 +207,78 @@ function TabList() {
       </div>
       <TabStrip orientation="vertical" />
     </section>
+  );
+}
+
+/**
+ * The foot of the rail: Settings, and beside it the two things that report on
+ * the app rather than the page — which build this is, and whether a newer one
+ * is waiting. Settings used to have the row to itself, which left the badge
+ * squeezing the window's name up in the title strip; here all three sit on one
+ * line, Settings at the left and the status marks at the right.
+ *
+ * Collapsed there is no room for a badge beside anything, so the update
+ * control stacks above Settings and the build badge waits for the rail to open.
+ */
+function RailFooter({ expanded }: { expanded: boolean }) {
+  const settings = (
+    <RailTooltip label="Settings" shortcut="⌘,"><button
+      type="button"
+      aria-label="Settings"
+      onClick={() => useBrowser.getState().toggle("settings", true)}
+      className={
+        expanded
+          ? "flex h-[var(--row-h)] min-w-0 shrink items-center gap-2.5 rounded-lg px-2 text-xs text-ink-3 hover:bg-surface-2 hover:text-ink"
+          : "grid h-[var(--row-h)] w-9 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink"
+      }
+    >
+      <span className="grid size-7 shrink-0 place-items-center">
+        <Icon icon={Settings2} />
+      </span>
+      {expanded && "Settings"}
+    </button></RailTooltip>
+  );
+
+  if (!expanded) {
+    return (
+      <div className="flex shrink-0 flex-col items-center gap-1">
+        <RailUpdateButton />
+        {settings}
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-[var(--row-h)] shrink-0 items-center gap-1 pr-1">
+      {settings}
+      <span className="min-w-1 flex-1" aria-hidden />
+      {!isPrivateWindow() && <BuildBadge align="end" side="above" />}
+      <RailUpdateButton />
+    </div>
+  );
+}
+
+/**
+ * Present only when an update is actually waiting, so the foot of the rail
+ * stays quiet the rest of the time. A dot rather than a word: the rail is
+ * narrow, and Settings › About has the detail.
+ */
+function RailUpdateButton() {
+  const status = useUpdates((s) => s.status);
+  const version = useUpdates((s) => s.update?.version);
+  const openSettings = useBrowser((s) => s.openSettings);
+  if (status !== "available") return null;
+  return (
+    <RailTooltip label={`Dive ${version ?? ""} is ready to install`}>
+      <button
+        type="button"
+        aria-label="Update available"
+        onClick={() => openSettings("about")}
+        className="relative grid size-7 shrink-0 place-items-center rounded-lg text-ink-3 hover:bg-surface-2 hover:text-ink"
+      >
+        <Icon icon={ArrowDownToLine} size={14} />
+        <span aria-hidden className="absolute top-1 right-1 size-1.5 rounded-full bg-highlight" />
+      </button>
+    </RailTooltip>
   );
 }
 

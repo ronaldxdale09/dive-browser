@@ -151,9 +151,6 @@ export function App() {
                   <RailToggle expanded />
                 </span>
                 <Wordmark />
-                <span data-tauri-drag-region="false" onMouseDown={(e) => e.stopPropagation()} className="shrink-0">
-                  <BuildBadge align="start" />
-                </span>
               </>
             )}
             {!effectiveRailExpanded && isPrivateWindow() && <span className="ml-auto font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
@@ -174,8 +171,8 @@ export function App() {
       </div>
       {oneBar ? (
         <header className="col-start-2 row-start-1 flex min-w-0 items-center">
-          {/* The build badge lives on the title row beside the name; with the
-              rail too narrow to carry a title row, it leads this one instead. */}
+          {/* The build badge lives at the foot of an open rail; with the rail
+              collapsed there is no room for it there, so it leads this row. */}
           {!effectiveRailExpanded && <span className="pl-2"><BuildBadge align="start" /></span>}
           {/* Left to right: navigation and the address, the page's actions,
               the feature cluster, then the browser's own controls in the

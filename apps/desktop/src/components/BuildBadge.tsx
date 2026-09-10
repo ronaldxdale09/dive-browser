@@ -16,7 +16,12 @@ import { copyText } from "../lib/clipboard";
  * release. Sits in the title bar as a quiet pill; clicking it shows the
  * version, build number, commit and when it was compiled, for bug reports.
  */
-export function BuildBadge({ align = "end" }: { /** Which edge the details panel hangs from: `start` when the badge sits at the left of a bar. */ align?: "start" | "end" } = {}) {
+export function BuildBadge({ align = "end", side = "below" }: {
+  /** Which edge the details panel hangs from: `start` when the badge sits at the left of a bar. */
+  align?: "start" | "end";
+  /** Which way the panel opens: `above` when the badge sits at the foot of the rail. */
+  side?: "below" | "above";
+} = {}) {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [open, setOpen] = useState(false);
   const dismiss = useCallback(() => setOpen(false), []);
@@ -41,12 +46,14 @@ export function BuildBadge({ align = "end" }: { /** Which edge the details panel
   const channel = info?.build.channel ?? (import.meta.env.DEV ? "dev" : "beta");
   const dev = channel === "dev";
   const label = dev ? "DEV" : "BETA";
-  // Amber, not red: red beside a Capture control reads as "recording", and
-  // a development build is a note, not an alarm.
+  // A beta build is the normal state of this app, so its badge is furniture:
+  // neutral, the same weight as the labels around it. DEV keeps amber, since
+  // running a development build by accident is worth catching the eye. Amber,
+  // not red: red beside a Capture control reads as "recording".
   const tone = dev
     ? "border-warn/40 bg-warn/15 text-warn hover:bg-warn/25 aria-expanded:bg-warn/25"
-    : "border-highlight/40 bg-highlight/15 text-highlight hover:bg-highlight/25 aria-expanded:bg-highlight/25";
-  const dot = dev ? "bg-warn" : "bg-highlight";
+    : "border-line-2 bg-surface-2 text-ink-3 hover:bg-surface-3 hover:text-ink-2 aria-expanded:bg-surface-3 aria-expanded:text-ink-2";
+  const dot = dev ? "bg-warn" : "bg-ink-3/60";
   const built = info ? formatBuilt(info.build.built_at ?? 0) : null;
   const summary = info ? `Dive ${info.version} (${label.toLowerCase()} build ${info.build.number}, built ${built ?? "unknown"})` : "";
 
@@ -65,14 +72,14 @@ export function BuildBadge({ align = "end" }: { /** Which edge the details panel
           aria-haspopup="dialog"
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
-          className={`pressable flex h-5 shrink-0 items-center gap-1.5 rounded-full border px-2 font-mono text-[10px] font-semibold tracking-[0.12em] transition-[color,background-color,transform] ${tone}`}
+          className={`pressable flex h-5 shrink-0 items-center gap-1.5 rounded-md border px-1.5 font-mono text-[10px] font-semibold tracking-[0.1em] transition-[color,background-color,transform] ${tone}`}
         >
           <span className={`size-1.5 rounded-full ${dot}`} aria-hidden />
           {label}
         </button>
       </Tooltip>
       {open && (
-        <div ref={panel} role="dialog" aria-label="Build details" className={`absolute z-50 mt-1.5 w-64 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl ${align === "start" ? "left-0" : "right-0"}`}>
+        <div ref={panel} role="dialog" aria-label="Build details" className={`absolute z-50 w-64 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl ${align === "start" ? "left-0" : "right-0"} ${side === "above" ? "bottom-full mb-1.5" : "mt-1.5"}`}>
           <div className="flex items-center gap-2 px-2 pt-1 pb-1.5">
             <span className={`size-1.5 rounded-full ${dot}`} aria-hidden />
             <span className="text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">{dev ? "Development build" : "Beta release"}</span>

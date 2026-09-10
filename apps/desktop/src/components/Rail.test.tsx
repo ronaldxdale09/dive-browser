@@ -5,6 +5,7 @@ import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { useDefaultBrowser } from "../store/defaultBrowser";
+import { useUpdates } from "../store/updates";
 import { Rail, RailToggle } from "./Rail";
 
 const personal: Workspace = {
@@ -96,6 +97,31 @@ describe("Rail", () => {
     // The strip renders the same control on its own.
     render(<RailToggle expanded />);
     expect(screen.getByRole("button", { name: "Collapse the rail" })).toBeTruthy();
+  });
+
+  it("shares the foot of the rail between Settings, the build badge and an update", async () => {
+    useUpdates.setState({ status: "available", update: { version: "9.9.9" } as never });
+    render(<Rail />);
+    // Settings no longer owns the row: all three sit on it.
+    expect(screen.getByRole("button", { name: "Settings" })).toBeTruthy();
+    // The label follows the channel (DEV under the test runner, BETA in a
+    // release), so the assertion is on the badge being there at all.
+    expect(await screen.findByRole("button", { name: /build$/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Update available" })).toBeTruthy();
+  });
+
+  it("offers the update only when one is waiting", () => {
+    useUpdates.setState({ status: "none", update: null });
+    render(<Rail />);
+    expect(screen.queryByRole("button", { name: "Update available" })).toBeNull();
+  });
+
+  it("keeps the badge out of a collapsed rail, where nothing fits beside an icon", async () => {
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, rail_expanded: false } });
+    render(<Rail />);
+    await waitFor(() => expect(screen.queryByText("Workspaces")).toBeNull());
+    expect(screen.getByRole("button", { name: "Settings" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /build$/ })).toBeNull();
   });
 
   it("confirms before deleting a workspace and its tabs", () => {
