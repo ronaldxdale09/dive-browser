@@ -7,6 +7,11 @@
 #   schtasks /run /tn DiveRebuild
 #
 # then poll C:\dive-rebuild.log for DONE.
+# -Installer also builds the .exe installer. NSIS rather than WiX: WiX v3
+# candle does not run on Windows-on-ARM, and `--bundles all` stops there
+# before it reaches anything else.
+param([switch] $Installer)
+
 $ProgressPreference = "SilentlyContinue"
 $log = "C:\dive-rebuild.log"
 Remove-Item $log -ErrorAction SilentlyContinue
@@ -39,5 +44,6 @@ Run "pnpm install" "pnpm install --frozen-lockfile"
 # frontend: the chrome webview is created, nothing renders in it, no error is
 # logged anywhere, and the window is simply black. `--no-bundle` stops before
 # the installer, which is all that was worth avoiding here.
-Run "tauri build" "pnpm --filter @dive/desktop tauri build --no-bundle --config src-tauri/tauri.no-updater.conf.json"
+$bundle = if ($Installer) { "--bundles nsis" } else { "--no-bundle" }
+Run "tauri build" "pnpm --filter @dive/desktop tauri build $bundle --config src-tauri/tauri.no-updater.conf.json"
 Say "DONE"
