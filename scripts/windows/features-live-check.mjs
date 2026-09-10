@@ -39,10 +39,12 @@ async function connect() {
 const ev = await connect();
 const invoke = async (command, args = {}, ms) => {
   const started = Date.now();
-  process.stdout.write(`  ${command} ... `);
+  // A whole line, not a prefix: redirected to a file, a partial write sits in
+  // the buffer, and the log then stops one call earlier than the hang.
+  console.log(`  -> ${command}`);
   const m = await ev(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)},${JSON.stringify(args)}).then(d=>({ok:d})).catch(e=>({err:String(e&&e.message||e)}))`, ms);
   const v = m.result?.result?.value;
-  console.log(`${Date.now() - started}ms`);
+  console.log(`     ${command} took ${Date.now() - started}ms`);
   if (!v || v.err) throw Error(`${command}: ${v?.err ?? "no reply"}`);
   return v.ok;
 };
