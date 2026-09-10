@@ -64,14 +64,16 @@ pub fn sample(app: &tauri::AppHandle<crate::Runtime>) -> AppResult<Option<String
 #[cfg(target_os = "windows")]
 #[allow(unsafe_code)] // Reading the screen is Win32-only.
 pub fn sample(_app: &tauri::AppHandle<crate::Runtime>) -> AppResult<Option<String>> {
-    use windows::Win32::Foundation::POINT;
+    use windows::Win32::Foundation::{COLORREF, POINT};
     use windows::Win32::Graphics::Gdi::{CLR_INVALID, GetDC, GetPixel, ReleaseDC};
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE, VK_LBUTTON};
     use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
-    // The high bit is "down right now"; the low bit is "was pressed since the
-    // last call" and would report the click that opened the picker.
-    let down = |key: i32| unsafe { GetAsyncKeyState(key) as u16 & 0x8000 != 0 };
+    // The high bit of the returned i16 is "down right now", so a negative
+    // value is a held key. The low bit means "pressed since the last call",
+    // which would report the click that opened the picker; ignoring it is the
+    // whole reason for reading the sign rather than testing for non-zero.
+    let down = |key: i32| unsafe { GetAsyncKeyState(key) } < 0;
 
     // The click on "Pick a colour" is very likely still held. Sampling now
     // would return the colour of the button the user just pressed, so let go
@@ -100,8 +102,8 @@ pub fn sample(_app: &tauri::AppHandle<crate::Runtime>) -> AppResult<Option<Strin
         // reads any pixel, not only Dive's own window.
         let screen = unsafe { GetDC(None) };
         let colour = unsafe { GetPixel(screen, point.x, point.y) };
-        unsafe { ReleaseDC(None, screen) };
-        if colour == CLR_INVALID {
+        let _ = unsafe { ReleaseDC(None, screen) };
+        if colour == COLORREF(CLR_INVALID) {
             return Err(AppError::new("that pixel could not be read"));
         }
         // COLORREF is 0x00bbggrr, the reverse of the hex the panel shows.
