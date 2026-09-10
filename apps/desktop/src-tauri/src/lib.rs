@@ -94,15 +94,31 @@ pub const CHROME_LABEL: &str = "chrome";
 /// Label of the main window.
 pub const MAIN_WINDOW: &str = "main";
 
+/// Which window a Dock click should bring back, given the labels that exist.
+///
+/// The main window when it is still around, otherwise any other — a torn-off
+/// tab or an installed app's window is better than nothing. `None` means
+/// there is nothing to raise and a fresh window has to be opened.
+#[cfg(target_os = "macos")]
+fn window_for_dock_click<'a>(labels: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
+    let mut first = None;
+    for label in labels {
+        if label == MAIN_WINDOW {
+            return Some(label);
+        }
+        first = first.or(Some(label));
+    }
+    first
+}
+
 /// Bring a window back for a Dock click: unminimize the main window (or the
 /// first one still around), else open a fresh one.
 #[cfg(target_os = "macos")]
 fn reopen_window(app: &tauri::AppHandle<Runtime>) {
     use tauri::Manager as _;
     let windows = app.windows();
-    let window = windows
-        .get(MAIN_WINDOW)
-        .or_else(|| windows.values().next())
+    let window = window_for_dock_click(windows.keys().map(String::as_str))
+        .and_then(|label| windows.get(label))
         .cloned();
     tracing::info!(found = window.is_some(), "dock reopen");
     match window {
@@ -430,18 +446,17 @@ pub fn run() {
                 }
             }
         }
-        // A click on the Dock icon while every window is minimized (or none
-        // is left). The runtime leaves this to the app, so without it the
-        // click did nothing and the window stayed in the Dock.
+        // A Dock click always brings a window back. macOS reports
+        // `has_visible_windows` as true for a window that is only minimized,
+        // so the guard that used to sit here — reopen only when there are no
+        // visible windows — meant clicking the Dock icon of a minimized Dive
+        // did nothing at all. Measured on macOS 27 by minimizing the window
+        // and firing the same delegate method a Dock click does (`open -a`):
+        // the event arrives, the flag is true, and the window stayed down.
+        // Raising a window that is already up merely focuses it, which is what
+        // a Dock click should do anyway.
         #[cfg(target_os = "macos")]
-        tauri::RunEvent::Reopen {
-            has_visible_windows,
-            ..
-        } => {
-            if !has_visible_windows {
-                reopen_window(app);
-            }
-        }
+        tauri::RunEvent::Reopen { .. } => reopen_window(app),
         tauri::RunEvent::Exit => tracing::info!("event loop exited"),
         // Links the system hands us once Dive is the default browser (or a
         // file dropped on the Dock icon).
@@ -961,6 +976,18 @@ fn restore_session(app: &tauri::App<Runtime>) {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn dock_click_prefers_the_main_window_then_anything_else() {
+        use super::window_for_dock_click;
+        assert_eq!(window_for_dock_click(["pop-1-abc", "main"]), Some("main"));
+        assert_eq!(window_for_dock_click(["main"]), Some("main"));
+        // A torn-off tab or an installed app's window is better than nothing.
+        assert_eq!(window_for_dock_click(["pop-1-abc"]), Some("pop-1-abc"));
+        // Nothing left to raise: the caller opens a fresh window.
+        assert_eq!(window_for_dock_click([]), None);
+    }
+
     #[test]
     fn startup_urls_turn_an_app_flag_into_a_launch_url() {
         let urls = startup_urls(
