@@ -117,4 +117,8 @@ const ps = (script) =>
     "uninstall left the shortcut behind",
   );
   say("web app launcher: removed on uninstall ✓");
+
+// The socket keeps the event loop alive, so say so rather than leaving a
+// finished check looking like a hung one.
+process.exit(0);
 }

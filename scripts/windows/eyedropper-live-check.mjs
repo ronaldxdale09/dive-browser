@@ -118,3 +118,7 @@ assert.equal(
   `sampled ${picked.hex} where ${SWATCH.hex} was painted -- the sampler read the wrong pixel`,
 );
 console.log(`eyedropper: ${picked.hex} ✓`);
+
+// The socket keeps the event loop alive, so say so rather than leaving a
+// finished check looking like a hung one.
+process.exit(0);
