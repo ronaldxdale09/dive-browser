@@ -9,16 +9,22 @@
 #   powershell -ExecutionPolicy Bypass -File run-in-session.ps1 -Script C:\check.ps1
 param(
   [Parameter(Mandatory = $true)][string] $Script,
-  [string] $Out = "C:\dive-session-out.txt",
+  [string] $Out = "",
   [int] $TimeoutSeconds = 120
 )
 
 $user = (Get-CimInstance Win32_ComputerSystem).UserName
 $name = "DiveSessionRun"
+# The logged-on user is not elevated, so the task cannot write to C:\ root --
+# it just exits 1 and leaves no output. Land in that user's own temp instead.
+if (-not $Out) {
+  $home = "C:\Users\" + $user.Split("\")[-1]
+  $Out = Join-Path $home "AppData\Local\Temp\dive-session-out.txt"
+}
 Remove-Item $Out -ErrorAction SilentlyContinue
 
 # schtasks /tr mangles nested quotes, so the redirect lives in a .cmd wrapper.
-$wrapper = "C:\dive-session-run.cmd"
+$wrapper = Join-Path (Split-Path $Out) "dive-session-run.cmd"
 $cmd = '@echo off' + "`r`n" + 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + $Script + '" > "' + $Out + '" 2>&1'
 Set-Content $wrapper $cmd -Encoding ASCII
 schtasks /create /tn $name /tr $wrapper /sc once /st 00:00 /ru $user /it /f | Out-Null
