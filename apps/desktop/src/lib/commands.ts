@@ -364,6 +364,23 @@ export function formatChord(chord: string, mac: boolean = isMac()): string {
 }
 
 /**
+ * A chord written in macOS glyphs, spelled for the platform it is shown on.
+ *
+ * Most of the chrome writes its shortcuts inline as `⌘R` rather than going
+ * through `formatChord`, which is fine on macOS and wrong everywhere else: a
+ * Windows build was telling people to press ⌘T. Translating at the point of
+ * display fixes every one of those at once, and leaves a chord that is
+ * already plain text alone.
+ */
+export function displayChord(chord: string, mac: boolean = isMac()): string {
+  if (mac) return chord;
+  const named: Record<string, string> = { "⌘": "Ctrl+", "⌃": "Ctrl+", "⌥": "Alt+", "⇧": "Shift+" };
+  const spelled = chord.replace(/[⌘⌃⌥⇧]/g, (glyph) => named[glyph] ?? glyph);
+  // ⌫ and ⌦ are glyphs for keys Windows spells out.
+  return spelled.replace(/⌫/g, "Backspace").replace(/⌦/g, "Delete").replace(/⎋/g, "Esc");
+}
+
+/**
  * Browser-global chords that keep working while the omnibox or another field
  * has focus. Everything else is the field's own business there: ⌘A selects
  * its text, Enter submits it, and a bare letter is typing.

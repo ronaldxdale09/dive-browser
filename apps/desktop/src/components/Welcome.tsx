@@ -8,6 +8,7 @@ import { usePrefs } from "../store/prefs";
 import { OrbBurst } from "./OrbBurst";
 import { CharacterBg } from "./CharacterBg";
 import { AgentIcon } from "./agent/AgentIcon";
+import { displayChord } from "../lib/commands";
 
 // Load the tour only after an explicit request, never on recurring empty tabs.
 const FeatureReel = lazy(() => import("./FeatureReel").then((module) => ({ default: module.FeatureReel })));
@@ -98,6 +99,7 @@ function OptionalFeatureTour() {
   );
 }
 function Kbd({ children, dim = false }: { children: string; dim?: boolean }) {
+  children = displayChord(children);
   return <kbd className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${dim ? "bg-surface-3 text-ink-3" : "bg-ground/15"}`}>{children}</kbd>;
 }
 

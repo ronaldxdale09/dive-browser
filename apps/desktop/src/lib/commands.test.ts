@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import menuSource from "../../src-tauri/src/menu.rs?raw";
-import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK } from "./commands";
+import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord } from "./commands";
 import { events, ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "./ipc";
@@ -376,5 +376,29 @@ describe("fill video", () => {
     const { SHORTCUTS, COMMAND_TITLES } = await import("./commands");
     expect(SHORTCUTS["mod+shift+f"]).toBe("tab.fillVideo");
     expect(COMMAND_TITLES["tab.fillVideo"]).toBe("Fill tab with video");
+  });
+});
+
+describe("displayChord", () => {
+  it("leaves macOS glyphs alone on macOS", () => {
+    expect(displayChord("⌘⇧Space", true)).toBe("⌘⇧Space");
+    expect(displayChord("⌘R", true)).toBe("⌘R");
+  });
+
+  it("spells the modifiers out everywhere else", () => {
+    // A Windows build was telling people to press ⌘T.
+    expect(displayChord("⌘T", false)).toBe("Ctrl+T");
+    expect(displayChord("⌘⇧Space", false)).toBe("Ctrl+Shift+Space");
+    expect(displayChord("⌘⌥I", false)).toBe("Ctrl+Alt+I");
+  });
+
+  it("spells out the keys that are glyphs on a Mac keyboard", () => {
+    expect(displayChord("⌫", false)).toBe("Backspace");
+    expect(displayChord("⎋", false)).toBe("Esc");
+  });
+
+  it("leaves a chord that is already plain text untouched", () => {
+    expect(displayChord("F12", false)).toBe("F12");
+    expect(displayChord("Enter", false)).toBe("Enter");
   });
 });
