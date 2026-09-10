@@ -67,6 +67,12 @@ jobs:
         if: runner.os == 'macOS'
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # The build without whisper.cpp is what Windows-on-ARM ships, and no
+      # other job compiles it -- the cfg had drifted far enough that clippy
+      # failed on it while every green run said otherwise.
+      - name: Lint the build without the local transcription engine
+        if: runner.os == 'macOS'
+        run: cargo clippy -p dive-desktop --all-targets --no-default-features --features cef -- -D warnings
       - run: cargo test --workspace
       - run: cargo audit
         if: runner.os == 'macOS'

@@ -765,8 +765,17 @@ pub fn is_running(app: &AppHandle<Runtime>, tab: TabId) -> bool {
 
 #[cfg(whisper_enabled)]
 type LocalContext = whisper_rs::WhisperState;
+/// Stands in for the engine's state where the engine is not compiled in.
+///
+/// A plain `()` would be the obvious choice and is the wrong one: every
+/// binding and match arm that carries a context downstream then becomes a
+/// lint about matching over a unit, in code whose shape has nothing to do
+/// with units. Nothing ever constructs this -- `load_context` returns an
+/// error on this build -- so an empty type says that too.
 #[cfg(not(whisper_enabled))]
-type LocalContext = ();
+pub(crate) struct NoLocalEngine;
+#[cfg(not(whisper_enabled))]
+type LocalContext = NoLocalEngine;
 
 #[cfg(whisper_enabled)]
 fn load_context(path: &std::path::Path) -> Result<LocalContext, String> {
