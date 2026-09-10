@@ -669,7 +669,17 @@ impl<T: UserEvent> WinitCefApp<T> {
                 },
             })
             .next()
-            .unwrap_or(cef::RuntimeStyle::DEFAULT);
+            // Windows has no working default here. CEF's default resolves to
+            // the Chrome style, which owns its own window and cannot be
+            // parented into a child HWND -- asking it to be one crashes
+            // inside CreateBrowserSync rather than failing. Alloy is the
+            // client-owned style, which is what a chrome drawn by the app
+            // needs, and what macOS already gets.
+            .unwrap_or(if cfg!(windows) {
+                cef::RuntimeStyle::ALLOY
+            } else {
+                cef::RuntimeStyle::DEFAULT
+            });
 
         log::info!(
             "cef webview {:?}: bounds {}x{} at ({}, {}), scale {scale}, style {cef_runtime_style:?}",
