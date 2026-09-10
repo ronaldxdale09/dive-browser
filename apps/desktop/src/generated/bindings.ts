@@ -108,10 +108,14 @@ export const commands = {
 	/**  The colours a page paints, most-used first. */
 	tabPalette: (id: TabId) => typedError<Palette, AppError>(__TAURI_INVOKE("tab_palette", { id })),
 	/**
-	 *  Open the eyedropper in the page and return the colour chosen.
+	 *  Sample a pixel with the system eyedropper and return the colour chosen.
 	 *
 	 *  `None` means the person dismissed it, which is an outcome rather than an
 	 *  error: the caller closes the cursor and says nothing.
+	 *
+	 *  The page is put on screen first even though the sampler can reach any
+	 *  pixel: the colour being reached for is almost always one this tab is
+	 *  painting, and the panel sits over it.
 	 */
 	tabEyedropper: (id: TabId) => typedError<{
 	/**  `#rrggbb`. */

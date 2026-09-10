@@ -1,18 +1,17 @@
-// The colours a page actually uses, and an eyedropper over any pixel of it.
+// The colours a page actually uses.
 //
 // ColorZilla and its kin read colours out of the DOM, which means they can
 // tell you about a `background-color` but not about a pixel inside a canvas,
-// a video frame or an image. Chromium's EyeDropper samples the composited
-// surface, so it answers for every one of those — including a gradient, where
-// the DOM only holds the stops and never the colour under the cursor.
+// a video frame or an image. Picking a pixel is the system eyedropper's job
+// (see `eyedropper.rs`); this script answers the other half of the question —
+// which colours the page leans on, and for what.
 //
 // The palette is gathered from computed styles rather than the stylesheet, so
 // a custom property that resolves at runtime is reported as the colour it
 // actually paints, and each colour carries how often it is used and what for.
 //
-// `__MODE__` is "palette" or "pick"; `return` carries the answer out.
+// `return` carries the answer out.
 
-const MODE = __MODE__;
 const MAX_ELEMENTS = 4000;
 
 /** `rgb()`/`rgba()` as 8-bit channels, or null when it paints nothing. */
@@ -30,21 +29,6 @@ const parse = (value) => {
 };
 
 const hex = ({ r, g, b }) => "#" + [r, g, b].map((n) => Math.round(n).toString(16).padStart(2, "0")).join("");
-
-if (MODE === "pick") {
-  // Requires a user gesture, which the caller supplies. A cancelled pick
-  // rejects, and that is a normal outcome rather than a failure to report.
-  return (async () => {
-    if (typeof EyeDropper !== "function") return { error: "unsupported" };
-    try {
-      const result = await new EyeDropper().open();
-      return { color: result.sRGBHex };
-    } catch (e) {
-      const name = e && e.name ? e.name : "";
-      return { error: name === "AbortError" ? "cancelled" : String((e && e.message) || e) };
-    }
-  })();
-}
 
 // --- palette ---------------------------------------------------------------
 

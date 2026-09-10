@@ -155,11 +155,7 @@ pub fn formats(value: &str) -> Option<ColorFormats> {
     })
 }
 
-async fn evaluate(
-    session: &dive_cdp::CdpSession,
-    script: String,
-    user_gesture: bool,
-) -> AppResult<serde_json::Value> {
+async fn evaluate(session: &dive_cdp::CdpSession, script: String) -> AppResult<serde_json::Value> {
     let result = session
         .call(
             "Runtime.evaluate",
@@ -167,7 +163,6 @@ async fn evaluate(
                 "expression": script,
                 "returnByValue": true,
                 "awaitPromise": true,
-                "userGesture": user_gesture,
             }),
         )
         .await
@@ -183,42 +178,37 @@ pub(crate) async fn tab_palette(
     id: dive_core::TabId,
 ) -> AppResult<Palette> {
     let session = crate::commands::cdp_for(&state, id)?;
-    let script = crate::pagescript::build("color.js", &[("__MODE__", "\"palette\"".into())]);
-    let value = evaluate(&session, script, false).await?;
+    let script = crate::pagescript::build("color.js", &[]);
+    let value = evaluate(&session, script).await?;
     let mut palette: Palette = serde_json::from_value(value)
         .map_err(|e| AppError::new(format!("the palette came back in an odd shape: {e}")))?;
     palette.theme_color = palette.theme_color.filter(|t| !t.is_empty());
     Ok(palette)
 }
 
-/// Open the eyedropper in the page and return the colour chosen.
+/// Sample a pixel with the system eyedropper and return the colour chosen.
 ///
 /// `None` means the person dismissed it, which is an outcome rather than an
 /// error: the caller closes the cursor and says nothing.
+///
+/// The page is put on screen first even though the sampler can reach any
+/// pixel: the colour being reached for is almost always one this tab is
+/// painting, and the panel sits over it.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn tab_eyedropper(
-    state: tauri::State<'_, crate::state::AppState>,
+    app: tauri::AppHandle<crate::Runtime>,
     id: dive_core::TabId,
 ) -> AppResult<Option<ColorFormats>> {
-    let session = crate::commands::cdp_for(&state, id)?;
-    let script = crate::pagescript::build("color.js", &[("__MODE__", "\"pick\"".into())]);
-    // EyeDropper refuses without a user gesture; the click that reached this
-    // command is one, so it is carried through.
-    let value = evaluate(&session, script, true).await?;
-    if let Some(error) = value["error"].as_str() {
-        return match error {
-            "cancelled" => Ok(None),
-            "unsupported" => Err(AppError::new(
-                "This build of Chromium has no eyedropper. Pick from the palette instead.",
-            )),
-            other => Err(AppError::new(format!("the eyedropper failed: {other}"))),
-        };
-    }
-    let Some(hex) = value["color"].as_str() else {
-        return Ok(None);
-    };
-    formats(hex).map(Some).ok_or_else(|| {
+    crate::commands::focus_page(&app, id)?;
+    let picked = tauri::async_runtime::spawn_blocking({
+        let app = app.clone();
+        move || crate::eyedropper::sample(&app)
+    })
+    .await
+    .map_err(AppError::new)??;
+    let Some(hex) = picked else { return Ok(None) };
+    formats(&hex).map(Some).ok_or_else(|| {
         AppError::new(format!(
             "the eyedropper returned a colour we cannot read: {hex}"
         ))

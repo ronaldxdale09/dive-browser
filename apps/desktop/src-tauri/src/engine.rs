@@ -1154,6 +1154,22 @@ impl TabHost {
         self.apply_visibility()
     }
 
+    /// Give the page itself the keyboard. Chromium will not open an
+    /// eyedropper for a frame that is not focused, and a picker asked for
+    /// from the dock arrives while the chrome webview holds focus, so the
+    /// caller has to hand it back first.
+    pub fn focus_page(&self, id: TabId) -> tauri::Result<()> {
+        if let Some(popout) = self.popouts.get(&id) {
+            popout.window.set_focus()?;
+        } else {
+            self.window.set_focus()?;
+        }
+        if let Some(view) = self.views.get(&id) {
+            let _ = view.set_focus();
+        }
+        Ok(())
+    }
+
     /// Bring `id` back from its own window into the main one. The caller
     /// decides whether it becomes the active tab.
     pub fn attach(&mut self, id: TabId) -> tauri::Result<()> {

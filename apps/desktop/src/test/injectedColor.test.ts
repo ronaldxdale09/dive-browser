@@ -13,7 +13,7 @@ interface Result { colors: Entry[]; theme_color: string; scanned: number }
 
 function palette(html: string): Result {
   document.body.innerHTML = html;
-  return eval(buildInjected("color.js", { __MODE__: '"palette"' })) as Result;
+  return eval(buildInjected("color.js", {})) as Result;
 }
 const hexes = (r: Result) => r.colors.map((c) => c.hex);
 

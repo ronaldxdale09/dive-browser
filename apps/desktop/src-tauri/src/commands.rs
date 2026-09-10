@@ -1695,6 +1695,23 @@ pub(crate) fn on_main<T: Send + 'static>(
         .map_err(|_| AppError::new("the main thread dropped the command"))?
 }
 
+/// Put `id` on screen and give its page the keyboard, then say so.
+///
+/// The eyedropper needs both: Chromium reads the pixels it is painting, so a
+/// hidden tab has none, and it refuses to open a picker for an unfocused
+/// frame. Clicking the dock's button leaves focus in the chrome webview, so
+/// without this the picker would abort the moment it opened.
+pub(crate) fn focus_page(app: &AppHandle<Runtime>, id: TabId) -> AppResult<()> {
+    on_main(app, move |main, app, state| {
+        activate_tab(main, app, state, id)?;
+        let mut host = lock(&state.host);
+        let host = host
+            .as_mut()
+            .ok_or_else(|| AppError::new("engine not ready"))?;
+        host.focus_page(id).map_err(AppError::new)
+    })
+}
+
 /// Show `id` (recreating its view if it was discarded), persist it as the
 /// active tab and announce the change.
 pub fn activate_tab(

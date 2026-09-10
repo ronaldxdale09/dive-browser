@@ -75,7 +75,8 @@ apple-native-keyring-store = { version = "1", features = ["keychain"] }
 core-foundation = "0.10"
 whisper-rs = { version = "0.14", optional = true, features = ["metal"] }
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSView", "NSWindow"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSView", "NSWindow", "NSColor", "NSColorSampler", "NSColorSpace"] }
+block2 = "0.6"
 
 [features]
 default = ["cef", "whisper"]

@@ -30,8 +30,9 @@ function grade(ratio: number): { label: string; tone: string } {
  * The page's colours: an eyedropper over any pixel, and the palette the page
  * actually paints, ranked by use.
  *
- * The eyedropper is Chromium's own, so it reads a pixel inside a canvas, a
- * video frame or a gradient — the places a DOM-reading extension is blind to.
+ * The eyedropper is the system's, so it reads any pixel on screen — inside a
+ * canvas, a video frame or a gradient, the places a DOM-reading extension is
+ * blind to, and outside the browser window as well.
  * Every colour carries its contrast against white and black, because the next
  * question after "what colour is that" is almost always "can I put text on it".
  */

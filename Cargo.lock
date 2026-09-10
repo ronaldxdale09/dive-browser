@@ -1653,6 +1653,7 @@ dependencies = [
  "arboard",
  "async-trait",
  "base64 0.22.1",
+ "block2",
  "cbc",
  "cef",
  "chrono",
