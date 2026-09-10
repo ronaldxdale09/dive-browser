@@ -4,7 +4,7 @@ import type { ConsoleEntry } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { useConsole } from "../store/console";
 import { useNetwork } from "../store/network";
-import { Dock, sourceName, stepPanel } from "./Dock";
+import { Dock, sourceName, PANELS, stepPanel } from "./Dock";
 
 const entry = (i: number, text = `line ${i}`, level: ConsoleEntry["level"] = "info"): ConsoleEntry => ({
   tab_id: "tab-1",
@@ -167,9 +167,12 @@ describe("Dock console panel", () => {
     fireEvent.keyDown(list, { key: "ArrowRight" });
     expect(screen.getByRole("tab", { name: "Network" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe("dock-tab-network");
+    // Derived from the panel list: End lands on whatever is last, and
+    // ArrowLeft from the first wraps to it, however many panels there are.
+    const last = PANELS[PANELS.length - 1]!;
     fireEvent.keyDown(list, { key: "End" });
-    expect(screen.getByRole("tab", { name: "Meta" }).getAttribute("aria-selected")).toBe("true");
-    expect(stepPanel("ArrowLeft", "console")).toBe("meta");
+    expect(screen.getByRole("tab", { name: last.label }).getAttribute("aria-selected")).toBe("true");
+    expect(stepPanel("ArrowLeft", "console")).toBe(last.id);
     expect(stepPanel("Enter", "console")).toBeNull();
   });
 

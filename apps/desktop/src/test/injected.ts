@@ -20,6 +20,8 @@ import locator from "../../src-tauri/src/inject/locator.js?raw";
 import markdown from "../../src-tauri/src/inject/markdown.js?raw";
 import webapp from "../../src-tauri/src/inject/webapp.js?raw";
 import webappIcon from "../../src-tauri/src/inject/webapp-icon.js?raw";
+import stack from "../../src-tauri/src/inject/stack.js?raw";
+import color from "../../src-tauri/src/inject/color.js?raw";
 import picker from "../../src-tauri/src/inject/picker.js?raw";
 import reactContext from "../../src-tauri/src/inject/react-context.js?raw";
 import recorder from "../../src-tauri/src/inject/recorder.js?raw";
@@ -38,6 +40,8 @@ const FRAGMENTS: Record<string, string> = {
   "markdown.js": markdown,
   "webapp.js": webapp,
   "webapp-icon.js": webappIcon,
+  "stack.js": stack,
+  "color.js": color,
 };
 
 const DIRECTIVE = "// @dive-include ";
@@ -67,12 +71,28 @@ function collect(name: string, depth: number, seen: string[], out: string[]): vo
   }
 }
 
+/**
+ * Globals the web platform and popular frameworks publish that happen to be
+ * shaped exactly like a placeholder. Mirrors `KNOWN_GLOBALS` in pagescript.rs.
+ */
+const KNOWN_GLOBALS = new Set([
+  "NEXT_DATA",
+  "NUXT",
+  "SENTRY",
+  "REDUX_DEVTOOLS_EXTENSION",
+  "REDUX_STORE",
+  "APOLLO_CLIENT",
+  "REACT_QUERY_STATE",
+  "TANSTACK_QUERY_STATE",
+  "TURBOPACK",
+]);
+
 /** Whether any `__UPPER_SNAKE__` token survived substitution. */
 export function hasUnfilledPlaceholder(body: string): boolean {
   return body
     .split("__")
     .filter((_, index) => index % 2 === 1)
-    .some((token) => token.length > 0 && /^[A-Z0-9_]+$/.test(token));
+    .some((token) => token.length > 0 && !KNOWN_GLOBALS.has(token) && /^[A-Z0-9_]+$/.test(token));
 }
 
 /**

@@ -1,6 +1,7 @@
 import { isPrivateWindow } from "./privateMode";
 import { ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
+import { useLayout } from "../store/layout";
 import { usePrefs } from "../store/prefs";
 import { useRecording } from "../store/recording";
 import { useRecorder } from "../store/recorder";
@@ -59,6 +60,16 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "sidecar.open": () => useBrowser.getState().toggle("sidecar", true),
   "share.open": () => void window.dispatchEvent(new CustomEvent(OPEN_SHARE)),
   "dock.toggle": () => useBrowser.getState().toggle("dock"),
+  // Open the dock straight at one panel: an app in the launcher should land
+  // on its own tool, not on whichever panel was last used.
+  "stack.open": () => {
+    useLayout.getState().setDockPanel("stack");
+    useBrowser.getState().toggle("dock", true);
+  },
+  "color.open": () => {
+    useLayout.getState().setDockPanel("color");
+    useBrowser.getState().toggle("dock", true);
+  },
   "simulator.toggle": () => usePicker.getState().toggle(),
   "subtitles.open": () => useBrowser.getState().toggle("subtitles", true),
   // Records clicks and typing in the current tab as Playwright steps; the
@@ -278,6 +289,8 @@ export const COMMAND_TITLES: Record<string, string> = {
   "sidecar.open": "Open the agent",
   "share.open": "Share this page: QR code and address for your phone",
   "dock.toggle": "Developer dock",
+  "stack.open": "Tech stack",
+  "color.open": "Colour picker",
   "simulator.toggle": "Device simulator",
   "subtitles.open": "Live subtitles",
   "recorder.toggle": "Record steps as a Playwright test",

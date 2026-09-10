@@ -103,6 +103,30 @@ export const commands = {
 	 *  can live anywhere (`DIVE_DATA_DIR`), so no static asset scope covers it.
 	 */
 	webappIcon: (appId: string) => typedError<string | null, AppError>(__TAURI_INVOKE("webapp_icon", { appId })),
+	/**  Read the page's own probe and merge it with what the traffic showed. */
+	tabStack: (id: TabId) => typedError<StackReport, AppError>(__TAURI_INVOKE("tab_stack", { id })),
+	/**  The colours a page paints, most-used first. */
+	tabPalette: (id: TabId) => typedError<Palette, AppError>(__TAURI_INVOKE("tab_palette", { id })),
+	/**
+	 *  Open the eyedropper in the page and return the colour chosen.
+	 *
+	 *  `None` means the person dismissed it, which is an outcome rather than an
+	 *  error: the caller closes the cursor and says nothing.
+	 */
+	tabEyedropper: (id: TabId) => typedError<{
+	/**  `#rrggbb`. */
+	hex: string,
+	/**  `rgb(r g b)`. */
+	rgb: string,
+	/**  `hsl(h s% l%)`. */
+	hsl: string,
+	/**  Relative luminance, 0-1, for contrast work. */
+	luminance: number | null,
+	/**  Contrast against white, 1-21. */
+	on_white: number | null,
+	/**  Contrast against black, 1-21. */
+	on_black: number | null,
+} | null, AppError>(__TAURI_INVOKE("tab_eyedropper", { id })),
 	workspaceActivate: (id: WorkspaceId) => typedError<null, AppError>(__TAURI_INVOKE("workspace_activate", { id })),
 	/**  Every profile, in switcher order. */
 	profilesList: () => typedError<Profile[], AppError>(__TAURI_INVOKE("profiles_list")),
@@ -736,6 +760,23 @@ export type BuildInfo = {
 
 export type CancelResult = "cancelled" | "completed";
 
+/**  Where a technology sits in a stack, so the panel can group them. */
+export type Category =
+/**  React, Vue, Svelte, and the meta-frameworks over them. */
+"framework" |
+/**  Component and CSS libraries. */
+"ui" |
+/**  Bundlers and dev servers. */
+"build" |
+/**  The application server or language runtime. */
+"server" |
+/**  Where it is hosted, and what fronts it. */
+"hosting" |
+/**  Content management and commerce platforms. */
+"platform" |
+/**  Measurement, error reporting and support widgets. */
+"analytics";
+
 /**  A streamed piece of the reply. */
 export type ChatDelta =
 /**  More text. */
@@ -785,6 +826,22 @@ export type ClearRequest = {
 	site_data: boolean,
 	/**  Form entries remembered in the active profile. */
 	forms?: boolean,
+};
+
+/**  A colour in every notation a developer pastes. */
+export type ColorFormats = {
+	/**  `#rrggbb`. */
+	hex: string,
+	/**  `rgb(r g b)`. */
+	rgb: string,
+	/**  `hsl(h s% l%)`. */
+	hsl: string,
+	/**  Relative luminance, 0-1, for contrast work. */
+	luminance: number | null,
+	/**  Contrast against white, 1-21. */
+	on_white: number | null,
+	/**  Contrast against black, 1-21. */
+	on_black: number | null,
 };
 
 /**  Public description of a command, safe to send to the UI. */
@@ -952,6 +1009,21 @@ export type DefaultBrowserStatus = {
 	is_default: boolean,
 	/**  Bundle id of whatever handles `https` today, when known. */
 	current: string | null,
+};
+
+/**  One technology found on a page. */
+export type Detection = {
+	/**  Display name. */
+	name: string,
+	/**  Which group it belongs to. */
+	category: Category,
+	/**  Exact version when something authoritative reported one. */
+	version: string | null,
+	/**
+	 *  Why we believe it, newest evidence first. More than one line means
+	 *  more than one independent signal agreed.
+	 */
+	evidence: string[],
 };
 
 /**  A server that answered. */
@@ -1476,6 +1548,30 @@ export type Original = {
 	line: number,
 	/**  1-based column. */
 	column: number,
+};
+
+/**  The palette of a page. */
+export type Palette = {
+	/**  Most-used first. */
+	colors: PaletteEntry[],
+	/**  `<meta name="theme-color">`, when declared. */
+	theme_color: string | null,
+	/**  How many elements were examined. */
+	scanned: number,
+};
+
+/**  One colour the page paints, and how much it leans on it. */
+export type PaletteEntry = {
+	/**  `#rrggbb`. */
+	hex: string,
+	/**  Alpha as painted, 0-1. */
+	alpha: number | null,
+	/**  How many elements paint it. */
+	count: number,
+	/**  What it is mostly used for: `text`, `background` or `border`. */
+	role: string,
+	/**  A selector-ish description of one element using it. */
+	sample: string,
 };
 
 /**  One pane of a split view: which tab, and where it sits. */
@@ -2041,6 +2137,22 @@ export type SourceFrame = {
 	line_number: number | null,
 	/**  1-based column. */
 	column_number: number | null,
+};
+
+/**  Everything the panel shows for one page. */
+export type StackReport = {
+	/**  What was found, grouped by category then name. */
+	technologies: Detection[],
+	/**  `<meta name="generator">`, when the page declares one. */
+	generator: string | null,
+	/**  Whether the document arrived with content rather than an empty shell. */
+	server_rendered: boolean,
+	/**
+	 *  Packages named by the page's own source maps, deduplicated. Nothing
+	 *  else can see these: they exist only when a site ships source maps,
+	 *  and they name real dependencies rather than guessing from a filename.
+	 */
+	packages: string[],
 };
 
 /**  Emitted whenever core state changes; carries the change itself. */

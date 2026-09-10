@@ -1,4 +1,4 @@
-import { Accessibility, Activity, Ban, ClipboardList, Database, ExternalLink, FileSearch, Network, Shuffle, Terminal, X } from "lucide-react";
+import { Accessibility, Activity, Ban, Boxes, ClipboardList, Database, ExternalLink, FileSearch, Network, Pipette, Shuffle, Terminal, X } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useLayout } from "../store/layout";
@@ -15,8 +15,12 @@ import { StoragePanel } from "./StoragePanel";
 import { MetaPanel } from "./MetaPanel";
 import { A11yPanel } from "./A11yPanel";
 import { VitalsPanel } from "./VitalsPanel";
+import { StackPanel } from "./StackPanel";
+import { ColorPanel } from "./ColorPanel";
 
-const PANELS = [
+/** The dock's panels, in tab order. Exported so tests read the order from
+ * here rather than naming whichever panel happens to be last. */
+export const PANELS = [
   { id: "console", label: "Console", icon: Terminal },
   { id: "network", label: "Network", icon: Network },
   { id: "rules", label: "Rules", icon: Shuffle },
@@ -24,6 +28,8 @@ const PANELS = [
   { id: "a11y", label: "A11y", icon: Accessibility },
   { id: "vitals", label: "Vitals", icon: Activity },
   { id: "meta", label: "Meta", icon: FileSearch },
+  { id: "stack", label: "Stack", icon: Boxes },
+  { id: "color", label: "Color", icon: Pipette },
 ] as const;
 type PanelId = (typeof PANELS)[number]["id"];
 
@@ -101,6 +107,8 @@ export function Dock() {
         {panel === "meta" && <MetaPanel />}
         {panel === "a11y" && <A11yPanel />}
         {panel === "vitals" && <VitalsPanel />}
+        {panel === "stack" && <StackPanel />}
+        {panel === "color" && <ColorPanel />}
       </div>
     </section>
   );

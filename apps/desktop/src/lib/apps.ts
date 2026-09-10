@@ -49,6 +49,8 @@ const APPS: AppEntry[] = [
   { id: "agent", name: "Agent", blurb: "Reads and operates the page beside you, with your own key.", category: "page", command: "sidecar.toggle", keywords: "ai assistant chat claude ollama" },
   { id: "subtitles", name: "Live subtitles", blurb: "Captions for any video, transcribed on this machine.", category: "page", command: "subtitles.open", keywords: "captions transcribe whisper", needsTab: true },
   { id: "dock", name: "Developer dock", blurb: "Network, console, storage, vitals and mock rules.", category: "developer", command: "dock.toggle", keywords: "console network har mock rules a11y vitals storage" },
+  { id: "stack", name: "Tech stack", blurb: "What this page is built with, and the versions.", category: "developer", command: "stack.open", keywords: "wappalyzer framework detect technology versions stack", needsTab: true },
+  { id: "color", name: "Colour picker", blurb: "Pick any pixel, read the page's palette and contrast.", category: "developer", command: "color.open", keywords: "colorzilla eyedropper hex rgb hsl palette contrast wcag", needsTab: true },
   { id: "devtools", name: "DevTools", blurb: "Chrome's full inspector, in its own window.", category: "developer", command: "tab.devtools", keywords: "inspect elements", needsTab: true },
   { id: "simulator", name: "Device simulator", blurb: "Phones and tablets with real frames, touch and throttling.", category: "developer", command: "simulator.toggle", keywords: "mobile responsive emulate iphone", needsTab: true },
   { id: "extensions", name: "Extensions", blurb: "Chrome extensions loaded into Dive.", category: "developer", command: "extensions.open", keywords: "addons plugins" },

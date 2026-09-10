@@ -29,6 +29,8 @@ const FRAGMENTS: &[(&str, &str)] = &[
     ("markdown.js", include_str!("inject/markdown.js")),
     ("webapp.js", include_str!("inject/webapp.js")),
     ("webapp-icon.js", include_str!("inject/webapp-icon.js")),
+    ("stack.js", include_str!("inject/stack.js")),
+    ("color.js", include_str!("inject/color.js")),
 ];
 
 /// Cap on include depth, so a cycle is a test failure rather than a hang.
@@ -89,10 +91,30 @@ pub fn build(entry: &str, values: &[(&str, String)]) -> String {
     format!("(function () {{\n\"use strict\";\n{body}}})()")
 }
 
+/// Globals the web platform and popular frameworks publish that happen to be
+/// shaped exactly like a placeholder.
+///
+/// The convention is `__UPPER_SNAKE__`, and `__NEXT_DATA__` is spelled the
+/// same way. A script that reads one of these is not a script with an
+/// unfilled placeholder, so they are named here rather than the check being
+/// loosened for everything.
+const KNOWN_GLOBALS: &[&str] = &[
+    "NEXT_DATA",
+    "NUXT",
+    "SENTRY",
+    "REDUX_DEVTOOLS_EXTENSION",
+    "REDUX_STORE",
+    "APOLLO_CLIENT",
+    "REACT_QUERY_STATE",
+    "TANSTACK_QUERY_STATE",
+    "TURBOPACK",
+];
+
 /// Whether any `__UPPER_SNAKE__` token survived substitution.
 fn has_unfilled_placeholder(body: &str) -> bool {
     body.split("__").skip(1).step_by(2).any(|token| {
         !token.is_empty()
+            && !KNOWN_GLOBALS.contains(&token)
             && token
                 .chars()
                 .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
@@ -134,6 +156,7 @@ mod tests {
                 ("__ROLE__", "\"button\"".into()),
                 ("__AUDIO_BINDING__", "__diveTestAudio".into()),
                 ("__MARKDOWN_CAP__", "1000".into()),
+                ("__MODE__", "\"palette\"".into()),
                 ("__MIN_ICON__", "192".into()),
                 ("__ICON_URL__", "\"https://x/i.png\"".into()),
                 ("__SIZE__", "512".into()),
@@ -161,6 +184,18 @@ mod tests {
         assert!(script.contains("const NONCE = \"abc\";"));
         assert!(script.contains("window.__diveRecord(JSON.stringify(payload))"));
         assert!(script.contains(".slice(0, 4096)"));
+    }
+
+    #[test]
+    fn a_framework_global_is_not_an_unfilled_placeholder() {
+        // `__NEXT_DATA__` is spelled exactly like a placeholder, and a probe
+        // that reads it must still compose.
+        assert!(!has_unfilled_placeholder("if (window.__NEXT_DATA__) {}"));
+        assert!(!has_unfilled_placeholder("window.__SENTRY__"));
+        // A real one is still caught in the same script.
+        assert!(has_unfilled_placeholder(
+            "window.__NEXT_DATA__; const n = __LIMIT__;"
+        ));
     }
 
     #[test]

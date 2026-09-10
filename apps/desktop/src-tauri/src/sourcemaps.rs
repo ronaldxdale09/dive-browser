@@ -61,6 +61,39 @@ impl Resolver {
         lookup(&map, line, column)
     }
 
+    /// Package names the source maps of `scripts` mention, for the stack
+    /// detector.
+    ///
+    /// A bundle's map lists every file that went into it, so
+    /// `node_modules/<name>/…` is a real dependency rather than a guess from
+    /// a filename — the one signal a fingerprint database cannot have. Only
+    /// same-host scripts are fetched, the same rule `resolve` enforces, and
+    /// only the first `max_scripts` of them: a large site ships dozens of
+    /// chunks and the answer stops improving after the first few.
+    pub async fn packages(
+        &self,
+        page_url: &str,
+        scripts: &[String],
+        max_scripts: usize,
+    ) -> Vec<String> {
+        let mut sources: Vec<String> = Vec::new();
+        let mut fetched = 0;
+        for url in scripts {
+            if fetched >= max_scripts {
+                break;
+            }
+            if !same_host(page_url, url) {
+                continue;
+            }
+            fetched += 1;
+            let Some(map) = self.map_for(url).await else {
+                continue;
+            };
+            sources.extend(map.sources().map(str::to_owned));
+        }
+        crate::stack::packages_in_sources(&sources)
+    }
+
     async fn map_for(&self, url: &str) -> Option<Arc<sourcemap::SourceMap>> {
         if let Some(cached) = self.cache.lock().await.get(url) {
             return cached.clone();

@@ -79,6 +79,18 @@ const artwork = {
     <path d="m20 8 4-1 5 17-4 1Z" {...soft} />
     <path d="M6 10h2m6-3h2m-2 14h2" />
   </>,
+  // Stacked layers: what a page is built on, read from the bottom up.
+  stack: <>
+    <path d="m16 4 12 6-12 6L4 10Z" {...soft} />
+    <path d="m4 16 12 6 12-6" />
+    <path d="m4 22 12 6 12-6" />
+  </>,
+  // A dropper over a swatch: the pick, and what it landed on.
+  color: <>
+    <rect x="4" y="19" width="24" height="9" rx="2.5" {...soft} />
+    <path d="M25.5 5.5a3 3 0 0 0-4.2 0l-1.6 1.6-1-1-2.1 2.1 6.2 6.2 2.1-2.1-1-1 1.6-1.6a3 3 0 0 0 0-4.2Z" />
+    <path d="m18.4 11.6-7 7V22h3.4l7-7" {...solid} />
+  </>,
 } as const;
 
 export type BuiltinAppId = keyof typeof artwork;

@@ -16,7 +16,7 @@ export interface Split {
 }
 
 /** The developer dock's tabs, by id; the last one chosen is remembered across launches. */
-export type DockPanel = "console" | "network" | "rules" | "storage" | "a11y" | "vitals" | "meta";
+export type DockPanel = "console" | "network" | "rules" | "storage" | "a11y" | "vitals" | "meta" | "stack" | "color";
 
 /** The panels whose open state survives a relaunch. The palette, find bar and settings are transient. */
 export type PersistedPanel = "sidecar" | "dock";
