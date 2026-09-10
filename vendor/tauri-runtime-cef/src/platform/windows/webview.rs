@@ -10,16 +10,83 @@ use windows::Win32::{
     Graphics::Gdi::{
         CombineRgn, CreateRectRgn, DeleteObject, MapWindowPoints, RGN_DIFF, SetWindowRgn,
     },
+    UI::HiDpi::GetDpiForWindow,
     UI::Shell::{DefSubclassProc, SetWindowSubclass},
     UI::WindowsAndMessaging::{
         DestroyWindow, GetParent, GetWindowRect, HWND_BOTTOM, HWND_TOP, SW_HIDE, SW_SHOW,
         SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetParent, SetWindowPos, ShowWindow,
         WINDOWPOS, WM_WINDOWPOSCHANGING,
     },
-    UI::HiDpi::GetDpiForWindow,
 };
 
 use crate::{webview::AppWebview, window::AppWindow};
+
+const PIN_Z_ORDER_SUBCLASS_ID: usize = 124;
+/// `dwRefData` of the pin subclass: whether it is currently vetoing.
+const Z_ORDER_UNPINNED: usize = 0;
+const Z_ORDER_PINNED: usize = 1;
+
+/// Refuses every z-order change to a webview while the pin is engaged.
+unsafe extern "system" fn pin_z_order_subclass_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _subclass_id: usize,
+    pinned: usize,
+) -> LRESULT {
+    unsafe {
+        if pinned == Z_ORDER_PINNED && msg == WM_WINDOWPOSCHANGING && lparam.0 != 0 {
+            let window_pos = &mut *(lparam.0 as *mut WINDOWPOS);
+            window_pos.flags |= SWP_NOZORDER;
+        }
+
+        DefSubclassProc(hwnd, msg, wparam, lparam)
+    }
+}
+
+/// Engages or disengages the z-order pin.
+///
+/// Re-installing the same proc under the same id does not chain a second
+/// subclass, it just updates `dwRefData` — so this both installs the pin the
+/// first time and toggles it afterwards.
+fn set_z_order_pinned(hwnd: HWND, pinned: bool) {
+    let _ = unsafe {
+        SetWindowSubclass(
+            hwnd,
+            Some(pin_z_order_subclass_proc),
+            PIN_Z_ORDER_SUBCLASS_ID,
+            if pinned {
+                Z_ORDER_PINNED
+            } else {
+                Z_ORDER_UNPINNED
+            },
+        )
+    };
+}
+
+/// Move a webview in the sibling z-order and pin it where it lands.
+///
+/// The pin vetoes z-order changes indiscriminately, including the runtime's
+/// own, so every deliberate move has to lift it first and put it back after.
+/// Raising the chrome over a page for an overlay goes through here for that
+/// reason: without the lift the `SetWindowPos` is silently dropped and the
+/// menu renders behind the page it is supposed to float over.
+pub(crate) fn restack_pinned(hwnd: HWND, after: HWND) {
+    set_z_order_pinned(hwnd, false);
+    let _ = unsafe {
+        SetWindowPos(
+            hwnd,
+            Some(after),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        )
+    };
+    set_z_order_pinned(hwnd, true);
+}
 
 impl AppWebview {
     pub(crate) fn hwnd(&self) -> HWND {
@@ -84,68 +151,10 @@ impl AppWebview {
         let _ = unsafe { DestroyWindow(self.hwnd()) };
     }
 
-    const PIN_Z_ORDER_SUBCLASS_ID: usize = 124;
-    /// `dwRefData` of the pin subclass: whether it is currently vetoing.
-    const Z_ORDER_UNPINNED: usize = 0;
-    const Z_ORDER_PINNED: usize = 1;
-
-    /// Refuses every z-order change to this webview while the pin is engaged.
-    unsafe extern "system" fn pin_z_order_subclass_proc(
-        hwnd: HWND,
-        msg: u32,
-        wparam: WPARAM,
-        lparam: LPARAM,
-        _subclass_id: usize,
-        pinned: usize,
-    ) -> LRESULT {
-        unsafe {
-            if pinned == Self::Z_ORDER_PINNED && msg == WM_WINDOWPOSCHANGING && lparam.0 != 0 {
-                let window_pos = &mut *(lparam.0 as *mut WINDOWPOS);
-                window_pos.flags |= SWP_NOZORDER;
-            }
-
-            DefSubclassProc(hwnd, msg, wparam, lparam)
-        }
-    }
-
-    /// Engages or disengages the z-order pin.
-    ///
-    /// Re-installing the same proc under the same id does not chain a second
-    /// subclass, it just updates `dwRefData` — so this both installs the pin the
-    /// first time and toggles it afterwards.
-    fn set_z_order_pinned(&self, pinned: bool) {
-        let _ = unsafe {
-            SetWindowSubclass(
-                self.hwnd(),
-                Some(Self::pin_z_order_subclass_proc),
-                Self::PIN_Z_ORDER_SUBCLASS_ID,
-                if pinned {
-                    Self::Z_ORDER_PINNED
-                } else {
-                    Self::Z_ORDER_UNPINNED
-                },
-            )
-        };
-    }
-
     /// Raises this webview above its siblings and pins it there, so nothing but
-    /// this runtime can move it again. See [`Self::pin_z_order_subclass_proc`].
+    /// this runtime can move it again. See [`pin_z_order_subclass_proc`].
     pub(crate) fn raise_to_top(&self) {
-        self.set_z_order_pinned(false);
-
-        let _ = unsafe {
-            SetWindowPos(
-                self.hwnd(),
-                Some(HWND_TOP),
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            )
-        };
-
-        self.set_z_order_pinned(true);
+        restack_pinned(self.hwnd(), HWND_TOP);
     }
 
     pub(crate) fn apply_physical_bounds(
@@ -198,16 +207,8 @@ impl crate::webview::Webview {
             // pages so they take the clicks again.
             unsafe {
                 let _ = SetWindowRgn(hwnd, None, true);
-                let _ = SetWindowPos(
-                    hwnd,
-                    Some(HWND_BOTTOM),
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                );
             }
+            restack_pinned(hwnd, HWND_BOTTOM);
             return true;
         }
 
@@ -238,9 +239,7 @@ impl crate::webview::Webview {
         // The region belongs to the window once this succeeds, so it must not
         // be deleted here; on failure it would leak, so it is freed instead.
         let applied = unsafe { SetWindowRgn(hwnd, Some(region), true) } != 0;
-        log::info!(
-            "overlay mask: window {width}x{height} scale={scale} applied={applied}"
-        );
+        log::info!("overlay mask: window {width}x{height} scale={scale} applied={applied}");
         if !applied {
             unsafe {
                 let _ = DeleteObject(region.into());
@@ -248,17 +247,7 @@ impl crate::webview::Webview {
             return false;
         }
         // Above the pages, so what it paints is what shows through.
-        unsafe {
-            let _ = SetWindowPos(
-                hwnd,
-                Some(HWND_TOP),
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            );
-        }
+        restack_pinned(hwnd, HWND_TOP);
         true
     }
 }
