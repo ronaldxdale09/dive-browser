@@ -602,6 +602,7 @@ export const commands = {
 	bookmarksSearch: (query: string, limit: number) => typedError<Bookmark[], AppError>(__TAURI_INVOKE("bookmarks_search", { query, limit })),
 	/**  LAN URL and QR code for opening `url` on another device. */
 	shareUrl: (url: string) => typedError<ShareInfo, AppError>(__TAURI_INVOKE("share_url", { url })),
+	faviconsFor: (urls: string[]) => __TAURI_INVOKE<([string, string])[]>("favicons_for", { urls }),
 	/**  The provider catalog, for the chrome's pickers. */
 	agentProviders: () => __TAURI_INVOKE<ProviderInfo[]>("agent_providers"),
 	/**

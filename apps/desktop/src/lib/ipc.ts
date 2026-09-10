@@ -167,6 +167,7 @@ export const ipc = {
   popoutSetBounds: async (id: string, b: { x: number; y: number; width: number; height: number }) => unwrap(await commands.popoutSetBounds(id, b)),
   commandsList: () => commands.commandsList(),
   appInfo: () => commands.appInfo(),
+  faviconsFor: (urls: string[]) => commands.faviconsFor(urls),
   privacyInfo: () => commands.privacyInfo(),
   prefsGet: () => commands.prefsGet(),
   prefsSet: async (prefs: Prefs) => unwrap(await commands.prefsSet(prefs)),

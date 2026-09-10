@@ -103,6 +103,60 @@ pub struct InspectorSnapshot {
     pub description: Option<String>,
 }
 
+/// How many icons one lookup will answer. A rail holds a dozen links; a
+/// longer list is a caller that has lost track of what it is asking for.
+const MAX_FAVICON_LOOKUPS: usize = 32;
+
+/// The cached icon for each of `urls`, as a `data:` URL.
+///
+/// Every site the person has visited leaves its icon in the store keyed by
+/// origin, so a pinned link can wear the site's own mark without anything
+/// touching the network -- and without waiting for a tab on that site to be
+/// open, which is what left a freshly added quick link showing a globe.
+///
+/// `www.` is tried both ways: a link pinned as `youtube.com` and a visit to
+/// `www.youtube.com` are different origins, and the person who typed the
+/// short one means the site they have been to.
+/// The same origin with `www.` added or taken away.
+///
+/// A link pinned as `youtube.com` and a visit to `www.youtube.com` are
+/// different origins to everything that stores things by origin, but they are
+/// the same site to the person who pinned it.
+fn alternate_origin(origin: &str) -> String {
+    let Some((scheme, host)) = origin.split_once("://") else {
+        return origin.to_owned();
+    };
+    host.strip_prefix("www.").map_or_else(
+        || format!("{scheme}://www.{host}"),
+        |bare| format!("{scheme}://{bare}"),
+    )
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn favicons_for(
+    state: State<'_, AppState>,
+    urls: Vec<String>,
+) -> Vec<(String, String)> {
+    let store = lock(&state.store);
+    let mut out = Vec::new();
+    for url in urls.into_iter().take(MAX_FAVICON_LOOKUPS) {
+        let Some(origin) = dive_core::origin_of(&url) else {
+            continue;
+        };
+        let alternate = alternate_origin(&origin);
+        let found = store
+            .favicon(&origin)
+            .ok()
+            .flatten()
+            .or_else(|| store.favicon(&alternate).ok().flatten());
+        if let Some(data) = found {
+            out.push((url, data));
+        }
+    }
+    out
+}
+
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn app_info() -> AppInfo {
@@ -698,6 +752,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             bookmark_status,
             bookmarks_search,
             share_url,
+            favicons_for,
             crate::agent::agent_providers,
             crate::agent::agent_keys,
             crate::agent::agent_key_set,
@@ -3779,6 +3834,44 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0]["method"], "Fetch.enable");
+    }
+
+    #[test]
+    fn a_pinned_short_host_finds_the_icon_left_by_the_long_one() {
+        // Someone pins youtube.com and has been to www.youtube.com. Those are
+        // different origins, so a straight lookup finds nothing and the rail
+        // shows a globe forever.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = dive_core::Store::open(dir.path().join("t.db")).expect("store");
+        store
+            .set_favicon("https://www.youtube.com", "data:image/png;base64,AAA")
+            .expect("set");
+        assert_eq!(
+            store.favicon("https://youtube.com").expect("lookup"),
+            None,
+            "the two origins really are different"
+        );
+        // The pairing is what the command adds on top.
+        let paired = alternate_origin("https://youtube.com");
+        assert_eq!(paired, "https://www.youtube.com");
+        assert_eq!(
+            store.favicon(&paired).expect("lookup"),
+            Some("data:image/png;base64,AAA".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_pairing_goes_both_ways() {
+        assert_eq!(
+            alternate_origin("https://www.example.com"),
+            "https://example.com"
+        );
+        assert_eq!(
+            alternate_origin("https://example.com"),
+            "https://www.example.com"
+        );
+        // Nothing to pair on leaves it alone rather than mangling it.
+        assert_eq!(alternate_origin("not-an-origin"), "not-an-origin");
     }
 
     #[test]

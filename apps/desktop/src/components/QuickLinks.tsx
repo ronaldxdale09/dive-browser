@@ -1,8 +1,9 @@
 import { Plus, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useBrowser } from "../store/browser";
 import { usePrefs } from "../store/prefs";
+import { ipc } from "../lib/ipc";
 import type { QuickLink } from "../lib/ipc";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { Favicon } from "./Favicon";
@@ -32,12 +33,28 @@ export function QuickLinks() {
     setAdding(false);
     void update({ quick_links: [...links.filter((l) => l.url !== link.url), link].slice(-MAX_QUICK_LINKS) });
   };
-  // A pinned site's icon comes from its open tab, so a list that has just
-  // been added to does not wait on a network round-trip to look right; the
-  // assistants Dive knows have a mark of their own for when no tab is open.
+  // A pinned site's icon comes from its open tab when there is one, so a list
+  // that has just been added to looks right immediately. Otherwise it comes
+  // from the store, which has kept the icon of every site the person has
+  // visited -- without that, pinning a site you are not currently looking at
+  // left a globe sitting in the rail until you happened to open it.
+  const [cached, setCached] = useState<Readonly<Record<string, string>>>({});
+  const addresses = links.map((l) => l.url).join(" ");
+  useEffect(() => {
+    let alive = true;
+    const urls = addresses.split(" ").filter(Boolean);
+    if (urls.length === 0) return;
+    ipc
+      .faviconsFor(urls)
+      .then((rows) => alive && setCached(Object.fromEntries(rows)))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [addresses]);
   const iconFor = (url: string) => {
     const host = hostOf(url);
-    return tabs.find((t) => hostOf(t.url) === host)?.favicon ?? null;
+    return tabs.find((t) => hostOf(t.url) === host)?.favicon ?? cached[url] ?? null;
   };
 
   return (
