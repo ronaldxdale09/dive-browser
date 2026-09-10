@@ -1732,6 +1732,45 @@ fn reveal_soon(window: Window<Runtime>) {
     });
 }
 
+/// Ask the compositor for Windows 11's rounded corners.
+///
+/// A decorated window gets them for nothing, but the chrome draws its own
+/// title bar, so the frame is off and the window comes back square -- which
+/// looks like an older Windows rather than a deliberate choice. This is the
+/// same corner radius every other Windows 11 app has.
+///
+/// Nothing to do anywhere else: macOS rounds its own windows, and this is a
+/// no-op there.
+#[cfg(target_os = "windows")]
+fn round_corners(window: &tauri::Window<Runtime>) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::{
+        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
+    };
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+        return;
+    };
+    let hwnd = HWND(win32.hwnd.get() as _);
+    let preference = DWMWCP_ROUND;
+    // A compositor that does not know the attribute (Windows 10) simply
+    // refuses it, which is the square corners it was already drawing.
+    let _ = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            std::ptr::from_ref(&preference).cast(),
+            u32::try_from(size_of_val(&preference)).unwrap_or(4),
+        )
+    };
+}
+
+#[cfg(not(target_os = "windows"))]
+fn round_corners(_window: &tauri::Window<Runtime>) {}
+
 pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
     let remembered = {
         let state = app.state::<AppState>();
@@ -1784,6 +1823,7 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
     tracing::info!("main window: building native window");
     let window = builder.build()?;
     tracing::info!("main window: native window built");
+    round_corners(&window);
 
     // Keep production's Dock icon clean. macOS renders this label directly on
     // the running development app's icon, so dev and release builds cannot be

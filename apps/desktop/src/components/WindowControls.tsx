@@ -1,6 +1,8 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { isWindows } from "../lib/commands";
+import { errorMessage } from "../lib/errors";
+import { useBrowser } from "../store/browser";
 
 /**
  * Minimise, maximise and close, for platforms whose window controls the app
@@ -34,18 +36,28 @@ export function WindowControls() {
 
   if (!isWindows()) return null;
 
+  // A window command the capability does not grant rejects rather than
+  // throwing, so without this a missing permission looks exactly like a
+  // button that does nothing -- which is how the first version of this
+  // shipped.
+  const act = (what: string, run: () => Promise<unknown>) => () => {
+    run().catch((error: unknown) => {
+      useBrowser.setState({ error: `Could not ${what} the window: ${errorMessage(error)}` });
+    });
+  };
+
   const button = "grid h-full w-[46px] place-items-center text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink";
   return (
     // Not a drag region: these are the controls, not the handle.
     <div className="flex h-full shrink-0 items-stretch" data-tauri-drag-region="false" onMouseDown={(e) => e.stopPropagation()}>
-      <button type="button" aria-label="Minimise" className={button} onClick={() => void getCurrentWindow().minimize()}>
+      <button type="button" aria-label="Minimise" className={button} onClick={act("minimise", () => getCurrentWindow().minimize())}>
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden><path d="M0 5h10" stroke="currentColor" strokeWidth="1" /></svg>
       </button>
       <button
         type="button"
         aria-label={maximized ? "Restore" : "Maximise"}
         className={button}
-        onClick={() => void getCurrentWindow().toggleMaximize()}
+        onClick={act("maximise", () => getCurrentWindow().toggleMaximize())}
       >
         {maximized ? (
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden>
@@ -64,7 +76,7 @@ export function WindowControls() {
         type="button"
         aria-label="Close"
         className={`${button} hover:!bg-[#c42b1c] hover:!text-white`}
-        onClick={() => void getCurrentWindow().close()}
+        onClick={act("close", () => getCurrentWindow().close())}
       >
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
           <path d="M0 0l10 10M10 0L0 10" stroke="currentColor" strokeWidth="1" />

@@ -76,6 +76,11 @@ adblock = { version = "0.13.3", default-features = false, features = ["embedded-
 [target.'cfg(not(all(target_os = "windows", target_arch = "aarch64")))'.dependencies]
 whisper-rs = { version = "0.14", optional = true }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+# To name the HWND behind a Tauri window; the version tauri already resolves.
+raw-window-handle = "0.6"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "1", features = ["keychain"] }
 core-foundation = "0.10"

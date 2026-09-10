@@ -1674,6 +1674,7 @@ dependencies = [
  "plist",
  "psl",
  "qrcode",
+ "raw-window-handle",
  "reqwest",
  "rfd",
  "rusqlite",
@@ -1700,6 +1701,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "whisper-rs",
+ "windows 0.61.3",
 ]
 
 [[package]]
