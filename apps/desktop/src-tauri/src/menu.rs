@@ -16,6 +16,7 @@ use tauri_specta::Event;
 use crate::Runtime;
 use crate::state::{AppState, lock};
 #[cfg(feature = "cef")]
+#[cfg(not(target_os = "windows"))]
 use crate::ui_probe::native_input_receipt;
 
 #[cfg(not(feature = "cef"))]
@@ -28,6 +29,9 @@ pub struct MenuCommand(pub String);
 /// Commands whose point is to type into the chrome. The page keeps keyboard
 /// focus while it is visible, so focus has to move before the command lands or
 /// the first keystrokes would go to the page.
+// Only the native menu bar uses this, and only macOS has one: Windows
+// draws its controls in the chrome instead.
+#[cfg(not(target_os = "windows"))]
 const FOCUS_CHROME: [&str; 12] = [
     "palette.open",
     "tabs.search",
@@ -49,12 +53,18 @@ pub(crate) fn main_window_command(command: &str) -> bool {
 }
 
 /// One chrome-owned menu item with its accelerator.
+// Only the native menu bar uses this, and only macOS has one: Windows
+// draws its controls in the chrome instead.
+#[cfg(not(target_os = "windows"))]
 fn item(app: &App<Runtime>, id: &str, text: &str, accel: &str) -> tauri::Result<MenuItem<Runtime>> {
     MenuItemBuilder::with_id(id, text)
         .accelerator(accel)
         .build(app)
 }
 
+// Only the native menu bar uses this, and only macOS has one: Windows
+// draws its controls in the chrome instead.
+#[cfg(not(target_os = "windows"))]
 fn open_window_from_menu(app: tauri::AppHandle<Runtime>, private: bool) {
     tauri::async_runtime::spawn(async move {
         let result = if private {
@@ -81,6 +91,7 @@ fn open_window_from_menu(app: tauri::AppHandle<Runtime>, private: bool) {
 }
 
 /// The File menu: the tab and chrome commands people reach for first.
+#[cfg(not(target_os = "windows"))]
 fn file_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
     let mut file = SubmenuBuilder::new(app, "File");
     if crate::private_session::is_private() {
@@ -142,6 +153,7 @@ fn file_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
 /// Workspaces earn a menu of their own: it is where someone who has never
 /// used one finds out they exist, and the numbered chords are the fastest way
 /// between them once they have a few.
+#[cfg(not(target_os = "windows"))]
 fn workspaces_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
     let mut menu = SubmenuBuilder::new(app, "Workspaces")
         .item(&item(
@@ -169,6 +181,7 @@ fn workspaces_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
 }
 
 /// Page history, tab traversal and the Chrome-compatible library shortcuts.
+#[cfg(not(target_os = "windows"))]
 fn history_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
     SubmenuBuilder::new(app, "History")
         .item(&item(app, "tab.back", "Back", "CmdOrCtrl+BracketLeft")?)
@@ -221,6 +234,9 @@ fn history_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
 }
 
 /// Build the menu and route its events to the chrome.
+// Only the native menu bar uses this, and only macOS has one: Windows
+// draws its controls in the chrome instead.
+#[cfg(not(target_os = "windows"))]
 pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
     // "About" opens Dive's own About section rather than the stock panel,
     // so the version, engine and update check are all in one place.

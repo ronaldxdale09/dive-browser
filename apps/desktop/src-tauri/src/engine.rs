@@ -1742,6 +1742,7 @@ fn reveal_soon(window: Window<Runtime>) {
 /// Nothing to do anywhere else: macOS rounds its own windows, and this is a
 /// no-op there.
 #[cfg(target_os = "windows")]
+#[allow(unsafe_code)] // DWM is reachable only through the Win32 C API.
 fn round_corners(window: &tauri::Window<Runtime>) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::Win32::Foundation::HWND;

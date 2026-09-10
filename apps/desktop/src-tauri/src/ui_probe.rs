@@ -66,6 +66,8 @@ fn enabled(flag: &str, mock: &str, profile: bool, competing_probe: bool) -> bool
 }
 
 /// Fixed launcher receipts only; never log arbitrary native menu IDs.
+// Only the native menu bar reports these, and Windows installs none.
+#[cfg(not(target_os = "windows"))]
 pub(crate) fn native_input_receipt(stage: &'static str, command: &str) {
     use std::io::Write as _;
     use std::sync::{OnceLock, atomic::AtomicUsize};

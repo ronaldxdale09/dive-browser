@@ -30,6 +30,7 @@ pub struct DefaultBrowserStatus {
 pub const SCHEMES: [&str; 2] = ["http", "https"];
 
 /// The bundle id the app is built with.
+#[cfg(target_os = "macos")]
 pub const BUNDLE_ID: &str = "app.dive.browser";
 
 // Launch Services has no safe binding; the two calls below are the whole
@@ -111,8 +112,8 @@ mod win {
     /// Whatever currently handles `scheme`, as the ProgID the shell records.
     ///
     /// This is `UserChoice`, the key the shell writes when someone picks a
-    /// default. It is the only honest answer: an application can be perfectly
-    /// registered and still not be the default.
+    /// default. It is the only honest answer: an application can be
+    /// perfectly registered and still not be the default.
     pub fn handler_for(scheme: &str) -> Option<String> {
         RegKey::predef(HKEY_CURRENT_USER)
             .open_subkey_with_flags(

@@ -177,6 +177,7 @@ impl Registry {
 
 /// CEF's report that a tab's web content process went away. The `DevTools`
 /// session usually notices too; whichever signal lands second is dropped.
+#[cfg(target_os = "macos")]
 pub fn on_native_terminate(webview: &tauri::Webview<Runtime>) {
     let Some(tab_id) = crate::engine::tab_from_label(webview.label()) else {
         return;

@@ -473,6 +473,7 @@ mod launcher {
     }
 
     /// A bundle identifier that is stable for the app and legal for Launch Services.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn bundle_id(app: &WebApp) -> String {
         let mut hasher = DefaultHasher::new();
         app.id.hash(&mut hasher);
@@ -480,10 +481,12 @@ mod launcher {
     }
 
     /// Single-quote a string for `sh`.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn sh_quote(value: &str) -> String {
         format!("'{}'", value.replace('\'', "'\\''"))
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn xml_escape(value: &str) -> String {
         value
             .replace('&', "&amp;")
@@ -493,6 +496,7 @@ mod launcher {
     }
 
     /// The bundle's Info.plist.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(super) fn info_plist(app: &WebApp) -> String {
         let name = xml_escape(&bundle_name(app));
         let id = bundle_id(app);
@@ -518,6 +522,7 @@ mod launcher {
     }
 
     /// The bundle's executable: hand the app id to Dive.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(super) fn launch_script(dive_binary: &Path, app: &WebApp) -> String {
         format!(
             "#!/bin/sh\n# Opens the installed web app \"{}\" in Dive.\nexec {} {}\n",

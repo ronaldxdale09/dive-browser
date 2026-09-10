@@ -1090,6 +1090,7 @@ fn list_screens(ffmpeg: &Path) -> Vec<String> {
 }
 
 /// `[AVFoundation indev @ ...] [2] Capture screen 0` lines, in screen order.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn parse_avfoundation_screens(listing: &str) -> Vec<String> {
     let mut screens: Vec<(u32, String)> = Vec::new();
     for line in listing.lines() {

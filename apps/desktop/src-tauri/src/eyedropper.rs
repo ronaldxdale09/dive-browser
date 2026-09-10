@@ -95,7 +95,7 @@ pub fn sample(_app: &tauri::AppHandle<crate::Runtime>) -> AppResult<Option<Strin
             continue;
         }
         let mut point = POINT::default();
-        if unsafe { GetCursorPos(&mut point) }.is_err() {
+        if unsafe { GetCursorPos(&raw mut point) }.is_err() {
             return Err(AppError::new("could not read the cursor position"));
         }
         // A null DC is the whole screen, which is the point: the eyedropper

@@ -106,8 +106,7 @@ pub(crate) fn default_data_root() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         std::env::var_os("APPDATA")
-            .map(PathBuf::from)
-            .unwrap_or(home)
+            .map_or(home, PathBuf::from)
             .join("dive")
     }
 }
