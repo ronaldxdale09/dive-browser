@@ -9,15 +9,22 @@
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::menu::{MenuBuilder, MenuItem, MenuItemBuilder, Submenu, SubmenuBuilder};
-use tauri::{App, Manager};
 use tauri_specta::Event;
 
+// Everything below this line builds the native menu bar, which only exists
+// where `install` runs. `MenuCommand` carries chrome and page-menu commands
+// on every platform and needs none of it.
+#[cfg(not(target_os = "windows"))]
 use crate::Runtime;
+#[cfg(not(target_os = "windows"))]
 use crate::state::{AppState, lock};
 #[cfg(feature = "cef")]
 #[cfg(not(target_os = "windows"))]
 use crate::ui_probe::native_input_receipt;
+#[cfg(not(target_os = "windows"))]
+use tauri::menu::{MenuBuilder, MenuItem, MenuItemBuilder, Submenu, SubmenuBuilder};
+#[cfg(not(target_os = "windows"))]
+use tauri::{App, Manager};
 
 #[cfg(not(feature = "cef"))]
 fn native_input_receipt(_stage: &'static str, _command: &str) {}

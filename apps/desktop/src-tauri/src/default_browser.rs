@@ -30,7 +30,7 @@ pub struct DefaultBrowserStatus {
 pub const SCHEMES: [&str; 2] = ["http", "https"];
 
 /// The bundle id the app is built with.
-#[cfg(target_os = "macos")]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const BUNDLE_ID: &str = "app.dive.browser";
 
 // Launch Services has no safe binding; the two calls below are the whole
@@ -106,10 +106,10 @@ mod win {
     use winreg::RegKey;
     use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
 
-    /// The ProgID Dive registers for `http` and `https`.
+    /// The `ProgID` Dive registers for `http` and `https`.
     pub const PROG_ID: &str = "DiveHTML";
 
-    /// Whatever currently handles `scheme`, as the ProgID the shell records.
+    /// Whatever currently handles `scheme`, as the `ProgID` the shell records.
     ///
     /// This is `UserChoice`, the key the shell writes when someone picks a
     /// default. It is the only honest answer: an application can be
