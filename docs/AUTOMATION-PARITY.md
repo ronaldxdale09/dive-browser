@@ -35,6 +35,18 @@ ground, that is the reason.
 | Save as PDF | `browser_pdf_save` | `page_pdf` — paper size by name, landscape, background, headers; the file is recorded as a download so one tool answers "what file did that produce" |
 | Cookies and web storage | 15 tools (`browser_cookie_*`, `browser_localstorage_*`, `browser_sessionstorage_*`, `browser_storage_state`, `browser_set_storage_state`) | 3 tools (`page_storage`, `page_storage_set`, `page_storage_clear`) — each reads or writes all three kinds at once, and what `page_storage` returns is what `page_storage_set` takes, so restoring a session is a round trip rather than a reassembly |
 
+## Where Browserbase's ground is
+
+Browserbase sells isolated browser sessions you can run in parallel, and
+session state you can carry between them. Playwright MCP has no context tool
+at all -- it drives one browsing session, so two flows in it share cookies.
+
+| Capability | Playwright MCP | Browserbase | Dive |
+|---|---|---|---|
+| Isolated parallel sessions | none | its whole product | `contexts`, `context_open`, `context_close`, and `context_id` on `tab_open` — each context has a cookie jar of its own, so two can be signed in as different people at once |
+| Carrying a session between them | none | session persistence | `page_storage` / `page_storage_set` round trip |
+| Where it runs | local | remote, metered | local, and it is the browser the person is already using |
+
 ## Where Dive is ahead
 
 Nothing on this list has an equivalent in Playwright MCP.
@@ -58,4 +70,4 @@ Nothing on this list has an equivalent in Playwright MCP.
 - Raw keyboard primitives beyond `page_press`
 - Tracing and video (`browser_start_tracing`, `browser_start_video`, `browser_start_recording`)
 - Highlighting and annotation (`browser_highlight`, `browser_annotate`)
-- Browserbase's ground: isolated parallel contexts, and session reuse across processes
+- Session reuse across separate processes (Browserbase keeps sessions alive server-side; Dive's live as long as the browser does)

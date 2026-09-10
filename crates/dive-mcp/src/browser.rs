@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::BrowserError;
 use crate::params::{
-    AppearanceParams, DialogParams, DownloadsParams, DragParams, ExpectParams, FillFormParams,
-    MouseParams, PdfParams, ResizeParams, SelectParams, StorageClearParams, StorageGetParams,
-    StorageSetParams, Target, UploadParams, WaitForParams,
+    AppearanceParams, ContextCloseParams, ContextOpenParams, DialogParams, DownloadsParams,
+    DragParams, ExpectParams, FillFormParams, MouseParams, PdfParams, ResizeParams, SelectParams,
+    StorageClearParams, StorageGetParams, StorageSetParams, Target, UploadParams, WaitForParams,
 };
 
 /// What a tool caller gets to know about a tab.
@@ -32,6 +32,18 @@ pub trait Browser: Send + Sync + 'static {
     async fn tabs(&self) -> Result<Vec<TabInfo>, BrowserError>;
     /// Open a tab in the active workspace and focus it.
     async fn open_tab(&self, url: String) -> Result<TabInfo, BrowserError>;
+    /// Open a URL in a new tab inside a named context.
+    ///
+    /// Defaulted so an implementation with only one context keeps compiling
+    /// and behaving as it did; the real browser overrides it.
+    async fn open_tab_in(
+        &self,
+        context: Option<String>,
+        url: String,
+    ) -> Result<TabInfo, BrowserError> {
+        let _ = context;
+        self.open_tab(url).await
+    }
     /// Navigate an existing tab.
     async fn navigate(&self, tab: TabId, url: String) -> Result<(), BrowserError>;
     /// Bring a tab to the front, so the person sees what the agent is doing.
@@ -233,4 +245,16 @@ pub trait Browser: Send + Sync + 'static {
     ) -> Result<serde_json::Value, BrowserError>;
     /// What has been downloaded, optionally waiting for one in flight.
     async fn downloads(&self, params: DownloadsParams) -> Result<serde_json::Value, BrowserError>;
+    /// The isolated contexts open right now.
+    async fn contexts(&self) -> Result<serde_json::Value, BrowserError>;
+    /// Make a fresh context, optionally with a cookie jar of its own.
+    async fn context_open(
+        &self,
+        params: ContextOpenParams,
+    ) -> Result<serde_json::Value, BrowserError>;
+    /// Close a context and everything open in it.
+    async fn context_close(
+        &self,
+        params: ContextCloseParams,
+    ) -> Result<serde_json::Value, BrowserError>;
 }

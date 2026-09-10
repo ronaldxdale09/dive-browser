@@ -16,12 +16,12 @@ use serde::Serialize;
 use crate::browser::Browser;
 use crate::error::BrowserError;
 use crate::params::{
-    AppearanceParams, BodyParams, ClickParams, ComponentParams, DialogParams, DownloadsParams,
-    DragParams, EvaluateParams, ExpectParams, FillFormParams, HistoryParams, LOCATOR_GRAMMAR,
-    LocateParams, MAX_WAIT_MS, MouseParams, NavigateParams, OpenParams, PdfParams, PressParams,
-    ResizeParams, RulesParams, ScreenshotParams, ScrollParams, SelectParams, StorageClearParams,
-    StorageGetParams, StorageSetParams, TabRef, TailParams, ThrottleParams, TypeParams,
-    UploadParams, WaitForParams,
+    AppearanceParams, BodyParams, ClickParams, ComponentParams, ContextCloseParams,
+    ContextOpenParams, DialogParams, DownloadsParams, DragParams, EvaluateParams, ExpectParams,
+    FillFormParams, HistoryParams, LOCATOR_GRAMMAR, LocateParams, MAX_WAIT_MS, MouseParams,
+    NavigateParams, OpenParams, PdfParams, PressParams, ResizeParams, RulesParams,
+    ScreenshotParams, ScrollParams, SelectParams, StorageClearParams, StorageGetParams,
+    StorageSetParams, TabRef, TailParams, ThrottleParams, TypeParams, UploadParams, WaitForParams,
 };
 
 #[cfg(test)]
@@ -118,14 +118,47 @@ impl<B: Browser> DiveServer<B> {
     /// Open a tab.
     #[tool(
         name = "tab_open",
-        description = "Open a URL in a new tab and focus it. Returns the tab."
+        description = "Open a URL in a new tab and focus it. Returns the tab. Pass context_id from contexts to open it in another context instead of the one in front."
     )]
     async fn tab_open(
         &self,
         Parameters(p): Parameters<OpenParams>,
     ) -> Result<CallToolResult, ErrorData> {
         check_url("tab_open", &p.url)?;
-        json_result(&self.browser.open_tab(p.url).await?)
+        json_result(&self.browser.open_tab_in(p.context_id, p.url).await?)
+    }
+
+    /// Contexts.
+    #[tool(
+        name = "contexts",
+        description = "The isolated contexts open right now, each with its id, name, how many tabs it holds and whether it has a cookie jar of its own. A context is a separate browsing session: two of them can be signed in as different people at the same time, and neither can see the other's cookies or storage."
+    )]
+    async fn contexts(&self) -> Result<CallToolResult, ErrorData> {
+        json_result(&self.browser.contexts().await?)
+    }
+
+    /// New context.
+    #[tool(
+        name = "context_open",
+        description = "Make a fresh isolated context and return its id, for running something in parallel without it sharing a session with anything else -- signing in as a second user, checking a signed-out view, or running two flows at once. It gets a cookie jar of its own unless isolated is false. Pass its id to tab_open, and close it with context_close when the work is done."
+    )]
+    async fn context_open(
+        &self,
+        Parameters(p): Parameters<ContextOpenParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        json_result(&self.browser.context_open(p).await?)
+    }
+
+    /// Close a context.
+    #[tool(
+        name = "context_close",
+        description = "Close a context and every tab in it. Only for a context you made with context_open; the person's own contexts are theirs."
+    )]
+    async fn context_close(
+        &self,
+        Parameters(p): Parameters<ContextCloseParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        json_result(&self.browser.context_close(p).await?)
     }
 
     /// Close.

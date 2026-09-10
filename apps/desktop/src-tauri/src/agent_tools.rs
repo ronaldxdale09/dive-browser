@@ -102,6 +102,21 @@ pub fn specs() -> Vec<ToolSpec> {
             obj(json!({"tab_id": tab, "from": locator, "to": locator}), &["from", "to"]),
         ),
         spec(
+            "contexts",
+            "The isolated contexts open right now, each with its id, name, tab count and whether it has cookies of its own. A context is a separate browsing session: two can be signed in as different people at once.".into(),
+            obj(json!({}), &[]),
+        ),
+        spec(
+            "context_open",
+            "Make a fresh isolated context and return its id, for work that must not share a session -- a second user, a signed-out view, two flows at once. Pass its id to tab_open; close it with context_close when done.".into(),
+            obj(json!({"name": {"type": "string"}, "isolated": {"type": "boolean"}}), &[]),
+        ),
+        spec(
+            "context_close",
+            "Close a context you opened, and every tab in it.".into(),
+            obj(json!({"context_id": {"type": "string"}}), &["context_id"]),
+        ),
+        spec(
             "page_pdf",
             "Render the page to a PDF on disk and return the path. This is the print output rather than a screenshot -- text stays selectable and the page is laid out for paper -- so it is what an invoice, a report or a receipt should be captured with. Takes filename, landscape, paper (a3, a4, a5, letter, legal, tabloid), background and headers.".into(),
             obj(json!({"tab_id": tab, "filename": {"type": "string"}, "landscape": {"type": "boolean"}, "headers": {"type": "boolean"}, "paper": {"type": "string"}, "background": {"type": "boolean"}}), &[]),
@@ -241,6 +256,8 @@ pub fn is_action(name: &str) -> bool {
             | "page_drag"
             | "page_mouse"
             | "page_pdf"
+            | "context_open"
+            | "context_close"
             | "page_storage_set"
             | "page_storage_clear"
             | "tab_history"
@@ -494,6 +511,28 @@ async fn execute<B: Browser>(
                         from: input["from"].as_str().map(str::to_owned),
                         to: input["to"].as_str().map(str::to_owned),
                     },
+                )
+                .await
+                .map_err(err)?,
+        ),
+        "contexts" => text(browser.contexts().await.map_err(err)?),
+        "context_open" => text(
+            browser
+                .context_open(
+                    serde_json::from_value(json!({
+                        "name": input["name"].clone(),
+                        "isolated": input["isolated"].clone(),
+                    }))
+                    .map_err(|e| format!("name must be text and isolated a boolean: {e}"))?,
+                )
+                .await
+                .map_err(err)?,
+        ),
+        "context_close" => text(
+            browser
+                .context_close(
+                    serde_json::from_value(json!({"context_id": input["context_id"].clone()}))
+                        .map_err(|e| format!("context_id must be an id from contexts: {e}"))?,
                 )
                 .await
                 .map_err(err)?,

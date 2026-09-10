@@ -379,6 +379,24 @@ impl Browser for Fake {
     ) -> Result<serde_json::Value, BrowserError> {
         Ok(serde_json::json!({"downloads": []}))
     }
+
+    async fn contexts(&self) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"contexts": []}))
+    }
+
+    async fn context_open(
+        &self,
+        params: crate::params::ContextOpenParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"name": params.name}))
+    }
+
+    async fn context_close(
+        &self,
+        _params: crate::params::ContextCloseParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"closed": true}))
+    }
 }
 
 #[test]
@@ -597,6 +615,7 @@ async fn tools_round_trip_through_the_fake() {
 
     let opened = server
         .tab_open(Parameters(OpenParams {
+            context_id: None,
             url: "https://a.dev".into(),
         }))
         .await
@@ -656,7 +675,10 @@ async fn only_http_urls_can_be_opened_or_navigated_to() {
         "ftp://a.dev/x",
     ] {
         let err = server
-            .tab_open(Parameters(OpenParams { url: url.into() }))
+            .tab_open(Parameters(OpenParams {
+                context_id: None,
+                url: url.into(),
+            }))
             .await
             .expect_err(url);
         assert_eq!(
@@ -679,6 +701,7 @@ async fn only_http_urls_can_be_opened_or_navigated_to() {
     }
     let err = server
         .tab_open(Parameters(OpenParams {
+            context_id: None,
             url: "not a url".into(),
         }))
         .await
@@ -695,7 +718,10 @@ async fn only_http_urls_can_be_opened_or_navigated_to() {
     // http(s) and a blank page are fine.
     for url in ["http://localhost:5173/", "https://a.dev/", "about:blank"] {
         server
-            .tab_open(Parameters(OpenParams { url: url.into() }))
+            .tab_open(Parameters(OpenParams {
+                context_id: None,
+                url: url.into(),
+            }))
             .await
             .expect(url);
         server
@@ -829,6 +855,7 @@ async fn page_dialog_defaults_to_accepting_and_passes_prompt_text() {
     let server = DiveServer::new(Arc::new(Fake::default()), Config::default());
     server
         .tab_open(Parameters(OpenParams {
+            context_id: None,
             url: "https://a.dev".into(),
         }))
         .await

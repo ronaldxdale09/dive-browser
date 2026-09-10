@@ -1151,7 +1151,7 @@ fn profile_workspace_key(profile: dive_core::ProfileId) -> String {
 }
 
 /// The profile of the active workspace, else the first profile.
-fn active_profile(
+pub(crate) fn active_profile(
     store: &dive_core::Store,
     active: Option<WorkspaceId>,
 ) -> AppResult<dive_core::Profile> {

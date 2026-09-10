@@ -56,6 +56,8 @@ const EXPECT_CHECK_CAP: usize = 20;
 const EXPECT_POLL_MS: u64 = 120;
 /// How long between looks while `downloads` waits for one to finish.
 const DOWNLOAD_POLL_MS: u64 = 120;
+/// The colour a context an agent opened wears in the rail.
+const AGENT_CONTEXT_COLOR: &str = "#7FD8C8";
 /// How many matches a visibility check looks at. Past this the answer is the
 /// same either way: something is visible.
 /// Largest string condition accepted by `page_wait_for`.
@@ -579,6 +581,25 @@ fn dialog_opened(dialog: &crate::js_dialog::JsDialogAsked, action: &str) -> Valu
     })
 }
 
+/// A context id as the caller wrote it.
+fn parse_workspace_id(raw: &str) -> Result<dive_core::WorkspaceId, BrowserError> {
+    raw.parse().map_err(|_| {
+        BrowserError::BadRequest(format!(
+            "{raw:?} is not a context id; get one from contexts"
+        ))
+    })
+}
+
+/// A short, sortable stamp for naming a context nobody bothered to name.
+fn short_stamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    format!("{:x}", secs % 0x10_0000)
+}
+
 /// Paper size in inches, by the names people use for paper.
 fn paper_size(named: Option<&str>) -> Result<(f64, f64), BrowserError> {
     Ok(match named.unwrap_or("a4").to_ascii_lowercase().as_str() {
@@ -953,14 +974,34 @@ impl Browser for AppBrowser {
     }
 
     async fn open_tab(&self, url: String) -> Result<TabInfo, BrowserError> {
+        self.open_tab_in(None, url).await
+    }
+
+    async fn open_tab_in(
+        &self,
+        context: Option<String>,
+        url: String,
+    ) -> Result<TabInfo, BrowserError> {
         let url = self.web_url(&url)?.to_string();
+        let wanted = context.as_deref().map(parse_workspace_id).transpose()?;
         // Creating the native view has to happen on the main thread; from
         // the server's thread CEF takes the process down.
         let tab = self
             .on_main(move |app| {
                 let state = app.state::<AppState>();
-                let workspace =
-                    (*lock(&state.active_workspace)).ok_or_else(|| other("no active workspace"))?;
+                let workspace = match wanted {
+                    Some(id) => {
+                        // Checked against the store rather than trusted: a
+                        // context that has been closed would otherwise open a
+                        // tab nobody can reach.
+                        lock(&state.store)
+                            .workspace(id)
+                            .map_err(|_| other("no context with that id"))?
+                            .id
+                    }
+                    None => (*lock(&state.active_workspace))
+                        .ok_or_else(|| other("no active workspace"))?,
+                };
                 let main = MainThread::here().ok_or_else(|| other("not on the main thread"))?;
                 open_tab(&main, app, &state, workspace, &url).map_err(|e| other(e.message))
             })
@@ -971,6 +1012,99 @@ impl Browser for AppBrowser {
             title: tab.title,
             active: true,
         })
+    }
+
+    async fn contexts(&self) -> Result<Value, BrowserError> {
+        let state = self.state();
+        let store = lock(&state.store);
+        let active = *lock(&state.active_workspace);
+        let profile =
+            crate::commands::active_profile(&store, active).map_err(|e| other(e.message))?;
+        let workspaces = store.workspaces_for_profile(profile.id).map_err(other)?;
+        let mut out = Vec::with_capacity(workspaces.len());
+        for workspace in workspaces {
+            let tabs = store.tabs_for_workspace(workspace.id).map_err(other)?.len();
+            // Sharing the profile's container means sharing its cookies, so
+            // "isolated" is exactly "has a container of its own".
+            let isolated = workspace.container_id != profile.container_id;
+            out.push(json!({
+                "context_id": workspace.id.to_string(),
+                "name": workspace.name,
+                "tabs": tabs,
+                "isolated": isolated,
+                "active": Some(workspace.id) == active,
+            }));
+        }
+        Ok(json!({"contexts": out}))
+    }
+
+    async fn context_open(
+        &self,
+        params: dive_mcp::ContextOpenParams,
+    ) -> Result<Value, BrowserError> {
+        let isolated = params.isolated.unwrap_or(true);
+        let name = params
+            .name
+            .map(|n| n.trim().to_owned())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| format!("Agent {}", short_stamp()));
+        let workspace = self
+            .on_main(move |app| {
+                let state = app.state::<AppState>();
+                crate::commands::workspace_create(
+                    app.clone(),
+                    state,
+                    crate::commands::WorkspaceDraft {
+                        name,
+                        // A colour of its own, so a context an agent made is
+                        // recognisable in the rail as one the person did not.
+                        color: AGENT_CONTEXT_COLOR.to_owned(),
+                        icon: String::new(),
+                    },
+                    isolated,
+                )
+                .map_err(|e| other(e.message))
+            })
+            .await??;
+        Ok(json!({
+            "context_id": workspace.id.to_string(),
+            "name": workspace.name,
+            "isolated": isolated,
+        }))
+    }
+
+    async fn context_close(
+        &self,
+        params: dive_mcp::ContextCloseParams,
+    ) -> Result<Value, BrowserError> {
+        let id = params
+            .context_id
+            .as_deref()
+            .ok_or_else(|| BrowserError::BadRequest("give context_id, from contexts".into()))?;
+        let id = parse_workspace_id(id)?;
+        self.on_main(move |app| {
+            let state = app.state::<AppState>();
+            // The last one cannot go: closing it would leave the window with
+            // nothing to show and nowhere to put a new tab.
+            let remaining = {
+                let store = lock(&state.store);
+                let workspace = store
+                    .workspace(id)
+                    .map_err(|_| other("no context with that id"))?;
+                store
+                    .workspaces_for_profile(workspace.profile_id)
+                    .map_err(other)?
+                    .len()
+            };
+            if remaining <= 1 {
+                return Err(other(
+                    "that is the only context; there would be nowhere to browse",
+                ));
+            }
+            crate::commands::workspace_delete(app.clone(), state, id).map_err(|e| other(e.message))
+        })
+        .await??;
+        Ok(json!({"closed": id.to_string()}))
     }
 
     async fn navigate(&self, tab: TabId, url: String) -> Result<(), BrowserError> {

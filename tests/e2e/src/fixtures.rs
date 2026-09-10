@@ -717,4 +717,22 @@ impl Browser for TestFakeBrowser {
     ) -> Result<serde_json::Value, BrowserError> {
         Ok(json!({"downloads": []}))
     }
+
+    async fn contexts(&self) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({"contexts": []}))
+    }
+
+    async fn context_open(
+        &self,
+        params: dive_mcp::ContextOpenParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({"name": params.name, "isolated": params.isolated.unwrap_or(true)}))
+    }
+
+    async fn context_close(
+        &self,
+        _params: dive_mcp::ContextCloseParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({"closed": true}))
+    }
 }

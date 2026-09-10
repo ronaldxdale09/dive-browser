@@ -43,6 +43,9 @@ pub struct TabRef {
 /// Open a URL.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct OpenParams {
+    /// Open it in this context instead of the one in front. From `contexts`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_id: Option<String>,
     /// Absolute URL (https://...).
     pub url: String,
 }
@@ -294,6 +297,24 @@ pub struct DragParams {
     pub from: Option<String>,
     /// Where to drop it, as a locator.
     pub to: Option<String>,
+}
+
+/// Make a fresh isolated context.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct ContextOpenParams {
+    /// What to call it. One is invented when omitted.
+    pub name: Option<String>,
+    /// Give it a cookie jar of its own, so a sign-in here is not a sign-in
+    /// anywhere else. True when omitted -- an isolated context that shares
+    /// cookies is not isolated.
+    pub isolated: Option<bool>,
+}
+
+/// Throw a context away.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct ContextCloseParams {
+    /// The context to close, from `contexts`.
+    pub context_id: Option<String>,
 }
 
 /// Render a page to PDF.
