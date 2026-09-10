@@ -1,5 +1,4 @@
-import { Bot, Bug, Captions, Camera, KeyRound, LibraryBig, PanelBottom, Puzzle, ScrollText, ShieldCheck, Smartphone, Video } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import type { BuiltinAppId } from "../components/BuiltinAppIcon";
 import { COMMAND_TITLES, chordsByCommand, formatChord, runCommand } from "./commands";
 import { isPrivateWindow } from "./privateMode";
 
@@ -20,11 +19,10 @@ export const APP_CATEGORIES: { id: AppCategory; name: string }[] = [
 ];
 
 export interface AppEntry {
-  id: string;
+  id: BuiltinAppId;
   name: string;
   /** One line on what it does, in the person's words. */
   blurb: string;
-  icon: LucideIcon;
   category: AppCategory;
   /** The registry command it runs. */
   command: string;
@@ -34,19 +32,29 @@ export interface AppEntry {
   needsTab?: boolean;
 }
 
+/**
+ * Longest a blurb may be before the launcher's two-line clamp cuts it.
+ *
+ * A tile is roughly a 212px column at 11px, so a description much past this
+ * ends mid-word behind an ellipsis — which is how "polish it…" and "with
+ * per-…" reached a build. Measured rather than guessed: 58 characters
+ * wrapped cleanly, 72 did not.
+ */
+export const MAX_BLURB = 62;
+
 const APPS: AppEntry[] = [
-  { id: "divescreen", name: "DiveScreen", blurb: "Record a tab as video or GIF, then crop, zoom and polish it into a demo.", icon: Video, category: "capture", command: "screencast.toggle", keywords: "record screen loom demo gif video", needsTab: true },
-  { id: "screenshot", name: "Screenshot", blurb: "Capture the full page and annotate it.", icon: Camera, category: "capture", command: "capture.fullpage", keywords: "snapshot image annotate capture", needsTab: true },
-  { id: "recorder", name: "Test recorder", blurb: "Turn what you do in a tab into a Playwright test.", icon: ScrollText, category: "capture", command: "recorder.toggle", keywords: "playwright e2e spec steps macro", needsTab: true },
-  { id: "agent", name: "Agent", blurb: "A model that reads and operates the page beside you, with your own key or a local model.", icon: Bot, category: "page", command: "sidecar.toggle", keywords: "ai assistant chat claude ollama" },
-  { id: "subtitles", name: "Live subtitles", blurb: "Captions for any video, transcribed on this machine.", icon: Captions, category: "page", command: "subtitles.open", keywords: "captions transcribe whisper", needsTab: true },
-  { id: "dock", name: "Developer dock", blurb: "Network, console, storage, accessibility, vitals and mock rules, beside the page.", icon: PanelBottom, category: "developer", command: "dock.toggle", keywords: "console network har mock rules a11y vitals storage" },
-  { id: "devtools", name: "DevTools", blurb: "Chrome's full inspector, in its own window.", icon: Bug, category: "developer", command: "tab.devtools", keywords: "inspect elements", needsTab: true },
-  { id: "simulator", name: "Device simulator", blurb: "Phones and tablets with real frames, touch and throttling.", icon: Smartphone, category: "developer", command: "simulator.toggle", keywords: "mobile responsive emulate iphone", needsTab: true },
-  { id: "extensions", name: "Extensions", blurb: "Chrome extensions loaded into Dive.", icon: Puzzle, category: "developer", command: "extensions.open", keywords: "addons plugins" },
-  { id: "privacy", name: "DivePrivacy", blurb: "Ads, trackers and fingerprinting blocked in the engine, with per-site controls.", icon: ShieldCheck, category: "yours", command: "settings.privacy", keywords: "tracking blocker ads shield" },
-  { id: "passwords", name: "Passwords & forms", blurb: "Saved logins and form entries, kept in the Keychain.", icon: KeyRound, category: "yours", command: "settings.passwords", keywords: "logins autofill keychain" },
-  { id: "library", name: "Library", blurb: "Bookmarks, history, downloads and recordings, by profile.", icon: LibraryBig, category: "yours", command: "library.open", keywords: "bookmarks history downloads recordings" },
+  { id: "divescreen", name: "DiveScreen", blurb: "Record a tab as video or GIF, then polish it into a demo.", category: "capture", command: "screencast.toggle", keywords: "record screen loom demo gif video", needsTab: true },
+  { id: "screenshot", name: "Screenshot", blurb: "Capture the full page and annotate it.", category: "capture", command: "capture.fullpage", keywords: "snapshot image annotate capture", needsTab: true },
+  { id: "recorder", name: "Test recorder", blurb: "Turn what you do in a tab into a Playwright test.", category: "capture", command: "recorder.toggle", keywords: "playwright e2e spec steps macro", needsTab: true },
+  { id: "agent", name: "Agent", blurb: "Reads and operates the page beside you, with your own key.", category: "page", command: "sidecar.toggle", keywords: "ai assistant chat claude ollama" },
+  { id: "subtitles", name: "Live subtitles", blurb: "Captions for any video, transcribed on this machine.", category: "page", command: "subtitles.open", keywords: "captions transcribe whisper", needsTab: true },
+  { id: "dock", name: "Developer dock", blurb: "Network, console, storage, vitals and mock rules.", category: "developer", command: "dock.toggle", keywords: "console network har mock rules a11y vitals storage" },
+  { id: "devtools", name: "DevTools", blurb: "Chrome's full inspector, in its own window.", category: "developer", command: "tab.devtools", keywords: "inspect elements", needsTab: true },
+  { id: "simulator", name: "Device simulator", blurb: "Phones and tablets with real frames, touch and throttling.", category: "developer", command: "simulator.toggle", keywords: "mobile responsive emulate iphone", needsTab: true },
+  { id: "extensions", name: "Extensions", blurb: "Chrome extensions loaded into Dive.", category: "developer", command: "extensions.open", keywords: "addons plugins" },
+  { id: "privacy", name: "DivePrivacy", blurb: "Ads, trackers and fingerprinting, blocked in the engine.", category: "yours", command: "settings.privacy", keywords: "tracking blocker ads shield" },
+  { id: "passwords", name: "Passwords & forms", blurb: "Saved logins and form entries, kept in the Keychain.", category: "yours", command: "settings.passwords", keywords: "logins autofill keychain" },
+  { id: "library", name: "Library", blurb: "Bookmarks, history, downloads and recordings, by profile.", category: "yours", command: "library.open", keywords: "bookmarks history downloads recordings" },
 ];
 
 /** Registry ids some cards run that the command list itself does not carry. */

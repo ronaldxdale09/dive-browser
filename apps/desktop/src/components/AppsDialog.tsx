@@ -7,7 +7,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
-import { AgentIcon } from "./agent/AgentIcon";
+import { BuiltinAppIcon } from "./BuiltinAppIcon";
 import { Icon, IconButton } from "./Icon";
 
 /**
@@ -136,9 +136,7 @@ function AppCard({ app, disabled, onLaunch }: { app: AppEntry; disabled: boolean
       onClick={() => onLaunch(app)}
       className="group flex items-start gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:border-line-2 hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-highlight focus-visible:ring-inset focus-visible:outline-none disabled:opacity-45"
     >
-      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-2 transition-colors group-hover:bg-surface-3 group-hover:text-ink">
-        {app.id === "agent" ? <AgentIcon size={18} className="text-highlight" /> : <Icon icon={app.icon} size={18} />}
-      </span>
+      <BuiltinAppIcon app={app.id} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex items-center gap-2">
           <span className="truncate text-[12.5px] font-medium text-ink">{app.name}</span>
