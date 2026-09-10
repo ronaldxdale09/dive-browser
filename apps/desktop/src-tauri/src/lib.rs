@@ -21,6 +21,7 @@ mod crash_probe;
 mod credential_fill;
 mod default_browser;
 mod devservers;
+mod downloads;
 mod emulate;
 mod engine;
 mod error;

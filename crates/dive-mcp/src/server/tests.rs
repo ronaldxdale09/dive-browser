@@ -364,6 +364,21 @@ impl Browser for Fake {
     ) -> Result<serde_json::Value, BrowserError> {
         Ok(serde_json::json!({"ok": true, "checked": params.checks.len()}))
     }
+
+    async fn page_pdf(
+        &self,
+        _tab: TabId,
+        _params: crate::params::PdfParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"path": "/tmp/page.pdf"}))
+    }
+
+    async fn downloads(
+        &self,
+        _params: crate::params::DownloadsParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"downloads": []}))
+    }
 }
 
 #[test]

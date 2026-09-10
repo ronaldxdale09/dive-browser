@@ -32,6 +32,7 @@ ground, that is the reason.
 | Route / mock | `browser_route`, `browser_unroute`, `browser_route_list` | `rules_set`, `rules_list` |
 | Offline / conditions | `browser_network_state_set` | `page_throttle` |
 | Raw pointer control | 6 tools (`browser_mouse_move_xy`, `browser_mouse_click_xy`, `browser_mouse_down`, `browser_mouse_up`, `browser_mouse_drag_xy`, `browser_mouse_wheel`) | 1 tool (`page_mouse`) that takes a *sequence* of steps, so a whole gesture — drawing on a canvas, dragging a map, working a slider — is one round trip instead of one per event |
+| Save as PDF | `browser_pdf_save` | `page_pdf` — paper size by name, landscape, background, headers; the file is recorded as a download so one tool answers "what file did that produce" |
 | Cookies and web storage | 15 tools (`browser_cookie_*`, `browser_localstorage_*`, `browser_sessionstorage_*`, `browser_storage_state`, `browser_set_storage_state`) | 3 tools (`page_storage`, `page_storage_set`, `page_storage_clear`) — each reads or writes all three kinds at once, and what `page_storage` returns is what `page_storage_set` takes, so restoring a session is a round trip rather than a reassembly |
 
 ## Where Dive is ahead
@@ -49,11 +50,11 @@ Nothing on this list has an equivalent in Playwright MCP.
 | `page_appearance` | Colour scheme, reduced motion, media type, display mode |
 | `page_inspect` | URL, title, loading, text, every interactive element with a locator, console errors, failed requests and what has already been tried — in one call |
 | `dive_capabilities` | What this instance allows, so a client can ask before it guesses |
+| `downloads` | What files have been saved and where they landed — with `wait_ms` to wait for one in flight, which is what makes "click Export, then use the file" possible at all. Playwright MCP has no download tool: an agent can press the button but never find out what came out |
 | A visible agent | The driven tab is marked in the tab list, the page carries an edge glow, and a virtual cursor glides to each target and ripples on click — so a person watching can see what is being done and where, rather than only its results |
 
 ## Still to close
 
-- PDF save (`browser_pdf_save`)
 - Raw keyboard primitives beyond `page_press`
 - Tracing and video (`browser_start_tracing`, `browser_start_video`, `browser_start_recording`)
 - Highlighting and annotation (`browser_highlight`, `browser_annotate`)

@@ -102,6 +102,16 @@ pub fn specs() -> Vec<ToolSpec> {
             obj(json!({"tab_id": tab, "from": locator, "to": locator}), &["from", "to"]),
         ),
         spec(
+            "page_pdf",
+            "Render the page to a PDF on disk and return the path. This is the print output rather than a screenshot -- text stays selectable and the page is laid out for paper -- so it is what an invoice, a report or a receipt should be captured with. Takes filename, landscape, paper (a3, a4, a5, letter, legal, tabloid), background and headers.".into(),
+            obj(json!({"tab_id": tab, "filename": {"type": "string"}, "landscape": {"type": "boolean"}, "headers": {"type": "boolean"}, "paper": {"type": "string"}, "background": {"type": "boolean"}}), &[]),
+        ),
+        spec(
+            "downloads",
+            "The files downloaded so far, newest first, each with the path it landed at. Give wait_ms straight after clicking something that saves a file and it waits for the download to finish first.".into(),
+            obj(json!({"limit": {"type": "integer"}, "wait_ms": {"type": "integer"}}), &[]),
+        ),
+        spec(
             "page_expect",
             "Check several things about the page at once; every check that does not hold is reported, not just the first. A check is one of: visible, hidden, text, no_text, value {locator, equals}, count {locator, equals|at_least|at_most}, url_includes, title_includes. Give timeout_ms to keep re-checking until they hold. A failure says what was actually there.".into(),
             obj(json!({"tab_id": tab, "checks": {"type": "array", "items": {"type": "object", "properties": {"visible": locator, "hidden": locator, "text": {"type": "string"}, "no_text": {"type": "string"}, "value": {"type": "object", "properties": {"locator": locator, "equals": {"type": "string"}}, "required": ["locator", "equals"]}, "count": {"type": "object", "properties": {"locator": locator, "equals": {"type": "integer"}, "at_least": {"type": "integer"}, "at_most": {"type": "integer"}}, "required": ["locator"]}, "url_includes": {"type": "string"}, "title_includes": {"type": "string"}}, "additionalProperties": false}}, "timeout_ms": {"type": "integer"}}), &["checks"]),
@@ -230,6 +240,7 @@ pub fn is_action(name: &str) -> bool {
             | "page_upload"
             | "page_drag"
             | "page_mouse"
+            | "page_pdf"
             | "page_storage_set"
             | "page_storage_clear"
             | "tab_history"
@@ -483,6 +494,34 @@ async fn execute<B: Browser>(
                         from: input["from"].as_str().map(str::to_owned),
                         to: input["to"].as_str().map(str::to_owned),
                     },
+                )
+                .await
+                .map_err(err)?,
+        ),
+        "page_pdf" => text(
+            browser
+                .page_pdf(
+                    tab()?,
+                    serde_json::from_value(json!({
+                        "filename": input["filename"].clone(),
+                        "landscape": input["landscape"].clone(),
+                        "headers": input["headers"].clone(),
+                        "paper": input["paper"].clone(),
+                        "background": input["background"].clone(),
+                    }))
+                    .map_err(|e| format!("the PDF options are not the right shape: {e}"))?,
+                )
+                .await
+                .map_err(err)?,
+        ),
+        "downloads" => text(
+            browser
+                .downloads(
+                    serde_json::from_value(json!({
+                        "limit": input["limit"].clone(),
+                        "wait_ms": input["wait_ms"].clone(),
+                    }))
+                    .map_err(|e| format!("limit and wait_ms must be numbers: {e}"))?,
                 )
                 .await
                 .map_err(err)?,

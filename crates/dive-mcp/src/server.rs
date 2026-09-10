@@ -16,11 +16,12 @@ use serde::Serialize;
 use crate::browser::Browser;
 use crate::error::BrowserError;
 use crate::params::{
-    AppearanceParams, BodyParams, ClickParams, ComponentParams, DialogParams, DragParams,
-    EvaluateParams, ExpectParams, FillFormParams, HistoryParams, LOCATOR_GRAMMAR, LocateParams,
-    MAX_WAIT_MS, MouseParams, NavigateParams, OpenParams, PressParams, ResizeParams, RulesParams,
-    ScreenshotParams, ScrollParams, SelectParams, StorageClearParams, StorageGetParams,
-    StorageSetParams, TabRef, TailParams, ThrottleParams, TypeParams, UploadParams, WaitForParams,
+    AppearanceParams, BodyParams, ClickParams, ComponentParams, DialogParams, DownloadsParams,
+    DragParams, EvaluateParams, ExpectParams, FillFormParams, HistoryParams, LOCATOR_GRAMMAR,
+    LocateParams, MAX_WAIT_MS, MouseParams, NavigateParams, OpenParams, PdfParams, PressParams,
+    ResizeParams, RulesParams, ScreenshotParams, ScrollParams, SelectParams, StorageClearParams,
+    StorageGetParams, StorageSetParams, TabRef, TailParams, ThrottleParams, TypeParams,
+    UploadParams, WaitForParams,
 };
 
 #[cfg(test)]
@@ -443,6 +444,31 @@ impl<B: Browser> DiveServer<B> {
     ) -> Result<CallToolResult, ErrorData> {
         let tab = self.resolve(p.tab_id.clone()).await?;
         json_result(&self.browser.page_expect(tab, p).await?)
+    }
+
+    /// Save as PDF.
+    #[tool(
+        name = "page_pdf",
+        description = "Render the page to a PDF on disk and return the path. Takes filename, landscape, paper (a4, a3, letter, legal, tabloid), background and headers. This is the print output, not a screenshot: text stays selectable and the page is laid out for paper, so it is what an invoice, a report or a receipt should be captured with."
+    )]
+    async fn page_pdf(
+        &self,
+        Parameters(p): Parameters<PdfParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id.clone()).await?;
+        json_result(&self.browser.page_pdf(tab, p).await?)
+    }
+
+    /// Downloaded files.
+    #[tool(
+        name = "downloads",
+        description = "The files this session has downloaded, newest first, with the path each landed at. Give wait_ms straight after clicking something that saves a file, and it waits for the download to finish before answering -- which is what makes \"click Export and then use the file\" possible at all. The path is on this machine, so a client that can read files can open it."
+    )]
+    async fn downloads(
+        &self,
+        Parameters(p): Parameters<DownloadsParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        json_result(&self.browser.downloads(p).await?)
     }
 
     /// Type.

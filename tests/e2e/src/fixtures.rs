@@ -702,4 +702,19 @@ impl Browser for TestFakeBrowser {
     ) -> Result<serde_json::Value, BrowserError> {
         Ok(json!({"ok": true, "checked": params.checks.len()}))
     }
+
+    async fn page_pdf(
+        &self,
+        _tab: TabId,
+        _params: dive_mcp::PdfParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({"path": "/tmp/page.pdf"}))
+    }
+
+    async fn downloads(
+        &self,
+        _params: dive_mcp::DownloadsParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({"downloads": []}))
+    }
 }

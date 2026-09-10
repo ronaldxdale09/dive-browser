@@ -202,6 +202,7 @@ fn handle_download(
         }
         _ => return true,
     };
+    app.state::<AppState>().downloads.record(&notice);
     let _ = notice.emit(app);
     true
 }

@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use base64::Engine as _;
 use dive_cdp::CdpSession;
 use dive_core::TabId;
 use dive_mcp::{
@@ -53,6 +54,8 @@ const GESTURE_DELAY_CAP_MS: u64 = 10_000;
 const EXPECT_CHECK_CAP: usize = 20;
 /// How long between re-checks while `page_expect` is waiting.
 const EXPECT_POLL_MS: u64 = 120;
+/// How long between looks while `downloads` waits for one to finish.
+const DOWNLOAD_POLL_MS: u64 = 120;
 /// How many matches a visibility check looks at. Past this the answer is the
 /// same either way: something is visible.
 /// Largest string condition accepted by `page_wait_for`.
@@ -574,6 +577,49 @@ fn dialog_opened(dialog: &crate::js_dialog::JsDialogAsked, action: &str) -> Valu
         },
         "hint": format!("{action} opened a dialog and the page is waiting on it. Answer it with page_dialog (accept true or false, text for a prompt), then carry on."),
     })
+}
+
+/// Paper size in inches, by the names people use for paper.
+fn paper_size(named: Option<&str>) -> Result<(f64, f64), BrowserError> {
+    Ok(match named.unwrap_or("a4").to_ascii_lowercase().as_str() {
+        "a4" => (8.27, 11.69),
+        "a3" => (11.69, 16.54),
+        "a5" => (5.83, 8.27),
+        "letter" => (8.5, 11.0),
+        "legal" => (8.5, 14.0),
+        "tabloid" => (11.0, 17.0),
+        other => {
+            return Err(BrowserError::BadRequest(format!(
+                "{other:?} is not a paper size; use a3, a4, a5, letter, legal or tabloid"
+            )));
+        }
+    })
+}
+
+/// The file name a PDF is saved under.
+///
+/// A name, never a path: the file goes to the download folder, and a caller
+/// that could pass `../` or an absolute path would be choosing where on the
+/// disk a remote tool call writes.
+fn pdf_filename(given: Option<&str>) -> Result<String, BrowserError> {
+    let Some(given) = given.map(str::trim).filter(|n| !n.is_empty()) else {
+        return Ok("page.pdf".to_owned());
+    };
+    if given.contains('/') || given.contains('\\') || given.starts_with('.') {
+        return Err(BrowserError::BadRequest(
+            "filename is a name, not a path; the file goes to the download folder".into(),
+        ));
+    }
+    Ok(
+        if std::path::Path::new(given)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+        {
+            given.to_owned()
+        } else {
+            format!("{given}.pdf")
+        },
+    )
 }
 
 /// Run one check and say whether it held, and what was there if it did not.
@@ -2321,6 +2367,86 @@ impl Browser for AppBrowser {
         )))
     }
 
+    async fn page_pdf(
+        &self,
+        tab: TabId,
+        params: dive_mcp::PdfParams,
+    ) -> Result<Value, BrowserError> {
+        let (width, height) = paper_size(params.paper.as_deref())?;
+        let name = pdf_filename(params.filename.as_deref())?;
+        let session = self.session_for(tab).await?;
+        let answer = session
+            .call(
+                "Page.printToPDF",
+                json!({
+                    "landscape": params.landscape.unwrap_or(false),
+                    "displayHeaderFooter": params.headers.unwrap_or(false),
+                    "printBackground": params.background.unwrap_or(true),
+                    "paperWidth": width,
+                    "paperHeight": height,
+                    // Base64 rather than a stream: a page that prints to more
+                    // than this is a book, and the caller gets a path either
+                    // way.
+                    "transferMode": "ReturnAsBase64",
+                }),
+            )
+            .await
+            .map_err(|e| other(e.to_string()))?;
+        let encoded = answer["data"]
+            .as_str()
+            .ok_or_else(|| other("the page produced no PDF"))?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(|e| other(format!("the PDF came back unreadable: {e}")))?;
+        let dir = {
+            let state = self.state();
+            state.prefs.get(&state).download_dir()
+        };
+        std::fs::create_dir_all(&dir).map_err(|e| other(format!("{}: {e}", dir.display())))?;
+        let path = crate::engine::unique_path(&dir, &name);
+        std::fs::write(&path, &bytes).map_err(|e| other(format!("{}: {e}", path.display())))?;
+        // Recorded like any other download, so the same tool answers "what
+        // file did that produce" however the file came about.
+        self.state()
+            .downloads
+            .record(&crate::engine::DownloadNotice {
+                tab: Some(tab),
+                url: String::new(),
+                path: path.to_string_lossy().into_owned(),
+                status: "finished".into(),
+            });
+        Ok(json!({"path": path.to_string_lossy(), "bytes": bytes.len()}))
+    }
+
+    async fn downloads(&self, params: dive_mcp::DownloadsParams) -> Result<Value, BrowserError> {
+        let limit = params.limit.unwrap_or(10).clamp(1, 50);
+        let registry = &self.state().downloads;
+        if let Some(wait) = params.wait_ms {
+            // The count of finished downloads at the moment of asking is the
+            // marker: anything that finishes after this is new, and a file
+            // that was already on disk does not answer "wait for the one I
+            // just started".
+            let before = registry.finished_count();
+            let deadline = std::time::Instant::now()
+                + std::time::Duration::from_millis(wait.min(dive_mcp::MAX_WAIT_MS));
+            while std::time::Instant::now() < deadline {
+                if self.state().downloads.finished_count() > before {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(DOWNLOAD_POLL_MS)).await;
+            }
+            let after = self.state().downloads.finished_count();
+            if after == before {
+                return Err(BrowserError::BadRequest(
+                    "no download finished in that time; check the click actually saved a file"
+                        .into(),
+                ));
+            }
+        }
+        let recent = self.state().downloads.recent(limit);
+        serde_json::to_value(json!({"downloads": recent})).map_err(other)
+    }
+
     async fn console_tail(&self, tab: TabId, limit: usize) -> Result<Value, BrowserError> {
         serde_json::to_value(self.state().buffers.console_tail(tab, limit)).map_err(other)
     }
@@ -2549,6 +2675,43 @@ mod tool_session_tests {
             assert_eq!(mouse_button(Some(named)), Ok(named.to_owned()));
         }
         assert!(mouse_button(Some("sideways")).is_err());
+    }
+
+    #[test]
+    fn a_pdf_filename_is_a_name_and_never_a_path() {
+        // A remote caller choosing where on the disk a tool writes is not a
+        // filename, it is a file write, so anything path-shaped is refused.
+        for hostile in [
+            "../escape.pdf",
+            "/etc/passwd",
+            "a/b.pdf",
+            ".hidden",
+            "..\\win.pdf",
+        ] {
+            assert!(
+                pdf_filename(Some(hostile)).is_err(),
+                "{hostile} should be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn a_pdf_filename_gains_the_extension_it_will_be_opened_by() {
+        assert_eq!(pdf_filename(Some("invoice")).unwrap(), "invoice.pdf");
+        assert_eq!(pdf_filename(Some("invoice.pdf")).unwrap(), "invoice.pdf");
+        assert_eq!(pdf_filename(Some("invoice.PDF")).unwrap(), "invoice.PDF");
+        // Nothing given, and nothing but whitespace, both mean "you pick".
+        assert_eq!(pdf_filename(None).unwrap(), "page.pdf");
+        assert_eq!(pdf_filename(Some("   ")).unwrap(), "page.pdf");
+    }
+
+    #[test]
+    fn paper_is_named_the_way_paper_is_named() {
+        assert_eq!(paper_size(None).unwrap(), (8.27, 11.69));
+        assert_eq!(paper_size(Some("Letter")).unwrap(), (8.5, 11.0));
+        assert_eq!(paper_size(Some("LEGAL")).unwrap(), (8.5, 14.0));
+        let problem = paper_size(Some("foolscap")).expect_err("not a size we know");
+        assert!(format!("{problem}").contains("a4"), "{problem}");
     }
 
     #[test]

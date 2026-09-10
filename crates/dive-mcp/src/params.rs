@@ -296,6 +296,34 @@ pub struct DragParams {
     pub to: Option<String>,
 }
 
+/// Render a page to PDF.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct PdfParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// File name to save under. A name only, not a path: the file goes to
+    /// the download folder either way.
+    pub filename: Option<String>,
+    /// Landscape instead of portrait.
+    pub landscape: Option<bool>,
+    /// Include the browser's own header and footer.
+    pub headers: Option<bool>,
+    /// Paper size by name: `a4`, `a3`, `letter`, `legal` or `tabloid`.
+    pub paper: Option<String>,
+    /// Print the background colours and images the page paints.
+    pub background: Option<bool>,
+}
+
+/// Ask what has been downloaded.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct DownloadsParams {
+    /// How many to report, newest first. Ten when omitted.
+    pub limit: Option<usize>,
+    /// Wait up to this long for a download that has not finished yet, for
+    /// use straight after clicking something that saves a file.
+    pub wait_ms: Option<u64>,
+}
+
 /// A value a field is expected to hold.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct ValueCheck {

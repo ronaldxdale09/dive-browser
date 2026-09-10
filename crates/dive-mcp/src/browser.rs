@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::BrowserError;
 use crate::params::{
-    AppearanceParams, DialogParams, DragParams, ExpectParams, FillFormParams, MouseParams,
-    ResizeParams, SelectParams, StorageClearParams, StorageGetParams, StorageSetParams, Target,
-    UploadParams, WaitForParams,
+    AppearanceParams, DialogParams, DownloadsParams, DragParams, ExpectParams, FillFormParams,
+    MouseParams, PdfParams, ResizeParams, SelectParams, StorageClearParams, StorageGetParams,
+    StorageSetParams, Target, UploadParams, WaitForParams,
 };
 
 /// What a tool caller gets to know about a tab.
@@ -225,4 +225,12 @@ pub trait Browser: Send + Sync + 'static {
         tab: TabId,
         params: ExpectParams,
     ) -> Result<serde_json::Value, BrowserError>;
+    /// Render a page to a PDF on disk and say where it went.
+    async fn page_pdf(
+        &self,
+        tab: TabId,
+        params: PdfParams,
+    ) -> Result<serde_json::Value, BrowserError>;
+    /// What has been downloaded, optionally waiting for one in flight.
+    async fn downloads(&self, params: DownloadsParams) -> Result<serde_json::Value, BrowserError>;
 }
