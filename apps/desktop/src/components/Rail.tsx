@@ -251,7 +251,10 @@ function RailFooter({ expanded }: { expanded: boolean }) {
     <div className="flex h-[var(--row-h)] shrink-0 items-center gap-1 pr-1">
       {settings}
       <span className="min-w-1 flex-1" aria-hidden />
-      {!isPrivateWindow() && <BuildBadge align="end" side="above" />}
+      {/* The panel opens toward the page, not back across the rail: it is
+          wider than the rail is, so hanging it from the badge's right edge
+          ran it off the window. */}
+      {!isPrivateWindow() && <BuildBadge align="start" side="above" />}
       <RailUpdateButton />
     </div>
   );

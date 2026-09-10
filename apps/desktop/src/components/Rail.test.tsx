@@ -110,6 +110,16 @@ describe("Rail", () => {
     expect(screen.getByRole("button", { name: "Update available" })).toBeTruthy();
   });
 
+  it("opens the build details toward the page, since the panel is wider than the rail", async () => {
+    render(<Rail />);
+    fireEvent.click(await screen.findByRole("button", { name: /build$/ }));
+    const panel = await screen.findByRole("dialog", { name: "Build details" });
+    // Anchored to the badge's left edge and lifted above it: hung from the
+    // right it would run off the window, which is what the rail's width does.
+    expect(panel.className).toContain("left-0");
+    expect(panel.className).toContain("bottom-full");
+  });
+
   it("offers the update only when one is waiting", () => {
     useUpdates.setState({ status: "none", update: null });
     render(<Rail />);

@@ -79,7 +79,7 @@ export function BuildBadge({ align = "end", side = "below" }: {
         </button>
       </Tooltip>
       {open && (
-        <div ref={panel} role="dialog" aria-label="Build details" className={`absolute z-50 w-64 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl ${align === "start" ? "left-0" : "right-0"} ${side === "above" ? "bottom-full mb-1.5" : "mt-1.5"}`}>
+        <div ref={panel} role="dialog" aria-label="Build details" className={`absolute z-50 w-64 max-w-[calc(100vw-16px)] rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl ${align === "start" ? "left-0" : "right-0"} ${side === "above" ? "bottom-full mb-1.5" : "mt-1.5"}`}>
           <div className="flex items-center gap-2 px-2 pt-1 pb-1.5">
             <span className={`size-1.5 rounded-full ${dot}`} aria-hidden />
             <span className="text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">{dev ? "Development build" : "Beta release"}</span>
