@@ -18,8 +18,10 @@ $name = "DiveSessionRun"
 # The logged-on user is not elevated, so the task cannot write to C:\ root --
 # it just exits 1 and leaves no output. Land in that user's own temp instead.
 if (-not $Out) {
-  $home = "C:\Users\" + $user.Split("\")[-1]
-  $Out = Join-Path $home "AppData\Local\Temp\dive-session-out.txt"
+  # Not $home: that one is read-only, and assigning to it fails without
+  # stopping the script, so the path silently stays SYSTEM's own profile.
+  $profileDir = "C:\Users\" + $user.Split("\")[-1]
+  $Out = Join-Path $profileDir "AppData\Local\Temp\dive-session-out.txt"
 }
 Remove-Item $Out -ErrorAction SilentlyContinue
 
