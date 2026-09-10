@@ -20,8 +20,10 @@ git reset --hard origin/main 2>&1 | Add-Content $log
 Get-Process dive-desktop -ErrorAction SilentlyContinue | Stop-Process -Force
 Say "pnpm install"
 pnpm install --frozen-lockfile 2>&1 | Add-Content $log
-Say "pnpm build (web assets)"
-pnpm --filter @dive/desktop build 2>&1 | Add-Content $log
+# vite, not `pnpm build`: that one is `tauri build`, which would bundle and
+# sign as well. All this needs is the assets the binary embeds.
+Say "vite build (web assets)"
+pnpm --filter @dive/desktop vite build 2>&1 | Add-Content $log
 Say "cargo build --release"
 cargo build --release -p dive-desktop --message-format short 2>&1 | Add-Content $log
 Say "EXITCODE $LASTEXITCODE"
