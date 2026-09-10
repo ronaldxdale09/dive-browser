@@ -67,26 +67,41 @@ Plus one that is not a compile error but is missing behaviour:
 has no equivalent of `NSColorSampler`. A real one means a magnifier overlay
 window written from scratch.
 
-### The overlay mask is the risk
+### The overlay mask
 
 On macOS the chrome is one native view raised above the page views, with a
 `CAShapeLayer` mask punched through it so the page shows where no overlay is
 drawn (`update_overlay_mask` in `engine.rs`, `set_chrome_overlay_mask` in the
-vendored runtime). That is what lets a menu float over live content, and it
-is why modals freeze the page instead: the mask is a rectangle, so a
-translucent overlay composites against the chrome's own background rather
-than the page.
+vendored runtime). That is what lets a menu float over live content.
 
-Windows has no equivalent of that. Page views are child HWNDs and the chrome
-is another; there is no layer mask to punch. The plausible approaches are
-layered windows (`WS_EX_LAYERED` + `UpdateLayeredWindow`), HWND regions
-(`SetWindowRgn`, rectangles only, aliased edges), or DirectComposition. None
-is a translation of what macOS does, and the choice affects how menus,
-popovers and dialogs look.
+Windows looked like the risk in this port. It is less of one than expected,
+because the vendored runtime already has half of it and Win32 has a close
+analogue of the other half:
 
-**Do this one first, on a spike, before anything else.** If it does not work
-the rest of the port is not worth doing, and every other item on the list is
-mechanical by comparison.
+- **Raising** is done: `raise_to_top` in
+  `vendor/tauri-runtime-cef/src/platform/windows/webview.rs` puts a webview
+  above its siblings and pins it there with a `WM_WINDOWPOSCHANGING`
+  subclass that refuses further z-order changes.
+- **Masking** is `SetWindowRgn`. Build a region from the window bounds and
+  subtract each hole (`CombineRgn` with `RGN_DIFF`), and the chrome HWND
+  paints and hit-tests only where an overlay is. That is the same shape of
+  answer as the macOS mask, and the same limitation: both are built from
+  rectangles, so neither has soft edges. `SetWindowRgn` clipping hit-testing
+  as well as painting is what makes clicks outside an overlay reach the page,
+  which is the behaviour the mask exists for.
+
+So the Windows implementation of `set_chrome_overlay_mask(holes, active)` is:
+region of the window minus `holes` plus `raise_to_top` when active; a null
+region and drop back below the page when not. The `holes` geometry is already
+computed platform-independently by `overlay_geometry::uncovered`.
+
+Not proven yet -- it has not been compiled, let alone run -- but it is a
+concrete plan against an existing API rather than a choice between three
+unknowns. Spike it early anyway: if `SetWindowRgn` on a CEF host window
+misbehaves, that is worth finding out before the mechanical work.
+
+`set_corner_radius` has no Windows counterpart either and matters much less;
+square corners on a child view are unremarkable there.
 
 ### Order
 
