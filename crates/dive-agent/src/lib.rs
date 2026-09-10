@@ -12,6 +12,8 @@ pub mod anthropic;
 pub mod openai;
 pub mod providers;
 
+use std::time::Duration;
+
 use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -286,6 +288,8 @@ pub enum AgentError {
         status: u16,
         /// Error body.
         message: String,
+        /// How long the provider asked us to wait, from `Retry-After`.
+        retry_after: Option<Duration>,
     },
 }
 
@@ -300,6 +304,53 @@ impl AgentError {
             }
         )
     }
+
+    /// Whether trying the same request again could plausibly work.
+    ///
+    /// Rate limits and the 5xx family are the provider asking for patience;
+    /// a transport failure is usually a dropped connection. Everything else —
+    /// a bad key, a malformed request, a model that does not exist — fails the
+    /// same way however many times it is sent, so retrying only wastes the
+    /// person's time and their tokens.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::Api { status, .. } => *status == 408 || *status == 429 || *status >= 500,
+            Self::Http(_) => true,
+            Self::MissingKey | Self::MissingBaseUrl => false,
+        }
+    }
+
+    /// How long the provider asked us to wait, when it said.
+    pub fn retry_after(&self) -> Option<Duration> {
+        match self {
+            Self::Api { retry_after, .. } => *retry_after,
+            _ => None,
+        }
+    }
+}
+
+/// `Retry-After` as a duration.
+///
+/// Only the delay-seconds form, which is what Anthropic and `OpenAI` send. The
+/// HTTP-date form is legal too, but parsing it would mean a date dependency
+/// for a case no provider here uses; an unreadable value simply means "no
+/// advice" and the caller backs off on its own schedule.
+fn retry_after_of(response: &reqwest::Response) -> Option<Duration> {
+    let raw = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?;
+    raw.trim().parse::<u64>().ok().map(Duration::from_secs)
+}
+
+/// Wait before attempt `attempt` (1-based), honouring the provider's own
+/// `Retry-After` when it sent one and otherwise backing off exponentially.
+/// Capped so a run never sits silent for minutes.
+pub fn retry_delay(attempt: u32, asked: Option<Duration>) -> Duration {
+    const CAP: Duration = Duration::from_secs(20);
+    let backoff = Duration::from_millis(500 * 2u64.saturating_pow(attempt.saturating_sub(1)));
+    asked.unwrap_or(backoff).min(CAP)
 }
 
 /// A model a provider offers.
@@ -444,12 +495,15 @@ impl Client {
             .await?;
         let status = response.status();
         if !status.is_success() {
+            // Read the header before the body: consuming the response moves it.
+            let retry_after = retry_after_of(&response);
             let message = tokio::time::timeout(ERROR_BODY_TIMEOUT, read_error_body(response))
                 .await
                 .unwrap_or_else(|_| "error response timed out".to_owned());
             return Err(AgentError::Api {
                 status: status.as_u16(),
                 message: tidy_error(&message),
+                retry_after,
             });
         }
         let bytes = response
@@ -518,12 +572,15 @@ impl Client {
         let response = self.send(self.headers(self.http()?.get(url))).await?;
         let status = response.status();
         if !status.is_success() {
+            // Read the header before the body: consuming the response moves it.
+            let retry_after = retry_after_of(&response);
             let message = tokio::time::timeout(ERROR_BODY_TIMEOUT, read_error_body(response))
                 .await
                 .unwrap_or_else(|_| "error response timed out".to_owned());
             return Err(AgentError::Api {
                 status: status.as_u16(),
                 message: tidy_error(&message),
+                retry_after,
             });
         }
         tokio::time::timeout(JSON_BODY_TIMEOUT, read_json_body(response))
@@ -690,6 +747,46 @@ async fn read_json_body(response: reqwest::Response) -> Result<Value, AgentError
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_transient_failures_are_worth_repeating() {
+        let api = |status| AgentError::Api {
+            status,
+            message: String::new(),
+            retry_after: None,
+        };
+        // The provider asking for patience, or a server that fell over.
+        assert!(api(429).is_transient());
+        assert!(api(500).is_transient());
+        assert!(api(503).is_transient());
+        assert!(api(408).is_transient());
+        assert!(AgentError::Http("connection reset".into()).is_transient());
+        // These fail identically however many times they are sent.
+        assert!(!api(401).is_transient());
+        assert!(!api(403).is_transient());
+        assert!(!api(400).is_transient());
+        assert!(!api(404).is_transient());
+        assert!(!AgentError::MissingKey.is_transient());
+    }
+
+    #[test]
+    fn the_provider_sets_the_pace_when_it_says_so() {
+        // Its own advice wins over our backoff.
+        assert_eq!(
+            retry_delay(1, Some(Duration::from_secs(7))),
+            Duration::from_secs(7)
+        );
+        // Without advice, back off exponentially from half a second.
+        assert_eq!(retry_delay(1, None), Duration::from_millis(500));
+        assert_eq!(retry_delay(2, None), Duration::from_secs(1));
+        assert_eq!(retry_delay(3, None), Duration::from_secs(2));
+        // Never sit silent for minutes, whoever asked.
+        assert_eq!(
+            retry_delay(1, Some(Duration::from_secs(600))),
+            Duration::from_secs(20)
+        );
+        assert_eq!(retry_delay(20, None), Duration::from_secs(20));
+    }
+
     use super::*;
 
     #[tokio::test]

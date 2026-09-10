@@ -505,7 +505,7 @@ async fn drive(
             stopped(on_delta);
             return Ok(());
         }
-        let stream = client.stream(&request).await.map_err(AppError::new)?;
+        let stream = start_stream(&client, &request, run, on_delta).await?;
         tokio::pin!(stream);
         let mut text = String::new();
         let mut calls = Vec::new();
@@ -591,6 +591,53 @@ async fn drive(
         }
         request.turns.push(assistant_turn);
         request.turns.push(Turn::tool_results(results));
+    }
+}
+
+/// How many times a round is asked for before the run gives up.
+const STREAM_ATTEMPTS: u32 = 3;
+
+/// Open the stream for one round, waiting out a provider that is rate-limiting
+/// or briefly broken.
+///
+/// Retried here and nowhere else: at this point the round has emitted nothing,
+/// so asking again cannot duplicate text the person has already read. A
+/// failure mid-stream is left alone for that reason. Only transient statuses
+/// are retried — a bad key or a malformed request fails identically however
+/// many times it is sent, and retrying would just spend the person's tokens.
+async fn start_stream(
+    client: &dive_agent::Client,
+    request: &dive_agent::Request,
+    run: &Run,
+    on_delta: &Channel<ChatDelta>,
+) -> AppResult<impl futures_util::Stream<Item = dive_agent::Delta> + use<>> {
+    let mut attempt = 1;
+    loop {
+        match client.stream(request).await {
+            Ok(stream) => return Ok(stream),
+            Err(e) if e.is_transient() && attempt < STREAM_ATTEMPTS => {
+                let wait = dive_agent::retry_delay(attempt, e.retry_after());
+                // Say so rather than appearing to hang: a rate limit can ask
+                // for twenty seconds, and silence reads as a stall.
+                let _ = on_delta.send(ChatDelta::Text(format!(
+                    "\n_The provider is busy; trying again in {}s._\n",
+                    wait.as_secs().max(1)
+                )));
+                tracing::info!(attempt, ?wait, "provider asked us to wait; retrying");
+                // Stop is answered during the wait, not after it: a person
+                // who presses Stop should not sit through the backoff.
+                let halted = tokio::select! {
+                    () = run.notify.notified() => true,
+                    () = tokio::time::sleep(wait) => run.is_cancelled(),
+                };
+                if halted {
+                    let _ = on_delta.send(ChatDelta::Done("stopped".into()));
+                    return Err(AppError::new("stopped"));
+                }
+                attempt += 1;
+            }
+            Err(e) => return Err(AppError::new(e)),
+        }
     }
 }
 
@@ -815,7 +862,9 @@ fn truncate(s: &str, max: usize) -> String {
 /// the raw "api 401: …" the client formats for logs.
 fn rejection_text(provider: &str, error: &dive_agent::AgentError) -> String {
     match error {
-        dive_agent::AgentError::Api { status, message } => {
+        dive_agent::AgentError::Api {
+            status, message, ..
+        } => {
             let message = message.trim().trim_end_matches('.');
             format!("{provider} rejected the key: {message} (HTTP {status}).")
         }
@@ -832,6 +881,7 @@ mod tests {
         let e = dive_agent::AgentError::Api {
             status: 401,
             message: "API key is invalid.".into(),
+            retry_after: None,
         };
         assert_eq!(
             rejection_text("Anthropic", &e),
