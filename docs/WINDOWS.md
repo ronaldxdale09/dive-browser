@@ -39,10 +39,22 @@ Ship `windows64`. Test on whichever you have.
 
 ## The work
 
-42 places name macOS. 13 already have a non-macOS arm and will compile as
-they are. The other **29 are compile errors**, and they cluster:
+42 places name macOS. How many of those are *errors* on Windows cannot be
+worked out from here, and it is worth being clear about why: a
+`#[cfg(target_os = "macos")] fn` is only a problem if something ungated calls
+it, and most of these are gated functions called from gated code, gated
+blocks inside shared functions, or gated match arms. All of those compile
+fine. The real list comes from the first Windows build.
 
-| Where | Sites | What it is | Difficulty |
+What a static read *can* say is where the platform-specific work lives, and
+two errors are identifiable without a compiler: `engine.rs`'s test module is
+not gated but calls a gated `new_tab_chrome_label`, and `normal_window.rs`
+calls the gated `open_handed_urls`. Expect a good deal more from missing
+types, unavailable Tauri variants and `objc2` imports.
+
+Where the work is:
+
+| Where | macOS sites | What it is | Difficulty |
 |---|---:|---|---|
 | `engine.rs` | 11 | The native chrome overlay mask, view corner radius, and new-tab shortcut binding for detached windows | **Hard** — see below |
 | `lib.rs` | 7 | Dock reopen, `--app=` URL handoff, app lifecycle | Easy: most have no Windows equivalent and become no-ops |
