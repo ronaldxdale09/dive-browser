@@ -29,6 +29,8 @@ import { scheduleBootCheck } from "./store/updates";
 import { bootSubtitles } from "./store/subtitles";
 import { useRecording } from "./store/recording";
 import { useRecorder } from "./store/recorder";
+import { WindowControls } from "./components/WindowControls";
+import { isWindows } from "./lib/commands";
 import { listenForAgentPresence } from "./store/agentPresence";
 
 const Sidecar = lazy(() => import("./components/Sidecar").then(({ Sidecar }) => ({ default: Sidecar })));
@@ -116,6 +118,12 @@ export function App() {
   const dockLimits = dockLimitsFor(viewport.height);
   const shownDockHeight = clampSize(live.dock ?? dockHeight, dockLimits);
 
+  // macOS keeps its traffic lights in the frame's top-left, so the bar leaves
+  // a gutter for them. Windows has none there -- its controls are on the
+  // right, and the chrome draws them itself -- so that space would just be a
+  // hole at the start of the row.
+  const captionGutter = isWindows() ? "pl-2" : "pl-[84px]";
+
   return (
     <TabDnd>
     <div
@@ -130,20 +138,21 @@ export function App() {
       style={{ gridTemplateColumns: `${railWidth}px minmax(0,1fr)`, "--chrome-top": oneBar ? "46px" : "86px" } as React.CSSProperties}
     >
       {!oneBar && (
-        <header className="col-span-2 row-start-1 flex items-center gap-2 pl-[84px]">
+        <header className={`col-span-2 row-start-1 flex items-center gap-2 ${captionGutter}`} data-tauri-drag-region="true">
           {isPrivateWindow() && <span className="px-2 font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
           <BuildBadge align="start" />
           <div className="h-full min-w-0 flex-1">
             <TabStrip />
           </div>
           <FeatureBar compact={responsive.collapseRail} />
+          <WindowControls />
         </header>
       )}
       <div className={`relative col-start-1 bg-ground ${oneBar ? "row-span-2 row-start-1" : "row-span-2 row-start-2"}`}>
         {/* A full-height rail starts under the traffic lights: that strip is
             the window's handle, and the rail's own content begins below it. */}
         {oneBar && (
-          <div className="flex h-10 items-center gap-1.5 pr-2 pl-[84px]" data-tauri-drag-region="true">
+          <div className={`flex h-10 items-center gap-1.5 pr-2 ${captionGutter}`} data-tauri-drag-region="true">
             {/* With the rail wide there is room past the traffic lights for
                 the collapse control and the name, on one row, the way every
                 sidebar app does it. A narrow rail is all traffic lights up
@@ -189,6 +198,7 @@ export function App() {
           <div className="pr-2">
             <BrowserActions />
           </div>
+          <WindowControls />
         </header>
       ) : (
         <nav aria-label="Browser controls" className="col-start-2 row-start-2 min-w-0">

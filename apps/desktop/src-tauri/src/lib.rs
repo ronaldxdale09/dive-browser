@@ -397,6 +397,12 @@ pub fn run() {
             startup::record_milestone("state_init");
             engine::create_main_window(app)?;
             startup::record_milestone("window_created");
+            // macOS puts the app menu in the system bar at the top of the
+            // screen, where it costs the window nothing. Windows would hang
+            // it inside the window as a third row above the chrome's own,
+            // and everything in it is already reachable from the chrome's
+            // menu button.
+            #[cfg(not(target_os = "windows"))]
             menu::install(app)?;
             if std::env::var_os("DIVE_NORMAL_FRESH_WINDOW").is_none() {
                 restore_session(app);

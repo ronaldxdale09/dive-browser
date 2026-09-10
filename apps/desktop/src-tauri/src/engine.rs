@@ -1064,14 +1064,22 @@ impl TabHost {
             .min_inner_size(360.0, 240.0);
         // The chrome draws its own title bar, with the tabs sitting beside
         // the traffic lights. That is a macOS window style; Tauri does not
-        // offer it elsewhere, and Windows has no traffic lights to sit
-        // beside, so it keeps its system title bar until the chrome grows a
-        // caption of its own.
+        // offer it elsewhere; Windows gets the same
+        // effect from `decorations(false)` plus the chrome's own controls.
         #[cfg(target_os = "macos")]
         {
             builder = builder
                 .title_bar_style(tauri::TitleBarStyle::Overlay)
                 .hidden_title(true);
+        }
+        // Windows draws a title bar of its own above the chrome's, so the
+        // window ends up with two. The chrome is the title bar here as much
+        // as on macOS, so the frame goes and `WindowControls` supplies the
+        // minimise, maximise and close buttons in the corner Windows keeps
+        // them.
+        #[cfg(target_os = "windows")]
+        {
+            builder = builder.decorations(false);
         }
         if let Some(b) = remembered {
             builder = builder.position(b.x.max(0.0), b.y.max(0.0));
@@ -1748,14 +1756,22 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
         .min_inner_size(720.0, 480.0);
     // The chrome draws its own title bar, with the tabs sitting beside
     // the traffic lights. That is a macOS window style; Tauri does not
-    // offer it elsewhere, and Windows has no traffic lights to sit
-    // beside, so it keeps its system title bar until the chrome grows a
-    // caption of its own.
+    // offer it elsewhere; Windows gets the same
+    // effect from `decorations(false)` plus the chrome's own controls.
     #[cfg(target_os = "macos")]
     {
         builder = builder
             .title_bar_style(tauri::TitleBarStyle::Overlay)
             .hidden_title(true);
+    }
+    // Windows draws a title bar of its own above the chrome's, so the
+    // window ends up with two. The chrome is the title bar here as much
+    // as on macOS, so the frame goes and `WindowControls` supplies the
+    // minimise, maximise and close buttons in the corner Windows keeps
+    // them.
+    #[cfg(target_os = "windows")]
+    {
+        builder = builder.decorations(false);
     }
     if let Some(b) = remembered {
         builder = builder.position(b.x, b.y);

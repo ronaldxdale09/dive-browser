@@ -405,6 +405,18 @@ export function isMac(): boolean {
   return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 }
 
+/**
+ * Whether the chrome is drawing its own window controls.
+ *
+ * macOS has traffic lights in the frame; Windows would give us a second title
+ * bar above our own, so the frame is off there and the chrome draws the
+ * controls itself.
+ */
+export function isWindows(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Win/.test(navigator.platform || navigator.userAgent);
+}
+
 /** Whether a key event happened inside something the user types into. */
 export function isEditable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
