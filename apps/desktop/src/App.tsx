@@ -2,6 +2,7 @@ import { isPrivateWindow } from "./lib/privateMode";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Rail, RAIL_WIDTH, RailToggle } from "./components/Rail";
 import { Wordmark } from "./components/Wordmark";
+import { BuildBadge } from "./components/BuildBadge";
 import { TabStrip } from "./components/TabStrip";
 import { TabDnd } from "./components/TabDnd";
 import { ProfileDialog } from "./components/ProfileDialog";
@@ -128,6 +129,7 @@ export function App() {
       {!oneBar && (
         <header className="col-span-2 row-start-1 flex items-center gap-2 pl-[84px]">
           {isPrivateWindow() && <span className="px-2 font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
+          <BuildBadge align="start" />
           <div className="h-full min-w-0 flex-1">
             <TabStrip />
           </div>
@@ -149,6 +151,9 @@ export function App() {
                   <RailToggle expanded />
                 </span>
                 <Wordmark />
+                <span data-tauri-drag-region="false" onMouseDown={(e) => e.stopPropagation()} className="shrink-0">
+                  <BuildBadge align="start" />
+                </span>
               </>
             )}
             {!effectiveRailExpanded && isPrivateWindow() && <span className="ml-auto font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
@@ -169,6 +174,9 @@ export function App() {
       </div>
       {oneBar ? (
         <header className="col-start-2 row-start-1 flex min-w-0 items-center">
+          {/* The build badge lives on the title row beside the name; with the
+              rail too narrow to carry a title row, it leads this one instead. */}
+          {!effectiveRailExpanded && <span className="pl-2"><BuildBadge align="start" /></span>}
           {/* Left to right: navigation and the address, the page's actions,
               the feature cluster, then the browser's own controls in the
               corner where every browser keeps its menu. */}

@@ -16,7 +16,7 @@ import { copyText } from "../lib/clipboard";
  * release. Sits in the title bar as a quiet pill; clicking it shows the
  * version, build number, commit and when it was compiled, for bug reports.
  */
-export function BuildBadge() {
+export function BuildBadge({ align = "end" }: { /** Which edge the details panel hangs from: `start` when the badge sits at the left of a bar. */ align?: "start" | "end" } = {}) {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [open, setOpen] = useState(false);
   const dismiss = useCallback(() => setOpen(false), []);
@@ -58,7 +58,7 @@ export function BuildBadge() {
 
   return (
     <div ref={ref} className="relative">
-      <Tooltip label={dev ? "Development build · details" : "Beta release · details"} side="bottom" align="end">
+      <Tooltip label={dev ? "Development build · details" : "Beta release · details"} side="bottom" align={align}>
         <button
           type="button"
           aria-label={`${dev ? "Development" : "Beta"} build`}
@@ -72,7 +72,7 @@ export function BuildBadge() {
         </button>
       </Tooltip>
       {open && (
-        <div ref={panel} role="dialog" aria-label="Build details" className="absolute right-0 z-50 mt-1.5 w-64 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl">
+        <div ref={panel} role="dialog" aria-label="Build details" className={`absolute z-50 mt-1.5 w-64 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl ${align === "start" ? "left-0" : "right-0"}`}>
           <div className="flex items-center gap-2 px-2 pt-1 pb-1.5">
             <span className={`size-1.5 rounded-full ${dot}`} aria-hidden />
             <span className="text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">{dev ? "Development build" : "Beta release"}</span>
