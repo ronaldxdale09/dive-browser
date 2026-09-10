@@ -100,6 +100,32 @@ fn named_key(key: &str) -> Option<(&'static str, i64, &'static str)> {
 }
 
 /// The `keyDown`/`keyUp` parameter pair for one key press.
+/// The editing command a chord stands for, if it is one.
+///
+/// Meta on macOS, Control elsewhere; both are accepted either way, because a
+/// caller writing a shortcut means "the shortcut key on this machine" and
+/// should not have to know which one that is.
+fn editing_command(key: &str, modifiers: u8) -> Option<&'static str> {
+    if modifiers & (CTRL | META) == 0 {
+        return None;
+    }
+    let shifted = modifiers & SHIFT != 0;
+    let mut letter = key.trim().chars();
+    let (Some(c), None) = (letter.next(), letter.next()) else {
+        return None;
+    };
+    Some(match (c.to_ascii_lowercase(), shifted) {
+        ('a', false) => "selectAll",
+        ('c', false) => "copy",
+        ('x', false) => "cut",
+        ('v', false) => "paste",
+        ('z', false) => "undo",
+        // Both spellings of redo: Shift+Z on macOS, Y on Windows and Linux.
+        ('z', true) | ('y', false) => "redo",
+        _ => return None,
+    })
+}
+
 pub fn key_events(key: &str, modifiers: u8) -> AppResult<(Value, Value)> {
     let key = key.trim();
     if key.is_empty() {
@@ -438,7 +464,17 @@ pub async fn type_text(
 
 /// Press one key against whatever has focus.
 pub async fn press(session: &CdpSession, key: &str, modifiers: u8) -> AppResult<()> {
-    let (down, up) = key_events(key, modifiers)?;
+    let (mut down, up) = key_events(key, modifiers)?;
+    // A chord that means an editing command has to say so. Chromium performs
+    // select-all, copy, paste and undo from the command attached to the
+    // event, not from the keystroke: without this, Meta+A fires a keydown the
+    // page can see but selects nothing, so a following Backspace deletes one
+    // character instead of the field. That reads as "the shortcut did
+    // nothing" and is exactly the kind of failure that is hard to spot,
+    // because the page's own handler ran.
+    if let Some(command) = editing_command(key, modifiers) {
+        down["commands"] = json!([command]);
+    }
     session
         .call("Input.dispatchKeyEvent", down)
         .await
@@ -506,6 +542,41 @@ pub async fn scroll(
         return Err(AppError::new(format!("scroll failed: {message}")));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod editing_command_tests {
+    use super::{ALT, CTRL, META, SHIFT, editing_command};
+
+    #[test]
+    fn the_shortcut_key_is_whichever_one_the_caller_used() {
+        // A caller writing Meta+A on Linux, or Control+A on a Mac, means the
+        // select-all shortcut either way.
+        assert_eq!(editing_command("a", META), Some("selectAll"));
+        assert_eq!(editing_command("a", CTRL), Some("selectAll"));
+        assert_eq!(editing_command("A", META), Some("selectAll"));
+    }
+
+    #[test]
+    fn the_clipboard_and_history_chords_are_named() {
+        for (key, want) in [("c", "copy"), ("x", "cut"), ("v", "paste"), ("z", "undo")] {
+            assert_eq!(editing_command(key, META), Some(want), "{key}");
+        }
+        // Redo is spelled two ways depending on the platform people came from.
+        assert_eq!(editing_command("z", META | SHIFT), Some("redo"));
+        assert_eq!(editing_command("y", CTRL), Some("redo"));
+    }
+
+    #[test]
+    fn an_ordinary_keystroke_carries_no_command() {
+        // Without this a plain "a" would select the whole field.
+        assert_eq!(editing_command("a", 0), None);
+        assert_eq!(editing_command("a", SHIFT), None);
+        assert_eq!(editing_command("a", ALT), None);
+        // A chord the browser has no editing meaning for is left to the page.
+        assert_eq!(editing_command("k", META), None);
+        assert_eq!(editing_command("Enter", META), None);
+    }
 }
 
 #[cfg(test)]

@@ -7,8 +7,9 @@ use crate::browser::{Browser, TabInfo};
 use crate::error::BrowserError;
 use crate::params::{
     AppearanceParams, ContextCloseParams, ContextOpenParams, DialogParams, DownloadsParams,
-    DragParams, ExpectParams, FillFormParams, MouseParams, PdfParams, ResizeParams, SelectParams,
-    StorageClearParams, StorageGetParams, StorageSetParams, Target, UploadParams, WaitForParams,
+    DragParams, ExpectParams, FillFormParams, KeysParams, MouseParams, PdfParams, ResizeParams,
+    SelectParams, StorageClearParams, StorageGetParams, StorageSetParams, Target, UploadParams,
+    WaitForParams,
 };
 use crate::server::DiveServer;
 
@@ -361,6 +362,14 @@ impl Browser for NoBrowser {
     async fn context_close(
         &self,
         _params: ContextCloseParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Err(BrowserError::Other("no browser behind the catalog".into()))
+    }
+
+    async fn page_keys(
+        &self,
+        _tab: TabId,
+        _params: KeysParams,
     ) -> Result<serde_json::Value, BrowserError> {
         Err(BrowserError::Other("no browser behind the catalog".into()))
     }

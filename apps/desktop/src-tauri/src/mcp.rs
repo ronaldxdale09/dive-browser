@@ -47,6 +47,11 @@ const UPLOAD_FILE_CAP: usize = 20;
 /// Steps one `page_mouse` gesture may have. Enough for a signature or a long
 /// drag; past it the caller wants a script, not a gesture.
 const GESTURE_STEP_CAP: usize = 200;
+/// Steps one `page_keys` sequence may have.
+const KEY_STEP_CAP: usize = 100;
+/// Key presses one sequence may add up to, once repeats are counted. A
+/// sequence past this is holding a key down, which is a different thing.
+const KEY_PRESS_CAP: u32 = 500;
 /// How long a gesture's own pauses may add up to. The call blocks for that
 /// whole time, so it has to stay well inside a client's patience.
 const GESTURE_DELAY_CAP_MS: u64 = 10_000;
@@ -2730,6 +2735,107 @@ impl Browser for AppBrowser {
         }
         let recent = self.state().downloads.recent(limit);
         serde_json::to_value(json!({"downloads": recent})).map_err(other)
+    }
+
+    async fn page_keys(
+        &self,
+        tab: TabId,
+        params: dive_mcp::KeysParams,
+    ) -> Result<Value, BrowserError> {
+        if params.steps.is_empty() {
+            return Err(BrowserError::BadRequest(
+                "give at least one step: [{key:'Enter'}]".into(),
+            ));
+        }
+        if params.steps.len() > KEY_STEP_CAP {
+            return Err(BrowserError::BadRequest(format!(
+                "a keyboard sequence may have at most {KEY_STEP_CAP} steps"
+            )));
+        }
+        // Repeats and pauses both cost real time, and the call blocks for all
+        // of it, so they are counted before anything is dispatched.
+        let presses: u32 = params
+            .steps
+            .iter()
+            .map(|s| s.repeat.unwrap_or(1).max(1))
+            .sum();
+        if presses > KEY_PRESS_CAP {
+            return Err(BrowserError::BadRequest(format!(
+                "that is {presses} key presses, over the {KEY_PRESS_CAP} limit"
+            )));
+        }
+        let total_delay: u64 = params.steps.iter().filter_map(|s| s.delay_ms).sum();
+        if total_delay > GESTURE_DELAY_CAP_MS {
+            return Err(BrowserError::BadRequest(format!(
+                "the pauses add up to {total_delay}ms, over the {GESTURE_DELAY_CAP_MS}ms limit"
+            )));
+        }
+        let session = self.action_session_for(tab).await?;
+        let described = Some(format!("{} steps", params.steps.len()));
+        let target = Target {
+            locator: params.locator.clone(),
+            r#ref: None,
+            x: None,
+            y: None,
+        };
+        self.tracked(
+            tab,
+            "page_keys",
+            described,
+            self.or_dialog(
+                tab,
+                async {
+                    let focused = self.focus_for(tab, &session, &target, false).await?;
+                    for (index, step) in params.steps.iter().enumerate() {
+                        let numbered = |e: String| {
+                            BrowserError::BadRequest(format!("step {}: {e}", index + 1))
+                        };
+                        match (&step.key, &step.text) {
+                            (Some(_), Some(_)) => {
+                                return Err(numbered("give key or text, not both".into()));
+                            }
+                            (None, None) => {
+                                return Err(numbered("give key or text".into()));
+                            }
+                            (Some(key), None) => {
+                                let mask = automation::modifier_mask(
+                                    step.modifiers.as_deref().unwrap_or(&[]),
+                                )
+                                .map_err(|e| numbered(e.message))?;
+                                for _ in 0..step.repeat.unwrap_or(1).max(1) {
+                                    automation::press(&session, key, mask)
+                                        .await
+                                        .map_err(|e| numbered(e.message))?;
+                                }
+                            }
+                            (None, Some(text)) => {
+                                if text.chars().count() > TYPE_TEXT_CAP {
+                                    return Err(numbered(format!(
+                                        "text is over the {TYPE_TEXT_CAP} character limit"
+                                    )));
+                                }
+                                // Not cleared and not submitted: a step in a sequence
+                                // inserts where the caret is, which is the whole
+                                // reason to reach for this over page_type.
+                                automation::type_text(&session, text, false, false)
+                                    .await
+                                    .map_err(|e| numbered(e.message))?;
+                            }
+                        }
+                        if let Some(pause) = step.delay_ms {
+                            tokio::time::sleep(std::time::Duration::from_millis(pause)).await;
+                        }
+                    }
+                    Ok(json!({
+                        "played": params.steps.len(),
+                        "presses": presses,
+                        "focused": focused,
+                    }))
+                },
+                |dialog| Ok(dialog_opened(dialog, "The keys")),
+            ),
+        )
+        .await
     }
 
     async fn console_tail(&self, tab: TabId, limit: usize) -> Result<Value, BrowserError> {

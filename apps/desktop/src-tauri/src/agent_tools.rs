@@ -132,6 +132,11 @@ pub fn specs() -> Vec<ToolSpec> {
             obj(json!({"tab_id": tab, "checks": {"type": "array", "items": {"type": "object", "properties": {"visible": locator, "hidden": locator, "text": {"type": "string"}, "no_text": {"type": "string"}, "value": {"type": "object", "properties": {"locator": locator, "equals": {"type": "string"}}, "required": ["locator", "equals"]}, "count": {"type": "object", "properties": {"locator": locator, "equals": {"type": "integer"}, "at_least": {"type": "integer"}, "at_most": {"type": "integer"}}, "required": ["locator"]}, "url_includes": {"type": "string"}, "title_includes": {"type": "string"}}, "additionalProperties": false}}, "timeout_ms": {"type": "integer"}}), &["checks"]),
         ),
         spec(
+            "page_keys",
+            "Play a keyboard sequence in one call: steps is a list of {key} presses, {text} insertions and {modifiers} chords, in order. Each step takes repeat and delay_ms; locator focuses something first. Use page_type to fill a field; this is for what a keyboard does that typing does not -- a shortcut, walking a menu with ArrowDown, a chord the page listens for.".into(),
+            obj(json!({"tab_id": tab, "locator": locator, "steps": {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}, "text": {"type": "string"}, "modifiers": {"type": "array", "items": {"type": "string"}}, "repeat": {"type": "integer"}, "delay_ms": {"type": "integer"}}, "additionalProperties": false}}}), &["steps"]),
+        ),
+        spec(
             "page_mouse",
             "Play a pointer gesture at viewport coordinates: steps is a list of {action, x, y} where action is move, down, up, click or wheel. The whole gesture is one call. Use page_click for anything a locator can name; this is for what it cannot -- canvases, maps, drawings, sliders with no accessible value.".into(),
             obj(json!({"tab_id": tab, "steps": {"type": "array", "items": {"type": "object", "properties": {"action": {"type": "string", "enum": ["move", "down", "up", "click", "wheel"]}, "x": {"type": "number"}, "y": {"type": "number"}, "button": {"type": "string", "enum": ["left", "right", "middle"]}, "delta_x": {"type": "number"}, "delta_y": {"type": "number"}, "delay_ms": {"type": "integer"}}, "required": ["action"], "additionalProperties": false}}}), &["steps"]),
@@ -254,6 +259,7 @@ pub fn is_action(name: &str) -> bool {
             | "page_fill_form"
             | "page_upload"
             | "page_drag"
+            | "page_keys"
             | "page_mouse"
             | "page_pdf"
             | "context_open"
@@ -576,6 +582,19 @@ async fn execute<B: Browser>(
                     .map_err(|e| {
                         format!("checks must be a list of single-condition objects: {e}")
                     })?,
+                )
+                .await
+                .map_err(err)?,
+        ),
+        "page_keys" => text(
+            browser
+                .page_keys(
+                    tab()?,
+                    serde_json::from_value(json!({
+                        "locator": input["locator"].clone(),
+                        "steps": input["steps"].clone(),
+                    }))
+                    .map_err(|e| format!("steps must be a list of {{key}} or {{text}}: {e}"))?,
                 )
                 .await
                 .map_err(err)?,

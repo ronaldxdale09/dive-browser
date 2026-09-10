@@ -735,4 +735,12 @@ impl Browser for TestFakeBrowser {
     ) -> Result<serde_json::Value, BrowserError> {
         Ok(json!({"closed": true}))
     }
+
+    async fn page_keys(
+        &self,
+        _tab: TabId,
+        params: dive_mcp::KeysParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(json!({"steps": params.steps.len()}))
+    }
 }

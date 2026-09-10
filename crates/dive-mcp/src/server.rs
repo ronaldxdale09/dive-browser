@@ -18,8 +18,8 @@ use crate::error::BrowserError;
 use crate::params::{
     AppearanceParams, BodyParams, ClickParams, ComponentParams, ContextCloseParams,
     ContextOpenParams, DialogParams, DownloadsParams, DragParams, EvaluateParams, ExpectParams,
-    FillFormParams, HistoryParams, LOCATOR_GRAMMAR, LocateParams, MAX_WAIT_MS, MouseParams,
-    NavigateParams, OpenParams, PdfParams, PressParams, ResizeParams, RulesParams,
+    FillFormParams, HistoryParams, KeysParams, LOCATOR_GRAMMAR, LocateParams, MAX_WAIT_MS,
+    MouseParams, NavigateParams, OpenParams, PdfParams, PressParams, ResizeParams, RulesParams,
     ScreenshotParams, ScrollParams, SelectParams, StorageClearParams, StorageGetParams,
     StorageSetParams, TabRef, TailParams, ThrottleParams, TypeParams, UploadParams, WaitForParams,
 };
@@ -502,6 +502,19 @@ impl<B: Browser> DiveServer<B> {
         Parameters(p): Parameters<DownloadsParams>,
     ) -> Result<CallToolResult, ErrorData> {
         json_result(&self.browser.downloads(p).await?)
+    }
+
+    /// A keyboard sequence.
+    #[tool(
+        name = "page_keys",
+        description = "Play a keyboard sequence in one call: steps is a list of {key} presses, {text} insertions and {modifiers} chords, played in order. Each step takes repeat to press it several times and delay_ms to pause after it, and locator focuses something first. Use page_type for filling a field; this is for what a keyboard does that typing does not -- a shortcut like {key:'a', modifiers:['Meta']} then Backspace, walking a menu with ArrowDown, or a chord a page listens for."
+    )]
+    async fn page_keys(
+        &self,
+        Parameters(p): Parameters<KeysParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tab = self.resolve(p.tab_id.clone()).await?;
+        json_result(&self.browser.page_keys(tab, p).await?)
     }
 
     /// Type.

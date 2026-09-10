@@ -299,6 +299,38 @@ pub struct DragParams {
     pub to: Option<String>,
 }
 
+/// One step of a keyboard sequence. Give `key` or `text`, not both.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct KeyStep {
+    /// A key to press: `Enter`, `Escape`, `Tab`, `ArrowDown`, `Backspace`,
+    /// or a single character.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// Literal text to insert, as typing it would.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Held while the key goes down: `Meta`, `Control`, `Alt`, `Shift`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modifiers: Option<Vec<String>>,
+    /// Press it this many times. Once when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<u32>,
+    /// Pause after this step, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delay_ms: Option<u64>,
+}
+
+/// A keyboard sequence.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct KeysParams {
+    /// Tab id from `tabs_list`; defaults to the active tab.
+    pub tab_id: Option<String>,
+    /// Focus this before typing. Omit to type at whatever has focus.
+    pub locator: Option<String>,
+    /// The steps, played in order.
+    pub steps: Vec<KeyStep>,
+}
+
 /// Make a fresh isolated context.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub struct ContextOpenParams {

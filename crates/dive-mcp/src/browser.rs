@@ -8,8 +8,9 @@ use serde::{Deserialize, Serialize};
 use crate::error::BrowserError;
 use crate::params::{
     AppearanceParams, ContextCloseParams, ContextOpenParams, DialogParams, DownloadsParams,
-    DragParams, ExpectParams, FillFormParams, MouseParams, PdfParams, ResizeParams, SelectParams,
-    StorageClearParams, StorageGetParams, StorageSetParams, Target, UploadParams, WaitForParams,
+    DragParams, ExpectParams, FillFormParams, KeysParams, MouseParams, PdfParams, ResizeParams,
+    SelectParams, StorageClearParams, StorageGetParams, StorageSetParams, Target, UploadParams,
+    WaitForParams,
 };
 
 /// What a tool caller gets to know about a tab.
@@ -256,5 +257,11 @@ pub trait Browser: Send + Sync + 'static {
     async fn context_close(
         &self,
         params: ContextCloseParams,
+    ) -> Result<serde_json::Value, BrowserError>;
+    /// Play a keyboard sequence: keys, text and chords, in order.
+    async fn page_keys(
+        &self,
+        tab: TabId,
+        params: KeysParams,
     ) -> Result<serde_json::Value, BrowserError>;
 }

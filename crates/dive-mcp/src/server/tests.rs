@@ -397,6 +397,14 @@ impl Browser for Fake {
     ) -> Result<serde_json::Value, BrowserError> {
         Ok(serde_json::json!({"closed": true}))
     }
+
+    async fn page_keys(
+        &self,
+        _tab: TabId,
+        params: crate::params::KeysParams,
+    ) -> Result<serde_json::Value, BrowserError> {
+        Ok(serde_json::json!({"steps": params.steps.len()}))
+    }
 }
 
 #[test]

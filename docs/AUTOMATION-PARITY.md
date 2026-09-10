@@ -31,6 +31,7 @@ ground, that is the reason.
 | Locator help | `browser_generate_locator` | `page_locate` |
 | Route / mock | `browser_route`, `browser_unroute`, `browser_route_list` | `rules_set`, `rules_list` |
 | Offline / conditions | `browser_network_state_set` | `page_throttle` |
+| Raw keyboard control | `browser_press_key` (one key) | `page_keys` — a sequence of presses, text insertions and chords in one call, with repeat and pauses; editing chords (select-all, copy, cut, paste, undo, redo) actually perform the command rather than only firing a keydown |
 | Raw pointer control | 6 tools (`browser_mouse_move_xy`, `browser_mouse_click_xy`, `browser_mouse_down`, `browser_mouse_up`, `browser_mouse_drag_xy`, `browser_mouse_wheel`) | 1 tool (`page_mouse`) that takes a *sequence* of steps, so a whole gesture — drawing on a canvas, dragging a map, working a slider — is one round trip instead of one per event |
 | Save as PDF | `browser_pdf_save` | `page_pdf` — paper size by name, landscape, background, headers; the file is recorded as a download so one tool answers "what file did that produce" |
 | Cookies and web storage | 15 tools (`browser_cookie_*`, `browser_localstorage_*`, `browser_sessionstorage_*`, `browser_storage_state`, `browser_set_storage_state`) | 3 tools (`page_storage`, `page_storage_set`, `page_storage_clear`) — each reads or writes all three kinds at once, and what `page_storage` returns is what `page_storage_set` takes, so restoring a session is a round trip rather than a reassembly |
@@ -68,7 +69,6 @@ Nothing on this list has an equivalent in Playwright MCP.
 
 ## Still to close
 
-- Raw keyboard primitives beyond `page_press`
 - Self-healing is suggestion-only: it names candidates, it does not retry for you
 - Tracing and video (`browser_start_tracing`, `browser_start_video`, `browser_start_recording`)
 - Highlighting and annotation (`browser_highlight`, `browser_annotate`)
