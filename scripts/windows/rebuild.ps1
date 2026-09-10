@@ -34,8 +34,10 @@ Run "pull" "git fetch --depth 1 origin main && git reset --hard origin/main"
 # Windows will not replace a binary that is still open.
 Get-Process dive-desktop -ErrorAction SilentlyContinue | Stop-Process -Force
 Run "pnpm install" "pnpm install --frozen-lockfile"
-# vite, not `pnpm build`: that one is `tauri build`, which would bundle and
-# sign as well. All this needs is the assets the binary embeds.
-Run "vite" "pnpm --filter @dive/desktop vite build"
-Run "cargo" "cargo build --release -p dive-desktop --message-format short"
+# It has to be `tauri build`, not vite + `cargo build`. Building the crate
+# directly skips the Tauri CLI, and the binary that comes out never loads the
+# frontend: the chrome webview is created, nothing renders in it, no error is
+# logged anywhere, and the window is simply black. `--no-bundle` stops before
+# the installer, which is all that was worth avoiding here.
+Run "tauri build" "pnpm --filter @dive/desktop tauri build --no-bundle --config src-tauri/tauri.no-updater.conf.json"
 Say "DONE"
