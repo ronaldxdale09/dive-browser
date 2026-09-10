@@ -1008,9 +1008,22 @@ fn spawn_screen(rect: WindowRect, mic: Option<&str>, fps: u32, path: &Path) -> A
             &mic.map_or_else(|| device.clone(), |m| format!("{device}:{m}")),
         ]);
     }
-    #[cfg(not(target_os = "macos"))]
+    // gdigrab names no display: it takes the whole desktop and the crop
+    // filter below picks the window out of it, which is what happens on the
+    // other platforms too once the region is grabbed.
+    #[cfg(target_os = "windows")]
     {
-        let _ = mic;
+        let _ = device;
+        cmd.args(["-f", "gdigrab", "-framerate", &fps.to_string(), "-i", "desktop"]);
+        // A microphone is a separate dshow input rather than part of the
+        // video device, so it is added as its own -f/-i pair.
+        if let Some(mic) = mic {
+            cmd.args(["-f", "dshow", "-i", &format!("audio={mic}")]);
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = (mic, device);
         cmd.args([
             "-f",
             "x11grab",
