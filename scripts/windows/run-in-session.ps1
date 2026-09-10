@@ -19,7 +19,8 @@ Remove-Item $Out -ErrorAction SilentlyContinue
 
 # schtasks /tr mangles nested quotes, so the redirect lives in a .cmd wrapper.
 $wrapper = "C:\dive-session-run.cmd"
-Set-Content $wrapper "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File \"$Script\" > \"$Out\" 2>&1" -Encoding ASCII
+$cmd = '@echo off' + "`r`n" + 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + $Script + '" > "' + $Out + '" 2>&1'
+Set-Content $wrapper $cmd -Encoding ASCII
 schtasks /create /tn $name /tr $wrapper /sc once /st 00:00 /ru $user /it /f | Out-Null
 schtasks /run /tn $name | Out-Null
 
