@@ -11,12 +11,13 @@
 //   DIVE_CHROMIUM_FLAGS=remote-debugging-port=9343 <Dive binary>
 //   node scripts/windows/eyedropper-live-check.mjs
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const port = process.env.DIVE_CHECK_CDP_PORT || "9343";
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 // The swatch the unit test uses, so a failure reads the same in both places.
 const SWATCH = { hex: "#123456", r: 18, g: 52, b: 86 };
 
@@ -45,7 +46,12 @@ async function connect() {
 ///
 /// Borderless and topmost so nothing of Dive's own interface is left under
 /// the cursor: the point is to know what colour is at the pixel that gets
-/// clicked. Runs detached because the eyedropper is already waiting.
+/// clicked.
+///
+/// Synchronous, and deliberately so. The eyedropper is already waiting on
+/// another thread, and blocking this one costs nothing but makes a failure
+/// here visible -- a detached child that never ran looked exactly like a
+/// sampler that never saw the click.
 function paintAndClick() {
   const script = `
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -76,12 +82,11 @@ $f.Close()
   // P/Invokes has to start at column 0, which a command line does not promise.
   const file = join(tmpdir(), "dive-eyedropper-swatch.ps1");
   writeFileSync(file, script);
-  const child = spawn(
+  execFileSync(
     "powershell",
     ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-File", file],
-    { stdio: "inherit", detached: true },
+    { stdio: "inherit" },
   );
-  child.unref();
 }
 
 const ev = await connect();
@@ -98,10 +103,14 @@ const tab = await invoke("tab_open", { workspaceId: workspace, url: "about:blank
 
 // Start the sampler, then paint under it. The command blocks until a click,
 // so the painting has to happen while this promise is outstanding.
-const sampling = invoke("tab_eyedropper", { id: tab.id }, 130000);
-setTimeout(paintAndClick, 500);
+const sampling = invoke("tab_eyedropper", { id: tab.id }, 130_000);
+// Let the sampler get past the release-wait it does first, then paint.
+await delay(700);
+const started = Date.now();
+paintAndClick();
 
 const picked = await sampling;
+console.log(`sampler answered ${((Date.now() - started) / 1000).toFixed(1)}s after the click`);
 assert(picked, "the eyedropper reported a cancel rather than a colour");
 assert.equal(
   picked.hex,
