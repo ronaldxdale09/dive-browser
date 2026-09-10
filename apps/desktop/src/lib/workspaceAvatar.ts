@@ -1,33 +1,20 @@
 /**
- * Workspace marks: DiceBear "shapes" avatars generated locally in a worker.
+ * Workspace marks.
  *
- * "shapes" over the character styles because a workspace is a place, not a
- * person, and its geometry still reads at 24px in the rail. The library runs
- * locally rather than through api.dicebear.com: the chrome's CSP is
- * `default-src 'self'`, and a browser's own chrome must not hit the network to
- * paint itself.
+ * The drawings live in `workspaceMarks.ts`; this module owns the seeds the
+ * picker offers and the seed a name suggests. Profiles still use DiceBear
+ * (notionists); workspaces do not, because a workspace is a thing you do
+ * rather than a person, and none of DiceBear's sets both say that and move.
  *
  * The stored `icon` of a workspace is the seed, so the same name always draws
- * the same mark, and values written before this (plain glyph names) simply
- * seed an avatar of their own instead of breaking.
+ * the same mark. A seed written before this — a shapes seed like "aurora", or
+ * an older glyph name — still resolves, deterministically, to one of the marks.
  */
 
-/** Seeds offered in the picker, after the one derived from the name. */
-export const AVATAR_SEEDS = [
-  "aurora",
-  "atlas",
-  "cobalt",
-  "ember",
-  "fern",
-  "harbor",
-  "juno",
-  "koda",
-  "lumen",
-  "nimbus",
-  "onyx",
-  "quartz",
-  "slate",
-];
+import { WORKSPACE_MARKS } from "./workspaceMarks";
+
+/** Marks offered in the picker, after the one derived from the name. */
+export const AVATAR_SEEDS: string[] = [...WORKSPACE_MARKS];
 
 /** The seed a name suggests, so a workspace has a mark before one is picked. */
 export function seedFromName(name: string): string {
