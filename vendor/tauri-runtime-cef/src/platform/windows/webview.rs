@@ -7,12 +7,14 @@ use tauri_runtime::dpi::{PhysicalPosition, PhysicalSize, Rect};
 use tauri_utils::config::Color;
 use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
-    Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, MapWindowPoints, RGN_DIFF},
+    Graphics::Gdi::{
+        CombineRgn, CreateRectRgn, DeleteObject, MapWindowPoints, RGN_DIFF, SetWindowRgn,
+    },
     UI::Shell::{DefSubclassProc, SetWindowSubclass},
     UI::WindowsAndMessaging::{
         DestroyWindow, GetParent, GetWindowRect, HWND_BOTTOM, HWND_TOP, SW_HIDE, SW_SHOW,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetParent, SetWindowPos, SetWindowRgn,
-        ShowWindow, WINDOWPOS, WM_WINDOWPOSCHANGING,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetParent, SetWindowPos, ShowWindow,
+        WINDOWPOS, WM_WINDOWPOSCHANGING,
     },
     UI::HiDpi::GetDpiForWindow,
 };
