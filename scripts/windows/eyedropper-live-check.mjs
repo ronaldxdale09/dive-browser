@@ -12,6 +12,9 @@
 //   node scripts/windows/eyedropper-live-check.mjs
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const port = process.env.DIVE_CHECK_CDP_PORT || "9343";
 // The swatch the unit test uses, so a failure reads the same in both places.
@@ -30,7 +33,7 @@ async function connect() {
     const p = pending.get(m.id);
     if (p) { pending.delete(m.id); p(m); }
   };
-  return (expression, ms = 60000) => new Promise((res, rej) => {
+  return (expression, ms = 60_000) => new Promise((res, rej) => {
     const i = ++id;
     const timer = setTimeout(() => { pending.delete(i); rej(Error("CDP timed out")); }, ms);
     pending.set(i, (m) => { clearTimeout(timer); res(m); });
@@ -69,13 +72,21 @@ Start-Sleep -Milliseconds 80
 Start-Sleep -Milliseconds 600
 $f.Close()
 `;
-  const child = spawn("powershell", ["-NoProfile", "-STA", "-Command", script], { stdio: "ignore", detached: true });
+  // Through a file rather than -Command: the here-string that declares the
+  // P/Invokes has to start at column 0, which a command line does not promise.
+  const file = join(tmpdir(), "dive-eyedropper-swatch.ps1");
+  writeFileSync(file, script);
+  const child = spawn(
+    "powershell",
+    ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-File", file],
+    { stdio: "inherit", detached: true },
+  );
   child.unref();
 }
 
 const ev = await connect();
-const invoke = async (command, args = {}) => {
-  const m = await ev(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)},${JSON.stringify(args)}).then(d=>({ok:d})).catch(e=>({err:String(e&&e.message||e)}))`);
+const invoke = async (command, args = {}, ms) => {
+  const m = await ev(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)},${JSON.stringify(args)}).then(d=>({ok:d})).catch(e=>({err:String(e&&e.message||e)}))`, ms);
   const v = m.result?.result?.value;
   if (!v || v.err) throw Error(`${command}: ${v?.err ?? "no reply"}`);
   return v.ok;
@@ -87,7 +98,7 @@ const tab = await invoke("tab_open", { workspaceId: workspace, url: "about:blank
 
 // Start the sampler, then paint under it. The command blocks until a click,
 // so the painting has to happen while this promise is outstanding.
-const sampling = invoke("tab_eyedropper", { id: tab.id });
+const sampling = invoke("tab_eyedropper", { id: tab.id }, 130000);
 setTimeout(paintAndClick, 500);
 
 const picked = await sampling;
