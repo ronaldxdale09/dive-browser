@@ -58,6 +58,13 @@ const EXPECT_POLL_MS: u64 = 120;
 const DOWNLOAD_POLL_MS: u64 = 120;
 /// The colour a context an agent opened wears in the rail.
 const AGENT_CONTEXT_COLOR: &str = "#7FD8C8";
+/// How many of the page's elements a suggestion looks through.
+const SUGGESTION_POOL: u32 = 150;
+/// How many candidates a failure names. More than a few is a page dump.
+const SUGGESTION_COUNT: usize = 4;
+/// How alike a candidate has to be before naming it helps rather than
+/// misleads. Below this it is a list of whatever happened to be on the page.
+const SUGGESTION_FLOOR: f64 = 0.34;
 /// How many matches a visibility check looks at. Past this the answer is the
 /// same either way: something is visible.
 /// Largest string condition accepted by `page_wait_for`.
@@ -405,7 +412,10 @@ impl AppBrowser {
     ) -> Result<(f64, f64, String), BrowserError> {
         match target.resolve()? {
             Addressed::Locator(selector) => {
-                let found = locator::point(session, &selector).await?;
+                let found = match locator::point(session, &selector).await {
+                    Ok(found) => found,
+                    Err(failure) => return Err(with_suggestions(session, failure).await),
+                };
                 let label = if found.name.is_empty() {
                     found.tag.clone()
                 } else {
@@ -447,10 +457,14 @@ impl AppBrowser {
         }
         match target.resolve()? {
             Addressed::Locator(selector) => {
-                let found = if editable {
-                    locator::focus(session, &selector).await?
+                let resolved = if editable {
+                    locator::focus(session, &selector).await
                 } else {
-                    locator::focus_any(session, &selector).await?
+                    locator::focus_any(session, &selector).await
+                };
+                let found = match resolved {
+                    Ok(found) => found,
+                    Err(failure) => return Err(with_suggestions(session, failure).await),
                 };
                 Ok(Some(
                     format!("{} {:?}", found.role, found.name).trim().to_owned(),
@@ -579,6 +593,143 @@ fn dialog_opened(dialog: &crate::js_dialog::JsDialogAsked, action: &str) -> Valu
         },
         "hint": format!("{action} opened a dialog and the page is waiting on it. Answer it with page_dialog (accept true or false, text for a prompt), then carry on."),
     })
+}
+
+/// The wording a locator is looking for, for comparing against what is there.
+///
+/// Only the human-readable part: a caller that asked for a button named
+/// "Sign In" and a page that has one named "Sign in" differ in the name, and
+/// that is the difference worth measuring. Engine prefixes and brackets are
+/// noise for that purpose.
+fn wanted_words(locator: &str) -> String {
+    let mut out = String::new();
+    let mut quoted = false;
+    for c in locator.chars() {
+        match c {
+            '"' => quoted = !quoted,
+            _ if quoted => out.push(c),
+            '=' | '[' | ']' | '>' => out.push(' '),
+            _ => out.push(c),
+        }
+    }
+    // The engine names themselves say nothing about which element was meant.
+    let noise = [
+        "role",
+        "text",
+        "css",
+        "testid",
+        "label",
+        "placeholder",
+        "alt",
+        "title",
+        "nth",
+        "visible",
+        "name",
+        "true",
+        "false",
+    ];
+    out.split_whitespace()
+        .filter(|w| !noise.contains(&w.to_ascii_lowercase().as_str()))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
+}
+
+/// How alike two pieces of wording are, from 0 to 1.
+///
+/// Dice's coefficient over character pairs: it rewards shared runs rather
+/// than shared characters, so "sign in" scores high against "sign In" and low
+/// against "settings", and a transposed or mistyped letter costs a little
+/// rather than everything. Short enough to keep here, and it needs no
+/// dictionary or tuning.
+fn similarity(a: &str, b: &str) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    if a == b {
+        return 1.0;
+    }
+    let pairs = |s: &str| -> Vec<[char; 2]> {
+        let chars: Vec<char> = s.chars().collect();
+        chars.windows(2).map(|w| [w[0], w[1]]).collect()
+    };
+    let (left, mut right) = (pairs(a), pairs(b));
+    if left.is_empty() || right.is_empty() {
+        return f64::from(u8::from(a == b));
+    }
+    let total = left.len() + right.len();
+    let mut shared = 0usize;
+    for pair in left {
+        // Each pair is consumed once, so a repeated pair cannot be matched
+        // over and over and inflate the score.
+        if let Some(at) = right.iter().position(|p| *p == pair) {
+            right.remove(at);
+            shared += 1;
+        }
+    }
+    #[allow(clippy::cast_precision_loss)] // Counts here are tens, not billions.
+    let score = (2.0 * shared as f64) / total as f64;
+    score
+}
+
+/// What the page has that is closest to what was asked for.
+///
+/// A locator that matches nothing is the commonest way automation fails, and
+/// the usual answer -- "call `page_inspect` and look" -- costs a round trip and
+/// hands back the whole page to search by hand. Naming the nearest few
+/// candidates instead lets the next call be the right one.
+async fn nearest_elements(session: &CdpSession, locator: &str) -> Vec<String> {
+    let Ok(listing) = locator::elements(session, SUGGESTION_POOL).await else {
+        return Vec::new();
+    };
+    let wanted = wanted_words(locator);
+    if wanted.is_empty() {
+        return Vec::new();
+    }
+    let empty = Vec::new();
+    let mut scored: Vec<(f64, String)> = listing["elements"]
+        .as_array()
+        .unwrap_or(&empty)
+        .iter()
+        .filter_map(|el| {
+            let candidate = el["locator"].as_str()?;
+            let name = el["name"].as_str().unwrap_or("").to_ascii_lowercase();
+            let role = el["role"].as_str().unwrap_or("").to_ascii_lowercase();
+            let by_name = similarity(&wanted, &name);
+            // The role is worth something on its own: asking for a button and
+            // being shown the only button is useful even when the name is
+            // nothing alike.
+            let by_role = if wanted.contains(&role) && !role.is_empty() {
+                0.25
+            } else {
+                0.0
+            };
+            Some(((by_name + by_role).min(1.0), candidate.to_owned()))
+        })
+        .filter(|(score, _)| *score >= SUGGESTION_FLOOR)
+        .collect();
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+    scored.dedup_by(|a, b| a.1 == b.1);
+    scored
+        .into_iter()
+        .take(SUGGESTION_COUNT)
+        .map(|(_, locator)| locator)
+        .collect()
+}
+
+/// Turn "nothing matches" into "nothing matches, but here is what does".
+async fn with_suggestions(session: &CdpSession, failure: locator::Failure) -> BrowserError {
+    let locator::Failure::NotFound { locator } = &failure else {
+        return failure.into();
+    };
+    let nearest = nearest_elements(session, locator).await;
+    if nearest.is_empty() {
+        return failure.into();
+    }
+    BrowserError::BadRequest(format!(
+        "nothing matches {locator:?}. The closest things on the page are:\n  {}",
+        nearest.join("\n  ")
+    ))
 }
 
 /// A context id as the caller wrote it.
@@ -2809,6 +2960,52 @@ mod tool_session_tests {
             assert_eq!(mouse_button(Some(named)), Ok(named.to_owned()));
         }
         assert!(mouse_button(Some("sideways")).is_err());
+    }
+
+    #[test]
+    fn the_wording_of_a_locator_is_what_gets_compared() {
+        // Engine names and punctuation say nothing about which element was
+        // meant; the quoted name is the whole of the question.
+        assert_eq!(
+            wanted_words(r#"role=button[name="Sign In"]"#),
+            "button sign in"
+        );
+        assert_eq!(wanted_words("text=Continue"), "continue");
+        // A locator with nothing human in it has nothing to compare.
+        assert_eq!(wanted_words("nth=0"), "0");
+    }
+
+    #[test]
+    fn similarity_puts_a_near_miss_above_an_unrelated_control() {
+        // The case that matters: the page says "Sign in" and the caller asked
+        // for "Sign In". That has to beat every other control on the page.
+        let asked = wanted_words(r#"role=button[name="Sign In"]"#);
+        let close = similarity(&asked, "sign in");
+        let other = similarity(&asked, "settings");
+        assert!(close > other, "{close} should beat {other}");
+        assert!(
+            close > SUGGESTION_FLOOR,
+            "a near miss must clear the floor: {close}"
+        );
+        assert!(
+            other < SUGGESTION_FLOOR,
+            "an unrelated control must not: {other}"
+        );
+    }
+
+    #[test]
+    fn similarity_is_one_for_the_same_wording_and_zero_for_nothing() {
+        assert!((similarity("submit", "submit") - 1.0).abs() < f64::EPSILON);
+        assert!((similarity("", "submit")).abs() < f64::EPSILON);
+        assert!((similarity("submit", "")).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn a_repeated_pair_cannot_inflate_a_score() {
+        // Without consuming each pair once, "aaaa" would look like a perfect
+        // match for "aa" and crowd out the real answer.
+        let inflated = similarity("aaaa", "aa");
+        assert!(inflated < 1.0, "{inflated} should not be a perfect match");
     }
 
     #[test]

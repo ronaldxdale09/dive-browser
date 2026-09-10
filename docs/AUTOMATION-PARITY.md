@@ -62,12 +62,14 @@ Nothing on this list has an equivalent in Playwright MCP.
 | `page_appearance` | Colour scheme, reduced motion, media type, display mode |
 | `page_inspect` | URL, title, loading, text, every interactive element with a locator, console errors, failed requests and what has already been tried — in one call |
 | `dive_capabilities` | What this instance allows, so a client can ask before it guesses |
+| Locators that repair themselves | A locator matching nothing is the commonest way automation fails. Instead of "call page_inspect and look", a miss names the closest few things that *are* on the page, so the next call can be the right one. `Sign In` → `Sign in`, `Email` → `Email address`, `Log in` → `Sign in`. Neither Playwright MCP nor Browserbase recovers from a miss |
 | `downloads` | What files have been saved and where they landed — with `wait_ms` to wait for one in flight, which is what makes "click Export, then use the file" possible at all. Playwright MCP has no download tool: an agent can press the button but never find out what came out |
 | A visible agent | The driven tab is marked in the tab list, the page carries an edge glow, and a virtual cursor glides to each target and ripples on click — so a person watching can see what is being done and where, rather than only its results |
 
 ## Still to close
 
 - Raw keyboard primitives beyond `page_press`
+- Self-healing is suggestion-only: it names candidates, it does not retry for you
 - Tracing and video (`browser_start_tracing`, `browser_start_video`, `browser_start_recording`)
 - Highlighting and annotation (`browser_highlight`, `browser_annotate`)
 - Session reuse across separate processes (Browserbase keeps sessions alive server-side; Dive's live as long as the browser does)

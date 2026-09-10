@@ -134,10 +134,7 @@ fn alternate_origin(origin: &str) -> String {
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn favicons_for(
-    state: State<'_, AppState>,
-    urls: Vec<String>,
-) -> Vec<(String, String)> {
+pub(crate) fn favicons_for(state: State<'_, AppState>, urls: Vec<String>) -> Vec<(String, String)> {
     let store = lock(&state.store);
     let mut out = Vec::new();
     for url in urls.into_iter().take(MAX_FAVICON_LOOKUPS) {
