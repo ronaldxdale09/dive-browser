@@ -27,16 +27,17 @@ Start-Sleep -Milliseconds 600
 $r = New-Object W+R; [W]::GetWindowRect($h, [ref]$r) | Out-Null
 Write-Output ("window {0},{1} {2}x{3}" -f $r.L,$r.T,($r.Rt-$r.L),($r.B-$r.T))
 
-# The address bar runs across the middle of the toolbar strip.
-$x = [int](($r.L + $r.Rt) / 2)
-$y = $r.T + 46
-[W]::SetCursorPos($x, $y) | Out-Null
-Start-Sleep -Milliseconds 200
-[W]::mouse_event(0x0002,0,0,0,[IntPtr]::Zero)
-[W]::mouse_event(0x0004,0,0,0,[IntPtr]::Zero)
-Start-Sleep -Milliseconds 600
-
 $shell = New-Object -ComObject WScript.Shell
+# A live page underneath is the whole point: the list has to float over
+# content that keeps rendering, not over the welcome screen.
+$shell.SendKeys("^t")
+Start-Sleep -Seconds 2
+$shell.SendKeys("example.com{ENTER}")
+Start-Sleep -Seconds 6
+
+# Back to the address bar, and type enough to bring the list up.
+$shell.SendKeys("^l")
+Start-Sleep -Milliseconds 800
 $shell.SendKeys("goo")
 Start-Sleep -Seconds 2
-Write-Output "typed; suggestions should be open"
+Write-Output "page loaded and suggestions opened"
