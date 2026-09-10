@@ -1,8 +1,8 @@
 # Windows
 
-Dive is macOS-only today. This is what it would take to change that, in the
-order the work actually has to happen, and what is already known rather than
-assumed.
+Dive runs on Windows. This is what the port cost, what is verified, and what
+is still missing -- kept as a status rather than a plan, because the parts
+that surprised us are the parts worth writing down.
 
 ## What cannot be done on a Mac
 
@@ -37,80 +37,72 @@ by the first build, the same as on macOS.
 
 Ship `windows64`. Test on whichever you have.
 
-## The work
+## The work, as it turned out
 
-42 places name macOS. How many of those are *errors* on Windows cannot be
-worked out from here, and it is worth being clear about why: a
-`#[cfg(target_os = "macos")] fn` is only a problem if something ungated calls
-it, and most of these are gated functions called from gated code, gated
-blocks inside shared functions, or gated match arms. All of those compile
-fine. The real list comes from the first Windows build.
+The static estimate below was wrong in an instructive way, so it is worth
+recording what actually bit.
 
-What a static read *can* say is where the platform-specific work lives, and
-two errors are identifiable without a compiler: `engine.rs`'s test module is
-not gated but calls a gated `new_tab_chrome_label`, and `normal_window.rs`
-calls the gated `open_handed_urls`. Expect a good deal more from missing
-types, unavailable Tauri variants and `objc2` imports.
+A count of `#[cfg(target_os = "macos")]` sites says almost nothing about how
+much is broken: a gated function called only from gated code compiles fine.
+The first Windows build produced **three** errors, not the 29 a crude count
+suggested. The expensive problems were all runtime ones, and none of them
+announced themselves.
 
-Where the work is:
+| What | Where it went wrong | Why it was hard to see |
+|---|---|---|
+| CEF would not start | `RuntimeStyle::DEFAULT` resolves to Chrome style, which cannot be a child HWND | Access violation inside `libcef.dll`, no message |
+| Three stacked title bars | Tauri decorations plus the native menu plus the chrome's own bar | Only visible on screen |
+| Window buttons dead | The capability list did not grant `core:window:*`, and the rejection was swallowed | A denied Tauri command rejects silently -- identical to a button that does nothing |
+| Dropdowns behind the page | The chrome carries the same z-order pin every webview gets, and the pin vetoes the runtime's own `SetWindowPos` | The mask was punched correctly; the list rendered, just underneath |
+| Agent keys never saved | `keyring_core` had no default store on Windows at all | Every save failed; nothing said why |
+| Black window, no error | Building with `cargo build` instead of `tauri build` | The webview is created and simply loads nothing |
 
-| Where | macOS sites | What it is | Difficulty |
-|---|---:|---|---|
-| `engine.rs` | 11 | The native chrome overlay mask, view corner radius, and new-tab shortcut binding for detached windows | **Hard** — see below |
-| `lib.rs` | 7 | Dock reopen, `--app=` URL handoff, app lifecycle | Easy: most have no Windows equivalent and become no-ops |
-| `default_browser.rs` | 3 | LaunchServices | Medium — Windows makes this deliberately awkward |
-| `webapp.rs` | 2 | `.app` bundles for installed web apps | Medium — becomes `.lnk` + Start Menu |
-| `agent.rs`, `automation.rs`, `normal_window.rs`, `permission_hidden_view.rs`, `private_session.rs`, `titlebar.rs` | 1 each | Keychain, process spawning, hidden views, title-bar drag regions | Easy to medium |
-
-Plus one that is not a compile error but is missing behaviour:
-`eyedropper.rs` already returns "not available on this platform", and Windows
-has no equivalent of `NSColorSampler`. A real one means a magnifier overlay
-window written from scratch.
+That last one is worth its own line: **build through the Tauri CLI.** A bare
+`cargo build --release` produces a binary that starts, logs a clean startup,
+serves MCP, and shows a black window forever. Use `scripts/windows/rebuild.ps1`.
 
 ### The overlay mask
 
-On macOS the chrome is one native view raised above the page views, with a
-`CAShapeLayer` mask punched through it so the page shows where no overlay is
-drawn (`update_overlay_mask` in `engine.rs`, `set_chrome_overlay_mask` in the
-vendored runtime). That is what lets a menu float over live content.
+On macOS the chrome is one native view raised above the page views with a
+`CAShapeLayer` mask punched through it, so the page shows where no overlay is
+drawn. On Windows the webviews are sibling child HWNDs, and the equivalent is
+a window region: build a region from the window bounds, subtract each hole
+with `CombineRgn(RGN_DIFF)`, and the chrome paints and hit-tests only where
+an overlay is. Clipping hit-testing as well as painting is the point -- a
+click outside an overlay has to reach the page beneath it.
 
-Windows looked like the risk in this port. It is less of one than expected,
-because the vendored runtime already has half of it and Win32 has a close
-analogue of the other half:
+The trap is the z-order pin. Every webview is raised above its siblings when
+it is created and then pinned by a `WM_WINDOWPOSCHANGING` subclass that
+stamps `SWP_NOZORDER` on every later z-order change, so Chromium's focus
+handling cannot reshuffle them. The chrome is a webview too, so it carries
+that pin -- and the pin does not distinguish the runtime's own calls from
+anyone else's. Raising the chrome for an overlay therefore has to go through
+`restack_pinned`, which lifts the pin, moves the window, and re-engages it.
+Without the lift the call is dropped on the floor and every menu, dropdown
+and suggestion list renders behind the page.
 
-- **Raising** is done: `raise_to_top` in
-  `vendor/tauri-runtime-cef/src/platform/windows/webview.rs` puts a webview
-  above its siblings and pins it there with a `WM_WINDOWPOSCHANGING`
-  subclass that refuses further z-order changes.
-- **Masking** is `SetWindowRgn`. Build a region from the window bounds and
-  subtract each hole (`CombineRgn` with `RGN_DIFF`), and the chrome HWND
-  paints and hit-tests only where an overlay is. That is the same shape of
-  answer as the macOS mask, and the same limitation: both are built from
-  rectangles, so neither has soft edges. `SetWindowRgn` clipping hit-testing
-  as well as painting is what makes clicks outside an overlay reach the page,
-  which is the behaviour the mask exists for.
+Both masks are built from rectangles, so neither has soft edges.
 
-So the Windows implementation of `set_chrome_overlay_mask(holes, active)` is:
-region of the window minus `holes` plus `raise_to_top` when active; a null
-region and drop back below the page when not. The `holes` geometry is already
-computed platform-independently by `overlay_geometry::uncovered`.
+## Testing from a Mac
 
-Not proven yet -- it has not been compiled, let alone run -- but it is a
-concrete plan against an existing API rather than a choice between three
-unknowns. Spike it early anyway: if `SetWindowRgn` on a CEF host window
-misbehaves, that is worth finding out before the mechanical work.
+`prlctl exec` lands in **session 0** as SYSTEM. That is a different window
+station: it can see Dive's processes, but every `MainWindowHandle` reads 0
+and anything it launches is invisible. Window-level checks have to run where
+the windows are, which is what `scripts/windows/run-in-session.ps1` is for --
+it hands a script to the Task Scheduler as the logged-on user.
 
-`set_corner_radius` has no Windows counterpart either and matters much less;
-square corners on a child view are unremarkable there.
+Other things that cost time and are not obvious:
 
-### Order
-
-1. Spike the overlay mask. Nothing else matters until it is settled.
-2. Make it compile: work the 29 sites, most of which are no-ops or small.
-3. Boot it: one window, one tab, CDP answering.
-4. The mechanical ports: default browser, web apps, screencast arguments.
-5. The eyedropper, which is new code rather than a port.
-6. CI on `windows-latest` and a signed installer.
+- The VM allows **one `prlctl exec` session at a time**. A long build in the
+  foreground blocks every other call, so builds run detached via the Task
+  Scheduler and the log is polled.
+- The logged-on user is **not elevated**: a task writing to `C:\` root exits 1
+  with no output.
+- `$home` is **read-only** in PowerShell. Assigning to it fails without
+  stopping the script, so a path built from it silently stays SYSTEM's.
+- Piping a native build tool into `Add-Content` can **take the whole script
+  down** mid-run, with no error and no further output. Give each step its own
+  `cmd` redirect.
 
 ## Live subtitles on Windows-on-ARM
 
@@ -137,9 +129,21 @@ feature is on *and* the target can have it. The eight gates in
 unaffected -- verified by checking the build script still emits
 `whisper_enabled` there and that `whisper-rs` is still linked.
 
-## What already works
+## Status
 
-The parts that took the longest are portable and need nothing: CEF itself,
-CDP, the MCP server and its whole tool surface, the agent, the React chrome,
-the store. `ci.yml` is already parameterised by `matrix.os`, so adding
-`windows-latest` is a one-line change once the code compiles.
+Portable and needing nothing: CEF itself, CDP, the MCP server and its whole
+tool surface, the agent, the React chrome, the store.
+
+Ported and working: the overlay mask, window controls and rounded corners,
+the frameless title bar, shortcut labels, screen recording (`gdigrab`), the
+eyedropper, the credential store, default-browser registration, and web-app
+launchers as Start Menu shortcuts.
+
+Known gaps:
+
+- **Live subtitles are absent on Windows-on-ARM only** (see above). The x64
+  build has them.
+- **The installer is unsigned.** Without an OV or EV certificate SmartScreen
+  warns on first run. WiX is not an option on ARM; the bundle target is NSIS.
+- **No CI job yet.** `ci.yml` is parameterised by `matrix.os`, so adding
+  `windows-latest` is a small change.
