@@ -1056,14 +1056,23 @@ impl TabHost {
             } else {
                 title
             })
-            .title_bar_style(tauri::TitleBarStyle::Overlay)
-            .hidden_title(true)
             .background_color(GROUND)
             // Shown once its chrome has painted (below), so the window never
             // appears as a bare band with the page hanging under it.
             .visible(false)
             .inner_size(width, height)
             .min_inner_size(360.0, 240.0);
+        // The chrome draws its own title bar, with the tabs sitting beside
+        // the traffic lights. That is a macOS window style; Tauri does not
+        // offer it elsewhere, and Windows has no traffic lights to sit
+        // beside, so it keeps its system title bar until the chrome grows a
+        // caption of its own.
+        #[cfg(target_os = "macos")]
+        {
+            builder = builder
+                .title_bar_style(tauri::TitleBarStyle::Overlay)
+                .hidden_title(true);
+        }
         if let Some(b) = remembered {
             builder = builder.position(b.x.max(0.0), b.y.max(0.0));
         } else if let Some((x, y)) = at {
@@ -1734,11 +1743,20 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
         } else {
             "Dive"
         })
-        .title_bar_style(tauri::TitleBarStyle::Overlay)
-        .hidden_title(true)
         .background_color(GROUND)
         .inner_size(width, height)
         .min_inner_size(720.0, 480.0);
+    // The chrome draws its own title bar, with the tabs sitting beside
+    // the traffic lights. That is a macOS window style; Tauri does not
+    // offer it elsewhere, and Windows has no traffic lights to sit
+    // beside, so it keeps its system title bar until the chrome grows a
+    // caption of its own.
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true);
+    }
     if let Some(b) = remembered {
         builder = builder.position(b.x, b.y);
     }

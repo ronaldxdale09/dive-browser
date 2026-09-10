@@ -652,7 +652,11 @@ fn install_panic_hook() {
 
 /// Open URLs the OS handed to the app, each in its own tab of the active
 /// workspace, and bring the window forward.
-#[cfg(target_os = "macos")]
+///
+/// Not macOS-only despite where it is called from there: macOS hands links
+/// over as a `RunEvent::Opened`, Windows as command-line arguments to a
+/// second instance, and what to do with them afterwards is the same either
+/// way.
 fn open_handed_urls(app: &tauri::AppHandle<Runtime>, urls: Vec<String>) {
     use tauri::Manager;
     let handle = app.clone();
