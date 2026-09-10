@@ -53,6 +53,14 @@ pub fn init_keychain() {
                 Ok(store) => keyring_core::set_default_store(store),
                 Err(e) => tracing::warn!("keychain unavailable: {e}"),
             }
+            // Credential Manager is the Windows equivalent. Leaving this out
+            // does not fail loudly -- `keyring_core` simply has no default
+            // store, and every attempt to save an API key errors instead.
+            #[cfg(target_os = "windows")]
+            match windows_native_keyring_store::Store::new() {
+                Ok(store) => keyring_core::set_default_store(store),
+                Err(e) => tracing::warn!("credential manager unavailable: {e}"),
+            }
         },
     );
 }

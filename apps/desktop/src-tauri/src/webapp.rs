@@ -458,6 +458,20 @@ mod launcher {
             .map(|home| PathBuf::from(home).join("Applications").join("Dive Apps"))
     }
 
+    /// Where launchers live: a folder of the person's own Start Menu, so
+    /// installed apps turn up in Search and can be pinned like any other.
+    #[cfg(target_os = "windows")]
+    fn root() -> Option<PathBuf> {
+        std::env::var_os("APPDATA").map(|appdata| {
+            PathBuf::from(appdata)
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs")
+                .join("Dive Apps")
+        })
+    }
+
     /// A bundle identifier that is stable for the app and legal for Launch Services.
     fn bundle_id(app: &WebApp) -> String {
         let mut hasher = DefaultHasher::new();
@@ -559,7 +573,116 @@ mod launcher {
         Ok(Some(bundle))
     }
 
-    #[cfg(not(target_os = "macos"))]
+    /// Wrap a PNG as an `.ico` so a shortcut can use it.
+    ///
+    /// An icon directory may hold a PNG verbatim rather than a bitmap, which
+    /// is what every icon since Vista does, so this is a header and the file
+    /// -- no decoding, no re-encoding. The size field is a single byte with 0
+    /// meaning 256, so anything larger cannot be described honestly here; the
+    /// caller falls back to Dive's own icon rather than write a lie the shell
+    /// would render as garbage.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    fn png_as_ico(png: &[u8]) -> Option<Vec<u8>> {
+        // IHDR is the first chunk: 8 bytes of signature, 8 of chunk header,
+        // then width and height as big-endian u32.
+        let dimension = |at: usize| -> Option<u32> {
+            Some(u32::from_be_bytes(png.get(at..at + 4)?.try_into().ok()?))
+        };
+        let (width, height) = (dimension(16)?, dimension(20)?);
+        if width == 0 || width > 256 || height == 0 || height > 256 {
+            return None;
+        }
+        // 256 does not fit a byte and is written as 0.
+        let byte = |v: u32| u8::try_from(v % 256).unwrap_or(0);
+        let mut ico = Vec::with_capacity(png.len() + 22);
+        ico.extend_from_slice(&[0, 0, 1, 0, 1, 0]); // reserved, type 1 (icon), one image
+        ico.extend_from_slice(&[byte(width), byte(height), 0, 0, 1, 0, 32, 0]);
+        ico.extend_from_slice(&u32::try_from(png.len()).ok()?.to_le_bytes());
+        ico.extend_from_slice(&22u32.to_le_bytes()); // the image follows the header
+        ico.extend_from_slice(png);
+        Some(ico)
+    }
+
+    /// Quote a string for a single-quoted PowerShell literal.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    fn ps_quote(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "''"))
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(super) fn install(app: &WebApp) -> Result<Option<PathBuf>, String> {
+        let Some(root) = root() else {
+            return Ok(None);
+        };
+        std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+        let dive = std::env::current_exe().map_err(|e| e.to_string())?;
+        let link = root.join(format!("{}.lnk", bundle_name(app)));
+
+        // A shortcut points at an icon file; it cannot carry a PNG. Write one
+        // next to the shortcut, and fall back to Dive's own icon -- index 0 of
+        // the executable -- when the app's icon cannot be described as an ico.
+        let icon = std::fs::read(&app.icon_path)
+            .ok()
+            .and_then(|png| png_as_ico(&png))
+            .and_then(|ico| {
+                let path = root.join(format!("{}.ico", bundle_name(app)));
+                std::fs::write(&path, ico).ok().map(|()| path)
+            })
+            .map_or_else(
+                || format!("{},0", dive.display()),
+                |path| path.display().to_string(),
+            );
+
+        // A .lnk is a COM object's business. Rather than bind IShellLink for
+        // one call, ask the shell scripting host that has always made them.
+        let script = format!(
+            "$s = (New-Object -ComObject WScript.Shell).CreateShortcut({link});\
+             $s.TargetPath = {target};\
+             $s.Arguments = {args};\
+             $s.IconLocation = {icon};\
+             $s.Description = {description};\
+             $s.Save()",
+            link = ps_quote(&link.display().to_string()),
+            target = ps_quote(&dive.display().to_string()),
+            args = ps_quote(&format!("--app={}", app.id)),
+            icon = ps_quote(&icon),
+            description = ps_quote(&format!("{} in Dive", bundle_name(app))),
+        );
+        let status = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err(format!(
+                "could not create the Start Menu shortcut ({status})"
+            ));
+        }
+        Ok(Some(link))
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(super) fn remove(app: &WebApp) -> Result<(), String> {
+        let Some(root) = root() else {
+            return Ok(());
+        };
+        // Only what Dive wrote: the folder is Dive's own, and the names come
+        // from the app being removed.
+        for path in [
+            root.join(format!("{}.lnk", bundle_name(app))),
+            root.join(format!("{}.ico", bundle_name(app))),
+        ] {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     pub(super) fn install(_app: &WebApp) -> Result<Option<PathBuf>, String> {
         Ok(None)
     }
@@ -582,7 +705,7 @@ mod launcher {
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     pub(super) fn remove(_app: &WebApp) -> Result<(), String> {
         Ok(())
     }
@@ -590,6 +713,54 @@ mod launcher {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn a_png_becomes_an_icon_directory_pointing_at_it() {
+            // 64x64: signature, IHDR header, then the dimensions.
+            let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+            png.extend_from_slice(&[0, 0, 0, 13, b'I', b'H', b'D', b'R']);
+            png.extend_from_slice(&64u32.to_be_bytes());
+            png.extend_from_slice(&64u32.to_be_bytes());
+            let ico = png_as_ico(&png).expect("64px is describable");
+            assert_eq!(&ico[..6], &[0, 0, 1, 0, 1, 0]);
+            assert_eq!((ico[6], ico[7]), (64, 64));
+            // The image is the PNG verbatim, at the offset the header gives.
+            let offset = u32::from_le_bytes(ico[18..22].try_into().unwrap()) as usize;
+            assert_eq!(offset, 22);
+            assert_eq!(&ico[offset..], &png[..]);
+        }
+
+        #[test]
+        fn two_hundred_and_fifty_six_is_written_as_zero() {
+            let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+            png.extend_from_slice(&[0, 0, 0, 13, b'I', b'H', b'D', b'R']);
+            png.extend_from_slice(&256u32.to_be_bytes());
+            png.extend_from_slice(&256u32.to_be_bytes());
+            let ico = png_as_ico(&png).expect("256px is the largest describable");
+            assert_eq!((ico[6], ico[7]), (0, 0));
+        }
+
+        #[test]
+        fn an_icon_too_large_to_describe_is_refused_rather_than_mislabelled() {
+            // 512 would have to be written as a byte, and the shell would
+            // render whatever that lie decoded to.
+            let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+            png.extend_from_slice(&[0, 0, 0, 13, b'I', b'H', b'D', b'R']);
+            png.extend_from_slice(&512u32.to_be_bytes());
+            png.extend_from_slice(&512u32.to_be_bytes());
+            assert!(png_as_ico(&png).is_none());
+            // A file too short to hold a header is not an icon either.
+            assert!(png_as_ico(&[0x89, b'P', b'N', b'G']).is_none());
+        }
+
+        #[test]
+        fn a_quote_in_a_path_cannot_end_the_powershell_literal() {
+            assert_eq!(
+                ps_quote(r"C:\Users\o'brien\App.lnk"),
+                r"'C:\Users\o''brien\App.lnk'"
+            );
+            assert_eq!(ps_quote("plain"), "'plain'");
+        }
 
         fn app(name: &str, id: &str) -> WebApp {
             WebApp {

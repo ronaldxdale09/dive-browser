@@ -1014,7 +1014,14 @@ fn spawn_screen(rect: WindowRect, mic: Option<&str>, fps: u32, path: &Path) -> A
     #[cfg(target_os = "windows")]
     {
         let _ = device;
-        cmd.args(["-f", "gdigrab", "-framerate", &fps.to_string(), "-i", "desktop"]);
+        cmd.args([
+            "-f",
+            "gdigrab",
+            "-framerate",
+            &fps.to_string(),
+            "-i",
+            "desktop",
+        ]);
         // A microphone is a separate dshow input rather than part of the
         // video device, so it is added as its own -f/-i pair.
         if let Some(mic) = mic {

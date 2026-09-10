@@ -1,5 +1,14 @@
-//! Being the system's default browser: asking macOS, and handling the
+//! Being the system's default browser: asking the system, and handling the
 //! links it then hands us.
+//!
+//! The two platforms differ in what "asking" even means. macOS lets an app
+//! set the handler itself and confirms with the person. Windows has not
+//! allowed that since Windows 8 -- the choice lives in a registry key signed
+//! with a hash only the shell can produce -- so all an application can do is
+//! register itself as a browser and open the Settings page where the person
+//! makes the change. Both are honest about it: [`make_default`] returns the
+//! status right after asking, and on Windows that status still says Dive is
+//! not the default until the person picks it.
 
 #![allow(unsafe_code)] // LaunchServices exposes these default-handler APIs only through C FFI.
 
@@ -89,6 +98,98 @@ mod mac {
     }
 }
 
+/// Registering as a browser, and sending the person to the one place Windows
+/// lets the default be chosen.
+#[cfg(target_os = "windows")]
+mod win {
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
+
+    /// The ProgID Dive registers for `http` and `https`.
+    pub const PROG_ID: &str = "DiveHTML";
+
+    /// Whatever currently handles `scheme`, as the ProgID the shell records.
+    ///
+    /// This is `UserChoice`, the key the shell writes when someone picks a
+    /// default. It is the only honest answer: an application can be perfectly
+    /// registered and still not be the default.
+    pub fn handler_for(scheme: &str) -> Option<String> {
+        RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey_with_flags(
+                format!(
+                    "Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\{scheme}\\UserChoice"
+                ),
+                KEY_READ,
+            )
+            .ok()?
+            .get_value::<String, _>("ProgId")
+            .ok()
+    }
+
+    /// Announce Dive to the shell as something that can be a browser.
+    ///
+    /// Windows will not offer an application in the defaults list at all
+    /// until it has registered its capabilities, so this has to succeed
+    /// before sending anyone to Settings -- otherwise they arrive to a list
+    /// Dive is not in. Everything goes under `HKCU`, so no elevation.
+    pub fn register() -> Result<(), String> {
+        let exe = std::env::current_exe().map_err(|e| format!("cannot locate Dive: {e}"))?;
+        let exe = exe.display().to_string();
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let write = |path: String| {
+            hkcu.create_subkey_with_flags(path, KEY_WRITE)
+                .map(|(key, _)| key)
+                .map_err(|e| format!("could not register Dive as a browser: {e}"))
+        };
+
+        let classes = format!("Software\\Classes\\{PROG_ID}");
+        let prog = write(classes.clone())?;
+        prog.set_value("", &"Dive Document")
+            .map_err(|e| e.to_string())?;
+        write(format!("{classes}\\DefaultIcon"))?
+            .set_value("", &format!("{exe},0"))
+            .map_err(|e| e.to_string())?;
+        write(format!("{classes}\\shell\\open\\command"))?
+            .set_value("", &format!("\"{exe}\" \"%1\""))
+            .map_err(|e| e.to_string())?;
+
+        let caps = "Software\\Dive\\Capabilities";
+        let capabilities = write(caps.to_owned())?;
+        capabilities
+            .set_value("ApplicationName", &"Dive")
+            .map_err(|e| e.to_string())?;
+        capabilities
+            .set_value(
+                "ApplicationDescription",
+                &"The browser built for developers",
+            )
+            .map_err(|e| e.to_string())?;
+        let urls = write(format!("{caps}\\URLAssociations"))?;
+        for scheme in super::SCHEMES {
+            urls.set_value(scheme, &PROG_ID)
+                .map_err(|e| e.to_string())?;
+        }
+        // The list the defaults UI actually reads.
+        write("Software\\RegisteredApplications".to_owned())?
+            .set_value("Dive", &caps)
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Open the defaults page. Windows allows nothing more direct than this.
+    pub fn open_settings() -> Result<(), String> {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", "ms-settings:defaultapps"])
+            .status()
+            .map_err(|e| format!("could not open Windows Settings: {e}"))
+            .and_then(|s| {
+                s.success()
+                    .then_some(())
+                    .ok_or_else(|| format!("Windows Settings would not open ({s})"))
+            })
+    }
+}
+
 /// The current state.
 pub fn status() -> DefaultBrowserStatus {
     #[cfg(target_os = "macos")]
@@ -103,7 +204,19 @@ pub fn status() -> DefaultBrowserStatus {
             current,
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let current = win::handler_for("https");
+        let is_default = SCHEMES
+            .iter()
+            .all(|s| win::handler_for(s).as_deref() == Some(win::PROG_ID));
+        DefaultBrowserStatus {
+            supported: true,
+            is_default,
+            current,
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         DefaultBrowserStatus {
             supported: false,
@@ -129,7 +242,15 @@ pub fn make_default() -> Result<DefaultBrowserStatus, String> {
         }
         Ok(status())
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        // Register first: an unregistered application is not in the list the
+        // Settings page shows, so sending someone there would waste the trip.
+        win::register()?;
+        win::open_settings()?;
+        Ok(status())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         Err("setting the default browser is not supported on this platform yet".to_owned())
     }

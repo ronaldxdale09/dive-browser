@@ -7,6 +7,11 @@
 //! real dismissal. macOS has the same picker natively as `NSColorSampler`, so
 //! Dive asks the system for it and leaves the page out of it entirely. That
 //! also picks from anywhere on screen, not only from Dive's own window.
+//!
+//! Windows ships no such picker, so this reads the screen directly: watch the
+//! cursor, and on the next click read that pixel off the desktop. Both routes
+//! sample the composited screen, so both see what the user sees -- video,
+//! other applications, the desktop -- rather than only what the page drew.
 
 use crate::error::{AppError, AppResult};
 
@@ -50,8 +55,74 @@ pub fn sample(app: &tauri::AppHandle<crate::Runtime>) -> AppResult<Option<String
     Ok(rx.recv().unwrap_or(None))
 }
 
-/// No native sampler outside macOS yet.
-#[cfg(not(target_os = "macos"))]
+/// Ask the user to sample a pixel. `Ok(None)` means they dismissed it.
+///
+/// Windows has no system colour sampler, so this is the sampler: wait for a
+/// click and read that pixel off the desktop device context. Runs on the
+/// calling thread, which is an IPC worker rather than the UI thread, so the
+/// wait blocks nothing the user can see.
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)] // Reading the screen is Win32-only.
+pub fn sample(_app: &tauri::AppHandle<crate::Runtime>) -> AppResult<Option<String>> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::Graphics::Gdi::{CLR_INVALID, GetDC, GetPixel, ReleaseDC};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE, VK_LBUTTON};
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    // The high bit is "down right now"; the low bit is "was pressed since the
+    // last call" and would report the click that opened the picker.
+    let down = |key: i32| unsafe { GetAsyncKeyState(key) as u16 & 0x8000 != 0 };
+
+    // The click on "Pick a colour" is very likely still held. Sampling now
+    // would return the colour of the button the user just pressed, so let go
+    // of that one first and wait for a fresh press.
+    let deadline = std::time::Instant::now() + WAIT;
+    while down(VK_LBUTTON.0.into()) {
+        if std::time::Instant::now() > deadline {
+            return Ok(None);
+        }
+        std::thread::sleep(POLL);
+    }
+
+    loop {
+        if down(VK_ESCAPE.0.into()) || std::time::Instant::now() > deadline {
+            return Ok(None);
+        }
+        if !down(VK_LBUTTON.0.into()) {
+            std::thread::sleep(POLL);
+            continue;
+        }
+        let mut point = POINT::default();
+        if unsafe { GetCursorPos(&mut point) }.is_err() {
+            return Err(AppError::new("could not read the cursor position"));
+        }
+        // A null DC is the whole screen, which is the point: the eyedropper
+        // reads any pixel, not only Dive's own window.
+        let screen = unsafe { GetDC(None) };
+        let colour = unsafe { GetPixel(screen, point.x, point.y) };
+        unsafe { ReleaseDC(None, screen) };
+        if colour == CLR_INVALID {
+            return Err(AppError::new("that pixel could not be read"));
+        }
+        // COLORREF is 0x00bbggrr, the reverse of the hex the panel shows.
+        let byte = |shift: u32| f64::from((colour.0 >> shift) & 0xff) / 255.0;
+        return Ok(Some(hex(byte(0), byte(8), byte(16))));
+    }
+}
+
+/// How often to look at the mouse. Fast enough to feel instant, idle enough
+/// not to spin a core while the user decides.
+#[cfg(target_os = "windows")]
+const POLL: std::time::Duration = std::time::Duration::from_millis(16);
+
+/// The picker gives up eventually rather than leaving a worker parked
+/// forever. macOS needs no equivalent: its sampler owns the session and ends
+/// it itself.
+#[cfg(target_os = "windows")]
+const WAIT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// No native sampler on this platform yet.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn sample(_app: &tauri::AppHandle<crate::Runtime>) -> AppResult<Option<String>> {
     Err(AppError::new(
         "The eyedropper is not available on this platform yet. Pick from the palette instead.",
