@@ -112,6 +112,22 @@ square corners on a child view are unremarkable there.
 5. The eyedropper, which is new code rather than a port.
 6. CI on `windows-latest` and a signed installer.
 
+## Live subtitles do not build on Windows-on-ARM
+
+`whisper-rs-sys` builds whisper.cpp with CMake, and ggml's own CMakeLists
+stops with "MSVC is not supported for ARM, use clang". It is an ARM problem
+rather than a Windows one: the x64 build we would actually ship compiles with
+MSVC fine, and this only shows up because the development VM is
+Windows-on-ARM.
+
+Live subtitles are an optional cargo feature, so the port builds without
+them:
+
+    cargo check -p dive-desktop --no-default-features --features cef
+
+Fixing it properly means pointing whisper's CMake at clang-cl on ARM. That is
+its own self-contained job and should not sit in front of the port.
+
 ## What already works
 
 The parts that took the longest are portable and need nothing: CEF itself,
