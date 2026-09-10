@@ -139,6 +139,17 @@ the frameless title bar, shortcut labels, screen recording (`gdigrab`), the
 eyedropper, the credential store, default-browser registration, and web-app
 launchers as Start Menu shortcuts.
 
+Building x64 locally needs one thing CI sets for itself: whisper.cpp and
+CEF's wrapper must agree on a C++ runtime. `cef-dll-sys` builds the wrapper
+with the static one and whisper.cpp defaults to the dynamic one, so the link
+ends in fifty-odd duplicate `std::locale` symbols. Point CMake at the
+toolchain file the workflows use:
+
+    $env:CMAKE_TOOLCHAIN_FILE = "$PWD\scripts\ci\ggml-portable.cmake"
+
+The ARM VM never sees this, because whisper.cpp is not built there at all --
+which is exactly why it linked a binary CI could not.
+
 Known gaps:
 
 - **Live subtitles are absent on Windows-on-ARM only** (see above). The x64
