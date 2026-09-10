@@ -85,6 +85,10 @@ if ($haveVs) {
         "--add", "Microsoft.VisualStudio.Workload.VCTools"
         "--add", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
         "--add", "Microsoft.VisualStudio.Component.Windows11SDK.22621"
+        # ring builds its assembly with clang, not MSVC, so a toolchain
+        # without this fails on a crypto crate long before reaching any of
+        # Dive's own code.
+        "--add", "Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Llvm.Clang"
         "--includeRecommended"
     )
     # Some build scripts still shell out to x64 helpers even on an ARM host,
@@ -94,6 +98,18 @@ if ($haveVs) {
     # 3010 is "installed, reboot pending", which a build toolchain does not need.
     if ($p.ExitCode -notin 0, 3010) { throw "VS Build Tools installer exited $($p.ExitCode)" }
     Say "VS Build Tools installed"
+}
+
+# clang ships inside the VS install but not on PATH, and cc-rs looks it up by
+# name. The ARM64 tree is the native compiler on an ARM host; the unsuffixed
+# bin directory is x64.
+$vs = & $vswhere -products * -property installationPath 2>$null | Select-Object -First 1
+if ($vs) {
+    $cand = if ($isArm) { @("$vs\VC\Tools\Llvm\ARM64\bin", "$vs\VC\Tools\Llvm\bin") }
+            else { @("$vs\VC\Tools\Llvm\x64\bin", "$vs\VC\Tools\Llvm\bin") }
+    $clang = $cand | Where-Object { Test-Path "$_\clang.exe" } | Select-Object -First 1
+    if ($clang) { Add-MachinePath $clang; Say "clang at $clang" }
+    else { Say "WARNING: no clang under $vs\VC\Tools\Llvm -- ring will not build" }
 }
 
 # ---- Rust ------------------------------------------------------------------
