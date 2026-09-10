@@ -4,6 +4,7 @@ import { Backdrop } from "./Backdrop";
 
 const TITLES: Record<(typeof STEPS)[number], string> = {
   profile: "Profile",
+  theme: "Theme",
   import: "Import",
   workspace: "Workspace",
   features: "What's inside",

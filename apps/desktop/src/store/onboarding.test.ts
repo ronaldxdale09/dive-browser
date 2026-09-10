@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
-import { STAGES, shouldOnboard, useOnboarding } from "./onboarding";
+import { STAGES, shouldOnboard, useOnboarding, STEPS } from "./onboarding";
 import { DEFAULT_PREFS, usePrefs } from "./prefs";
 
 afterEach(() => {
@@ -19,7 +19,7 @@ describe("onboarding flow", () => {
     expect(shouldOnboard(true, false, true, true)).toBe(false);
   });
 
-  it("walks intro, start, profile, import, workspace, features, then records itself done", async () => {
+  it("walks the intro, the start screen and every setup step, then records itself done", async () => {
     const write = vi.spyOn(ipc, "prefsSet").mockImplementation(async (p) => p);
     usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
     const { begin, next, skipIntro, back } = useOnboarding.getState();
@@ -34,18 +34,17 @@ describe("onboarding flow", () => {
       next();
       expect(useOnboarding.getState().stage).toBe(stage);
     }
+    // Back through the steps in order, whatever they are, so adding one to
+    // the flow does not need this walk rewritten.
+    for (const step of [...STEPS].reverse().slice(1)) {
+      back();
+      expect(useOnboarding.getState().stage).toBe(step);
+    }
+    // The first step is the floor: Back there does nothing.
     back();
-    expect(useOnboarding.getState().stage).toBe("workspace");
-    back();
-    expect(useOnboarding.getState().stage).toBe("import");
-    back();
-    expect(useOnboarding.getState().stage).toBe("profile");
-    back();
-    expect(useOnboarding.getState().stage).toBe("profile");
-    next();
-    next();
-    next();
-    next();
+    expect(useOnboarding.getState().stage).toBe(STEPS[0]);
+    // Forward through every step, and once more off the end to finish.
+    for (let i = 0; i < STEPS.length; i++) next();
     await vi.waitFor(() => expect(usePrefs.getState().prefs.onboarded).toBe(true));
     expect(useOnboarding.getState().stage).toBeNull();
     expect(write).toHaveBeenLastCalledWith(expect.objectContaining({ onboarded: true }));

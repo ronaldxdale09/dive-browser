@@ -77,6 +77,15 @@ describe("Onboarding", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(updateProfile).toHaveBeenCalledWith("p1", expect.objectContaining({ name: "Ada", avatar: "ada" })));
 
+    // Theme: the template applies as it is clicked, so the step is its own
+    // preview; Continue moves on.
+    expect(await screen.findByRole("heading", { name: "Make it yours" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "Midnight" }));
+    // The template lands in the preferences, which is what repaints the window.
+    await waitFor(() => expect(usePrefs.getState().prefs.appearance_preset).toBe("midnight"));
+    expect(screen.getByRole("radio", { name: "Midnight" }).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
     // Import: nothing on this Mac to import from, so it only offers Continue.
     expect(await screen.findByRole("heading", { name: "Bring your bookmarks, history, passwords and form entries" })).toBeTruthy();
     // Focus moves with the step, so a keyboard user is never left behind the dialog.
@@ -115,6 +124,8 @@ describe("Onboarding", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Start Dive/ }));
     expect(await screen.findByRole("heading", { name: "Who's diving?" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByRole("heading", { name: "Make it yours" });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await screen.findByRole("heading", { name: /Bring your bookmarks/ });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     expect(await screen.findByRole("heading", { name: "Your first workspace" })).toBeTruthy();
@@ -128,7 +139,7 @@ describe("Onboarding", () => {
     act(() => useOnboarding.setState({ stage: "profile" }));
     render(<Onboarding />);
     fireEvent.click(screen.getByRole("button", { name: "Skip" }));
-    expect(await screen.findByRole("heading", { name: "Bring your bookmarks, history, passwords and form entries" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Make it yours" })).toBeTruthy();
     expect(updateProfile).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(await screen.findByRole("heading", { name: "Who's diving?" })).toBeTruthy();

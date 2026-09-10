@@ -7,6 +7,7 @@ import { isPrivateWindow } from "../../lib/privateMode";
 import { Shell } from "./Shell";
 import { StartScreen } from "./StartScreen";
 import { ProfileStep } from "./ProfileStep";
+import { ThemeStep } from "./ThemeStep";
 import { ImportStep } from "./ImportStep";
 import { WorkspaceStep } from "./WorkspaceStep";
 import { FeaturesStep } from "./FeaturesStep";
@@ -52,6 +53,7 @@ export function Onboarding() {
   return (
     <Shell>
       {stage === "profile" && <ProfileStep />}
+      {stage === "theme" && <ThemeStep />}
       {stage === "import" && <ImportStep />}
       {stage === "workspace" && <WorkspaceStep />}
       {stage === "features" && <FeaturesStep />}
