@@ -1765,7 +1765,9 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
     if std::env::var_os("DIVE_WINDOW_HIDDEN").is_some() {
         builder = builder.visible(false);
     }
+    tracing::info!("main window: building native window");
     let window = builder.build()?;
+    tracing::info!("main window: native window built");
 
     // Keep production's Dock icon clean. macOS renders this label directly on
     // the running development app's icon, so dev and release builds cannot be
@@ -1780,6 +1782,7 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
     };
     let chrome_popup_app = app.handle().clone();
     let chrome_download_app = app.handle().clone();
+    tracing::info!("main window: attaching chrome webview");
     let chrome = window.add_child(
         private_chrome(WebviewBuilder::new(
             CHROME_LABEL,
