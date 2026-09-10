@@ -23,6 +23,22 @@ $Log = "C:\dive-setup.log"
 function Say($m) { $l = "$(Get-Date -Format HH:mm:ss)  $m"; Write-Output $l; Add-Content $Log $l }
 function Have($cmd) { $null -ne (Get-Command $cmd -ErrorAction SilentlyContinue) }
 
+# Native programs are judged by their exit code, never by whether they wrote
+# to stderr. rustup, corepack and git all report progress there, and with
+# ErrorActionPreference = Stop a `2>&1` pipe turns that chatter into a
+# terminating error -- which is exactly how the first run of this script died
+# one line after installing Rust successfully.
+function Run($exe, [string[]]$exeArgs, [switch]$IgnoreExit) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $exe @exeArgs 2>&1 | ForEach-Object { $_.ToString() } | Out-Null
+        if (-not $IgnoreExit -and $LASTEXITCODE -ne 0) {
+            throw "$exe $($exeArgs -join ' ') exited $LASTEXITCODE"
+        }
+    } finally { $ErrorActionPreference = $prev }
+}
+
 function Add-MachinePath($dir) {
     $cur = [Environment]::GetEnvironmentVariable("Path", "Machine")
     if ($cur -notlike "*$dir*") {
@@ -87,10 +103,10 @@ if (Have rustc) {
     $arch = if ($isArm) { "aarch64" } else { "x86_64" }
     $init = "$env:TEMP\rustup-init.exe"
     Invoke-WebRequest "https://static.rust-lang.org/rustup/dist/$arch-pc-windows-msvc/rustup-init.exe" -OutFile $init -UseBasicParsing
-    & $init -y --no-modify-path --default-toolchain stable --profile minimal
+    Run $init @("-y", "--no-modify-path", "--default-toolchain", "stable", "--profile", "minimal")
     Say "rust installed: $(& "$cargoHome\bin\rustc.exe" --version)"
 }
-& "$cargoHome\bin\rustup.exe" component add clippy rustfmt 2>&1 | Out-Null
+Run "$cargoHome\bin\rustup.exe" @("component", "add", "clippy", "rustfmt")
 
 # ---- Node and pnpm ---------------------------------------------------------
 if (Have node) {
@@ -108,8 +124,8 @@ if (Have node) {
     Say "node installed: $(& "$nodeDir\node.exe" --version)"
 }
 Say "enabling pnpm"
-corepack enable 2>&1 | Out-Null
-corepack prepare pnpm@latest --activate 2>&1 | Out-Null
+Run "corepack" @("enable")
+Run "corepack" @("prepare", "pnpm@latest", "--activate")
 
 # ---- CMake and Ninja -------------------------------------------------------
 # cef-dll-sys needs both to build the CEF C++ wrapper.
