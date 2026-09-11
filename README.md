@@ -73,9 +73,13 @@ Dive is a native browser for macOS and Windows, built on the Chromium Embedded F
 
 Dive checks for updates and installs them in the background.
 
-The Windows installer is not yet signed with a certificate Microsoft
-recognises, so SmartScreen warns the first time you run it: choose **More
-info**, then **Run anyway**.
+macOS builds are signed with an Apple Developer ID certificate and notarized.
+Windows builds are being set up for code signing through the
+[SignPath Foundation](https://signpath.org/)'s free program for open-source
+projects; see [docs/CODE_SIGNING.md](docs/CODE_SIGNING.md) for the policy.
+Until that certificate is issued the Windows installer is unsigned, so
+SmartScreen warns the first time you run it: choose **More info**, then **Run
+anyway**.
 
 ## Connect an agent
 
