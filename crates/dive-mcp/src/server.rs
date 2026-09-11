@@ -611,7 +611,7 @@ impl<B: Browser> DiveServer<B> {
     /// Resize the viewport.
     #[tool(
         name = "page_resize",
-        description = "Resize a tab's viewport to check responsive layout: {preset:'iphone-15'} for a device from page_devices, {width:1024,height:768} for an exact size, or {reset:true} to go back to filling the window. A preset also emulates its pixel ratio, touch support, user agent and safe-area insets, and by default gives the page the viewport the device's own browser would (ui:'browser'); ui:'standalone' is an installed web app, ui:'none' the whole screen. The tab reloads only when the user agent changes."
+        description = "Resize a tab's viewport to check responsive layout: {preset:'iphone-15'} for a device from page_devices, {width:1024,height:768} for an exact size, or {reset:true} to go back to filling the window. A preset also emulates its pixel ratio, touch support, user agent and safe-area insets, and by default gives the page the viewport the device's own browser would (ui:'browser'); ui:'standalone' is an installed web app, ui:'none' the whole screen. Dive puts the device on screen in its simulator, so a later page_screenshot shows the page at that size inside the device rather than filling the window. The tab reloads only when the user agent changes."
     )]
     async fn page_resize(
         &self,

@@ -12,6 +12,7 @@ use dive_mcp::{
 };
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager};
+use tauri_specta::Event as _;
 
 use crate::Runtime;
 use crate::commands::{activate_tab, normalize_url_with, open_tab};
@@ -521,10 +522,16 @@ impl AppBrowser {
 
     /// Apply a device to a tab and reload, which is the cheapest way to make
     /// the new metrics take effect on layout.
+    ///
+    /// `shown` is what the chrome should put on screen. CDP only tells the
+    /// page its size; the native view keeps whatever bounds it had, so without
+    /// this the page paints a phone-shaped column in the corner of a
+    /// full-size view. Telling the chrome lets the stage frame it properly.
     async fn emulate_device(
         &self,
         tab: TabId,
         device: Option<crate::emulate::Device>,
+        shown: Option<crate::emulate::DeviceEmulated>,
     ) -> Result<bool, BrowserError> {
         let session = self.session_for(tab).await?;
         crate::emulate::apply(&session, crate::emulate::device_calls(device.as_ref()))
@@ -536,6 +543,11 @@ impl AppBrowser {
         let previous = self.state().buffers.device(tab);
         let reload = browsing_identity(previous.as_ref()) != browsing_identity(device.as_ref());
         self.state().buffers.set_device(tab, device);
+        if let Some(shown) = shown {
+            // Best effort: a headless caller has no chrome to tell, and the
+            // emulation itself has already been applied either way.
+            let _ = shown.emit(&self.app);
+        }
         if reload {
             session.call0("Page.reload").await.map_err(other)?;
         }
@@ -1936,7 +1948,18 @@ impl Browser for AppBrowser {
                         strips.bottom
                     )
                 };
-                Some((preset.id.clone(), device, note))
+                Some((
+                    preset.id.clone(),
+                    device,
+                    note,
+                    crate::emulate::DeviceEmulated {
+                        tab_id: tab,
+                        preset: Some(preset.id.clone()),
+                        size: None,
+                        landscape,
+                        ui: ui.as_str().to_owned(),
+                    },
+                ))
             }
             (None, Some(width), Some(height), _) => {
                 if params.orientation.is_some() || params.ui.is_some() {
@@ -1950,6 +1973,13 @@ impl Browser for AppBrowser {
                     format!("{width}x{height}"),
                     device,
                     "A bare viewport with Dive's own user agent.".into(),
+                    crate::emulate::DeviceEmulated {
+                        tab_id: tab,
+                        preset: None,
+                        size: Some((width, height)),
+                        landscape: width > height,
+                        ui: crate::emulate::UiMode::None.as_str().to_owned(),
+                    },
                 ))
             }
             (None, Some(_), None, _) | (None, None, Some(_), _) => {
@@ -1963,11 +1993,25 @@ impl Browser for AppBrowser {
                 ));
             }
         };
-        let described = requested.as_ref().map(|(id, _, _)| id.clone());
-        let device = requested.as_ref().map(|(_, d, _)| d.clone());
-        let note = requested.as_ref().map(|(_, _, n)| n.clone());
+        let described = requested.as_ref().map(|(id, _, _, _)| id.clone());
+        let device = requested.as_ref().map(|(_, d, _, _)| d.clone());
+        let note = requested.as_ref().map(|(_, _, n, _)| n.clone());
+        // Clearing is a device too, as far as the chrome is concerned: it has
+        // to take the frame back down and give the view the window again.
+        let shown = requested.as_ref().map_or_else(
+            || crate::emulate::DeviceEmulated {
+                tab_id: tab,
+                preset: None,
+                size: None,
+                landscape: false,
+                ui: crate::emulate::UiMode::Browser.as_str().to_owned(),
+            },
+            |(_, _, _, shown)| shown.clone(),
+        );
         self.tracked(tab, "page_resize", described.clone(), async {
-            let reloaded = self.emulate_device(tab, device.clone()).await?;
+            let reloaded = self
+                .emulate_device(tab, device.clone(), Some(shown.clone()))
+                .await?;
             Ok(json!({
                 "preset": described,
                 "viewport": device.as_ref().map(|d| json!({"width": d.width, "height": d.height})),

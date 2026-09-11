@@ -173,7 +173,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ),
         spec(
             "page_resize",
-            "Resize the viewport to check responsive layout: a preset from page_devices, an exact width and height, or reset to fill the window.".into(),
+            "Resize the viewport to check responsive layout: a preset from page_devices, an exact width and height, or reset to fill the window. A preset also shows the device on screen in Dive's simulator, so a screenshot afterwards is of the page inside that device.".into(),
             obj(json!({"tab_id": tab, "preset": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}, "orientation": {"type": "string", "enum": ["portrait", "landscape"]}, "ui": {"type": "string", "enum": ["browser", "standalone", "none"], "description": "What surrounds the page: the device's browser bars (default), an installed web app, or nothing."}, "reset": {"type": "boolean"}}), &[]),
         ),
         spec("page_devices", "Device presets page_resize accepts.".into(), obj(json!({}), &[])),

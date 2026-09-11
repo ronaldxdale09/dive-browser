@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { needsReload, presetFor, toEnvironmentInput, toInput, toMediaInput } from "./emulation";
+import { beforeEach, describe, expect, it } from "vitest";
+import { needsReload, presetFor, resetPushed, toEnvironmentInput, toInput, toMediaInput, useEmulation } from "./emulation";
 import type { DeviceSelection } from "./emulation";
 import { deviceById } from "../data/devices";
 
@@ -78,5 +78,54 @@ describe("reload decision", () => {
     const desktop = toInput({ ...iphone, deviceId: "desktop", ui: "none" }, 1);
     expect(needsReload(laptop, desktop)).toBe(false);
     expect(deviceById("laptop")!.userAgent).toBe("");
+  });
+});
+
+describe("adopting what an agent emulated", () => {
+  // CDP tells the page it is 390px wide; it does not resize the native view,
+  // so a page emulated from outside the chrome paints a phone-shaped column in
+  // the corner of a full-size view. The stage is what fixes that, and the
+  // stage renders from this store.
+  const base = { tab_id: "tab-1", preset: null, size: null, landscape: false, ui: "browser" };
+
+  beforeEach(() => {
+    useEmulation.setState({ byTab: {}, recent: [] });
+    resetPushed();
+  });
+
+  it("puts the agent's preset on the stage", () => {
+    useEmulation.getState().adopt({ ...base, preset: "iphone-15-pro" });
+    const sel = useEmulation.getState().byTab["tab-1"];
+    expect(sel).toMatchObject({ deviceId: "iphone-15-pro", landscape: false, ui: "browser" });
+    // It belongs in the recents like any other choice: the person may want to
+    // go back to whatever the agent was looking at.
+    expect(useEmulation.getState().recent).toContain("iphone-15-pro");
+  });
+
+  it("carries a rotation and an exact size", () => {
+    useEmulation.getState().adopt({ ...base, preset: "ipad-pro-11", landscape: true, ui: "none" });
+    expect(useEmulation.getState().byTab["tab-1"]).toMatchObject({ landscape: true, ui: "none" });
+
+    useEmulation.getState().adopt({ ...base, size: [1280, 720] });
+    expect(useEmulation.getState().byTab["tab-1"]).toMatchObject({
+      deviceId: "custom",
+      custom: { width: 1280, height: 720 }
+    });
+  });
+
+  it("takes the stage back down when the agent resets", () => {
+    useEmulation.getState().adopt({ ...base, preset: "iphone-15-pro" });
+    useEmulation.getState().adopt(base);
+    expect(useEmulation.getState().byTab["tab-1"]).toBeUndefined();
+  });
+
+  it("does not push the metrics back to the host", () => {
+    // The host applied them before emitting. Pushing again would reload the
+    // page a second time for a user agent that never changed.
+    const sel = useEmulation.getState();
+    expect(sel.adopt).toBeTypeOf("function");
+    expect(() => sel.adopt({ ...base, preset: "iphone-15-pro" })).not.toThrow();
+    // `adopt` is synchronous precisely because it talks to nobody.
+    expect(sel.adopt({ ...base, preset: "iphone-15-pro" })).toBeUndefined();
   });
 });

@@ -14,6 +14,7 @@ use dive_cdp::CdpSession;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use specta::Type;
+use tauri_specta::Event;
 
 use crate::error::{AppError, AppResult};
 
@@ -34,6 +35,29 @@ pub struct Insets {
 }
 
 /// A device as sent by the chrome, or built from a catalog preset.
+/// A device an agent asked for, so the chrome can show the same thing.
+///
+/// Emulation is two halves and only one of them is CDP. `setDeviceMetricsOverride`
+/// tells the page it is 390px wide; it does not make the native view 390px
+/// wide, so a page emulated from outside the chrome paints a phone-shaped
+/// column in the corner of a full-size view with black around it. The stage
+/// owns the other half -- the frame, the scale, and the view bounds -- so the
+/// agent asks for a device and the chrome puts that device on screen.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
+pub struct DeviceEmulated {
+    /// The tab the device was applied to.
+    pub tab_id: dive_core::TabId,
+    /// Preset id from [`presets`], or `None` when emulation was cleared.
+    pub preset: Option<String>,
+    /// Set for an exact width and height rather than a preset.
+    pub size: Option<(u32, u32)>,
+    /// Whether the device was rotated out of its natural orientation.
+    pub landscape: bool,
+    /// What surrounds the page: the device's browser bars, an installed app,
+    /// or nothing.
+    pub ui: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct Device {
     /// Viewport width in CSS pixels.
@@ -387,6 +411,16 @@ impl UiMode {
             other => Err(AppError::new(format!(
                 "unknown ui {other:?}; use browser, standalone or none"
             ))),
+        }
+    }
+
+    /// The name the chrome and the agent both use.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Browser => "browser",
+            Self::Standalone => "standalone",
+            Self::None => "none",
         }
     }
 }

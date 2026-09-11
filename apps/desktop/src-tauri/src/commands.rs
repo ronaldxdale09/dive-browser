@@ -785,6 +785,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::subtitles::SubtitleModelProgress,
             crate::subtitles::SubtitleCue,
             crate::subtitles::SubtitleState,
+            crate::emulate::DeviceEmulated,
         ])
 }
 

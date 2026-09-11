@@ -30,8 +30,10 @@ import { bootSubtitles } from "./store/subtitles";
 import { useRecording } from "./store/recording";
 import { useRecorder } from "./store/recorder";
 import { WindowControls } from "./components/WindowControls";
+import { WindowResizeEdges } from "./components/WindowResizeEdges";
 import { isWindows } from "./lib/commands";
 import { listenForAgentPresence } from "./store/agentPresence";
+import { listenForEmulation } from "./store/emulation";
 
 const Sidecar = lazy(() => import("./components/Sidecar").then(({ Sidecar }) => ({ default: Sidecar })));
 const Dock = lazy(() => import("./components/Dock").then(({ Dock }) => ({ default: Dock })));
@@ -79,6 +81,9 @@ export function App() {
   useEffect(() => void bootSubtitles(), []);
   // And once to "an agent is driving this tab", which marks the tab list.
   useEffect(() => listenForAgentPresence(), []);
+  // An agent asking for a phone should put the phone on screen, not just tell
+  // the page it is one.
+  useEffect(() => listenForEmulation(), []);
   // Which panels were open last time is remembered here rather than in the
   // browser store, whose `open` map is per-window state. Applied once at
   // boot, then followed.
@@ -137,6 +142,9 @@ export function App() {
       // main menu) begins, whichever shape the bar is in.
       style={{ gridTemplateColumns: `${railWidth}px minmax(0,1fr)`, "--chrome-top": oneBar ? "46px" : "86px" } as React.CSSProperties}
     >
+      {/* Resize handles for the frameless Windows window; renders nothing
+          elsewhere or while maximized. */}
+      <WindowResizeEdges />
       {!oneBar && (
         <header className={`col-span-2 row-start-1 flex items-center gap-2 ${captionGutter}`} data-tauri-drag-region="true">
           {isPrivateWindow() && <span className="px-2 font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
