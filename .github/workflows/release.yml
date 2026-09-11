@@ -238,13 +238,18 @@ jobs:
       #                    alone once it is defined.
       #   RUNTIME_LIBRARY  the documented knob, kept for the generators that
       #                    honour it rather than the flags.
+      #
+      # Written with a leading dash rather than a slash. cl accepts either, but
+      # a step that runs under bash hands these to a native program through
+      # MSYS, which rewrites anything shaped like an absolute POSIX path: /MT
+      # arrived as C:/Program Files/Git/MT and cl tried to compile it.
       - name: Match CEF's C++ runtime
         shell: pwsh
         run: |
-          "CFLAGS=/MT" >> $env:GITHUB_ENV
-          "CXXFLAGS=/MT" >> $env:GITHUB_ENV
-          "CMAKE_C_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG" >> $env:GITHUB_ENV
-          "CMAKE_CXX_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG" >> $env:GITHUB_ENV
+          "CFLAGS=-MT" >> $env:GITHUB_ENV
+          "CXXFLAGS=-MT" >> $env:GITHUB_ENV
+          "CMAKE_C_FLAGS_RELEASE=-MT -O2 -Ob2 -DNDEBUG" >> $env:GITHUB_ENV
+          "CMAKE_CXX_FLAGS_RELEASE=-MT -O2 -Ob2 -DNDEBUG" >> $env:GITHUB_ENV
           "CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded" >> $env:GITHUB_ENV
 
       - name: Cache CEF binaries
