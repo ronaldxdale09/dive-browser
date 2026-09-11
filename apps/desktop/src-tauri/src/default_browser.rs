@@ -264,10 +264,25 @@ mod tests {
     #[test]
     fn status_reports_the_platform_honestly() {
         let s = status();
-        assert_eq!(s.supported, cfg!(target_os = "macos"));
+        // Windows counts as supported even though it will not let anyone set
+        // the default: Dive can register itself and open the page where the
+        // choice is made, which is the whole of what "supported" promises.
+        assert_eq!(
+            s.supported,
+            cfg!(any(target_os = "macos", target_os = "windows"))
+        );
         if !s.supported {
             assert!(!s.is_default);
+            assert_eq!(s.current, None);
         }
+    }
+
+    /// A platform that cannot be asked must not claim Dive is already the
+    /// default, or the chrome would hide the button that says otherwise.
+    #[test]
+    fn an_unsupported_platform_never_claims_to_be_the_default() {
+        let s = status();
+        assert!(s.supported || !s.is_default);
     }
 
     #[cfg(target_os = "macos")]
