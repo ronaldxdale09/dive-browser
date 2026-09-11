@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/ronaldxdale09/dive-browser/releases/latest"><img src="https://img.shields.io/badge/Download%20for%20macOS-Apple%20Silicon-0f8f7e?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
   &nbsp;
-  <img src="https://img.shields.io/badge/Windows-Coming%20soon-3a3f45?style=for-the-badge&logo=windows11&logoColor=white" alt="Windows: coming soon" />
+  <a href="https://github.com/ronaldxdale09/dive-browser/releases/latest"><img src="https://img.shields.io/badge/Download%20for%20Windows-x64-0f8f7e?style=for-the-badge&logo=windows11&logoColor=white" alt="Download for Windows" /></a>
 </p>
 
 <p align="center">
@@ -27,14 +27,14 @@
   <a href="https://react.dev"><img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React 19" /></a>
   <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-built--in-8A63D2?style=flat-square" alt="MCP built in" /></a>
-  <img src="https://img.shields.io/badge/Platform-macOS-000000?style=flat-square&logo=apple&logoColor=white" alt="macOS" />
+  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-000000?style=flat-square&logo=apple&logoColor=white" alt="macOS and Windows" />
 </p>
 
 <p align="center">
   <img src="assets/screenshots/home-dark.png" alt="The Dive home page with detected dev servers listed and ready to open" width="100%" />
 </p>
 
-Dive is a native macOS browser built on the Chromium Embedded Framework, with a Rust core and a React chrome. It is fast, keyboard-first and private by default. The difference is what sits beside the page: network, console, storage and accessibility panels, a device simulator, a screen studio, and an AI agent that can read and operate the tab. Every tab is also reachable by Claude Code, Cursor or any MCP client.
+Dive is a native browser for macOS and Windows, built on the Chromium Embedded Framework, with a Rust core and a React chrome. It is fast, keyboard-first and private by default. The difference is what sits beside the page: network, console, storage and accessibility panels, a device simulator, a screen studio, and an AI agent that can read and operate the tab. Every tab is also reachable by Claude Code, Cursor or any MCP client.
 
 ## What you get
 
@@ -69,9 +69,13 @@ Dive is a native macOS browser built on the Chromium Embedded Framework, with a 
 | Platform | |
 |---|---|
 | macOS 13 or newer, Apple Silicon | [Download the DMG](https://github.com/ronaldxdale09/dive-browser/releases/latest) |
-| Windows | Coming soon |
+| Windows 10 or newer, x64 | [Download the installer](https://github.com/ronaldxdale09/dive-browser/releases/latest) |
 
 Dive checks for updates and installs them in the background.
+
+The Windows installer is not yet signed with a certificate Microsoft
+recognises, so SmartScreen warns the first time you run it: choose **More
+info**, then **Run anyway**.
 
 ## Connect an agent
 
@@ -80,6 +84,13 @@ Dive serves MCP on `127.0.0.1:7391` and requires the token it writes to its data
 ```bash
 claude mcp add --transport http dive http://127.0.0.1:7391/mcp \
   --header "Authorization: Bearer $(cat ~/Library/Application\ Support/app.dive.browser/mcp-token)"
+```
+
+On Windows the token is under `%APPDATA%\dive\mcp-token`:
+
+```powershell
+claude mcp add --transport http dive http://127.0.0.1:7391/mcp `
+  --header "Authorization: Bearer $(Get-Content $env:APPDATA\dive\mcp-token)"
 ```
 
 Cursor and other clients take the same URL and header. Settings › Developer shows the token path and the current port.
@@ -95,6 +106,10 @@ pnpm install
 export CEF_PATH="$HOME/.local/share/cef"   # CEF is downloaded here once (~500 MB)
 pnpm dev
 ```
+
+Windows needs the MSVC toolchain and one extra environment variable so
+whisper.cpp and CEF agree on a C++ runtime; [docs/WINDOWS.md](docs/WINDOWS.md)
+has the setup and the reasoning.
 
 `pnpm check` runs the full gate. Layout, environment knobs and conventions are in [CONTRIBUTING.md](CONTRIBUTING.md); design notes and measurements are under [docs/](docs/README.md).
 
