@@ -60,16 +60,30 @@ jobs:
       # one. whisper.cpp otherwise brings the dynamic one and the link ends in
       # dozens of duplicate std::locale symbols.
       #
-      # These land here rather than in CMAKE_MSVC_RUNTIME_LIBRARY because an
-      # explicit /MD in the compiler flags beats that variable. cc appends
-      # CFLAGS and CXXFLAGS after its own flags, and MSVC honours the last
-      # runtime flag it is given.
+      # Three things are needed, because the runtime flag can be set in three
+      # places and the last one wins:
+      #
+      #   CFLAGS/CXXFLAGS  cc appends these after its own -MD, and MSVC
+      #                    honours the last runtime flag it is given. This
+      #                    covers CMAKE_<LANG>_FLAGS, which is built from cc's
+      #                    compiler line.
+      #   *_FLAGS_RELEASE  CMake appends the per-config flags after those, and
+      #                    its MSVC default carries /MD -- which is what beat
+      #                    the previous three attempts at this. whisper-rs-sys
+      #                    forwards any CMAKE_* variable from the environment
+      #                    as a define, and the cmake crate leaves the variable
+      #                    alone once it is defined.
+      #   RUNTIME_LIBRARY  the documented knob, kept for the generators that
+      #                    honour it rather than the flags.
       - name: Match CEF's C++ runtime
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           "CFLAGS=/MT" >> $env:GITHUB_ENV
           "CXXFLAGS=/MT" >> $env:GITHUB_ENV
+          "CMAKE_C_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG" >> $env:GITHUB_ENV
+          "CMAKE_CXX_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG" >> $env:GITHUB_ENV
+          "CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded" >> $env:GITHUB_ENV
 
       - name: Cache CEF binaries
         uses: actions/cache@v4
