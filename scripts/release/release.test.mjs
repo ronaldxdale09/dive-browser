@@ -7,6 +7,7 @@
  * no signature, a version that disagrees across platforms, and a tag that was
  * already published.
  */
+import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
@@ -85,6 +86,29 @@ describe('resolve-release', () => {
   it('rejects a ref or version that is not a release', () => {
     expect(() => resolveRelease({ ref: 'main' })).toThrow(/Not a release tag/)
     expect(() => resolveRelease({ version: 'latest' })).toThrow(/Not a valid version/)
+  })
+})
+
+describe('every release script can tell it is the entry point', () => {
+  // This is a Windows-only failure and macOS cannot see it. `process.argv[1]`
+  // there is a drive path, so `file://${process.argv[1]}` is
+  // `file://D:\\a\\x.mjs` while `import.meta.url` is `file:///D:/a/x.mjs`.
+  // The comparison never matches, the main block never runs, and the script
+  // exits 0 having done nothing -- which is how a release once bundled an
+  // installer stamped with the previous version.
+  it('compares argv to import.meta.url as a URL, not by pasting a prefix', () => {
+    const dir = resolve(import.meta.dirname)
+    const scripts = readdirSync(dir).filter((f) => f.endsWith('.mjs') && !f.endsWith('.test.mjs'))
+    expect(scripts.length).toBeGreaterThan(0)
+    for (const file of scripts) {
+      const source = readFileSync(resolve(dir, file), 'utf8')
+      expect(source, `${file} builds a file:// URL by hand`).not.toMatch(
+        /`file:\/\/\$\{process\.argv\[1\]\}`/
+      )
+      if (source.includes('process.argv[1]')) {
+        expect(source, `${file} should compare with pathToFileURL`).toMatch(/pathToFileURL/)
+      }
+    }
   })
 })
 
@@ -217,17 +241,17 @@ describe('update-manifest', () => {
 
   it('wants each platform\'s own archive shape, not one fixed extension', () => {
     const win = { ...base, target: 'x86_64-pc-windows-msvc' }
-    // What Tauri's NSIS updater bundle is actually called.
+    // On Windows the signed installer is the updater archive.
     expect(
-      buildManifest({ ...win, archive: '/build/Dive_1.2.3_x64-setup.nsis.zip' })
+      buildManifest({ ...win, archive: '/build/Dive_1.2.3_x64-setup.exe' })
         .platforms['windows-x86_64'].url
-    ).toMatch(/Dive_1\.2\.3_x64-setup\.nsis\.zip$/)
-    // The installer itself is not the updater archive, and saying so here is
-    // the difference between a failed build and a broken update.
-    expect(() => buildManifest({ ...win, archive: '/build/Dive_1.2.3_x64-setup.exe' })).toThrow(
-      /nsis\.zip/
+    ).toMatch(/Dive_1\.2\.3_x64-setup\.exe$/)
+    // A macOS archive under a Windows target is a build matrix wired wrong,
+    // and would publish a manifest that only fails on someone's machine.
+    expect(() => buildManifest({ ...win, archive: '/build/Dive.app.tar.gz' })).toThrow(/-setup\.exe/)
+    expect(() => buildManifest({ ...base, archive: '/build/Dive_1.2.3_x64-setup.exe' })).toThrow(
+      /tar\.gz/
     )
-    expect(() => buildManifest({ ...win, archive: '/build/Dive.app.tar.gz' })).toThrow(/nsis\.zip/)
   })
 
   it('merges one platform per architecture into a single manifest', () => {
@@ -274,8 +298,7 @@ describe('verify-release-assets', () => {
     { name: 'Dive.app.tar.gz', size: 80_000_000 },
     { name: 'Dive.app.tar.gz.sig', size: 200 },
     { name: 'Dive_0.1.4_x64-setup.exe', size: 900 },
-    { name: 'Dive_0.1.4_x64-setup.nsis.zip', size: 800 },
-    { name: 'Dive_0.1.4_x64-setup.nsis.zip.sig', size: 100 }
+    { name: 'Dive_0.1.4_x64-setup.exe.sig', size: 100 }
   ]
 
   it('accepts a release that carries everything an update needs', async () => {
@@ -283,7 +306,7 @@ describe('verify-release-assets', () => {
       tag: 'v0.1.4',
       fetchRelease: async () => ({ assets: complete })
     })
-    expect(result.assets).toHaveLength(7)
+    expect(result.assets).toHaveLength(6)
   })
 
   it('names what is missing rather than failing generically', () => {
@@ -296,24 +319,22 @@ describe('verify-release-assets', () => {
       'macOS updater archive',
       'macOS updater signature',
       'Windows installer',
-      'Windows updater archive',
       'Windows updater signature'
     ])
   })
 
-  it('treats a .nsis.zip.sig as a signature and not as the installer or archive', () => {
-    // `-setup.exe` is what a person downloads and `.nsis.zip` is what the
-    // updater downloads; neither substitutes for the other.
+  it('treats a -setup.exe.sig as a signature and not as the installer', () => {
+    // The signature ends with `.sig`, not `-setup.exe`, so a release carrying
+    // only the signature must still report the installer as missing.
     const windowsOnly = [
       { name: 'latest.json', size: 1 },
-      { name: 'Dive_0.1.4_x64-setup.nsis.zip.sig', size: 1 }
+      { name: 'Dive_0.1.4_x64-setup.exe.sig', size: 1 }
     ]
     expect(missingAssetKinds(windowsOnly)).toEqual([
       'DMG installer',
       'macOS updater archive',
       'macOS updater signature',
-      'Windows installer',
-      'Windows updater archive'
+      'Windows installer'
     ])
   })
 
@@ -325,7 +346,6 @@ describe('verify-release-assets', () => {
       'DMG installer',
       'macOS updater archive',
       'Windows installer',
-      'Windows updater archive',
       'Windows updater signature'
     ])
   })

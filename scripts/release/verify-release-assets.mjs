@@ -9,6 +9,8 @@
  * because that is the only state users are served from.
  */
 
+import { pathToFileURL } from 'node:url'
+
 const API_VERSION = '2022-11-28'
 
 /**
@@ -27,8 +29,7 @@ export function requiredAssets() {
     { name: 'macOS updater archive', match: (file) => file.endsWith('.tar.gz') },
     { name: 'macOS updater signature', match: (file) => file.endsWith('.tar.gz.sig') },
     { name: 'Windows installer', match: (file) => file.endsWith('-setup.exe') },
-    { name: 'Windows updater archive', match: (file) => file.endsWith('.nsis.zip') },
-    { name: 'Windows updater signature', match: (file) => file.endsWith('.nsis.zip.sig') }
+    { name: 'Windows updater signature', match: (file) => file.endsWith('-setup.exe.sig') }
   ]
 }
 
@@ -76,7 +77,11 @@ export async function verifyRelease({ repo, tag, token, fetchRelease = null }) {
   return { tag, assets: assets.map((asset) => asset.name) }
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+// Run directly, rather than imported by a test. Compared as a URL because
+// Windows argv is a drive path -- `file://D:\\a\\x.mjs` never equals the
+// `file:///D:/a/x.mjs` that import.meta.url holds, so the naive form left
+// this whole block unreachable there and the script a silent no-op.
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const [, , tag] = process.argv
   const repo = process.env.GITHUB_REPOSITORY
   const token = process.env.GITHUB_TOKEN

@@ -9,6 +9,7 @@
  */
 
 import { existsSync, globSync, readFileSync, writeFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 
 /** The manifests that carry the app version, relative to the repo root. */
@@ -131,7 +132,11 @@ export function stampVersions(root, version) {
   return { changed, version }
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+// Run directly, rather than imported by a test. Compared as a URL because
+// Windows argv is a drive path -- `file://D:\\a\\x.mjs` never equals the
+// `file:///D:/a/x.mjs` that import.meta.url holds, so the naive form left
+// this whole block unreachable there and the script a silent no-op.
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const version = process.argv[2]
   if (!version) {
     console.error('usage: node scripts/release/stamp-versions.mjs <version> [--github-output]')

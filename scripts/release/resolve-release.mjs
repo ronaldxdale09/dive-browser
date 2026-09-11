@@ -10,6 +10,8 @@
  * version instead of committing it up front.
  */
 
+import { pathToFileURL } from 'node:url'
+
 const STABLE = /^v?(\d+)\.(\d+)\.(\d+)$/
 const RC = /^v?(\d+)\.(\d+)\.(\d+)-rc\.(\d+)$/
 
@@ -132,7 +134,11 @@ export function resolveRelease({ ref = null, kind = 'patch', version = null, tag
   }
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+// Run directly, rather than imported by a test. Compared as a URL because
+// Windows argv is a drive path -- `file://D:\\a\\x.mjs` never equals the
+// `file:///D:/a/x.mjs` that import.meta.url holds, so the naive form left
+// this whole block unreachable there and the script a silent no-op.
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const [, , ...args] = process.argv
   const flag = (name) => {
     const index = args.indexOf(`--${name}`)

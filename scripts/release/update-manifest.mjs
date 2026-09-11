@@ -16,6 +16,7 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 import { basename } from 'node:path'
 
 /** Platform keys the Tauri updater understands, for the targets Dive builds. */
@@ -31,8 +32,14 @@ function required(value, what) {
   return text
 }
 
-/** What each platform's updater archive is named, by Tauri's own convention. */
-const ARCHIVE_SUFFIX = { darwin: '.tar.gz', windows: '.nsis.zip' }
+/**
+ * What each platform's updater archive is named, by Tauri's own convention.
+ *
+ * On Windows that is the NSIS installer itself: the bundler signs `-setup.exe`
+ * and the updater downloads and runs it. There is no separate archive, which is
+ * worth stating because the older convention had one and the name lingers.
+ */
+const ARCHIVE_SUFFIX = { darwin: '.tar.gz', windows: '-setup.exe' }
 
 /**
  * A one-platform manifest fragment.
@@ -115,7 +122,11 @@ export function assertManifestComplete(manifest, expectedPlatforms = []) {
   return manifest
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+// Run directly, rather than imported by a test. Compared as a URL because
+// Windows argv is a drive path -- `file://D:\\a\\x.mjs` never equals the
+// `file:///D:/a/x.mjs` that import.meta.url holds, so the naive form left
+// this whole block unreachable there and the script a silent no-op.
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const args = process.argv.slice(2)
   const flag = (name) => {
     const index = args.indexOf(`--${name}`)

@@ -287,12 +287,14 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           mkdir -p out
+          # The installer is both what a person downloads and what the updater
+          # downloads: the bundler signs -setup.exe rather than producing a
+          # separate archive beside it.
           cp target/release/bundle/nsis/*-setup.exe out/
-          cp target/release/bundle/nsis/*-setup.nsis.zip out/
-          cp target/release/bundle/nsis/*-setup.nsis.zip.sig out/
+          cp target/release/bundle/nsis/*-setup.exe.sig out/
 
-          archives=(out/*.nsis.zip)
-          signatures=(out/*.nsis.zip.sig)
+          archives=(out/*-setup.exe)
+          signatures=(out/*-setup.exe.sig)
           if [ "${#archives[@]}" -ne 1 ] || [ "${#signatures[@]}" -ne 1 ]; then
             echo "::error::Expected one updater archive and one signature," \
                  "found ${#archives[@]} and ${#signatures[@]}."
@@ -364,8 +366,7 @@ jobs:
             assets/*.tar.gz
             assets/*.tar.gz.sig
             assets/*-setup.exe
-            assets/*.nsis.zip
-            assets/*.nsis.zip.sig
+            assets/*-setup.exe.sig
           fail_on_unmatched_files: true
 
       # Against the release as GitHub stored it: the only state users are
