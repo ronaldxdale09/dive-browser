@@ -92,7 +92,12 @@ jobs:
     name: Build macOS (aarch64)
     needs: preflight
     runs-on: macos-15
-    timeout-minutes: 60
+    # Longer than the Windows job because this one also waits on Apple's
+    # notarization queue, which is not ours to hurry. 60 was enough only while
+    # the caches were warm: a dependency change invalidates both the CEF
+    # download and the Rust cache, and a cold build then runs past the cap and
+    # is cancelled at the finish line.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
