@@ -70,11 +70,50 @@ function liveOverlaysAvailable() {
   return (window as Window & { __DIVE_LIVE_OVERLAYS__?: boolean }).__DIVE_LIVE_OVERLAYS__ === true;
 }
 
+/**
+ * What counts as an overlay, by the role it declares.
+ *
+ * `alertdialog` is here because a JS `alert()` card is exactly as much an
+ * overlay as a dialog, and leaving it out hid every one of them behind the
+ * page. `tooltip` likewise. `status` and `alert` are deliberately absent:
+ * loading skeletons and inline match counters carry them and are part of the
+ * chrome's own layout, not floating over a page.
+ */
+const OVERLAY_SELECTOR =
+  '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="tooltip"], [data-native-overlay]';
+
+/**
+ * The overlay elements on screen, cached until the DOM changes shape.
+ *
+ * The regions are re-measured every frame while an overlay is open, and
+ * running the selector over the whole document that often is what made the
+ * measurement expensive. Matching elements come and go far less than once a
+ * frame, so a mutation observer invalidates the list instead.
+ */
+let matched: HTMLElement[] | null = null;
+let watcher: MutationObserver | null = null;
+
+function overlayElements(): HTMLElement[] {
+  if (matched) return matched;
+  watcher ??= new MutationObserver(() => { matched = null; });
+  watcher.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["role", "data-native-overlay"] });
+  matched = Array.from(document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR))
+    .filter((element) => !element.parentElement?.closest(OVERLAY_SELECTOR));
+  return matched;
+}
+
+/** Drop the cached elements; tests only. */
+export function resetOverlayElements() {
+  matched = null;
+  watcher?.disconnect();
+  watcher = null;
+}
+
 export function visibleOverlayRegions() {
-  const selector = '[role="dialog"], [role="menu"], [role="listbox"], [data-native-overlay]';
-  return Array.from(document.querySelectorAll<HTMLElement>(selector))
-    .filter((element) => !element.parentElement?.closest(selector))
-    .filter((element) => getComputedStyle(element).visibility !== "hidden" && getComputedStyle(element).display !== "none")
+  return overlayElements()
+    // One style read, not two: a `display: none` element measures 0x0 and is
+    // dropped by the size filter below, but a hidden one still has a box.
+    .filter((element) => getComputedStyle(element).visibility !== "hidden")
     .map((element) => { const { x, y, width, height } = element.getBoundingClientRect(); return { x, y, width, height }; })
     .filter((rect) => rect.width > 0 && rect.height > 0).slice(0, 64);
 }

@@ -8,7 +8,7 @@
  * view's bounds.
  */
 import { Camera, Maximize2, MonitorSmartphone, RotateCw, Smartphone, X, ZoomIn } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ipc } from "../../lib/ipc";
 import { useContentPreview } from "../../lib/overlay";
 import { useBrowser } from "../../store/browser";
@@ -58,7 +58,14 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
     if (!el) return;
     // The caption under the frame and the tool strip beside it come out of
     // the budget, or the frame fits and the caption does not.
-    const measure = () => setAvailable({ width: el.clientWidth - TOOLS_WIDTH, height: el.clientHeight - CAPTION_HEIGHT });
+    // Same numbers keep the same object: `layout` is memoised on this, and a
+    // fresh object per observation would defeat that on every scroll-driven
+    // resize notification.
+    const measure = () =>
+      setAvailable((previous) => {
+        const next = { width: el.clientWidth - TOOLS_WIDTH, height: el.clientHeight - CAPTION_HEIGHT };
+        return previous.width === next.width && previous.height === next.height ? previous : next;
+      });
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -66,7 +73,13 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
   }, []);
 
   const device = baseFor(sel);
-  const layout = device && available.width > 0 ? layoutFor(device, sel.landscape, sel.ui, sel.zoom, available) : null;
+  // Memoised because `DeviceFrame` keys an effect on it: a fresh object every
+  // render tore down the bounds reporter and re-sent an identical rectangle
+  // over IPC on every unrelated re-render of this tab.
+  const layout = useMemo(
+    () => (device && available.width > 0 ? layoutFor(device, sel.landscape, sel.ui, sel.zoom, available) : null),
+    [device, sel.landscape, sel.ui, sel.zoom, available],
+  );
   const layoutScale = layout?.scale;
 
   // The engine hears the scale after the stage has measured it, never a guess.

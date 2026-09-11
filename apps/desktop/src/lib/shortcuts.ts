@@ -3,6 +3,8 @@ import { flushSync } from "react-dom";
 import { events } from "./ipc";
 import { selectAllInChromeField } from "./chromeEditing";
 import { isMac, runCommand, shortcutFor } from "./commands";
+import { contentCoverDepth } from "./overlay";
+import { useBrowser } from "../store/browser";
 
 /**
  * Global key chords, routed through the shared command dispatcher.
@@ -17,6 +19,14 @@ export function useShortcuts() {
       if (e.defaultPrevented || selectAllInChromeField(e, isMac())) return;
       const id = shortcutFor(e);
       if (!id) return;
+      // Escape belongs to whatever is open on top of the page. Anything that
+      // floats over content registers as covering it, and handles Escape
+      // itself; only when nothing does is the key free to stop a load. Without
+      // this the key would both close a dialog and stop the page behind it.
+      if (id === "tab.stop" && e.key === "Escape") {
+        const { activeTab, loading } = useBrowser.getState();
+        if (contentCoverDepth() > 0 || !activeTab || !loading[activeTab]) return;
+      }
       e.preventDefault();
       runCommand(id, "keyboard");
     };

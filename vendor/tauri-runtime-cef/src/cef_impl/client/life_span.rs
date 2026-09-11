@@ -116,10 +116,15 @@ wrap_life_span_handler! {
           // window's first webview to the URL instead — the closest
           // equivalent of wry hosting the popup in that window's webview.
           // Note `window.opener` is not linked to the new document.
-          let _ = self.context.send_message(Message::NavigateFirstWebview {
+          // Queued like its siblings below, never sent inline: this fires
+          // from inside a CEF callback, and `send_message` runs the message
+          // there and then when it is already on the main thread -- which can
+          // re-enter a handler that is still running.
+          let _ = self.sender.send(Message::NavigateFirstWebview {
             window_id,
             url: url_str,
           });
+          self.proxy.wake_up();
           1
         }
         tauri_runtime::webview::NewWindowResponse::Deny => 1,

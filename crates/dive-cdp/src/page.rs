@@ -113,6 +113,22 @@ pub async fn layout_metrics(session: &CdpSession) -> Result<LayoutMetrics> {
 
 /// Capture a screenshot and return the decoded image bytes.
 pub async fn capture_screenshot(session: &CdpSession, opts: ScreenshotOptions) -> Result<Vec<u8>> {
+    let data = capture_screenshot_base64(session, opts).await?;
+    base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(|e| CdpError::Transport(format!("bad base64 in screenshot: {e}")))
+}
+
+/// Capture a screenshot and return it as CDP sent it, still base64.
+///
+/// A caller building a `data:` URL wants exactly these bytes. Going through
+/// [`capture_screenshot`] would decode them and immediately re-encode, which
+/// for a full-viewport capture is two passes over a few hundred kilobytes for
+/// no gain.
+pub async fn capture_screenshot_base64(
+    session: &CdpSession,
+    opts: ScreenshotOptions,
+) -> Result<String> {
     let mut params = json!({
         "format": opts.format,
         "captureBeyondViewport": opts.capture_beyond_viewport,
@@ -125,13 +141,11 @@ pub async fn capture_screenshot(session: &CdpSession, opts: ScreenshotOptions) -
         params["clip"] = serde_json::to_value(clip)?;
     }
     let result = session.call("Page.captureScreenshot", params).await?;
-    let data = result
+    result
         .get("data")
         .and_then(Value::as_str)
-        .ok_or(CdpError::MissingField("data"))?;
-    base64::engine::general_purpose::STANDARD
-        .decode(data)
-        .map_err(|e| CdpError::Transport(format!("bad base64 in screenshot: {e}")))
+        .map(str::to_owned)
+        .ok_or(CdpError::MissingField("data"))
 }
 
 /// Capture the whole document after visibly traversing it. The traversal lets

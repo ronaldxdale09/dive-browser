@@ -305,6 +305,10 @@ pub struct TabHost {
     /// always paint above the main webview, so the active view is hidden for
     /// as long as one is up, otherwise the overlay is buried behind the page.
     covered: bool,
+    /// Whether the chrome was already given focus for the current cover.
+    /// `apply_visibility` runs on every overlay region update, and focus
+    /// belongs to the moment the page becomes covered, not to each frame.
+    focused_for_cover: std::cell::Cell<bool>,
     live_overlays: HashMap<String, Vec<Bounds>>,
     /// Corner radius of page views in the main window, in logical pixels,
     /// following the chrome's corner preference. Zero is square.
@@ -457,6 +461,7 @@ impl TabHost {
             active: None,
             profiles_root,
             covered: false,
+            focused_for_cover: std::cell::Cell::new(false),
             live_overlays: HashMap::new(),
             corner_radius: 0.0,
             panes: Vec::new(),
@@ -847,9 +852,13 @@ impl TabHost {
         if chrome == CHROME_LABEL {
             self.covered = active;
         }
-        self.update_overlay_mask(chrome, active)?;
+        // `apply_visibility` rebuilds the mask for every live overlay itself,
+        // so doing it here as well built the region twice and, on Windows,
+        // repainted the whole chrome twice per frame of an animating menu.
         if chrome == CHROME_LABEL {
             self.apply_visibility()?;
+        } else {
+            self.update_overlay_mask(chrome, active)?;
         }
         Ok(())
     }
@@ -943,9 +952,13 @@ impl TabHost {
                 view.hide()?;
             }
         }
-        if self.covered {
+        // Only as the page becomes covered. Refocusing on every region update
+        // took the keyboard away from whatever the overlay had given it, once
+        // per frame while a menu animated.
+        if self.covered && !self.focused_for_cover.get() {
             self.focus_chrome();
         }
+        self.focused_for_cover.set(self.covered);
         for chrome in self.live_overlays.keys() {
             self.update_overlay_mask(chrome, true)?;
         }
@@ -1571,7 +1584,15 @@ pub fn update_tab(app: &AppHandle<Runtime>, id: TabId, f: impl FnOnce(&mut Tab))
     let store = lock(&state.store);
     let Ok(mut tab) = store.tab(id) else { return };
     let was = tab.url.clone();
+    let before = tab.clone();
     f(&mut tab);
+    // A page that animates its own title -- a chat tab counting unread, a
+    // clock -- calls this every second. Writing the row, recording a visit and
+    // republishing the tab for a change that did not happen cost a SQLite
+    // write and a re-render of the whole chrome each time.
+    if tab == before {
+        return;
+    }
     // The read above lends the tab its origin's remembered icon, which belongs
     // to the site it is leaving; a URL change has to re-key it or the old mark
     // gets written back against the new address.
@@ -1582,11 +1603,12 @@ pub fn update_tab(app: &AppHandle<Runtime>, id: TabId, f: impl FnOnce(&mut Tab))
         tracing::warn!(%id, "failed to persist tab update: {e}");
         return;
     }
-    if tab.url.starts_with("http")
+    let navigated = tab.url != was;
+    if records_a_visit(&tab.url, navigated, tab.title != before.title)
         && !crate::private_session::is_private()
         && let Err(e) = store.record_visit(
             &tab.url,
-            visit_title(tab.url != was, &tab.title),
+            visit_title(navigated, &tab.title),
             dive_core::Timestamp::now(),
         )
     {
@@ -1609,6 +1631,17 @@ fn reported_url(current: &str, reported: String) -> String {
 /// tab's title still belongs to the page it left (or is "about:blank" for a
 /// fresh tab), so the visit starts untitled and the real title fills it in
 /// when it arrives; a redirect's source address is never wrongly titled.
+/// Whether this change to a tab belongs in history.
+///
+/// Going somewhere does. So does a title arriving for where you already are --
+/// that is what fills in the entry, and `record_visit` folds it into the visit
+/// it already has. Anything else does not: a page that animates its own title
+/// otherwise wrote a fresh row every minute for as long as the tab was open,
+/// and a favicon or a load-state change wrote one for nothing at all.
+fn records_a_visit(url: &str, navigated: bool, title_changed: bool) -> bool {
+    url.starts_with("http") && (navigated || title_changed)
+}
+
 fn visit_title(url_changed: bool, title: &str) -> &str {
     // "about:blank" is the blank document's own name, never the page's;
     // it arrives as a title change while the real page is still loading.
@@ -1980,6 +2013,23 @@ fn private_chrome(builder: WebviewBuilder<Runtime>) -> WebviewBuilder<Runtime> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn history_records_where_you_went_and_what_it_turned_out_to_be_called() {
+        use super::records_a_visit;
+        // Going somewhere, and the title that arrives for it afterwards.
+        assert!(records_a_visit("https://a.test/", true, false));
+        assert!(records_a_visit("https://a.test/", false, true));
+        // A page counting unread messages in its own title changes nothing
+        // else; before this check each tick wrote another history row.
+        assert!(!records_a_visit("https://a.test/", false, false));
+        // Neither a favicon nor a load flag is a visit.
+        assert!(!records_a_visit("https://a.test/", false, false));
+        // Only real web addresses: internal pages are not browsing history.
+        assert!(!records_a_visit("dive://home", true, true));
+        assert!(!records_a_visit("about:blank", true, false));
+        assert!(!records_a_visit("file:///tmp/x.html", true, true));
+    }
+
     #[test]
     fn a_visit_recorded_on_an_address_change_starts_untitled() {
         assert_eq!(super::visit_title(true, "about:blank"), "");

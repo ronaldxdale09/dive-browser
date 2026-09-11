@@ -674,12 +674,19 @@ impl Registry {
     }
 
     /// Drop a recording without encoding it (cancelled, or the tab is going away).
+    ///
+    /// Stopping a segment asks ffmpeg to quit and then waits up to five
+    /// seconds for it, so the wait runs on the blocking pool: `tab_close` runs
+    /// on the main thread, which also pumps CEF, and a busy encoder froze the
+    /// whole browser there for as long as it took to go.
     pub fn discard(&self, tab: TabId) {
         if let Some(rec) = self.active().remove(&tab) {
             rec.stopped.store(true, Ordering::Relaxed);
-            rec.stop_audio_segment();
-            rec.stop_screen_segment();
-            rec.remove_dir();
+            tauri::async_runtime::spawn_blocking(move || {
+                rec.stop_audio_segment();
+                rec.stop_screen_segment();
+                rec.remove_dir();
+            });
         }
     }
 

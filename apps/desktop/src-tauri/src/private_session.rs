@@ -13,7 +13,10 @@ use crate::{MAIN_WINDOW, Runtime};
 
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 static MAIN_CLOSED: AtomicBool = AtomicBool::new(false);
-static ROOT: OnceLock<tempfile::TempDir> = OnceLock::new();
+static ROOT: OnceLock<PathBuf> = OnceLock::new();
+/// Kept alive for the life of the process so the directory is not removed out
+/// from under the session; `cleanup` deletes it explicitly on the way out.
+static TEMP_ROOT: OnceLock<tempfile::TempDir> = OnceLock::new();
 struct Session {
     input: ChildStdin,
     alive: Arc<AtomicBool>,
@@ -28,21 +31,41 @@ pub fn is_private() -> bool {
 /// real profile must neither read that profile nor delete it on shutdown.
 pub fn data_root() -> PathBuf {
     ROOT.get_or_init(|| {
-        tempfile::Builder::new()
+        let built = tempfile::Builder::new()
             .prefix(&format!(
                 "dive-private-{}-",
                 std::env::var("DIVE_PRIVATE_LAUNCH_TOKEN").unwrap_or_default()
             ))
-            .tempdir()
-            .expect("create isolated private runtime directory")
+            .tempdir();
+        match built {
+            Ok(dir) => {
+                let path = dir.path().to_owned();
+                let _ = TEMP_ROOT.set(dir);
+                path
+            }
+            // A full or unwritable temp directory used to abort the process
+            // here, before any window existed, because this runs while the app
+            // is still being built. A private window with a less exotic
+            // location is a better answer than no browser at all.
+            Err(e) => {
+                tracing::warn!(
+                    "no temporary directory for the private session ({e}); using the data root"
+                );
+                let path = crate::state::default_data_root()
+                    .join(format!("private-{}", std::process::id()));
+                if let Err(e) = std::fs::create_dir_all(&path) {
+                    tracing::warn!("could not create {}: {e}", path.display());
+                }
+                path
+            }
+        }
     })
-    .path()
-    .to_owned()
+    .clone()
 }
 
 pub fn cleanup() {
     if let Some(root) = ROOT.get() {
-        let _ = std::fs::remove_dir_all(root.path());
+        let _ = std::fs::remove_dir_all(root);
     }
 }
 

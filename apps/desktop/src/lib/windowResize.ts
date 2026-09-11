@@ -60,9 +60,21 @@ export function useWindowMaximized(): boolean {
         .then((v) => alive && setMaximized(v))
         .catch(() => undefined);
     sync();
-    const stop = window.onResized(sync);
+    // Coalesced to one read per frame: `tauri://resize` fires per WM_SIZE, so
+    // dragging an edge asked the window whether it was maximized dozens of
+    // times a second to answer a question that changes at most once per drag.
+    let frame: number | null = null;
+    const onResize = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        sync();
+      });
+    };
+    const stop = window.onResized(onResize);
     return () => {
       alive = false;
+      if (frame !== null) cancelAnimationFrame(frame);
       void stop.then((off) => off()).catch(() => undefined);
     };
   }, []);

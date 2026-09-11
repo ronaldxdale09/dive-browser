@@ -1,10 +1,11 @@
 import { create } from "zustand";
+import { isWindows } from "../lib/commands";
 import { ipc, events } from "../lib/ipc";
 import { listenConsole, useConsole } from "./console";
 import { listenNetwork, useNetwork } from "./network";
 import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
 import { useDownloads } from "./downloads";
-import type { CoreEvent, Decision, Duration, NavigationHistory, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
+import type { DownloadNotice, CoreEvent, Decision, Duration, NavigationHistory, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
 
 export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser" | "subtitles" | "import" | "apps";
@@ -440,26 +441,35 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     // error-boundary retry) would race past the `??=` guards below; share it.
     booting ??= (async () => {
       try {
-        unlisten ??= await events.stateChanged.listen((e) => get().applyEvent(e.payload));
-        unlistenLoad ??= await events.tabLoad.listen((e) => get().applyLoad(e.payload));
-        unlistenCrash ??= await events.tabCrashed.listen((e) => get().applyCrash(e.payload));
-        unlistenPermission ??= await events.permissionAsked.listen((e) => get().applyPermissionAsked(e.payload));
-        unlistenPermissionDismissed ??= await events.permissionDismissed.listen((e) => set((s) => ({permissionRequests: withoutRequest(s.permissionRequests,e.payload.tab_id,e.payload)})));
-        unlistenWindowChanged ??= await events.tabWindowChanged.listen((e) => set(reduceWindowChange(get(), e.payload.tab, e.payload.detached)));
-        unlistenDownload ??= await events.downloadNotice.listen((e) => {
+        // Subscribed together, not one after another: each `listen` is its own
+        // IPC round trip, and the content area waits on `ready` behind all of
+        // them. The snapshot is applied after they resolve, so no event that
+        // arrives in between is lost.
+        const downloadNotice = (e: { payload: DownloadNotice }) => {
           const d = e.payload;
           useDownloads.getState().apply(d);
           const name = d.path.split("/").pop() ?? d.url;
           // A finished file is one click from the Finder; nothing to do about the others.
-          const show = d.status === "finished" && d.path ? { label: "Show in Finder", run: () => void ipc.downloadsReveal(d.path).catch((err: unknown) => set({ error: errorMessage(err) })) } : undefined;
+          const show = d.status === "finished" && d.path ? { label: isWindows() ? "Show in Explorer" : "Show in Finder", run: () => void ipc.downloadsReveal(d.path).catch((err: unknown) => set({ error: errorMessage(err) })) } : undefined;
           get().notify(d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : `Download failed: ${name}`, show ? 8000 : 5000, show);
           // Closed once the file is on disk, not when it starts: the engine
           // reports a download's end through the page it came from, so a
           // page closed mid-download never says "Saved".
           if (d.status !== "started" && d.tab) void get().closeIfOnlyDownload(d.tab, d.url);
-        });
-        await Promise.all([listenConsole(), listenNetwork(), listenPrivacy(), usePrivacy.getState().loadInfo()]);
-        set({ ...fromSnapshot(await ipc.snapshot()), ready: true, error: null });
+        };
+        const [a, b, c, d, f, g, h] = await Promise.all([
+          unlisten ?? events.stateChanged.listen((e) => get().applyEvent(e.payload)),
+          unlistenLoad ?? events.tabLoad.listen((e) => get().applyLoad(e.payload)),
+          unlistenCrash ?? events.tabCrashed.listen((e) => get().applyCrash(e.payload)),
+          unlistenPermission ?? events.permissionAsked.listen((e) => get().applyPermissionAsked(e.payload)),
+          unlistenPermissionDismissed ?? events.permissionDismissed.listen((e) => set((s) => ({permissionRequests: withoutRequest(s.permissionRequests,e.payload.tab_id,e.payload)}))),
+          unlistenWindowChanged ?? events.tabWindowChanged.listen((e) => set(reduceWindowChange(get(), e.payload.tab, e.payload.detached))),
+          unlistenDownload ?? events.downloadNotice.listen(downloadNotice),
+        ]);
+        unlisten = a; unlistenLoad = b; unlistenCrash = c; unlistenPermission = d;
+        unlistenPermissionDismissed = f; unlistenWindowChanged = g; unlistenDownload = h;
+        const [, , , snapshot] = await Promise.all([listenConsole(), listenNetwork(), listenPrivacy(), ipc.snapshot(), usePrivacy.getState().loadInfo()]);
+        set({ ...fromSnapshot(snapshot), ready: true, error: null });
         void get().refreshCounts();
       } catch (e) {
         set({ error: String(e), ready: true });

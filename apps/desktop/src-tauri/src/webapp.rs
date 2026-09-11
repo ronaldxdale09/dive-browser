@@ -319,7 +319,14 @@ pub(crate) async fn webapp_install(
 
     // The launcher is a convenience, not the install: a failure to write it
     // is reported in the log and the app still works from inside Dive.
-    if let Err(e) = launcher::install(&record) {
+    //
+    // On the blocking pool because it spawns a subprocess and waits: PowerShell
+    // on Windows, `sips` on macOS. Run inline it held a runtime worker for as
+    // long as the child took, and forever if the child hung.
+    let launcher_for = record.clone();
+    if let Ok(Err(e)) =
+        tauri::async_runtime::spawn_blocking(move || launcher::install(&launcher_for)).await
+    {
         tracing::warn!(app = %record.name, "could not write the app launcher: {e}");
     }
 

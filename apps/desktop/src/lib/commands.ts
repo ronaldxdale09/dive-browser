@@ -206,6 +206,9 @@ export function runCommand(id: string, source: "keyboard" | "native-menu" | "com
 
 /** Default chords, parsed from the same notation Rust reports ("mod+shift+s"). */
 export const SHORTCUTS: Record<string, string> = {
+  // The toolbar advertises Esc on the stop button. It is dispatched only when
+  // nothing else owns the key -- see `useShortcuts`.
+  escape: "tab.stop",
   "mod+k": "palette.open",
   "mod+shift+space": "apps.open",
   "mod+shift+a": "tabs.search",

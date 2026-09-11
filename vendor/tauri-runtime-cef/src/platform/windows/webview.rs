@@ -220,6 +220,11 @@ impl crate::webview::Webview {
         // The window is sized in physical pixels; the holes arrive logical.
         let dpi = unsafe { GetDpiForWindow(hwnd) };
         let scale = if dpi == 0 { 1.0 } else { f64::from(dpi) / 96.0 };
+        // Position and extent are rounded separately, the way a page view's own
+        // bounds are (`to_physical` on each), so a hole lands exactly on the
+        // view it is cut for. Rounding the far edge from the sum instead left
+        // a one-pixel seam of chrome over the page at fractional scales.
+        #[allow(clippy::cast_possible_truncation)]
         let px = |v: f64| (v * scale).round() as i32;
 
         let region = unsafe { CreateRectRgn(0, 0, width, height) };
@@ -227,7 +232,7 @@ impl crate::webview::Webview {
             return false;
         }
         for [x, y, w, h] in holes {
-            let hole = unsafe { CreateRectRgn(px(*x), px(*y), px(x + w), px(y + h)) };
+            let hole = unsafe { CreateRectRgn(px(*x), px(*y), px(*x) + px(*w), px(*y) + px(*h)) };
             if hole.is_invalid() {
                 continue;
             }

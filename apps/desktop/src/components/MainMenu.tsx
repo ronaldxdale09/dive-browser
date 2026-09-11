@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { runCommand } from "../lib/commands";
+import { displayChord, runCommand } from "../lib/commands";
 import { ipc } from "../lib/ipc";
 import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
@@ -166,7 +166,7 @@ export function MainMenu() {
                     >
                       <span className="grid size-5 shrink-0 place-items-center text-ink-2">{item.glyph ?? (item.icon && <Icon icon={item.icon} size={15} />)}</span>
                       <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                      {item.shortcut && <kbd className="font-mono text-[11px] text-ink-3">{item.shortcut}</kbd>}
+                      {item.shortcut && <kbd className="font-mono text-[11px] text-ink-3">{displayChord(item.shortcut)}</kbd>}
                       {item.more && <Icon icon={ChevronRight} size={13} className="text-ink-3" />}
                     </button>
                   );
@@ -198,13 +198,13 @@ function ZoomRow() {
         <Icon icon={Search} size={15} />
       </span>
       <span className="flex-1">Zoom</span>
-      <button type="button" aria-label="Zoom out" title="Zoom out (⌘−)" disabled={!active} onClick={() => void zoomStep(-1)} className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
+      <button type="button" aria-label="Zoom out" title={`Zoom out (${displayChord("⌘−")})`} disabled={!active} onClick={() => void zoomStep(-1)} className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
         <Icon icon={Minus} size={14} />
       </button>
-      <button type="button" aria-label="Reset zoom" title="Reset zoom (⌘0)" onClick={() => void zoomStep(0)} className="w-12 rounded-md py-1 text-center font-mono text-[12px] tabular-nums hover:bg-surface-2">
+      <button type="button" aria-label="Reset zoom" title={`Reset zoom (${displayChord("⌘0")})`} onClick={() => void zoomStep(0)} className="w-12 rounded-md py-1 text-center font-mono text-[12px] tabular-nums hover:bg-surface-2">
         {Math.round(zoom * 100)}%
       </button>
-      <button type="button" aria-label="Zoom in" title="Zoom in (⌘=)" disabled={!active} onClick={() => void zoomStep(1)} className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
+      <button type="button" aria-label="Zoom in" title={`Zoom in (${displayChord("⌘=")})`} disabled={!active} onClick={() => void zoomStep(1)} className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
         <Icon icon={Plus} size={14} />
       </button>
       <span className="mx-1 h-5 w-px bg-line-2" aria-hidden />

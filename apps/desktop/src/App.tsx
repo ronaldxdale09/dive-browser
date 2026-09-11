@@ -59,7 +59,15 @@ export function App() {
   const open = useBrowser((s) => s.open);
   // Keep the native page covered between navigation dialogs, including while
   // a replacement's lazy chunk is loading inside Suspense.
-  useCoversContent(open.palette || open.settings || open.library || open.shortcuts);
+  // Every flag that gates a Suspense fallback below: the scrim is the dialog
+  // as far as the page is concerned, and a dialog whose chunk is still loading
+  // was drawn behind the page for exactly as long as the fetch took.
+  useCoversContent(
+    Boolean(
+      open.palette || open.settings || open.library || open.shortcuts || open.extensions ||
+      open.defaultBrowser || open.subtitles || open.import || open.apps,
+    ),
+  );
   const loadPrefs = usePrefs((s) => s.load);
   const railExpanded = usePrefs((s) => s.prefs.rail_expanded);
   const responsive = useChromeLayout();
@@ -190,7 +198,7 @@ export function App() {
         />
       </div>
       {oneBar ? (
-        <header className="col-start-2 row-start-1 flex min-w-0 items-center">
+        <header className="col-start-2 row-start-1 flex min-w-0 items-center" data-tauri-drag-region="true">
           {/* The build badge lives at the foot of an open rail; with the rail
               collapsed there is no room for it there, so it leads this row. */}
           {!effectiveRailExpanded && <span className="pl-2"><BuildBadge align="start" /></span>}
@@ -254,7 +262,7 @@ export function App() {
         )}
         {showSidecar && <IsolatedPanel label="Agent" onClose={() => toggle("sidecar", false)}><Suspense fallback={<PanelSkeleton label="agent" />}><Sidecar /></Suspense></IsolatedPanel>}
       </main>
-      <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || open.subtitles || open.import) ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
+      <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || open.subtitles || open.import) ? <div data-native-overlay className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
         {open.palette && <Palette />}
         {open.settings && <SettingsDialog />}
         {open.library && <Library />}
@@ -266,7 +274,7 @@ export function App() {
       </Suspense>
       {open.extensions && <IsolatedPanel label="Extensions" modal onClose={() => toggle("extensions", false)}><Suspense fallback={<div className="fixed inset-0 z-50 bg-ground/75 backdrop-blur-sm" aria-label="Loading extensions" />}><Extensions /></Suspense></IsolatedPanel>}
       <Splash />
-      <Suspense fallback={(editing || recorderOpen || recordingPhase === "setup" || recordingPhase === "done") ? <div className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
+      <Suspense fallback={(editing || recorderOpen || recordingPhase === "setup" || recordingPhase === "done") ? <div data-native-overlay className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
         {editing && <WorkspaceDialog key={editing.id ?? "new"} />}
         <ProfileDialog />
         {recorderOpen && <RecorderModal />}

@@ -1,4 +1,5 @@
 import { AlertTriangle, CheckCircle2, X } from "lucide-react";
+import { useCoversContent } from "../lib/overlay";
 import type { NoticeAction } from "../store/browser";
 import { Icon } from "./Icon";
 
@@ -31,9 +32,14 @@ export function ToastViewport({
   onDismissNotice: () => void;
   onDismissError: () => void;
 }) {
+  // Bottom-right is the page's rectangle whenever the dock and sidecar are
+  // closed, and a native page paints above the chrome. Without a region the
+  // toast is drawn behind it -- which took every error message, "Saved ..."
+  // and the Undo on "Closed N tabs" with it.
+  useCoversContent(Boolean(notice || error));
   if (!notice && !error) return null;
   return (
-    <div className="pointer-events-none fixed right-4 bottom-4 z-[80] flex w-[min(360px,calc(100vw-24px))] flex-col gap-2" aria-label="Notifications">
+    <div data-native-overlay className="pointer-events-none fixed right-4 bottom-4 z-[80] flex w-[min(360px,calc(100vw-24px))] flex-col gap-2" aria-label="Notifications">
       {error && <Toast tone="danger" message={error} onDismiss={onDismissError} />}
       {notice && <Toast tone="success" message={notice} action={noticeAction} onDismiss={onDismissNotice} />}
     </div>

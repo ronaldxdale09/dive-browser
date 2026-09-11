@@ -333,6 +333,18 @@ pub(crate) type AfterWindowCreationCallback = Box<dyn for<'a> Fn(RawWindow<'a>) 
 #[cfg(any(target_os = "macos", windows))]
 const CLOSE_ACK_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
 
+/// How long the loop keeps running for a browser that missed its grace period,
+/// so CEF can finish letting go before `cef::shutdown()`.
+///
+/// `CefShutdown` requires every browser to be closed. A browser that never
+/// acknowledged is still live as far as CEF is concerned, and shutting down
+/// under it tears down views the application has already dropped. Waiting is
+/// the fix; waiting forever is not, because a browser that never acknowledges
+/// would leave a window the person asked to close sitting on screen. After
+/// this the exit proceeds regardless -- the same behaviour as before, just
+/// later and only when CEF really has stopped answering.
+const FINAL_ACK_GRACE: std::time::Duration = std::time::Duration::from_millis(2500);
+
 pub(crate) enum Message<T: UserEvent> {
     EventLoop(EventLoopMessage),
     BrowserClosed(WindowId, u32),
@@ -343,6 +355,8 @@ pub(crate) enum Message<T: UserEvent> {
     /// The close-acknowledgement grace period for a webview ran out.
     #[cfg(any(target_os = "macos", windows))]
     CloseAckTimeout(u32),
+    /// The last wait for browsers CEF never acknowledged has elapsed.
+    FinalAckTimeout,
     Opened(Vec<url::Url>),
     #[cfg(target_os = "macos")]
     Reopen {
@@ -478,6 +492,10 @@ pub(crate) struct AppState<T: UserEvent> {
     /// Browsers retired without CEF's `on_before_close`; a late acknowledgement
     /// must not retire them a second time.
     unacknowledged_browsers: HashSet<u32>,
+    /// Whether the final wait for a missing acknowledgement has been armed.
+    awaiting_final_ack: bool,
+    /// Whether that wait has elapsed, after which the exit proceeds regardless.
+    final_ack_elapsed: bool,
     exit_code: Arc<AtomicI32>,
     pub(crate) exiting: bool,
 }
@@ -512,6 +530,8 @@ impl<T: UserEvent> WinitCefApp<T> {
                 live_browsers: 0,
                 closing_windows: HashSet::new(),
                 unacknowledged_browsers: HashSet::new(),
+                awaiting_final_ack: false,
+                final_ack_elapsed: false,
                 exit_code: Arc::new(AtomicI32::new(0)),
                 exiting: false,
             },
@@ -555,6 +575,10 @@ impl<T: UserEvent> WinitCefApp<T> {
                 // later (or during CEF shutdown); its bookkeeping is already gone.
                 if self.state.unacknowledged_browsers.remove(&webview_id) {
                     log::debug!(target: "dive_native_close", "stage=late_ack webview={webview_id}");
+                    // The exit may be parked waiting for exactly this.
+                    if self.state.awaiting_final_ack {
+                        self.exit_if_done(event_loop);
+                    }
                     return;
                 }
                 self.retire_browser(event_loop, webview_id);
@@ -592,6 +616,15 @@ impl<T: UserEvent> WinitCefApp<T> {
                 }
             }
             #[cfg(any(target_os = "macos", windows))]
+            Message::FinalAckTimeout => {
+                log::debug!(
+                    target: "dive_native_close",
+                    "stage=final_wait_elapsed remaining={:?}",
+                    self.state.unacknowledged_browsers
+                );
+                self.state.final_ack_elapsed = true;
+                self.exit_if_done(event_loop);
+            }
             Message::CloseAckTimeout(webview_id) => {
                 let still_registered = self.state.windows.values().any(|appwindow| {
                     appwindow
@@ -1023,6 +1056,27 @@ impl<T: UserEvent> WinitCefApp<T> {
         }
 
         if self.state.exiting || (self.state.windows.is_empty() && self.request_exit(None)) {
+            // Browsers retired on a timeout are gone from the bookkeeping but
+            // not from CEF, and `cef::shutdown()` runs as soon as this loop
+            // returns. Hold the loop open once so those acknowledgements can
+            // land; `FinalAckTimeout` exits whether they do or not.
+            if !self.state.unacknowledged_browsers.is_empty() && !self.state.awaiting_final_ack {
+                self.state.awaiting_final_ack = true;
+                let waiting: Vec<u32> =
+                    self.state.unacknowledged_browsers.iter().copied().collect();
+                log::debug!(target: "dive_native_close", "stage=final_wait webviews={waiting:?}");
+                let sender = self.context.sender.clone();
+                let proxy = self.context.proxy.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(FINAL_ACK_GRACE);
+                    let _ = sender.send(Message::FinalAckTimeout);
+                    proxy.wake_up();
+                });
+                return;
+            }
+            if !self.state.unacknowledged_browsers.is_empty() && !self.state.final_ack_elapsed {
+                return;
+            }
             self.run_callback(RunEvent::Exit);
             event_loop.exit();
         }

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { displayChord } from "../lib/commands";
+import { useCoversContent } from "../lib/overlay";
 
 /**
  * A tooltip for the rail. The rail's lists scroll, and a scrolling box clips
@@ -11,6 +13,9 @@ import { createPortal } from "react-dom";
  */
 export function RailTooltip({ label, shortcut, children }: { label: string; shortcut?: string | undefined; children: ReactNode }) {
   const [at, setAt] = useState<{ left: number; top: number } | null>(null);
+  // It is portalled to the body at the trigger's right edge, which is over the
+  // content column -- where a native page paints above the chrome.
+  useCoversContent(at !== null);
   // The wrapper is `display: contents` and so has no box of its own; the
   // trigger is its first real child.
   const show = (wrapper: HTMLElement) => {
@@ -24,7 +29,7 @@ export function RailTooltip({ label, shortcut, children }: { label: string; shor
         createPortal(
           <span role="tooltip" style={{ left: at.left, top: at.top }} className="pointer-events-none fixed z-[60] flex -translate-y-1/2 items-center gap-2 rounded-md border border-line-2 bg-surface-2 px-2 py-1 text-[11px] leading-none whitespace-nowrap text-ink shadow-lg">
             {label}
-            {shortcut && <kbd className="font-mono text-[9px] text-ink-3">{shortcut}</kbd>}
+            {shortcut && <kbd className="font-mono text-[9px] text-ink-3">{displayChord(shortcut)}</kbd>}
           </span>,
           document.body,
         )}

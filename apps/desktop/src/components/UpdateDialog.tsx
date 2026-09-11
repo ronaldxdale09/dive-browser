@@ -1,6 +1,7 @@
 import { ArrowUpCircle, ExternalLink, Loader2, RefreshCw, X } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { REPO_URL } from "../lib/constants";
+import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
 import { useUpdates } from "../store/updates";
@@ -33,6 +34,9 @@ export function UpdateDialog() {
     }, 150);
   }, [dismiss]);
 
+  // `role="dialog"` alone does not put it on screen: the mask is only built
+  // while something claims to cover content, and nothing claimed this one.
+  useCoversContent(visible);
   useFocusTrap(root, { active: visible, onEscape: handleDismiss });
 
   if (!visible || !update) return null;

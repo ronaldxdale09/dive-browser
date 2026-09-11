@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "./ipc";
-import { contentCoverDepth, resetContentCover, useContentPreview, useCoversContent, visibleOverlayRegions } from "./overlay";
+import { contentCoverDepth, resetContentCover, resetOverlayElements, useContentPreview, useCoversContent, visibleOverlayRegions } from "./overlay";
 
 function Overlay({ active = true }: { active?: boolean }) {
   useCoversContent(active);
@@ -16,6 +16,7 @@ function Preview() {
 afterEach(() => {
   cleanup();
   resetContentCover();
+  resetOverlayElements();
   Reflect.deleteProperty(window, "__DIVE_LIVE_OVERLAYS__");
   vi.restoreAllMocks();
 });
@@ -162,5 +163,76 @@ describe("live native overlays", () => {
     const dialog = container.querySelector('[role="dialog"]')!;
     vi.spyOn(dialog, "getBoundingClientRect").mockReturnValue({x:100,y:90,width:340,height:500} as DOMRect);
     expect(visibleOverlayRegions()).toEqual([{x:100,y:90,width:340,height:500}]);
+  });
+});
+
+describe("what counts as an overlay", () => {
+  // These append to the body directly, which `cleanup()` does not undo.
+  afterEach(() => {
+    document.body.innerHTML = "";
+    resetOverlayElements();
+  });
+
+  // A region is what actually masks the page. Covering content without one
+  // sends an empty list, the whole page stays on top, and the element is drawn
+  // behind it -- which is how every JS dialog, toast and tooltip went missing
+  // while their own tests passed on `contentCoverDepth() === 1` alone.
+  const box = { x: 10, y: 20, width: 300, height: 100 };
+
+  function measured(role: string, extra: Record<string, string> = {}) {
+    const el = document.createElement("div");
+    for (const [k, v] of Object.entries({ role, ...extra })) el.setAttribute(k, v);
+    el.getBoundingClientRect = () => ({ ...box, top: box.y, left: box.x, right: box.x + box.width, bottom: box.y + box.height, toJSON: () => "" });
+    document.body.append(el);
+    resetOverlayElements();
+    return el;
+  }
+
+  it.each([
+    ["dialog", "a modal"],
+    ["alertdialog", "a page's alert(), which pauses the renderer until answered"],
+    ["menu", "a chrome menu"],
+    ["listbox", "the address bar's suggestions"],
+    ["tooltip", "a tip beside a toolbar button"],
+  ])("masks the page under role=%s (%s)", (role) => {
+    measured(role);
+    expect(visibleOverlayRegions()).toEqual([box]);
+  });
+
+  it("masks the page under an element that only carries the data attribute", () => {
+    const el = document.createElement("div");
+    el.dataset.nativeOverlay = "";
+    el.getBoundingClientRect = () => ({ ...box, top: box.y, left: box.x, right: box.x + box.width, bottom: box.y + box.height, toJSON: () => "" });
+    document.body.append(el);
+    resetOverlayElements();
+    expect(visibleOverlayRegions()).toEqual([box]);
+  });
+
+  it.each(["status", "alert", "log"])("leaves role=%s alone: those are chrome's own layout, not overlays", (role) => {
+    measured(role);
+    expect(visibleOverlayRegions()).toEqual([]);
+  });
+
+  it("drops a hidden overlay, and one that measures nothing", () => {
+    const hidden = measured("dialog");
+    hidden.style.visibility = "hidden";
+    expect(visibleOverlayRegions()).toEqual([]);
+
+    hidden.remove();
+    const empty = document.createElement("div");
+    empty.setAttribute("role", "dialog");
+    empty.getBoundingClientRect = () => ({ x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0, toJSON: () => "" });
+    document.body.append(empty);
+    resetOverlayElements();
+    expect(visibleOverlayRegions()).toEqual([]);
+  });
+
+  it("reports a nested overlay once, as the outer element", () => {
+    const outer = measured("dialog");
+    const inner = document.createElement("div");
+    inner.setAttribute("role", "menu");
+    outer.append(inner);
+    resetOverlayElements();
+    expect(visibleOverlayRegions()).toEqual([box]);
   });
 });

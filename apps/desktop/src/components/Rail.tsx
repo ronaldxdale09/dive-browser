@@ -19,7 +19,7 @@ import { useFocusTrap } from "../lib/useFocusTrap";
 import { QuickLinks } from "./QuickLinks";
 import { ProfileChip } from "./ProfileChip";
 import { TabStrip } from "./TabStrip";
-import { runCommand } from "../lib/commands";
+import { displayChord, runCommand } from "../lib/commands";
 import { clampFloatingPosition } from "../lib/floating";
 
 /** Rail width in each mode; App.tsx sizes the grid column from these. */
@@ -316,7 +316,7 @@ function WorkspaceRow({
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: w.id });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.6 : 1 };
   // Only the first nine are reachable by chord, so only those advertise one.
-  const shortcut = index < 9 ? ` (⌘${index + 1})` : "";
+  const shortcut = index < 9 ? ` (${displayChord(`⌘${index + 1}`)})` : "";
   const summary = `${w.name} — ${count} ${count === 1 ? "tab" : "tabs"}${separate ? ", own cookies" : ""}${shortcut}`;
 
   const row = (

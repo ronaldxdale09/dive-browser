@@ -582,11 +582,17 @@ fn get_request_headers(request: &mut Request) -> HeaderMap {
 
     // Iterate through all entries
     for (name, value) in map {
+        // Skipped rather than unwrapped: this runs inside a CEF callback, so a
+        // panic here unwinds into an `extern "C"` frame and takes the process
+        // down. A header http rejects is not worth a crash.
+        let Ok(name) = HeaderName::from_bytes(name.as_bytes()) else {
+            continue;
+        };
         for v in value {
-            headers.append(
-                HeaderName::from_bytes(name.as_bytes()).unwrap(),
-                HeaderValue::from_str(&v).unwrap(),
-            );
+            let Ok(value) = HeaderValue::from_str(&v) else {
+                continue;
+            };
+            headers.append(name.clone(), value);
         }
     }
 

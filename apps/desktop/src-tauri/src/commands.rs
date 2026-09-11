@@ -3205,18 +3205,21 @@ pub(crate) async fn layout_prepare_content_cover(
     webview: tauri::Webview<Runtime>,
     state: State<'_, AppState>,
 ) -> AppResult<Vec<ContentPreview>> {
-    use base64::Engine as _;
     use futures_util::future::join_all;
 
     let sessions = lock(&state.host).as_ref().map_or_else(Vec::new, |host| {
         host.covered_sessions_for_chrome(webview.label())
     });
     let captures = join_all(sessions.into_iter().map(|(tab_id, session)| async move {
-        let result = dive_cdp::page::capture_screenshot(
+        // Base64 straight through: the result becomes a `data:` URL, and
+        // decoding it here only to encode it again costs two passes over the
+        // image while the dialog's backdrop waits to paint. The quality is low
+        // because what the person sees is this image behind a heavy blur.
+        let result = dive_cdp::page::capture_screenshot_base64(
             &session,
             dive_cdp::page::ScreenshotOptions {
                 format: dive_cdp::page::ImageFormat::Jpeg,
-                quality: Some(82),
+                quality: Some(50),
                 ..Default::default()
             },
         )
@@ -3228,12 +3231,9 @@ pub(crate) async fn layout_prepare_content_cover(
     Ok(captures
         .into_iter()
         .filter_map(|(tab_id, result)| match result {
-            Ok(bytes) => Some(ContentPreview {
+            Ok(data) => Some(ContentPreview {
                 tab_id,
-                data_url: format!(
-                    "data:image/jpeg;base64,{}",
-                    base64::engine::general_purpose::STANDARD.encode(bytes)
-                ),
+                data_url: format!("data:image/jpeg;base64,{data}"),
             }),
             Err(error) => {
                 tracing::debug!(%tab_id, %error, "could not freeze page for chrome overlay");

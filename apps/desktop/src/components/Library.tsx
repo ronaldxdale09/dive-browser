@@ -3,7 +3,7 @@ import { AppWindow, Clapperboard, Download, FolderOpen, History, LayoutGrid, Sea
 import { useWebAppIcon } from "../lib/useWebAppIcon";
 import { WEBAPPS_CHANGED, useWebApps } from "../store/webapps";
 import type { WebApp } from "../lib/ipc";
-import { BOOKMARKS_CHANGED } from "../lib/commands";
+import { displayChord, BOOKMARKS_CHANGED } from "../lib/commands";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ipc } from "../lib/ipc";
@@ -183,7 +183,7 @@ function Bookmarks({ query, onOpened, scrollRef }: { query: string; onOpened: ()
   });
 
   if (items === null) return <p className="p-3 text-xs text-ink-3">Loading…</p>;
-  if (shown.length === 0) return items.length === 0 ? <EmptyState icon={Star} title="No bookmarks yet" hint="Press ⌘D on a page to keep it here" /> : <NoMatch />;
+  if (shown.length === 0) return items.length === 0 ? <EmptyState icon={Star} title="No bookmarks yet" hint={`Press ${displayChord("⌘D")} on a page to keep it here`} /> : <NoMatch />;
 
   const virtualItems = virtualizer.getVirtualItems();
   const useVirtual = virtualItems.length > 0 && shown.length > 40;
