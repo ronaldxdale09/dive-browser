@@ -272,7 +272,10 @@ describe('verify-release-assets', () => {
     { name: 'latest.json', size: 300 },
     { name: 'Dive_0.1.4_aarch64.dmg', size: 90_000_000 },
     { name: 'Dive.app.tar.gz', size: 80_000_000 },
-    { name: 'Dive.app.tar.gz.sig', size: 200 }
+    { name: 'Dive.app.tar.gz.sig', size: 200 },
+    { name: 'Dive_0.1.4_x64-setup.exe', size: 900 },
+    { name: 'Dive_0.1.4_x64-setup.nsis.zip', size: 800 },
+    { name: 'Dive_0.1.4_x64-setup.nsis.zip.sig', size: 100 }
   ]
 
   it('accepts a release that carries everything an update needs', async () => {
@@ -280,7 +283,7 @@ describe('verify-release-assets', () => {
       tag: 'v0.1.4',
       fetchRelease: async () => ({ assets: complete })
     })
-    expect(result.assets).toHaveLength(4)
+    expect(result.assets).toHaveLength(7)
   })
 
   it('names what is missing rather than failing generically', () => {
@@ -290,8 +293,27 @@ describe('verify-release-assets', () => {
     expect(missingAssetKinds([])).toEqual([
       'update manifest',
       'DMG installer',
-      'updater archive',
-      'updater signature'
+      'macOS updater archive',
+      'macOS updater signature',
+      'Windows installer',
+      'Windows updater archive',
+      'Windows updater signature'
+    ])
+  })
+
+  it('treats a .nsis.zip.sig as a signature and not as the installer or archive', () => {
+    // `-setup.exe` is what a person downloads and `.nsis.zip` is what the
+    // updater downloads; neither substitutes for the other.
+    const windowsOnly = [
+      { name: 'latest.json', size: 1 },
+      { name: 'Dive_0.1.4_x64-setup.nsis.zip.sig', size: 1 }
+    ]
+    expect(missingAssetKinds(windowsOnly)).toEqual([
+      'DMG installer',
+      'macOS updater archive',
+      'macOS updater signature',
+      'Windows installer',
+      'Windows updater archive'
     ])
   })
 
@@ -299,7 +321,13 @@ describe('verify-release-assets', () => {
     // `.tar.gz.sig` ends with neither `.tar.gz` nor `.dmg`, so a release with
     // only the signature must still report the archive as missing.
     const signatureOnly = [{ name: 'latest.json', size: 1 }, { name: 'Dive.app.tar.gz.sig', size: 1 }]
-    expect(missingAssetKinds(signatureOnly)).toEqual(['DMG installer', 'updater archive'])
+    expect(missingAssetKinds(signatureOnly)).toEqual([
+      'DMG installer',
+      'macOS updater archive',
+      'Windows installer',
+      'Windows updater archive',
+      'Windows updater signature'
+    ])
   })
 
   it('rejects a truncated upload, which reads as a corrupt download', async () => {

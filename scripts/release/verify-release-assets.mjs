@@ -11,13 +11,24 @@
 
 const API_VERSION = '2022-11-28'
 
-/** Asset kinds a macOS release has to carry to be installable and updatable. */
+/**
+ * Asset kinds a release has to carry to be installable and updatable, on every
+ * platform it claims to ship.
+ *
+ * A build job that quietly produces nothing still lets the publish succeed, and
+ * the result is a release whose download button is missing for one platform.
+ * Naming each kind per platform is what turns that into a failed release rather
+ * than a bad one.
+ */
 export function requiredAssets() {
   return [
     { name: 'update manifest', match: (file) => file === 'latest.json' },
     { name: 'DMG installer', match: (file) => file.endsWith('.dmg') },
-    { name: 'updater archive', match: (file) => file.endsWith('.tar.gz') },
-    { name: 'updater signature', match: (file) => file.endsWith('.tar.gz.sig') }
+    { name: 'macOS updater archive', match: (file) => file.endsWith('.tar.gz') },
+    { name: 'macOS updater signature', match: (file) => file.endsWith('.tar.gz.sig') },
+    { name: 'Windows installer', match: (file) => file.endsWith('-setup.exe') },
+    { name: 'Windows updater archive', match: (file) => file.endsWith('.nsis.zip') },
+    { name: 'Windows updater signature', match: (file) => file.endsWith('.nsis.zip.sig') }
   ]
 }
 
