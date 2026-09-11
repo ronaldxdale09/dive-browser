@@ -1081,6 +1081,7 @@ impl TabHost {
         {
             builder = builder.decorations(false);
         }
+        builder = builder.resizable(true).prevent_overflow();
         if let Some(b) = remembered {
             builder = builder.position(b.x.max(0.0), b.y.max(0.0));
         } else if let Some((x, y)) = at {
@@ -1092,6 +1093,8 @@ impl TabHost {
                 (origin.x + x - 120.0).max(0.0),
                 (origin.y + y - 20.0).max(0.0),
             );
+        } else {
+            builder = builder.center();
         }
         let window = builder.build()?;
         // Nothing may fail between here and the reparent without taking the
@@ -1813,8 +1816,19 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
     {
         builder = builder.decorations(false);
     }
+    // Keep the window resizable and never larger than the work area it opens
+    // into. `prevent_overflow` clamps the initial size to `monitor - taskbar`,
+    // so a remembered size from a bigger display, or the 1280x820 default on a
+    // small screen, still fits. `resizable` is Tauri's default, but stated
+    // here because the frameless Windows window relies on the chrome's own
+    // resize handles (see `ResizeEdges`), and this is what they drive.
+    builder = builder.resizable(true).prevent_overflow();
     if let Some(b) = remembered {
         builder = builder.position(b.x, b.y);
+    } else {
+        // First launch has no remembered bounds: open in the middle of the
+        // screen rather than wherever the OS drops an unplaced window.
+        builder = builder.center();
     }
     // `DIVE_WINDOW_HIDDEN=1`: harness runs keep the window off screen so a
     // person at the machine cannot close a trial by accident.

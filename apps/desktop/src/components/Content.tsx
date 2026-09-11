@@ -4,6 +4,8 @@ import { AlertTriangle, Check, RotateCw, Search, ShieldQuestion, WifiOff, X } fr
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
 import { createBoundsReporter, elementBounds } from "../lib/boundsReporter";
+import { isWindows } from "../lib/commands";
+import { RESIZE_GUTTER, useWindowMaximized } from "../lib/windowResize";
 import { describeNavError, searchTermFor } from "../lib/navError";
 import { useContentPreview, useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
@@ -253,12 +255,23 @@ function FullPage() {
   const activeTab = useBrowser((s) => s.activeTab);
   const ready = useBrowser((s) => s.ready);
   const preview = useContentPreview(activeTab);
+  // On the frameless Windows window, hold the native page view a few pixels
+  // short of the right and bottom edges so the resize handles over the chrome
+  // stay reachable there (see WindowResizeEdges). A maximized window can't be
+  // resized, so it takes the full area with no gutter.
+  const maximized = useWindowMaximized();
+  const inset = isWindows() && !maximized ? RESIZE_GUTTER : 0;
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const reporter = createBoundsReporter(
-      () => elementBounds(el),
+      () => {
+        const b = elementBounds(el);
+        return inset
+          ? { ...b, width: Math.max(1, b.width - inset), height: Math.max(1, b.height - inset) }
+          : b;
+      },
       (bounds) => void ipc.setContentBounds(bounds).catch(() => undefined),
     );
     reporter.schedule();
@@ -270,7 +283,7 @@ function FullPage() {
       ro.disconnect();
       window.removeEventListener("resize", reporter.schedule);
     };
-  }, []);
+  }, [inset]);
 
   return (
     <div ref={ref} className="relative min-h-0 bg-surface">

@@ -30,6 +30,7 @@ import { bootSubtitles } from "./store/subtitles";
 import { useRecording } from "./store/recording";
 import { useRecorder } from "./store/recorder";
 import { WindowControls } from "./components/WindowControls";
+import { WindowResizeEdges } from "./components/WindowResizeEdges";
 import { isWindows } from "./lib/commands";
 import { listenForAgentPresence } from "./store/agentPresence";
 
@@ -137,6 +138,9 @@ export function App() {
       // main menu) begins, whichever shape the bar is in.
       style={{ gridTemplateColumns: `${railWidth}px minmax(0,1fr)`, "--chrome-top": oneBar ? "46px" : "86px" } as React.CSSProperties}
     >
+      {/* Resize handles for the frameless Windows window; renders nothing
+          elsewhere or while maximized. */}
+      <WindowResizeEdges />
       {!oneBar && (
         <header className={`col-span-2 row-start-1 flex items-center gap-2 ${captionGutter}`} data-tauri-drag-region="true">
           {isPrivateWindow() && <span className="px-2 font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
