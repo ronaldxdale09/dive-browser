@@ -4,6 +4,15 @@
 #
 #   scripts/release/local-release.sh [patch|minor|major|rc] [exact-version]
 #
+# Windows is built by the `release` workflow, which cannot sign a macOS app and
+# so never publishes on its own. Point DIVE_WINDOWS_RUN at the run that built
+# it and its installer joins this release:
+#
+#   DIVE_WINDOWS_RUN=<run id> scripts/release/local-release.sh patch
+#
+# The versions have to match, and this checks that they do -- a release whose
+# two halves disagree offers each platform an update the other does not have.
+#
 # Same path as .github/workflows/release.yml, in the same order: resolve the
 # version, run the fast preflight, stamp the version into this checkout, build
 # and sign, notarize, write latest.json, publish the GitHub release (which
@@ -37,6 +46,9 @@ step "preconditions"
 [[ -d "${CEF_PATH}" ]] || die "CEF_PATH ${CEF_PATH} does not exist"
 [[ -f "${KEY}" && -f "${KEY}.pub" ]] || die "updater keypair not found at ${KEY} (see RELEASING.md)"
 [[ "$(git branch --show-current)" == "main" ]] || die "release from main"
+# Every release carries both platforms, and the verifier after publishing says
+# so. Find that out here rather than after the tag exists.
+[[ -n "${DIVE_WINDOWS_RUN:-}" ]] || die "set DIVE_WINDOWS_RUN to the release workflow run that built windows-x86_64 (gh run list --workflow=release.yml)"
 git diff --quiet && git diff --cached --quiet || die "working tree must be clean"
 # Release tags are created on GitHub by the publish step, so the local list
 # is only complete after a fetch; resolving against a stale list would try
@@ -106,6 +118,24 @@ if [[ -z "${APPLE_ID:-}" ]]; then
     spctl -a -t open --context context:primary-signature -v "${images[0]}"
 fi
 
+WINDOWS_ASSETS=()
+if [[ -n "${DIVE_WINDOWS_RUN:-}" ]]; then
+    step "collect the Windows build from run ${DIVE_WINDOWS_RUN}"
+    rm -rf out/windows && mkdir -p out/windows
+    gh run download "${DIVE_WINDOWS_RUN}" -n windows-x86_64 -D out/windows \
+        || die "could not download the windows-x86_64 artifact from run ${DIVE_WINDOWS_RUN}"
+    installers=(out/windows/*-setup.exe)
+    winsigs=(out/windows/*-setup.exe.sig)
+    winmanifests=(out/windows/manifest-*.json)
+    [[ "${#installers[@]}" -eq 1 && "${#winsigs[@]}" -eq 1 && "${#winmanifests[@]}" -eq 1 ]] \
+        || die "expected one installer, one signature and one manifest in the Windows artifact"
+    # The installer carries its version in its name, and the run that built it
+    # resolved that version independently of this one.
+    [[ "${installers[0]##*/}" == *"_${VERSION}_"* ]] \
+        || die "the Windows build is ${installers[0]##*/}, which is not ${VERSION}"
+    WINDOWS_ASSETS=("${installers[0]}" "${winsigs[0]}")
+fi
+
 step "update manifest"
 node scripts/release/update-manifest.mjs build \
     --version "${VERSION}" \
@@ -115,8 +145,13 @@ node scripts/release/update-manifest.mjs build \
     --notes "${NAME}" \
     --base-url "https://github.com/${REPO}/releases/download/${TAG}" \
     --out out/manifest-aarch64-apple-darwin.json
+expect=darwin-aarch64
+if [[ "${#WINDOWS_ASSETS[@]}" -gt 0 ]]; then
+    cp "${winmanifests[0]}" out/
+    expect=darwin-aarch64,windows-x86_64
+fi
 node scripts/release/update-manifest.mjs merge out/manifest-*.json \
-    --expect-platforms darwin-aarch64 \
+    --expect-platforms "${expect}" \
     --out out/latest.json
 rm -f out/manifest-*.json
 
@@ -124,7 +159,8 @@ step "publish ${TAG} to GitHub Releases"
 flags=(--target "${COMMIT}" --title "${NAME}" --generate-notes)
 [[ "${IS_PRERELEASE}" == "true" ]] && flags+=(--prerelease)
 [[ "${MAKE_LATEST}" == "true" ]] && flags+=(--latest) || flags+=(--latest=false)
-gh release create "${TAG}" "${flags[@]}" out/latest.json "${images[0]}" "${archives[0]}" "${signatures[0]}"
+gh release create "${TAG}" "${flags[@]}" out/latest.json "${images[0]}" "${archives[0]}" \
+    "${signatures[0]}" "${WINDOWS_ASSETS[@]}"
 PUBLISHED=1
 git fetch -q --tags origin
 
