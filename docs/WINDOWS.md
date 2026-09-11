@@ -141,14 +141,21 @@ launchers as Start Menu shortcuts.
 
 Building x64 locally needs one thing CI sets for itself: whisper.cpp and
 CEF's wrapper must agree on a C++ runtime. `cef-dll-sys` builds the wrapper
-with the static one and whisper.cpp defaults to the dynamic one, so the link
-ends in fifty-odd duplicate `std::locale` symbols. Point CMake at the
-toolchain file the workflows use:
+with the static one -- CEF's own convention, not configurable from here --
+and whisper.cpp defaults to the dynamic one, so the link ends in fifty-odd
+duplicate `std::locale` symbols.
 
-    $env:CMAKE_TOOLCHAIN_FILE = "$PWD\scripts\ci\ggml-portable.cmake"
+    $env:CFLAGS = "/MT"; $env:CXXFLAGS = "/MT"
 
-The ARM VM never sees this, because whisper.cpp is not built there at all --
-which is exactly why it linked a binary CI could not.
+Not `CMAKE_MSVC_RUNTIME_LIBRARY`, which is the obvious answer and the wrong
+one: the `cmake` crate hands CMake the flags the `cc` crate chose, and an
+explicit `/MD` among them beats the variable. `cc` appends `CFLAGS` and
+`CXXFLAGS` after its own flags, and MSVC honours the last runtime flag it is
+given, so that is where it has to go.
+
+The ARM VM never sees any of this, because whisper.cpp is not built there at
+all -- which is exactly why it linked a binary CI could not. `cargo clippy`
+does not see it either, because clippy never invokes the linker.
 
 Known gaps:
 

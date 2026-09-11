@@ -55,6 +55,22 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install ninja -y --no-progress
 
+      # CEF's dll wrapper is built with the static C++ runtime -- CEF's own
+      # convention, not configurable from here -- and a program links exactly
+      # one. whisper.cpp otherwise brings the dynamic one and the link ends in
+      # dozens of duplicate std::locale symbols.
+      #
+      # These land here rather than in CMAKE_MSVC_RUNTIME_LIBRARY because an
+      # explicit /MD in the compiler flags beats that variable. cc appends
+      # CFLAGS and CXXFLAGS after its own flags, and MSVC honours the last
+      # runtime flag it is given.
+      - name: Match CEF's C++ runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "CFLAGS=/MT" >> $env:GITHUB_ENV
+          "CXXFLAGS=/MT" >> $env:GITHUB_ENV
+
       - name: Cache CEF binaries
         uses: actions/cache@v4
         with:
