@@ -96,84 +96,87 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
         <IconButton icon={RotateCw} label="Reload" shortcut="⌘R" disabled={!current} onClick={() => void reload()} size={14} />
       )}
       <IconButton icon={House} label="Home" shortcut="⌘⇧H" disabled={!current && !homepage} onClick={() => void runCommand("tab.home")} size={14} />
-      <form
-        className="relative mx-1 flex h-[calc(var(--row-h)-4px)] min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!value.trim()) return;
-          const row = rows[highlight];
-          if (row) {
-            pick(row);
-            return;
-          }
-          void navigate(value);
-          finishEditing();
-        }}
-      >
-        {/* The glyph says what kind of thing the bar holds: a search when
-            it is empty, a lock for https, a globe for plain http, a warning
-            for a page that did not load. Each explains itself on hover. */}
-        {(() => {
-          const kind = !current ? "none" : failed ? "failed" : secure ? "secure" : "plain";
-          const glyph = kind === "failed" ? TriangleAlert : kind === "secure" ? Lock : kind === "plain" ? Globe : Search;
-          const meaning = kind === "failed" ? "This page could not be loaded" : kind === "secure" ? "Secure connection" : kind === "plain" ? "Not secure: this page uses plain http" : "Search or enter an address";
-          return (
-            <Tooltip label={meaning} side="bottom" align="start">
-              <span role="img" aria-label={meaning} data-security={kind === "plain" ? "none" : kind} className="grid shrink-0 place-items-center">
-                <Icon icon={glyph} size={13} className={kind === "failed" ? "text-warn" : "text-ink-3"} />
-              </span>
-            </Tooltip>
-          );
-        })()}
-        {/* The input and the text drawn over it share one box, so the resting
-            address ends exactly where the field does -- before the actions in
-            the pill rather than underneath them. */}
-        <span className="relative flex min-w-0 flex-1 items-center">
-        {/* At rest the host is set in ink and the path in a quieter tone, so a
-            glance reads the site; the input underneath keeps the whole text
-            for selection, copying and assistive tech. */}
-        {!editing && current && display && (
-          <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center overflow-hidden text-[13px] whitespace-nowrap">
-            <span className="text-ink">{splitAddress(url).host}</span>
-            <span className="truncate text-ink-3">{splitAddress(url).rest}</span>
-          </span>
-        )}
-        <input
-          ref={inputRef}
-          aria-label="Address"
-          value={editing ? value : display}
-          onChange={(e) => setValue(e.target.value)}
-          onFocus={(e) => {
-            setEditing(true);
-            setValue(url);
-            e.currentTarget.select();
-          }}
-          onBlur={() => setEditing(false)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              event.stopPropagation();
-              setValue(url);
-              event.currentTarget.blur();
+      <div data-address-field className="relative mx-1 flex h-[calc(var(--row-h)-4px)] min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2">
+        <form
+          className="flex min-w-0 flex-1 items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!value.trim()) return;
+            const row = rows[highlight];
+            if (row) {
+              pick(row);
               return;
             }
-            if ((event.key === "ArrowDown" || event.key === "ArrowUp") && rows.length > 0) {
-              event.preventDefault();
-              move(event.key === "ArrowDown" ? 1 : -1);
-            }
+            void navigate(value);
+            finishEditing();
           }}
-          placeholder="Search or enter address"
-          spellCheck={false}
-          autoComplete="off"
-          role="combobox"
-          aria-haspopup="listbox"
-          aria-expanded={rows.length > 0}
-          aria-autocomplete="list"
-          aria-controls={rows.length > 0 ? listId : undefined}
-          aria-activedescendant={rows.length > 0 ? optionId(listId, highlight) : undefined}
-          className={`min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-ink-3 ${!editing && current && display ? "text-transparent" : "text-ink"}`}
-        />
-        </span>
+        >
+          {/* The glyph says what kind of thing the bar holds: a search when
+              it is empty, a lock for https, a globe for plain http, a warning
+              for a page that did not load. Each explains itself on hover. */}
+          {(() => {
+            const kind = !current ? "none" : failed ? "failed" : secure ? "secure" : "plain";
+            const glyph = kind === "failed" ? TriangleAlert : kind === "secure" ? Lock : kind === "plain" ? Globe : Search;
+            const meaning = kind === "failed" ? "This page could not be loaded" : kind === "secure" ? "Secure connection" : kind === "plain" ? "Not secure: this page uses plain http" : "Search or enter an address";
+            return (
+              <Tooltip label={meaning} side="bottom" align="start">
+                <span role="img" aria-label={meaning} data-security={kind === "plain" ? "none" : kind} className="grid shrink-0 place-items-center">
+                  <Icon icon={glyph} size={13} className={kind === "failed" ? "text-warn" : "text-ink-3"} />
+                </span>
+              </Tooltip>
+            );
+          })()}
+          {/* The input and the text drawn over it share one box, so the resting
+              address ends exactly where the field does -- before the actions in
+              the pill rather than underneath them. */}
+          <span className="relative flex min-w-0 flex-1 items-center">
+          {/* At rest the host is set in ink and the path in a quieter tone, so a
+              glance reads the site; the input underneath keeps the whole text
+              for selection, copying and assistive tech. */}
+          {!editing && current && display && (
+            <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center overflow-hidden text-[13px] whitespace-nowrap">
+              <span className="text-ink">{splitAddress(url).host}</span>
+              <span className="truncate text-ink-3">{splitAddress(url).rest}</span>
+            </span>
+          )}
+          <input
+            ref={inputRef}
+            aria-label="Address"
+            value={editing ? value : display}
+            onChange={(e) => setValue(e.target.value)}
+            onFocus={(e) => {
+              setEditing(true);
+              setValue(url);
+              e.currentTarget.select();
+            }}
+            onBlur={() => setEditing(false)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                setValue(url);
+                event.currentTarget.blur();
+                return;
+              }
+              if ((event.key === "ArrowDown" || event.key === "ArrowUp") && rows.length > 0) {
+                event.preventDefault();
+                move(event.key === "ArrowDown" ? 1 : -1);
+              }
+            }}
+            placeholder="Search or enter address"
+            spellCheck={false}
+            autoComplete="off"
+            role="combobox"
+            aria-haspopup="listbox"
+            aria-expanded={rows.length > 0}
+            aria-autocomplete="list"
+            aria-controls={rows.length > 0 ? listId : undefined}
+            aria-activedescendant={rows.length > 0 ? optionId(listId, highlight) : undefined}
+            className={`min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-ink-3 ${!editing && current && display ? "text-transparent" : "text-ink"}`}
+          />
+          </span>
+          <AddressSuggestions id={listId} rows={rows} highlight={highlight} onHighlight={setHighlight} onPick={pick} />
+        </form>
         {/* Inside the pill, at its right edge, as Brave and Chrome keep
             them: what this page can become (an installed app), what is being
             done to it (protection) and what you can do with it (save it,
@@ -185,8 +188,7 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
           {!isPrivateWindow() && <BookmarkButton />}
           <SharePopover />
         </span>
-        <AddressSuggestions id={listId} rows={rows} highlight={highlight} onHighlight={setHighlight} onPick={pick} />
-      </form>
+      </div>
       {compact ? (
         <ToolbarMore>
           <ZoomBadge />

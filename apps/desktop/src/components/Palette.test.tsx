@@ -76,6 +76,13 @@ describe("Palette", () => {
     const headings = Array.from(document.querySelectorAll("[cmdk-group-heading]")).map((h) => h.textContent);
     expect(headings.indexOf("Tabs")).toBeGreaterThanOrEqual(0);
     expect(headings.indexOf("Tabs")).toBeLessThan(headings.indexOf("Bookmarks"));
+
+    // When typing a query, matching tabs precede the web search row
+    const input = screen.getByPlaceholderText(/Search open tabs/);
+    fireEvent.change(input, { target: { value: "alp" } });
+    const rows = screen.getAllByRole("option").map((o) => o.textContent ?? "");
+    expect(rows[0]).toContain("Alpha");
+
     // A plain open leads with everything again.
     useBrowser.getState().toggle("palette", true);
     expect(useBrowser.getState().paletteFocus).toBe("all");

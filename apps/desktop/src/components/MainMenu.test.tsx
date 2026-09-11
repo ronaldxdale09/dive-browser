@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
@@ -79,5 +79,24 @@ describe("MainMenu", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: /Clear browsing data/ }));
     expect(useBrowser.getState().open.settings).toBe(true);
     expect(useBrowser.getState().settingsSection).toBe("privacy");
+  });
+
+  it("synchronizes keyboard selection with rendered menu items past the zoom row", async () => {
+    const printSpy = vi.spyOn(ipc, "tabPrint").mockResolvedValue(undefined as never);
+    render(<MainMenu />);
+    const menuItems = screen.getAllByRole("menuitem");
+    const printItem = screen.getByRole("menuitem", { name: /Print/ });
+    const printIndex = menuItems.indexOf(printItem);
+    expect(printIndex).toBeGreaterThan(0);
+
+    // Hovering on Print sets cursor to printIndex
+    fireEvent.mouseEnter(printItem);
+
+    // Enter executes the selected item (Print)
+    const search = screen.getByRole("textbox", { name: "Search the menu" });
+    fireEvent.keyDown(search, { key: "Enter" });
+    // Menu closes and command runs
+    await waitFor(() => expect(useBrowser.getState().open.menu).toBe(false));
+    expect(printSpy).toHaveBeenCalledWith("t1");
   });
 });

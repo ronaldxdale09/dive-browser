@@ -50,6 +50,7 @@ export function Library() {
   const tabs = isPrivateWindow() ? TABS.filter((t) => t.id === "downloads" || t.id === "recordings") : TABS;
   const [tab, setTab] = useState<LibraryTab>(() => (tabs.some((t) => t.id === initial) ? initial : tabs[0]!.id));
   const [query, setQuery] = useState("");
+  const panelRef = useRef<HTMLDivElement>(null);
 
   return (
     <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 grid place-items-center ${className}`} onMouseDown={close}>
@@ -92,8 +93,8 @@ export function Library() {
           </label>
           <IconButton icon={X} label="Close library" onClick={close} />
         </header>
-        <div role="tabpanel" id={`library-panel-${tab}`} aria-labelledby={`library-tab-${tab}`} className="min-h-0 flex-1 overflow-y-auto p-2">
-          {tab === "bookmarks" ? <Bookmarks query={query} onOpened={close} /> : tab === "history" ? <HistoryList query={query} onOpened={close} /> : tab === "downloads" ? <DownloadsList query={query} /> : tab === "apps" ? <Apps query={query} onOpened={close} /> : <Recordings query={query} onOpened={close} />}
+        <div key={tab} ref={panelRef} role="tabpanel" id={`library-panel-${tab}`} aria-labelledby={`library-tab-${tab}`} className="min-h-0 flex-1 overflow-y-auto p-2">
+          {tab === "bookmarks" ? <Bookmarks query={query} onOpened={close} scrollRef={panelRef} /> : tab === "history" ? <HistoryList query={query} onOpened={close} /> : tab === "downloads" ? <DownloadsList query={query} /> : tab === "apps" ? <Apps query={query} onOpened={close} /> : <Recordings query={query} onOpened={close} />}
         </div>
       </div>
     </div>
@@ -144,9 +145,10 @@ function BookmarkRow({
   );
 }
 
-function Bookmarks({ query, onOpened }: { query: string; onOpened: () => void }) {
+function Bookmarks({ query, onOpened, scrollRef }: { query: string; onOpened: () => void; scrollRef?: React.RefObject<HTMLDivElement | null> }) {
   const [items, setItems] = useState<Bookmark[] | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const localScrollRef = useRef<HTMLDivElement>(null);
+  const targetScrollRef = scrollRef ?? localScrollRef;
   useEffect(() => {
     let alive = true;
     ipc
@@ -174,7 +176,7 @@ function Bookmarks({ query, onOpened }: { query: string; onOpened: () => void })
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: shown.length,
-    getScrollElement: () => scrollRef.current,
+    getScrollElement: () => targetScrollRef.current,
     estimateSize: () => 36,
     overscan: 10,
     getItemKey: (i) => shown[i]?.url ?? i,
@@ -198,28 +200,34 @@ function Bookmarks({ query, onOpened }: { query: string; onOpened: () => void })
     );
   }
 
+  const virtualList = (
+    <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
+      {virtualItems.map((virtualRow) => {
+        const b = shown[virtualRow.index];
+        if (!b) return null;
+        return (
+          <div
+            key={b.url}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              transform: `translateY(${virtualRow.start}px)`,
+            }}
+          >
+            <BookmarkRow item={b} onOpen={open} onRemove={remove} />
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  if (scrollRef) return virtualList;
+
   return (
-    <div ref={scrollRef} className="h-full overflow-y-auto">
-      <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
-        {virtualItems.map((virtualRow) => {
-          const b = shown[virtualRow.index];
-          if (!b) return null;
-          return (
-            <div
-              key={b.url}
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                transform: `translateY(${virtualRow.start}px)`,
-              }}
-            >
-              <BookmarkRow item={b} onOpen={open} onRemove={remove} />
-            </div>
-          );
-        })}
-      </div>
+    <div ref={localScrollRef} className="h-full overflow-y-auto">
+      {virtualList}
     </div>
   );
 }

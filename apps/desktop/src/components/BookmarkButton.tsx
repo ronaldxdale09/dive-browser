@@ -142,6 +142,7 @@ export function BookmarkButton() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              e.stopPropagation();
               done();
             }}
           >

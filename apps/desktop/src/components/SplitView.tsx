@@ -10,6 +10,8 @@ import { Favicon } from "./Favicon";
 import { Icon } from "./Icon";
 import { paneId, zoneId } from "./TabDnd";
 import { shorten, tabLabel } from "./TabStrip";
+import { isWindows } from "../lib/commands";
+import { RESIZE_GUTTER, useWindowMaximized } from "../lib/windowResize";
 
 const GAP = 6;
 
@@ -39,6 +41,9 @@ export function SplitView({ split, workspace }: { split: Split; workspace: strin
     else bodies.current.delete(tab);
   }, []);
 
+  const maximized = useWindowMaximized();
+  const inset = isWindows() && !maximized ? RESIZE_GUTTER : 0;
+
   useEffect(() => {
     const el = root.current;
     if (!el) return;
@@ -46,11 +51,14 @@ export function SplitView({ split, workspace }: { split: Split; workspace: strin
     const report = () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
-        const panes = split.tabs.flatMap((tab) => {
+        const panes = split.tabs.flatMap((tab, i) => {
           const body = bodies.current.get(tab);
           if (!body) return [];
           const r = body.getBoundingClientRect();
-          return [{ tab, bounds: { x: r.left, y: r.top, width: r.width, height: r.height } }];
+          const isRightmost = i === split.tabs.length - 1;
+          const width = inset && isRightmost ? Math.max(1, r.width - inset) : r.width;
+          const height = inset ? Math.max(1, r.height - inset) : r.height;
+          return [{ tab, bounds: { x: r.left, y: r.top, width, height } }];
         });
         void ipc.setPanes(panes).catch(() => undefined);
       });
@@ -65,7 +73,7 @@ export function SplitView({ split, workspace }: { split: Split; workspace: strin
       ro.disconnect();
       window.removeEventListener("resize", report);
     };
-  }, [split.tabs]);
+  }, [split.tabs, inset]);
 
   // Leaving the split returns the engine to a single page.
   useEffect(() => () => void ipc.setPanes([]).catch(() => undefined), []);

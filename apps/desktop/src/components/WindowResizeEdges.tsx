@@ -22,13 +22,9 @@ import {
  * bottom, width from either side. Nothing renders off Windows or while
  * maximized, where the OS handles resizing.
  */
-export function WindowResizeEdges() {
+export function WindowResizeEdges({ top = 44 }: { top?: number } = {}) {
   const maximized = useWindowMaximized();
   if (!isWindows() || maximized) return null;
-
-  // Below the title/toolbar band so the drag region and window controls keep
-  // the top edge to themselves.
-  const top = 44;
 
   const handle = (
     key: string,

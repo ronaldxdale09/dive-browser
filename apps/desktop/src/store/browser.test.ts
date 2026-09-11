@@ -475,7 +475,8 @@ describe("reopening closed tabs", () => {
     const close = vi.spyOn(ipc, "tabClose").mockResolvedValue(null as never);
     const open = vi.spyOn(ipc, "tabOpen").mockResolvedValue({ id: "n" } as never);
     const pinned = { ...t("p", "https://p.test/"), tier: "pinned" } as Tab;
-    useBrowser.setState({ tabs: [t("a", "https://a.test/"), t("b", "https://b.test/"), t("c", "https://c.test/"), pinned], activeTab: "b", activeWorkspace: "w1", workspaces: [{ id: "w1" }] as unknown as Workspace[] });
+    const essential = { ...t("e", "https://e.test/"), tier: "essential" } as Tab;
+    useBrowser.setState({ tabs: [t("a", "https://a.test/"), t("b", "https://b.test/"), t("c", "https://c.test/"), pinned, essential], activeTab: "b", activeWorkspace: "w1", workspaces: [{ id: "w1" }] as unknown as Workspace[] });
     const closing = useBrowser.getState().closeOtherTabs("b");
     // The engine confirms each close.
     await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(2));

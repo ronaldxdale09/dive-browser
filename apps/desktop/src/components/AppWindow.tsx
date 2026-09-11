@@ -13,6 +13,9 @@ import { errorMessage } from "../lib/errors";
 import { NavErrorPanel } from "./Content";
 import { inScope, originOf, useWebApps } from "../store/webapps";
 import { useWebAppIcon } from "../lib/useWebAppIcon";
+import { isWindows } from "../lib/commands";
+import { WindowResizeEdges } from "./WindowResizeEdges";
+import { WindowControls } from "./WindowControls";
 
 function run(action: Promise<unknown>) {
   void action.catch((error: unknown) => useBrowser.setState({ error: errorMessage(error) }));
@@ -93,9 +96,11 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
   const icon = appIcon ?? tab?.favicon ?? null;
   const rows = `40px${outside ? " 32px" : ""} auto minmax(0,1fr)`;
 
+  const captionGutter = isWindows() ? "pl-2" : "pl-[84px] pr-2";
   return (
     <div className="grid h-full bg-ground text-ink" style={{ gridTemplateRows: rows }}>
-      <header className="flex min-w-0 items-center gap-1.5 border-b border-line/70 pr-2 pl-[84px]" data-tauri-drag-region="true">
+      <WindowResizeEdges top={outside ? 72 : 40} />
+      <header className={`flex min-w-0 items-center gap-1.5 border-b border-line/70 ${captionGutter}`} data-tauri-drag-region="true">
         <IconButton icon={ArrowLeft} label="Back" disabled={!canBack} onClick={() => run(ipc.tabBack(tabId))} />
         <IconButton icon={ArrowRight} label="Forward" disabled={!canForward} onClick={() => run(ipc.tabForward(tabId))} />
         {loading
@@ -116,6 +121,7 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
             </div>
           )}
         </div>
+        <WindowControls />
       </header>
       {outside && app && (
         <div role="status" className="flex items-center gap-2 border-b border-line bg-surface-2 px-3 text-[11px] text-ink-2">

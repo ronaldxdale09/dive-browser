@@ -14,10 +14,12 @@ import { Favicon } from "./Favicon";
 import { tabLabel } from "./TabStrip";
 import { usePopoutPage } from "../lib/usePopoutPage";
 import { useTabHistory } from "../lib/useTabHistory";
-import { isMac, shortcutFor } from "../lib/commands";
+import { isMac, isWindows, shortcutFor } from "../lib/commands";
 import { selectAllInChromeField } from "../lib/chromeEditing";
 import { errorMessage } from "../lib/errors";
 import { NavErrorPanel } from "./Content";
+import { WindowResizeEdges } from "./WindowResizeEdges";
+import { WindowControls } from "./WindowControls";
 
 /** Keep commands in a detached window on the same visible error path as the main chrome. */
 function run(action: Promise<unknown>) {
@@ -185,9 +187,11 @@ export function Popout({ tabId }: { tabId: string }) {
   useCoversContent(privateStart);
   const secure = url.startsWith("https://");
   const title = tab ? (blank ? "New tab" : tabLabel(tab)) : "Opening tab";
+  const captionGutter = isWindows() ? "pl-2" : "pl-[84px] pr-2";
   return (
     <div className="grid h-full grid-rows-[40px_44px_auto_minmax(0,1fr)] bg-ground text-ink">
-      <header className="flex min-w-0 items-center gap-1.5 border-b border-line/70 pr-2 pl-[84px]">
+      <WindowResizeEdges top={84} />
+      <header className={`flex min-w-0 items-center gap-1.5 border-b border-line/70 ${captionGutter}`}>
         <div role="tablist" aria-label="Window tabs" className="flex min-w-0 max-w-72 flex-1 items-center">
           <div className="group flex h-8 min-w-0 flex-1 items-center rounded-lg bg-surface-2 text-xs text-ink ring-1 ring-line-2">
             <button
@@ -218,6 +222,7 @@ export function Popout({ tabId }: { tabId: string }) {
         <IconButton icon={Plus} label="New tab in main window" shortcut="⌘T" onClick={() => run(ipc.windowCommand("tab.new"))} />
         <div className="min-w-8 flex-1 self-stretch" data-tauri-drag-region="true" />
         {isPrivateWindow() && <PrivateBadge />}
+        <WindowControls />
       </header>
       <nav aria-label="Browser controls" className="flex min-w-0 items-center gap-1 border-b border-line px-2">
         <IconButton icon={ArrowLeft} label="Back" disabled={!canBack} onClick={() => run(ipc.tabBack(tabId))} />

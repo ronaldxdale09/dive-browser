@@ -93,7 +93,7 @@ export function MainMenu() {
     if (!q) return groups;
     return groups.map((g) => ({ ...g, items: g.items.filter((i) => `${i.label} ${i.keywords ?? ""}`.toLowerCase().includes(q)) })).filter((g) => g.items.length > 0);
   }, [allGroups, q]);
-  const flat = filtered.flatMap((g) => g.items);
+  const flat = filtered.filter((g) => g.id !== "zoom").flatMap((g) => g.items);
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {

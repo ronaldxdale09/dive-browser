@@ -504,7 +504,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   },
   closeOtherTabs: async (keep) => {
     const kept = get().tabs.find((t) => t.id === keep);
-    const others = get().tabs.filter((t) => t.id !== keep && t.tier !== "pinned" && (!kept || t.workspace_id === kept.workspace_id));
+    const others = get().tabs.filter((t) => t.id !== keep && t.tier !== "pinned" && t.tier !== "essential" && (!kept || t.workspace_id === kept.workspace_id));
     if (others.length === 0) return;
     // One at a time, so the closed-tab stack keeps their order and Undo puts them back the same way.
     for (const t of others) await get().closeTab(t.id);

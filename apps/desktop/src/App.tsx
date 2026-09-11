@@ -144,7 +144,7 @@ export function App() {
     >
       {/* Resize handles for the frameless Windows window; renders nothing
           elsewhere or while maximized. */}
-      <WindowResizeEdges />
+      <WindowResizeEdges top={oneBar ? 44 : 84} />
       {!oneBar && (
         <header className={`col-span-2 row-start-1 flex items-center gap-2 ${captionGutter}`} data-tauri-drag-region="true">
           {isPrivateWindow() && <span className="px-2 font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}

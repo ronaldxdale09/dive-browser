@@ -100,7 +100,7 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
   const essentials = useMemo(() => essentialTabs(all), [all]);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [tablistRef, measuredNarrow] = useNarrowTabs(tabs.length);
-  const hiddenAcross = useHiddenTabs(tablistRef, tabs.length, active);
+  const hiddenAcross = useHiddenTabs(tablistRef, tabs.length, active, vertical);
   // Rows down the rail are as wide as the rail: they never lose their titles,
   // and they scroll rather than hide.
   const narrow: Narrow = vertical ? { title: false, close: false } : measuredNarrow;
@@ -116,6 +116,8 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
   const onTabMenu = useCallback((id: string, x: number, y: number) => setMenu({ id, x, y }), []);
   const stop = tabs.some((t) => t.id === focused) ? focused : active;
 
+  const hasActiveEssential = essentials.some((t) => t.id === active);
+
   return (
     <div className={vertical ? "flex h-full min-h-0 flex-col gap-1" : "flex h-full items-center gap-[var(--ui-gap)] pr-2 pl-2"} onClick={() => menu && setMenu(null)}>
       {essentials.length > 0 && (
@@ -123,14 +125,43 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
           {/* Essentials: icon-only and present in every workspace. Not
               sortable -- their order is the engine's -- and set apart by a
               hairline so they read as a fixture, not the first few tabs. */}
-          <div role="tablist" aria-label="Essentials" aria-orientation={vertical ? "vertical" : undefined} className={vertical ? "flex shrink-0 flex-col gap-px" : "flex shrink-0 items-center gap-1"}>
-            {essentials.map((t) => (
+          <div
+            role="tablist"
+            aria-label="Essentials"
+            aria-orientation={vertical ? "vertical" : undefined}
+            className={vertical ? "flex shrink-0 flex-col gap-px" : "flex shrink-0 items-center gap-1"}
+            onKeyDown={(e) => {
+              const forward = e.key === "ArrowRight" || e.key === "ArrowDown";
+              const back = e.key === "ArrowLeft" || e.key === "ArrowUp";
+              if (!forward && !back && e.key !== "Home" && e.key !== "End") return;
+              const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]'));
+              const target = e.target instanceof HTMLElement && e.target.getAttribute("role") === "tab" ? e.target : null;
+              if (!target) return;
+              const i = items.indexOf(target);
+              if (i === -1) return;
+              if (forward && i === items.length - 1 && tablistRef.current) {
+                const mainTab = tablistRef.current.querySelector<HTMLElement>('[role="tab"][tabindex="0"]') ?? tablistRef.current.querySelector<HTMLElement>('[role="tab"]');
+                if (mainTab) {
+                  e.preventDefault();
+                  mainTab.focus();
+                  return;
+                }
+              }
+              const next = roveTab(e.key, e.currentTarget, e.target);
+              if (next) {
+                e.preventDefault();
+                next.focus();
+              }
+            }}
+          >
+            {essentials.map((t, idx) => (
               <EssentialTab
                 key={t.id}
                 tab={t}
                 active={t.id === active}
                 loading={loading[t.id] === true}
                 vertical={vertical}
+                tabIndex={t.id === active || (!hasActiveEssential && idx === 0) ? 0 : -1}
                 onActivate={() => void activate(t.id)}
                 onMenu={(x, y) => setMenu({ id: t.id, x, y })}
               />
@@ -157,6 +188,20 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
           aria-label="Tabs"
           aria-orientation={vertical ? "vertical" : undefined}
           onKeyDown={(e) => {
+            const back = e.key === "ArrowLeft" || e.key === "ArrowUp";
+            if (back && essentials.length > 0) {
+              const target = e.target instanceof HTMLElement && e.target.getAttribute("role") === "tab" ? e.target : null;
+              const tabsList = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]'));
+              if (target && tabsList.indexOf(target) === 0) {
+                const essentialTabs = Array.from(e.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="tablist"][aria-label="Essentials"] [role="tab"]') ?? []);
+                const lastEssential = essentialTabs[essentialTabs.length - 1];
+                if (lastEssential) {
+                  e.preventDefault();
+                  lastEssential.focus();
+                  return;
+                }
+              }
+            }
             const next = roveTab(e.key, e.currentTarget, e.target);
             if (!next) return;
             e.preventDefault();
@@ -322,7 +367,7 @@ export function countOutOfView(list: { left: number; right: number }, items: { l
  * scrollbar, so without this a tab past the edge might as well be closed.
  * The active tab is also kept in view whenever it changes.
  */
-function useHiddenTabs(ref: React.RefObject<HTMLDivElement | null>, count: number, active: string | null): number {
+function useHiddenTabs(ref: React.RefObject<HTMLDivElement | null>, count: number, active: string | null, vertical: boolean = false): number {
   const [hidden, setHidden] = useState(0);
   useEffect(() => {
     const list = ref.current;
@@ -349,8 +394,14 @@ function useHiddenTabs(ref: React.RefObject<HTMLDivElement | null>, count: numbe
     const tab = active ? [...list.querySelectorAll<HTMLElement>('[role="tab"]')].find((el) => el.dataset["tabId"] === active) : null;
     // Scroll the strip itself, never scrollIntoView: that also scrolls every
     // scrollable ancestor, and once shifted the whole chrome to the left.
-    if (tab) list.scrollLeft = revealScrollLeft({ ...list.getBoundingClientRect(), scrollLeft: list.scrollLeft }, tab.getBoundingClientRect());
-  }, [ref, active]);
+    if (tab) {
+      if (vertical) {
+        list.scrollTop = revealScrollTop({ ...list.getBoundingClientRect(), scrollTop: list.scrollTop }, tab.getBoundingClientRect());
+      } else {
+        list.scrollLeft = revealScrollLeft({ ...list.getBoundingClientRect(), scrollLeft: list.scrollLeft }, tab.getBoundingClientRect());
+      }
+    }
+  }, [ref, active, vertical]);
   return hidden;
 }
 
@@ -359,6 +410,13 @@ export function revealScrollLeft(list: { left: number; right: number; scrollLeft
   if (tab.left < list.left) return list.scrollLeft - (list.left - tab.left);
   if (tab.right > list.right) return list.scrollLeft + (tab.right - list.right);
   return list.scrollLeft;
+}
+
+/** The strip's scrollTop that brings `tab` fully into view with the least movement. */
+export function revealScrollTop(list: { top: number; bottom: number; scrollTop: number }, tab: { top: number; bottom: number }): number {
+  if (tab.top < list.top) return list.scrollTop - (list.top - tab.top);
+  if (tab.bottom > list.bottom) return list.scrollTop + (tab.bottom - list.bottom);
+  return list.scrollTop;
 }
 
 /**
@@ -390,7 +448,7 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
       style={style}
       data-tauri-drag-region="false"
       onMouseDown={(e) => e.stopPropagation()}
-      onAuxClick={(e) => e.button === 1 && onClose()}
+      onAuxClick={(e) => e.button === 1 && !pinned && onClose()}
       onContextMenu={(e) => {
         e.preventDefault();
         onMenu(e.clientX, e.clientY);
@@ -415,7 +473,7 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
         role="tab"
         id={`dive-tab-${t.id}`}
         aria-label={driven ? `${label(t)}, an agent is working in it` : detached ? `${label(t)}, in its own window` : sleeping ? `${label(t)}, sleeping` : label(t)}
-        aria-keyshortcuts={!pinned ? "Delete" : undefined}
+        aria-keyshortcuts={!pinned ? "Delete, Backspace" : undefined}
         aria-selected={active}
         tabIndex={inTabOrder ? 0 : -1}
         // Tauri installs a document-level mousedown listener for native
@@ -426,7 +484,7 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
         onFocus={onFocus}
         onClick={onActivate}
         onKeyDown={(e) => {
-          if (e.key === "Delete" && !pinned) {
+          if ((e.key === "Delete" || e.key === "Backspace") && !pinned) {
             e.preventDefault();
             onClose();
             return;
@@ -486,10 +544,12 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
         )}
       </button>
       {!pinned && !bare && (!narrow.close || active) && (
-        <span
+        <button
+          type="button"
+          aria-label={`Close ${label(t)}`}
           data-close-tab
           data-tauri-drag-region="false"
-          aria-hidden="true"
+          tabIndex={-1}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
@@ -498,19 +558,35 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
           className={`mr-1 grid size-5 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100 ${active ? "opacity-100" : ""}`}
         >
           <Icon icon={X} size={12} />
-        </span>
+        </button>
       )}
     </div>
   );
 });
 
 /** An essential in the rail: the site's icon, and nothing else, in every workspace. */
-function EssentialTab({ tab: t, active, loading, vertical = false, onActivate, onMenu }: { tab: Tab; active: boolean; loading: boolean; vertical?: boolean; onActivate: () => void; onMenu: (x: number, y: number) => void }) {
+function EssentialTab({
+  tab: t,
+  active,
+  loading,
+  vertical = false,
+  tabIndex = -1,
+  onActivate,
+  onMenu,
+}: {
+  tab: Tab;
+  active: boolean;
+  loading: boolean;
+  vertical?: boolean;
+  tabIndex?: number;
+  onActivate: () => void;
+  onMenu: (x: number, y: number) => void;
+}) {
   return (
     <div
       role="tab"
       aria-selected={active}
-      tabIndex={active ? 0 : -1}
+      tabIndex={tabIndex}
       onClick={onActivate}
       onKeyDown={(e) => {
         if (e.key !== "Enter" && e.key !== " ") return;

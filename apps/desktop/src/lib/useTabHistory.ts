@@ -34,7 +34,7 @@ export function useTabHistory(tabId: string | null, url: string, loading: boolea
     }).catch(() => { void refresh(); });
     return () => { alive = false; unlisten?.(); };
   }, [tabId, url, loading]);
-  const history = snapshot?.tabId === tabId && snapshot.url === url && snapshot.loading === loading && !url.startsWith("dive://") ? snapshot.history : null;
+  const history = snapshot?.tabId === tabId && snapshot.url === url && !url.startsWith("dive://") ? snapshot.history : null;
   return {
     history,
     canBack: history !== null && history.current_index > 0,

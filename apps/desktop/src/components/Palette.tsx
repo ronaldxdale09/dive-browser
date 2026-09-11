@@ -188,6 +188,7 @@ export function Palette() {
               )}
             </Command.Group>
           )}
+          {tabsFirst && tabGroup}
           {query.trim() && (
             <Command.Group value="open">
               <Command.Item value={`open ${query}`} onSelect={() => void go(query)} className="flex items-center gap-2 rounded-lg px-3 py-2">
@@ -197,8 +198,7 @@ export function Palette() {
               </Command.Item>
             </Command.Group>
           )}
-          {/* Open tabs come first: the thing most likely wanted is already open. */}
-          {tabGroup}
+          {!tabsFirst && tabGroup}
           {servers.length > 0 && (
             <Command.Group heading="Local servers">
               {servers.map((d) => (

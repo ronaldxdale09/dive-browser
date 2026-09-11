@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { countOutOfView, essentialTabs, revealScrollLeft, orderTabs, roveTab, splitAction, tabLabel, TabStrip } from "./TabStrip";
+import { countOutOfView, essentialTabs, revealScrollLeft, revealScrollTop, orderTabs, roveTab, splitAction, tabLabel, TabStrip } from "./TabStrip";
 import type { Tab } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { ipc } from "../lib/ipc";
@@ -151,6 +151,13 @@ describe("TabStrip controls", () => {
     expect(revealScrollLeft(list, { left: 680, right: 740 })).toBe(160);
   });
 
+  it("reveals a tab in vertical mode by scrolling the strip vertically", () => {
+    const list = { top: 100, bottom: 400, scrollTop: 50 };
+    expect(revealScrollTop(list, { top: 150, bottom: 200 })).toBe(50);
+    expect(revealScrollTop(list, { top: 80, bottom: 120 })).toBe(30);
+    expect(revealScrollTop(list, { top: 380, bottom: 420 })).toBe(70);
+  });
+
   it("offers a way to the tabs that scrolled out of view, none when they all fit", () => {
     useBrowser.setState({ tabs: [t("a", "today", 0), t("b", "today", 1)], activeTab: "a", toggle: vi.fn() });
     render(createElement(TabStrip));
@@ -161,18 +168,35 @@ describe("TabStrip controls", () => {
   it("closes a tab without activating it and keeps controls out of the window drag region", () => {
     const closeTab = vi.fn().mockResolvedValue(undefined);
     const activateTab = vi.fn().mockResolvedValue(undefined);
-    useBrowser.setState({ tabs: [{ ...t("a", "today", 0), title: "Example" }], activeTab: "a", closeTab, activateTab });
+    useBrowser.setState({ tabs: [{ ...t("a", "today", 0), title: "Example" }, { ...t("p", "pinned", 1), title: "Pinned" }], activeTab: "a", closeTab, activateTab });
 
     const { container } = render(createElement(TabStrip));
-    const tab = screen.getByRole("tab");
-    const close = container.querySelector<HTMLElement>("[data-close-tab]")!;
-    fireEvent.pointerDown(close);
-    fireEvent.click(close);
+    const tab = screen.getByRole("tab", { name: "Example" });
+    const closeBtn = screen.getByRole("button", { name: "Close Example" });
+    expect(closeBtn).toBeTruthy();
+    fireEvent.pointerDown(closeBtn);
+    fireEvent.click(closeBtn);
 
     expect(closeTab).toHaveBeenCalledWith("a");
     expect(activateTab).not.toHaveBeenCalled();
+
+    // Delete key closes tab
     fireEvent.keyDown(tab, { key: "Delete" });
     expect(closeTab).toHaveBeenCalledTimes(2);
+
+    // Backspace key also closes tab
+    fireEvent.keyDown(tab, { key: "Backspace" });
+    expect(closeTab).toHaveBeenCalledTimes(3);
+
+    // Middle click closes unpinned tab
+    fireEvent(tab.parentElement!, new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 }));
+    expect(closeTab).toHaveBeenCalledTimes(4);
+
+    // Middle click on pinned tab does NOT close it
+    const pinnedTab = screen.getByRole("tab", { name: "Pinned" });
+    fireEvent(pinnedTab.parentElement!, new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 }));
+    expect(closeTab).toHaveBeenCalledTimes(4);
+
     expect(container.querySelector('[data-tauri-drag-region="true"] button')).toBeNull();
   });
 
@@ -214,6 +238,39 @@ describe("TabStrip controls", () => {
     expect(activateTab).toHaveBeenCalledWith("c");
     fireEvent.keyDown(tabs[0]!, { key: "Enter" });
     expect(activateTab).toHaveBeenCalledWith("a");
+  });
+
+  it("gives the first essential tab tabIndex 0 when a regular tab is active and roves between them and main tabs", () => {
+    useBrowser.setState({
+      tabs: [
+        { ...t("e1", "essential", 0), title: "Essential 1" },
+        { ...t("e2", "essential", 1), title: "Essential 2" },
+        { ...t("t1", "today", 2), title: "Tab 1" },
+      ],
+      activeTab: "t1",
+    });
+    render(createElement(TabStrip));
+
+    const essentialList = screen.getByRole("tablist", { name: "Essentials" });
+    const essentialTabs = essentialList.querySelectorAll<HTMLElement>('[role="tab"]');
+    expect(essentialTabs.length).toBe(2);
+    // When a regular tab is active, the first essential tab has tabIndex 0 so it's reachable by Tab
+    expect(essentialTabs[0]!.tabIndex).toBe(0);
+    expect(essentialTabs[1]!.tabIndex).toBe(-1);
+
+    // Arrow keys inside essentials move focus
+    essentialTabs[0]!.focus();
+    fireEvent.keyDown(essentialTabs[0]!, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(essentialTabs[1]);
+
+    // Arrow right on last essential tab moves into the main tab strip
+    const mainTab = screen.getByRole("tab", { name: "Tab 1" });
+    fireEvent.keyDown(essentialTabs[1]!, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(mainTab);
+
+    // Arrow left on first main tab moves back to last essential tab
+    fireEvent.keyDown(mainTab, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(essentialTabs[1]);
   });
 
   it("ignores arrow keys that were not pressed on a tab", () => {

@@ -578,10 +578,12 @@ describe("Toolbar", () => {
     // stay in the pill at every width rather than hiding in a tray.
     render(<Toolbar compact />);
 
-    const field = screen.getByRole("combobox", { name: "Address" }).closest("form");
+    const form = screen.getByRole("combobox", { name: "Address" }).closest("form");
+    const field = screen.getByRole("combobox", { name: "Address" }).closest("[data-address-field]");
     for (const name of ["Bookmark this page", "Share to another device"]) {
       const button = screen.getByRole("button", { name });
       expect(field?.contains(button)).toBe(true);
+      expect(form?.contains(button)).toBe(false);
     }
   });
 
