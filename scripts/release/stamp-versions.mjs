@@ -40,7 +40,7 @@ export function stampCargoToml(source, version) {
  * `version.workspace = true` change when the workspace version does.
  */
 export function workspaceCrates(root) {
-  const workspace = readFileSync(resolve(root, 'Cargo.toml'), 'utf8')
+  const workspace = readFileSync(resolve(root, 'Cargo.toml'), 'utf8').replaceAll('\r\n', '\n')
   const members = workspace.match(/^members\s*=\s*\[([^\]]*)\]/m)
   if (!members) throw new Error('Could not find [workspace] members in Cargo.toml')
   const patterns = [...members[1].matchAll(/"([^"]+)"/g)].map((m) => m[1])
@@ -49,7 +49,8 @@ export function workspaceCrates(root) {
     for (const dir of globSync(pattern, { cwd: root })) {
       const manifestPath = resolve(root, dir, 'Cargo.toml')
       if (!existsSync(manifestPath)) continue
-      const manifest = readFileSync(manifestPath, 'utf8')
+      // A CRLF checkout would defeat the `^` anchors below.
+      const manifest = readFileSync(manifestPath, 'utf8').replaceAll('\r\n', '\n')
       const name = manifest.match(/^name\s*=\s*"([^"]+)"/m)
       if (name && /^version\.workspace\s*=\s*true/m.test(manifest)) names.push(name[1])
     }
@@ -112,18 +113,36 @@ export function stampCrashReporterCfg(source, version) {
 }
 
 /** Write `version` into every manifest under `root`. Returns which files changed. */
+/**
+ * Run `transform` over LF text, then give the file its own endings back.
+ *
+ * `.gitattributes` normalises to LF in the repository and a Windows checkout
+ * converts to CRLF on the way out, so every stamper below would otherwise have
+ * to cope: the Cargo.lock split looks for "\n[[package]]\n", and the `$`
+ * anchors in the version patterns sit before a `\r` that stops them matching.
+ * Handling it once here keeps each stamper about versions rather than about
+ * line endings.
+ */
+export function withLfEndings(source, transform) {
+  const crlf = source.includes('\r\n')
+  const result = transform(crlf ? source.replaceAll('\r\n', '\n') : source)
+  return crlf ? result.replaceAll('\n', '\r\n') : result
+}
+
 export function stampVersions(root, version) {
   const changed = []
   for (const file of VERSIONED_FILES) {
     const path = resolve(root, file)
     const before = readFileSync(path, 'utf8')
-    const after = file === 'Cargo.lock'
-      ? stampCargoLock(before, version, workspaceCrates(root))
-      : file.endsWith('.toml')
-        ? stampCargoToml(before, version)
-        : file.endsWith('.cfg')
-          ? stampCrashReporterCfg(before, version)
-          : stampJsonVersion(before, version, file)
+    const after = withLfEndings(before, (text) =>
+      file === 'Cargo.lock'
+        ? stampCargoLock(text, version, workspaceCrates(root))
+        : file.endsWith('.toml')
+          ? stampCargoToml(text, version)
+          : file.endsWith('.cfg')
+            ? stampCrashReporterCfg(text, version)
+            : stampJsonVersion(text, version, file)
+    )
     if (after !== before) {
       writeFileSync(path, after)
       changed.push(file)
