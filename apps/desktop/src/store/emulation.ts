@@ -4,7 +4,8 @@ import type { DevicePreset } from "../data/devices";
 import { defaultMode, safeAreaFor, viewportFor } from "../components/simulator/geometry";
 import type { UiMode, Zoom } from "../components/simulator/geometry";
 import { ipc } from "../lib/ipc";
-import type { DeviceInput, EnvironmentInput, MediaInput, NetworkProfile } from "../lib/ipc";
+import type { DeviceEmulated, DeviceInput, EnvironmentInput, MediaInput, NetworkProfile } from "../lib/ipc";
+import { events } from "../lib/ipc";
 import { useBrowser } from "./browser";
 import { errorMessage } from "../lib/errors";
 
@@ -64,6 +65,7 @@ interface EmulationState {
   recent: string[];
   setThrottle: (tabId: string, profile: NetworkProfile | null) => Promise<void>;
   setDevice: (tabId: string, deviceId: string | null) => Promise<void>;
+  adopt: (shown: DeviceEmulated) => void;
   setCustomSize: (tabId: string, width: number, height: number) => Promise<void>;
   toggleLandscape: (tabId: string) => Promise<void>;
   setUi: (tabId: string, ui: UiMode) => Promise<void>;
@@ -212,6 +214,45 @@ export const useEmulation = create<EmulationState>((set, get) => ({
     // about a new device; clearing goes straight through.
     if (!byTab[tabId]) await push(tabId, undefined, 1);
   },
+  /**
+   * Show what an agent already emulated.
+   *
+   * The host has applied the metrics over CDP by the time this arrives, so
+   * nothing is pushed back: that would reload the page a second time for a
+   * user agent that has not changed. What is missing is the half CDP cannot
+   * do -- the frame, the scale and the native view's bounds -- and putting the
+   * selection in the store is what makes the stage do it. The stage then
+   * reports its scale, which is the one push that follows.
+   */
+  adopt: (shown) => {
+    const byTab = { ...get().byTab };
+    const tabId = shown.tab_id;
+    if (!shown.preset && !shown.size) {
+      if (!byTab[tabId]) return;
+      delete byTab[tabId];
+      pushed.delete(tabId);
+      set({ byTab });
+      return;
+    }
+    const current = byTab[tabId];
+    const ui = (["browser", "standalone", "none"] as const).find((m) => m === shown.ui) ?? "none";
+    byTab[tabId] = shown.preset
+      ? { deviceId: shown.preset, landscape: shown.landscape, ui, zoom: current?.zoom ?? "fit" }
+      : {
+          deviceId: "custom",
+          landscape: shown.landscape,
+          ui: "none",
+          zoom: current?.zoom ?? "fit",
+          custom: { width: shown.size?.[0] ?? 0, height: shown.size?.[1] ?? 0 },
+        };
+    // The host pushed these metrics itself, so forget what the chrome last
+    // sent: the next scale report should be treated as a change, not a repeat.
+    pushed.delete(tabId);
+    set({
+      byTab,
+      recent: shown.preset ? remember(get().recent, shown.preset) : get().recent,
+    });
+  },
   setCustomSize: async (tabId, width, height) => {
     const current = get().byTab[tabId];
     const sel: DeviceSelection = { deviceId: "custom", landscape: false, ui: "none", zoom: current?.zoom ?? "fit", custom: { width, height } };
@@ -278,3 +319,22 @@ export const selectMedia = (tabId: string | null) => (s: EmulationState) => (tab
 export const selectThrottle = (tabId: string | null) => (s: EmulationState) => (tabId ? (s.throttle[tabId] ?? null) : null);
 export const selectEnvironment = (tabId: string | null) => (s: EmulationState) => (tabId ? (s.environment[tabId] ?? DEFAULT_ENVIRONMENT) : DEFAULT_ENVIRONMENT);
 export const selectDevice = (tabId: string | null) => (s: EmulationState) => (tabId ? s.byTab[tabId] : undefined);
+
+let listening = false;
+
+/**
+ * Follow the devices an agent asks for.
+ *
+ * `page_resize` applies the metrics over CDP itself, which tells the page its
+ * size and nothing else -- the native view keeps the whole window, so the page
+ * paints a phone-shaped column in the corner with black around it. The stage
+ * is what makes it look like a device, and the stage reads this store.
+ */
+export function listenForEmulation() {
+  if (listening) return;
+  listening = true;
+  // Outside Tauri (tests) there is no bridge, and nothing is driving a tab.
+  void events.deviceEmulated
+    .listen((e) => useEmulation.getState().adopt(e.payload))
+    .catch(() => undefined);
+}

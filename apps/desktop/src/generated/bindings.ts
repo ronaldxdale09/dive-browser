@@ -640,6 +640,7 @@ export const events = {
 	consoleEntry: makeEvent<ConsoleEntry>("console-entry"),
 	credentialPrompt: makeEvent<CredentialPrompt>("credential-prompt"),
 	devServersChanged: makeEvent<DevServersChanged>("dev-servers-changed"),
+	deviceEmulated: makeEvent<DeviceEmulated>("device-emulated"),
 	downloadNotice: makeEvent<DownloadNotice>("download-notice"),
 	inspectEvent: makeEvent<InspectEvent>("inspect-event"),
 	jsDialogAsked: makeEvent<JsDialogAsked>("js-dialog-asked"),
@@ -1062,7 +1063,6 @@ export type DevServersChanged = {
 	servers: DevServer[],
 };
 
-/**  A device as sent by the chrome, or built from a catalog preset. */
 export type Device = {
 	/**  Viewport width in CSS pixels. */
 	width: number,
@@ -1085,6 +1085,33 @@ export type Device = {
 	scale?: number | null,
 	/**  What `env(safe-area-inset-*)` reports. Absent leaves it alone. */
 	safe_area?: Insets | null,
+};
+
+/**
+ *  A device as sent by the chrome, or built from a catalog preset.
+ *  A device an agent asked for, so the chrome can show the same thing.
+ *
+ *  Emulation is two halves and only one of them is CDP. `setDeviceMetricsOverride`
+ *  tells the page it is 390px wide; it does not make the native view 390px
+ *  wide, so a page emulated from outside the chrome paints a phone-shaped
+ *  column in the corner of a full-size view with black around it. The stage
+ *  owns the other half -- the frame, the scale, and the view bounds -- so the
+ *  agent asks for a device and the chrome puts that device on screen.
+ */
+export type DeviceEmulated = {
+	/**  The tab the device was applied to. */
+	tab_id: TabId,
+	/**  Preset id from [`presets`], or `None` when emulation was cleared. */
+	preset: string | null,
+	/**  Set for an exact width and height rather than a preset. */
+	size: [number, number] | null,
+	/**  Whether the device was rotated out of its natural orientation. */
+	landscape: boolean,
+	/**
+	 *  What surrounds the page: the device's browser bars, an installed app,
+	 *  or nothing.
+	 */
+	ui: string,
 };
 
 /**  A download started or finished; shown as a toast. */
