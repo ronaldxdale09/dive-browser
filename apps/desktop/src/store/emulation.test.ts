@@ -94,12 +94,15 @@ describe("adopting what an agent emulated", () => {
   });
 
   it("puts the agent's preset on the stage", () => {
-    useEmulation.getState().adopt({ ...base, preset: "iphone-15-pro" });
+    useEmulation.getState().adopt({ ...base, preset: "iphone-15" });
     const sel = useEmulation.getState().byTab["tab-1"];
-    expect(sel).toMatchObject({ deviceId: "iphone-15-pro", landscape: false, ui: "browser" });
+    expect(sel).toMatchObject({ deviceId: "iphone-15", landscape: false, ui: "browser" });
+    // The id has to be one the stage can draw: `adopt` trusts the host's
+    // catalog, so this is where a made-up id in a test would otherwise hide.
+    expect(deviceById("iphone-15")).toBeDefined();
     // It belongs in the recents like any other choice: the person may want to
     // go back to whatever the agent was looking at.
-    expect(useEmulation.getState().recent).toContain("iphone-15-pro");
+    expect(useEmulation.getState().recent).toContain("iphone-15");
   });
 
   it("carries a rotation and an exact size", () => {
@@ -114,7 +117,7 @@ describe("adopting what an agent emulated", () => {
   });
 
   it("takes the stage back down when the agent resets", () => {
-    useEmulation.getState().adopt({ ...base, preset: "iphone-15-pro" });
+    useEmulation.getState().adopt({ ...base, preset: "iphone-15" });
     useEmulation.getState().adopt(base);
     expect(useEmulation.getState().byTab["tab-1"]).toBeUndefined();
   });
@@ -124,8 +127,8 @@ describe("adopting what an agent emulated", () => {
     // page a second time for a user agent that never changed.
     const sel = useEmulation.getState();
     expect(sel.adopt).toBeTypeOf("function");
-    expect(() => sel.adopt({ ...base, preset: "iphone-15-pro" })).not.toThrow();
+    expect(() => sel.adopt({ ...base, preset: "iphone-15" })).not.toThrow();
     // `adopt` is synchronous precisely because it talks to nobody.
-    expect(sel.adopt({ ...base, preset: "iphone-15-pro" })).toBeUndefined();
+    expect(sel.adopt({ ...base, preset: "iphone-15" })).toBeUndefined();
   });
 });
