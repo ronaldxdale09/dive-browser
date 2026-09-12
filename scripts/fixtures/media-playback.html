@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Media playback fixture</title>
+<style>
+  html { overflow: visible; }
+  body { height: 0; margin: 0; overflow: auto; }
+  #player { position: fixed; inset: 40px auto auto 40px; width: 480px; height: 270px; background: #111; }
+  video { width: 100%; height: 100%; }
+  [data-startup-play] { position: absolute; left: 206px; top: 111px; width: 68px; height: 48px; z-index: 2; }
+</style>
+<div id="player">
+  <video src="/media-playback.webm" preload="auto"></video>
+  <button data-startup-play aria-label="Start fixture video">Play</button>
+</div>
+<script>
+  const video = document.querySelector("video");
+  const button = document.querySelector("[data-startup-play]");
+  button.addEventListener("click", async (event) => {
+    window.fixtureInput = { trusted: event.isTrusted, x: event.clientX, y: event.clientY };
+    await video.play();
+    button.hidden = true;
+  });
+</script>

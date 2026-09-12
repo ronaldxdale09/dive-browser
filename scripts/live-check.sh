@@ -12,13 +12,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MCP="${SCRIPT_DIR}/mcp-call.py"
+MEDIA_CHECK="${SCRIPT_DIR}/media-playback-check.py"
 PORT="${LIVE_MCP_PORT:-7493}"
 CDP_P95_BUDGET_MS="${CDP_P95_BUDGET_MS:-5}"
 YOUTUBE_URL="${LIVE_YOUTUBE_URL:-https://www.youtube.com/watch?v=jNQXAC9IVRw}"
 DATA_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dive-live.XXXXXX")"
 SITE_DIR="${DATA_DIR}/site"
 LOG="${REPO_ROOT}/target/live-check.log"
-mkdir -p "${SITE_DIR}" "${REPO_ROOT}/target"
+EVIDENCE_DIR="${REPO_ROOT}/target/readiness-8"
+mkdir -p "${SITE_DIR}" "${REPO_ROOT}/target" "${EVIDENCE_DIR}"
 
 if [[ -n "${DIVE_BIN:-}" && -x "${DIVE_BIN}" ]]; then
     BIN="${DIVE_BIN}"
@@ -231,6 +233,22 @@ mcp call page_throttle "{\"tab_id\": \"${B_ID}\", \"profile\": \"none\"}" >/dev/
 mcp call tab_navigate "{\"tab_id\": \"${B_ID}\", \"url\": \"${SITE}/b.html\"}" >/dev/null || fail "navigation did not recover after clearing offline mode"
 mcp call page_wait_for "{\"tab_id\": \"${B_ID}\", \"text\": \"bravo content\", \"timeout_ms\": 15000}" >/dev/null || fail "tab did not recover after offline navigation"
 
+step "trusted startup input produces sustained local media playback"
+cp "${SCRIPT_DIR}/fixtures/media-playback.html" "${SITE_DIR}/media-playback.html"
+cp "${SCRIPT_DIR}/fixtures/media-playback.webm" "${SITE_DIR}/media-playback.webm"
+MEDIA_TAB=$(mcp call tab_open "{\"url\": \"${SITE}/media-playback.html\"}") || fail "media fixture tab could not be opened"
+MEDIA_ID=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"${MEDIA_TAB}")
+mcp call tab_activate "{\"tab_id\": \"${MEDIA_ID}\"}" >/dev/null || fail "media fixture tab could not be activated"
+mcp call page_wait_for "{\"tab_id\": \"${MEDIA_ID}\", \"locator\": \"video\", \"load\": true, \"timeout_ms\": 15000}" >/dev/null || fail "media fixture video did not load"
+if ! LOCAL_PLAYBACK=$(python3 "${MEDIA_CHECK}" --data-dir "${DATA_DIR}" --port "${PORT}" --tab-id "${MEDIA_ID}" --url "${SITE}/media-playback.html"); then
+    printf '%s\n' "${LOCAL_PLAYBACK}" >"${EVIDENCE_DIR}/media-playback-local.json"
+    fail "local media did not sustain playback: ${LOCAL_PLAYBACK}"
+fi
+printf '%s\n' "${LOCAL_PLAYBACK}" >"${EVIDENCE_DIR}/media-playback-local.json"
+echo "   ${LOCAL_PLAYBACK}"
+mcp call tab_close "{\"tab_id\": \"${MEDIA_ID}\"}" >/dev/null
+mcp call tab_activate "{\"tab_id\": \"${B_ID}\"}" >/dev/null
+
 if [[ "${LIVE_SKIP_YOUTUBE:-0}" != "1" ]]; then
     step "YouTube video reaches playback"
     # Let the startup CDP probe finish before loading a deliberately heavy external
@@ -242,16 +260,11 @@ if [[ "${LIVE_SKIP_YOUTUBE:-0}" != "1" ]]; then
     YOUTUBE_ID=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"${YOUTUBE}")
     mcp call tab_activate "{\"tab_id\": \"${YOUTUBE_ID}\"}" >/dev/null || fail "YouTube tab could not be activated"
     mcp call page_wait_for "{\"tab_id\": \"${YOUTUBE_ID}\", \"locator\": \"video\", \"load\": true, \"timeout_ms\": 45000}" >/dev/null || fail "YouTube video element did not load"
-    # Use the persistent transport control: the large aria-label="Play" overlay
-    # can disappear between discovery and click during player initialization.
-    # A script-level play() during YouTube initialization can be immediately
-    # cancelled by the player. Exercise its visible control and require actual
-    # sustained playback; a fraction of a second before pausing is not success.
-    mcp call page_wait_for "{\"tab_id\": \"${YOUTUBE_ID}\", \"locator\": \"css=.ytp-play-button\", \"timeout_ms\": 15000}" >/dev/null || fail "YouTube Play control did not become available"
-    mcp call page_evaluate "{\"tab_id\": \"${YOUTUBE_ID}\", \"expression\": \"document.querySelector('video').muted=true\"}" >/dev/null || fail "could not mute the test video"
-    mcp call page_click "{\"tab_id\": \"${YOUTUBE_ID}\", \"locator\": \"css=.ytp-play-button\"}" >/dev/null || fail "YouTube Play control could not be clicked"
-    PLAYBACK=$(mcp call page_evaluate "{\"tab_id\": \"${YOUTUBE_ID}\", \"expression\": \"(async()=>{const v=document.querySelector('video');if(!v)throw new Error('video missing');const start=v.currentTime;const end=performance.now()+10000;while(performance.now()<end){if(document.querySelector('video')!==v)throw new Error('player replaced video during verification');if(v.currentTime>start+1.5&&v.readyState>=2&&!v.paused)return {advanced:true,currentTime:v.currentTime,readyState:v.readyState,paused:v.paused};await new Promise(r=>setTimeout(r,100))}return {advanced:false,currentTime:v.currentTime,readyState:v.readyState,paused:v.paused,error:v.error?.message}})()\"}") || fail "YouTube playback evaluation failed"
-    python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["advanced"] and v["readyState"] >= 2 and not v["paused"], v' <<<"${PLAYBACK}" || fail "YouTube did not sustain playback: ${PLAYBACK}"
+    if ! PLAYBACK=$(python3 "${MEDIA_CHECK}" --data-dir "${DATA_DIR}" --port "${PORT}" --tab-id "${YOUTUBE_ID}" --url "${YOUTUBE_URL}"); then
+        printf '%s\n' "${PLAYBACK}" >"${EVIDENCE_DIR}/media-playback-youtube.json"
+        fail "YouTube did not sustain playback: ${PLAYBACK}"
+    fi
+    printf '%s\n' "${PLAYBACK}" >"${EVIDENCE_DIR}/media-playback-youtube.json"
     echo "   ${PLAYBACK}"
     mcp call tab_close "{\"tab_id\": \"${YOUTUBE_ID}\"}" >/dev/null
     mcp call tab_activate "{\"tab_id\": \"${B_ID}\"}" >/dev/null
