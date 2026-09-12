@@ -28,7 +28,7 @@ use crate::cef_impl::{client as browser_client, cookie, request_context, request
 use crate::pending_creation::{
     Completion, CompletionToken, Creation, PendingQueue, SharedContexts,
 };
-use crate::runtime::{CefRuntime, Message, RuntimeContext, WinitCefApp};
+use crate::runtime::{CefRuntime, Message, NativeDeadline, RuntimeContext, WinitCefApp};
 use crate::window::AppWindow;
 
 pub use crate::reserved_shortcut_native::NativeNewTabTarget;
@@ -627,19 +627,20 @@ impl<T: UserEvent> WinitCefApp<T> {
             pending,
         )
         .ok_or_else(|| Error::CreateWebview("CEF request context rejected".into()))?;
+        if !self.state.native_deadlines.schedule(
+            NativeDeadline::Creation(webview_id),
+            std::time::Instant::now() + request_context::CREATION_DEADLINE,
+        ) {
+            return Err(Error::CreateWebview(
+                "CEF pending creation capacity reached".into(),
+            ));
+        }
         self.state
             .window_orders
             .entry(window_id)
             .or_default()
             .push(webview_id);
         self.state.pending_browsers.insert(webview_id, prepared);
-        let sender = self.context.sender.clone();
-        let proxy = self.context.proxy.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(request_context::CREATION_DEADLINE);
-            let _ = sender.send(Message::CreationTimeout(webview_id));
-            proxy.wake_up();
-        });
         Ok(())
     }
 
@@ -975,6 +976,9 @@ impl<T: UserEvent> WinitCefApp<T> {
             self.fail_attached_creation(id, "ERR_DIVE_DOCUMENT_START_REGISTRATION");
             return;
         }
+        self.state
+            .native_deadlines
+            .cancel(&NativeDeadline::Creation(id));
         child.initialization_ready = true;
         load_initial_url(&child.browser, &url);
         let mut queue = std::mem::replace(
@@ -987,6 +991,9 @@ impl<T: UserEvent> WinitCefApp<T> {
     }
 
     pub(crate) fn fail_attached_creation(&mut self, id: u32, reason: &str) {
+        self.state
+            .native_deadlines
+            .cancel(&NativeDeadline::Creation(id));
         let Some(child) = self
             .state
             .windows
@@ -1048,6 +1055,9 @@ impl<T: UserEvent> WinitCefApp<T> {
     }
 
     fn end_pending_creation(&mut self, id: u32, reason: Option<&str>) {
+        self.state
+            .native_deadlines
+            .cancel(&NativeDeadline::Creation(id));
         let Some(pending) = self.state.pending_browsers.get_mut(&id) else {
             return;
         };
@@ -1310,6 +1320,11 @@ impl<T: UserEvent> WinitCefApp<T> {
         webview_id: u32,
         message: WebviewMessage,
     ) {
+        if matches!(message, WebviewMessage::Close) {
+            self.state
+                .native_deadlines
+                .cancel(&NativeDeadline::Creation(webview_id));
+        }
         if self.state.pending_browsers.contains_key(&webview_id) {
             self.handle_pending_message(window_id, webview_id, message);
             return;

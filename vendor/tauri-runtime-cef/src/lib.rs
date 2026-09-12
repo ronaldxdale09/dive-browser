@@ -8,9 +8,10 @@
 mod cef_impl;
 pub mod downloads;
 mod external_message_pump;
+mod native_deadlines;
 mod native_input_trace;
-mod platform;
 mod pending_creation;
+mod platform;
 mod reserved_shortcut;
 mod reserved_shortcut_native;
 mod runtime;

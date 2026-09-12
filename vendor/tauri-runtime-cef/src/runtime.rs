@@ -333,20 +333,24 @@ pub(crate) type AfterWindowCreationCallback = Box<dyn for<'a> Fn(RawWindow<'a>) 
 #[cfg(any(target_os = "macos", windows))]
 const CLOSE_ACK_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
 
+/// Native-loop timers carry only identities, never browser/window ownership.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) enum NativeDeadline {
+    Creation(u32),
+    #[cfg(any(target_os = "macos", windows))]
+    CloseAcknowledgement(u32),
+}
+
 pub(crate) enum Message<T: UserEvent> {
     EventLoop(EventLoopMessage),
     BrowserClosed(WindowId, u32, i32),
     RequestContextReady(u32, Option<RequestContext>),
     BrowserCreated(u32, Browser),
-    CreationTimeout(u32),
     InitialScriptsReady(u32, bool, String),
     /// CEF handed us the teardown of a webview's browser, keyed by the webview's
     /// process-unique id. See `TauriCefChildLifeSpanHandler::do_close`.
     #[cfg(any(target_os = "macos", windows))]
     DestroyWebviewHostWindow(u32),
-    /// The close-acknowledgement grace period for a webview ran out.
-    #[cfg(any(target_os = "macos", windows))]
-    CloseAckTimeout(u32),
     Opened(Vec<url::Url>),
     #[cfg(target_os = "macos")]
     Reopen {
@@ -479,6 +483,7 @@ pub(crate) struct AppState<T: UserEvent> {
     pub(crate) callback: Box<dyn FnMut(RunEvent<T>)>,
     pub(crate) live_browsers: usize,
     pub(crate) pending_browsers: HashMap<u32, webview::PendingBrowser>,
+    pub(crate) native_deadlines: crate::native_deadlines::Deadlines<NativeDeadline>,
     pub(crate) window_orders: HashMap<WindowId, Vec<u32>>,
     closing_windows: HashSet<WindowId>,
     exit_code: Arc<AtomicI32>,
@@ -514,6 +519,7 @@ impl<T: UserEvent> WinitCefApp<T> {
                 callback,
                 live_browsers: 0,
                 pending_browsers: HashMap::new(),
+                native_deadlines: crate::native_deadlines::Deadlines::new(4096),
                 window_orders: HashMap::new(),
                 closing_windows: HashSet::new(),
                 exit_code: Arc::new(AtomicI32::new(0)),
@@ -570,12 +576,6 @@ impl<T: UserEvent> WinitCefApp<T> {
             Message::InitialScriptsReady(id, success, url) => {
                 self.initial_scripts_ready(id, success, url)
             }
-            Message::CreationTimeout(id) => {
-                self.fail_pending_creation(id, "ERR_DIVE_NATIVE_CREATION_TIMEOUT");
-                self.fail_attached_creation(id, "ERR_DIVE_NATIVE_CREATION_TIMEOUT");
-                self.finish_pending_window_closes(event_loop);
-            }
-
             Message::BrowserClosed(_window_id, webview_id, browser_id) => {
                 self.retire_browser(event_loop, webview_id, browser_id);
             }
@@ -601,31 +601,13 @@ impl<T: UserEvent> WinitCefApp<T> {
                         // host view deallocates. Report a missing acknowledgement
                         // after a bounded interval, while retaining ownership and
                         // continuing to pump until the actual acknowledgement.
-                        let sender = self.context.sender.clone();
-                        let proxy = self.context.proxy.clone();
-                        std::thread::spawn(move || {
-                            std::thread::sleep(CLOSE_ACK_GRACE);
-                            let _ = sender.send(Message::CloseAckTimeout(webview_id));
-                            proxy.wake_up();
-                        });
+                        if !self.state.native_deadlines.schedule(
+                            NativeDeadline::CloseAcknowledgement(webview_id),
+                            std::time::Instant::now() + CLOSE_ACK_GRACE,
+                        ) {
+                            log::warn!(target: "dive_native_close", "close diagnostic timer capacity reached; retaining webview={webview_id} until acknowledgement");
+                        }
                     }
-                }
-            }
-            #[cfg(any(target_os = "macos", windows))]
-            Message::CloseAckTimeout(webview_id) => {
-                let still_registered = self.state.windows.values().any(|appwindow| {
-                    appwindow
-                        .children
-                        .iter()
-                        .any(|child| child.webview_id == webview_id)
-                });
-                if still_registered {
-                    log::warn!(
-                      target: "dive_native_close",
-                      "stage=unacknowledged webview={webview_id}: CEF did not confirm the close within {CLOSE_ACK_GRACE:?}; retaining native ownership until acknowledgement"
-                    );
-                    // A deadline is not a CEF acknowledgement. Keep the native
-                    // parent and child registered while normal pumping continues.
                 }
             }
             Message::CreateWindow {
@@ -902,6 +884,13 @@ impl<T: UserEvent> WinitCefApp<T> {
         let Some((window_id, mut child, was_last)) = closed else {
             return;
         };
+        self.state
+            .native_deadlines
+            .cancel(&NativeDeadline::Creation(webview_id));
+        #[cfg(any(target_os = "macos", windows))]
+        self.state
+            .native_deadlines
+            .cancel(&NativeDeadline::CloseAcknowledgement(webview_id));
         let mut emptied_window = None;
         {
             child.creation.retire();
@@ -957,6 +946,9 @@ impl<T: UserEvent> WinitCefApp<T> {
                 // Out of sight at once; the native teardown may take its grace period.
                 appwindow.window.set_visible(false);
                 for child in &appwindow.children {
+                    self.state
+                        .native_deadlines
+                        .cancel(&NativeDeadline::Creation(child.webview_id));
                     child.request_close(true);
                 }
             }
@@ -1051,6 +1043,9 @@ impl<T: UserEvent> WinitCefApp<T> {
     }
 
     fn close_all_browsers(&mut self) {
+        // No creation readiness remains relevant after shutdown. Actual CEF
+        // ownership is retained separately until callbacks acknowledge closure.
+        self.state.native_deadlines.clear();
         let pending: Vec<u32> = self.state.pending_browsers.keys().copied().collect();
         for id in pending {
             self.cancel_pending_creation(id);
@@ -1094,6 +1089,39 @@ impl<T: UserEvent> WinitCefApp<T> {
         }
     }
 
+    fn service_native_deadlines(&mut self, event_loop: &dyn ActiveEventLoop) {
+        // Bound work per turn as well as stored timers. A remaining expired
+        // entry causes WaitUntil to wake the next turn without spawning work.
+        let now = std::time::Instant::now();
+        let mut expired = false;
+        for _ in 0..64 {
+            let Some(deadline) = self.state.native_deadlines.pop_due(now) else {
+                break;
+            };
+            expired = true;
+            match deadline {
+                NativeDeadline::Creation(id) => {
+                    self.fail_pending_creation(id, "ERR_DIVE_NATIVE_CREATION_TIMEOUT");
+                    self.fail_attached_creation(id, "ERR_DIVE_NATIVE_CREATION_TIMEOUT");
+                }
+                #[cfg(any(target_os = "macos", windows))]
+                NativeDeadline::CloseAcknowledgement(id) => {
+                    if self
+                        .state
+                        .windows
+                        .values()
+                        .any(|window| window.children.iter().any(|child| child.webview_id == id))
+                    {
+                        log::warn!(target: "dive_native_close", "stage=unacknowledged webview={id}: CEF did not confirm close within {CLOSE_ACK_GRACE:?}; retaining native ownership until acknowledgement");
+                    }
+                }
+            }
+        }
+        if expired {
+            self.finish_pending_window_closes(event_loop);
+        }
+    }
+
     /// Service the default GLib main context so the external message pump's GLib
     /// source (and any GTK work CEF schedules) gets dispatched, then arm winit to
     /// wake when the next GLib pump deadline is due. Windows/macOS need no
@@ -1105,13 +1133,10 @@ impl<T: UserEvent> WinitCefApp<T> {
         target_os = "netbsd",
         target_os = "openbsd"
     ))]
-    fn service_glib(&self, event_loop: &dyn ActiveEventLoop) {
+    fn service_glib(&self) {
         let context = gtk::glib::MainContext::default();
         while context.pending() {
             context.iteration(false);
-        }
-        if let Some(deadline) = self.context.cef_pump.next_deadline() {
-            event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(deadline));
         }
     }
 }
@@ -1150,8 +1175,31 @@ impl<T: UserEvent> ApplicationHandler for WinitCefApp<T> {
             target_os = "netbsd",
             target_os = "openbsd"
         ))]
-        self.service_glib(event_loop);
+        self.service_glib();
         self.run_callback(RunEvent::MainEventsCleared);
+        self.service_native_deadlines(event_loop);
+        #[cfg(not(any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        )))]
+        let pump_deadline = None;
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        ))]
+        let pump_deadline = self.context.cef_pump.next_deadline();
+        let next =
+            crate::native_deadlines::earliest(self.state.native_deadlines.next(), pump_deadline);
+        event_loop.set_control_flow(next.map_or(
+            winit::event_loop::ControlFlow::Wait,
+            winit::event_loop::ControlFlow::WaitUntil,
+        ));
     }
 
     fn window_event(
@@ -1923,5 +1971,56 @@ impl<T: UserEvent> Runtime<T> for CefRuntime<T> {
         if code != 0 {
             std::process::exit(code);
         }
+    }
+}
+
+#[cfg(test)]
+mod native_deadline_tests {
+    use super::NativeDeadline;
+    use crate::{
+        native_deadlines::Deadlines,
+        pending_creation::{Completion, Creation},
+    };
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn expired_creation_deadline_retains_parent_for_late_success_and_close_ack() {
+        let now = Instant::now();
+        let mut timers = Deadlines::new(2);
+        let mut creation = Creation::new(7);
+        assert!(creation.context_ready());
+        assert!(creation.accept());
+        assert!(timers.schedule(NativeDeadline::Creation(1), now));
+        assert_eq!(timers.pop_due(now), Some(NativeDeadline::Creation(1)));
+        assert!(creation.fail());
+        assert!(creation.pins_parent());
+        assert_eq!(timers.next(), None);
+        assert_eq!(creation.complete(), Completion::Close);
+        assert!(creation.pins_parent());
+        assert!(creation.retire());
+        assert!(!creation.pins_parent());
+    }
+
+    #[test]
+    fn rapid_readiness_and_context_cancellation_reuse_timer_capacity() {
+        let now = Instant::now();
+        let mut timers = Deadlines::new(4);
+        for id in 0..10_000 {
+            let mut creation = Creation::new(7);
+            let key = NativeDeadline::Creation(id);
+            assert!(timers.schedule(key, now + Duration::from_secs(15)));
+            if id % 2 == 0 {
+                assert!(creation.cancel());
+                assert!(!creation.context_ready());
+            } else {
+                assert!(creation.context_ready());
+                assert!(creation.accept());
+                assert_eq!(creation.complete(), Completion::Attach);
+            }
+            assert!(timers.cancel(&key));
+            assert_eq!(timers.next(), None);
+        }
+        timers.clear();
+        assert_eq!(timers.pop_due(now + Duration::from_secs(60)), None);
     }
 }
