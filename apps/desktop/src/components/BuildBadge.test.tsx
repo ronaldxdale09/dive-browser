@@ -18,7 +18,7 @@ describe("BuildBadge", () => {
     const dialog = screen.getByRole("dialog", { name: "Build details" });
     expect(dialog.textContent).toContain("0.1.5");
     expect(dialog.textContent).toContain("212");
-    expect(dialog.textContent).not.toContain("9966239ab");
+    expect(dialog.textContent).toContain("9966239ab");
     expect(dialog.textContent).toContain(formatBuilt(info.build.built_at) ?? "");
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

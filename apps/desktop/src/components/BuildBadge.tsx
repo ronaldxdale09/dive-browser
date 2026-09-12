@@ -55,7 +55,9 @@ export function BuildBadge({ align = "end", side = "below" }: {
     : "border-line-2 bg-surface-2 text-ink-3 hover:bg-surface-3 hover:text-ink-2 aria-expanded:bg-surface-3 aria-expanded:text-ink-2";
   const dot = dev ? "bg-warn" : "bg-ink-3/60";
   const built = info ? formatBuilt(info.build.built_at ?? 0) : null;
-  const summary = info ? `Dive ${info.version} (${label.toLowerCase()} build ${info.build.number}, built ${built ?? "unknown"})` : "";
+  // The commit is what tells a local build from the release it shares a
+  // version with, so it is in the summary a report gets pasted from.
+  const summary = info ? `Dive ${info.version} (${label.toLowerCase()} build ${info.build.number}, commit ${info.build.commit}, built ${built ?? "unknown"})` : "";
 
   const copy = () => {
     copyText(summary)
@@ -87,6 +89,7 @@ export function BuildBadge({ align = "end", side = "below" }: {
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 px-2 py-1">
             <Fact label="Version" value={info?.version} />
             <Fact label="Build" value={info?.build.number} />
+            <Fact label="Commit" value={info?.build.commit} />
             <Fact label="Built" value={built} />
           </dl>
           <div className="mt-1 flex justify-end border-t border-line-2 px-1 pt-1.5">
