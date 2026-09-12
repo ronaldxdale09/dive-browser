@@ -240,7 +240,7 @@ MEDIA_TAB=$(mcp call tab_open "{\"url\": \"${SITE}/media-playback.html\"}") || f
 MEDIA_ID=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"${MEDIA_TAB}")
 mcp call tab_activate "{\"tab_id\": \"${MEDIA_ID}\"}" >/dev/null || fail "media fixture tab could not be activated"
 mcp call page_wait_for "{\"tab_id\": \"${MEDIA_ID}\", \"locator\": \"video\", \"load\": true, \"timeout_ms\": 15000}" >/dev/null || fail "media fixture video did not load"
-if ! LOCAL_PLAYBACK=$(python3 "${MEDIA_CHECK}" --data-dir "${DATA_DIR}" --port "${PORT}" --tab-id "${MEDIA_ID}" --url "${SITE}/media-playback.html"); then
+if ! LOCAL_PLAYBACK=$(python3 "${MEDIA_CHECK}" --data-dir "${DATA_DIR}" --port "${PORT}" --tab-id "${MEDIA_ID}" --url "${SITE}/media-playback.html" --require-fixture-input); then
     printf '%s\n' "${LOCAL_PLAYBACK}" >"${EVIDENCE_DIR}/media-playback-local.json"
     fail "local media did not sustain playback: ${LOCAL_PLAYBACK}"
 fi

@@ -2,7 +2,9 @@
 """Verify sustained media playback through Dive's trusted MCP input path."""
 
 import argparse
+from collections import Counter
 import json
+import math
 import pathlib
 import sys
 import time
@@ -51,6 +53,13 @@ OBSERVE_EXPRESSION = r"""(() => {
     return document.elementsFromPoint(x, y).some(hit => hit === element || element.contains(hit));
   };
   const video = document.querySelector('video');
+  const player = document.getElementById('movie_player');
+  let content = null;
+  if (player) {
+    let data = null;
+    try { data = typeof player.getVideoData === 'function' ? player.getVideoData() : null; } catch {}
+    content = {video_id: data && data.video_id || null, ad_showing: player.classList.contains('ad-showing')};
+  }
   if (video && !state.ids.has(video)) state.ids.set(video, `video-${state.nextId++}`);
   if (video) video.muted = true;
   const candidates = [
@@ -61,6 +70,7 @@ OBSERVE_EXPRESSION = r"""(() => {
   return {
     url: location.href,
     documentIdentity: state.documentId,
+    content,
     scroll: {x: scrollX, y: scrollY},
     viewport: {width: innerWidth, height: innerHeight},
     video: video ? {
@@ -90,14 +100,31 @@ class JsonArgumentParser(argparse.ArgumentParser):
         raise ValueError(message)
 
 
-def same_document_url(expected, actual):
-    """Fragments may change during playback; every other URL part must match."""
+def classify_navigation(expected, actual):
+    """Allow exact navigation or YouTube's observed, same-video theme reload.
+
+    This classifies URL identity only. Document/video identity must independently
+    reset playback continuity even when the URL still names the intended video.
+    """
     try:
         left = urllib.parse.urlsplit(expected)
         right = urllib.parse.urlsplit(actual)
     except (TypeError, ValueError):
-        return False
-    return bool(left.scheme and left.netloc) and left[:4] == right[:4]
+        return "mismatch"
+    if not left.scheme or not left.netloc:
+        return "mismatch"
+    if left[:4] == right[:4]:
+        return "exact"
+    if left[:3] != ("https", "www.youtube.com", "/watch") or right[:3] != left[:3]:
+        return "mismatch"
+    before = urllib.parse.parse_qsl(left.query, keep_blank_values=True)
+    after = urllib.parse.parse_qsl(right.query, keep_blank_values=True)
+    videos = [value for key, value in before if key == "v"]
+    if len(videos) != 1 or not videos[0] or any(key == "themeRefresh" for key, _ in before):
+        return "mismatch"
+    if Counter(after) == Counter(before + [("themeRefresh", "1")]):
+        return "same_video_theme_reload"
+    return "mismatch"
 
 
 class PlaybackVerifier:
@@ -107,6 +134,9 @@ class PlaybackVerifier:
 
     def __init__(self, expected_url):
         self.expected_url = expected_url
+        parsed = urllib.parse.urlsplit(expected_url)
+        ids = urllib.parse.parse_qs(parsed.query).get("v", [])
+        self.expected_video_id = ids[0] if parsed[:3] == ("https", "www.youtube.com", "/watch") and len(ids) == 1 else None
         self.identity = None
         self.window_at = None
         self.window_time = None
@@ -132,7 +162,7 @@ class PlaybackVerifier:
         self.previous_time = None
 
     def consume(self, obs):
-        if not same_document_url(self.expected_url, obs.get("url")):
+        if classify_navigation(self.expected_url, obs.get("url")) == "mismatch":
             return Decision("failure", "navigation_mismatch")
         video = obs.get("video")
         if not isinstance(video, dict):
@@ -143,6 +173,13 @@ class PlaybackVerifier:
         if not video.get("connected"):
             self._clear()
             return Decision("observing", "video_detached")
+        content = obs.get("content") or {}
+        if self.expected_video_id:
+            if content.get("ad_showing"):
+                self._clear()
+                return Decision("observing", "advertisement")
+            if content.get("video_id") and content["video_id"] != self.expected_video_id:
+                return Decision("failure", "player_content_mismatch")
 
         video_identity = video.get("identity")
         identity = (obs.get("documentIdentity"), video_identity)
@@ -169,6 +206,10 @@ class PlaybackVerifier:
             reason = "paused_without_visible_startup_control" if video.get("paused") else "video_not_ready"
             return Decision("observing", reason)
 
+        if self.expected_video_id and content.get("video_id") != self.expected_video_id:
+            self._clear()
+            return Decision("observing", "player_content_unverified")
+
         if self.identity is None or self.window_at is None:
             return self._reset(obs, "playback_window_started")
 
@@ -184,6 +225,57 @@ class PlaybackVerifier:
         if total_wall >= self.REQUIRED_ADVANCE and total_media >= self.REQUIRED_ADVANCE:
             return Decision("success", "sustained_playback", advanced_seconds=total_media)
         return Decision("observing", "advancing", advanced_seconds=max(0.0, total_media))
+
+
+def fixture_input_errors(evidence):
+    """Assert native fixture input receipts; never manufacture trusted events."""
+    errors = []
+    if evidence.get("status") != "success" or evidence.get("advanced_seconds", 0) < 1.5:
+        errors.append("sustained playback was not verified")
+    actions = evidence.get("actions", [])
+    if len(actions) != 1 or actions[0].get("type") != "trusted_click" or actions[0].get("locator") != "css=[data-startup-play]":
+        return errors + ["expected one fixture startup click"]
+    observations = evidence.get("observations", [])
+    if len(observations) < 2:
+        return errors + ["missing before and after observations"]
+    before, after = observations[0], observations[-1]
+    target = before.get("startup_target") or {}
+    rect = target.get("rect") or {}
+    def finite(value):
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    if not all(finite(rect.get(key)) for key in ("x", "y", "width", "height")) or rect.get("width", 0) <= 0 or rect.get("height", 0) <= 0:
+        return errors + ["missing startup bounds"]
+    click = actions[0].get("result") or {}
+    if not all(finite(click.get(key)) for key in ("x", "y")):
+        return errors + ["missing click coordinates"]
+    if not (rect["x"] <= click["x"] <= rect["x"] + rect["width"] and rect["y"] <= click["y"] <= rect["y"] + rect["height"]):
+        errors.append("click outside startup bounds")
+    first_video = before.get("video") or {}
+    identity = (before.get("documentIdentity"), first_video.get("identity"))
+    if not all(identity) or first_video.get("paused") is not True:
+        errors.append("fixture did not begin paused with stable identity")
+    for item in observations:
+        video = item.get("video") or {}
+        if (item.get("documentIdentity"), video.get("identity")) != identity or video.get("connected") is not True:
+            errors.append("fixture document or video was replaced")
+            break
+    last_video = after.get("video") or {}
+    if last_video.get("paused") is not False or last_video.get("readyState", 0) < 2:
+        errors.append("fixture did not finish playing")
+    events = after.get("trusted_pointer_events", [])
+    if [event.get("type") for event in events] != ["pointerdown", "pointerup", "click"]:
+        return errors + ["missing ordered native pointer events"]
+    previous_stamp = -1
+    for event in events:
+        stamp = event.get("at")
+        if (event.get("trusted") is not True or event.get("tag") != "BUTTON"
+                or event.get("id") != "start-media" or event.get("className") != "fixture-play"
+                or event.get("x") != click["x"] or event.get("y") != click["y"]
+                or not finite(stamp) or stamp < previous_stamp):
+            errors.append("native event receipt does not match the startup button")
+            break
+        previous_stamp = stamp
+    return errors
 
 
 class McpClient:
@@ -278,7 +370,8 @@ def verify(client, tab_id, expected_url, timeout=15.0, poll_interval=0.2):
         raw["observed_at"] = time.monotonic() - started
         decision = verifier.consume(raw)
         recorded = dict(raw)
-        recorded["url_matches_expected"] = same_document_url(expected_url, recorded.pop("url", None))
+        recorded["navigation"] = classify_navigation(expected_url, recorded.pop("url", None))
+        recorded["url_matches_expected"] = recorded["navigation"] != "mismatch"
         evidence["observations"].append(recorded)
         evidence["reason"] = decision.reason
         evidence["advanced_seconds"] = decision.advanced_seconds
@@ -312,6 +405,7 @@ def main(argv=None):
     parser.add_argument("--tab-id", required=True)
     parser.add_argument("--url", required=True)
     parser.add_argument("--timeout", type=float, default=15.0)
+    parser.add_argument("--require-fixture-input", action="store_true")
     try:
         args = parser.parse_args(argv)
     except ValueError as error:
@@ -324,6 +418,12 @@ def main(argv=None):
         deadline = time.monotonic() + args.timeout
         client = McpClient(args.data_dir, args.port, timeout=max(0.001, deadline - time.monotonic()))
         evidence = verify(client, args.tab_id, args.url, timeout=max(0.001, deadline - time.monotonic()))
+        if args.require_fixture_input:
+            errors = fixture_input_errors(evidence)
+            evidence["fixture_input_errors"] = errors
+            if errors:
+                evidence["status"] = "failure"
+                evidence["reason"] = "fixture_input_mismatch"
     except Exception as error:
         evidence["error"] = str(error)
     print(json.dumps(evidence, sort_keys=True))

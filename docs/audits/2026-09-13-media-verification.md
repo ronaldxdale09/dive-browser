@@ -1,67 +1,46 @@
-# Task 2 report: Reliable automated media interaction
+# Native media verification — 2026-09-13
 
-## Status
+## Outcome and scope
 
-**DONE_WITH_CONCERNS**
+The media task passes three consecutive fresh-profile macOS runs of the complete native resilience harness. Each run verifies actual trusted startup input, sustained local playback, the intended YouTube video, renderer recovery, discard/wake, PDF, popups, sandboxing and native lifecycle. Independent scoped review: spec PASS, quality PASS.
 
-The deterministic helper, local causal fixture, harness integration, and behavioral tests are complete in commit `259e7e7`. Native execution of the new helper remains the acceptance boundary and is delegated to root as required by the task split. Root independently reported that the optimized `b54cf359` bundle locator-clicked both the zero-height BODY fixture and YouTube with trusted input, but that is supporting locator evidence rather than execution evidence for this new helper.
+This qualifies the media fix on the identified optimized macOS bundle. It does not qualify the pending native-creation rewrite, Windows, the required two-hour workloads, or the overall 8/10 rating. The existing camera/microphone test requiring OS consent was skipped in all three runs and remains unverified.
 
-Task 1 reviewer follow-up is separately committed as `d16c75c`. It adds the requested decisive regression for an `overflow:hidden`, stale zero-sized root box with a non-clipping BODY and visible button. No production injected or Rust source was changed.
+## Confirmed causes and changes
 
-## Implementation
+1. The injected actionability check treated a zero-height BODY as an ordinary clip ancestor even when its overflow propagated to the viewport. The corrected generic overflow behavior allows the visible Play control to receive native input. Native local evidence proves the zero-height BODY case and trusted events; no website-specific visibility bypass was added.
+2. The previous harness unconditionally clicked the transport toggle, which may mean Pause. The helper observes already-playing media and clicks only a visible startup control when paused.
+3. Early trusted pointerdown reached the actual YouTube Play button, then YouTube replaced its document and appended only `themeRefresh=1`. The original strict helper correctly exposed this as `navigation_mismatch`. No-input and mute-only controls did not navigate. Inspection of the first-party script loaded in the test found YouTube's theme-mismatch redirect; this behavior is also documented in [Mozilla's primary compatibility investigation](https://bugzilla.mozilla.org/show_bug.cgi?id=1671032).
 
-- `scripts/media-playback-check.py` implements the required CLI and emits one JSON evidence object on success or failure. It loads the bearer token without printing it, uses the caller's overall deadline for every MCP HTTP call, and returns nonzero for invalid arguments, initialization/RPC/action failures, navigation mismatch, player error, action exhaustion, or timeout.
-- Observation records include the intended startup target locator and bounds, viewport and scroll position, opaque document/video identity, video connection/readiness/paused/error/timing state, and actual trusted pointer event targets. Observed page and media URLs are not retained in evidence.
-- The state machine never clicks a playing video or a transport toggle. While paused it may click only a visible startup overlay (`.ytp-large-play-button` or the fixture's `[data-startup-play]`) through MCP `page_click`, with a global two-action bound. It does not call DOM `.click()` or `video.play()`.
-- Success requires at least 1.5 seconds of both wall-clock and media-time advancement while the same connected video remains ready and unpaused. Missing, detached, paused, unready, ended, replaced, reloaded-document, backward, or seek-jump observations reset the continuous window.
-- `scripts/fixtures/media-playback.html` reproduces the zero-height scrolling BODY with a visible startup control. Its page-owned trusted click handler starts a four-second local WebM. `scripts/live-check.sh` verifies this fixture first, then YouTube, and preserves JSON evidence in `target/readiness-8/` on success and failure.
+The navigation classifier now recognizes only the exact requested URL modulo fragment, or the same HTTPS `www.youtube.com/watch` URL with exactly one added `themeRefresh=1`. It requires a single unchanged video ID and rejects altered origin, port, path, duplicate parameters, unrelated query additions/removals and other video IDs. A reload resets the continuity window; no pre-reload progress counts toward success.
 
-## TDD and verification evidence
+The observer additionally checks YouTube's player video ID and excludes ads or unidentified content from success. Playback requires at least 1.5 seconds of both wall time and media advancement on the same connected, ready, unpaused video in the same document. Actions remain globally bounded at two and every RPC uses the remaining overall deadline.
 
-Red phases were observed for the missing helper; the unbounded third action; empty MCP notification response; missing-video continuity bridge; same-URL document identity reuse; per-RPC 60-second timeout; lost diagnostics after RPC timeout; malformed CLI output; and invalid detached/paused window baselines. Each failed for the intended behavioral reason before its implementation change.
+The local fixture asserts one actual startup click and ordered trusted pointerdown/up/click receipts, including target tag, ID, class, timestamps and coordinates within the observed button bounds. Missing, synthetic or mistargeted input fails the harness. Its real event handler starts the local WebM; the verifier does not invoke DOM click or play methods.
 
-Final checks:
+## Exact native evidence
 
-```text
-python3 -m unittest scripts/tests/test_media_playback_check.py
-17 tests passed
+Optimized local bundle, version 0.1.24, native production source `b54cf3595c7028d3195ad8b2780e4a0efd5fd41e` (later changes before these runs are scripts, tests and documentation):
 
-python3 -m unittest discover -s scripts/tests -p 'test_*.py'
-47 tests passed
+- Binary: `target/release/bundle/macos/Dive.app/Contents/MacOS/dive-desktop`
+- SHA256: `e9be2d2aa8e01d28897c7f4bcdcf513942251fbf9a98f7027b2e7f9d56baf1e7`
+- Machine-readable receipt: `target/readiness-8/media-native-qualification.json`
+- Logs: `target/readiness-8/media-final-full-{1,2,3}.log`
+- Full observations: `target/readiness-8/final{1,2,3}-media-playback-{local,youtube}.json`
 
-pnpm --filter @dive/desktop exec vitest run src/test/injectedVisibility.test.ts src/test/injected.test.ts
-2 files passed; 63 tests passed
+| Fresh run | Local continuous advance | YouTube continuous advance | CDP p95 | Full harness |
+| --- | ---: | ---: | ---: | --- |
+| 1 | 1.654298 s | 1.686985 s | 1.211 ms | PASS |
+| 2 | 1.656209 s | 1.698057 s | 1.063 ms | PASS |
+| 3 | 1.664225 s | 1.678837 s | 1.094 ms | PASS |
 
-bash -n scripts/live-check.sh
-python3 -m py_compile scripts/media-playback-check.py scripts/tests/test_media_playback_check.py
-ffprobe: media-playback.webm duration=4.000000
-git diff --check
-all passed
-```
+Each run observed the theme reload, verified the intended video after replacement, used one trusted startup action per fixture/video, and reported no local input assertion errors. The native lifecycle subphase includes four normal quit/window-close cycles and an intentional incomplete-startup failure. All owned harness processes were cleaned up by its exit trap.
 
-The full Python suite emitted its existing best-effort `sample` timeout/missing-tool diagnostics; the suite still exited 0.
+## Regression checks
 
-## Exact native command
+- 25 focused Python media tests passed; 56 total Python tests passed.
+- Four tests execute the exact injected observer expression, including stable/replaced identity, media state/bounds, content/ad identification and synthetic-event rejection.
+- TypeScript checking, scoped ESLint and diff whitespace checks passed.
+- Red results were recorded before implementing the navigation exception, content checks and input validator. Negative cases cover wrong videos/origins/queries, document replacement, ads, missing identity, synthetic input, wrong targets, missing events and insufficient playback.
 
-Run the complete harness three times. Each invocation creates a fresh disposable profile; per-run logs retain the JSON evidence even though the convenience JSON files use stable names.
-
-```bash
-cd /Users/dvle/Documents/GitHub/dive-browser-readiness
-for run in 1 2 3; do
-  DIVE_BIN="$PWD/target/release/bundle/macos/Dive.app/Contents/MacOS/dive-desktop" \
-    scripts/live-check.sh >"target/readiness-8/media-live-check-${run}.log" 2>&1 || exit 1
-done
-```
-
-For an already-running disposable instance and known tab, invoke only the helper:
-
-```bash
-python3 /Users/dvle/Documents/GitHub/dive-browser-readiness/scripts/media-playback-check.py \
-  --data-dir DIR --port PORT --tab-id ID \
-  --url 'https://www.youtube.com/watch?v=jNQXAC9IVRw'
-```
-
-## Remaining concerns
-
-- The new helper has not yet produced native JSON evidence in this implementation task. Root must execute it against the optimized bundle and retain the result before Task 2 can be called complete.
-- Windows native execution and the required two-hour continuous workload remain outside this task's execution split and are still required for the overall readiness rating.
+The earlier viewport task separately passed 63 injected visibility/locator tests and native causal verification. Every affected native check must run again after the creation lifecycle changes and on Windows before overall qualification.

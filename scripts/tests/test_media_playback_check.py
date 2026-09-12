@@ -3,6 +3,7 @@ import pathlib
 import io
 import json
 import unittest
+import copy
 from contextlib import redirect_stdout
 from unittest import mock
 
@@ -29,10 +30,42 @@ def observation(*, at, time, paused=False, ready=4, identity="video-1", document
         },
         "startup_target": target,
         "trusted_pointer_events": [],
+        "content": {"video_id": "jNQXAC9IVRw", "ad_showing": False},
     }
 
 
 class PlaybackVerifierTests(unittest.TestCase):
+    def test_youtube_does_not_count_ads_or_unidentified_media(self):
+        url = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+        for content in [None, {"video_id": "jNQXAC9IVRw", "ad_showing": True}]:
+            verifier = media.PlaybackVerifier(url)
+            for at in (0, 1, 2):
+                obs = observation(at=at, time=at, url=url)
+                obs["content"] = content
+                decision = verifier.consume(obs)
+                self.assertNotEqual(decision.status, "success")
+            self.assertEqual(verifier.consume(observation(at=3, time=3, url=url)).status, "observing")
+
+    def test_youtube_rejects_player_video_id_mismatch(self):
+        url = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+        obs = observation(at=0, time=0, url=url)
+        obs["content"]["video_id"] = "other-video"
+        decision = media.PlaybackVerifier(url).consume(obs)
+        self.assertEqual(decision.status, "failure")
+        self.assertEqual(decision.reason, "player_content_mismatch")
+
+    def test_youtube_theme_reload_requires_a_fresh_continuous_window(self):
+        url = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+        verifier = media.PlaybackVerifier(url)
+        verifier.consume(observation(at=0, time=0, url=url))
+        verifier.consume(observation(at=1, time=1, url=url))
+        reloaded = url + "&themeRefresh=1"
+        decision = verifier.consume(observation(at=1.7, time=1.7, document="new", url=reloaded))
+        self.assertEqual(decision.status, "observing")
+        self.assertEqual(decision.reason, "video_replaced")
+        self.assertEqual(verifier.consume(observation(at=2.7, time=2.7, document="new", url=reloaded)).status, "observing")
+        self.assertEqual(verifier.consume(observation(at=3.3, time=3.3, document="new", url=reloaded)).status, "success")
+
     def test_playing_video_is_observed_without_requesting_a_click(self):
         verifier = media.PlaybackVerifier("https://example.test/watch?v=one")
 
@@ -152,6 +185,71 @@ class PlaybackVerifierTests(unittest.TestCase):
         self.assertIsNone(decision.action)
         self.assertEqual(decision.status, "failure")
         self.assertEqual(decision.reason, "trusted_action_limit_exceeded")
+
+
+class NavigationIdentityTests(unittest.TestCase):
+    URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+
+    def test_only_verified_theme_reload_is_classified_as_same_video(self):
+        self.assertEqual(media.classify_navigation(self.URL, self.URL + "#player"), "exact")
+        self.assertEqual(media.classify_navigation(self.URL, self.URL + "&themeRefresh=1"), "same_video_theme_reload")
+        self.assertEqual(media.classify_navigation(self.URL, "https://www.youtube.com/watch?themeRefresh=1&v=jNQXAC9IVRw"), "same_video_theme_reload")
+
+    def test_theme_reload_does_not_admit_other_navigation_changes(self):
+        for actual in [
+            self.URL.replace("jNQXAC9IVRw", "other") + "&themeRefresh=1",
+            self.URL.replace("https:", "http:") + "&themeRefresh=1",
+            self.URL.replace("www.youtube.com", "www.youtube.com.evil.test") + "&themeRefresh=1",
+            self.URL.replace("www.youtube.com", "www.youtube.com:443") + "&themeRefresh=1",
+            self.URL.replace("/watch", "/embed") + "&themeRefresh=1",
+            self.URL + "&themeRefresh=0", self.URL + "&themeRefresh=1&themeRefresh=1",
+            self.URL + "&themeRefresh=1&v=jNQXAC9IVRw", self.URL + "&themeRefresh=1&extra=1",
+            "https://www.youtube.com/watch?themeRefresh=1",
+        ]:
+            with self.subTest(actual=actual):
+                self.assertEqual(media.classify_navigation(self.URL, actual), "mismatch")
+        self.assertEqual(media.classify_navigation(self.URL + "&t=2", self.URL + "&themeRefresh=1"), "mismatch")
+        self.assertEqual(media.classify_navigation("https://example.test/watch?v=one", "https://example.test/watch?v=one&themeRefresh=1"), "mismatch")
+
+
+class FixtureEvidenceTests(unittest.TestCase):
+    def evidence(self):
+        before = observation(at=0, time=0, paused=True, target={
+            "locator": "css=[data-startup-play]",
+            "rect": {"x": 246, "y": 151, "width": 68, "height": 48},
+        })
+        after = observation(at=2, time=1.8)
+        after["trusted_pointer_events"] = [
+            {"type": name, "trusted": True, "tag": "BUTTON", "id": "start-media", "className": "fixture-play", "x": 280, "y": 175, "at": stamp}
+            for name, stamp in [("pointerdown", 200), ("pointerup", 220), ("click", 220)]
+        ]
+        return {"status": "success", "advanced_seconds": 1.6,
+                "actions": [{"type": "trusted_click", "locator": "css=[data-startup-play]", "result": {"x": 280, "y": 175}}],
+                "observations": [before, after]}
+
+    def test_accepts_real_fixture_input_receipt_shape(self):
+        self.assertEqual(media.fixture_input_errors(self.evidence()), [])
+
+    def test_rejects_missing_synthetic_or_mistargeted_input(self):
+        original = self.evidence()
+        for field, value in [("trusted", False), ("tag", "HTML"), ("id", None), ("className", "other"), ("x", 1000), ("at", None)]:
+            evidence = copy.deepcopy(original)
+            evidence["observations"][-1]["trusted_pointer_events"][1][field] = value
+            with self.subTest(field=field):
+                self.assertTrue(media.fixture_input_errors(evidence))
+        for events in [[], original["observations"][-1]["trusted_pointer_events"][:2]]:
+            evidence = copy.deepcopy(original)
+            evidence["observations"][-1]["trusted_pointer_events"] = events
+            self.assertTrue(media.fixture_input_errors(evidence))
+
+    def test_rejects_autoplay_replacement_and_unverified_playback(self):
+        for field, value in [("actions", []), ("status", "failure"), ("advanced_seconds", 0.1)]:
+            evidence = self.evidence()
+            evidence[field] = value
+            self.assertTrue(media.fixture_input_errors(evidence))
+        evidence = self.evidence()
+        evidence["observations"][-1]["documentIdentity"] = "replacement"
+        self.assertTrue(media.fixture_input_errors(evidence))
 
 
 class McpClientProtocolTests(unittest.TestCase):

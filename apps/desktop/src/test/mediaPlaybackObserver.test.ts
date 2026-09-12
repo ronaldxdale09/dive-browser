@@ -28,6 +28,7 @@ interface Observation {
     rect: RectValue;
   } | null;
   startup_target: { locator: string; rect: RectValue } | null;
+  content: { video_id: string | null; ad_showing: boolean } | null;
   trusted_pointer_events: Array<{ type: string; trusted: boolean }>;
 }
 
@@ -67,6 +68,15 @@ beforeEach(() => {
 });
 
 describe("media playback browser observation", () => {
+  it("reports the player's content identity separately from an advertisement", () => {
+    document.body.innerHTML = '<div id="movie_player" class="ad-showing"></div>';
+    const player = document.getElementById("movie_player")!;
+    Object.assign(player, { getVideoData: () => ({ video_id: "jNQXAC9IVRw" }) });
+    expect(observe().content).toEqual({ video_id: "jNQXAC9IVRw", ad_showing: true });
+    player.classList.remove("ad-showing");
+    expect(observe().content).toEqual({ video_id: "jNQXAC9IVRw", ad_showing: false });
+  });
+
   it("reports media state, bounds and scroll while prioritizing the visible YouTube startup overlay", () => {
     document.body.innerHTML = `
       <video></video>
