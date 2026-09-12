@@ -1575,6 +1575,14 @@ fn attach_cdp(
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let sink = session.clone();
     tauri::async_runtime::spawn(async move {
+        // If this worker ever stops while the view lives -- it should only
+        // end when the view's handlers are dropped -- close the session so
+        // calls fail at once instead of every paused request sitting
+        // unanswered and every call waiting out its deadline.
+        let _closer = CloseSessionOnDrop {
+            session: sink.clone(),
+            tab,
+        };
         while let Some(bytes) = rx.recv().await {
             match std::str::from_utf8(&bytes) {
                 Ok(text) => {
@@ -1601,6 +1609,22 @@ fn attach_cdp(
         }
     })?;
     Ok(session)
+}
+
+/// Closes a session when the task that feeds it ends, unless it is already
+/// closed: a session nobody parses for is a tab that never answers.
+struct CloseSessionOnDrop {
+    session: CdpSession,
+    tab: TabId,
+}
+
+impl Drop for CloseSessionOnDrop {
+    fn drop(&mut self) {
+        if !self.session.is_closed() {
+            tracing::warn!(tab = %self.tab, "cdp worker stopped before its session; closing the session");
+            self.session.close();
+        }
+    }
 }
 
 /// Title of the runtime's internal initial-load document; never persist it.
