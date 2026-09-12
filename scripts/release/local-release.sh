@@ -105,7 +105,19 @@ pnpm test
 
 step "stamp ${VERSION} into this checkout"
 PUBLISHED=0
+CEF_CFG="${CEF_PATH}/Chromium Embedded Framework.framework/Resources/crash_reporter.cfg"
+CEF_CFG_BACKUP="$(mktemp -d "${TMPDIR:-/tmp}/dive-cef-config.XXXXXX")"
+if [[ -f "${CEF_CFG}" ]]; then
+    cp -p "${CEF_CFG}" "${CEF_CFG_BACKUP}/original"
+fi
 restore() {
+    if [[ -f "${CEF_CFG_BACKUP}/original" ]]; then
+        cp -p "${CEF_CFG_BACKUP}/original" "${CEF_CFG}"
+    else
+        rm -f "${CEF_CFG}"
+    fi
+    rm -f "${CEF_CFG_BACKUP}/original"
+    rmdir "${CEF_CFG_BACKUP}"
     if [[ "${PUBLISHED}" -eq 0 ]]; then
         git checkout -q -- "${STAMPED[@]}" || true
         echo "restored the unstamped files; nothing was published"
@@ -113,6 +125,11 @@ restore() {
 }
 trap restore EXIT
 node scripts/release/stamp-versions.mjs "${VERSION}"
+# The bundler copies and signs this framework, then creates both installers.
+# Adding this file to the finished .app invalidates its resource seal and
+# leaves it missing from the updater archive and DMG. Restore the cached copy
+# on exit so a release never leaves versioned data in the shared CEF cache.
+cp apps/desktop/src-tauri/cef/crash_reporter.cfg "${CEF_CFG}"
 
 step "build, sign${APPLE_ID:+, notarize}"
 PUBKEY="$(tr -d '\n' < "${KEY}.pub")"
@@ -139,6 +156,11 @@ if [[ -z "${APPLE_ID:-}" ]]; then
     xcrun stapler staple "${images[0]}"
     spctl -a -t open --context context:primary-signature -v "${images[0]}"
 fi
+
+step "verify the signed native bundle before publishing"
+codesign --verify --deep --strict target/release/bundle/macos/Dive.app
+DIVE_BIN="${ROOT}/target/release/bundle/macos/Dive.app/Contents/MacOS/dive-desktop" \
+    bash scripts/live-check.sh
 
 WINDOWS_ASSETS=()
 if [[ -n "${DIVE_WINDOWS_RUN:-}" ]]; then
@@ -179,11 +201,6 @@ node scripts/release/update-manifest.mjs merge out/manifest-*.json \
     --expect-platforms "${expect}" \
     --out out/latest.json
 rm -f out/manifest-*.json
-
-step "verify the signed native bundle before publishing"
-codesign --verify --deep --strict target/release/bundle/macos/Dive.app
-DIVE_BIN="${ROOT}/target/release/bundle/macos/Dive.app/Contents/MacOS/dive-desktop" \
-    bash scripts/live-check.sh
 
 step "publish ${TAG} to GitHub Releases"
 flags=(--target "${COMMIT}" --title "${NAME}" --generate-notes)
