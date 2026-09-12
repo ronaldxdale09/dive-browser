@@ -215,7 +215,7 @@ jobs:
             --base-url "${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.preflight.outputs.tag }}" \
             --out out/manifest-aarch64-apple-darwin.json
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-aarch64
           path: out/*
@@ -333,7 +333,7 @@ jobs:
             --base-url "${{ github.server_url }}/${{ github.repository }}/releases/download/${{ needs.preflight.outputs.tag }}" \
             --out out/manifest-x86_64-pc-windows-msvc.json
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-x86_64
           path: out/*

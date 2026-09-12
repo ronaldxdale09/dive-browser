@@ -184,7 +184,7 @@ jobs:
           mkdir -p target/crash-reports
           cp ~/Library/Logs/DiagnosticReports/dive-desktop*.ips target/crash-reports/ 2>/dev/null || true
           ls target/crash-reports
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: live-logs
