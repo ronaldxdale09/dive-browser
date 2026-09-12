@@ -544,6 +544,9 @@ pub struct RequestContext<'a> {
     pub url: &'a str,
     /// URL of the document that initiated the request.
     pub document_url: &'a str,
+    /// `document_url`'s host as [`crate::rules::document_host_of`] gives it,
+    /// parsed once per document by the caller rather than once per request.
+    pub document_host: Option<String>,
     /// CDP resource type for the request.
     pub resource_type: &'a str,
     /// HTTP method for the request.
@@ -592,7 +595,7 @@ impl DivePrivacy {
             return PrivacyDecision::Allow;
         }
 
-        if exact_host(context.document_url).is_none() {
+        if context.document_host.is_none() {
             return PrivacyDecision::Allow;
         }
 
@@ -662,6 +665,7 @@ mod tests {
         RequestContext {
             url,
             document_url,
+            document_host: exact_host(document_url),
             resource_type,
             method: "GET",
         }

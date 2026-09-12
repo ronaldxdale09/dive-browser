@@ -1822,8 +1822,14 @@ pub fn remember_window_bounds(window: &Window<Runtime>) {
         return;
     };
     let state = window.app_handle().state::<AppState>();
-    if let Err(e) = crate::state::lock(&state.store).set_setting(WINDOW_BOUNDS, &bounds.serialize())
-    {
+    // This runs on the main thread from window events. `try_lock`: a worker
+    // mid-write (history, a favicon) must not stall the window; the bounds
+    // are saved again on the next move, blur or close.
+    let Ok(store) = state.store.try_lock() else {
+        tracing::debug!("window bounds not saved: store busy");
+        return;
+    };
+    if let Err(e) = store.set_setting(WINDOW_BOUNDS, &bounds.serialize()) {
         tracing::debug!("could not remember window bounds: {e}");
     }
 }
@@ -2032,14 +2038,12 @@ fn open_chrome_link(
                     return;
                 };
                 let state = handle.state::<AppState>();
-                let workspace = if let Some(tab) = source {
-                    let Ok(tab) = lock(&state.store).tab(tab) else {
-                        return;
-                    };
-                    tab.workspace_id.or(*lock(&state.active_workspace))
-                } else {
-                    *lock(&state.active_workspace)
-                };
+                // Main thread, reached from an engine callback: never wait on
+                // the store here. If it is busy the link opens in the active
+                // workspace, which is where the source tab almost always is.
+                let workspace = source
+                    .and_then(|tab| state.store.try_lock().ok()?.tab(tab).ok()?.workspace_id)
+                    .or(*lock(&state.active_workspace));
                 if let Some(workspace) = workspace
                     && let Err(error) =
                         crate::commands::open_tab(&main, &handle, &state, workspace, url.as_str())
@@ -2065,7 +2069,20 @@ fn forward_events(app: AppHandle<Runtime>, mut rx: tokio::sync::broadcast::Recei
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!(n, "chrome missed core events");
+                    // The chrome's tab list is now behind and nothing coming
+                    // will fill the gap. A workspace activation it did not
+                    // ask for is the signal it already answers by fetching a
+                    // fresh snapshot, so re-announce the current one.
+                    tracing::warn!(n, "chrome missed core events; asking it to resync");
+                    let current = *lock(&app.state::<AppState>().active_workspace);
+                    if let Some(workspace) = current
+                        && let Err(e) = crate::commands::emit_state_changed(
+                            &app,
+                            CoreEvent::WorkspaceActivated(workspace),
+                        )
+                    {
+                        tracing::warn!("resync signal failed: {e}");
+                    }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }

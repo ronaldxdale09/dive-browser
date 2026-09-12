@@ -120,12 +120,15 @@ fn open_beside(
     if url.is_empty() {
         return Err(AppError::new("that item has no address"));
     }
-    let workspace = {
-        let store = lock(&state.store);
-        store.tab(tab_id).ok().and_then(|t| t.workspace_id)
-    }
-    .or(*lock(&state.active_workspace))
-    .ok_or_else(|| AppError::new("no workspace to open the tab in"))?;
+    // The context menu runs on the main thread; a busy store must not hold
+    // the menu, so a contended lock falls back to the active workspace.
+    let workspace = state
+        .store
+        .try_lock()
+        .ok()
+        .and_then(|store| store.tab(tab_id).ok().and_then(|t| t.workspace_id))
+        .or(*lock(&state.active_workspace))
+        .ok_or_else(|| AppError::new("no workspace to open the tab in"))?;
     crate::commands::open_tab_with(main, app, state, workspace, url, activate)?;
     Ok(())
 }

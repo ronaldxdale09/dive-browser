@@ -37,15 +37,26 @@ fn env_secs(key: &str) -> Option<i64> {
     std::env::var(key).ok()?.trim().parse().ok()
 }
 
+/// Sweeps between history prunes: hourly at the default one-minute sweep.
+const PRUNE_EVERY_SWEEPS: u32 = 60;
+
 /// Start the periodic sweep.
 pub fn start(app: AppHandle<Runtime>) {
     tauri::async_runtime::spawn(async move {
+        let mut sweeps: u32 = 0;
         loop {
             tokio::time::sleep(every()).await;
             match sweep(&app).await {
                 Ok(0) => {}
                 Ok(n) => tracing::info!(n, "discarded idle tabs"),
                 Err(e) => tracing::warn!("discard sweep failed: {e}"),
+            }
+            // History retention is measured in days; pruning it on every
+            // one-minute sweep was a SQLite transaction a minute for the life
+            // of the process. Once an hour is plenty.
+            sweeps = sweeps.wrapping_add(1);
+            if !sweeps.is_multiple_of(PRUNE_EVERY_SWEEPS) {
+                continue;
             }
             let state = app.state::<AppState>();
             match crate::prefs::prune_history(&state) {

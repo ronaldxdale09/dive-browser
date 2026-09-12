@@ -684,6 +684,7 @@ mod tests {
         let script = rules::PausedRequest {
             url: "http://ads.doubleclick.net:34567/tracker.js?privacy",
             document_url: "http://127.0.0.1:34567/",
+            document_host: rules::document_host_of("http://127.0.0.1:34567/"),
             resource_type: "Script",
             method: "GET",
         };
@@ -694,7 +695,7 @@ mod tests {
         let media = rules::PausedRequest {
             url: "http://ads.doubleclick.net:34567/fixture.wav?privacy",
             resource_type: "Media",
-            ..script
+            ..script.clone()
         };
         assert_eq!(
             rules::decide_paused_request(&[], &privacy, &prefs, &media),

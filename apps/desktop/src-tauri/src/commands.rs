@@ -1822,9 +1822,23 @@ pub(crate) fn on_main<T: Send + 'static>(
         };
         let _ = tx.send(result);
     })?;
-    rx.recv()
-        .map_err(|_| AppError::new("the main thread dropped the command"))?
+    // A budget, not a wait-forever: with the main thread stuck the pool of
+    // workers parked here is what used to turn one stall into a dead app.
+    // Creating a view can take a couple of seconds on a cold profile, so
+    // this is generous; anything past it is a bug worth a clear error.
+    match rx.recv_timeout(MAIN_HOP_BUDGET) {
+        Ok(result) => result,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(AppError::new(format!(
+            "the main thread did not answer within {}s",
+            MAIN_HOP_BUDGET.as_secs()
+        ))),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err(AppError::new("the main thread dropped the command"))
+        }
+    }
 }
+
+const MAIN_HOP_BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Put `id` on screen and give its page the keyboard, then say so.
 ///

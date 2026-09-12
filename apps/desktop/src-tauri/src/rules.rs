@@ -47,12 +47,27 @@ pub enum RuleAction {
 }
 
 /// Request fields used by the pure interception planner.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct PausedRequest<'a> {
     pub url: &'a str,
     pub document_url: &'a str,
+    /// `document_url`'s host, normalised the way the privacy exceptions and
+    /// the blocklists expect it, or `None` when the URL has none. Carried
+    /// so a page's every subresource does not re-parse the same document
+    /// URL twice on its way to a decision.
+    pub document_host: Option<String>,
     pub resource_type: &'a str,
     pub method: &'a str,
+}
+
+/// The host of `document_url` as the privacy code compares hosts: lower
+/// case, no trailing dot, IPv6 literals bracketed. `None` for a URL with
+/// no host (`about:`, `data:`, an empty string while a frame is in flight).
+pub fn document_host_of(document_url: &str) -> Option<String> {
+    url::Url::parse(document_url)
+        .ok()?
+        .host_str()
+        .map(|host| host.trim_end_matches('.').to_ascii_lowercase())
 }
 
 /// The document URL that belongs to the current top frame, advanced from the
@@ -62,6 +77,8 @@ pub struct PausedRequest<'a> {
 struct TopFrameContext {
     frame_id: Option<String>,
     document_url: String,
+    /// Parsed once per document change, read once per subresource.
+    document_host: Option<String>,
 }
 
 impl TopFrameContext {
@@ -69,11 +86,23 @@ impl TopFrameContext {
         Self {
             frame_id: None,
             document_url: document_url.to_owned(),
+            document_host: document_host_of(document_url),
         }
     }
 
     fn document_url(&self) -> &str {
         &self.document_url
+    }
+
+    fn document_host(&self) -> Option<&str> {
+        self.document_host.as_deref()
+    }
+
+    fn set_document_url(&mut self, url: &str) {
+        if url != self.document_url {
+            url.clone_into(&mut self.document_url);
+            self.document_host = document_host_of(url);
+        }
     }
 
     fn observe(&mut self, event: &dive_cdp::CdpEvent) {
@@ -85,10 +114,7 @@ impl TopFrameContext {
                     && let Some(frame_id) = frame["id"].as_str()
                 {
                     self.frame_id = Some(frame_id.to_owned());
-                    frame["url"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .clone_into(&mut self.document_url);
+                    self.set_document_url(frame["url"].as_str().unwrap_or_default());
                 }
             }
             "Page.frameStartedLoading" => {
@@ -102,7 +128,7 @@ impl TopFrameContext {
                     // An unknown destination must fail open instead of using
                     // the page the frame is leaving.
                     if is_top {
-                        self.document_url.clear();
+                        self.set_document_url("");
                     }
                 }
             }
@@ -124,7 +150,7 @@ impl TopFrameContext {
 
     fn note_document_request(&mut self, frame_id: Option<&str>, url: Option<&str>) {
         let Some(frame_id) = frame_id else {
-            self.document_url.clear();
+            self.set_document_url("");
             return;
         };
         let is_top = if let Some(top) = self.frame_id.as_deref() {
@@ -134,7 +160,7 @@ impl TopFrameContext {
             true
         };
         if is_top {
-            url.unwrap_or_default().clone_into(&mut self.document_url);
+            self.set_document_url(url.unwrap_or_default());
         }
     }
 }
@@ -360,12 +386,13 @@ pub fn decide_paused_request(
             },
         };
     }
-    if !prefs.block_trackers || !prefs.privacy_enabled_for(request.document_url) {
+    if !prefs.block_trackers || !prefs.privacy_enabled_for_host(request.document_host.as_deref()) {
         return InterceptAction::Continue;
     }
     match privacy.decide(&RequestContext {
         url: request.url,
         document_url: request.document_url,
+        document_host: request.document_host.clone(),
         resource_type: request.resource_type,
         method: request.method,
     }) {
@@ -473,6 +500,10 @@ async fn request_id_or_reset(
 /// that has not come in this long is not coming, and the page is better off
 /// with the request released as failed than held for 30 s.
 const FETCH_ACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// How long the rule/preference snapshot serves paused requests before it
+/// is re-read from the registries.
+const SNAPSHOT_TTL: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// How many paused requests may be resolving at once per tab. Enough that a
 /// page's subresources overlap the way the network expects; bounded so a
@@ -586,6 +617,11 @@ pub fn attach(
         }
         let mut top_frame = TopFrameContext::new(&initial_document_url);
         let in_flight = Arc::new(tokio::sync::Semaphore::new(MAX_IN_FLIGHT));
+        // The rules and the preferences change when a person edits them,
+        // not per request. Reading them through two registry mutexes for
+        // every paused request was measurable; a short-lived copy is not,
+        // and an edit still lands within the TTL.
+        let mut snapshot: Option<(std::time::Instant, _, _)> = None;
         let _ = ready_tx.send(());
         loop {
             let event = match events.recv().await {
@@ -615,15 +651,24 @@ pub fn attach(
                 continue;
             }
             let p = &event.params;
-            let (rules, prefs) = {
-                let state = app.state::<AppState>();
-                (
-                    workspace.map_or_else(
+            let (rules, prefs) = match &snapshot {
+                Some((taken, rules, prefs)) if taken.elapsed() < SNAPSHOT_TTL => {
+                    (Arc::clone(rules), Arc::clone(prefs))
+                }
+                _ => {
+                    let state = app.state::<AppState>();
+                    let rules = workspace.map_or_else(
                         || Arc::new(Vec::new()),
                         |id| state.rules.snapshot(&state, id),
-                    ),
-                    state.prefs.snapshot(&state),
-                )
+                    );
+                    let prefs = state.prefs.snapshot(&state);
+                    snapshot = Some((
+                        std::time::Instant::now(),
+                        Arc::clone(&rules),
+                        Arc::clone(&prefs),
+                    ));
+                    (rules, prefs)
+                }
             };
             let Some(request_id) = request_id_or_reset(&session, tab_id, p, &rules, &prefs).await
             else {
@@ -639,6 +684,7 @@ pub fn attach(
                     &PausedRequest {
                         url,
                         document_url: top_frame.document_url(),
+                        document_host: top_frame.document_host().map(str::to_owned),
                         resource_type: p["resourceType"].as_str().unwrap_or_default(),
                         method: p["request"]["method"].as_str().unwrap_or_default(),
                     },
@@ -709,6 +755,7 @@ mod tests {
         PausedRequest {
             url: "https://ads.doubleclick.net/pagead/id",
             document_url: "https://news.test/",
+            document_host: document_host_of("https://news.test/"),
             resource_type: "Script",
             method: "GET",
         }
@@ -882,6 +929,7 @@ mod tests {
         let early = PausedRequest {
             url: "https://ads.doubleclick.net/early.js",
             document_url: context.document_url(),
+            document_host: document_host_of(context.document_url()),
             resource_type: "Script",
             method: "GET",
         };
@@ -903,6 +951,7 @@ mod tests {
         let after_redirect = PausedRequest {
             url: "https://ads.doubleclick.net/early.js",
             document_url: context.document_url(),
+            document_host: document_host_of(context.document_url()),
             resource_type: "Script",
             method: "GET",
         };

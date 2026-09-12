@@ -55,7 +55,10 @@ struct Inner {
     transport: Box<dyn Transport>,
     next_id: AtomicU64,
     pending: Pending,
-    events: broadcast::Sender<CdpEvent>,
+    /// Shared, not cloned: a session has a dozen subscribers per tab, and
+    /// `broadcast` hands each its own copy of the value. A deep clone of the
+    /// parsed JSON per subscriber per event is what that used to cost.
+    events: broadcast::Sender<Arc<CdpEvent>>,
     /// Set once the browser behind the transport is going away. A call made
     /// after that fails here instead of reaching the transport: the feeds
     /// answer events on their own schedule, and a message handed to a
@@ -67,14 +70,17 @@ struct Inner {
 /// even while another feed still owns a clone of that session.
 #[derive(Debug)]
 pub struct CdpEventReceiver {
-    events: broadcast::Receiver<CdpEvent>,
+    events: broadcast::Receiver<Arc<CdpEvent>>,
     closed: watch::Receiver<bool>,
 }
 
 impl CdpEventReceiver {
     /// Receive the next event, or report lag/closure using broadcast semantics.
     /// Cancellation is safe: a cancelled wait does not consume an event.
-    pub async fn recv(&mut self) -> Result<CdpEvent, broadcast::error::RecvError> {
+    ///
+    /// Events arrive shared (`Arc`); field access and `&event` borrows work
+    /// as before, and a subscriber that needs an owned copy clones it.
+    pub async fn recv(&mut self) -> Result<Arc<CdpEvent>, broadcast::error::RecvError> {
         if *self.closed.borrow() {
             return Err(broadcast::error::RecvError::Closed);
         }
@@ -92,7 +98,7 @@ impl CdpEventReceiver {
     }
 
     /// Receive without waiting. Closed sessions never deliver buffered events.
-    pub fn try_recv(&mut self) -> Result<CdpEvent, broadcast::error::TryRecvError> {
+    pub fn try_recv(&mut self) -> Result<Arc<CdpEvent>, broadcast::error::TryRecvError> {
         if *self.closed.borrow() {
             return Err(broadcast::error::TryRecvError::Closed);
         }
@@ -237,10 +243,10 @@ impl CdpSession {
                 let _ = tx.send(outcome);
             }
             (None, Some(method)) => {
-                let _ = self.inner.events.send(CdpEvent {
+                let _ = self.inner.events.send(Arc::new(CdpEvent {
                     method,
                     params: msg.params.unwrap_or(Value::Null),
-                });
+                }));
             }
             (None, None) => tracing::debug!("cdp message with neither id nor method"),
         }
