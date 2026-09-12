@@ -98,6 +98,7 @@ struct Detector {
     pending: Option<Pending>,
     previous: Option<Sample>,
     last_send: Option<u64>,
+    failed: bool,
 }
 
 impl Detector {
@@ -108,27 +109,9 @@ impl Detector {
         dispatch: &mut impl FnMut(Arc<Acknowledgement>, bool) -> bool,
         fault: bool,
     ) -> bool {
-        if let Some(previous) = self.previous {
-            let Some(awake) = now.awake.checked_sub(previous.awake) else {
-                sink(Record::new(now, Kind::ClockDiscontinuity, None));
-                return false;
-            };
-            let Some(continuous) = now.continuous.checked_sub(previous.continuous) else {
-                sink(Record::new(now, Kind::ClockDiscontinuity, None));
-                return false;
-            };
-            let skew = CLOCK_SKEW
-                .saturating_add(now.skew)
-                .saturating_add(previous.skew);
-            if awake > continuous.saturating_add(skew) {
-                sink(Record::new(now, Kind::ClockDiscontinuity, None));
-                return false;
-            }
-            if continuous > awake.saturating_add(skew) {
-                sink(Record::new(now, Kind::SuspendGap, Some(continuous - awake)));
-            }
+        if self.failed || !self.validate_clock(now, sink) {
+            return false;
         }
-        self.previous = Some(now);
         if !self.observe_pending(now, sink, false) {
             return false;
         }
@@ -149,10 +132,42 @@ impl Detector {
                 sink(Record::new(now, Kind::FaultInjected, Some(4 * SECOND)));
             }
             if !dispatch(ack, fault) {
-                sink(Record::new(now, Kind::DispatchFailed, None));
-                return false;
+                return self.fail(now, Kind::DispatchFailed, sink);
             }
         }
+        true
+    }
+
+    // A terminal failure invalidates the pending measurement permanently. A
+    // later readable clock or published ack must not revive the rejected epoch.
+    fn fail(&mut self, now: Sample, kind: Kind, sink: &mut impl FnMut(Record)) -> bool {
+        if !self.failed {
+            self.failed = true;
+            self.pending = None;
+            sink(Record::new(now, kind, None));
+        }
+        false
+    }
+
+    fn validate_clock(&mut self, now: Sample, sink: &mut impl FnMut(Record)) -> bool {
+        if let Some(previous) = self.previous {
+            let Some(awake) = now.awake.checked_sub(previous.awake) else {
+                return self.fail(now, Kind::ClockDiscontinuity, sink);
+            };
+            let Some(continuous) = now.continuous.checked_sub(previous.continuous) else {
+                return self.fail(now, Kind::ClockDiscontinuity, sink);
+            };
+            let skew = CLOCK_SKEW
+                .saturating_add(now.skew)
+                .saturating_add(previous.skew);
+            if awake > continuous.saturating_add(skew) {
+                return self.fail(now, Kind::ClockDiscontinuity, sink);
+            }
+            if continuous > awake.saturating_add(skew) {
+                sink(Record::new(now, Kind::SuspendGap, Some(continuous - awake)));
+            }
+        }
+        self.previous = Some(now);
         true
     }
 
@@ -170,13 +185,11 @@ impl Detector {
                 return true;
             }
             if published == u64::MAX {
-                sink(Record::new(now, Kind::ClockUnavailable, None));
-                return false;
+                return self.fail(now, Kind::ClockUnavailable, sink);
             }
             let acknowledged = published.checked_sub(1);
             let Some(age) = acknowledged.unwrap_or(now.awake).checked_sub(pending.sent) else {
-                sink(Record::new(now, Kind::ClockDiscontinuity, None));
-                return false;
+                return self.fail(now, Kind::ClockDiscontinuity, sink);
             };
             // The callback can execute just after the observer's clock sample.
             // Future acknowledgement times are valid; their own clock is precise.
@@ -203,7 +216,9 @@ impl Detector {
     }
 
     fn stop(&mut self, now: Sample, sink: &mut impl FnMut(Record)) {
-        self.observe_pending(now, sink, true);
+        if !self.failed && self.validate_clock(now, sink) {
+            self.observe_pending(now, sink, true);
+        }
         let duration = self
             .pending
             .take()
@@ -522,6 +537,39 @@ mod tests {
         assert!(!d.tick(sample(0), &mut |r| events.push(r), &mut |_, _| false, false));
         assert_eq!(events[0].kind, Kind::DispatchFailed);
     }
+    #[test]
+    fn rejected_clock_epoch_is_never_finalized_as_recovery() {
+        let mut r = Rig::new();
+        r.tick(sample(0));
+        r.tick(sample(1000));
+        r.ack(10010);
+        let invalid = Sample {
+            continuous: 1_520_000_000,
+            ..sample(10020)
+        };
+        assert!(!r.tick(invalid));
+        r.detector.stop(invalid, &mut |event| r.events.push(event));
+        assert_eq!(r.kinds(), [Kind::ClockDiscontinuity, Kind::MonitorStopped]);
+        assert_eq!(r.events.last().unwrap().duration_ms, None);
+        assert_eq!(r.pending.len(), 1);
+    }
+
+    #[test]
+    fn final_clock_sample_must_be_valid_before_ack_is_drained() {
+        let mut r = Rig::new();
+        r.tick(sample(0));
+        r.tick(sample(1000));
+        r.ack(10010);
+        let invalid = Sample {
+            continuous: 1_520_000_000,
+            ..sample(10020)
+        };
+        r.detector.stop(invalid, &mut |event| r.events.push(event));
+        assert_eq!(r.kinds(), [Kind::ClockDiscontinuity, Kind::MonitorStopped]);
+        assert_eq!(r.events.last().unwrap().duration_ms, None);
+        assert_eq!(r.pending.len(), 1);
+    }
+
     #[test]
     fn stop_records_threshold_crossing_ack_before_observer_tick() {
         let mut r = Rig::new();
@@ -862,7 +910,7 @@ fn spawn_observer(
                 // Fault file checks and startup disk work precede the send timestamp.
                 // An old pending token is never replaced, even across machine sleep.
                 let Some(now) = clock() else {
-                    sink(Record::new(last, Kind::ClockUnavailable, None));
+                    detector.fail(last, Kind::ClockUnavailable, &mut sink);
                     break;
                 };
                 if !started {
@@ -882,7 +930,7 @@ fn spawn_observer(
                 // The request check may touch storage, so timestamp immediately
                 // before dispatch, after every possible filesystem operation.
                 let Some(now) = clock() else {
-                    sink(Record::new(now, Kind::ClockUnavailable, None));
+                    detector.fail(now, Kind::ClockUnavailable, &mut sink);
                     break;
                 };
                 last = now;
@@ -905,7 +953,11 @@ fn spawn_observer(
                     break;
                 }
             }
-            detector.stop(clock().unwrap_or(last), &mut sink);
+            let final_sample = clock().unwrap_or_else(|| {
+                detector.fail(last, Kind::ClockUnavailable, &mut sink);
+                last
+            });
+            detector.stop(final_sample, &mut sink);
         })?;
     Ok(MonitorGuard {
         stop,
@@ -1006,6 +1058,52 @@ mod ownership_tests {
             Err(mpsc::TryRecvError::Disconnected)
         ));
     }
+    #[test]
+    fn unavailable_clock_after_ack_does_not_claim_recovery_at_stop() {
+        let (tx, rx) = mpsc::channel();
+        let mut reads = 0;
+        let mut observer = spawn_observer(
+            move || {
+                reads += 1;
+                if reads == 4 {
+                    return None;
+                }
+                let time = if reads > 4 { 2_500_000_000 } else { 0 };
+                Some(Sample {
+                    awake: time,
+                    continuous: time,
+                    ..Sample::default()
+                })
+            },
+            move |record| {
+                tx.send(record).unwrap();
+            },
+            |ack, _| {
+                ack.publish(Some(2_400_000_000));
+                true
+            },
+            || false,
+        )
+        .unwrap();
+        let mut kinds = Vec::new();
+        loop {
+            let record = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            kinds.push(record.kind);
+            if record.kind == Kind::MonitorStopped {
+                break;
+            }
+        }
+        observer.join();
+        assert_eq!(
+            kinds,
+            [
+                Kind::MonitorStarted,
+                Kind::ClockUnavailable,
+                Kind::MonitorStopped
+            ]
+        );
+    }
+
     #[test]
     fn unavailable_clock_terminates_owned_observer() {
         let (tx, rx) = mpsc::channel();
