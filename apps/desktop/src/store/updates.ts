@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { ipc } from "../lib/ipc";
+import { events, ipc } from "../lib/ipc";
 import type { UpdateInfo } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
 
@@ -15,6 +15,12 @@ interface UpdatesState {
   update: UpdateInfo | null;
   error: string | null;
   installing: boolean;
+  /** Bytes of the update downloaded so far, while it is downloading. */
+  received: number;
+  /** Its total size, when the release declared one. */
+  total: number | null;
+  /** The download is done and the installer is running. */
+  applying: boolean;
   dismissed: boolean;
   check: () => Promise<void>;
   install: () => Promise<void>;
@@ -27,6 +33,9 @@ export const useUpdates = create<UpdatesState>((set, get) => ({
   update: null,
   error: null,
   installing: false,
+  received: 0,
+  total: null,
+  applying: false,
   dismissed: false,
   check: async () => {
     if (get().status === "checking") return;
@@ -40,7 +49,7 @@ export const useUpdates = create<UpdatesState>((set, get) => ({
   },
   install: async () => {
     if (get().installing) return;
-    set({ installing: true, error: null });
+    set({ installing: true, error: null, received: 0, total: null, applying: false });
     try {
       await ipc.updateInstall();
     } catch (e) {
@@ -50,6 +59,29 @@ export const useUpdates = create<UpdatesState>((set, get) => ({
   dismiss: () => set({ dismissed: true }),
   reopen: () => set({ dismissed: false }),
 }));
+
+let listening = false;
+
+/**
+ * Follow the update download.
+ *
+ * The updater reports every chunk it writes; without this the dialog said
+ * "Installing..." for the length of the download and showed nothing else.
+ */
+export function listenForUpdateProgress() {
+  if (listening) return;
+  listening = true;
+  void events
+    .updateProgress.listen((e) => {
+      const { received, total, done } = e.payload;
+      useUpdates.setState(
+        done
+          ? { applying: true }
+          : { received: received ?? 0, total: total ?? null, applying: false },
+      );
+    })
+    .catch(() => undefined);
+}
 
 /** Delay before the one automatic check after launch, so it never competes with startup. */
 export const BOOT_CHECK_DELAY_MS = 10_000;

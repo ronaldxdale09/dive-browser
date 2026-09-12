@@ -330,8 +330,8 @@ describe("Toolbar", () => {
   it("lists downloads and reveals a finished one", () => {
     useDownloads.setState({
       items: [
-        { url: "https://cdn.example.com/report.pdf", path: "/Users/me/Downloads/report.pdf", name: "report.pdf", status: "finished", at: Date.now() },
-        { url: "https://cdn.example.com/big.zip", path: "/Users/me/Downloads/big.zip", name: "big.zip", status: "started", at: Date.now() },
+        { url: "https://cdn.example.com/report.pdf", path: "/Users/me/Downloads/report.pdf", name: "report.pdf", status: "finished", at: Date.now(), startedAt: Date.now() },
+        { url: "https://cdn.example.com/big.zip", path: "/Users/me/Downloads/big.zip", name: "big.zip", status: "started", at: Date.now(), startedAt: Date.now() },
       ],
     });
     render(<Toolbar />);

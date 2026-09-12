@@ -93,3 +93,34 @@ describe("UpdateDialog", () => {
     expect(installSpy).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("while the update downloads", () => {
+  const available = {
+    status: "available" as const,
+    update: { version: "0.1.23", notes: "Dive 0.1.23", date: null },
+    dismissed: false,
+    error: null,
+  };
+
+  it("says how far it has got instead of just spinning", () => {
+    useUpdates.setState({ ...available, installing: true, received: 30_000_000, total: 120_000_000, applying: false });
+    render(<UpdateDialog />);
+    expect(screen.getByText("Downloading 25%")).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "Update download" }).getAttribute("aria-valuenow")).toBe("25");
+  });
+
+  it("shows what has arrived when the release declared no size", () => {
+    useUpdates.setState({ ...available, installing: true, received: 4_200_000, total: null, applying: false });
+    render(<UpdateDialog />);
+    expect(screen.getByText("Downloading 4.2 MB")).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "Update download" }).getAttribute("aria-valuenow")).toBeNull();
+  });
+
+  it("turns to Installing once the bytes are down and the installer runs", () => {
+    useUpdates.setState({ ...available, installing: true, received: 120_000_000, total: 120_000_000, applying: true });
+    render(<UpdateDialog />);
+    expect(screen.getByText("Installing…")).toBeTruthy();
+    // The bar is for the download; the install itself reports nothing.
+    expect(screen.queryByRole("progressbar", { name: "Update download" })).toBeNull();
+  });
+});

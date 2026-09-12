@@ -39,12 +39,24 @@ pub struct Download {
 #[derive(Default)]
 pub struct Registry {
     seen: Mutex<VecDeque<Download>>,
+    /// How many downloads have ever finished, counted rather than recounted.
+    ///
+    /// The deque holds the last [`KEEP`]; once it is full of finished entries,
+    /// counting them always gives `KEEP`, because a new download evicts an old
+    /// one. A wait that compares the count before and after therefore never
+    /// saw an increase, and told the caller nothing had finished when
+    /// something had. A counter that only goes up cannot do that.
+    finished: std::sync::atomic::AtomicUsize,
 }
 
 impl Registry {
     /// Record a notice. A finish replaces the start it belongs to, so one
     /// download is one entry rather than two half-told ones.
     pub fn record(&self, notice: &DownloadNotice) {
+        if notice.status == "finished" {
+            self.finished
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         let mut seen = lock(&self.seen);
         let entry = Download {
             path: notice.path.clone(),
@@ -70,18 +82,22 @@ impl Registry {
         }
     }
 
+    /// Forget everything. The chrome's list and this one are the same list as
+    /// far as anyone using Dive is concerned, so clearing one clears both.
+    pub fn clear(&self) {
+        lock(&self.seen).clear();
+    }
+
     /// The most recent downloads, newest first.
     pub fn recent(&self, limit: usize) -> Vec<Download> {
         let seen = lock(&self.seen);
         seen.iter().rev().take(limit).cloned().collect()
     }
 
-    /// How many have been seen, as a marker for "anything new since".
+    /// How many downloads have finished this session, as a marker for
+    /// "anything new since". Monotonic: see [`Registry::finished`].
     pub fn finished_count(&self) -> usize {
-        lock(&self.seen)
-            .iter()
-            .filter(|d| d.status == "finished")
-            .count()
+        self.finished.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -132,6 +148,34 @@ mod tests {
         registry.record(&notice("", "failed"));
         assert_eq!(registry.recent(10).len(), 2);
         assert_eq!(registry.finished_count(), 0);
+    }
+
+    #[test]
+    fn a_long_session_can_still_tell_that_something_finished() {
+        // The deque keeps the last KEEP entries, so counting finished ones
+        // inside it saturates and a wait can never observe an increase. An
+        // agent was told "no download finished in that time" for a file that
+        // was already on disk.
+        let registry = Registry::default();
+        for i in 0..(KEEP + 10) {
+            registry.record(&notice(&format!("/tmp/{i}.bin"), "started"));
+            registry.record(&notice(&format!("/tmp/{i}.bin"), "finished"));
+        }
+        let before = registry.finished_count();
+        registry.record(&notice("/tmp/new.bin", "started"));
+        registry.record(&notice("/tmp/new.bin", "finished"));
+        assert!(
+            registry.finished_count() > before,
+            "a finish after {before} others has to be visible; the deque only holds {KEEP}"
+        );
+    }
+
+    #[test]
+    fn clearing_forgets_what_an_agent_can_see_too() {
+        let registry = Registry::default();
+        registry.record(&notice("/tmp/a.csv", "finished"));
+        registry.clear();
+        assert!(registry.recent(10).is_empty());
     }
 
     #[test]

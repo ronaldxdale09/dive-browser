@@ -524,15 +524,88 @@ pub(crate) fn downloads_open(path: String) -> AppResult<()> {
     let status = std::process::Command::new("open").arg(&target).status();
     #[cfg(target_os = "linux")]
     let status = std::process::Command::new("xdg-open").arg(&target).status();
+    // Windows goes through the shell API, not `cmd /C start`. A download's
+    // name comes from the server, `&` is legal in a Windows filename, and Rust
+    // quotes an argument only when it holds a space -- so `report&calc.csv`
+    // reached cmd unquoted and cmd split on it. ShellExecuteW takes the path
+    // as one wide string and parses nothing.
     #[cfg(target_os = "windows")]
-    let status = std::process::Command::new("cmd")
-        .args(["/C", "start", "", &target.display().to_string()])
-        .status();
+    return open_with_shell(&target);
+    #[cfg(not(target_os = "windows"))]
     match status {
         Ok(s) if s.success() => Ok(()),
         Ok(s) => Err(AppError::new(format!("could not open the file ({s})"))),
         Err(e) => Err(AppError::new(e)),
     }
+}
+
+/// Hand a path to the Windows shell to open with its default application.
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)] // ShellExecuteW is reachable only through the Win32 API.
+fn open_with_shell(target: &std::path::Path) -> AppResult<()> {
+    use std::os::windows::ffi::OsStrExt as _;
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::core::PCWSTR;
+
+    let wide = |s: &std::ffi::OsStr| {
+        s.encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<u16>>()
+    };
+    let verb = wide(std::ffi::OsStr::new("open"));
+    let path = wide(target.as_os_str());
+    // SAFETY: both strings are NUL-terminated and outlive the call, and a null
+    // HWND is documented as "no parent window".
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(verb.as_ptr()),
+            PCWSTR(path.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    // Success is documented as a value greater than 32; anything else is an
+    // error code in disguise.
+    if result.0 as usize > 32 {
+        Ok(())
+    } else {
+        Err(AppError::new(format!(
+            "Windows could not open the file (code {})",
+            result.0 as usize
+        )))
+    }
+}
+
+/// Stop a download that is still going.
+///
+/// `id` is CEF's, reported with each progress update. The request is queued
+/// and applied on the download's next update, which for an active download is
+/// within a quarter of a second; one that has already finished never sees it,
+/// which is the right answer for a cancel that lost the race.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::unnecessary_wraps)] // The chrome's ipc layer unwraps a Result for every command.
+pub(crate) fn downloads_cancel(id: u32) -> AppResult<()> {
+    #[cfg(feature = "cef")]
+    tauri_runtime_cef::downloads::control(id, tauri_runtime_cef::DownloadControl::Cancel);
+    #[cfg(not(feature = "cef"))]
+    let _ = id;
+    Ok(())
+}
+
+/// Forget the downloads this session has seen.
+///
+/// Clears the engine's list as well as the chrome's: someone tidying up, or
+/// clearing before handing the browser to an agent, means both.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::unnecessary_wraps)] // The chrome's ipc layer unwraps a Result for every command.
+pub(crate) fn downloads_clear(state: State<'_, AppState>) -> AppResult<()> {
+    state.downloads.clear();
+    Ok(())
 }
 
 /// Open `path` in the platform file manager, selecting it when it is a file.
@@ -738,6 +811,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             browsing_data_clear,
             downloads_reveal,
             downloads_open,
+            downloads_cancel,
+            downloads_clear,
             tab_focus,
             mcp_token,
             tab_storage_delete,
@@ -786,6 +861,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::subtitles::SubtitleCue,
             crate::subtitles::SubtitleState,
             crate::emulate::DeviceEmulated,
+            crate::engine::DownloadProgress,
+            crate::engine::UpdateProgress,
         ])
 }
 
@@ -2530,6 +2607,7 @@ pub(crate) async fn update_install(app: AppHandle<Runtime>) -> AppResult<()> {
     let updater = app
         .updater()
         .map_err(|_| AppError::new("this build has no updater"))?;
+    let app_for_finish = app.clone();
     let Some(update) = updater
         .check()
         .await
@@ -2537,8 +2615,35 @@ pub(crate) async fn update_install(app: AppHandle<Runtime>) -> AppResult<()> {
     else {
         return Err(AppError::new("already up to date"));
     };
+    // The two closures are the whole of the updater's progress reporting, and
+    // discarding them left the dialog saying "Installing..." for however long
+    // a hundred-megabyte download takes, with nothing to show for it.
+    let downloaded = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let progress_app = app.clone();
+    let counter = std::sync::Arc::clone(&downloaded);
     update
-        .download_and_install(|_, _| {}, || {})
+        .download_and_install(
+            move |chunk, total| {
+                let received = counter
+                    .fetch_add(chunk as u64, std::sync::atomic::Ordering::Relaxed)
+                    + chunk as u64;
+                #[allow(clippy::cast_precision_loss)] // exact to 2^53 bytes.
+                let _ = crate::engine::UpdateProgress {
+                    received: received as f64,
+                    total: total.map(|t| t as f64),
+                    done: false,
+                }
+                .emit(&progress_app);
+            },
+            move || {
+                let _ = crate::engine::UpdateProgress {
+                    received: 0.0,
+                    total: None,
+                    done: true,
+                }
+                .emit(&app_for_finish);
+            },
+        )
         .await
         .map_err(|e| AppError::new(e.to_string()))?;
     app.restart();

@@ -395,6 +395,10 @@ pub fn run() {
             state::init(app)?;
             capture_scope::install(app)?;
             startup::record_milestone("state_init");
+            // Before the first window, so a download that starts immediately
+            // still reports its progress.
+            #[cfg(feature = "cef")]
+            engine::watch_download_progress(app.handle());
             engine::create_main_window(app)?;
             startup::record_milestone("window_created");
             // macOS puts the app menu in the system bar at the top of the

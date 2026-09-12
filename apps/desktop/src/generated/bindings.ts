@@ -574,6 +574,22 @@ export const commands = {
 	 */
 	downloadsOpen: (path: string) => typedError<null, AppError>(__TAURI_INVOKE("downloads_open", { path })),
 	/**
+	 *  Stop a download that is still going.
+	 *
+	 *  `id` is CEF's, reported with each progress update. The request is queued
+	 *  and applied on the download's next update, which for an active download is
+	 *  within a quarter of a second; one that has already finished never sees it,
+	 *  which is the right answer for a cancel that lost the race.
+	 */
+	downloadsCancel: (id: number) => typedError<null, AppError>(__TAURI_INVOKE("downloads_cancel", { id })),
+	/**
+	 *  Forget the downloads this session has seen.
+	 *
+	 *  Clears the engine's list as well as the chrome's: someone tidying up, or
+	 *  clearing before handing the browser to an agent, means both.
+	 */
+	downloadsClear: () => typedError<null, AppError>(__TAURI_INVOKE("downloads_clear")),
+	/**
 	 *  Give the page keyboard focus again, after a chrome surface such as the
 	 *  find bar closes; arrow keys and space then scroll the page as expected.
 	 */
@@ -642,6 +658,7 @@ export const events = {
 	devServersChanged: makeEvent<DevServersChanged>("dev-servers-changed"),
 	deviceEmulated: makeEvent<DeviceEmulated>("device-emulated"),
 	downloadNotice: makeEvent<DownloadNotice>("download-notice"),
+	downloadProgress: makeEvent<DownloadProgress>("download-progress"),
 	inspectEvent: makeEvent<InspectEvent>("inspect-event"),
 	jsDialogAsked: makeEvent<JsDialogAsked>("js-dialog-asked"),
 	jsDialogClosed: makeEvent<JsDialogClosed>("js-dialog-closed"),
@@ -660,6 +677,7 @@ export const events = {
 	tabHistoryChanged: makeEvent<TabHistoryChanged>("tab-history-changed"),
 	tabLoad: makeEvent<TabLoad>("tab-load"),
 	tabWindowChanged: makeEvent<TabWindowChanged>("tab-window-changed"),
+	updateProgress: makeEvent<UpdateProgress>("update-progress"),
 };
 
 /* Types */
@@ -1124,6 +1142,33 @@ export type DownloadNotice = {
 	path: string,
 	/**  `started` | `finished` | `failed`. */
 	status: string,
+};
+
+/**
+ *  How far a download has got, while it is still going.
+ *
+ *  Separate from [`DownloadNotice`], which says only that something started or
+ *  ended. This is the one the progress bar reads, and it arrives about four
+ *  times a second per download.
+ */
+export type DownloadProgress = {
+	/**  CEF's id, and the handle for cancelling. */
+	id: number,
+	/**  Source URL, for matching against a row that has no path yet. */
+	url: string,
+	/**  Destination, once CEF has decided on one. */
+	path: string,
+	/**
+	 *  Bytes written so far. A float because that is what JavaScript has, and
+	 *  it counts whole bytes exactly far past any file anyone will download.
+	 */
+	received: number | null,
+	/**  Total size when the server declared one. A chunked response has none. */
+	total: number | null,
+	/**  Bytes per second. */
+	speed: number | null,
+	/**  Whether it is paused. */
+	paused: boolean,
 };
 
 export type Duration = "page" | "remember";
@@ -2405,6 +2450,21 @@ export type UpdateInfo = {
 	version: string,
 	/**  Release notes, if the manifest carried any. */
 	notes: string | null,
+};
+
+/**
+ *  How far the update download has got.
+ *
+ *  The updater reports every chunk; this is throttled by nothing because a
+ *  single update is one download and the chrome coalesces renders anyway.
+ */
+export type UpdateProgress = {
+	/**  Bytes downloaded so far. */
+	received: number | null,
+	/**  Total size when the release declared one. */
+	total: number | null,
+	/**  Set once the download is done and the install begins. */
+	done: boolean,
 };
 
 /**  Token accounting for one reply. */

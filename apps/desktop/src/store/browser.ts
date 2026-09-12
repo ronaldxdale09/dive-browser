@@ -7,6 +7,7 @@ import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
 import { useDownloads } from "./downloads";
 import type { DownloadNotice, CoreEvent, Decision, Duration, NavigationHistory, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
+import { fileNameOr } from "../lib/paths";
 
 export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser" | "subtitles" | "import" | "apps";
 /** The sections of the library dialog. */
@@ -317,6 +318,7 @@ let unlistenPermission: (() => void) | null = null;
 let unlistenPermissionDismissed: (() => void) | null = null;
 let unlistenWindowChanged: (() => void) | null = null;
 let unlistenDownload: (() => void) | null = null;
+let unlistenDownloadProgress: (() => void) | null = null;
 /** The boot in flight, so a remount that boots again waits for it instead of subscribing twice. */
 let booting: Promise<void> | null = null;
 /** The one toast timer: a newer notice cancels the older one's clearing. */
@@ -448,7 +450,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
         const downloadNotice = (e: { payload: DownloadNotice }) => {
           const d = e.payload;
           useDownloads.getState().apply(d);
-          const name = d.path.split("/").pop() ?? d.url;
+          const name = fileNameOr(d.path, d.url);
           // A finished file is one click from the Finder; nothing to do about the others.
           const show = d.status === "finished" && d.path ? { label: isWindows() ? "Show in Explorer" : "Show in Finder", run: () => void ipc.downloadsReveal(d.path).catch((err: unknown) => set({ error: errorMessage(err) })) } : undefined;
           get().notify(d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : `Download failed: ${name}`, show ? 8000 : 5000, show);
@@ -457,17 +459,28 @@ export const useBrowser = create<BrowserState>((set, get) => ({
           // page closed mid-download never says "Saved".
           if (d.status !== "started" && d.tab) void get().closeIfOnlyDownload(d.tab, d.url);
         };
-        const [a, b, c, d, f, g, h] = await Promise.all([
-          unlisten ?? events.stateChanged.listen((e) => get().applyEvent(e.payload)),
-          unlistenLoad ?? events.tabLoad.listen((e) => get().applyLoad(e.payload)),
-          unlistenCrash ?? events.tabCrashed.listen((e) => get().applyCrash(e.payload)),
-          unlistenPermission ?? events.permissionAsked.listen((e) => get().applyPermissionAsked(e.payload)),
-          unlistenPermissionDismissed ?? events.permissionDismissed.listen((e) => set((s) => ({permissionRequests: withoutRequest(s.permissionRequests,e.payload.tab_id,e.payload)}))),
-          unlistenWindowChanged ?? events.tabWindowChanged.listen((e) => set(reduceWindowChange(get(), e.payload.tab, e.payload.detached))),
-          unlistenDownload ?? events.downloadNotice.listen(downloadNotice),
+        // Each records its own unlisten the moment it resolves, rather than
+        // all of them together at the end. Together, one rejection threw away
+        // seven subscriptions that had already been made -- and the retry then
+        // subscribed the survivors a second time.
+        const once = async (
+          held: (() => void) | null,
+          subscribe: () => Promise<() => void>,
+          keep: (off: () => void) => void,
+        ) => {
+          if (held) return;
+          keep(await subscribe());
+        };
+        await Promise.all([
+          once(unlisten, () => events.stateChanged.listen((e) => get().applyEvent(e.payload)), (off) => { unlisten = off; }),
+          once(unlistenLoad, () => events.tabLoad.listen((e) => get().applyLoad(e.payload)), (off) => { unlistenLoad = off; }),
+          once(unlistenCrash, () => events.tabCrashed.listen((e) => get().applyCrash(e.payload)), (off) => { unlistenCrash = off; }),
+          once(unlistenPermission, () => events.permissionAsked.listen((e) => get().applyPermissionAsked(e.payload)), (off) => { unlistenPermission = off; }),
+          once(unlistenPermissionDismissed, () => events.permissionDismissed.listen((e) => set((s) => ({permissionRequests: withoutRequest(s.permissionRequests,e.payload.tab_id,e.payload)}))), (off) => { unlistenPermissionDismissed = off; }),
+          once(unlistenWindowChanged, () => events.tabWindowChanged.listen((e) => set(reduceWindowChange(get(), e.payload.tab, e.payload.detached))), (off) => { unlistenWindowChanged = off; }),
+          once(unlistenDownload, () => events.downloadNotice.listen(downloadNotice), (off) => { unlistenDownload = off; }),
+          once(unlistenDownloadProgress, () => events.downloadProgress.listen((e) => useDownloads.getState().progress(e.payload)), (off) => { unlistenDownloadProgress = off; }),
         ]);
-        unlisten = a; unlistenLoad = b; unlistenCrash = c; unlistenPermission = d;
-        unlistenPermissionDismissed = f; unlistenWindowChanged = g; unlistenDownload = h;
         const [, , , snapshot] = await Promise.all([listenConsole(), listenNetwork(), listenPrivacy(), ipc.snapshot(), usePrivacy.getState().loadInfo()]);
         set({ ...fromSnapshot(snapshot), ready: true, error: null });
         void get().refreshCounts();
@@ -623,7 +636,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     if (!id) return;
     await run(set, async () => {
       const path = await ipc.tabBugReport(id);
-      get().notify(`Bug report copied · saved ${path.split("/").pop() ?? path}`, 5000);
+      get().notify(`Bug report copied · saved ${fileNameOr(path, path)}`, 5000);
     });
   },
   devtools: async () => {
@@ -676,7 +689,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       if (tab?.url) params.set("url", tab.url);
       if (tab?.title) params.set("title", tab.title);
       if (workspace) await ipc.tabOpen(workspace, `dive://capture?${params.toString()}`);
-      get().notify(`Captured ${path.split("/").pop() ?? path}`, 4000);
+      get().notify(`Captured ${fileNameOr(path, path)}`, 4000);
     } catch (cause) {
       set({ error: errorMessage(cause) });
     } finally {

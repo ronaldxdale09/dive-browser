@@ -123,6 +123,67 @@ pub struct DownloadNotice {
     pub status: String,
 }
 
+/// How far a download has got, while it is still going.
+///
+/// Separate from [`DownloadNotice`], which says only that something started or
+/// ended. This is the one the progress bar reads, and it arrives about four
+/// times a second per download.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
+pub struct DownloadProgress {
+    /// CEF's id, and the handle for cancelling.
+    pub id: u32,
+    /// Source URL, for matching against a row that has no path yet.
+    pub url: String,
+    /// Destination, once CEF has decided on one.
+    pub path: String,
+    /// Bytes written so far. A float because that is what JavaScript has, and
+    /// it counts whole bytes exactly far past any file anyone will download.
+    pub received: f64,
+    /// Total size when the server declared one. A chunked response has none.
+    pub total: Option<f64>,
+    /// Bytes per second.
+    pub speed: f64,
+    /// Whether it is paused.
+    pub paused: bool,
+}
+
+/// How far the update download has got.
+///
+/// The updater reports every chunk; this is throttled by nothing because a
+/// single update is one download and the chrome coalesces renders anyway.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
+pub struct UpdateProgress {
+    /// Bytes downloaded so far.
+    pub received: f64,
+    /// Total size when the release declared one.
+    pub total: Option<f64>,
+    /// Set once the download is done and the install begins.
+    pub done: bool,
+}
+
+/// Forward the runtime's download progress to the chrome.
+///
+/// Registered once at startup. The runtime throttles to about four reports a
+/// second per download, so this is a cheap passthrough rather than a place
+/// that needs its own rate limit.
+#[cfg(feature = "cef")]
+pub fn watch_download_progress(app: &AppHandle<Runtime>) {
+    let app = app.clone();
+    tauri_runtime_cef::downloads::on_download_progress(move |p| {
+        #[allow(clippy::cast_precision_loss)] // exact to 2^53 bytes; files are smaller.
+        let _ = DownloadProgress {
+            id: p.id,
+            url: p.url,
+            path: p.path,
+            received: p.received as f64,
+            total: p.total.map(|t| t as f64),
+            speed: p.speed as f64,
+            paused: p.paused,
+        }
+        .emit(&app);
+    });
+}
+
 /// `~/Downloads`, or the temp dir when the home is unknown.
 pub fn downloads_dir() -> PathBuf {
     let home = std::env::var_os("HOME")
@@ -143,11 +204,27 @@ pub fn unique_path(dir: &std::path::Path, suggested: &str) -> PathBuf {
     };
     let mut candidate = dir.join(name);
     let mut n = 1;
-    while candidate.exists() {
-        candidate = dir.join(format!("{stem} ({n}){ext}"));
-        n += 1;
+    // Created, not merely checked. Two downloads of the same name starting
+    // together both used to find the name free and both take it, so the second
+    // overwrote the first -- the one thing this function exists to prevent.
+    // Creating it exclusively means the winner holds the name.
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            // Anything other than "taken" -- a read-only directory, a name the
+            // filesystem refuses -- is for the caller to report: hand back the
+            // candidate and let the write fail where it can be explained.
+            Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => return candidate,
+            Ok(_) => return candidate,
+            Err(_) => {
+                candidate = dir.join(format!("{stem} ({n}){ext}"));
+                n += 1;
+            }
+        }
     }
-    candidate
 }
 
 /// Shared by page views and chrome-owned editors. Blob exports from capture,

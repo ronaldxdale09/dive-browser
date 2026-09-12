@@ -273,6 +273,14 @@ button:not(:disabled):active,
    "dimming" is really a cut to black; a short fade on the scrim and panel
    turns the cut into a transition. The leave animation runs before the
    dialog unmounts (lib/useFadeClose.ts), which is what gives the page back. */
+/* A download whose server sent no Content-Length has no percentage to show,
+   so the bar sweeps instead of filling. Reduced motion gets a full bar rather
+   than a moving one -- still "something is happening", without the movement. */
+@keyframes dive-indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
 @keyframes dialog-in {
   from {
     opacity: 0;

@@ -26,7 +26,7 @@ export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, 
 export type { ExtensionInfo, ExtensionList };
 export type { WebApp, WebAppProbe } from "../generated/bindings";
 export type { StackReport, Detection, Category, Palette, PaletteEntry, ColorFormats } from "../generated/bindings";
-export type { QuickLink, Prefs, ClearRequest, Rule, RuleAction, PrivacyCategory, PrivacyEvent, PrivacyInfo, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RequestDetail, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, RecordOptions, RecordingResult, RecordingCapabilities, RecordingEvent, Microphone, MediaInfo, ExportRequest, KeptSegment, RecordingInfo, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions, SitePermission, PermissionList, Scope, Duration, PermissionDismissed, Decision, UpdateInfo, PermissionAsked, TabTier, DefaultBrowserStatus, Profile, ProfileId, ProfileDraft, SubtitleModel, SubtitleModelProgress, SubtitleCue, SubtitleState, ImportSource, ImportSummary, DeviceEmulated } from "../generated/bindings";
+export type { QuickLink, Prefs, ClearRequest, Rule, RuleAction, PrivacyCategory, PrivacyEvent, PrivacyInfo, NetworkProfile, Snapshot, Tab, Workspace, Command, CoreEvent, Bounds, WorkspaceDraft, ConsoleEntry, Level, NetworkEvent, Device, MediaOverrides, ChatDelta, ChatTurn, StorageSnapshot, Cookie, MetaSnapshot, A11yReport, Violation, FindResult, DownloadNotice, AppInfo, Vitals, Original, DevServer, DevServersChanged, ShareInfo, ReplayRequest, ReplayResponse, RequestDetail, RecordedStep, RecorderEvent, HistoryEntry, Bookmark, Pick, StyleChange_Serialize as StyleChange, InspectorSnapshot_Serialize as InspectorSnapshot, InspectEvent, TabCrashed, TabLoad, LoadPhase, PaneBounds, TabWindowChanged, RecordOptions, RecordingResult, RecordingCapabilities, RecordingEvent, Microphone, MediaInfo, ExportRequest, KeptSegment, RecordingInfo, ProviderInfo, Provider, ModelInfo, Usage, KeyCheck, SendOptions, SitePermission, PermissionList, Scope, Duration, PermissionDismissed, Decision, UpdateInfo, PermissionAsked, TabTier, DefaultBrowserStatus, Profile, ProfileId, ProfileDraft, SubtitleModel, SubtitleModelProgress, SubtitleCue, SubtitleState, ImportSource, ImportSummary, DeviceEmulated, DownloadProgress } from "../generated/bindings";
 
 /** Unwrap a specta `Result`, throwing the app error message on failure. */
 export function unwrap<T, E extends { message: string }>(r: Result<T, E>): T {
@@ -176,6 +176,10 @@ export const ipc = {
   browsingDataClear: async (what: ClearRequest) => unwrap(await commands.browsingDataClear(what)),
   downloadsReveal: async (path: string | null) => unwrap(await commands.downloadsReveal(path)),
   downloadsOpen: async (path: string) => unwrap(await commands.downloadsOpen(path)),
+  /** Stop a download still in flight; `id` comes from its progress reports. */
+  downloadsCancel: async (id: number) => unwrap(await commands.downloadsCancel(id)),
+  /** Forget this session's downloads, in the engine as well as the chrome. */
+  downloadsClear: async () => unwrap(await commands.downloadsClear()),
   tabFocus: async (id: string) => unwrap(await commands.tabFocus(id)),
   mcpToken: async () => unwrap(await commands.mcpToken()),
   tabStorageDelete: async (id: string, section: "cookies" | "local" | "session", key: string, domain: string | null, path: string | null) =>

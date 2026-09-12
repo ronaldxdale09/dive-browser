@@ -72,7 +72,7 @@ wrap_download_handler! {
       &self,
       _browser: Option<&mut Browser>,
       download_item: Option<&mut DownloadItem>,
-      _callback: Option<&mut DownloadItemCallback>,
+      callback: Option<&mut DownloadItemCallback>,
     ) {
       let Some(download_item) = download_item else {
         return;
@@ -83,6 +83,20 @@ wrap_download_handler! {
       let Ok(url) = url::Url::parse(&url_str) else {
         return;
       };
+
+      // Cancelling, pausing and resuming are only possible through the
+      // callback CEF lends for the length of this call, so a request made
+      // while nothing was in flight is applied on the next update.
+      let id = download_item.id();
+      if let Some(callback) = callback
+        && let Some(action) = crate::downloads::take_control(id)
+      {
+        match action {
+          crate::downloads::Control::Cancel => callback.cancel(),
+          crate::downloads::Control::Pause => callback.pause(),
+          crate::downloads::Control::Resume => callback.resume(),
+        }
+      }
 
       // Check download state - CEF returns i32 where 0 is false, non-zero is true.
       let is_complete = download_item.is_complete() != 0;
@@ -101,6 +115,31 @@ wrap_download_handler! {
       } else {
         None
       };
+
+      // What the chrome needs to draw a bar. Tauri's handler has no variant
+      // for this, so it goes out through the runtime's own channel.
+      let received = download_item.received_bytes().max(0);
+      let total = download_item.total_bytes();
+      crate::downloads::report(
+        &crate::downloads::DownloadProgress {
+          id,
+          url: url_str.clone(),
+          path: {
+            let path = CefString::from(&download_item.full_path()).to_string();
+            path
+          },
+          #[allow(clippy::cast_sign_loss)] // clamped to zero above.
+          received: received as u64,
+          // A chunked response reports no total; the chrome shows what has
+          // arrived rather than inventing a percentage.
+          #[allow(clippy::cast_sign_loss)]
+          total: (total > 0).then_some(total as u64),
+          #[allow(clippy::cast_sign_loss)]
+          speed: download_item.current_speed().max(0) as u64,
+          paused: download_item.is_paused() != 0,
+        },
+        is_complete || is_canceled,
+      );
 
       // Only call handler when download is finished (complete or canceled).
       if is_complete || is_canceled {

@@ -34,6 +34,7 @@ import { WindowResizeEdges } from "./components/WindowResizeEdges";
 import { isWindows } from "./lib/commands";
 import { listenForAgentPresence } from "./store/agentPresence";
 import { listenForEmulation } from "./store/emulation";
+import { listenForUpdateProgress } from "./store/updates";
 
 const Sidecar = lazy(() => import("./components/Sidecar").then(({ Sidecar }) => ({ default: Sidecar })));
 const Dock = lazy(() => import("./components/Dock").then(({ Dock }) => ({ default: Dock })));
@@ -92,6 +93,7 @@ export function App() {
   // An agent asking for a phone should put the phone on screen, not just tell
   // the page it is one.
   useEffect(() => listenForEmulation(), []);
+  useEffect(() => listenForUpdateProgress(), []);
   // Which panels were open last time is remembered here rather than in the
   // browser store, whose `open` map is per-window state. Applied once at
   // boot, then followed.

@@ -6,6 +6,7 @@
 #![allow(clippy::too_many_arguments)]
 
 mod cef_impl;
+pub mod downloads;
 mod external_message_pump;
 mod native_input_trace;
 mod platform;
@@ -19,6 +20,7 @@ mod window_builder;
 mod window_handle;
 
 pub use cef::sys::CEF_API_VERSION_LAST;
+pub use downloads::{Control as DownloadControl, DownloadProgress};
 pub use runtime::*;
 pub use webview::*;
 pub use window::CefWindowDispatcher;

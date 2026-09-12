@@ -2,6 +2,7 @@ import { ArrowUpCircle, ExternalLink, Loader2, RefreshCw, X } from "lucide-react
 import { useCallback, useRef, useState } from "react";
 import { REPO_URL } from "../lib/constants";
 import { useCoversContent } from "../lib/overlay";
+import { formatBytes } from "../lib/paths";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
 import { useUpdates } from "../store/updates";
@@ -17,6 +18,12 @@ export function UpdateDialog() {
   const update = useUpdates((s) => s.update);
   const error = useUpdates((s) => s.error);
   const installing = useUpdates((s) => s.installing);
+  const received = useUpdates((s) => s.received);
+  const total = useUpdates((s) => s.total);
+  const applying = useUpdates((s) => s.applying);
+  // A percentage needs a size the release declared. Without one the download
+  // still says how much has arrived, which beats a spinner saying nothing.
+  const pct = installing && !applying && total ? Math.min(100, Math.round((received / total) * 100)) : null;
   const dismissed = useUpdates((s) => s.dismissed);
   const dismiss = useUpdates((s) => s.dismiss);
   const install = useUpdates((s) => s.install);
@@ -53,9 +60,11 @@ export function UpdateDialog() {
       }`}
     >
       <div className="flex items-start gap-3">
-        <span className="relative grid size-9 shrink-0 place-items-center rounded-xl bg-highlight-soft text-highlight">
-          <Icon icon={RefreshCw} size={16} />
-          <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-highlight ring-2 ring-surface" />
+        {/* No tile behind it: one card, one surface. The dot is the only
+            thing that needs to sit above the mark. */}
+        <span className="relative mt-0.5 grid size-5 shrink-0 place-items-center text-highlight">
+          <Icon icon={RefreshCw} size={18} className={installing ? "animate-spin motion-reduce:animate-none" : undefined} />
+          {!installing && <span className="absolute -top-1 -right-1 size-2 rounded-full bg-highlight ring-2 ring-surface" />}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -115,8 +124,8 @@ export function UpdateDialog() {
         >
           {installing ? (
             <>
-              <Icon icon={Loader2} size={13} className="animate-spin" />
-              Installing…
+              <Icon icon={Loader2} size={13} className="animate-spin motion-reduce:animate-none" />
+              {applying ? "Installing…" : pct === null ? (received ? `Downloading ${formatBytes(received)}` : "Starting…") : `Downloading ${pct}%`}
             </>
           ) : (
             <>
@@ -126,6 +135,23 @@ export function UpdateDialog() {
           )}
         </button>
       </div>
+
+      {installing && !applying && (
+        <div
+          role="progressbar"
+          aria-label="Update download"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          {...(pct === null ? {} : { "aria-valuenow": pct })}
+          aria-valuetext={pct === null ? `${formatBytes(received)} downloaded` : `${pct}%`}
+          className="mt-3 h-1 w-full overflow-hidden rounded-full bg-surface-3"
+        >
+          <div
+            className={`h-full rounded-full bg-accent ${pct === null ? "w-1/3 animate-[dive-indeterminate_1.4s_ease-in-out_infinite] motion-reduce:w-full motion-reduce:animate-none" : "transition-[width] duration-200 ease-out motion-reduce:transition-none"}`}
+            {...(pct === null ? {} : { style: { width: `${pct}%` } })}
+          />
+        </div>
+      )}
     </div>
   );
 }
