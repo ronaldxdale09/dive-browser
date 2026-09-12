@@ -166,6 +166,24 @@ jobs:
             --config "{\"plugins\":{\"updater\":{\"pubkey\":\"$DIVE_UPDATER_PUBKEY\"}}}"
           scripts/release/prepare-bundle.sh target/release/bundle/macos/Dive.app
 
+      # Tauri writes the disk image with zlib; the same image packed with LZMA
+      # is about a quarter smaller and nothing is removed. The script re-signs
+      # the converted image with the same identity and proves it mounts before
+      # it replaces the original. Only the DMG a person downloads shrinks: the
+      # updater's .tar.gz must stay gzip, which is all the updater can read.
+      - name: Recompress DMG with LZMA
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmgs=(target/release/bundle/dmg/*.dmg)
+          [ "${#dmgs[@]}" -eq 1 ] || { echo "::error::Expected one DMG, found ${#dmgs[@]}."; exit 1; }
+          scripts/release/compress-dmg.sh "${dmgs[0]}"
+
       # Fails when the signature or the archive is missing, instead of writing
       # a manifest with an empty field that only breaks on a user's machine.
       - name: Build update manifest
