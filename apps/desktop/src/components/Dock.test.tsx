@@ -4,7 +4,7 @@ import type { ConsoleEntry } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { useConsole } from "../store/console";
 import { useNetwork } from "../store/network";
-import { Dock, sourceName, PANELS, stepPanel } from "./Dock";
+import { coalesce, Dock, sourceName, PANELS, stepPanel } from "./Dock";
 
 const entry = (i: number, text = `line ${i}`, level: ConsoleEntry["level"] = "info"): ConsoleEntry => ({
   tab_id: "tab-1",
@@ -116,15 +116,24 @@ describe("Dock console panel", () => {
     expect(parseInt(list.style.height, 10)).toBe(500 * ROW);
   });
 
-  it("follows new output only while the user is at the bottom", () => {
+  it("follows new output only while the user is at the bottom, one scroll per frame", () => {
+    // Frames run by hand: a burst of flushes must cost one scroll, after the frame.
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => frames.push(cb));
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => { frames.splice(id - 1, 1, () => undefined); });
+    const runFrames = () => act(() => { frames.splice(0).forEach((cb) => cb(0)); });
     push([entry(1)]);
     render(<Dock />);
+    runFrames();
     const scroll = screen.getByTestId("console-scroll");
     const scrollTo = HTMLElement.prototype.scrollTo as unknown as ReturnType<typeof vi.fn>;
     scrollTo.mockClear();
 
     push([entry(2)]);
-    expect(scrollTo).toHaveBeenCalled();
+    push([entry(3)]);
+    expect(scrollTo).not.toHaveBeenCalled();
+    runFrames();
+    expect(scrollTo).toHaveBeenCalledTimes(1);
 
     // Scroll up to read older output: new entries no longer pull the view along.
     Object.defineProperty(scroll, "scrollHeight", { configurable: true, get: () => 5000 });
@@ -132,14 +141,29 @@ describe("Dock console panel", () => {
     scroll.scrollTop = 0;
     fireEvent.scroll(scroll);
     scrollTo.mockClear();
-    push([entry(3)]);
+    push([entry(4)]);
+    runFrames();
     expect(scrollTo).not.toHaveBeenCalled();
 
     // Back at the end, following resumes.
     scroll.scrollTop = 5000 - VIEWPORT;
     fireEvent.scroll(scroll);
-    push([entry(4)]);
+    push([entry(5)]);
+    runFrames();
     expect(scrollTo).toHaveBeenCalled();
+  });
+
+  it("hands back the same row objects for runs that have not changed", () => {
+    const rows = [entry(1, "a"), entry(2, "b"), entry(3, "b"), entry(4, "c")].map((e, id) => ({ ...e, id }));
+    const before = coalesce(rows);
+    expect(before.map((r) => r.repeats)).toEqual([1, 2, 1]);
+    // A new array with the same lines, as every flush hands the panel.
+    const same = coalesce([...rows]);
+    expect(same.map((r, i) => r === before[i])).toEqual([true, true, true]);
+    // The run that grew is a new object, so its count re-renders; the others are not.
+    const grown = coalesce([...rows, { ...entry(5, "c"), id: 4 }]);
+    expect(grown.map((r, i) => r === before[i])).toEqual([true, true, false]);
+    expect(grown[2]?.repeats).toBe(2);
   });
 
   it("folds a run of identical lines into one row with a count", () => {

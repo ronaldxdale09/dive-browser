@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import type { ReactNode } from "react";
 
 /**
@@ -114,7 +114,9 @@ export function parseInline(src: string): Inline[] {
   return out;
 }
 
-function Inlines({ text, onLink }: { text: string; onLink?: ((href: string) => void) | undefined }) {
+// While a reply streams only its last block changes; memo keeps the blocks
+// above it from re-parsing on every flush.
+const Inlines = memo(function Inlines({ text, onLink }: { text: string; onLink?: ((href: string) => void) | undefined }) {
   return (
     <>
       {parseInline(text).map((piece, i) => {
@@ -145,7 +147,7 @@ function Inlines({ text, onLink }: { text: string; onLink?: ((href: string) => v
       })}
     </>
   );
-}
+});
 
 /** Render Markdown as chrome-styled React. */
 export function Markdown({ text, onLink }: { text: string; onLink?: ((href: string) => void) | undefined }): ReactNode {

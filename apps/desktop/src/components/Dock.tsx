@@ -143,6 +143,16 @@ const BOTTOM_SLACK = 8;
 export type ShownRow = ConsoleRow & { repeats: number };
 
 /**
+ * The shown row each run was last folded into, by the run's first line.
+ *
+ * A flush hands the panel a new entries array, and folding it fresh gave
+ * every row a new object -- which the memoized Row took as a change and the
+ * virtualizer re-measured, for every visible line, on every flush. A run
+ * that has not grown gets the same object it had.
+ */
+const folded = new WeakMap<ConsoleRow, ShownRow>();
+
+/**
  * Fold a run of identical lines (same text, level, source and place) into
  * one row with a count, the way DevTools does, so a polling loop's twentieth
  * "Failed to load resource" does not push the line that matters off screen.
@@ -150,15 +160,31 @@ export type ShownRow = ConsoleRow & { repeats: number };
  */
 export function coalesce(rows: readonly ConsoleRow[]): ShownRow[] {
   const out: ShownRow[] = [];
-  for (const row of rows) {
-    const last = out[out.length - 1];
-    if (last && last.text === row.text && last.level === row.level && last.source === row.source && last.url === row.url && last.line === row.line) {
-      last.repeats += 1;
-      last.timestamp = row.timestamp;
-    } else {
-      out.push({ ...row, repeats: 1 });
+  let first: ConsoleRow | undefined;
+  let repeats = 0;
+  let timestamp: ConsoleRow["timestamp"] = null;
+  const emit = () => {
+    if (!first) return;
+    const known = folded.get(first);
+    if (known && known.repeats === repeats && known.timestamp === timestamp) {
+      out.push(known);
+      return;
     }
+    const row = { ...first, repeats, timestamp };
+    folded.set(first, row);
+    out.push(row);
+  };
+  for (const row of rows) {
+    if (first && first.text === row.text && first.level === row.level && first.source === row.source && first.url === row.url && first.line === row.line) {
+      repeats += 1;
+    } else {
+      emit();
+      first = row;
+      repeats = 1;
+    }
+    timestamp = row.timestamp;
   }
+  emit();
   return out;
 }
 
@@ -187,8 +213,12 @@ function ConsolePanel() {
     overscan: 12,
     getItemKey: (i) => shown[i]?.id ?? i,
   });
+  // A burst of output lands as several flushes; the scroll waits for the
+  // next frame so the burst costs one, and only while the user is at the end.
   useEffect(() => {
-    if (atBottom.current && shown.length > 0) virtualizer.scrollToEnd();
+    if (!atBottom.current || shown.length === 0) return;
+    const frame = requestAnimationFrame(() => virtualizer.scrollToEnd());
+    return () => cancelAnimationFrame(frame);
   }, [shown.length, virtualizer]);
 
   return (

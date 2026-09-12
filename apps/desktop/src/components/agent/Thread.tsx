@@ -45,6 +45,9 @@ const SUGGESTIONS: Suggestion[] = [
   },
 ];
 
+/** Within this many pixels of the end, the person counts as reading the newest text. */
+const BOTTOM_SLACK = 40;
+
 /** The conversation and its composer. */
 export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
   const messages = useAgent((s) => s.messages);
@@ -63,9 +66,20 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  // Whether the person was reading the newest text the last time they scrolled.
+  const atBottom = useRef(true);
+  const seen = useRef(messages.length);
 
+  // A streaming reply changes `messages` many times a second. The scroll
+  // waits for the next frame so a burst costs one, and follows the text only
+  // while the person is at the end -- scrolling up to reread something must
+  // not be undone by the next token. A new turn always shows itself.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
+    const newTurn = messages.length !== seen.current;
+    seen.current = messages.length;
+    if (!newTurn && !atBottom.current) return;
+    const frame = requestAnimationFrame(() => endRef.current?.scrollIntoView({ block: "end" }));
+    return () => cancelAnimationFrame(frame);
   }, [messages]);
 
   // Opened with ⌘J or the toolbar: the person came here to type.
@@ -83,7 +97,13 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
 
   return (
     <>
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-3 py-3 select-text">
+      <div
+        className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-3 py-3 select-text"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK;
+        }}
+      >
         {messages.length === 0 && (
           <div className="flex flex-1 flex-col justify-end gap-4 py-2 animate-agent-slide-up">
             {/* The header already says "Agent"; this says what to do with it,
