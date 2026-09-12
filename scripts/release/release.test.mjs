@@ -322,6 +322,19 @@ describe('update-manifest', () => {
   })
 })
 
+describe('local-release.sh', () => {
+  const script = readFileSync(resolve(import.meta.dirname, 'local-release.sh'), 'utf8')
+
+  it('expands the Windows assets in a way bash 3.2 survives with set -u', () => {
+    // macOS ships bash 3.2, where an empty array's [@] counts as unset: a
+    // macOS-only release built for an hour and then died at `gh release
+    // create` with "WINDOWS_ASSETS[@]: unbound variable".
+    const expansions = script.split('\n').filter((line) => line.includes('${WINDOWS_ASSETS[@]}'))
+    expect(expansions).toHaveLength(1)
+    expect(expansions[0]).toContain('${WINDOWS_ASSETS[@]+"${WINDOWS_ASSETS[@]}"}')
+  })
+})
+
 describe('verify-release-assets', () => {
   const complete = [
     { name: 'latest.json', size: 300 },
