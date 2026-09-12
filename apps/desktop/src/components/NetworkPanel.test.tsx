@@ -187,6 +187,22 @@ describe("NetworkPanel", () => {
   });
 });
 
+describe("socket frames", () => {
+  it("mounts only the newest frames, and the earlier ones on request", () => {
+    const socket = { ...row(0), resourceType: "WebSocket", mimeType: "websocket" };
+    const frames = Array.from({ length: 200 }, (_, i) => ({ direction: i % 2 ? ("sent" as const) : ("received" as const), payload: `frame-${i}`, at: i / 10 }));
+    useNetwork.setState({ byTab: { "tab-1": [socket] }, frames: { "tab-1:r0": frames } });
+    render(<NetworkPanel />);
+    fireEvent.click(screen.getByText("item-0").closest("tr")!);
+    expect(screen.getByText("frame-199")).toBeTruthy();
+    expect(screen.getByText("frame-140")).toBeTruthy();
+    expect(screen.queryByText("frame-139")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show 140 earlier frames" }));
+    expect(screen.getByText("frame-0")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /earlier frames/ })).toBeNull();
+  });
+});
+
 describe("mocked rows", () => {
   it("says (mock) beside the status of a reply a rule answered", () => {
     useNetwork.setState({ byTab: { "tab-1": [{ ...rows(1)[0]!, status: 200, mocked: true }] } });
