@@ -1325,6 +1325,17 @@ impl TabHost {
                 covered: false,
             },
         );
+        // Chrome may finish native creation after the page was reparented.
+        // Queue its initial inactive mask on this exact chrome generation so
+        // it goes below the page before navigation; later overlays keep FIFO order.
+        if let Err(error) = self.update_overlay_mask(&self.popouts[&id].chrome, false) {
+            if let Err(rollback) = self.attach(id) {
+                tracing::error!(%rollback, "preserving page after initial popout mask failed");
+            } else if let Err(restore) = self.apply_visibility() {
+                tracing::error!(%restore, "restoring page visibility after popout rollback failed");
+            }
+            return Err(error);
+        }
         if let Some(spec) = web_app {
             self.app_windows.insert(id, spec.id.clone());
         } else {

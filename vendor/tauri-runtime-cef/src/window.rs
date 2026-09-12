@@ -488,6 +488,8 @@ impl<T: UserEvent> WinitCefApp<T> {
         }
 
         #[cfg(windows)]
+        let mut appwindow = appwindow;
+        #[cfg(windows)]
         appwindow.draw_background_surface();
 
         #[cfg(not(windows))]
