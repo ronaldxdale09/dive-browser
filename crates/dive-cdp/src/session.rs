@@ -111,6 +111,101 @@ impl CdpEventReceiver {
     }
 }
 
+impl CdpSession {
+    /// Fail open for a `Fetch.requestPaused` we could not parse: pull the
+    /// request id out of the raw text and continue the request as-is. The
+    /// reply comes back under an id nobody is waiting for, which
+    /// `handle_incoming` already ignores.
+    fn release_paused_request_in(&self, raw: &str) {
+        if !raw.contains("\"Fetch.requestPaused\"") {
+            return;
+        }
+        let Some(request_id) = extract_string_field(raw, "\"requestId\":\"") else {
+            return;
+        };
+        tracing::warn!(
+            request_id,
+            "unreadable Fetch.requestPaused; continuing the request so the page does not hang"
+        );
+        let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
+        let message = json!({
+            "id": id,
+            "method": "Fetch.continueRequest",
+            "params": { "requestId": request_id }
+        })
+        .to_string();
+        if let Err(error) = self.inner.transport.send(&message) {
+            tracing::warn!(request_id, "could not continue the request: {error}");
+        }
+    }
+}
+
+/// The value of the first `"key":"..."` in `raw`, unescaped only as far as
+/// a request id needs (they are plain ASCII).
+fn extract_string_field<'a>(raw: &'a str, key: &str) -> Option<&'a str> {
+    let start = raw.find(key)? + key.len();
+    let rest = &raw[start..];
+    let end = rest.find('"')?;
+    Some(&rest[..end])
+}
+
+/// Replace JSON `\uXXXX` escapes that strict parsing rejects -- a lone half
+/// of a surrogate pair, or an escape cut short -- with U+FFFD, leaving every
+/// well-formed escape and everything else untouched.
+fn repair_json_escapes(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out = String::with_capacity(raw.len());
+    let mut i = 0;
+    let hex4 = |at: usize| -> Option<u32> {
+        let s = raw.get(at..at + 4)?;
+        u32::from_str_radix(s, 16).ok()
+    };
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'u' {
+            match hex4(i + 2) {
+                Some(unit) if (0xD800..0xDC00).contains(&unit) => {
+                    // High surrogate: valid only when a low one follows.
+                    let low = if raw.get(i + 6..i + 8) == Some("\\u") {
+                        hex4(i + 8).filter(|u| (0xDC00..0xE000).contains(u))
+                    } else {
+                        None
+                    };
+                    if low.is_some() {
+                        out.push_str(&raw[i..i + 12]);
+                        i += 12;
+                    } else {
+                        out.push_str("\\ufffd");
+                        i += 6;
+                    }
+                }
+                Some(unit) if (0xDC00..0xE000).contains(&unit) => {
+                    // A low surrogate on its own (a paired one was consumed above).
+                    out.push_str("\\ufffd");
+                    i += 6;
+                }
+                Some(_) => {
+                    out.push_str(&raw[i..i + 6]);
+                    i += 6;
+                }
+                None => {
+                    // `\u` without four hex digits: an escape cut short.
+                    out.push_str("\\ufffd");
+                    i += 2;
+                }
+            }
+        } else if bytes[i] == b'\\' && i + 1 < bytes.len() {
+            // Any other escape: copy the pair so a `\\u` is not misread.
+            out.push_str(&raw[i..i + 2]);
+            i += 2;
+        } else {
+            let ch = raw[i..].chars().next().unwrap_or('\u{fffd}');
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    out
+}
+
 /// Removes an in-flight call when its future is timed out or cancelled.
 /// Results normally remove themselves in `handle_incoming`; this guard makes
 /// every other exit path equally leak-free.
@@ -225,7 +320,27 @@ impl CdpSession {
             // act on them, and acting is what breaks the teardown.
             return Ok(());
         }
-        let msg: Incoming = serde_json::from_str(raw)?;
+        let msg: Incoming = match serde_json::from_str(raw) {
+            Ok(msg) => msg,
+            Err(error) => {
+                // Chromium writes page text into protocol messages as JSON
+                // `\uXXXX` escapes, and a page holding half of a surrogate
+                // pair -- a broken emoji, a truncated string -- yields a lone
+                // surrogate that strict JSON parsing rejects. Dropping the
+                // message was how a paused request stayed paused forever and
+                // a page "just stopped". Repair the escapes and parse again.
+                let repaired = repair_json_escapes(raw);
+                let Ok(msg) = serde_json::from_str(&repaired) else {
+                    // Still unreadable. Whatever else it was, if it paused a
+                    // request, release that request: a page must never hang
+                    // on our failure to read a message about it.
+                    self.release_paused_request_in(raw);
+                    return Err(error.into());
+                };
+                tracing::debug!("cdp message repaired: {error}");
+                msg
+            }
+        };
         match (msg.id, msg.method) {
             (Some(id), _) => {
                 let Some(tx) = self.pending().remove(&id) else {
@@ -280,6 +395,42 @@ impl CdpSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repairs_lone_and_truncated_surrogate_escapes() {
+        assert_eq!(
+            repair_json_escapes(r#"{"a":"\ud83d\ude00"}"#),
+            r#"{"a":"\ud83d\ude00"}"#
+        );
+        assert_eq!(
+            repair_json_escapes(r#"{"a":"x\ud83dy"}"#),
+            r#"{"a":"x\ufffdy"}"#
+        );
+        assert_eq!(
+            repair_json_escapes(r#"{"a":"\ude00"}"#),
+            r#"{"a":"\ufffd"}"#
+        );
+        assert_eq!(
+            repair_json_escapes(r#"{"a":"\u12"}"#),
+            r#"{"a":"\ufffd12"}"#
+        );
+        assert_eq!(
+            repair_json_escapes(r#"{"a":"\\u0041"}"#),
+            r#"{"a":"\\u0041"}"#
+        );
+        let repaired =
+            repair_json_escapes(r#"{"method":"Log.entryAdded","params":{"t":"\ud83d"}}"#);
+        assert!(serde_json::from_str::<serde_json::Value>(&repaired).is_ok());
+    }
+
+    #[test]
+    fn extracts_a_request_id_from_raw_text() {
+        let raw = r#"{"method":"Fetch.requestPaused","params":{"requestId":"interception-job-7.0","request":{"url":"\ud83d"}}}"#;
+        assert_eq!(
+            extract_string_field(raw, "\"requestId\":\""),
+            Some("interception-job-7.0")
+        );
+    }
 
     #[tokio::test]
     async fn a_closed_session_refuses_calls_without_touching_the_transport() {
