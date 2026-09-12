@@ -716,7 +716,7 @@ impl TabHost {
                         app.clone(),
                         tab_id,
                         session.clone(),
-                        view.label().to_owned(),
+                        activity_nonce.clone(),
                     );
                     crate::favicon::attach(app.clone(), tab_id, session.clone());
                     let loading = crate::loading::attach(app.clone(), tab_id, session.clone());
@@ -1566,12 +1566,17 @@ fn attach_cdp(
     }
 
     let session = CdpSession::new(CefTransport(view.clone()));
+    // CEF delivers protocol messages on its UI thread, which is the window's
+    // main thread -- the one that paints and takes input. A busy page sends
+    // hundreds a second and a screencast frame runs to hundreds of KB, so
+    // scanning and parsing them there is what dropped frames during a page
+    // load. The callback only hands the bytes over; one worker per session
+    // does the JSON work, in arrival order, and exits when the view goes.
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let sink = session.clone();
-    view.on_dev_tools_protocol(move |protocol| {
-        // `Message` carries the raw JSON for both results and events; the
-        // other variants are pre-parsed duplicates we do not need.
-        match protocol {
-            tauri::CefDevToolsProtocol::Message(bytes) => match std::str::from_utf8(&bytes) {
+    tauri::async_runtime::spawn(async move {
+        while let Some(bytes) = rx.recv().await {
+            match std::str::from_utf8(&bytes) {
                 Ok(text) => {
                     tracing::trace!(
                         len = text.len(),
@@ -1584,17 +1589,15 @@ fn attach_cdp(
                     }
                 }
                 Err(e) => tracing::warn!("cdp message is not utf-8: {e}"),
-            },
-            tauri::CefDevToolsProtocol::MethodResult {
-                message_id,
-                success,
-                result,
-            } => {
-                tracing::trace!(message_id, success, len = result.len(), "cdp method result");
             }
-            tauri::CefDevToolsProtocol::Event { method, .. } => {
-                tracing::trace!(%method, "cdp event");
-            }
+        }
+    });
+    view.on_dev_tools_protocol(move |protocol| {
+        // `Message` carries the raw JSON for both results and events; the
+        // runtime no longer dispatches the pre-parsed variants.
+        if let tauri::CefDevToolsProtocol::Message(bytes) = protocol {
+            // A closed channel means the worker is gone with the session.
+            let _ = tx.send(bytes);
         }
     })?;
     Ok(session)
@@ -1649,8 +1652,17 @@ fn apply_site_zoom(app: &AppHandle<Runtime>, tab_id: TabId, url: &str) {
 /// A late callback from a closing renderer must not overwrite its replacement.
 fn update_session_tab(app: &AppHandle<Runtime>, id: TabId, nonce: &str, f: impl FnOnce(&mut Tab)) {
     let state = app.state::<AppState>();
-    let _host = lock(&state.host);
-    if state.activity.session_current(id, nonce) {
+    // Check under the host lock, then let it go before the row is written.
+    // Holding it across the SQLite writes in `update_tab` stalled every tab
+    // operation on the main thread for every title and address change of
+    // every tab. What that opens -- the view replaced between the check and
+    // the write -- is a window of microseconds, and the replacement's own
+    // callbacks follow with the right values.
+    let current = {
+        let _host = lock(&state.host);
+        state.activity.session_current(id, nonce)
+    };
+    if current {
         update_tab(app, id, f);
     }
 }
@@ -1810,8 +1822,14 @@ pub fn remember_window_bounds(window: &Window<Runtime>) {
         return;
     };
     let state = window.app_handle().state::<AppState>();
-    if let Err(e) = crate::state::lock(&state.store).set_setting(WINDOW_BOUNDS, &bounds.serialize())
-    {
+    // This runs on the main thread from window events. `try_lock`: a worker
+    // mid-write (history, a favicon) must not stall the window; the bounds
+    // are saved again on the next move, blur or close.
+    let Ok(store) = state.store.try_lock() else {
+        tracing::debug!("window bounds not saved: store busy");
+        return;
+    };
+    if let Err(e) = store.set_setting(WINDOW_BOUNDS, &bounds.serialize()) {
         tracing::debug!("could not remember window bounds: {e}");
     }
 }
@@ -2020,14 +2038,12 @@ fn open_chrome_link(
                     return;
                 };
                 let state = handle.state::<AppState>();
-                let workspace = if let Some(tab) = source {
-                    let Ok(tab) = lock(&state.store).tab(tab) else {
-                        return;
-                    };
-                    tab.workspace_id.or(*lock(&state.active_workspace))
-                } else {
-                    *lock(&state.active_workspace)
-                };
+                // Main thread, reached from an engine callback: never wait on
+                // the store here. If it is busy the link opens in the active
+                // workspace, which is where the source tab almost always is.
+                let workspace = source
+                    .and_then(|tab| state.store.try_lock().ok()?.tab(tab).ok()?.workspace_id)
+                    .or(*lock(&state.active_workspace));
                 if let Some(workspace) = workspace
                     && let Err(error) =
                         crate::commands::open_tab(&main, &handle, &state, workspace, url.as_str())
@@ -2053,7 +2069,20 @@ fn forward_events(app: AppHandle<Runtime>, mut rx: tokio::sync::broadcast::Recei
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!(n, "chrome missed core events");
+                    // The chrome's tab list is now behind and nothing coming
+                    // will fill the gap. A workspace activation it did not
+                    // ask for is the signal it already answers by fetching a
+                    // fresh snapshot, so re-announce the current one.
+                    tracing::warn!(n, "chrome missed core events; asking it to resync");
+                    let current = *lock(&app.state::<AppState>().active_workspace);
+                    if let Some(workspace) = current
+                        && let Err(e) = crate::commands::emit_state_changed(
+                            &app,
+                            CoreEvent::WorkspaceActivated(workspace),
+                        )
+                    {
+                        tracing::warn!("resync signal failed: {e}");
+                    }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }

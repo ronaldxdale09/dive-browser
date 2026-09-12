@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { applyDelta, isReady } from "./agent";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { applyDelta, coalesceDeltas, isReady, STREAM_FLUSH_MS, useAgent } from "./agent";
 import type { Message } from "./agent";
-import type { ProviderInfo } from "../lib/ipc";
+import type { ChatDeltaOut, ProviderInfo } from "../lib/ipc";
+import { ipc } from "../lib/ipc";
 
 const base: Message[] = [
   { id: "1", role: "user", content: "hi" },
@@ -66,6 +67,63 @@ describe("approval", () => {
     m = applyDelta(m, { type: "needs_approval", data: { id: "tu3", name: "page_type", input: "{}", action: true, locator: null } });
     expect(applyDelta(m, { type: "done", data: "stopped" })[1]?.steps?.[0]?.awaiting).toBe(false);
     expect(applyDelta(m, { type: "error", data: "gone" })[1]?.steps?.[0]?.awaiting).toBe(false);
+  });
+});
+
+describe("coalesceDeltas", () => {
+  it("joins adjacent text and reasoning pieces but keeps a tool call between them", () => {
+    const call: ChatDeltaOut = { type: "tool_call", data: { id: "t", name: "page_click", input: "{}", action: true, locator: null } };
+    expect(coalesceDeltas([
+      { type: "reasoning", data: "Fi" }, { type: "reasoning", data: "rst" },
+      { type: "text", data: "a" }, { type: "text", data: "b" }, call, { type: "text", data: "c" },
+    ])).toEqual([{ type: "reasoning", data: "First" }, { type: "text", data: "ab" }, call, { type: "text", data: "c" }]);
+  });
+});
+
+describe("streaming", () => {
+  const initial = useAgent.getState();
+  beforeEach(() => {
+    vi.useFakeTimers();
+    useAgent.setState(initial, true);
+  });
+  afterEach(() => {
+    useAgent.setState(initial, true);
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("writes the store a few times a second, not per token, and loses nothing at the end", async () => {
+    let finish!: () => void;
+    let emit!: (d: ChatDeltaOut) => void;
+    vi.spyOn(ipc, "agentSend").mockImplementation((_run, _turns, _tab, _options, onDelta) => {
+      emit = onDelta;
+      return new Promise<void>((resolve) => { finish = resolve; });
+    });
+    const writes = vi.fn();
+    const unsubscribe = useAgent.subscribe(writes);
+    const sending = useAgent.getState().send("hi", null);
+    await vi.advanceTimersByTimeAsync(0);
+    writes.mockClear();
+
+    for (const piece of ["Hel", "lo", ", ", "wor"]) emit({ type: "text", data: piece });
+    expect(writes).not.toHaveBeenCalled();
+    expect(useAgent.getState().messages.at(-1)?.content).toBe("");
+    await vi.advanceTimersByTimeAsync(STREAM_FLUSH_MS);
+    expect(writes).toHaveBeenCalledTimes(1);
+    expect(useAgent.getState().messages.at(-1)?.content).toBe("Hello, wor");
+
+    // A tool call is shown at once, with the text that was waiting before it.
+    emit({ type: "text", data: "ld" });
+    emit({ type: "tool_call", data: { id: "t1", name: "page_click", input: "{}", action: true, locator: null } });
+    expect(useAgent.getState().messages.at(-1)).toMatchObject({ content: "Hello, world", steps: [{ id: "t1" }] });
+
+    // Text still in the buffer when the stream ends is not dropped.
+    emit({ type: "text", data: "!" });
+    finish();
+    await sending;
+    expect(useAgent.getState().messages.at(-1)).toMatchObject({ content: "Hello, world!", pending: false });
+    expect(useAgent.getState().busy).toBe(false);
+    unsubscribe();
   });
 });
 

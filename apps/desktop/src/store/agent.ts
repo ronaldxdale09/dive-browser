@@ -127,6 +127,53 @@ export function applyDelta(messages: Message[], delta: ChatDeltaOut): Message[] 
   return [...messages.slice(0, -1), { ...last, ...patch }];
 }
 
+/** How long streamed deltas are held before they reach the store. */
+export const STREAM_FLUSH_MS = 50;
+
+/**
+ * Deltas as they will be applied: adjacent text pieces become one, as do
+ * adjacent reasoning pieces, so a flush of forty tokens is one append and
+ * one message copy rather than forty. Everything else keeps its place, since
+ * a tool call between two text pieces separates them. Pure for tests.
+ */
+export function coalesceDeltas(deltas: readonly ChatDeltaOut[]): ChatDeltaOut[] {
+  const out: ChatDeltaOut[] = [];
+  for (const delta of deltas) {
+    const last = out.at(-1);
+    if (last && (delta.type === "text" || delta.type === "reasoning") && last.type === delta.type) out[out.length - 1] = { type: delta.type, data: last.data + delta.data };
+    else out.push(delta);
+  }
+  return out;
+}
+
+/**
+ * Hand deltas to the store a few times a second rather than per token.
+ *
+ * A reply streams hundreds of tokens a second, and a store write for each
+ * re-rendered the thread and re-parsed the Markdown that often. Text and
+ * reasoning wait for the timer; anything that changes what the person can
+ * do -- a tool call, an approval request, the end of the reply -- goes
+ * through at once, carrying whatever text was waiting so order holds.
+ */
+function batchDeltas(apply: (deltas: ChatDeltaOut[]) => void) {
+  let buffered: ChatDeltaOut[] = [];
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const flush = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    if (buffered.length === 0) return;
+    const deltas = buffered;
+    buffered = [];
+    apply(coalesceDeltas(deltas));
+  };
+  const push = (delta: ChatDeltaOut) => {
+    buffered.push(delta);
+    if (delta.type === "text" || delta.type === "reasoning") timer ??= setTimeout(flush, STREAM_FLUSH_MS);
+    else flush();
+  };
+  return { push, flush };
+}
+
 /** The provider currently selected in preferences, with its catalog row. */
 export function currentProvider(providers: ProviderInfo[]): ProviderInfo | undefined {
   const id = usePrefs.getState().prefs.agent_provider;
@@ -206,11 +253,14 @@ export const useAgent = create<AgentState>((set, get) => ({
     const turns = [...history, user].map((m) => ({ role: m.role, content: m.content }));
     const prefs = usePrefs.getState().prefs;
     const options = { include_page: prefs.agent_include_page, auto_approve: get().sessionAutoApprove };
+    const stream = batchDeltas((deltas) => set((s) => ({ messages: deltas.reduce(applyDelta, s.messages) })));
     try {
-      await ipc.agentSend(runId, turns, tabId, options, (d) => set((s) => ({ messages: applyDelta(s.messages, d) })));
+      await ipc.agentSend(runId, turns, tabId, options, stream.push);
     } catch (e) {
-      set((s) => ({ messages: applyDelta(s.messages, { type: "error", data: errorMessage(e) }) }));
+      stream.push({ type: "error", data: errorMessage(e) });
     } finally {
+      // Nothing may be left waiting once the reply is over.
+      stream.flush();
       set((s) => ({ busy: false, runId: null, messages: applyDelta(s.messages, { type: "done", data: "end_turn" }) }));
     }
   },

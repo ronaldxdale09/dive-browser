@@ -85,10 +85,9 @@ const OVERLAY_SELECTOR =
 /**
  * The overlay elements on screen, cached until the DOM changes shape.
  *
- * The regions are re-measured every frame while an overlay is open, and
- * running the selector over the whole document that often is what made the
- * measurement expensive. Matching elements come and go far less than once a
- * frame, so a mutation observer invalidates the list instead.
+ * Running the selector over the whole document on every measurement is what
+ * made it expensive. Matching elements come and go far less often than the
+ * regions are measured, so a mutation observer invalidates the list instead.
  */
 let matched: HTMLElement[] | null = null;
 let watcher: MutationObserver | null = null;
@@ -128,19 +127,75 @@ function sendLive(regions: ReturnType<typeof visibleOverlayRegions>, active: boo
   void liveQueue.catch(() => undefined);
 }
 
+/**
+ * How long a transition or animation is followed frame by frame after it
+ * starts. Its end event normally stops the loop sooner; the cap is for the
+ * element that is removed mid-flight and never sends one.
+ */
+const MOTION_FOLLOW_MS = 500;
+
+/** Attributes whose change can move or resize an overlay without resizing it. */
+const MOTION_ATTRIBUTES = ["style", "class", "hidden", "role", "data-native-overlay"];
+
+/**
+ * Keep the native mask matched to the overlays on screen.
+ *
+ * This used to re-measure every frame for as long as anything was open,
+ * which meant a tooltip cost a style read, a layout read and a serialise
+ * sixty times a second while nothing moved. Overlays only change shape for
+ * a reason the DOM reports -- an element resizes, the tree or an attribute
+ * changes, the window resizes, something scrolls -- so each of those
+ * schedules one measurement. The exception is CSS motion: a transition
+ * moves the box every frame and says so only at its start and end, so the
+ * frame loop runs between those two events and no longer.
+ */
 function beginLive() {
   let frame = 0;
   let last = "";
   let stopped = false;
-  const update = () => {
-    if (stopped) return;
+  let motionUntil = 0;
+  const measure = () => {
     const regions = visibleOverlayRegions();
     const key = JSON.stringify([window.innerWidth, window.innerHeight, regions]);
     if (key !== last) { last = key; sendLive(regions, true); }
-    frame = requestAnimationFrame(update);
   };
-  update();
-  return () => { stopped = true; cancelAnimationFrame(frame); sendLive([], false); };
+  const onFrame = () => {
+    frame = 0;
+    if (stopped) return;
+    measure();
+    if (performance.now() < motionUntil) frame = requestAnimationFrame(onFrame);
+  };
+  // At most one measurement per frame, however many events ask for it.
+  const schedule = () => { if (!frame && !stopped) frame = requestAnimationFrame(onFrame); };
+  const onMotionStart = () => { motionUntil = performance.now() + MOTION_FOLLOW_MS; schedule(); };
+  // The end event measures once more, at the settled position.
+  const onMotionEnd = () => { motionUntil = 0; schedule(); };
+
+  const resizer = new ResizeObserver(schedule);
+  const observeOverlays = () => {
+    resizer.disconnect();
+    for (const element of overlayElements()) resizer.observe(element);
+  };
+  const mutations = new MutationObserver(() => { observeOverlays(); schedule(); });
+  mutations.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: MOTION_ATTRIBUTES });
+  window.addEventListener("resize", schedule);
+  document.addEventListener("scroll", schedule, true);
+  for (const type of ["transitionstart", "animationstart"]) document.addEventListener(type, onMotionStart, true);
+  for (const type of ["transitionend", "transitioncancel", "animationend", "animationcancel"]) document.addEventListener(type, onMotionEnd, true);
+  observeOverlays();
+  measure();
+
+  return () => {
+    stopped = true;
+    cancelAnimationFrame(frame);
+    resizer.disconnect();
+    mutations.disconnect();
+    window.removeEventListener("resize", schedule);
+    document.removeEventListener("scroll", schedule, true);
+    for (const type of ["transitionstart", "animationstart"]) document.removeEventListener(type, onMotionStart, true);
+    for (const type of ["transitionend", "transitioncancel", "animationend", "animationcancel"]) document.removeEventListener(type, onMotionEnd, true);
+    sendLive([], false);
+  };
 }
 
 /**

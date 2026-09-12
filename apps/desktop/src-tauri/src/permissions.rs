@@ -409,7 +409,7 @@ fn dismiss(app: &tauri::AppHandle<Runtime>, tab_id: TabId, ids: Vec<String>) {
 async fn next_permission_event(
     events: &mut dive_cdp::CdpEventReceiver,
     tab_id: TabId,
-) -> Option<dive_cdp::CdpEvent> {
+) -> Option<std::sync::Arc<dive_cdp::CdpEvent>> {
     loop {
         match events.recv().await {
             Ok(event) => return Some(event),

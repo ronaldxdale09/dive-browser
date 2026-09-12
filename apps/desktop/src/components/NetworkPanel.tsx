@@ -7,7 +7,7 @@ import { isReady, useAgent } from "../store/agent";
 import { usePrefs } from "../store/prefs";
 import { selectFrames, selectRequests, useNetwork } from "../store/network";
 import { useLayout } from "../store/layout";
-import type { RequestRow } from "../store/network";
+import type { FrameRow, RequestRow } from "../store/network";
 import type { RequestDetail } from "../lib/ipc";
 import { Icon, IconButton } from "./Icon";
 import { ReplayEditor } from "./ReplayEditor";
@@ -143,8 +143,18 @@ export function NetworkPanel() {
     const q = filter.toLowerCase();
     return q ? rows.filter((r) => r.url.toLowerCase().includes(q)) : rows;
   }, [rows, filter]);
-  const transferred = useMemo(() => rows.reduce((a, r) => a + (r.size ?? 0), 0), [rows]);
-  const detail = useMemo(() => rows.find((r) => r.id === selected), [rows, selected]);
+  // One pass per flush for both the total and the lookup, so selecting a
+  // row is a map read rather than another walk of a thousand rows.
+  const { transferred, byId } = useMemo(() => {
+    let transferred = 0;
+    const byId = new Map<string, RequestRow>();
+    for (const r of rows) {
+      transferred += r.size ?? 0;
+      byId.set(r.id, r);
+    }
+    return { transferred, byId };
+  }, [rows]);
+  const detail = selected ? byId.get(selected) : undefined;
   const frames = useNetwork(selectFrames(activeTab, selected));
   const select = useCallback((id: string) => setSelected((cur) => (cur === id ? null : id)), []);
   // The editor holds method, URL, headers, body, Send and a response; at the
@@ -214,17 +224,7 @@ export function NetworkPanel() {
           </tbody>
         </table>
       </div>
-      {detail && frames.length > 0 && (
-        <div className="max-h-40 overflow-auto border-t border-line font-mono text-[11px]">
-          {frames.map((f, i) => (
-            <div key={i} className="flex items-start gap-2 border-b border-line/60 px-3 py-1">
-              <Icon icon={f.direction === "sent" ? ArrowUpRight : ArrowDownLeft} size={11} className={f.direction === "sent" ? "mt-0.5 shrink-0 text-ink-3" : "mt-0.5 shrink-0 text-accent"} />
-              <span className="min-w-0 flex-1 break-all whitespace-pre-wrap text-ink-2 select-text">{f.payload}</span>
-              <span className="shrink-0 text-ink-3 tabular-nums">{frames[0] ? `+${Math.round((f.at - frames[0].at) * 1000)} ms` : ""}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      {detail && frames.length > 0 && <FrameList key={detail.id} frames={frames} />}
       {detail && replaying !== detail.id && activeTab && frames.length === 0 && <DetailPane tabId={activeTab} requestId={detail.id} />}
       {detail && replaying !== detail.id && (
         <div className="flex items-center gap-3 border-t border-line bg-surface-2 px-3 py-1.5 font-mono text-[11px] text-ink-2 select-text">
@@ -252,6 +252,40 @@ export function NetworkPanel() {
   );
 }
 
+/** How many of a socket's frames are on screen before the earlier ones are asked for. */
+const FRAMES_SHOWN = 60;
+
+/**
+ * A socket's or event stream's frames, newest last.
+ *
+ * The store keeps two hundred per request, and a chatty socket replaces the
+ * list on every flush; mounting all of them each time was most of the panel's
+ * work while a socket was selected. The tail is what the person is watching,
+ * so only it is mounted, and the rest are a click away. Keyed on the request
+ * by the caller, so picking another socket starts folded again.
+ */
+function FrameList({ frames }: { frames: readonly FrameRow[] }) {
+  const [all, setAll] = useState(false);
+  const hidden = all ? 0 : Math.max(0, frames.length - FRAMES_SHOWN);
+  const first = frames[0];
+  return (
+    <div className="max-h-40 overflow-auto border-t border-line font-mono text-[11px]">
+      {hidden > 0 && (
+        <button type="button" onClick={() => setAll(true)} className="block w-full border-b border-line/60 px-3 py-1 text-left font-sans text-ink-3 hover:bg-surface-2 hover:text-ink">
+          Show {hidden} earlier {hidden === 1 ? "frame" : "frames"}
+        </button>
+      )}
+      {frames.slice(hidden).map((f, i) => (
+        <div key={hidden + i} className="flex items-start gap-2 border-b border-line/60 px-3 py-1">
+          <Icon icon={f.direction === "sent" ? ArrowUpRight : ArrowDownLeft} size={11} className={f.direction === "sent" ? "mt-0.5 shrink-0 text-ink-3" : "mt-0.5 shrink-0 text-accent"} />
+          <span className="min-w-0 flex-1 break-all whitespace-pre-wrap text-ink-2 select-text">{f.payload}</span>
+          <span className="shrink-0 text-ink-3 tabular-nums">{first ? `+${Math.round((f.at - first.at) * 1000)} ms` : ""}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /**
  * What the selected request sent and what came back: both header sets and
  * the bodies the engine kept. Read-only; Replay opens the editor.
@@ -270,6 +304,10 @@ function DetailPane({ tabId, requestId }: { tabId: string; requestId: string }) 
     };
   }, [tabId, requestId]);
   const notify = useBrowser((s) => s.notify);
+  // A JSON body reads as JSON: laid out, not one long line. Laid out once;
+  // a re-render for a notice must not re-parse a body at the buffer budget.
+  const responseBody = detail?.response_body ?? null;
+  const pretty = useMemo(() => (responseBody ? prettyJson(responseBody) : null), [responseBody]);
   const copy = async (label: string, text: string) => {
     try {
       await copyText(text);
@@ -280,8 +318,7 @@ function DetailPane({ tabId, requestId }: { tabId: string; requestId: string }) 
   };
   if (error) return <div className="border-t border-line px-3 py-2 font-mono text-[11px] text-ink-3">{error}</div>;
   if (!detail) return null;
-  // A JSON body reads as JSON: laid out, not one long line.
-  const body = detail.response_body ? prettyJson(detail.response_body) : (detail.response_body_note ?? (detail.status === null ? "No response yet." : "Body not kept: only JSON responses within the buffer budget are."));
+  const body = pretty ?? detail.response_body_note ?? (detail.status === null ? "No response yet." : "Body not kept: only JSON responses within the buffer budget are.");
   const chip = "flex h-5 items-center gap-1 rounded-full border border-line px-1.5 font-sans text-[10px] text-ink-2 hover:bg-surface-3 hover:text-ink";
   return (
     <div className="grid max-h-[50%] shrink-0 grid-cols-2 gap-x-4 overflow-auto border-t border-line px-3 py-2 font-mono text-[11px] leading-5 select-text" data-testid="request-detail">

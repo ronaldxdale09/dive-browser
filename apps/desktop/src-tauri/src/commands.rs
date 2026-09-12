@@ -1822,9 +1822,23 @@ pub(crate) fn on_main<T: Send + 'static>(
         };
         let _ = tx.send(result);
     })?;
-    rx.recv()
-        .map_err(|_| AppError::new("the main thread dropped the command"))?
+    // A budget, not a wait-forever: with the main thread stuck the pool of
+    // workers parked here is what used to turn one stall into a dead app.
+    // Creating a view can take a couple of seconds on a cold profile, so
+    // this is generous; anything past it is a bug worth a clear error.
+    match rx.recv_timeout(MAIN_HOP_BUDGET) {
+        Ok(result) => result,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(AppError::new(format!(
+            "the main thread did not answer within {}s",
+            MAIN_HOP_BUDGET.as_secs()
+        ))),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err(AppError::new("the main thread dropped the command"))
+        }
+    }
 }
+
+const MAIN_HOP_BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Put `id` on screen and give its page the keyboard, then say so.
 ///
@@ -1851,9 +1865,12 @@ pub fn activate_tab(
     state: &AppState,
     id: TabId,
 ) -> AppResult<()> {
-    // Lock order everywhere: host, then store. Holding both here closes the
-    // window in which a concurrent `tab_close` could delete the row while we
-    // recreate its view.
+    // Lock order everywhere: host, then store. The host is held throughout,
+    // which closes the window in which a concurrent `tab_close` could delete
+    // the row while we recreate its view (it needs the host first). The store
+    // is taken only for the reads, and again for the writes: creating the
+    // native view is the slow part, and holding the store across it stalled
+    // every history, favicon and feed write in the process for the duration.
     let tab = {
         let mut host = lock(&state.host);
         let host = host
@@ -1865,22 +1882,32 @@ pub fn activate_tab(
             host.focus_popout(id)?;
             return Ok(());
         }
-        let store = lock(&state.store);
-        let mut tab = store.tab(id)?;
-        if !host.has(id) {
-            let ws = tab
-                .workspace_id
-                .or(*lock(&state.active_workspace))
-                .ok_or_else(|| AppError::new("tab has no workspace"))?;
-            let container = store.container(store.workspace(ws)?.container_id)?;
+        let (mut tab, container) = {
+            let store = lock(&state.store);
+            let tab = store.tab(id)?;
+            let container = if host.has(id) {
+                None
+            } else {
+                let ws = tab
+                    .workspace_id
+                    .or(*lock(&state.active_workspace))
+                    .ok_or_else(|| AppError::new("tab has no workspace"))?;
+                Some(store.container(store.workspace(ws)?.container_id)?)
+            };
+            (tab, container)
+        };
+        if let Some(container) = container {
             host.open(main, app, &tab, &container)?;
             crate::housekeeping::restore_scroll(app.clone(), id);
         }
         host.activate(main, id)?;
         tab.last_active_at = dive_core::Timestamp::now();
         tab.state = dive_core::TabState::Active;
-        store.upsert_tab(&tab)?;
-        store.set_setting(crate::state::ACTIVE_TAB, &id.to_string())?;
+        {
+            let store = lock(&state.store);
+            store.upsert_tab(&tab)?;
+            store.set_setting(crate::state::ACTIVE_TAB, &id.to_string())?;
+        }
         tab
     };
     state.bus.publish(CoreEvent::TabUpserted(tab));

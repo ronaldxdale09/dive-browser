@@ -439,19 +439,19 @@ impl Prefs {
 
     /// Whether `DivePrivacy` applies to this document URL.
     pub fn privacy_enabled_for(&self, document_url: &str) -> bool {
-        let Some(host) = url::Url::parse(document_url).ok().and_then(|url| {
-            url.host().map(|host| match host {
-                url::Host::Domain(host) => host.trim_end_matches('.').to_ascii_lowercase(),
-                url::Host::Ipv4(host) => host.to_string(),
-                url::Host::Ipv6(host) => format!("[{host}]"),
-            })
-        }) else {
+        self.privacy_enabled_for_host(crate::rules::document_host_of(document_url).as_deref())
+    }
+
+    /// [`privacy_enabled_for`](Self::privacy_enabled_for) for a host the
+    /// caller already parsed; `None` (no host) means protection applies.
+    pub fn privacy_enabled_for_host(&self, host: Option<&str>) -> bool {
+        let Some(host) = host else {
             return true;
         };
         !self
             .privacy_exceptions
             .iter()
-            .any(|exception| exception == &host)
+            .any(|exception| exception == host)
     }
 }
 

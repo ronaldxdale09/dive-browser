@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderInfo, Tab } from "../../lib/ipc";
 import { useAgent } from "../../store/agent";
@@ -105,6 +105,42 @@ describe("Thread", () => {
     expect(openSettings).toHaveBeenCalledWith("agent");
     expect(screen.getByText("Thinking…")).toBeTruthy();
     expect(screen.queryByText("Try one of these")).toBeNull();
+  });
+
+  it("follows a streaming reply only while the reader is at the end, and always shows a new turn", () => {
+    // Frames run by hand: a burst of deltas must cost one scroll, after the frame.
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => frames.push(cb));
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => { frames.splice(id - 1, 1, () => undefined); });
+    const runFrames = () => act(() => { frames.splice(0).forEach((cb) => cb(0)); });
+    const scrolled = Element.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>;
+    const reply = (content: string) => ({ id: "a1", role: "assistant" as const, content, pending: true });
+    useAgent.setState({ messages: [{ id: "u1", role: "user", content: "hi" }, reply("")] });
+    render(<Thread onAddProvider={() => {}} />);
+    runFrames();
+    scrolled.mockClear();
+
+    act(() => useAgent.setState({ messages: [{ id: "u1", role: "user", content: "hi" }, reply("one")] }));
+    act(() => useAgent.setState({ messages: [{ id: "u1", role: "user", content: "hi" }, reply("one two")] }));
+    expect(scrolled).not.toHaveBeenCalled();
+    runFrames();
+    expect(scrolled).toHaveBeenCalledTimes(1);
+
+    // Scrolled up to reread: the next token leaves the view where it is.
+    const pane = screen.getByText("one two").closest(".overflow-auto")!;
+    Object.defineProperty(pane, "scrollHeight", { configurable: true, get: () => 3000 });
+    Object.defineProperty(pane, "clientHeight", { configurable: true, get: () => 400 });
+    pane.scrollTop = 0;
+    fireEvent.scroll(pane);
+    scrolled.mockClear();
+    act(() => useAgent.setState({ messages: [{ id: "u1", role: "user", content: "hi" }, reply("one two three")] }));
+    runFrames();
+    expect(scrolled).not.toHaveBeenCalled();
+
+    // A new message is a new turn, and shows itself.
+    act(() => useAgent.setState({ messages: [{ id: "u1", role: "user", content: "hi" }, reply("one two three"), { id: "u2", role: "user", content: "more" }] }));
+    runFrames();
+    expect(scrolled).toHaveBeenCalledTimes(1);
   });
 
   it("says so when a finished reply carries no text, steps or error", () => {

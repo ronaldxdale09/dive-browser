@@ -838,12 +838,19 @@ impl<T: UserEvent> WinitCefApp<T> {
         if request_context.is_none() {
             init_done.store(true, Ordering::SeqCst);
         }
-        request_context::wait_for_deferred_init(&init_done);
+        if !request_context::wait_for_deferred_init(&init_done) {
+          log::error!("webview creation: request context never initialized; giving up");
+          return None;
+        }
 
         // `None` here means browser creation failed (or the request context never
         // initialized); the continuation logs the reason. Soft-fail instead of
         // taking down the whole process.
-        let mut webview = browser_rx.recv().ok()?;
+        // Bounded like the init wait: a creation that never completes must give
+        // the thread back, not hang it.
+        let mut webview = browser_rx
+          .recv_timeout(request_context::CREATION_DEADLINE)
+          .ok()?;
         if let (Some(key), Some(context)) = (incognito_key, request_context) {
             let owned = Arc::new(context);
             INCOGNITO_CONTEXTS
@@ -1292,14 +1299,23 @@ pub struct CefWebviewDispatcher<T: UserEvent> {
 }
 
 impl<T: UserEvent> CefWebviewDispatcher<T> {
+    /// Queue a DevTools protocol message for the webview.
+    ///
+    /// This does not wait for the main thread to hand the message to CEF. Every
+    /// protocol call the host makes -- and request interception makes one per
+    /// subresource -- used to park a worker thread here until the main thread
+    /// next drained its queue, which both added the main thread's latency to
+    /// every request and could exhaust the worker pool under load. The reply
+    /// only said whether CEF accepted the message; a message for a browser that
+    /// is gone is answered by the session closing, so nothing is lost by not
+    /// waiting for it.
     pub fn send_dev_tools_message(&self, message: &[u8]) -> Result<()> {
-        let (tx, rx) = mpsc::channel();
-        self.context.send_message(Message::Webview {
-            window_id: *self.window_id.lock().unwrap(),
-            webview_id: self.webview_id,
-            message: WebviewMessage::SendDevToolsMessage(message.to_vec(), tx),
-        })?;
-        rx.recv().map_err(|_| Error::FailedToReceiveMessage)?
+      let (tx, _rx) = mpsc::channel();
+      self.context.send_message(Message::Webview {
+        window_id: *self.window_id.lock().unwrap(),
+        webview_id: self.webview_id,
+        message: WebviewMessage::SendDevToolsMessage(message.to_vec(), tx),
+      })
     }
 
     pub fn on_dev_tools_protocol<F: Fn(DevToolsProtocol) + Send + Sync + 'static>(
@@ -1738,12 +1754,15 @@ cef::wrap_dev_tools_message_observer! {
       _browser: Option<&mut cef::Browser>,
       message: Option<&[u8]>,
     ) -> std::os::raw::c_int {
-      if let Some(message) = message {
-        let protocol = DevToolsProtocol::Message(message.to_vec());
-        if let Ok(handlers) = self.handlers.lock() {
-          for handler in handlers.iter() {
-            handler(protocol.clone());
-          }
+      // This runs on CEF's UI thread, which is the window's main thread, for
+      // every protocol message a page produces -- hundreds a second under
+      // load. One copy per handler (there is one in practice) is the floor;
+      // the old `clone()` per handler on top of the initial `to_vec` doubled it.
+      if let Some(message) = message
+        && let Ok(handlers) = self.handlers.lock()
+      {
+        for handler in handlers.iter() {
+          handler(DevToolsProtocol::Message(message.to_vec()));
         }
       }
       0
@@ -1767,16 +1786,12 @@ cef::wrap_dev_tools_message_observer! {
         post_load_initial_url(browser, initial_url);
       }
 
-      let protocol = DevToolsProtocol::MethodResult {
-        message_id,
-        success: success != 0,
-        result: result.map(|r| r.to_vec()).unwrap_or_default(),
-      };
-      if let Ok(handlers) = self.handlers.lock() {
-        for handler in handlers.iter() {
-          handler(protocol.clone());
-        }
-      }
+      // The raw message delivered to `on_dev_tools_message` already carries
+      // this result; handlers parse that one. Building and copying a second,
+      // pre-parsed variant per handler for every result was pure main-thread
+      // waste, so it is no longer dispatched. The variant stays in the enum
+      // for API stability.
+      let _ = (success, result);
     }
 
     fn on_dev_tools_event(
@@ -1785,15 +1800,9 @@ cef::wrap_dev_tools_message_observer! {
       method: Option<&CefString>,
       params: Option<&[u8]>,
     ) {
-      let protocol = DevToolsProtocol::Event {
-        method: method.map(|m| format!("{m}")).unwrap_or_default(),
-        params: params.map(|p| p.to_vec()).unwrap_or_default(),
-      };
-      if let Ok(handlers) = self.handlers.lock() {
-        for handler in handlers.iter() {
-          handler(protocol.clone());
-        }
-      }
+      // Same as method results: the raw message is the one consumed, so the
+      // per-event `format!` + copy + per-handler clone are skipped.
+      let _ = (method, params);
     }
   }
 }

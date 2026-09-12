@@ -121,7 +121,7 @@ pub fn attach(
     app: AppHandle<Runtime>,
     tab_id: TabId,
     session: CdpSession,
-    view_label: String,
+    nonce: String,
 ) -> crate::cdp_feed::Ready {
     use tauri::Manager;
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
@@ -137,14 +137,14 @@ pub fn attach(
         let (queue, receiver) = tokio::sync::mpsc::channel(BODY_QUEUE_CAP);
         let body_app = app.clone();
         let body_session = session.clone();
-        let body_label = view_label.clone();
+        let body_nonce = nonce.clone();
         let worker = tauri::async_runtime::spawn(body_worker(
             receiver,
             session.clone(),
             body_slots(),
             tab_id,
             move |id, result| {
-                record_capture(&body_app, tab_id, &body_session, &body_label, &id, result);
+                record_capture(&body_app, tab_id, &body_session, &body_nonce, &id, result);
             },
         ));
         let mut tracker = BodyTracker::default();
@@ -155,14 +155,12 @@ pub fn attach(
                     tracker.observe(&event);
                     if let Some(item) = map_event(tab_id, &event) {
                         let state = app.state::<crate::state::AppState>();
-                        let host = crate::state::lock(&state.host);
-                        if session.is_closed()
-                            || host.as_ref().is_none_or(|host| {
-                                !host
-                                    .with_view(tab_id, |view| Ok(view.label() == view_label))
-                                    .unwrap_or(false)
-                            })
-                        {
+                        // Is this session still the tab's live view? The
+                        // activity registry answers from its own small lock.
+                        // Asking the host meant taking the global host mutex
+                        // -- the one the main thread needs for every tab
+                        // operation -- once per network event of every tab.
+                        if session.is_closed() || !state.activity.session_current(tab_id, &nonce) {
                             continue;
                         }
                         state.buffers.push_network(&item);
@@ -215,22 +213,18 @@ fn record_capture(
     app: &AppHandle<Runtime>,
     tab: TabId,
     session: &CdpSession,
-    label: &str,
+    nonce: &str,
     id: &str,
     result: Result<String, &'static str>,
 ) {
     use tauri::Manager;
     let state = app.state::<crate::state::AppState>();
-    // Retain the host lock through the buffer write: a closing renderer cannot
-    // attach its body to a replacement view's reused request ID.
-    let host = crate::state::lock(&state.host);
-    if session.is_closed()
-        || host.as_ref().is_none_or(|host| {
-            !host
-                .with_view(tab, |view| Ok(view.label() == label))
-                .unwrap_or(false)
-        })
-    {
+    // A closing renderer must not attach its body to a replacement view's
+    // reused request ID. The session nonce is the check; it no longer holds
+    // the global host lock through the write, which left a window of
+    // microseconds between check and write in exchange for not stalling the
+    // main thread's tab operations behind every captured body.
+    if session.is_closed() || !state.activity.session_current(tab, nonce) {
         return;
     }
     match result {

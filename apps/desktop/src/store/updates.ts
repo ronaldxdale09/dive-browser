@@ -62,24 +62,49 @@ export const useUpdates = create<UpdatesState>((set, get) => ({
 
 let listening = false;
 
+/** How often the dialog is told about the download; a chunk lands far more often than that. */
+export const PROGRESS_INTERVAL_MS = 200;
+let progressAt = 0;
+let progressTimer: ReturnType<typeof setTimeout> | null = null;
+let progressPending: { received: number; total: number | null } | null = null;
+
 /**
- * Follow the update download.
+ * Fold one progress report into the store, at most one write per interval.
  *
- * The updater reports every chunk it writes; without this the dialog said
- * "Installing..." for the length of the download and showed nothing else.
+ * The updater reports every chunk it writes, and a fast download re-rendered
+ * the dialog hundreds of times a second. A report that arrives too soon
+ * waits for the interval to lapse and is then applied -- the latest one, so
+ * the bar never sits on a stale count -- and the end of the download goes
+ * through at once. Exported for tests.
  */
+export function reportUpdateProgress(payload: { received: number | null; total: number | null; done: boolean }, now = Date.now()) {
+  if (payload.done) {
+    if (progressTimer) clearTimeout(progressTimer);
+    progressTimer = null;
+    progressPending = null;
+    useUpdates.setState({ applying: true });
+    return;
+  }
+  progressPending = { received: payload.received ?? 0, total: payload.total ?? null };
+  if (progressTimer) return;
+  const wait = PROGRESS_INTERVAL_MS - (now - progressAt);
+  const apply = () => {
+    progressTimer = null;
+    if (!progressPending) return;
+    progressAt = Date.now();
+    useUpdates.setState({ ...progressPending, applying: false });
+    progressPending = null;
+  };
+  if (wait <= 0) apply();
+  else progressTimer = setTimeout(apply, wait);
+}
+
+/** Follow the update download; without this the dialog said "Installing..." for its whole length. */
 export function listenForUpdateProgress() {
   if (listening) return;
   listening = true;
   void events
-    .updateProgress.listen((e) => {
-      const { received, total, done } = e.payload;
-      useUpdates.setState(
-        done
-          ? { applying: true }
-          : { received: received ?? 0, total: total ?? null, applying: false },
-      );
-    })
+    .updateProgress.listen((e) => reportUpdateProgress(e.payload))
     .catch(() => undefined);
 }
 
@@ -115,4 +140,8 @@ export function resetBootCheck() {
   if (bootTimer) clearTimeout(bootTimer);
   bootTimer = null;
   bootScheduled = false;
+  if (progressTimer) clearTimeout(progressTimer);
+  progressTimer = null;
+  progressPending = null;
+  progressAt = 0;
 }
