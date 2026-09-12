@@ -56,6 +56,23 @@ step "preconditions"
 if [[ -z "${DIVE_WINDOWS_RUN:-}" && "${DIVE_SKIP_WINDOWS:-}" != "1" ]]; then
     die "set DIVE_WINDOWS_RUN to the release workflow run that built windows-x86_64 (gh run list --workflow=release.yml), or DIVE_SKIP_WINDOWS=1 for a macOS-only release"
 fi
+# The toolchain has to be able to link before an hour of CEF is spent finding
+# out that it cannot. Command Line Tools can be a macOS version ahead of the
+# selected Xcode, and then the default SDK carries architectures that Xcode's
+# linker does not know ("tapi error: malformed file ... unknown architecture").
+# Falling back to the first of the selected Xcode's own SDKs that can link
+# keeps both halves of one toolchain together.
+if ! printf 'int main(){return 0;}' | cc -x c - -o /dev/null >/dev/null 2>&1; then
+    for sdk in "$(xcode-select -p)"/Platforms/MacOSX.platform/Developer/SDKs/MacOSX*.sdk; do
+        [[ -d "${sdk}" ]] || continue
+        if printf 'int main(){return 0;}' | SDKROOT="${sdk}" cc -x c - -o /dev/null >/dev/null 2>&1; then
+            export SDKROOT="${sdk}"
+            echo "   default SDK cannot link; using ${SDKROOT##*/}"
+            break
+        fi
+    done
+    [[ -n "${SDKROOT:-}" ]] || die "cc cannot link anything; check xcode-select -p and the Command Line Tools"
+fi
 git diff --quiet && git diff --cached --quiet || die "working tree must be clean"
 # Release tags are created on GitHub by the publish step, so the local list
 # is only complete after a fetch; resolving against a stale list would try
