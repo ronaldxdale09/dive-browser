@@ -8,7 +8,8 @@ use tauri_utils::config::Color;
 use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{
-        CombineRgn, CreateRectRgn, DeleteObject, MapWindowPoints, RGN_DIFF, SetWindowRgn,
+        CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, MapWindowPoints, RGN_DIFF,
+        RGN_OR, SetWindowRgn,
     },
     UI::HiDpi::GetDpiForWindow,
     UI::Shell::{DefSubclassProc, SetWindowSubclass},
@@ -192,7 +193,12 @@ impl crate::webview::Webview {
     ///
     /// `holes` are the page rectangles that must stay visible, in the
     /// chrome's own logical coordinates, as the macOS side takes them.
-    pub fn set_chrome_overlay_mask(&self, holes: &[[f64; 4]], active: bool) -> bool {
+    pub fn set_chrome_overlay_mask(
+        &self,
+        holes: &[[f64; 4]],
+        overlays: &[[f64; 5]],
+        active: bool,
+    ) -> bool {
         use cef::ImplBrowser;
         let Some(host) = self.browser().host() else {
             return false;
@@ -239,6 +245,31 @@ impl crate::webview::Webview {
             unsafe {
                 CombineRgn(Some(region), Some(region), Some(hole), RGN_DIFF);
                 let _ = DeleteObject(hole.into());
+            }
+        }
+        // Union rounded surfaces after subtracting page bounds. Combining each
+        // surface with OR keeps nested and overlapping menus fully visible.
+        for [x, y, w, h, radius] in overlays {
+            let surface = unsafe {
+                if *radius > 0.0 {
+                    CreateRoundRectRgn(
+                        px(*x),
+                        px(*y),
+                        px(*x) + px(*w),
+                        px(*y) + px(*h),
+                        px(radius * 2.0),
+                        px(radius * 2.0),
+                    )
+                } else {
+                    CreateRectRgn(px(*x), px(*y), px(*x) + px(*w), px(*y) + px(*h))
+                }
+            };
+            if surface.is_invalid() {
+                continue;
+            }
+            unsafe {
+                CombineRgn(Some(region), Some(region), Some(surface), RGN_OR);
+                let _ = DeleteObject(surface.into());
             }
         }
         // The region belongs to the window once this succeeds, so it must not

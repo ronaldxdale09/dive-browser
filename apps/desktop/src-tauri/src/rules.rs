@@ -3,6 +3,7 @@
 //! through the `DevTools` `Fetch` domain on every tab of the workspace.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use base64::Engine as _;
@@ -456,11 +457,20 @@ pub async fn apply(session: &CdpSession, rules: &[Rule], prefs: &Prefs) -> AppRe
 /// from authoritative rules. Each step is attempted once; recovery never
 /// recurses into itself.
 async fn reset_interception(session: &CdpSession, rules: &[Rule], prefs: &Prefs) {
-    if let Err(error) = session.call0("Fetch.disable").await {
+    if let Err(error) = session
+        .call_with_timeout("Fetch.disable", json!({}), FETCH_RECOVERY_TIMEOUT)
+        .await
+    {
         tracing::debug!("Fetch.disable recovery failed: {error}");
     }
     if interception_required(rules, prefs)
-        && let Err(error) = apply(session, rules, prefs).await
+        && let Err(error) = session
+            .call_with_timeout(
+                "Fetch.enable",
+                json!({"patterns": interception_patterns(rules)}),
+                FETCH_RECOVERY_TIMEOUT,
+            )
+            .await
     {
         tracing::debug!("Fetch recovery re-enable failed: {error}");
     }
@@ -500,6 +510,7 @@ async fn request_id_or_reset(
 /// that has not come in this long is not coming, and the page is better off
 /// with the request released as failed than held for 30 s.
 const FETCH_ACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+const FETCH_RECOVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// How long the rule/preference snapshot serves paused requests before it
 /// is re-read from the registries.
@@ -510,15 +521,78 @@ const SNAPSHOT_TTL: std::time::Duration = std::time::Duration::from_millis(200);
 /// runaway page cannot spawn a task per request without limit.
 const MAX_IN_FLIGHT: usize = 32;
 
-/// Execute the selected terminal action. Any action that modifies or refuses
-/// a request gets exactly one plain-continue fallback when Chromium rejects
-/// it. A failed plain continue is not retried, which keeps failure bounded.
+#[derive(Debug, PartialEq, Eq)]
+enum ActionOutcome {
+    Resolved(Option<PrivacyCategory>),
+    NeedsRecovery { protected: bool },
+}
+
+/// Chromium removes interception jobs on navigation/cancellation. A late
+/// answer to such a job must not stop the *new* document's load.
+fn request_is_gone(error: &dive_cdp::CdpError) -> bool {
+    matches!(error, dive_cdp::CdpError::Closed)
+        || matches!(error, dive_cdp::CdpError::Protocol { code: -32602, message }
+            if message == "Invalid InterceptionId.")
+}
+
+#[derive(Default)]
+struct RequestRecovery {
+    running: AtomicBool,
+}
+
+struct RecoveryRun<'a>(&'a AtomicBool);
+
+impl Drop for RecoveryRun<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+impl RequestRecovery {
+    /// Run at most one recovery operation for a tab at a time. An unresolved
+    /// request stops the page load rather than disabling Fetch, which could
+    /// release another request that policy required us to block.
+    async fn recover(
+        &self,
+        session: &CdpSession,
+        protected: bool,
+        tab_id: TabId,
+        epoch: u64,
+    ) -> bool {
+        if session.is_closed() || session.navigation_epoch() != epoch {
+            return false;
+        }
+        if self
+            .running
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            tracing::debug!(%tab_id, "Fetch recovery already running; coalescing request");
+            return false;
+        }
+        let _run = RecoveryRun(&self.running);
+        if let Err(error) = session
+            .call_with_timeout("Page.stopLoading", json!({}), FETCH_RECOVERY_TIMEOUT)
+            .await
+        {
+            tracing::warn!(%tab_id, protected, "could not stop loading after unresolved Fetch failure: {error}");
+        } else {
+            tracing::warn!(%tab_id, protected, "stopped loading after unresolved Fetch failure");
+        }
+        !session.is_closed() && session.navigation_epoch() == epoch
+    }
+}
+
+/// Execute the selected terminal action with exactly one request-level
+/// fallback. Protected requests remain protected; everything else is failed
+/// if it cannot be continued. The caller owns tab-level recovery when both
+/// bounded attempts fail.
 async fn execute_action(
     session: &CdpSession,
     request_id: &str,
     request_headers: &Value,
     action: &InterceptAction,
-) -> Option<PrivacyCategory> {
+) -> ActionOutcome {
     let privacy_category = match action {
         InterceptAction::PrivacyBlock { category } => Some(*category),
         _ => None,
@@ -568,21 +642,39 @@ async fn execute_action(
         .call_with_timeout(method, params, FETCH_ACTION_TIMEOUT)
         .await
     {
-        Ok(_) => privacy_category,
+        Ok(_) => ActionOutcome::Resolved(privacy_category),
         Err(error) => {
-            tracing::debug!(%method, "intercept action failed: {error}");
-            if !matches!(action, InterceptAction::Continue)
-                && let Err(fallback) = session
-                    .call_with_timeout(
-                        "Fetch.continueRequest",
-                        json!({"requestId": request_id}),
-                        FETCH_ACTION_TIMEOUT,
-                    )
-                    .await
-            {
-                tracing::debug!("plain continue recovery failed: {fallback}");
+            if request_is_gone(&error) {
+                return ActionOutcome::Resolved(None);
             }
-            None
+            tracing::debug!(%method, "intercept action failed: {error}");
+            let protected = matches!(
+                action,
+                InterceptAction::Block | InterceptAction::PrivacyBlock { .. }
+            );
+            let fallback = if protected || matches!(action, InterceptAction::Continue) {
+                "Fetch.failRequest"
+            } else {
+                "Fetch.continueRequest"
+            };
+            let fallback_params = if fallback == "Fetch.failRequest" {
+                json!({"requestId": request_id, "errorReason": if protected { "BlockedByClient" } else { "Failed" }})
+            } else {
+                json!({"requestId": request_id})
+            };
+            match session
+                .call_with_timeout(fallback, fallback_params, FETCH_ACTION_TIMEOUT)
+                .await
+            {
+                Ok(_) => ActionOutcome::Resolved(protected.then_some(privacy_category).flatten()),
+                Err(fallback_error) => {
+                    if request_is_gone(&fallback_error) {
+                        return ActionOutcome::Resolved(None);
+                    }
+                    tracing::warn!(%method, %fallback, "terminal Fetch recovery failed: {fallback_error}");
+                    ActionOutcome::NeedsRecovery { protected }
+                }
+            }
         }
     }
 }
@@ -617,6 +709,7 @@ pub fn attach(
         }
         let mut top_frame = TopFrameContext::new(&initial_document_url);
         let in_flight = Arc::new(tokio::sync::Semaphore::new(MAX_IN_FLIGHT));
+        let recovery = Arc::new(RequestRecovery::default());
         // The rules and the preferences change when a person edits them,
         // not per request. Reading them through two registry mutexes for
         // every paused request was measurable; a short-lived copy is not,
@@ -707,14 +800,29 @@ pub fn attach(
             };
             let session = session.clone();
             let app = app.clone();
+            let recovery = Arc::clone(&recovery);
             let headers = p["request"]["headers"].clone();
+            let epoch = event.navigation_epoch;
             tauri::async_runtime::spawn(async move {
                 let _permit = permit;
-                if let Some(category) =
-                    execute_action(&session, &request_id, &headers, &action).await
-                    && let Err(e) = (PrivacyEvent::Blocked { tab_id, category }).emit(&app)
-                {
-                    tracing::warn!(%tab_id, "privacy event emit failed: {e}");
+                match execute_action(&session, &request_id, &headers, &action).await {
+                    ActionOutcome::Resolved(Some(category)) => {
+                        if let Err(e) = (PrivacyEvent::Blocked { tab_id, category }).emit(&app) {
+                            tracing::warn!(%tab_id, "privacy event emit failed: {e}");
+                        }
+                    }
+                    ActionOutcome::Resolved(None) => {}
+                    ActionOutcome::NeedsRecovery { protected } => {
+                        if recovery.recover(&session, protected, tab_id, epoch).await {
+                            let _ = (crate::loading::TabLoad {
+                                tab_id,
+                                phase: crate::loading::LoadPhase::Failed,
+                                url: None,
+                                error: Some("ERR_DIVE_REQUEST_RECOVERY".into()),
+                            })
+                            .emit(&app);
+                        }
+                    }
                 }
             });
         }
@@ -900,6 +1008,7 @@ mod tests {
 
     fn event(method: &str, params: Value) -> dive_cdp::CdpEvent {
         dive_cdp::CdpEvent {
+            navigation_epoch: 0,
             method: method.into(),
             params,
         }
@@ -1014,6 +1123,7 @@ mod tests {
     enum Reply {
         Ok,
         ProtocolError,
+        RequestGone,
         PinnedFetchContract,
     }
 
@@ -1077,6 +1187,9 @@ mod tests {
                 Reply::ProtocolError => {
                     json!({"id": id, "error": {"code": -32000, "message": "injected"}})
                 }
+                Reply::RequestGone => {
+                    json!({"id": id, "error": {"code": -32602, "message": "Invalid InterceptionId."}})
+                }
             };
             self.session
                 .lock()
@@ -1103,6 +1216,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancelled_interception_does_not_stop_a_new_navigation() {
+        for replies in [
+            vec![Reply::RequestGone],
+            vec![Reply::ProtocolError, Reply::RequestGone],
+        ] {
+            let expected = replies.len();
+            let (session, sent) = scripted_session(replies);
+            let outcome = execute_action(
+                &session,
+                "old-document",
+                &json!({}),
+                &InterceptAction::Continue,
+            )
+            .await;
+            assert_eq!(outcome, ActionOutcome::Resolved(None));
+            assert_eq!(sent.lock().unwrap().len(), expected);
+        }
+    }
+
+    #[tokio::test]
     async fn failed_header_rewrite_retries_one_plain_continue() {
         let (session, sent) = scripted_session(vec![Reply::ProtocolError, Reply::Ok]);
         let action = InterceptAction::Header {
@@ -1118,7 +1251,7 @@ mod tests {
         )
         .await;
 
-        assert_eq!(reported, None);
+        assert_eq!(reported, ActionOutcome::Resolved(None));
         let sent = sent
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1130,6 +1263,126 @@ mod tests {
             json!({"requestId": "request-1"}),
             "the retry must drop the failed header override",
         );
+    }
+
+    #[tokio::test]
+    async fn failed_privacy_block_retries_as_block_and_never_continues() {
+        let (session, sent) = scripted_session(vec![Reply::ProtocolError, Reply::Ok]);
+        let action = InterceptAction::PrivacyBlock {
+            category: PrivacyCategory::Ads,
+        };
+
+        let outcome = execute_action(&session, "protected", &json!({}), &action).await;
+
+        assert_eq!(outcome, ActionOutcome::Resolved(Some(PrivacyCategory::Ads)));
+        let methods = sent
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|m| m["method"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(methods, ["Fetch.failRequest", "Fetch.failRequest"]);
+    }
+
+    #[tokio::test]
+    async fn unresolved_continue_is_failed_instead_of_left_paused() {
+        let (session, sent) = scripted_session(vec![Reply::ProtocolError, Reply::Ok]);
+
+        let outcome =
+            execute_action(&session, "ordinary", &json!({}), &InterceptAction::Continue).await;
+
+        assert_eq!(outcome, ActionOutcome::Resolved(None));
+        let sent = sent.lock().unwrap();
+        let methods = sent
+            .iter()
+            .map(|m| m["method"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(methods, ["Fetch.continueRequest", "Fetch.failRequest"]);
+        assert_eq!(sent[1]["params"]["errorReason"], "Failed");
+    }
+
+    #[tokio::test]
+    async fn exhausted_terminal_attempts_require_supervised_recovery() {
+        let (session, sent) = scripted_session(vec![Reply::ProtocolError, Reply::ProtocolError]);
+
+        let outcome =
+            execute_action(&session, "protected", &json!({}), &InterceptAction::Block).await;
+
+        assert_eq!(outcome, ActionOutcome::NeedsRecovery { protected: true });
+        let methods = sent
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|m| m["method"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(methods, ["Fetch.failRequest", "Fetch.failRequest"]);
+    }
+
+    #[tokio::test]
+    async fn protected_recovery_stops_loading_without_disabling_fetch() {
+        let (session, sent) = scripted_session(vec![Reply::Ok]);
+        let recovery = RequestRecovery::default();
+
+        recovery.recover(&session, true, TabId::new(), 0).await;
+
+        let methods = sent
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|m| m["method"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(methods, ["Page.stopLoading"]);
+    }
+
+    #[tokio::test]
+    async fn iframe_navigation_does_not_abandon_main_page_request_recovery() {
+        let (session, sent) = scripted_session(vec![Reply::Ok]);
+        session
+            .handle_incoming(r#"{"method":"Page.frameNavigated","params":{"frame":{"id":"main"}}}"#)
+            .unwrap();
+        let epoch = session.navigation_epoch();
+        session
+            .handle_incoming(
+                r#"{"method":"Page.frameStartedLoading","params":{"frameId":"child"}}"#,
+            )
+            .unwrap();
+        assert!(
+            RequestRecovery::default()
+                .recover(&session, true, TabId::new(), epoch)
+                .await
+        );
+        assert_eq!(sent.lock().unwrap()[0]["method"], "Page.stopLoading");
+    }
+
+    #[tokio::test]
+    async fn recovery_from_an_older_navigation_cannot_stop_the_new_page() {
+        let (session, sent) = scripted_session(vec![Reply::Ok]);
+        let mut events = session.subscribe();
+        session
+            .handle_incoming(r#"{"method":"Fetch.requestPaused","params":{}}"#)
+            .unwrap();
+        let old_request = events.recv().await.unwrap();
+        session
+            .handle_incoming(r#"{"method":"Page.frameStartedLoading","params":{"frameId":"main"}}"#)
+            .unwrap();
+        let recovery = RequestRecovery::default();
+        assert!(
+            !recovery
+                .recover(&session, true, TabId::new(), old_request.navigation_epoch)
+                .await
+        );
+        assert!(sent.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn overlapping_tab_recovery_is_coalesced() {
+        let (session, sent) = scripted_session(vec![]);
+        let recovery = RequestRecovery::default();
+        recovery.running.store(true, Ordering::Release);
+
+        recovery.recover(&session, false, TabId::new(), 0).await;
+
+        assert!(sent.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -1163,10 +1416,9 @@ mod tests {
             .expect("privacy filters must enable on the shipping Fetch backend");
         let action = decide_paused_request(&[], &privacy(), &enabled_prefs(), &paused_ad());
         assert!(matches!(action, InterceptAction::PrivacyBlock { .. }));
-        assert!(
-            execute_action(&session, "tracker", &json!({}), &action)
-                .await
-                .is_some()
+        assert_eq!(
+            execute_action(&session, "tracker", &json!({}), &action).await,
+            ActionOutcome::Resolved(Some(PrivacyCategory::Ads)),
         );
         let sent = sent.lock().unwrap();
         assert_eq!(sent.len(), 2);

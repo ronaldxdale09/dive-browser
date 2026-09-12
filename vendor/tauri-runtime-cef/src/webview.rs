@@ -839,8 +839,8 @@ impl<T: UserEvent> WinitCefApp<T> {
             init_done.store(true, Ordering::SeqCst);
         }
         if !request_context::wait_for_deferred_init(&init_done) {
-          log::error!("webview creation: request context never initialized; giving up");
-          return None;
+            log::error!("webview creation: request context never initialized; giving up");
+            return None;
         }
 
         // `None` here means browser creation failed (or the request context never
@@ -849,8 +849,8 @@ impl<T: UserEvent> WinitCefApp<T> {
         // Bounded like the init wait: a creation that never completes must give
         // the thread back, not hang it.
         let mut webview = browser_rx
-          .recv_timeout(request_context::CREATION_DEADLINE)
-          .ok()?;
+            .recv_timeout(request_context::CREATION_DEADLINE)
+            .ok()?;
         if let (Some(key), Some(context)) = (incognito_key, request_context) {
             let owned = Arc::new(context);
             INCOGNITO_CONTEXTS
@@ -1180,8 +1180,9 @@ impl<T: UserEvent> WinitCefApp<T> {
                             std::thread::sleep(std::time::Duration::from_millis(100));
                             let (tx, rx) = mpsc::channel();
                             let sent = context.run_on_main_thread(move || {
-                                let placed = objc2::MainThreadMarker::new()
-                                    .is_some_and(|mtm| crate::platform::macos::place_devtools_window(bounds, mtm));
+                                let placed = objc2::MainThreadMarker::new().is_some_and(|mtm| {
+                                    crate::platform::macos::place_devtools_window(bounds, mtm)
+                                });
                                 let _ = tx.send(placed);
                             });
                             if sent.is_err() || rx.recv().unwrap_or(true) {
@@ -1197,6 +1198,17 @@ impl<T: UserEvent> WinitCefApp<T> {
             WebviewMessage::IsDevToolsOpen(tx) => _ = tx.send(child.host.has_dev_tools() == 1),
             WebviewMessage::SendDevToolsMessage(message, tx) => {
                 let result = child.host.send_dev_tools_message(Some(&message));
+                if result != 1 {
+                    // Sending is asynchronous; the dispatcher no longer waits
+                    // on tx. Resolve the actual protocol call immediately when
+                    // CEF rejects it, instead of making it wait out its timeout.
+                    if let Some(reply) = rejected_devtools_reply(&message) {
+                        let handlers = child.devtools_protocol_handlers.lock().unwrap().clone();
+                        for handler in handlers {
+                            handler(DevToolsProtocol::Message(reply.clone()));
+                        }
+                    }
+                }
                 let _ = tx.send(if result == 1 {
                     Ok(())
                 } else {
@@ -1231,6 +1243,31 @@ impl<T: UserEvent> WinitCefApp<T> {
                 }
             }
         }
+    }
+}
+
+fn rejected_devtools_reply(message: &[u8]) -> Option<Vec<u8>> {
+    let message: serde_json::Value = serde_json::from_slice(message).ok()?;
+    let id = message.get("id")?.as_i64()?;
+    serde_json::to_vec(&serde_json::json!({
+        "id": id,
+        "error": {"code": -32000, "message": "CEF rejected the DevTools command"}
+    }))
+    .ok()
+}
+
+#[cfg(test)]
+mod rejected_command_tests {
+    #[test]
+    fn rejection_resolves_the_original_call_and_ignores_notifications() {
+        let reply =
+            super::rejected_devtools_reply(br#"{"id":10000042,"method":"Fetch.continueRequest"}"#)
+                .unwrap();
+        let reply: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+        assert_eq!(reply["id"], 10000042);
+        assert_eq!(reply["error"]["code"], -32000);
+        assert!(super::rejected_devtools_reply(br#"{"method":"event"}"#).is_none());
+        assert!(super::rejected_devtools_reply(b"invalid").is_none());
     }
 }
 
@@ -1310,12 +1347,12 @@ impl<T: UserEvent> CefWebviewDispatcher<T> {
     /// is gone is answered by the session closing, so nothing is lost by not
     /// waiting for it.
     pub fn send_dev_tools_message(&self, message: &[u8]) -> Result<()> {
-      let (tx, _rx) = mpsc::channel();
-      self.context.send_message(Message::Webview {
-        window_id: *self.window_id.lock().unwrap(),
-        webview_id: self.webview_id,
-        message: WebviewMessage::SendDevToolsMessage(message.to_vec(), tx),
-      })
+        let (tx, _rx) = mpsc::channel();
+        self.context.send_message(Message::Webview {
+            window_id: *self.window_id.lock().unwrap(),
+            webview_id: self.webview_id,
+            message: WebviewMessage::SendDevToolsMessage(message.to_vec(), tx),
+        })
     }
 
     pub fn on_dev_tools_protocol<F: Fn(DevToolsProtocol) + Send + Sync + 'static>(

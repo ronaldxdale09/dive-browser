@@ -1,7 +1,24 @@
 import { AlertTriangle, CheckCircle2, X } from "lucide-react";
+import { useRef } from "react";
 import { useCoversContent } from "../lib/overlay";
+import { useFocusTrap } from "../lib/useFocusTrap";
 import type { NoticeAction } from "../store/browser";
 import { Icon } from "./Icon";
+
+/** Keep a slow lazy import visible, keyboard accessible, and cancellable. */
+export function DialogLoading({ onClose }: { onClose: () => void }) {
+  const root = useRef<HTMLDivElement>(null);
+  useCoversContent(true);
+  useFocusTrap(root, { onEscape: onClose });
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center">
+      <div ref={root} role="dialog" aria-modal="true" aria-label="Loading dialog" className="w-72 rounded-2xl border border-line-2 bg-surface p-5 shadow-2xl">
+        <p role="status" className="text-sm text-ink">Opening dialog…</p>
+        <button type="button" onClick={onClose} className="mt-4 rounded-full border border-line-2 px-4 py-1.5 text-xs text-ink hover:bg-surface-2">Cancel</button>
+      </div>
+    </div>
+  );
+}
 
 /** Lightweight loading shape used while a lazy panel chunk arrives. */
 export function PanelSkeleton({ label, horizontal = false }: { label: string; horizontal?: boolean }) {
@@ -39,7 +56,7 @@ export function ToastViewport({
   useCoversContent(Boolean(notice || error));
   if (!notice && !error) return null;
   return (
-    <div data-native-overlay className="pointer-events-none fixed right-4 bottom-4 z-[80] flex w-[min(360px,calc(100vw-24px))] flex-col gap-2" aria-label="Notifications">
+    <div className="pointer-events-none fixed right-4 bottom-4 z-[80] flex w-[min(360px,calc(100vw-24px))] flex-col gap-2" aria-label="Notifications">
       {error && <Toast tone="danger" message={error} onDismiss={onDismissError} />}
       {notice && <Toast tone="success" message={notice} action={noticeAction} onDismiss={onDismissNotice} />}
     </div>
@@ -49,7 +66,7 @@ export function ToastViewport({
 function Toast({ tone, message, action = null, onDismiss }: { tone: "success" | "danger"; message: string; action?: NoticeAction | null; onDismiss: () => void }) {
   const danger = tone === "danger";
   return (
-    <div role={danger ? "alert" : "status"} className={`surface-enter pointer-events-auto flex items-start gap-2.5 rounded-xl border bg-surface/95 p-3 shadow-2xl backdrop-blur-xl ${danger ? "border-danger/45" : "border-line-2"}`}>
+    <div data-native-overlay role={danger ? "alert" : "status"} className={`surface-enter pointer-events-auto flex items-start gap-2.5 rounded-xl border bg-surface/95 p-3 shadow-2xl backdrop-blur-xl ${danger ? "border-danger/45" : "border-line-2"}`}>
       <Icon icon={danger ? AlertTriangle : CheckCircle2} size={14} className={`mt-0.5 shrink-0 ${danger ? "text-danger" : "text-highlight"}`} />
       <span className="min-w-0 flex-1 text-xs leading-relaxed text-ink-2">{message}</span>
       {action && (

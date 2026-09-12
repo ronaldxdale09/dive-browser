@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { isWindows } from "../lib/commands";
 import { ipc, events } from "../lib/ipc";
-import { listenConsole, useConsole } from "./console";
+import { listenConsole, useConsole, usesNativeConsoleBatch } from "./console";
 import { listenNetwork, useNetwork } from "./network";
 import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
 import { useDownloads } from "./downloads";
@@ -328,6 +328,77 @@ const zoomInFlight = new Map<string, Promise<void>>();
 const zoomWanted = new Map<string, number>();
 /** The workspace this chrome asked the engine for; its `workspace_activated` needs no refresh. */
 let requestedWorkspace: string | null = null;
+/**
+ * Snapshots are asynchronous full-state reads. Events and user intent can move
+ * the store on while a read is in flight, so only the newest request made
+ * against an unchanged revision may commit.
+ */
+let intentRevision = 0;
+let snapshotSequence = 0;
+let eventRevision = 0;
+type SnapshotDelta =
+  | { revision: number; kind: "event"; event: CoreEvent }
+  | { revision: number; kind: "window"; tab: string; detached: boolean };
+type SnapshotDeltaInput =
+  | { kind: "event"; event: CoreEvent }
+  | { kind: "window"; tab: string; detached: boolean };
+let snapshotDeltas: SnapshotDelta[] = [];
+const SNAPSHOT_DELTA_LIMIT = 1024;
+
+function supersedeSnapshots() {
+  intentRevision += 1;
+  return intentRevision;
+}
+
+function recordSnapshotDelta(delta: SnapshotDeltaInput) {
+  if (snapshotDeltas.length >= SNAPSHOT_DELTA_LIMIT) {
+    // Bound replay memory. An in-flight snapshot that lost its replay base
+    // must retry; the next request starts against the retained suffix.
+    supersedeSnapshots();
+    snapshotDeltas = [];
+  }
+  snapshotDeltas.push({ ...delta, revision: ++eventRevision } as SnapshotDelta);
+}
+
+async function snapshotCandidate() {
+  const sequence = ++snapshotSequence;
+  const intent = intentRevision;
+  const events = eventRevision;
+  const snapshot = await ipc.snapshot();
+  return {
+    snapshot,
+    intent,
+    events,
+    isLatest: () => sequence === snapshotSequence,
+    isCurrent: () => sequence === snapshotSequence && intent === intentRevision,
+  };
+}
+
+function replaySnapshot(snapshot: Snapshot, after: number): Partial<BrowserState> {
+  const base = fromSnapshot(snapshot);
+  let state: Reduced = { ...base, recordingTab: null };
+  for (const delta of snapshotDeltas) {
+    if (delta.revision <= after) continue;
+    if (delta.kind === "event") state = { ...state, ...reduceEvent(state, delta.event) };
+    else state = { ...state, ...reduceWindowChange(state, delta.tab, delta.detached) };
+  }
+  const replayed: Partial<BrowserState> = { ...state };
+  delete replayed.recordingTab;
+  return replayed;
+}
+
+async function applyLatestSnapshot(set: (patch: Partial<BrowserState>) => void, extra: Partial<BrowserState> = {}, extraIntent = intentRevision): Promise<boolean> {
+  for (;;) {
+    const candidate = await snapshotCandidate();
+    if (candidate.isCurrent()) {
+      set({ ...replaySnapshot(candidate.snapshot, candidate.events), ...(extraIntent === intentRevision ? extra : {}) });
+      snapshotDeltas = [];
+      return true;
+    }
+    if (!candidate.isLatest()) return false;
+  }
+  return false;
+}
 
 /**
  * True when the tab has no page of its own: nothing in its history, or only
@@ -346,25 +417,32 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   profiles: [],
   activeProfile: null,
   editingProfile: null,
-  setEditingProfile: (editingProfile) => set({ editingProfile }),
+  setEditingProfile: (editingProfile) => {
+    supersedeSnapshots();
+    set({ editingProfile });
+  },
   createProfile: async (draft) => {
+    const intent = supersedeSnapshots();
     await run(set, () => ipc.profileCreate(draft));
-    set({ ...fromSnapshot(await ipc.snapshot()), editingProfile: null });
+    await applyLatestSnapshot(set, { editingProfile: null }, intent);
     void get().refreshCounts();
   },
   updateProfile: async (id, draft) => {
+    const intent = supersedeSnapshots();
     await run(set, () => ipc.profileUpdate(id, draft));
-    set({ editingProfile: null });
+    if (intent === intentRevision) set({ editingProfile: null });
   },
   deleteProfile: async (id) => {
+    const intent = supersedeSnapshots();
     await run(set, () => ipc.profileDelete(id));
-    set({ ...fromSnapshot(await ipc.snapshot()), editingProfile: null });
+    await applyLatestSnapshot(set, { editingProfile: null }, intent);
     void get().refreshCounts();
   },
   activateProfile: async (id) => {
     if (get().activeProfile === id) return;
+    supersedeSnapshots();
     await run(set, () => ipc.profileActivate(id));
-    set(fromSnapshot(await ipc.snapshot()));
+    await applyLatestSnapshot(set);
     void get().refreshCounts();
   },
   tabs: [],
@@ -430,13 +508,16 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     if (load.phase === "started") {
       clearPrivacy(load.tab_id);
       useNetwork.getState().navigated(load.tab_id, load.url);
-      useConsole.getState().navigated(load.tab_id);
+      if (!usesNativeConsoleBatch()) useConsole.getState().navigated(load.tab_id);
     }
     set((s) => reduceLoad(s, load));
   },
   applyCrash: (crash) => set((s) => reduceCrash(s, crash)),
   editing: null,
-  setEditing: (editing) => set({ editing }),
+  setEditing: (editing) => {
+    supersedeSnapshots();
+    set({ editing });
+  },
 
   boot: () => {
     // A second boot while the first is still subscribing (StrictMode, an
@@ -477,12 +558,17 @@ export const useBrowser = create<BrowserState>((set, get) => ({
           once(unlistenCrash, () => events.tabCrashed.listen((e) => get().applyCrash(e.payload)), (off) => { unlistenCrash = off; }),
           once(unlistenPermission, () => events.permissionAsked.listen((e) => get().applyPermissionAsked(e.payload)), (off) => { unlistenPermission = off; }),
           once(unlistenPermissionDismissed, () => events.permissionDismissed.listen((e) => set((s) => ({permissionRequests: withoutRequest(s.permissionRequests,e.payload.tab_id,e.payload)}))), (off) => { unlistenPermissionDismissed = off; }),
-          once(unlistenWindowChanged, () => events.tabWindowChanged.listen((e) => set(reduceWindowChange(get(), e.payload.tab, e.payload.detached))), (off) => { unlistenWindowChanged = off; }),
+          once(unlistenWindowChanged, () => events.tabWindowChanged.listen((e) => {
+            recordSnapshotDelta({ kind: "window", tab: e.payload.tab, detached: e.payload.detached });
+            set(reduceWindowChange(get(), e.payload.tab, e.payload.detached));
+          }), (off) => { unlistenWindowChanged = off; }),
           once(unlistenDownload, () => events.downloadNotice.listen(downloadNotice), (off) => { unlistenDownload = off; }),
           once(unlistenDownloadProgress, () => events.downloadProgress.listen((e) => useDownloads.getState().progress(e.payload)), (off) => { unlistenDownloadProgress = off; }),
         ]);
-        const [, , , snapshot] = await Promise.all([listenConsole(), listenNetwork(), listenPrivacy(), ipc.snapshot(), usePrivacy.getState().loadInfo()]);
-        set({ ...fromSnapshot(snapshot), ready: true, error: null });
+        const [, , , candidate] = await Promise.all([listenConsole(), listenNetwork(), listenPrivacy(), snapshotCandidate(), usePrivacy.getState().loadInfo()]);
+        if (candidate.isCurrent()) set(replaySnapshot(candidate.snapshot, candidate.events));
+        else await applyLatestSnapshot(set);
+        set({ ready: true, error: null });
         void get().refreshCounts();
       } catch (e) {
         set({ error: String(e), ready: true });
@@ -509,9 +595,11 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     set({ activeTab: null });
   },
   detachTab: async (id, at) => {
+    supersedeSnapshots();
     await run(set, () => ipc.tabDetach(id, at));
   },
   attachTab: async (id) => {
+    supersedeSnapshots();
     await run(set, () => ipc.tabAttach(id));
   },
   closeIfOnlyDownload: async (id, url) => {
@@ -718,6 +806,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     // round trip stays; it just no longer gates the highlight.
     const prev = get().activeWorkspace;
     if (prev === id) return;
+    supersedeSnapshots();
     set({ activeWorkspace: id });
     requestedWorkspace = id;
     try {
@@ -727,7 +816,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       set((s) => ({ activeWorkspace: s.activeWorkspace === id ? prev : s.activeWorkspace, error: errorMessage(e) }));
       return;
     }
-    await run(set, async () => set(fromSnapshot(await ipc.snapshot())));
+    await run(set, () => applyLatestSnapshot(set));
     void get().refreshCounts();
   },
   refreshCounts: async () => {
@@ -750,22 +839,26 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     }
   },
   createWorkspace: async (draft, separateContainer) => {
+    const intent = supersedeSnapshots();
     await run(set, () => ipc.workspaceCreate(draft, separateContainer));
-    set({ ...fromSnapshot(await ipc.snapshot()), editing: null });
+    await applyLatestSnapshot(set, { editing: null }, intent);
     void get().refreshCounts();
   },
   updateWorkspace: async (id, draft) => {
+    const intent = supersedeSnapshots();
     await run(set, () => ipc.workspaceUpdate(id, draft));
-    set({ editing: null });
+    if (intent === intentRevision) set({ editing: null });
   },
   deleteWorkspace: async (id) => {
+    const intent = supersedeSnapshots();
     await run(set, () => ipc.workspaceDelete(id));
-    set({ ...fromSnapshot(await ipc.snapshot()), editing: null });
+    await applyLatestSnapshot(set, { editing: null }, intent);
     void get().refreshCounts();
   },
 
   toggle: (panel, value) => set((s) => ({ open: togglePanel(s.open, panel, value), ...(panel === "palette" ? { paletteFocus: "all" as const } : {}) })),
   applyEvent: (event) => {
+    recordSnapshotDelta({ kind: "event", event });
     // Remembered before the reducer forgets the tab.
     const gone = event.type === "tab_closed" ? get().tabs.find((t) => t.id === event.data) : undefined;
     const goneIndex = event.type === "tab_closed" ? stripIndex(get().tabs, event.data) : -1;
@@ -778,7 +871,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       const expected = requestedWorkspace === event.data;
       requestedWorkspace = null;
       if (!expected) {
-        void run(set, async () => set(fromSnapshot(await ipc.snapshot())));
+        void run(set, () => applyLatestSnapshot(set));
         void get().refreshCounts();
       }
     }

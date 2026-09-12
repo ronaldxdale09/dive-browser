@@ -82,6 +82,21 @@ describe("live overlays versus a modal", () => {
   });
   afterEach(() => {
     delete (window as Window & { __DIVE_LIVE_OVERLAYS__?: boolean }).__DIVE_LIVE_OVERLAYS__;
+    Reflect.deleteProperty(window, "__DIVE_LIVE_MODAL_OVERLAYS__");
+  });
+
+  it("releases and reacquires the Windows modal fallback over a live menu", async () => {
+    Object.defineProperty(window, "__DIVE_LIVE_MODAL_OVERLAYS__", { value: false, configurable: true });
+    const view = render(createElement("div", null, createElement(Menu, { key: "m" })));
+    for (let attempt = 0; attempt < 2; attempt++) {
+      view.rerender(createElement("div", null, createElement(Menu, { key: "m" }), createElement(Modal, { key: "d" })));
+      await waitFor(() => expect(ipc.setContentCovered).toHaveBeenLastCalledWith(true));
+      view.rerender(createElement("div", null, createElement(Menu, { key: "m" })));
+      await waitFor(() => expect(ipc.setContentCovered).toHaveBeenLastCalledWith(false));
+    }
+    expect(ipc.prepareContentCover).toHaveBeenCalledTimes(2);
+    view.unmount();
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith([], false));
   });
 
   it("leaves the page live under a menu, so it keeps playing", async () => {
@@ -91,33 +106,28 @@ describe("live overlays versus a modal", () => {
     expect(ipc.setContentCovered).not.toHaveBeenCalled();
   });
 
-  it("freezes the page under a modal, so the backdrop has something to blur", async () => {
-    // The native mask is a rectangle over a view CSS cannot reach: no blur is
-    // possible against it, and a rounded panel sits in a square of chrome.
-    // A capture inside the chrome is a real surface, so both work.
-    render(createElement(Modal));
-    await waitFor(() => expect(ipc.setContentCovered).toHaveBeenLastCalledWith(true));
-    expect(ipc.prepareContentCover).toHaveBeenCalledTimes(1);
+  it("opens a modal over the live page without waiting on its renderer", async () => {
+    vi.mocked(ipc.prepareContentCover).mockImplementation(() => new Promise(() => undefined));
+    const view = render(createElement(Modal));
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenCalledWith([], true));
+    expect(ipc.prepareContentCover).not.toHaveBeenCalled();
+    expect(ipc.setContentCovered).not.toHaveBeenCalled();
+    view.unmount();
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith([], false));
   });
 
-  it("switches a live page to frozen when a modal opens over a menu", async () => {
+  it("keeps nested modal reopenings live and releases the final native mask", async () => {
     const view = render(createElement("div", null, createElement(Menu, { key: "m" })));
-    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenCalled());
-
-    view.rerender(createElement("div", null, createElement(Menu, { key: "m" }), createElement(Modal, { key: "d" })));
-    await waitFor(() => expect(ipc.setContentCovered).toHaveBeenLastCalledWith(true));
-    expect(ipc.prepareContentCover).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps the page live under a modal when the capture comes back empty", async () => {
-    // A capture that fails or times out -- a busy renderer, a playing video.
-    // The page must not be hidden with nothing to replace it (a black screen
-    // behind the blur that only closing the dialog clears). It stays live
-    // under the mask instead.
-    vi.mocked(ipc.prepareContentCover).mockResolvedValue([]);
-    render(createElement(Modal));
-    await waitFor(() => expect(ipc.prepareContentCover).toHaveBeenCalled());
-    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenCalled());
-    expect(ipc.setContentCovered).not.toHaveBeenCalledWith(true);
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenCalledWith([], true));
+    for (let attempt = 0; attempt < 3; attempt++) {
+      view.rerender(createElement("div", null, createElement(Menu, { key: "m" }), createElement(Modal, { key: "d" })));
+      expect(contentCoverDepth()).toBe(2);
+      view.rerender(createElement("div", null, createElement(Menu, { key: "m" })));
+      expect(contentCoverDepth()).toBe(1);
+    }
+    expect(ipc.prepareContentCover).not.toHaveBeenCalled();
+    expect(ipc.setContentCovered).not.toHaveBeenCalled();
+    view.unmount();
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith([], false));
   });
 });

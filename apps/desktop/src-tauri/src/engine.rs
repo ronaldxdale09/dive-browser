@@ -315,6 +315,17 @@ pub struct Bounds {
     pub height: f64,
 }
 
+/// Painted shape of a floating chrome surface, in CSS logical pixels.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+pub struct OverlayRegion {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    #[serde(default)]
+    pub radius: f64,
+}
+
 impl Bounds {
     fn position(self) -> LogicalPosition<f64> {
         LogicalPosition::new(self.x, self.y)
@@ -386,7 +397,7 @@ pub struct TabHost {
     /// `apply_visibility` runs on every overlay region update, and focus
     /// belongs to the moment the page becomes covered, not to each frame.
     focused_for_cover: std::cell::Cell<bool>,
-    live_overlays: HashMap<String, Vec<Bounds>>,
+    live_overlays: HashMap<String, Vec<OverlayRegion>>,
     /// Corner radius of page views in the main window, in logical pixels,
     /// following the chrome's corner preference. Zero is square.
     corner_radius: f64,
@@ -844,6 +855,41 @@ impl TabHost {
         self.cdp.get(&id).cloned()
     }
 
+    /// A stopped protocol session needs a new browser on explicit user retry.
+    pub fn needs_protocol_rebuild(&self, id: TabId) -> bool {
+        cfg!(feature = "cef")
+            && !self.internal.contains(&id)
+            && self.cdp.get(&id).is_none_or(CdpSession::is_closed)
+    }
+
+    /// Recreate only the page, retaining the tab, split placement and any
+    /// detached window. Called on user navigation/retry, never automatically.
+    pub fn rebuild_protocol_view(
+        &mut self,
+        main: &MainThread,
+        app: &AppHandle<Runtime>,
+        tab: &Tab,
+        container: &Container,
+    ) -> tauri::Result<()> {
+        if let Some(view) = self.views.get(&tab.id) {
+            view.close()?;
+        }
+        self.views.remove(&tab.id);
+        self.open(main, app, tab, container)?;
+        if let Some(popout) = self.popouts.get(&tab.id)
+            && let Some(view) = self.views.get(&tab.id)
+        {
+            view.reparent(&popout.window)?;
+            #[cfg(all(feature = "cef", target_os = "macos"))]
+            if let Some(chrome) = app.get_webview(&popout.chrome) {
+                bind_detached_new_tab_shortcuts(view, &chrome, &self.window);
+            }
+            view.show()?;
+        }
+        self.layout()?;
+        self.apply_visibility()
+    }
+
     /// Every live `DevTools` session, for changes that touch all open tabs.
     pub fn sessions(&self) -> Vec<(TabId, CdpSession)> {
         self.cdp.iter().map(|(id, s)| (*id, s.clone())).collect()
@@ -918,9 +964,10 @@ impl TabHost {
     pub fn set_live_overlay(
         &mut self,
         chrome: &str,
-        regions: Vec<Bounds>,
+        regions: Vec<OverlayRegion>,
         active: bool,
     ) -> tauri::Result<()> {
+        let was_active = self.live_overlays.contains_key(chrome);
         if active {
             self.live_overlays.insert(chrome.to_owned(), regions);
         } else {
@@ -932,9 +979,11 @@ impl TabHost {
         // `apply_visibility` rebuilds the mask for every live overlay itself,
         // so doing it here as well built the region twice and, on Windows,
         // repainted the whole chrome twice per frame of an animating menu.
-        if chrome == CHROME_LABEL {
+        if chrome == CHROME_LABEL && was_active != active {
             self.apply_visibility()?;
         } else {
+            // Animation only changes the mask. Do not re-show every tab and
+            // restore Chromium accessibility trees on every animation frame.
             self.update_overlay_mask(chrome, active)?;
         }
         Ok(())
@@ -968,12 +1017,19 @@ impl TabHost {
                 .get(chrome)
                 .into_iter()
                 .flatten()
-                .map(|b| [b.x, b.y, b.width, b.height])
+                .map(|b| {
+                    [
+                        b.x,
+                        b.y,
+                        b.width,
+                        b.height,
+                        b.radius.min(b.width / 2.0).min(b.height / 2.0),
+                    ]
+                })
                 .collect::<Vec<_>>();
-            let holes = crate::overlay_geometry::uncovered(&pages, &overlays);
             if let Some(view) = self.window.app_handle().get_webview(chrome) {
                 view.with_webview(move |native| {
-                    native.set_chrome_overlay_mask(&holes, active);
+                    native.set_chrome_overlay_mask(&pages, &overlays, active);
                 })?;
             }
         }
@@ -1583,7 +1639,9 @@ fn attach_cdp(
     // scanning and parsing them there is what dropped frames during a page
     // load. The callback only hands the bytes over; one worker per session
     // does the JSON work, in arrival order, and exits when the view goes.
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+    let (tx, mut rx) = dive_cdp::queue::bounded(4096, 64 * 1024 * 1024);
+    let (overflow, mut overloaded) = tokio::sync::watch::channel(false);
+    let failed_view = view.clone();
     let sink = session.clone();
     tauri::async_runtime::spawn(async move {
         // If this worker ever stops while the view lives -- it should only
@@ -1594,8 +1652,31 @@ fn attach_cdp(
             session: sink.clone(),
             tab,
         };
-        while let Some(bytes) = rx.recv().await {
-            match std::str::from_utf8(&bytes) {
+        loop {
+            let message = tokio::select! {
+                biased;
+                _ = overloaded.changed() => {
+                    if *overloaded.borrow() {
+                        tracing::error!(%tab, "CDP ingress budget exceeded; stopping tab protocol session");
+                        sink.close();
+                        // Cancel native loading without depending on the
+                        // overloaded protocol channel or turning Fetch off.
+                        let _ = failed_view.with_webview(|native| {
+                            use cef::ImplBrowser;
+                            native.browser().stop_load();
+                        });
+                        let _ = (crate::loading::TabLoad {
+                            tab_id: tab,
+                            phase: crate::loading::LoadPhase::Failed,
+                            url: None,
+                            error: Some("ERR_DIVE_PROTOCOL_OVERLOAD".into()),
+                        }).emit(failed_view.app_handle());
+                    }
+                    break;
+                },
+                message = rx.recv() => match message { Some(message) => message, None => break },
+            };
+            match std::str::from_utf8(&message.bytes) {
                 Ok(text) => {
                     tracing::trace!(
                         len = text.len(),
@@ -1611,12 +1692,16 @@ fn attach_cdp(
             }
         }
     });
+    let callback_session = session.clone();
     view.on_dev_tools_protocol(move |protocol| {
         // `Message` carries the raw JSON for both results and events; the
         // runtime no longer dispatches the pre-parsed variants.
-        if let tauri::CefDevToolsProtocol::Message(bytes) = protocol {
-            // A closed channel means the worker is gone with the session.
-            let _ = tx.send(bytes);
+        if let tauri::CefDevToolsProtocol::Message(bytes) = protocol
+            && !callback_session.is_closed()
+            && tx.try_send(bytes).is_err()
+        {
+            callback_session.close();
+            overflow.send_replace(true);
         }
     })?;
     Ok(session)
@@ -1853,20 +1938,37 @@ pub fn windowed_bounds(window: &Window<Runtime>) -> Option<WindowBounds> {
 /// A full-screen frame is not one to come back to; the last windowed frame
 /// stays on record instead.
 pub fn remember_window_bounds(window: &Window<Runtime>) {
+    static PENDING: Mutex<Option<(AppHandle<Runtime>, String)>> = Mutex::new(None);
+    static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    use std::sync::atomic::Ordering;
     let Some(bounds) = windowed_bounds(window) else {
         return;
     };
-    let state = window.app_handle().state::<AppState>();
-    // This runs on the main thread from window events. `try_lock`: a worker
-    // mid-write (history, a favicon) must not stall the window; the bounds
-    // are saved again on the next move, blur or close.
-    let Ok(store) = state.store.try_lock() else {
-        tracing::debug!("window bounds not saved: store busy");
+    // Even an uncontended Rust mutex can lead to SQLite's busy timeout. Keep
+    // disk work off the window callback and coalesce drag bursts to one worker.
+    *lock(&PENDING) = Some((window.app_handle().clone(), bounds.serialize()));
+    if RUNNING.swap(true, Ordering::AcqRel) {
         return;
-    };
-    if let Err(e) = store.set_setting(WINDOW_BOUNDS, &bounds.serialize()) {
-        tracing::debug!("could not remember window bounds: {e}");
     }
+    tauri::async_runtime::spawn_blocking(move || {
+        loop {
+            let next = {
+                let mut pending = lock(&PENDING);
+                let next = pending.take();
+                if next.is_none() {
+                    // Hold PENDING until the flag is reset so a racing producer
+                    // either reaches this worker or starts the next one.
+                    RUNNING.store(false, Ordering::Release);
+                }
+                next
+            };
+            let Some((app, bounds)) = next else { break };
+            let state = app.state::<AppState>();
+            if let Err(e) = lock(&state.store).set_setting(WINDOW_BOUNDS, &bounds) {
+                tracing::debug!("could not remember window bounds: {e}");
+            }
+        }
+    });
 }
 
 /// Build the main window with the chrome webview filling it.
@@ -2140,6 +2242,10 @@ fn private_chrome(builder: WebviewBuilder<Runtime>) -> WebviewBuilder<Runtime> {
     #[cfg(all(feature = "cef", any(target_os = "macos", target_os = "windows")))]
     let builder = builder.initialization_script(
         "Object.defineProperty(window, '__DIVE_LIVE_OVERLAYS__', {value:true});",
+    );
+    #[cfg(all(feature = "cef", target_os = "windows"))]
+    let builder = builder.initialization_script(
+        "Object.defineProperty(window, '__DIVE_LIVE_MODAL_OVERLAYS__', {value:false});",
     );
     if crate::private_session::is_private() {
         builder.incognito(true)

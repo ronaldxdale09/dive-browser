@@ -641,6 +641,7 @@ mod tests {
     #[test]
     fn binding_messages_are_decoded_and_others_ignored() {
         let event = CdpEvent {
+            navigation_epoch: 0,
             method: "Runtime.bindingCalled".into(),
             params: json!({
                 "name": BINDING,
@@ -653,12 +654,14 @@ mod tests {
 
         // Another binding, or another event entirely, is not ours.
         let other = CdpEvent {
+            navigation_epoch: 0,
             method: "Runtime.bindingCalled".into(),
             params: json!({"name": "__somethingElse", "payload": "{}"}),
         };
         assert!(message(&other).is_none());
         assert!(
             message(&CdpEvent {
+                navigation_epoch: 0,
                 method: "Page.loadEventFired".into(),
                 params: json!({}),
             })
@@ -667,6 +670,7 @@ mod tests {
         // Unparseable JSON from a page must not panic.
         assert!(
             message(&CdpEvent {
+                navigation_epoch: 0,
                 method: "Runtime.bindingCalled".into(),
                 params: json!({"name": BINDING, "payload": "not json"}),
             })
@@ -778,6 +782,7 @@ mod tests {
     #[test]
     fn oversized_binding_payloads_are_discarded_before_json_parsing() {
         let event = CdpEvent {
+            navigation_epoch: 0,
             method: "Runtime.bindingCalled".into(),
             params: json!({"name": BINDING, "payload": "x".repeat(MAX_BINDING_PAYLOAD + 1)}),
         };

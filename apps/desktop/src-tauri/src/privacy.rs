@@ -911,6 +911,7 @@ mod tests {
         let tab_id = dive_core::TabId::new();
         let binding = "__divePrivacy_test";
         let event = dive_cdp::CdpEvent {
+            navigation_epoch: 0,
             method: "Runtime.bindingCalled".into(),
             params: serde_json::json!({
                 "name": binding,
@@ -936,6 +937,7 @@ mod tests {
             "not json",
         ] {
             let malformed = dive_cdp::CdpEvent {
+                navigation_epoch: 0,
                 method: "Runtime.bindingCalled".into(),
                 params: serde_json::json!({"name": binding, "payload": payload, "executionContextId": 7}),
             };
@@ -946,6 +948,7 @@ mod tests {
         }
 
         let oversized = dive_cdp::CdpEvent {
+            navigation_epoch: 0,
             method: "Runtime.bindingCalled".into(),
             params: serde_json::json!({"name": binding, "payload": "x".repeat(65), "executionContextId": 7}),
         };
@@ -957,6 +960,7 @@ mod tests {
 
     fn cdp_event(method: &str, params: serde_json::Value) -> CdpEvent {
         CdpEvent {
+            navigation_epoch: 0,
             method: method.into(),
             params,
         }

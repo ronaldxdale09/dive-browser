@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { listen } from "@tauri-apps/api/event";
 import { events } from "../lib/ipc";
 import type { ConsoleEntry } from "../lib/ipc";
 
@@ -83,10 +84,36 @@ export const useConsole = create<ConsoleState>((set, get) => ({
 }));
 
 let listening: Promise<() => void> | null = null;
+let nativeBatchActive = false;
+type ConsoleWireBatch = ConsoleEntry[] | { reset: string };
+
+/** Apply a native batch in wire order through the same bounded UI queue. */
+export function enqueueConsoleBatch(batch: ConsoleWireBatch) {
+  nativeBatchActive = true;
+  if (!Array.isArray(batch)) {
+    useConsole.getState().navigated(batch.reset);
+    return;
+  }
+  for (const entry of batch) useConsole.getState().enqueue(entry);
+}
+
+/** Whether navigation reset ordering is owned by the native console stream. */
+export function usesNativeConsoleBatch() {
+  return nativeBatchActive;
+}
 
 /** Subscribe once to console events from the engine. */
 export function listenConsole() {
-  listening ??= events.consoleEntry.listen((e) => useConsole.getState().enqueue(e.payload));
+  listening ??= (async () => {
+    const offLegacy = await events.consoleEntry.listen((e) => useConsole.getState().enqueue(e.payload));
+    try {
+      const offBatch = await listen<ConsoleWireBatch>("console-entry-batch", (e) => enqueueConsoleBatch(e.payload));
+      return () => { offBatch(); offLegacy(); };
+    } catch (error) {
+      offLegacy();
+      throw error;
+    }
+  })();
   return listening;
 }
 

@@ -8,6 +8,7 @@
 
 pub mod error;
 pub mod page;
+pub mod queue;
 mod session;
 
 pub use error::CdpError;

@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { beginsAwaitedPage, fold, isMocked, resetNavigationWaits, rowsSinceNavigation, selectFrames, selectRequests, useNetwork } from "./network";
+import { beginsAwaitedPage, enqueueNetworkBatch, fold, isMocked, resetNavigationWaits, rowsSinceNavigation, selectFrames, selectRequests, useNetwork } from "./network";
 import type { NetworkEvent } from "../lib/ipc";
 
 type SentEvent = Extract<NetworkEvent, { type: "sent" }>;
@@ -87,6 +87,19 @@ describe("selectRequests", () => {
 });
 
 describe("network UI batches", () => {
+  it("folds a native lifecycle batch in wire order", () => {
+    useNetwork.setState({ byTab: {}, frames: {} });
+    enqueueNetworkBatch([
+      sent("native", "https://a.dev/api"),
+      { type: "response", data: { tab_id: "t", request_id: "native", status: 204, mime_type: "text/plain", from_cache: false, headers: {}, timestamp: 1.1 } },
+      { type: "finished", data: { tab_id: "t", request_id: "native", encoded_length: 12, timestamp: 1.2 } },
+    ]);
+    useNetwork.getState().flush();
+    expect(selectRequests("t")(useNetwork.getState())).toEqual([
+      expect.objectContaining({ id: "native", status: 204, size: 12, durationMs: 200 }),
+    ]);
+  });
+
   it("flushes on its real 33ms schedule without mutating the published frame snapshot", async () => {
     vi.useFakeTimers();
     try {

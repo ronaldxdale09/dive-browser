@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { append, isNoise, selectEntries, useConsole } from "./console";
+import { append, enqueueConsoleBatch, isNoise, selectEntries, useConsole } from "./console";
 import type { ConsoleRow } from "./console";
 import type { ConsoleEntry } from "../lib/ipc";
 
@@ -47,6 +47,29 @@ describe("selectEntries", () => {
 });
 
 describe("console UI batches", () => {
+  it("keeps native batch order in the frontend queue", () => {
+    useConsole.setState({ byTab: {} });
+    enqueueConsoleBatch([entry(1), entry(2), entry(3)]);
+    useConsole.getState().flush();
+    expect(useConsole.getState().byTab.t?.map((row) => row.text)).toEqual(["1", "2", "3"]);
+  });
+
+  it("applies an ordered native navigation reset without resurrecting old pending entries", () => {
+    useConsole.setState({ byTab: {}, preserve: false });
+    enqueueConsoleBatch([entry(1), entry(2)]);
+    enqueueConsoleBatch({ reset: "t" });
+    enqueueConsoleBatch([entry(3)]);
+    useConsole.getState().flush();
+    expect(useConsole.getState().byTab.t?.map((row) => row.text)).toEqual(["3"]);
+
+    useConsole.setState({ byTab: {}, preserve: true });
+    enqueueConsoleBatch([entry(4)]);
+    enqueueConsoleBatch({ reset: "t" });
+    enqueueConsoleBatch([entry(5)]);
+    useConsole.getState().flush();
+    expect(useConsole.getState().byTab.t?.map((row) => row.text)).toEqual(["4", "5"]);
+  });
+
   it("flushes after33ms and preserves unaffected tab references", async () => {
     vi.useFakeTimers();
     try {

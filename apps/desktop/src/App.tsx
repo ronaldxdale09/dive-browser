@@ -23,7 +23,7 @@ import { useShortcuts } from "./lib/shortcuts";
 import { useCoversContent } from "./lib/overlay";
 import { Palette } from "./components/Palette";
 import { useChromeLayout, useViewportSize } from "./lib/adaptiveLayout";
-import { PanelSkeleton, ToastViewport } from "./components/ChromeFeedback";
+import { DialogLoading, PanelSkeleton, ToastViewport } from "./components/ChromeFeedback";
 import { usePicker } from "./store/simulator";
 import { scheduleBootCheck } from "./store/updates";
 import { bootSubtitles } from "./store/subtitles";
@@ -264,7 +264,9 @@ export function App() {
         )}
         {showSidecar && <IsolatedPanel label="Agent" onClose={() => toggle("sidecar", false)}><Suspense fallback={<PanelSkeleton label="agent" />}><Sidecar /></Suspense></IsolatedPanel>}
       </main>
-      <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || open.subtitles || open.import) ? <div data-native-overlay className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
+      <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || open.subtitles || open.import) ? <DialogLoading onClose={() => {
+        for (const panel of ["palette", "settings", "library", "shortcuts", "defaultBrowser", "subtitles", "import"] as const) toggle(panel, false);
+      }} /> : null}>
         {open.palette && <Palette />}
         {open.settings && <SettingsDialog />}
         {open.library && <Library />}
@@ -274,9 +276,14 @@ export function App() {
         {open.subtitles && <Subtitles />}
         {open.import && <ImportDialog />}
       </Suspense>
-      {open.extensions && <IsolatedPanel label="Extensions" modal onClose={() => toggle("extensions", false)}><Suspense fallback={<div className="fixed inset-0 z-50 bg-ground/75 backdrop-blur-sm" aria-label="Loading extensions" />}><Extensions /></Suspense></IsolatedPanel>}
+      {open.extensions && <IsolatedPanel label="Extensions" modal onClose={() => toggle("extensions", false)}><Suspense fallback={<DialogLoading onClose={() => toggle("extensions", false)} />}><Extensions /></Suspense></IsolatedPanel>}
       <Splash />
-      <Suspense fallback={(editing || recorderOpen || recordingPhase === "setup" || recordingPhase === "done") ? <div data-native-overlay className="fixed inset-0 z-40 bg-ground/75 backdrop-blur-sm" aria-label="Loading dialog" /> : null}>
+      <Suspense fallback={(editing || recorderOpen || recordingPhase === "setup" || recordingPhase === "done") ? <DialogLoading onClose={() => {
+        useBrowser.getState().setEditing(null);
+        useRecorder.getState().setOpen(false);
+        if (recordingPhase === "setup") useRecording.getState().closeSetup();
+        if (recordingPhase === "done") useRecording.getState().dismiss();
+      }} /> : null}>
         {editing && <WorkspaceDialog key={editing.id ?? "new"} />}
         <ProfileDialog />
         {recorderOpen && <RecorderModal />}

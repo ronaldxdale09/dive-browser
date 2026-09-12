@@ -1,8 +1,8 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useLayoutEffect, useSyncExternalStore } from "react";
 import { ipc } from "./ipc";
 
 /**
- * On macOS a native mask lets chrome overlap live content without hiding it.
+ * On macOS and Windows a native mask raises chrome without hiding content.
  * Other runtimes retain the screenshot fallback below.
  * Native page views normally paint above chrome. Overlays register here so
  * the host can raise only their surfaces above live content. The reference
@@ -48,25 +48,13 @@ async function cover(token: number) {
   covering = true;
   let frozen: Awaited<ReturnType<typeof ipc.prepareContentCover>> = [];
   try {
+    if (liveOverlaysAvailable()) await liveQueue.catch(() => undefined);
     frozen = await ipc.prepareContentCover();
   } catch {
     // The dialog must remain usable even when a renderer cannot be captured.
   }
   if (depth === 0 || token !== generation) {
     covering = false;
-    return;
-  }
-  if (frozen.length === 0 && liveOverlaysAvailable()) {
-    // Nothing came back to stand in for the page -- a capture that failed or
-    // timed out on a busy renderer, a playing video being the usual one.
-    // Hiding the page now would leave a black rectangle behind the modal's
-    // blur with no way back until it closes: the "click +, everything goes
-    // dark and stays" freeze. Where a live mask exists (macOS), keep the page
-    // live with the chrome masked above it instead. The blur has nothing to
-    // work on, but the page is there and the overlay is usable -- far better
-    // than a black screen. Without a mask there is no alternative to covering.
-    covering = false;
-    if (!stopLive) stopLive = beginLive();
     return;
   }
   publish(Object.fromEntries(frozen.map((preview) => [preview.tab_id, preview.data_url])));
@@ -83,7 +71,7 @@ async function cover(token: number) {
   await ipc.setContentCovered(true).catch(() => undefined);
 }
 
-/** macOS uses a native chrome mask; CEF keeps rendering the page beneath it. */
+/** Native masks keep CEF rendering the page beneath every chrome overlay. */
 function liveOverlaysAvailable() {
   return (window as Window & { __DIVE_LIVE_OVERLAYS__?: boolean }).__DIVE_LIVE_OVERLAYS__ === true;
 }
@@ -131,7 +119,18 @@ export function visibleOverlayRegions() {
     // One style read, not two: a `display: none` element measures 0x0 and is
     // dropped by the size filter below, but a hidden one still has a box.
     .filter((element) => getComputedStyle(element).visibility !== "hidden")
-    .map((element) => { const { x, y, width, height } = element.getBoundingClientRect(); return { x, y, width, height }; })
+    .map((element) => {
+      const { x, y, width, height } = element.getBoundingClientRect();
+      // Floating chrome surfaces use uniform circular corners. Carry their
+      // painted shape through IPC; a rectangular native mask exposes the
+      // chrome's opaque background in the otherwise transparent corners.
+      const style = getComputedStyle(element);
+      const radius = Math.min(width / 2, height / 2, ...[
+        style.borderTopLeftRadius, style.borderTopRightRadius,
+        style.borderBottomRightRadius, style.borderBottomLeftRadius,
+      ].map((value) => Number.parseFloat(value || style.borderRadius) || 0));
+      return { x, y, width, height, ...(radius > 0 ? { radius } : {}) };
+    })
     .filter((rect) => rect.width > 0 && rect.height > 0).slice(0, 64);
 }
 
@@ -216,34 +215,9 @@ function beginLive() {
   };
 }
 
-/**
- * Whether anything on screen right now is a modal dialog.
- *
- * Read from the DOM rather than declared at the call site, so a dialog is
- * treated as one by virtue of saying it is one. Effects run after commit, so
- * by the time an overlay acquires, its element is already here.
- */
-function modalIsOpen() {
-  return document.querySelector('[aria-modal="true"]') !== null;
-}
-
-/**
- * Freeze the page rather than keep it live.
- *
- * A modal dims and blurs everything behind it, and neither is possible
- * against a native page view: it is a sibling of the chrome, not part of its
- * compositing, so `backdrop-filter` has nothing to work on and the mask that
- * lets chrome overlap it is a plain rectangle -- which is why a rounded panel
- * used to sit in a square of chrome background. Capturing the page and
- * showing the capture inside the chrome puts those pixels where CSS can
- * reach them, so the blur is real and the corners are the panel's own.
- *
- * Only modals: a menu or a suggestion list must leave the page playing.
- */
-function wantsFrozen() {
-  return !liveOverlaysAvailable() || modalIsOpen();
-}
-
+/** Native overlays stay live where painting and modal input are independent. Capturing a
+ * busy renderer before raising a dialog made opening basic browser controls
+ * wait for CDP and introduced races between frozen and live cover states. */
 /** Put the page in whichever state the overlays now on screen call for. */
 function sync() {
   if (depth === 0) {
@@ -268,7 +242,9 @@ function sync() {
     }
     return;
   }
-  if (wantsFrozen()) {
+  const modalNeedsFallback = (window as Window & { __DIVE_LIVE_MODAL_OVERLAYS__?: boolean }).__DIVE_LIVE_MODAL_OVERLAYS__ === false
+    && document.querySelector('[aria-modal="true"]') !== null;
+  if (!liveOverlaysAvailable() || modalNeedsFallback) {
     // A modal opened over a live overlay: drop the mask before capturing, or
     // the capture races a page the chrome is still punching holes through.
     if (stopLive) {
@@ -280,6 +256,10 @@ function sync() {
       void cover(generation);
     }
     return;
+  }
+  if (covered) {
+    covered = false;
+    liveQueue = liveQueue.catch(() => undefined).then(async () => { await ipc.setContentCovered(false); });
   }
   if (!stopLive) {
     generation += 1;
@@ -295,11 +275,13 @@ function acquire() {
 function release() {
   depth = Math.max(0, depth - 1);
   sync();
+  // Layout-effect cleanup can precede removal of the modal DOM node.
+  if (depth > 0) queueMicrotask(sync);
 }
 
 /** Keep chrome overlays above native pages while `active`. */
 export function useCoversContent(active: boolean) {
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!active) return;
     acquire();
     return release;
@@ -333,5 +315,6 @@ export function resetContentCover() {
   generation += 1;
   depth = 0;
   covered = false;
+  covering = false;
   publish({});
 }

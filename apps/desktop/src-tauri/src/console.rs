@@ -60,6 +60,7 @@ pub fn attach(
         tab_id,
         session,
         &["Runtime.enable", "Log.enable"],
+        "console-entry-batch",
         map_event,
         |state, entry| {
             state.buffers.push_console(entry.clone());
@@ -314,6 +315,7 @@ mod tests {
 
     fn ev(method: &str, params: Value) -> CdpEvent {
         CdpEvent {
+            navigation_epoch: 0,
             method: method.into(),
             params,
         }

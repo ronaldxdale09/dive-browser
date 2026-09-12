@@ -509,6 +509,7 @@ mod tests {
 
     fn event(method: &str, params: Value) -> CdpEvent {
         CdpEvent {
+            navigation_epoch: 0,
             method: method.into(),
             params,
         }

@@ -1,8 +1,22 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ToastViewport } from "./ChromeFeedback";
+import { DialogLoading, ToastViewport } from "./ChromeFeedback";
 
 afterEach(cleanup);
+
+describe("DialogLoading", () => {
+  it("shows an immediately cancellable dialog while a panel loads", () => {
+    const close = vi.fn();
+    render(<DialogLoading onClose={close} />);
+    expect(screen.getByRole("dialog", { name: "Loading dialog" })).toBeTruthy();
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    expect(document.activeElement).toBe(cancel);
+    fireEvent.keyDown(cancel, { key: "Escape" });
+    expect(close).toHaveBeenCalledTimes(1);
+    fireEvent.click(cancel);
+    expect(close).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("ToastViewport", () => {
   it("shows a notice's action and dismisses after running it", () => {

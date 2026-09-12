@@ -562,8 +562,19 @@ impl<T: UserEvent> WinitCefApp<T> {
     }
 
     fn drain_messages(&mut self, event_loop: &dyn ActiveEventLoop) {
+        // Producers can refill this queue faster than native work consumes it.
+        // Return to Winit regularly so input, CEF pumping and paint can run.
+        let started = std::time::Instant::now();
+        let mut count = 0;
         while let Ok(message) = self.receiver.try_recv() {
             self.handle_message(event_loop, message);
+            count += 1;
+            if count >= 64 || started.elapsed() >= std::time::Duration::from_millis(4) {
+                // Wake even when that happened to be the last message: peeking
+                // would consume work, and one empty wake is harmless.
+                self.context.proxy.wake_up();
+                break;
+            }
         }
     }
 

@@ -58,7 +58,7 @@ export type GeolocationInput = { latitude: number; longitude: number; accuracy: 
 export type EnvironmentInput = { geolocation: GeolocationInput | null; timezone: string | null; locale: string | null };
 
 export const ipc = {
-  setOverlayRegions: async (regions: { x: number; y: number; width: number; height: number }[], active: boolean) => unwrap(await commands.layoutSetOverlayRegions(regions, active)),
+  setOverlayRegions: async (regions: { x: number; y: number; width: number; height: number; radius?: number }[], active: boolean) => unwrap(await commands.layoutSetOverlayRegions(regions, active)),
   keepSitesList: async (profile: string) => unwrap(await commands.keepSitesList(profile)),
   keepSiteSet: async (profile: string, url: string, keep: boolean) => unwrap(await commands.keepSiteSet(profile, url, keep)),
   snapshot: async () => unwrap(await commands.snapshot()),

@@ -10,8 +10,9 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "test:probes": "python3 -m unittest discover -s scripts/tests -p 'test_*.py'",
-    "check": "pnpm test:probes && cargo fmt --all -- --check && pnpm typecheck && pnpm lint && pnpm test && pnpm --filter @dive/desktop exec vite build && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
-    "release:next": "node scripts/release/resolve-release.mjs"
+    "check": "bash scripts/check.sh",
+    "release:next": "node scripts/release/resolve-release.mjs",
+    "test:runtime": "bash scripts/test-runtime.sh"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

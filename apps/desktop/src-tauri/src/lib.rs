@@ -50,7 +50,6 @@ mod network;
 mod network_probe;
 mod normal_window;
 mod openapi;
-mod overlay_geometry;
 mod page_menu;
 mod pagescript;
 mod passwords;

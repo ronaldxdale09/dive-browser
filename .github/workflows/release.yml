@@ -26,6 +26,11 @@ on:
         description: "Exact version, e.g. 0.2.0 (overrides the bump)"
         required: false
         type: string
+      windows_only:
+        description: "Build Windows assets for a locally signed macOS release; do not publish"
+        required: false
+        type: boolean
+        default: false
 
 # Releases are serialized. Cancelling a publish half way through is how a tag
 # ends up existing with no assets behind it.
@@ -90,6 +95,7 @@ jobs:
 
   build:
     name: Build macOS (aarch64)
+    if: ${{ !inputs.windows_only }}
     needs: preflight
     runs-on: macos-15
     # Longer than the Windows job because this one also waits on Apple's
@@ -434,7 +440,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json
+          git add Cargo.toml Cargo.lock apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json apps/desktop/src-tauri/cef/crash_reporter.cfg
           git commit -m "chore(release): ${{ needs.preflight.outputs.tag }}"
           git push origin HEAD:main
 

@@ -29,7 +29,8 @@ tauri-utils = { version = "2.9.2", git = "https://github.com/tauri-apps/tauri", 
   "html-manipulation",
 ] }
 url = "2"
-winit = "0.31.0-beta.2"
+# The native API is pinned; Cargo otherwise accepts incompatible beta.3.
+winit = "=0.31.0-beta.2"
 
 [target."cfg(windows)".dependencies]
 softbuffer = { version = "0.4", default-features = false }

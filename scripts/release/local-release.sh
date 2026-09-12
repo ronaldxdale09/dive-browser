@@ -4,8 +4,8 @@
 #
 #   scripts/release/local-release.sh [patch|minor|major|rc] [exact-version]
 #
-# Windows is built by the `release` workflow, which cannot sign a macOS app and
-# so never publishes on its own. Point DIVE_WINDOWS_RUN at the run that built
+# Windows is built by the `release` workflow with windows_only=true, which
+# never publishes on its own. Point DIVE_WINDOWS_RUN at the run that built
 # it and its installer joins this release:
 #
 #   DIVE_WINDOWS_RUN=<run id> scripts/release/local-release.sh patch
@@ -56,23 +56,8 @@ step "preconditions"
 if [[ -z "${DIVE_WINDOWS_RUN:-}" && "${DIVE_SKIP_WINDOWS:-}" != "1" ]]; then
     die "set DIVE_WINDOWS_RUN to the release workflow run that built windows-x86_64 (gh run list --workflow=release.yml), or DIVE_SKIP_WINDOWS=1 for a macOS-only release"
 fi
-# The toolchain has to be able to link before an hour of CEF is spent finding
-# out that it cannot. Command Line Tools can be a macOS version ahead of the
-# selected Xcode, and then the default SDK carries architectures that Xcode's
-# linker does not know ("tapi error: malformed file ... unknown architecture").
-# Falling back to the first of the selected Xcode's own SDKs that can link
-# keeps both halves of one toolchain together.
-if ! printf 'int main(){return 0;}' | cc -x c - -o /dev/null >/dev/null 2>&1; then
-    for sdk in "$(xcode-select -p)"/Platforms/MacOSX.platform/Developer/SDKs/MacOSX*.sdk; do
-        [[ -d "${sdk}" ]] || continue
-        if printf 'int main(){return 0;}' | SDKROOT="${sdk}" cc -x c - -o /dev/null >/dev/null 2>&1; then
-            export SDKROOT="${sdk}"
-            echo "   default SDK cannot link; using ${SDKROOT##*/}"
-            break
-        fi
-    done
-    [[ -n "${SDKROOT:-}" ]] || die "cc cannot link anything; check xcode-select -p and the Command Line Tools"
-fi
+# Share the same SDK preflight as local checks.
+source "${ROOT}/scripts/native-toolchain.sh"
 # A failed bundle leaves its scratch image mounted, and the next run fails to
 # unmount its own with "couldn't unmount ... Resource busy" -- one flake then
 # costs every later attempt. Eject whatever this repo left behind first; other
@@ -158,6 +143,9 @@ fi
 WINDOWS_ASSETS=()
 if [[ -n "${DIVE_WINDOWS_RUN:-}" ]]; then
     step "collect the Windows build from run ${DIVE_WINDOWS_RUN}"
+    [[ "$(gh run view "${DIVE_WINDOWS_RUN}" --json headSha -q .headSha)" == "${COMMIT}" ]] \
+        || die "the Windows workflow must build the same commit as this checkout"
+    gh run watch "${DIVE_WINDOWS_RUN}" --exit-status || die "Windows build failed"
     rm -rf out/windows && mkdir -p out/windows
     gh run download "${DIVE_WINDOWS_RUN}" -n windows-x86_64 -D out/windows \
         || die "could not download the windows-x86_64 artifact from run ${DIVE_WINDOWS_RUN}"
@@ -191,6 +179,11 @@ node scripts/release/update-manifest.mjs merge out/manifest-*.json \
     --expect-platforms "${expect}" \
     --out out/latest.json
 rm -f out/manifest-*.json
+
+step "verify the signed native bundle before publishing"
+codesign --verify --deep --strict target/release/bundle/macos/Dive.app
+DIVE_BIN="${ROOT}/target/release/bundle/macos/Dive.app/Contents/MacOS/dive-desktop" \
+    bash scripts/live-check.sh
 
 step "publish ${TAG} to GitHub Releases"
 flags=(--target "${COMMIT}" --title "${NAME}" --generate-notes)

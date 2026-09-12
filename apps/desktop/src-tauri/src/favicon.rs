@@ -276,6 +276,7 @@ mod tests {
 
     fn ev(method: &str, params: Value) -> CdpEvent {
         CdpEvent {
+            navigation_epoch: 0,
             method: method.into(),
             params,
         }

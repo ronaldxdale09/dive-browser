@@ -13,7 +13,7 @@ use tauri_plugin_updater::UpdaterExt as _;
 use tauri_specta::{Event, collect_commands, collect_events};
 
 use crate::Runtime;
-use crate::engine::{Bounds, MainThread, PaneBounds};
+use crate::engine::{Bounds, MainThread, OverlayRegion, PaneBounds};
 use crate::error::{AppError, AppResult};
 use crate::state::{AppState, lock};
 
@@ -1812,7 +1812,13 @@ pub(crate) fn on_main<T: Send + 'static>(
     }
     let (tx, rx) = std::sync::mpsc::channel();
     let handle = app.clone();
+    let deadline = std::time::Instant::now() + MAIN_HOP_BUDGET;
     app.run_on_main_thread(move || {
+        // A timed-out queued mutation must not run minutes later when a busy
+        // native thread recovers. Work already executing cannot be cancelled.
+        if std::time::Instant::now() >= deadline {
+            return;
+        }
         let result = match MainThread::here() {
             Some(main) => {
                 let state = handle.state::<AppState>();
@@ -1917,8 +1923,16 @@ pub fn activate_tab(
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn tab_navigate(state: State<'_, AppState>, id: TabId, url: String) -> AppResult<()> {
+pub(crate) fn tab_navigate(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: TabId,
+    url: String,
+) -> AppResult<()> {
     let url = normalize_url_with(&url, state.prefs.get(&state).search_template())?;
+    if rebuild_failed_protocol(&app, &state, id, Some(url.as_str().to_owned()))? {
+        return Ok(());
+    }
     let host = lock(&state.host);
     host.as_ref()
         .ok_or_else(|| AppError::new("engine not ready"))?
@@ -2008,8 +2022,53 @@ pub(crate) fn tab_forward(state: State<'_, AppState>, id: TabId) -> AppResult<()
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn tab_reload(state: State<'_, AppState>, id: TabId) -> AppResult<()> {
+pub(crate) fn tab_reload(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: TabId,
+) -> AppResult<()> {
+    if rebuild_failed_protocol(&app, &state, id, None)? {
+        return Ok(());
+    }
     with_view(&state, id, tauri::Webview::reload)
+}
+
+fn rebuild_failed_protocol(
+    app: &AppHandle<Runtime>,
+    state: &AppState,
+    id: TabId,
+    url: Option<String>,
+) -> AppResult<bool> {
+    if !lock(&state.host)
+        .as_ref()
+        .is_some_and(|host| host.needs_protocol_rebuild(id))
+    {
+        return Ok(false);
+    }
+    on_main(app, move |main, app, state| {
+        let mut host = lock(&state.host);
+        let host = host
+            .as_mut()
+            .ok_or_else(|| AppError::new("engine not ready"))?;
+        if !host.needs_protocol_rebuild(id) {
+            return Ok(false);
+        }
+        let (mut tab, container) = {
+            let store = lock(&state.store);
+            let tab = store.tab(id)?;
+            let workspace = tab
+                .workspace_id
+                .or(*lock(&state.active_workspace))
+                .ok_or_else(|| AppError::new("tab has no workspace"))?;
+            let container = store.container(store.workspace(workspace)?.container_id)?;
+            (tab, container)
+        };
+        if let Some(url) = url {
+            tab.url = url;
+        }
+        host.rebuild_protocol_view(main, app, &tab, &container)?;
+        Ok(true)
+    })
 }
 
 /// Open Chromium's `DevTools` window for a tab.
@@ -3447,14 +3506,17 @@ pub(crate) fn layout_set_content_covered(
 pub(crate) fn layout_set_overlay_regions(
     app: AppHandle<Runtime>,
     webview: tauri::Webview<Runtime>,
-    regions: Vec<Bounds>,
+    regions: Vec<OverlayRegion>,
     active: bool,
 ) -> AppResult<()> {
     if regions.len() > 64
         || regions.iter().any(|b| {
-            [b.x, b.y, b.width, b.height].iter().any(|n| !n.is_finite())
+            [b.x, b.y, b.width, b.height, b.radius]
+                .iter()
+                .any(|n| !n.is_finite())
                 || b.width < 0.0
                 || b.height < 0.0
+                || b.radius < 0.0
         })
     {
         return Err(AppError::new("invalid overlay geometry"));

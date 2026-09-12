@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { listen } from "@tauri-apps/api/event";
 import { events } from "../lib/ipc";
 import type { NetworkEvent } from "../lib/ipc";
 
@@ -272,9 +273,23 @@ export const selectFrames = (tabId: string | null, requestId: string | null) => 
 
 let listening: Promise<() => void> | null = null;
 
+/** Apply a native batch in wire order through the same bounded UI queue. */
+export function enqueueNetworkBatch(entries: NetworkEvent[]) {
+  for (const entry of entries) useNetwork.getState().enqueue(entry);
+}
+
 /** Subscribe once to network events from the engine. */
 export function listenNetwork() {
-  listening ??= events.networkEvent.listen((e) => useNetwork.getState().enqueue(e.payload));
+  listening ??= (async () => {
+    const offLegacy = await events.networkEvent.listen((e) => useNetwork.getState().enqueue(e.payload));
+    try {
+      const offBatch = await listen<NetworkEvent[]>("network-event-batch", (e) => enqueueNetworkBatch(e.payload));
+      return () => { offBatch(); offLegacy(); };
+    } catch (error) {
+      offLegacy();
+      throw error;
+    }
+  })();
   return listening;
 }
 

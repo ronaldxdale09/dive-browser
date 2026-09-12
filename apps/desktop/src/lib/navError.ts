@@ -15,6 +15,10 @@ export function describeNavError(error: string, url: string): NavErrorText {
   const code = (error.match(/ERR_[A-Z0-9_]+/) ?? [error.replace(/^net::/, "")])[0] ?? error;
   const port = portOf(url);
   switch (code) {
+    case "ERR_DIVE_REQUEST_RECOVERY":
+      return { title: "The page stopped responding", detail: "A page request could not be completed safely. Your protection settings are still enabled.", hint: "Retry to load the page again." };
+    case "ERR_DIVE_PROTOCOL_OVERLOAD":
+      return { title: "This tab became too busy", detail: "The browser stopped this tab's connection to keep the window responsive.", hint: "Retry to reconnect this tab." };
     case "ERR_NAME_NOT_RESOLVED":
       return { title: "This site can't be reached", detail: "DNS lookup failed: the server's address could not be found.", hint: "Check the spelling of the host, or your DNS settings." };
     case "ERR_CONNECTION_REFUSED":

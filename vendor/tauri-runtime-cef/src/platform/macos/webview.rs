@@ -17,14 +17,22 @@ use super::utils;
 /// Where a DevTools window opens, in top-left screen coordinates. It is a
 /// real working size (not CEF's 640×608 default), sits a little down and
 /// right of the page it inspects, and stays on the screen.
-pub(crate) fn devtools_bounds(page: (f64, f64, f64, f64), screen: (f64, f64)) -> (i32, i32, i32, i32) {
+pub(crate) fn devtools_bounds(
+    page: (f64, f64, f64, f64),
+    screen: (f64, f64),
+) -> (i32, i32, i32, i32) {
     let (px, py, pw, ph) = page;
     let (sw, sh) = screen;
     let width = (pw * 0.7).max(960.0).min(sw);
     let height = (ph * 0.85).max(700.0).min(sh);
     let x = (px + 48.0).min((sw - width).max(0.0)).max(0.0);
     let y = (py + 48.0).min((sh - height).max(0.0)).max(0.0);
-    (x.round() as i32, y.round() as i32, width.round() as i32, height.round() as i32)
+    (
+        x.round() as i32,
+        y.round() as i32,
+        width.round() as i32,
+        height.round() as i32,
+    )
 }
 
 /// Chrome sizes the DevTools window it opens (CEF's `WindowInfo` bounds
@@ -42,7 +50,9 @@ pub(crate) fn place_devtools_window(bounds: (i32, i32, i32, i32), mtm: MainThrea
         if frame.size.width > 700.0 {
             continue;
         }
-        let screen_height = window.screen().map_or(0.0, |screen| screen.frame().size.height);
+        let screen_height = window
+            .screen()
+            .map_or(0.0, |screen| screen.frame().size.height);
         let rect = NSRect::new(
             NSPoint::new(f64::from(x), screen_height - f64::from(y + height)),
             NSSize::new(f64::from(width), f64::from(height)),
@@ -222,7 +232,12 @@ impl crate::webview::Webview {
         true
     }
 
-    pub fn set_chrome_overlay_mask(&self, holes: &[[f64; 4]], active: bool) -> bool {
+    pub fn set_chrome_overlay_mask(
+        &self,
+        holes: &[[f64; 4]],
+        overlays: &[[f64; 5]],
+        active: bool,
+    ) -> bool {
         use cef::ImplBrowser;
         use objc2::MainThreadMarker;
         use objc2_app_kit::NSWindowOrderingMode;
@@ -273,6 +288,16 @@ impl crate::webview::Webview {
             mask.setFrame(bounds);
             mask.setPath(Some(&path));
             mask.setFillRule(unsafe { kCAFillRuleEvenOdd });
+            // The base mask exposes each page. Paint rounded overlay shapes
+            // back into its alpha, using a separate nonzero-filled layer so
+            // overlapping dialogs union instead of punching holes in each other.
+            let surfaces = CGMutablePath::new();
+            append_overlay_surfaces(&surfaces, bounds.size.height, overlays);
+            let surface_mask = CAShapeLayer::layer();
+            surface_mask.setFrame(bounds);
+            surface_mask.setPath(Some(&surfaces));
+            // This fresh layer has no parent; adding it cannot form a cycle.
+            mask.addSublayer(&surface_mask);
             // SAFETY: the fresh mask has no superlayer, so this cannot form a cycle.
             unsafe {
                 layer.setMask(Some(&mask));
@@ -290,19 +315,70 @@ impl crate::webview::Webview {
     }
 }
 
+/// Append equally wound paths: the default nonzero fill unions intersections.
+fn append_overlay_surfaces(
+    path: &objc2_core_graphics::CGMutablePath,
+    height: f64,
+    overlays: &[[f64; 5]],
+) {
+    use objc2_core_graphics::CGMutablePath;
+    for [x, y, width, h, radius] in overlays {
+        let rect = NSRect::new(NSPoint::new(*x, height - y - h), NSSize::new(*width, *h));
+        // SAFETY: the null transform is identity and the caller validates geometry.
+        unsafe {
+            CGMutablePath::add_rounded_rect(Some(path), std::ptr::null(), rect, *radius, *radius);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::devtools_bounds;
+    use super::{append_overlay_surfaces, devtools_bounds};
+
+    #[test]
+    fn overlay_paths_round_corners_and_union_overlaps() {
+        use super::NSPoint;
+        use objc2_core_graphics::{CGMutablePath, CGPath};
+        let path = CGMutablePath::new();
+        append_overlay_surfaces(&path, 200.0, &[[10.0, 20.0, 100.0, 80.0, 16.0]]);
+        let contains = |x, y| unsafe {
+            CGPath::contains_point(
+                Some(&path),
+                std::ptr::null(),
+                NSPoint::new(x, 200.0 - y),
+                false,
+            )
+        };
+        assert!(!contains(11.0, 21.0), "transparent top-left corner");
+        assert!(!contains(109.0, 99.0), "transparent bottom-right corner");
+        assert!(contains(26.0, 21.0), "top edge beyond the curve");
+        assert!(contains(60.0, 60.0), "surface centre");
+        append_overlay_surfaces(&path, 200.0, &[[50.0, 40.0, 100.0, 80.0, 12.0]]);
+        assert!(contains(60.0, 60.0), "overlap must stay opaque");
+        assert!(contains(130.0, 70.0), "second surface remains visible");
+    }
 
     #[test]
     fn devtools_opens_at_a_working_size_beside_the_page_and_on_screen() {
         // A roomy window: 70% of its size, offset down and right.
-        assert_eq!(devtools_bounds((100.0, 50.0, 1600.0, 1000.0), (2560.0, 1440.0)), (148, 98, 1120, 850));
+        assert_eq!(
+            devtools_bounds((100.0, 50.0, 1600.0, 1000.0), (2560.0, 1440.0)),
+            (148, 98, 1120, 850)
+        );
         // A small window still gets a usable DevTools.
-        assert_eq!(devtools_bounds((0.0, 0.0, 800.0, 600.0), (2560.0, 1440.0)), (48, 48, 960, 700));
+        assert_eq!(
+            devtools_bounds((0.0, 0.0, 800.0, 600.0), (2560.0, 1440.0)),
+            (48, 48, 960, 700)
+        );
         // Near the screen edge it is pulled back so it stays visible.
-        assert_eq!(devtools_bounds((1900.0, 900.0, 1400.0, 900.0), (2560.0, 1440.0)), (1580, 675, 980, 765));
+        assert_eq!(
+            devtools_bounds((1900.0, 900.0, 1400.0, 900.0), (2560.0, 1440.0)),
+            (1580, 675, 980, 765)
+        );
         // A screen smaller than the minimum: no larger than the screen.
-        assert_eq!(devtools_bounds((0.0, 0.0, 900.0, 600.0), (900.0, 600.0)), (0, 0, 900, 600));
+        assert_eq!(
+            devtools_bounds((0.0, 0.0, 900.0, 600.0), (900.0, 600.0)),
+            (0, 0, 900, 600)
+        );
     }
 }

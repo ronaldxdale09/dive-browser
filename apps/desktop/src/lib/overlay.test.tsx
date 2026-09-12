@@ -218,6 +218,12 @@ describe("live native overlays", () => {
     vi.spyOn(dialog, "getBoundingClientRect").mockReturnValue({x:100,y:90,width:340,height:500} as DOMRect);
     expect(visibleOverlayRegions()).toEqual([{x:100,y:90,width:340,height:500}]);
   });
+  it("preserves the painted corner radius in the native mask", () => {
+    const { container } = render(<div role="dialog" style={{ borderRadius: "16px" }} />);
+    const dialog = container.firstElementChild!;
+    vi.spyOn(dialog, "getBoundingClientRect").mockReturnValue({ x: 100, y: 90, width: 340, height: 500 } as DOMRect);
+    expect(visibleOverlayRegions()).toEqual([{ x: 100, y: 90, width: 340, height: 500, radius: 16 }]);
+  });
 });
 
 describe("what counts as an overlay", () => {

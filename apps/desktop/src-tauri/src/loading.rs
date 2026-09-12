@@ -297,6 +297,7 @@ mod tests {
 
     fn ev(method: &str, params: serde_json::Value) -> CdpEvent {
         CdpEvent {
+            navigation_epoch: 0,
             method: method.into(),
             params,
         }

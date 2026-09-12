@@ -3,7 +3,7 @@ import type { Event } from "@tauri-apps/api/event";
 import { CLOSED_TABS_LIMIT, orderWithAt, reduceCrash, sameSiteTab, togglePanel, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, useBrowser, withoutRequest } from "./browser";
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
-import type { PermissionAsked, PermissionDismissed, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
+import type { PermissionAsked, PermissionDismissed, Snapshot, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
 import { usePrivacy } from "./privacy";
 
 const tab = (id: string, url = "https://x"): Tab => ({
@@ -257,6 +257,85 @@ describe("optimistic switching", () => {
     useBrowser.getState().applyEvent({ type: "workspace_activated", data: "w3" });
     await Promise.resolve();
     expect(snapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the newer engine-driven workspace when snapshots resolve out of order", async () => {
+    const pending: Array<(snapshot: Snapshot) => void> = [];
+    vi.spyOn(ipc, "snapshot").mockImplementation(() => new Promise<Snapshot>((resolve) => pending.push(resolve)));
+    vi.spyOn(ipc, "workspaceTabCounts").mockResolvedValue([]);
+    useBrowser.setState({ activeWorkspace: "w1", tabs: [tab("a")], activeTab: "a", workspaces: [] });
+
+    useBrowser.getState().applyEvent({ type: "workspace_activated", data: "older" });
+    useBrowser.getState().applyEvent({ type: "workspace_activated", data: "newer" });
+    expect(pending).toHaveLength(2);
+    const snapshot = (id: string): Snapshot => ({ workspaces: [], active_workspace: id, tabs: [], active_tab: null, detached: [], profiles: [], active_profile: null });
+    pending[1]!(snapshot("newer"));
+    await Promise.resolve();
+    pending[0]!(snapshot("older"));
+    await Promise.resolve();
+
+    expect(useBrowser.getState().activeWorkspace).toBe("newer");
+  });
+
+  it("keeps a newer optimistic workspace switch over an older user-requested snapshot", async () => {
+    const pending: Array<(snapshot: Snapshot) => void> = [];
+    vi.spyOn(ipc, "workspaceActivate").mockResolvedValue(null);
+    vi.spyOn(ipc, "snapshot").mockImplementation(() => new Promise<Snapshot>((resolve) => pending.push(resolve)));
+    vi.spyOn(ipc, "workspaceTabCounts").mockResolvedValue([]);
+    useBrowser.setState({ activeWorkspace: "w1", tabs: [tab("a")], activeTab: "a" });
+
+    const older = useBrowser.getState().activateWorkspace("w2");
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    const newer = useBrowser.getState().activateWorkspace("w3");
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    const snapshot = (id: string): Snapshot => ({ workspaces: [], active_workspace: id, tabs: [], active_tab: null, detached: [], profiles: [], active_profile: null });
+    pending[1]!(snapshot("w3"));
+    await newer;
+    pending[0]!(snapshot("w2"));
+    await older;
+
+    expect(useBrowser.getState().activeWorkspace).toBe("w3");
+  });
+
+  it("does not let a profile snapshot overwrite a newer profile event", async () => {
+    const pending: Array<(snapshot: Snapshot) => void> = [];
+    vi.spyOn(ipc, "profileActivate").mockResolvedValue(null);
+    vi.spyOn(ipc, "snapshot").mockImplementation(() => new Promise<Snapshot>((resolve) => pending.push(resolve)));
+    vi.spyOn(ipc, "workspaceTabCounts").mockResolvedValue([]);
+    useBrowser.setState({ activeProfile: "p1" });
+
+    const switching = useBrowser.getState().activateProfile("p2");
+    await vi.waitFor(() => expect(ipc.snapshot).toHaveBeenCalledOnce());
+    useBrowser.getState().applyEvent({ type: "profile_activated", data: "p3" });
+    pending[0]!({ workspaces: [], active_workspace: null, tabs: [], active_tab: null, detached: [], profiles: [], active_profile: "p2" });
+    await switching;
+
+    expect(useBrowser.getState().activeProfile).toBe("p3");
+    expect(ipc.snapshot).toHaveBeenCalledOnce();
+  });
+
+  it("eventually hydrates after repeated intent invalidations and preserves a reopened dialog", async () => {
+    const pending: Array<(snapshot: Snapshot) => void> = [];
+    const profile = { id: "p", name: "P", color: "#fff", avatar: "seed", note: "", container_id: "c", position: 0, created_at: "2026-01-01T00:00:00Z" };
+    vi.spyOn(ipc, "profileCreate").mockResolvedValue(profile);
+    vi.spyOn(ipc, "snapshot").mockImplementation(() => new Promise<Snapshot>((resolve) => pending.push(resolve)));
+    vi.spyOn(ipc, "workspaceTabCounts").mockResolvedValue([]);
+    useBrowser.setState({ workspaces: [], profiles: [], editingProfile: { id: null } });
+
+    const creating = useBrowser.getState().createProfile({ name: "Created", color: "#fff", avatar: "seed", note: "" });
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    useBrowser.getState().setEditingProfile({ id: "new-dialog" });
+    pending[0]!({ workspaces: [], active_workspace: null, tabs: [], active_tab: null, detached: [], profiles: [], active_profile: null });
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    useBrowser.getState().setEditingProfile({ id: "new-dialog" });
+    pending[1]!({ workspaces: [], active_workspace: null, tabs: [], active_tab: null, detached: [], profiles: [], active_profile: null });
+    await vi.waitFor(() => expect(pending).toHaveLength(3));
+    pending[2]!({ workspaces: [ws("hydrated", "Hydrated", 0)], active_workspace: "hydrated", tabs: [], active_tab: null, detached: [], profiles: [profile], active_profile: "p" });
+    await creating;
+
+    expect(useBrowser.getState().activeWorkspace).toBe("hydrated");
+    expect(useBrowser.getState().profiles).toHaveLength(1);
+    expect(useBrowser.getState().editingProfile).toEqual({ id: "new-dialog" });
   });
 
   it("rolls the workspace back when the engine refuses, without a snapshot", async () => {

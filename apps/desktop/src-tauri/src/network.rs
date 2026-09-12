@@ -117,6 +117,7 @@ pub(crate) async fn enable(session: &CdpSession) -> Result<Value, dive_cdp::CdpE
 }
 
 /// Forward metadata independently of the bounded response capture worker.
+#[allow(clippy::too_many_lines)] // one actor owns ordered metadata batching and bounded body capture
 pub fn attach(
     app: AppHandle<Runtime>,
     tab_id: TabId,
@@ -148,10 +149,41 @@ pub fn attach(
             },
         ));
         let mut tracker = BodyTracker::default();
+        let mut batch = crate::cdp_feed::IpcBatch::default();
         let _ = ready_tx.send(());
         loop {
-            match events.recv().await {
+            let incoming = if let Some(deadline) = batch.deadline() {
+                tokio::select! {
+                    event = events.recv() => Some(event),
+                    () = tokio::time::sleep_until(deadline) => None,
+                }
+            } else {
+                Some(events.recv().await)
+            };
+            let Some(incoming) = incoming else {
+                crate::cdp_feed::emit_batch(
+                    &app,
+                    &session,
+                    "network-event-batch",
+                    &mut batch,
+                    tab_id,
+                );
+                continue;
+            };
+            match incoming {
                 Ok(event) => {
+                    if matches!(
+                        event.method.as_str(),
+                        "Page.frameStartedLoading" | "Page.frameNavigated"
+                    ) {
+                        crate::cdp_feed::emit_batch(
+                            &app,
+                            &session,
+                            "network-event-batch",
+                            &mut batch,
+                            tab_id,
+                        );
+                    }
                     tracker.observe(&event);
                     if let Some(item) = map_event(tab_id, &event) {
                         let state = app.state::<crate::state::AppState>();
@@ -190,8 +222,14 @@ pub fn attach(
                                 }
                             }
                         }
-                        if let Err(error) = item.emit(&app) {
-                            tracing::warn!(%tab_id, %error, "network event emit failed");
+                        if batch.push(item) {
+                            crate::cdp_feed::emit_batch(
+                                &app,
+                                &session,
+                                "network-event-batch",
+                                &mut batch,
+                                tab_id,
+                            );
                         }
                     }
                 }
@@ -199,7 +237,12 @@ pub fn attach(
                     tracker.clear();
                     tracing::warn!(%tab_id, missed, "network feed lagged; partial body sizes discarded");
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    // Host history is already current; do not republish stale
+                    // rows after the frontend has dropped a closed tab.
+                    let _ = batch.take();
+                    break;
+                }
             }
         }
         // Cancel both queued and in-flight capture immediately on session close.
@@ -711,6 +754,7 @@ mod tests {
 
     fn ev(method: &str, params: Value) -> CdpEvent {
         CdpEvent {
+            navigation_epoch: 0,
             method: method.into(),
             params,
         }

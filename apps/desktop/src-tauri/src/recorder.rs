@@ -225,6 +225,7 @@ mod tests {
     fn maps_binding_and_navigation_events() {
         let click = json!({"name": BINDING, "payload": "{\"kind\":\"click\",\"role\":\"button\",\"name\":\"Save\",\"value\":\"\",\"at\":5,\"nonce\":\"n1\"}"});
         let ev = CdpEvent {
+            navigation_epoch: 0,
             method: "Runtime.bindingCalled".into(),
             params: click,
         };
@@ -238,16 +239,19 @@ mod tests {
             "forged payloads without the nonce are ignored"
         );
         let other = CdpEvent {
+            navigation_epoch: 0,
             method: "Runtime.bindingCalled".into(),
             params: json!({"name": "other", "payload": "{}"}),
         };
         assert!(map_event(&other, "n1").is_none());
         let nav = CdpEvent {
+            navigation_epoch: 0,
             method: "Page.frameNavigated".into(),
             params: json!({"frame": {"id": "1", "url": "https://a.dev/x"}}),
         };
         assert_eq!(map_event(&nav, "n1").unwrap().value, "https://a.dev/x");
         let child = CdpEvent {
+            navigation_epoch: 0,
             method: "Page.frameNavigated".into(),
             params: json!({"frame": {"id": "2", "parentId": "1", "url": "https://ad.example"}}),
         };
@@ -255,6 +259,7 @@ mod tests {
         let masked = json!({"name": BINDING, "payload": "{\"kind\":\"type\",\"role\":\"textbox\",\"name\":\"Password\",\"value\":\"\",\"masked\":true,\"at\":5,\"nonce\":\"n1\"}"});
         let step = map_event(
             &CdpEvent {
+                navigation_epoch: 0,
                 method: "Runtime.bindingCalled".into(),
                 params: masked,
             },
@@ -265,6 +270,7 @@ mod tests {
         let huge = json!({"name": BINDING, "payload": format!("{{\"kind\":\"type\",\"value\":\"{}\",\"nonce\":\"n1\"}}", "x".repeat(MAX_FIELD + 10))});
         let step = map_event(
             &CdpEvent {
+                navigation_epoch: 0,
                 method: "Runtime.bindingCalled".into(),
                 params: huge,
             },
@@ -274,6 +280,7 @@ mod tests {
         assert_eq!(step.value.len(), MAX_FIELD);
 
         let oversized = CdpEvent {
+            navigation_epoch: 0,
             method: "Runtime.bindingCalled".into(),
             params: json!({"name": BINDING, "payload": "x".repeat(MAX_BINDING_PAYLOAD + 1)}),
         };

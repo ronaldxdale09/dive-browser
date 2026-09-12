@@ -379,6 +379,7 @@ mod tests {
 
     fn event(name: &str, payload: &str) -> CdpEvent {
         CdpEvent {
+            navigation_epoch: 0,
             method: "Runtime.bindingCalled".into(),
             params: json!({"name": name, "payload": payload}),
         }

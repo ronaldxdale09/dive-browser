@@ -489,11 +489,6 @@ export const commands = {
 	/**  Stop recording and return the steps. */
 	tabRecordStop: (id: TabId) => __TAURI_INVOKE<RecordedStep[]>("tab_record_stop", { id }),
 	layoutSetContentBounds: (bounds: Bounds) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_bounds", { bounds })),
-	/**
-	 *  Freeze every page shown in the main window before a DOM overlay hides its
-	 *  native child view. Unlike a user capture, these previews stay in memory and
-	 *  never touch the captures folder or clipboard.
-	 */
 	layoutPrepareContentCover: () => typedError<ContentPreview[], AppError>(__TAURI_INVOKE("layout_prepare_content_cover")),
 	/**
 	 *  Hide the native content view while a DOM overlay (dialog, menu, popover)
@@ -511,7 +506,7 @@ export const commands = {
 	 */
 	windowSetBackground: (hex: string) => typedError<null, AppError>(__TAURI_INVOKE("window_set_background", { hex })),
 	/**  Regions belong to trusted chrome and use CSS logical pixels. */
-	layoutSetOverlayRegions: (regions: Bounds[], active: boolean) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_overlay_regions", { regions, active })),
+	layoutSetOverlayRegions: (regions: OverlayRegion[], active: boolean) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_overlay_regions", { regions, active })),
 	/**
 	 *  Show these tabs side by side at these rectangles; an empty list returns
 	 *  to a single page. Sleeping tabs are woken so every pane has a page.
@@ -1634,6 +1629,15 @@ export type Original = {
 	line: number,
 	/**  1-based column. */
 	column: number,
+};
+
+/**  Painted shape of a floating chrome surface, in CSS logical pixels. */
+export type OverlayRegion = {
+	x: number | null,
+	y: number | null,
+	width: number | null,
+	height: number | null,
+	radius?: number | null,
 };
 
 /**  The palette of a page. */

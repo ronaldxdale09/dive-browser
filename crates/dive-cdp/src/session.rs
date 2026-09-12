@@ -20,6 +20,9 @@ pub trait Transport: Send + Sync + 'static {
 /// An event pushed by the browser (a message without an `id`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CdpEvent {
+    /// Navigation generation assigned before broadcast, so delayed consumers
+    /// can refuse recovery work belonging to a document that has moved on.
+    pub navigation_epoch: u64,
     /// Fully-qualified method name such as `Page.loadEventFired`.
     pub method: String,
     /// Event parameters; `Null` when the browser sent none.
@@ -54,6 +57,8 @@ pub struct CdpSession {
 struct Inner {
     transport: Box<dyn Transport>,
     next_id: AtomicU64,
+    navigation_epoch: AtomicU64,
+    main_frame: Mutex<Option<String>>,
     pending: Pending,
     /// Shared, not cloned: a session has a dozen subscribers per tab, and
     /// `broadcast` hands each its own copy of the value. A deep clone of the
@@ -241,6 +246,8 @@ impl CdpSession {
             inner: Arc::new(Inner {
                 transport: Box::new(transport),
                 next_id: AtomicU64::new(FIRST_ID),
+                navigation_epoch: AtomicU64::new(0),
+                main_frame: Mutex::new(None),
                 pending: Mutex::new(HashMap::new()),
                 events,
                 closed,
@@ -358,9 +365,35 @@ impl CdpSession {
                 let _ = tx.send(outcome);
             }
             (None, Some(method)) => {
+                let params = msg.params.unwrap_or(Value::Null);
+                if method == "Page.frameNavigated"
+                    && params["frame"]["parentId"].is_null()
+                    && let Some(id) = params["frame"]["id"].as_str()
+                {
+                    *self
+                        .inner
+                        .main_frame
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(id.to_owned());
+                }
+                // Once the main frame is known, iframe loads cannot cancel
+                // recovery of an unrelated page request. Before that first
+                // identity arrives, conservatively avoid stopping a new load.
+                if method == "Page.frameStartedLoading"
+                    && self
+                        .inner
+                        .main_frame
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .as_deref()
+                        .is_none_or(|main| params["frameId"].as_str() == Some(main))
+                {
+                    self.inner.navigation_epoch.fetch_add(1, Ordering::AcqRel);
+                }
                 let _ = self.inner.events.send(Arc::new(CdpEvent {
+                    navigation_epoch: self.navigation_epoch(),
                     method,
-                    params: msg.params.unwrap_or(Value::Null),
+                    params,
                 }));
             }
             (None, None) => tracing::debug!("cdp message with neither id nor method"),
@@ -378,6 +411,11 @@ impl CdpSession {
     /// Whether [`close`](Self::close) has been called.
     pub fn is_closed(&self) -> bool {
         *self.inner.closed.borrow()
+    }
+
+    /// Latest observed navigation generation, independent of listener lag.
+    pub fn navigation_epoch(&self) -> u64 {
+        self.inner.navigation_epoch.load(Ordering::Acquire)
     }
 
     fn pending(

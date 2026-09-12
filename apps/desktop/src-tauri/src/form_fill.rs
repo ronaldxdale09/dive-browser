@@ -166,6 +166,7 @@ mod tests {
     #[test]
     fn only_our_binding_with_the_right_nonce_gets_through() {
         let event = |name: &str, payload: &str| CdpEvent {
+            navigation_epoch: 0,
             method: "Runtime.bindingCalled".into(),
             params: json!({"name": name, "payload": payload}),
         };

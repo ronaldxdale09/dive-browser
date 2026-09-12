@@ -28,15 +28,17 @@ overrides the bump.
 ### From this machine
 
 ```bash
-scripts/release/local-release.sh patch      # or minor, major, rc, or an exact version as the second argument
+gh workflow run release.yml --ref main -f kind=patch -f windows_only=true
+# Read the new run ID from gh run list --workflow release.yml, then:
+DIVE_WINDOWS_RUN=<run-id> scripts/release/local-release.sh patch
 ```
 
 The same path as the workflow, run locally: resolve, preflight, stamp, build
 and sign, notarize, `latest.json`, publish (creating the tag), verify, then
 commit the bump to `main`.
 
-Windows is built by the `release` workflow, which cannot sign a macOS app and
-so never publishes on its own; point `DIVE_WINDOWS_RUN` at the run that built
+Windows is built by the `release` workflow using `windows_only=true`, which
+skips the hosted macOS build and publishing; point `DIVE_WINDOWS_RUN` at the run that built
 `windows-x86_64` and its installer joins the release. `DIVE_SKIP_WINDOWS=1`
 cuts a macOS-only release instead: the manifest then carries one platform, so
 a Windows install is offered nothing rather than something broken, but the
@@ -46,7 +48,9 @@ files. It needs the updater keypair in `~/.tauri` (`dive.key`,
 keychain, and notarization credentials: `APPLE_ID`, `APPLE_PASSWORD` and
 `APPLE_TEAM_ID` in the environment, or a notarytool keychain profile named
 `dive` (`xcrun notarytool store-credentials dive`). Use it when GitHub-hosted
-macOS minutes are not available.
+macOS minutes are not available. The local script waits for that Windows run,
+checks its source commit matches, and verifies the signed macOS bundle with
+the native live harness before publishing.
 
 ### From a tag
 
