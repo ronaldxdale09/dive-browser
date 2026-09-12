@@ -45,6 +45,17 @@ describe("what counts as visible", () => {
     expect(visible("css=#b")).toBe(true);
   });
 
+  it("treats root overflow as viewport behavior instead of clipping to a stale root box", () => {
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "visible";
+    document.body.innerHTML = `<button id="b">Play</button>`;
+    withBox(document.documentElement, { x: -1000, y: -1000, width: 0, height: 0 });
+    withBox(document.body, { x: 0, y: 0, width: 1000, height: 800 });
+    withBox(document.getElementById("b")!, { x: 100, y: 200, width: 68, height: 48 });
+
+    expect(visible("css=#b")).toBe(true);
+  });
+
   it("treats BODY as an ordinary clipping box when root overflow prevents propagation", () => {
     document.documentElement.style.overflow = "hidden";
     document.body.style.overflow = "hidden";
