@@ -158,6 +158,60 @@ describe("live native overlays", () => {
     await waitFor(() => expect(geometry).toHaveBeenLastCalledWith([], false));
     expect(contentCoverDepth()).toBe(0);
   });
+  it("measures on DOM changes, and runs a frame loop only while a transition is in flight", async () => {
+    Object.defineProperty(window, "__DIVE_LIVE_OVERLAYS__", { value: true, configurable: true });
+    const geometry = vi.spyOn(ipc, "setOverlayRegions").mockResolvedValue(null);
+    // Frames run by hand, so the test says when a frame happens and how much
+    // time has passed rather than racing jsdom's timers.
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => frames.push(cb));
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+    let clock = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => clock);
+    const runFrame = () => act(() => { frames.shift()?.(clock); });
+    const settle = () => act(() => new Promise<void>((resolve) => queueMicrotask(resolve)));
+
+    const view = render(<Overlay />);
+    await waitFor(() => expect(geometry).toHaveBeenCalledWith([], true));
+    // Nothing on screen changes, so nothing is scheduled: a static tooltip
+    // must not cost a measurement sixty times a second.
+    expect(frames).toHaveLength(0);
+
+    // An element appearing schedules one measurement, not a loop.
+    const el = document.createElement("div");
+    el.setAttribute("role", "menu");
+    el.getBoundingClientRect = () => ({ x: 5, y: 6, width: 70, height: 80, top: 6, left: 5, right: 75, bottom: 86, toJSON: () => "" });
+    document.body.append(el);
+    await settle();
+    expect(frames).toHaveLength(1);
+    await runFrame();
+    await waitFor(() => expect(geometry).toHaveBeenLastCalledWith([{ x: 5, y: 6, width: 70, height: 80 }], true));
+    expect(frames).toHaveLength(0);
+
+    // A transition keeps the loop going until its end event, and no longer.
+    el.dispatchEvent(new Event("transitionstart", { bubbles: true }));
+    expect(frames).toHaveLength(1);
+    await runFrame();
+    await runFrame();
+    expect(frames).toHaveLength(1);
+    el.dispatchEvent(new Event("transitionend", { bubbles: true }));
+    await runFrame();
+    expect(frames).toHaveLength(0);
+
+    // An element removed mid-transition never sends its end event; the cap
+    // stops the loop anyway.
+    el.dispatchEvent(new Event("animationstart", { bubbles: true }));
+    await runFrame();
+    expect(frames).toHaveLength(1);
+    clock += 600;
+    await runFrame();
+    expect(frames).toHaveLength(0);
+
+    el.remove();
+    view.unmount();
+    await waitFor(() => expect(geometry).toHaveBeenLastCalledWith([], false));
+    resetOverlayElements();
+  });
   it("uses the dialog surface once, not its nested menus or full-window scrim", () => {
     const {container} = render(<div><div role="dialog"><div role="menu" /></div></div>);
     const dialog = container.querySelector('[role="dialog"]')!;
