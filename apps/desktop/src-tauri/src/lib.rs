@@ -65,6 +65,7 @@ mod private_session;
 mod recorder;
 mod replay;
 mod report;
+mod responsiveness;
 mod rules;
 mod screen;
 mod screencast;
@@ -284,6 +285,11 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     }
 
+    // Keep ownership outside managed AppHandle state: the observer holds an
+    // AppHandle only to dispatch, so managed state would introduce a cycle.
+    let responsiveness =
+        std::sync::Arc::new(std::sync::Mutex::new(None::<responsiveness::MonitorGuard>));
+    let setup_responsiveness = responsiveness.clone();
     let specta_handler = specta.invoke_handler();
 
     let app = builder
@@ -392,6 +398,16 @@ pub fn run() {
                 return Err("Private Mode requires native crash reporting to be disabled".into());
             }
             state::init(app)?;
+            let monitor_app = app.handle().clone();
+            *state::lock(&setup_responsiveness) = responsiveness::start(
+                private_session::is_private(), state::data_root,
+                move |ack, fault| monitor_app.run_on_main_thread(move || {
+                    // Only the explicitly gated disposable-profile diagnostic
+                    // may do anything besides the atomic clock acknowledgement.
+                    if fault { std::thread::sleep(std::time::Duration::from_secs(4)); }
+                    ack.acknowledge();
+                }).is_ok(),
+            );
             capture_scope::install(app)?;
             startup::record_milestone("state_init");
             // Before the first window, so a download that starts immediately
@@ -435,11 +451,15 @@ pub fn run() {
         Ok(app) => app,
         Err(error) => {
             tracing::error!(%error, "failed to build Dive");
+            // Build/setup can fail after the observer was started.
+            drop(state::lock(&responsiveness).take());
             drop(log_guard);
+            private_session::cleanup();
             std::process::exit(1);
         }
     };
-    let exit_code = app.run_return(|app, event| match event {
+    let exit_responsiveness = responsiveness.clone();
+    let exit_code = app.run_return(move |app, event| match event {
         // Why the process is going away is the first question after an
         // unexpected exit; say so in the log.
         tauri::RunEvent::ExitRequested { code, api, .. } => {
@@ -471,7 +491,14 @@ pub fn run() {
         // a Dock click should do anyway.
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { .. } => reopen_window(app),
-        tauri::RunEvent::Exit => tracing::info!("event loop exited"),
+        tauri::RunEvent::Exit => {
+            // ExitRequested can be vetoed. Only actual Exit signals the worker;
+            // joining belongs after the event loop, never on this UI callback.
+            if let Some(monitor) = state::lock(&exit_responsiveness).as_ref() {
+                monitor.request_stop();
+            }
+            tracing::info!("event loop exited");
+        }
         // Links the system hands us once Dive is the default browser (or a
         // file dropped on the Dock icon).
         #[cfg(target_os = "macos")]
@@ -494,6 +521,9 @@ pub fn run() {
         } => tracing::info!(%label, "window close requested"),
         _ => {}
     });
+    // Dropping joins even with an unacknowledged UI callback. Late callbacks
+    // own only an inert atomic token, never monitor state or filesystem paths.
+    drop(state::lock(&responsiveness).take());
     // Flush the asynchronous file logger after CEF and the app have drained,
     // then preserve the exit status for launchers and runtime probes.
     drop(log_guard);
