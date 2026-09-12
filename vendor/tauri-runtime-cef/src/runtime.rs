@@ -329,25 +329,17 @@ impl<T: UserEvent> RuntimeContext<T> {
 pub(crate) type AfterWindowCreationCallback = Box<dyn for<'a> Fn(RawWindow<'a>) + Send>;
 
 /// How long a closing browser may take to acknowledge the removal of its
-/// host view before the runtime stops waiting for it.
+/// host view before the runtime reports a missing acknowledgement.
 #[cfg(any(target_os = "macos", windows))]
 const CLOSE_ACK_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
 
-/// How long the loop keeps running for a browser that missed its grace period,
-/// so CEF can finish letting go before `cef::shutdown()`.
-///
-/// `CefShutdown` requires every browser to be closed. A browser that never
-/// acknowledged is still live as far as CEF is concerned, and shutting down
-/// under it tears down views the application has already dropped. Waiting is
-/// the fix; waiting forever is not, because a browser that never acknowledges
-/// would leave a window the person asked to close sitting on screen. After
-/// this the exit proceeds regardless -- the same behaviour as before, just
-/// later and only when CEF really has stopped answering.
-const FINAL_ACK_GRACE: std::time::Duration = std::time::Duration::from_millis(1000);
-
 pub(crate) enum Message<T: UserEvent> {
     EventLoop(EventLoopMessage),
-    BrowserClosed(WindowId, u32),
+    BrowserClosed(WindowId, u32, i32),
+    RequestContextReady(u32, Option<RequestContext>),
+    BrowserCreated(u32, Browser),
+    CreationTimeout(u32),
+    InitialScriptsReady(u32, bool, String),
     /// CEF handed us the teardown of a webview's browser, keyed by the webview's
     /// process-unique id. See `TauriCefChildLifeSpanHandler::do_close`.
     #[cfg(any(target_os = "macos", windows))]
@@ -355,8 +347,6 @@ pub(crate) enum Message<T: UserEvent> {
     /// The close-acknowledgement grace period for a webview ran out.
     #[cfg(any(target_os = "macos", windows))]
     CloseAckTimeout(u32),
-    /// The last wait for browsers CEF never acknowledged has elapsed.
-    FinalAckTimeout,
     Opened(Vec<url::Url>),
     #[cfg(target_os = "macos")]
     Reopen {
@@ -488,14 +478,9 @@ pub(crate) struct AppState<T: UserEvent> {
     pub(crate) winid_id_to_window_id_map: HashMap<WinitWindowId, WindowId>,
     pub(crate) callback: Box<dyn FnMut(RunEvent<T>)>,
     pub(crate) live_browsers: usize,
+    pub(crate) pending_browsers: HashMap<u32, webview::PendingBrowser>,
+    pub(crate) window_orders: HashMap<WindowId, Vec<u32>>,
     closing_windows: HashSet<WindowId>,
-    /// Browsers retired without CEF's `on_before_close`; a late acknowledgement
-    /// must not retire them a second time.
-    unacknowledged_browsers: HashSet<u32>,
-    /// Whether the final wait for a missing acknowledgement has been armed.
-    awaiting_final_ack: bool,
-    /// Whether that wait has elapsed, after which the exit proceeds regardless.
-    final_ack_elapsed: bool,
     exit_code: Arc<AtomicI32>,
     pub(crate) exiting: bool,
 }
@@ -528,10 +513,9 @@ impl<T: UserEvent> WinitCefApp<T> {
                 winid_id_to_window_id_map: HashMap::new(),
                 callback,
                 live_browsers: 0,
+                pending_browsers: HashMap::new(),
+                window_orders: HashMap::new(),
                 closing_windows: HashSet::new(),
-                unacknowledged_browsers: HashSet::new(),
-                awaiting_final_ack: false,
-                final_ack_elapsed: false,
                 exit_code: Arc::new(AtomicI32::new(0)),
                 exiting: false,
             },
@@ -581,18 +565,19 @@ impl<T: UserEvent> WinitCefApp<T> {
     fn handle_message(&mut self, event_loop: &dyn ActiveEventLoop, message: Message<T>) {
         match message {
             Message::EventLoop(message) => self.handle_event_loop_message(event_loop, message),
-            Message::BrowserClosed(_window_id, webview_id) => {
-                // A browser retired after its grace period may still acknowledge
-                // later (or during CEF shutdown); its bookkeeping is already gone.
-                if self.state.unacknowledged_browsers.remove(&webview_id) {
-                    log::debug!(target: "dive_native_close", "stage=late_ack webview={webview_id}");
-                    // The exit may be parked waiting for exactly this.
-                    if self.state.awaiting_final_ack {
-                        self.exit_if_done(event_loop);
-                    }
-                    return;
-                }
-                self.retire_browser(event_loop, webview_id);
+            Message::RequestContextReady(id, context) => self.context_ready(id, context),
+            Message::BrowserCreated(id, browser) => self.browser_created(id, browser),
+            Message::InitialScriptsReady(id, success, url) => {
+                self.initial_scripts_ready(id, success, url)
+            }
+            Message::CreationTimeout(id) => {
+                self.fail_pending_creation(id, "ERR_DIVE_NATIVE_CREATION_TIMEOUT");
+                self.fail_attached_creation(id, "ERR_DIVE_NATIVE_CREATION_TIMEOUT");
+                self.finish_pending_window_closes(event_loop);
+            }
+
+            Message::BrowserClosed(_window_id, webview_id, browser_id) => {
+                self.retire_browser(event_loop, webview_id, browser_id);
             }
             #[cfg(any(target_os = "macos", windows))]
             Message::DestroyWebviewHostWindow(webview_id) => {
@@ -613,9 +598,9 @@ impl<T: UserEvent> WinitCefApp<T> {
                     if child.destroy_host_window_once() {
                         log::debug!(target: "dive_native_close", "stage=host_removed webview={}", webview_id);
                         // CEF acknowledges the removal with `on_before_close` once its
-                        // host view deallocates. A view that was ever reparented between
-                        // windows keeps an extra AppKit reference and never does, so the
-                        // acknowledgement is waited for only so long.
+                        // host view deallocates. Report a missing acknowledgement
+                        // after a bounded interval, while retaining ownership and
+                        // continuing to pump until the actual acknowledgement.
                         let sender = self.context.sender.clone();
                         let proxy = self.context.proxy.clone();
                         std::thread::spawn(move || {
@@ -627,15 +612,6 @@ impl<T: UserEvent> WinitCefApp<T> {
                 }
             }
             #[cfg(any(target_os = "macos", windows))]
-            Message::FinalAckTimeout => {
-                log::debug!(
-                    target: "dive_native_close",
-                    "stage=final_wait_elapsed remaining={:?}",
-                    self.state.unacknowledged_browsers
-                );
-                self.state.final_ack_elapsed = true;
-                self.exit_if_done(event_loop);
-            }
             Message::CloseAckTimeout(webview_id) => {
                 let still_registered = self.state.windows.values().any(|appwindow| {
                     appwindow
@@ -646,10 +622,10 @@ impl<T: UserEvent> WinitCefApp<T> {
                 if still_registered {
                     log::warn!(
                       target: "dive_native_close",
-                      "stage=unacknowledged webview={webview_id}: CEF did not confirm the close within {CLOSE_ACK_GRACE:?}; retiring it so its window and the application can finish closing"
+                      "stage=unacknowledged webview={webview_id}: CEF did not confirm the close within {CLOSE_ACK_GRACE:?}; retaining native ownership until acknowledgement"
                     );
-                    self.retire_browser(event_loop, webview_id);
-                    self.state.unacknowledged_browsers.insert(webview_id);
+                    // A deadline is not a CEF acknowledgement. Keep the native
+                    // parent and child registered while normal pumping continues.
                 }
             }
             Message::CreateWindow {
@@ -896,9 +872,14 @@ impl<T: UserEvent> WinitCefApp<T> {
         }
     }
 
-    /// Drop a browser's bookkeeping once CEF has let go of it (or gave up
-    /// acknowledging it), then continue the window close or exit it was part of.
-    fn retire_browser(&mut self, event_loop: &dyn ActiveEventLoop, webview_id: u32) {
+    /// Retire exactly the acknowledged browser identity, then continue its
+    /// window close or application exit. Timeout events never retire ownership.
+    fn retire_browser(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        webview_id: u32,
+        browser_id: i32,
+    ) {
         // Keep children in state throughout asynchronous close so do_close can
         // still find and destroy their host views. Release them only here.
         //
@@ -911,17 +892,28 @@ impl<T: UserEvent> WinitCefApp<T> {
             appwindow
                 .children
                 .iter()
-                .position(|child| child.webview_id == webview_id)
+                .position(|child| child.webview_id == webview_id && child.browser_id == browser_id)
                 .map(|index| {
                     let child = appwindow.children.remove(index);
                     (*id, child, appwindow.children.is_empty())
                 })
         });
 
+        let Some((window_id, mut child, was_last)) = closed else {
+            return;
+        };
         let mut emptied_window = None;
-        if let Some((window_id, child, was_last)) = closed {
+        {
+            child.creation.retire();
+            if let Some(order) = self.state.window_orders.get_mut(&window_id) {
+                order.retain(|id| *id != webview_id);
+            }
             self.remove_scheme_handler_entries(&child);
-            if was_last {
+            if was_last
+                && (!child.creation.is_terminal()
+                    || self.state.exiting
+                    || self.state.closing_windows.contains(&window_id))
+            {
                 emptied_window = Some(window_id);
             }
         }
@@ -945,10 +937,22 @@ impl<T: UserEvent> WinitCefApp<T> {
     }
 
     pub(crate) fn close_window(&mut self, window_id: WindowId, event_loop: &dyn ActiveEventLoop) {
+        let pending: Vec<u32> = self
+            .state
+            .pending_browsers
+            .iter()
+            .filter_map(|(id, pending)| (pending.creation.owner() == window_id).then_some(*id))
+            .collect();
+        for id in pending {
+            self.cancel_pending_creation(id);
+        }
+        let parent_pinned = self.state.pending_browsers.values().any(|pending| {
+            pending.creation.parent() == window_id && pending.creation.pins_parent()
+        });
         let Some(appwindow) = self.state.windows.get(&window_id) else {
             return;
         };
-        if !appwindow.children.is_empty() {
+        if parent_pinned || !appwindow.children.is_empty() {
             if self.state.closing_windows.insert(window_id) {
                 // Out of sight at once; the native teardown may take its grace period.
                 appwindow.window.set_visible(false);
@@ -961,6 +965,7 @@ impl<T: UserEvent> WinitCefApp<T> {
         // All CEF hosts have acknowledged closure. It is now safe to drop their
         // parent window and its native-id mapping.
         let appwindow = self.state.windows.remove(&window_id).unwrap();
+        self.state.window_orders.remove(&window_id);
         self.state.closing_windows.remove(&window_id);
         self.state
             .winid_id_to_window_id_map
@@ -977,6 +982,14 @@ impl<T: UserEvent> WinitCefApp<T> {
         });
         for handler in listeners.lock().unwrap().values() {
             handler(&WindowEvent::Destroyed);
+        }
+        self.exit_if_done(event_loop);
+    }
+
+    fn finish_pending_window_closes(&mut self, event_loop: &dyn ActiveEventLoop) {
+        let windows: Vec<_> = self.state.closing_windows.iter().copied().collect();
+        for window in windows {
+            self.close_window(window, event_loop);
         }
         self.exit_if_done(event_loop);
     }
@@ -1018,21 +1031,30 @@ impl<T: UserEvent> WinitCefApp<T> {
         }
     }
 
-    fn navigate_first_webview(&self, window_id: WindowId, url: &str) {
-        let Some(frame) = self
+    fn navigate_first_webview(&mut self, window_id: WindowId, url: &str) {
+        let ready_id = self
             .state
             .windows
             .get(&window_id)
             .and_then(|window| window.children.first())
-            .and_then(|webview| webview.browser.main_frame())
-        else {
-            return;
-        };
-
-        frame.load_url(Some(&CefString::from(url)));
+            .map(|child| child.webview_id);
+        let pending_id = self
+            .state
+            .pending_browsers
+            .iter()
+            .filter_map(|(id, pending)| (pending.creation.owner() == window_id).then_some(*id))
+            .min();
+        let id = ready_id.into_iter().chain(pending_id).min();
+        if let (Some(id), Ok(url)) = (id, url.parse()) {
+            self.handle_webview_message(window_id, id, WebviewMessage::Navigate(url));
+        }
     }
 
     fn close_all_browsers(&mut self) {
+        let pending: Vec<u32> = self.state.pending_browsers.keys().copied().collect();
+        for id in pending {
+            self.cancel_pending_creation(id);
+        }
         // Do not clear windows here: CEF's queued do_close handler still needs
         // each child's host view to finish closure and emit BrowserClosed.
         for (window_id, appwindow) in &self.state.windows {
@@ -1062,32 +1084,11 @@ impl<T: UserEvent> WinitCefApp<T> {
     }
 
     fn exit_if_done(&mut self, event_loop: &dyn ActiveEventLoop) {
-        if self.state.live_browsers != 0 {
+        if self.state.live_browsers != 0 || !self.state.pending_browsers.is_empty() {
             return;
         }
 
         if self.state.exiting || (self.state.windows.is_empty() && self.request_exit(None)) {
-            // Browsers retired on a timeout are gone from the bookkeeping but
-            // not from CEF, and `cef::shutdown()` runs as soon as this loop
-            // returns. Hold the loop open once so those acknowledgements can
-            // land; `FinalAckTimeout` exits whether they do or not.
-            if !self.state.unacknowledged_browsers.is_empty() && !self.state.awaiting_final_ack {
-                self.state.awaiting_final_ack = true;
-                let waiting: Vec<u32> =
-                    self.state.unacknowledged_browsers.iter().copied().collect();
-                log::debug!(target: "dive_native_close", "stage=final_wait webviews={waiting:?}");
-                let sender = self.context.sender.clone();
-                let proxy = self.context.proxy.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(FINAL_ACK_GRACE);
-                    let _ = sender.send(Message::FinalAckTimeout);
-                    proxy.wake_up();
-                });
-                return;
-            }
-            if !self.state.unacknowledged_browsers.is_empty() && !self.state.final_ack_elapsed {
-                return;
-            }
             self.run_callback(RunEvent::Exit);
             event_loop.exit();
         }

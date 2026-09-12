@@ -5,10 +5,7 @@
 use std::{
     fs::create_dir_all,
     path::{Component, Path, PathBuf},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -92,142 +89,12 @@ fn resolve_request_context_cache_path(global_cache_path: &Path, data_directory: 
 /// underlying browser context has finished asynchronous initialization.
 ///
 /// Receives a fresh handle to the same [`RequestContext`] that was created in
-/// [`request_context_from_webview_attributes`], so the continuation can pass
-/// it to `browser_view_create` / `browser_host_create_browser_sync` knowing
-/// that `VerifyBrowserContext()` will succeed.
+/// [`request_context_from_webview_attributes`]. The continuation posts readiness
+/// to the native event loop; it never waits for browser creation.
 pub(crate) type RequestContextInitContinuation = Box<dyn FnOnce(Option<RequestContext>) + 'static>;
 
-/// Wraps a deferred-init continuation so that it always flips a shared
-/// completion flag when it exits, regardless of how it exits (normal return,
-/// early `return` on browser-create failure, or panic).
-///
-/// Returns the completion flag plus the wrapped continuation.
-pub(crate) fn deferred_init_continuation<F>(
-    work: F,
-) -> (Arc<AtomicBool>, RequestContextInitContinuation)
-where
-    F: FnOnce(Option<RequestContext>) + 'static,
-{
-    struct Guard(Arc<AtomicBool>);
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            self.0.store(true, Ordering::SeqCst);
-        }
-    }
-
-    let flag = Arc::new(AtomicBool::new(false));
-    let guard = Guard(flag.clone());
-    let wrapped: RequestContextInitContinuation = Box::new(move |request_context| {
-        let _guard = guard;
-        work(request_context);
-    });
-    (flag, wrapped)
-}
-
-/// Block the calling thread until `flag` is `true`.
-///
-/// Browser creation goes through `RequestContextHandler::on_request_context_initialized`,
-/// which CEF always dispatches via `CEF_POST_TASK(CEF_UIT, ...)`. Tauri runs
-/// CEF with an external message pump (see `cef::do_message_loop_work` in the
-/// runtime's main loop), so the only way for that posted task to actually
-/// execute is for someone on the CEF UI thread to keep pumping the loop.
-///
-/// Two cases:
-///
-/// 1. We're on the CEF UI thread (typical: app setup, dispatched messages, or
-///    inside a CEF callback like `LifeSpanHandler::on_after_created` /
-///    `RequestHandler::on_open_url_from_tab`). Pump the message loop ourselves
-///    so the `OnRequestContextInitialized` task can run.
-///
-///    We must enable nestable tasks for the duration of the pump because we
-///    may already be running inside another CEF task; without
-///    `CefSetNestableTasksAllowed(true)` Chromium's `RunLoop::RunUntilIdle`
-///    refuses to dispatch any task to the UI thread, the deferred init never
-///    fires, and we'd spin here forever.
-///
-/// 2. We're on some other thread (e.g. a tokio IPC handler that called the
-///    Tauri API directly). The CEF UI thread is running its own pump and will
-///    pick up our queued init task on its own; we just block here on a sleep
-///    loop until the flag flips or the deadline passes. We can't call `do_message_loop_work` from
-///    this thread - it asserts on the init thread.
-///
-/// Spinning here keeps `create_webview` synchronous from the caller's
-/// perspective: the function does not return until the browser exists in
-/// `state.windows`, so any subsequent dispatcher call (e.g.
-/// `webview.open_devtools()`, `webview.on_dev_tools_protocol(...)`) can find
-/// the webview.
-/// How long webview creation may wait for the request context and then the
-/// browser. Creation normally takes well under a second; a cold profile on a
-/// slow disk takes a few. Past this something is wrong, and the thread must
-/// be given back rather than spun forever.
+/// Deadline bounds caller readiness only; accepted native ownership is retained.
 pub(crate) const CREATION_DEADLINE: Duration = Duration::from_secs(15);
-
-/// Returns `false` if the deadline passed before the flag flipped.
-pub(crate) fn wait_for_deferred_init(flag: &Arc<AtomicBool>) -> bool {
-    let on_ui_thread = cef::currently_on(cef::sys::cef_thread_id_t::TID_UI.into()) != 0;
-    let started = std::time::Instant::now();
-
-    if on_ui_thread {
-        let _allow = AllowNestableTasks::enter();
-        while !flag.load(Ordering::SeqCst) {
-            if started.elapsed() > CREATION_DEADLINE {
-                return false;
-            }
-            cef::do_message_loop_work();
-            // The init task runs on this loop, so pumping is what makes
-            // progress; the pause only keeps an idle pass from pegging a core.
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    } else {
-        while !flag.load(Ordering::SeqCst) {
-            if started.elapsed() > CREATION_DEADLINE {
-                return false;
-            }
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    }
-    true
-}
-
-/// RAII guard that scopes `CefSetNestableTasksAllowed(true)` for the current
-/// CEF UI-thread call.
-///
-/// CEF requires balanced enable/disable calls and explicitly forbids
-/// reentrancy at the C++ level (`CHECK(allowed != has_value())`). The guard
-/// uses a thread-local depth counter so only the outermost
-/// [`wait_for_deferred_init`] on this thread toggles the flag, which makes
-/// nesting (e.g. an `on_initialized` continuation that creates another
-/// webview) safe.
-struct AllowNestableTasks;
-
-impl AllowNestableTasks {
-    fn enter() -> Self {
-        NESTABLE_TASKS_DEPTH.with(|depth| {
-            let current = depth.get();
-            if current == 0 {
-                cef::set_nestable_tasks_allowed(1);
-            }
-            depth.set(current + 1);
-        });
-        Self
-    }
-}
-
-impl Drop for AllowNestableTasks {
-    fn drop(&mut self) {
-        NESTABLE_TASKS_DEPTH.with(|depth| {
-            let current = depth.get();
-            depth.set(current - 1);
-            if current == 1 {
-                cef::set_nestable_tasks_allowed(0);
-            }
-        });
-    }
-}
-
-thread_local! {
-  static NESTABLE_TASKS_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
 
 wrap_request_context_handler! {
   struct WebviewRequestContextHandler {
@@ -254,10 +121,8 @@ wrap_request_context_handler! {
 /// profile via `GetPrimaryUserProfile()`) or when the cache_path is empty
 /// (off-the-record profile). Any other path (notably the per-`data_directory`
 /// case used by Tauri) takes `ChromeBrowserContext::InitializeAsync`'s
-/// `CreateProfileAsync` branch which finishes asynchronously. Calling
-/// `browser_host_create_browser_sync` synchronously after
-/// `request_context_create_context` would then fail
-/// `CefRequestContextImpl::VerifyBrowserContext()` and return a null browser.
+/// `CreateProfileAsync` branch which finishes asynchronously. Submitting browser
+/// creation before that callback would fail `VerifyBrowserContext()`.
 ///
 /// Routing browser creation through `on_initialized` keeps a single code path
 /// for every cache_path layout: CEF always dispatches the callback through
@@ -350,15 +215,11 @@ pub(crate) fn request_context_from_webview_attributes<'a>(
         ..Default::default()
     };
 
-    // Holds a strong reference to the `RequestContext` until the
-    // `on_request_context_initialized` callback fires. CEF keeps the underlying
-    // C++ `CefRequestContextImpl` alive during async profile creation through
-    // its own bound callbacks, but holding an explicit reference here guarantees
-    // we don't race with reference-count releases on shutdown paths.
-    let rc_holder: Arc<Mutex<Option<RequestContext>>> = Arc::new(Mutex::new(None));
+    // Runtime pending ownership retains the context. The handler must not own a
+    // context holder: context -> handler -> holder -> context is a cycle when
+    // initialization is canceled or never arrives.
     let proxy_url = webview_attributes.proxy_url.clone();
     let wrapped_callback: RequestContextInitContinuation = Box::new({
-        let rc_holder = rc_holder.clone();
         move |rc| {
             // The proxy preference can only be set once the request context's
             // underlying profile has finished initializing, which is exactly what
@@ -367,7 +228,6 @@ pub(crate) fn request_context_from_webview_attributes<'a>(
                 apply_proxy(rc, proxy_url);
             }
             on_initialized(rc);
-            let _released = rc_holder.lock().unwrap().take();
         }
     });
 
@@ -380,7 +240,6 @@ pub(crate) fn request_context_from_webview_attributes<'a>(
     } else {
         request_context_create_context(Some(&settings), Some(&mut handler))
     };
-    *rc_holder.lock().unwrap() = request_context.clone();
 
     if let Some(request_context) = request_context.as_ref() {
         for scheme in custom_schemes {

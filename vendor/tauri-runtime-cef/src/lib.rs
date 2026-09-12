@@ -10,6 +10,7 @@ pub mod downloads;
 mod external_message_pump;
 mod native_input_trace;
 mod platform;
+mod pending_creation;
 mod reserved_shortcut;
 mod reserved_shortcut_native;
 mod runtime;

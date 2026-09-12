@@ -692,9 +692,13 @@ impl TabHost {
             });
         }
 
-        let view = self
-            .window
-            .add_child(builder, self.bounds.position(), self.bounds.size())?;
+        // A replacement for a detached page is admitted directly into its
+        // final owner; pending native views cannot be reparented synchronously.
+        let owner = self
+            .popouts
+            .get(&tab_id)
+            .map_or(&self.window, |popout| &popout.window);
+        let view = owner.add_child(builder, self.bounds.position(), self.bounds.size())?;
         if let Err(error) = view.hide() {
             let _ = view.close();
             return Err(error);
@@ -802,6 +806,11 @@ impl TabHost {
                     .await;
                 crate::prefs::apply(&session_for_prefs, &prefs, chrome_scheme.as_deref()).await;
                 tracing::debug!(%tab_id, "browser preferences complete before navigation");
+                if session_for_prefs.is_closed()
+                    || !activity.session_current(tab_id, &activity_nonce)
+                {
+                    return;
+                }
                 if let Err(e) = nav.navigate(url) {
                     tracing::warn!(%tab_id, "initial navigation failed: {e}");
                 }
@@ -876,12 +885,11 @@ impl TabHost {
         }
         self.views.remove(&tab.id);
         self.open(main, app, tab, container)?;
-        if let Some(popout) = self.popouts.get(&tab.id)
+        if self.popouts.contains_key(&tab.id)
             && let Some(view) = self.views.get(&tab.id)
         {
-            view.reparent(&popout.window)?;
             #[cfg(all(feature = "cef", target_os = "macos"))]
-            if let Some(chrome) = app.get_webview(&popout.chrome) {
+            if let Some(chrome) = app.get_webview(&self.popouts[&tab.id].chrome) {
                 bind_detached_new_tab_shortcuts(view, &chrome, &self.window);
             }
             view.show()?;
@@ -1296,7 +1304,10 @@ impl TabHost {
             LogicalSize::new(width, height),
         )?;
         #[cfg(feature = "cef")]
-        crate::permissions::attach_chrome(&chrome_view)?;
+        {
+            crate::permissions::attach_chrome(&chrome_view)?;
+            watch_chrome_creation(&chrome_view, Some(id))?;
+        }
         reveal_soon(window.clone());
         crate::titlebar::keep_drags_in_chrome_soon(&window);
         view.reparent(&window)?;
@@ -1643,6 +1654,7 @@ fn attach_cdp(
     let (overflow, mut overloaded) = tokio::sync::watch::channel(false);
     let failed_view = view.clone();
     let sink = session.clone();
+    let failure_nonce = nonce.clone();
     tauri::async_runtime::spawn(async move {
         // If this worker ever stops while the view lives -- it should only
         // end when the view's handlers are dropped -- close the session so
@@ -1693,7 +1705,22 @@ fn attach_cdp(
         }
     });
     let callback_session = session.clone();
+    let failure_app = view.app_handle().clone();
+    let failure_activity = failure_app.state::<AppState>().activity.clone();
     view.on_dev_tools_protocol(move |protocol| {
+        if let tauri::CefDevToolsProtocol::CreationFailed(reason) = &protocol {
+            callback_session.close();
+            if failure_activity.session_current(tab, &failure_nonce) {
+                let _ = (crate::loading::TabLoad {
+                    tab_id: tab,
+                    phase: crate::loading::LoadPhase::Failed,
+                    url: None,
+                    error: Some(reason.clone()),
+                })
+                .emit(&failure_app);
+            }
+            return;
+        }
         // `Message` carries the raw JSON for both results and events; the
         // runtime no longer dispatches the pre-parsed variants.
         if let tauri::CefDevToolsProtocol::Message(bytes) = protocol
@@ -1705,6 +1732,55 @@ fn attach_cdp(
         }
     })?;
     Ok(session)
+}
+
+/// Native admission can succeed before CEF reports an error. Surface chrome
+/// failure even when no renderer exists to display an application error page.
+#[cfg(feature = "cef")]
+fn watch_chrome_creation(view: &Webview<Runtime>, tab: Option<TabId>) -> tauri::Result<()> {
+    let app = view.app_handle().clone();
+    let label = view.label().to_owned();
+    let window = view.window();
+    view.on_dev_tools_protocol(move |protocol| {
+        let tauri::CefDevToolsProtocol::CreationFailed(reason) = protocol else { return; };
+        let task_app = app.clone();
+        let label = label.clone();
+        let window = window.clone();
+        let _ = app.run_on_main_thread(move || {
+            if task_app.get_webview(&label).is_none() { return; }
+            tracing::error!(%reason, "native chrome creation failed");
+            if let Some(tab) = tab {
+                let state = task_app.state::<AppState>();
+                let mut host = lock(&state.host);
+                let Some(host) = host.as_mut() else { return; };
+                if host.popouts.get(&tab).is_none_or(|popout| popout.chrome != label) { return; }
+                if let Err(error) = host.attach(tab) {
+                    tracing::error!(%error, "preserving detached page after chrome rollback failed");
+                    let _ = window.set_title(&format!("DIVE window failed: {reason}"));
+                    let _ = window.set_decorations(true);
+                    let _ = window.show();
+                    return;
+                }
+                host.active = Some(tab);
+                let _ = host.apply_visibility();
+                let _ = (crate::commands::TabWindowChanged { tab, detached: false }).emit(&task_app);
+                tauri::async_runtime::spawn(async move {
+                    rfd::AsyncMessageDialog::new().set_title("DIVE could not open this window")
+                        .set_description(format!("Your tab was returned to the main window. {reason}"))
+                        .set_level(rfd::MessageLevel::Error).set_buttons(rfd::MessageButtons::Ok).show().await;
+                });
+            } else {
+                // The runtime retains an empty failed-creation window until
+                // this asynchronous native error message has been dismissed.
+                tauri::async_runtime::spawn(async move {
+                    rfd::AsyncMessageDialog::new().set_title("DIVE could not start")
+                        .set_description(format!("The browser window could not start. {reason}"))
+                        .set_level(rfd::MessageLevel::Error).set_buttons(rfd::MessageButtons::Ok).show().await;
+                    let _ = window.destroy();
+                });
+            }
+        });
+    })
 }
 
 /// Closes a session when the task that feeds it ends, unless it is already
@@ -2135,7 +2211,10 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
         LogicalSize::new(width, height),
     )?;
     #[cfg(feature = "cef")]
-    crate::permissions::attach_chrome(&chrome)?;
+    {
+        crate::permissions::attach_chrome(&chrome)?;
+        watch_chrome_creation(&chrome, None)?;
+    }
     #[cfg(all(feature = "cef", target_os = "macos"))]
     chrome.with_webview(|native| {
         if !native.set_address_shortcut_target(native.new_tab_shortcut_target()) {

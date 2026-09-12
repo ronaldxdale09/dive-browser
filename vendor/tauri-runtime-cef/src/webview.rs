@@ -25,6 +25,9 @@ use tauri_utils::{Theme, config::Color, html::normalize_script_for_csp};
 use url::Url;
 
 use crate::cef_impl::{client as browser_client, cookie, request_context, request_handler};
+use crate::pending_creation::{
+    Completion, CompletionToken, Creation, PendingQueue, SharedContexts,
+};
 use crate::runtime::{CefRuntime, Message, RuntimeContext, WinitCefApp};
 use crate::window::AppWindow;
 
@@ -38,7 +41,7 @@ pub use browser_client::{
 // CEF shutdown. A data directory is only a grouping key for incognito views;
 // it is never passed to CEF as their cache path.
 static INCOGNITO_CONTEXTS: std::sync::LazyLock<
-    Mutex<HashMap<std::path::PathBuf, Vec<std::sync::Weak<RequestContext>>>>,
+    Mutex<SharedContexts<std::path::PathBuf, RequestContext>>,
 > = std::sync::LazyLock::new(Default::default);
 
 /// A handle to the native CEF browser backing a Tauri webview.
@@ -247,6 +250,8 @@ fn browser_settings_from_webview_attributes(
 
 #[derive(Debug, Clone)]
 pub enum DevToolsProtocol {
+    /// Native creation failed; no page navigation was issued.
+    CreationFailed(String),
     Message(Vec<u8>),
     Event {
         method: String,
@@ -372,6 +377,9 @@ impl Default for BoundsRate {
 }
 
 pub(crate) struct AppWebview {
+    pub(crate) creation: Creation<WindowId>,
+    pub(crate) initialization_ready: bool,
+    initial_operations: PendingQueue<WebviewMessage>,
     pub(crate) shortcut_target: Arc<crate::reserved_shortcut_native::NewTabTarget>,
     pub(crate) shortcut_binding: Arc<crate::reserved_shortcut_native::NativeShortcutBinding>,
     pub(crate) permissions: Arc<browser_client::permission::PermissionBridge>,
@@ -381,7 +389,7 @@ pub(crate) struct AppWebview {
     pub(crate) label: String,
     pub(crate) browser: cef::Browser,
     pub(crate) browser_id: i32,
-    incognito_context: Option<Arc<RequestContext>>,
+    _incognito_context: Option<Arc<RequestContext>>,
     pub(crate) host: cef::BrowserHost,
     #[cfg(target_os = "macos")]
     accessibility_enabled: Arc<Mutex<Option<bool>>>,
@@ -483,6 +491,98 @@ impl AppWebview {
     }
 }
 
+fn register_pending_protocol(
+    handlers: &Arc<Mutex<Vec<Arc<DevToolsProtocolHandler>>>>,
+    handler: Arc<DevToolsProtocolHandler>,
+    tx: Sender<Result<()>>,
+) {
+    let mut handlers = handlers.lock().unwrap();
+    if handlers.len() >= 1024 {
+        let _ = tx.send(Err(Error::CreateWebview(
+            "CEF pending handler budget exceeded".into(),
+        )));
+    } else {
+        handlers.push(handler);
+        let _ = tx.send(Ok(()));
+    }
+}
+
+fn reject_pending_message(message: WebviewMessage, reason: &str) {
+    let error = || Error::CreateWebview(reason.to_owned().into());
+    match message {
+        WebviewMessage::CanGoBack(tx) | WebviewMessage::CanGoForward(tx) => {
+            let _ = tx.send(Err(error()));
+        }
+        WebviewMessage::Url(tx) => {
+            let _ = tx.send(Err(error()));
+        }
+        WebviewMessage::Bounds(tx) => {
+            let _ = tx.send(Err(error()));
+        }
+        WebviewMessage::Position(tx) => {
+            let _ = tx.send(Err(error()));
+        }
+        WebviewMessage::Size(tx) => {
+            let _ = tx.send(Err(error()));
+        }
+        WebviewMessage::Cookies(tx) | WebviewMessage::CookiesForUrl(_, tx) => {
+            let _ = tx.send(Err(error()));
+        }
+        WebviewMessage::Reparent(_, tx)
+        | WebviewMessage::OnDevToolsProtocol(_, tx)
+        | WebviewMessage::SendDevToolsMessage(_, tx) => {
+            let _ = tx.send(Err(error()));
+        }
+        #[cfg(any(debug_assertions, feature = "devtools"))]
+        WebviewMessage::IsDevToolsOpen(tx) => {
+            let _ = tx.send(false);
+        }
+        _ => {}
+    }
+}
+
+type SubmitBrowser = Box<dyn FnOnce(&AppWindow, &RequestContext) -> bool>;
+type AdoptBrowser = Box<
+    dyn FnOnce(cef::Browser, Creation<WindowId>, Option<Arc<RequestContext>>) -> Option<AppWebview>,
+>;
+
+pub(crate) struct PendingBrowser {
+    pub(crate) creation: Creation<WindowId>,
+    context: Option<Arc<RequestContext>>,
+    submit: Option<SubmitBrowser>,
+    adopt: Option<AdoptBrowser>,
+    queue: PendingQueue<WebviewMessage>,
+    handlers: Arc<Mutex<Vec<Arc<DevToolsProtocolHandler>>>>,
+    listeners: WebviewEventListeners,
+    bounds: Rect,
+    bounds_rate: Option<BoundsRate>,
+    initial_window: bool,
+    visible: bool,
+    initial_load: Option<Box<dyn FnOnce(&cef::Browser)>>,
+    unadopted: Option<Browser>,
+}
+
+impl PendingBrowser {
+    fn current_bounds(&self, parent: PhysicalSize<u32>) -> Rect {
+        if let Some(rate) = self.bounds_rate {
+            Rect {
+                position: PhysicalPosition::new(
+                    (rate.x * parent.width as f32).round() as i32,
+                    (rate.y * parent.height as f32).round() as i32,
+                )
+                .into(),
+                size: PhysicalSize::new(
+                    (rate.width * parent.width as f32).round() as u32,
+                    (rate.height * parent.height as f32).round() as u32,
+                )
+                .into(),
+            }
+        } else {
+            self.bounds
+        }
+    }
+}
+
 impl<T: UserEvent> WinitCefApp<T> {
     pub(crate) fn create_webview(
         &mut self,
@@ -490,82 +590,60 @@ impl<T: UserEvent> WinitCefApp<T> {
         webview_id: u32,
         pending: PendingWebview<T, CefRuntime<T>>,
     ) -> Result<()> {
-        let Self {
-            context,
-            scheme_registry,
-            state,
-            ..
-        } = self;
-        let Some(appwindow) = state.windows.get_mut(&window_id) else {
-            return Err(Error::CreateWebview(
-                format!("window {window_id:?} does not exist").into(),
-            ));
-        };
-        Self::build_and_attach_webview(
-            context,
-            scheme_registry,
-            &mut state.live_browsers,
-            appwindow,
+        self.admit_webview(
+            window_id,
             webview_id,
             browser_client::DragDropEventTarget::Webview,
             pending,
         )
     }
 
-    /// Builds a webview and attaches it to `appwindow`, bumping `live_browsers`
-    /// and relaying it out. Works whether `appwindow` already lives in `state` or
-    /// is still being assembled, so window and child creation share one path.
-    pub(crate) fn build_and_attach_webview(
-        context: &RuntimeContext<T>,
-        scheme_registry: &request_handler::SchemeRegistry,
-        live_browsers: &mut usize,
-        appwindow: &mut AppWindow,
+    pub(crate) fn admit_webview(
+        &mut self,
+        window_id: WindowId,
         webview_id: u32,
-        drag_drop_event_target: browser_client::DragDropEventTarget,
+        target: browser_client::DragDropEventTarget,
         pending: PendingWebview<T, CefRuntime<T>>,
     ) -> Result<()> {
-        let parent = appwindow.raw_cef_handle();
-        let parent_size = appwindow.window.surface_size();
-        let scale = appwindow.window.scale_factor();
-        let app_wide_theme = *context.app_wide_theme.lock().unwrap();
-        let theme = appwindow.resolved_theme(app_wide_theme);
-        let Some(child) = Self::build_browser_child(
-            context,
-            scheme_registry,
-            appwindow.id,
+        let window = self
+            .state
+            .windows
+            .get(&window_id)
+            .ok_or(Error::WindowNotFound)?;
+        if self.state.exiting || self.state.is_window_closing(window_id) {
+            return Err(Error::WindowNotFound);
+        }
+        let theme = window.resolved_theme(*self.context.app_wide_theme.lock().unwrap());
+        let prepared = Self::prepare_browser_child(
+            &self.context,
+            &self.scheme_registry,
+            window_id,
             webview_id,
-            parent,
-            parent_size,
-            scale,
+            window.raw_cef_handle(),
+            window.window.surface_size(),
+            window.window.scale_factor(),
             theme,
-            drag_drop_event_target,
+            target,
             pending,
-        ) else {
-            return Err(Error::CreateWebview(
-                "failed to create CEF browser".to_string().into(),
-            ));
-        };
-
-        // On Windows a window's webviews are sibling child HWNDs. Put each new one
-        // on top of the ones already there — the order they were created in — and
-        // pin it, so Chromium's focus raise cannot reshuffle them behind our back
-        // and bury an overlay webview under the one that fills the window.
-        #[cfg(windows)]
-        child.raise_to_top();
-
-        // AXEnhancedUserInterface / enableAccessibility can arrive before this
-        // browser exists. Reapply the latest request after deferred creation so
-        // new windows, tabs, and revived renderers participate in accessibility.
-        #[cfg(target_os = "macos")]
-        child.apply_requested_accessibility();
-
-        *live_browsers += 1;
-        appwindow.children.push(child);
-        layout_app_window(appwindow);
+        )
+        .ok_or_else(|| Error::CreateWebview("CEF request context rejected".into()))?;
+        self.state
+            .window_orders
+            .entry(window_id)
+            .or_default()
+            .push(webview_id);
+        self.state.pending_browsers.insert(webview_id, prepared);
+        let sender = self.context.sender.clone();
+        let proxy = self.context.proxy.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(request_context::CREATION_DEADLINE);
+            let _ = sender.send(Message::CreationTimeout(webview_id));
+            proxy.wake_up();
+        });
         Ok(())
     }
 
-    pub(crate) fn build_browser_child(
+    fn prepare_browser_child(
         context: &RuntimeContext<T>,
         scheme_registry: &request_handler::SchemeRegistry,
         window_id: WindowId,
@@ -576,7 +654,7 @@ impl<T: UserEvent> WinitCefApp<T> {
         theme: Option<Theme>,
         drag_drop_event_target: browser_client::DragDropEventTarget,
         mut pending: PendingWebview<T, CefRuntime<T>>,
-    ) -> Option<AppWebview> {
+    ) -> Option<PendingBrowser> {
         let bounds_rate = compute_child_bounds_rate(
             pending.webview_attributes.bounds.as_ref(),
             pending.webview_attributes.auto_resize,
@@ -631,7 +709,7 @@ impl<T: UserEvent> WinitCefApp<T> {
             window_id,
             webview_id,
             pending.label.clone(),
-            Some(pending.url.as_str().to_string()),
+            Arc::new(CompletionToken::default()),
             devtools_enabled,
             drag_drop_event_target,
             drag_drop_handler_enabled,
@@ -643,10 +721,11 @@ impl<T: UserEvent> WinitCefApp<T> {
 
         // If the bounds are not specified, default to the parent window's size and position.
         // aka full-window webview.
-        let bounds = pending.webview_attributes.bounds.unwrap_or_else(|| Rect {
+        let desired_bounds = pending.webview_attributes.bounds.unwrap_or_else(|| Rect {
             position: PhysicalPosition::new(0, 0).into(),
             size: parent_size.into(),
         });
+        let bounds = desired_bounds;
         #[cfg(not(target_os = "macos"))]
         let bounds = bounds.to_physical::<i32, i32>(scale);
         #[cfg(target_os = "macos")]
@@ -692,6 +771,15 @@ impl<T: UserEvent> WinitCefApp<T> {
         let mut window_info = cef::WindowInfo::default().set_as_child(parent, &bounds);
         log::info!("cef webview {:?}: window info ready", pending.label);
         window_info.runtime_style = cef_runtime_style;
+        #[cfg(target_os = "macos")]
+        {
+            window_info.hidden = 1;
+        }
+        #[cfg(windows)]
+        {
+            window_info.style &= !0x10000000;
+        } // WS_VISIBLE: reveal after adoption.
+
         let settings = browser_settings_from_webview_attributes(&pending.webview_attributes);
 
         let custom_protocol_scheme = if pending.webview_attributes.use_https_scheme {
@@ -705,49 +793,68 @@ impl<T: UserEvent> WinitCefApp<T> {
             .map(|scheme| format!("{scheme}.localhost"))
             .collect();
         let real_initial_url = pending.url.as_str().to_string();
-        let (browser_tx, browser_rx) = mpsc::channel();
-        let (init_done, on_initialized) = request_context::deferred_init_continuation({
-            let scheme_registry = scheme_registry.clone();
-            let uri_scheme_protocols = uri_scheme_protocols.clone();
-            let initialization_scripts = initialization_scripts.clone();
-            let custom_protocol_scheme = custom_protocol_scheme.clone();
-            let custom_scheme_domain_names = custom_scheme_domain_names.clone();
-            let label = pending.label.clone();
+        let handlers = Arc::new(Mutex::new(Vec::new()));
+        let listeners: WebviewEventListeners = Default::default();
+        let submit: SubmitBrowser = Box::new({
             let permissions = permissions.clone();
-            #[cfg(target_os = "macos")]
-            let accessibility_enabled = context.accessibility_enabled.clone();
-            move |mut request_context| {
-                let reset = request_context
-                    .as_ref()
-                    .ok_or_else(|| "CEF request context unavailable".to_owned())
-                    .and_then(|context| permissions.initialize_context(context));
-                if let Err(error) = reset {
-                    log::error!("refusing to create webview {label:?}: {error}");
-                    return;
+            move |window, request_context| {
+                if let Err(error) = permissions.initialize_context(request_context) {
+                    log::error!("CEF permission context initialization failed: {error}");
+                    return false;
                 }
-                request_context::apply_theme_scheme(request_context.as_ref(), theme);
-
-                // Create with an inert document so the BrowserHost exists before the real
-                // navigation; the real URL is loaded once the document-start script is set.
-                let initial_url = CefString::from(INITIAL_LOAD_URL);
-                log::info!("cef webview {label:?}: creating browser");
-                let Some(browser) = cef::browser_host_create_browser_sync(
+                request_context::apply_theme_scheme(
+                    Some(request_context),
+                    window.resolved_theme(theme),
+                );
+                let mut request_context = request_context.clone();
+                cef::browser_host_create_browser(
                     Some(&window_info),
                     Some(&mut client),
-                    Some(&initial_url),
+                    Some(&CefString::from(INITIAL_LOAD_URL)),
                     Some(&settings),
                     None,
-                    request_context.as_mut(),
-                ) else {
-                    log::error!("failed to create CEF browser for webview {label:?}");
-                    return;
-                };
-                let Some(host) = browser.host() else {
-                    log::error!("CEF browser for webview {label:?} has no host");
-                    return;
-                };
+                    Some(&mut request_context),
+                ) == 1
+            }
+        });
+        let pending_initial_loads: PendingInitialLoads = Arc::new(Mutex::new(HashMap::new()));
+        let initial_load: Box<dyn FnOnce(&cef::Browser)> = Box::new({
+            let pending_initial_loads = pending_initial_loads.clone();
+            let sender = context.sender.clone();
+            let proxy = context.proxy.clone();
+            let initialization_scripts = initialization_scripts.clone();
+            let custom_protocol_scheme = custom_protocol_scheme.clone();
+            move |browser| {
+                // The observer and every queued native setup operation are installed first.
+                load_initial_url_after_registering_initialization_scripts(
+                    browser,
+                    &initialization_scripts,
+                    &custom_protocol_scheme,
+                    &custom_scheme_domain_names,
+                    Box::new(move |success| {
+                        let _ = sender.send(Message::InitialScriptsReady(
+                            webview_id,
+                            success,
+                            real_initial_url,
+                        ));
+                        proxy.wake_up();
+                    }),
+                    &pending_initial_loads,
+                );
+            }
+        });
+        let adopt: AdoptBrowser = Box::new({
+            let scheme_registry = scheme_registry.clone();
+            let uri_scheme_protocols = uri_scheme_protocols.clone();
+            let label = pending.label.clone();
+            let devtools_protocol_handlers = handlers.clone();
+            let listeners = listeners.clone();
+            let pending_initial_loads = pending_initial_loads.clone();
+            #[cfg(target_os = "macos")]
+            let accessibility_enabled = context.accessibility_enabled.clone();
+            move |browser, creation, incognito_context| {
+                let host = browser.host()?;
                 let browser_id = browser.identifier();
-
                 {
                     let mut registry = scheme_registry.lock().unwrap();
                     for (scheme, handler) in uri_scheme_protocols.iter() {
@@ -761,53 +868,39 @@ impl<T: UserEvent> WinitCefApp<T> {
                         );
                     }
                 }
-
-                let devtools_protocol_handlers = Arc::new(Mutex::new(Vec::new()));
-                let pending_initial_loads: PendingInitialLoads =
-                    Arc::new(Mutex::new(HashMap::new()));
                 let devtools_observer_registration = Arc::new(Mutex::new(add_dev_tools_observer(
                     &browser,
                     devtools_protocol_handlers.clone(),
-                    pending_initial_loads.clone(),
+                    pending_initial_loads,
                 )));
-                load_initial_url_after_registering_initialization_scripts(
-                    &browser,
-                    &initialization_scripts,
-                    &custom_protocol_scheme,
-                    &custom_scheme_domain_names,
-                    &real_initial_url,
-                    &pending_initial_loads,
-                );
-
-                browser_tx
-                    .send(AppWebview {
-                        shortcut_target: Arc::new(
-                            crate::reserved_shortcut_native::NewTabTarget::new(
-                                browser.clone(),
-                                webview_id,
-                            ),
-                        ),
-                        shortcut_binding,
-                        permissions,
-                        context_menu,
-                        js_dialog,
+                Some(AppWebview {
+                    creation,
+                    initialization_ready: false,
+                    initial_operations: PendingQueue::new(1024, 8 * 1024 * 1024),
+                    shortcut_target: Arc::new(crate::reserved_shortcut_native::NewTabTarget::new(
+                        browser.clone(),
                         webview_id,
-                        label,
-                        browser,
-                        browser_id,
-                        incognito_context: None,
-                        host,
-                        #[cfg(target_os = "macos")]
-                        accessibility_enabled,
-                        uri_scheme_protocols,
-                        devtools_protocol_handlers,
-                        devtools_observer_registration,
-                        listeners: Default::default(),
-                        bounds_rate,
-                        closing: std::sync::atomic::AtomicBool::new(false),
-                        host_destroyed: std::sync::atomic::AtomicBool::new(false),
-                    })
-                    .expect("failed to send initialized CEF browser");
+                    )),
+                    shortcut_binding,
+                    permissions,
+                    context_menu,
+                    js_dialog,
+                    webview_id,
+                    label,
+                    browser,
+                    browser_id,
+                    _incognito_context: incognito_context,
+                    host,
+                    #[cfg(target_os = "macos")]
+                    accessibility_enabled,
+                    uri_scheme_protocols,
+                    devtools_protocol_handlers,
+                    devtools_observer_registration,
+                    listeners,
+                    bounds_rate,
+                    closing: std::sync::atomic::AtomicBool::new(false),
+                    host_destroyed: std::sync::atomic::AtomicBool::new(false),
+                })
             }
         });
         let incognito_key = pending
@@ -816,17 +909,19 @@ impl<T: UserEvent> WinitCefApp<T> {
             .then(|| pending.webview_attributes.data_directory.clone())
             .flatten();
         let shared = incognito_key.as_ref().and_then(|key| {
-            let mut contexts = INCOGNITO_CONTEXTS.lock().unwrap();
-            contexts.retain(|_, contexts| {
-                contexts.retain(|context| context.strong_count() > 0);
-                !contexts.is_empty()
-            });
-            contexts
+            INCOGNITO_CONTEXTS
+                .lock()
+                .unwrap()
                 .get(key)
-                .and_then(|contexts| contexts.iter().find_map(std::sync::Weak::upgrade))
                 .map(|context| (*context).clone())
         });
-        let request_context = request_context::request_context_from_webview_attributes(
+        let sender = context.sender.clone();
+        let proxy = context.proxy.clone();
+        let on_initialized = Box::new(move |request_context| {
+            let _ = sender.send(Message::RequestContextReady(webview_id, request_context));
+            proxy.wake_up();
+        });
+        let request_context = Arc::new(request_context::request_context_from_webview_attributes(
             &context.cache_path,
             &pending.webview_attributes,
             uri_scheme_protocols.keys(),
@@ -834,34 +929,379 @@ impl<T: UserEvent> WinitCefApp<T> {
             scheme_registry.clone(),
             on_initialized,
             shared,
-        );
-        if request_context.is_none() {
-            init_done.store(true, Ordering::SeqCst);
-        }
-        if !request_context::wait_for_deferred_init(&init_done) {
-            log::error!("webview creation: request context never initialized; giving up");
-            return None;
-        }
-
-        // `None` here means browser creation failed (or the request context never
-        // initialized); the continuation logs the reason. Soft-fail instead of
-        // taking down the whole process.
-        // Bounded like the init wait: a creation that never completes must give
-        // the thread back, not hang it.
-        let mut webview = browser_rx
-            .recv_timeout(request_context::CREATION_DEADLINE)
-            .ok()?;
-        if let (Some(key), Some(context)) = (incognito_key, request_context) {
-            let owned = Arc::new(context);
+        )?);
+        // Publish before returning admission: concurrent pending private tabs share
+        // the in-memory backing store even while the first context initializes.
+        if let Some(key) = incognito_key {
             INCOGNITO_CONTEXTS
                 .lock()
                 .unwrap()
-                .entry(key)
-                .or_default()
-                .push(Arc::downgrade(&owned));
-            webview.incognito_context = Some(owned);
+                .publish(key, &request_context);
         }
-        Some(webview)
+        Some(PendingBrowser {
+            creation: Creation::new(window_id),
+            context: Some(request_context),
+            submit: Some(submit),
+            adopt: Some(adopt),
+            queue: PendingQueue::new(1024, 8 * 1024 * 1024),
+            handlers,
+            listeners,
+            bounds: desired_bounds,
+            bounds_rate,
+            initial_window: matches!(
+                drag_drop_event_target,
+                browser_client::DragDropEventTarget::Window
+            ),
+            visible: true,
+            initial_load: Some(initial_load),
+            unadopted: None,
+        })
+    }
+
+    pub(crate) fn initial_scripts_ready(&mut self, id: u32, success: bool, url: String) {
+        let Some((owner, child)) = self.state.windows.iter_mut().find_map(|(owner, window)| {
+            window
+                .children
+                .iter_mut()
+                .find(|child| child.webview_id == id)
+                .map(|child| (*owner, child))
+        }) else {
+            return;
+        };
+        if child.initialization_ready || child.closing.load(Ordering::Acquire) {
+            return;
+        }
+        if !success {
+            self.fail_attached_creation(id, "ERR_DIVE_DOCUMENT_START_REGISTRATION");
+            return;
+        }
+        child.initialization_ready = true;
+        load_initial_url(&child.browser, &url);
+        let mut queue = std::mem::replace(
+            &mut child.initial_operations,
+            PendingQueue::new(1024, 8 * 1024 * 1024),
+        );
+        while let Some(message) = queue.pop() {
+            self.handle_webview_message(owner, id, message);
+        }
+    }
+
+    pub(crate) fn fail_attached_creation(&mut self, id: u32, reason: &str) {
+        let Some(child) = self
+            .state
+            .windows
+            .values_mut()
+            .flat_map(|window| window.children.iter_mut())
+            .find(|child| child.webview_id == id)
+        else {
+            return;
+        };
+        if child.initialization_ready || child.closing.load(Ordering::Acquire) {
+            return;
+        }
+        child.creation.fail();
+        child.initial_operations.clear();
+        let handlers = std::mem::take(&mut *child.devtools_protocol_handlers.lock().unwrap());
+        child.request_close(true);
+        for handler in handlers {
+            handler(DevToolsProtocol::CreationFailed(reason.to_owned()));
+        }
+    }
+
+    pub(crate) fn context_ready(&mut self, id: u32, context: Option<RequestContext>) {
+        let Some(pending) = self.state.pending_browsers.get_mut(&id) else {
+            return;
+        };
+        if !pending.creation.context_ready() {
+            return;
+        }
+        let owner = pending.creation.owner();
+        if self.state.exiting || self.state.is_window_closing(owner) {
+            self.cancel_pending_creation(id);
+            return;
+        }
+        let accepted =
+            if let (Some(context), Some(window)) = (context, self.state.windows.get(&owner)) {
+                self.state
+                    .pending_browsers
+                    .get_mut(&id)
+                    .and_then(|pending| pending.submit.take())
+                    .is_some_and(|submit| submit(window, &context))
+            } else {
+                false
+            };
+        if accepted {
+            if let Some(pending) = self.state.pending_browsers.get_mut(&id) {
+                pending.creation.accept();
+            }
+        } else {
+            self.fail_pending_creation(id, "ERR_DIVE_NATIVE_CREATION_REJECTED");
+        }
+    }
+
+    pub(crate) fn cancel_pending_creation(&mut self, id: u32) {
+        self.end_pending_creation(id, None);
+    }
+
+    pub(crate) fn fail_pending_creation(&mut self, id: u32, reason: &str) {
+        self.end_pending_creation(id, Some(reason));
+    }
+
+    fn end_pending_creation(&mut self, id: u32, reason: Option<&str>) {
+        let Some(pending) = self.state.pending_browsers.get_mut(&id) else {
+            return;
+        };
+        let changed = if reason.is_some() {
+            pending.creation.fail()
+        } else {
+            pending.creation.cancel()
+        };
+        if !changed {
+            return;
+        }
+        // Drop handlers outside their mutex: captured application transports may
+        // shut down and dispatch more work when their final sender disappears.
+        let handlers = std::mem::take(&mut *pending.handlers.lock().unwrap());
+        pending.queue.clear();
+        pending.initial_load.take();
+        pending.submit.take();
+        let pinned = pending.creation.pins_parent();
+        let owner = pending.creation.owner();
+        let initial_window = pending.initial_window;
+        if !pinned {
+            if let Some(order) = self.state.window_orders.get_mut(&owner) {
+                order.retain(|view| *view != id);
+            }
+            self.state.pending_browsers.remove(&id);
+        }
+        if reason.is_some() && initial_window {
+            let _ = self.context.sender.send(Message::Window {
+                window_id: owner,
+                message: crate::window::WindowMessage::Destroy,
+            });
+            self.context.proxy.wake_up();
+        }
+        if let Some(reason) = reason {
+            log::error!("native webview creation {id} failed: {reason}");
+            for handler in &handlers {
+                handler(DevToolsProtocol::CreationFailed(reason.to_owned()));
+            }
+        }
+    }
+
+    pub(crate) fn browser_created(&mut self, id: u32, browser: Browser) {
+        let Some(mut pending) = self.state.pending_browsers.remove(&id) else {
+            return;
+        };
+        let completion = pending.creation.complete();
+        if completion == Completion::Ignore {
+            self.state.pending_browsers.insert(id, pending);
+            return;
+        }
+        let owner = pending.creation.owner();
+        // on_after_created guarantees a host. Retain all ownership and surface
+        // failure if a broken implementation ever violates that guarantee.
+        if browser.host().is_none() {
+            pending.unadopted = Some(browser);
+            self.state.pending_browsers.insert(id, pending);
+            self.fail_pending_creation(id, "ERR_DIVE_NATIVE_HOST_MISSING");
+            return;
+        }
+        let Some(adopt) = pending.adopt.take() else {
+            return;
+        };
+        let bounds = pending.current_bounds(self.state.windows[&owner].window.surface_size());
+        let mut child =
+            adopt(browser, pending.creation, pending.context.take()).expect("validated CEF host");
+        let Some(window) = self.state.windows.get_mut(&owner) else {
+            // The accepted-creation parent pin prevents this branch.
+            unreachable!("accepted CEF creation lost its parent");
+        };
+        child.set_bounds(
+            window.window.surface_size(),
+            window.window.scale_factor(),
+            bounds,
+        );
+        child.bounds_rate = pending.bounds_rate;
+        request_context::apply_theme_scheme(
+            child.host.request_context().as_ref(),
+            window.resolved_theme(*self.context.app_wide_theme.lock().unwrap()),
+        );
+        child.set_visible(pending.visible && completion == Completion::Attach);
+        #[cfg(target_os = "macos")]
+        child.apply_requested_accessibility();
+        self.state.live_browsers += 1;
+        // Process-unique IDs are allocated at admission. Restore admission order
+        // instead of allowing out-of-order CEF completion to reorder overlays.
+        let order = self
+            .state
+            .window_orders
+            .get(&owner)
+            .expect("admitted child order");
+        let rank = order
+            .iter()
+            .position(|view| *view == id)
+            .expect("admitted child rank");
+        let index = window
+            .children
+            .iter()
+            .position(|child| {
+                order
+                    .iter()
+                    .position(|view| *view == child.webview_id)
+                    .is_some_and(|position| position > rank)
+            })
+            .unwrap_or(window.children.len());
+        window.children.insert(index, child);
+        #[cfg(windows)]
+        for child in &window.children {
+            child.raise_to_top();
+        }
+        layout_app_window(window);
+        if self.state.windows[&owner]
+            .children
+            .iter()
+            .find(|child| child.webview_id == id)
+            .is_some_and(|child| {
+                child
+                    .devtools_observer_registration
+                    .lock()
+                    .unwrap()
+                    .is_none()
+            })
+        {
+            self.fail_attached_creation(id, "ERR_DIVE_DEVTOOLS_OBSERVER_REGISTRATION");
+            return;
+        }
+        if completion == Completion::Close
+            || self.state.exiting
+            || self.state.is_window_closing(owner)
+        {
+            self.state.windows[&owner]
+                .children
+                .iter()
+                .find(|child| child.webview_id == id)
+                .unwrap()
+                .request_close(true);
+            return;
+        }
+        while let Some(message) = pending.queue.pop() {
+            self.handle_webview_message(owner, id, message);
+        }
+        if let Some(load) = pending.initial_load.take()
+            && let Some(child) = self
+                .state
+                .windows
+                .get(&owner)
+                .and_then(|window| window.children.iter().find(|child| child.webview_id == id))
+            && !child.closing.load(Ordering::Acquire)
+        {
+            load(&child.browser);
+        }
+    }
+
+    fn handle_pending_message(&mut self, window_id: WindowId, id: u32, message: WebviewMessage) {
+        let Some(pending) = self.state.pending_browsers.get_mut(&id) else {
+            return;
+        };
+        if pending.creation.owner() != window_id && !message.follows_browser() {
+            reject_pending_message(message, "CEF webview owner changed");
+            return;
+        }
+        if matches!(message, WebviewMessage::Close) {
+            self.cancel_pending_creation(id);
+            return;
+        }
+        if pending.creation.is_terminal() {
+            reject_pending_message(message, "CEF webview creation has ended");
+            return;
+        }
+        let window = &self.state.windows[&pending.creation.owner()];
+        let scale = window.window.scale_factor();
+        let parent_size = window.window.surface_size();
+        pending.bounds = pending.current_bounds(parent_size);
+        match message {
+            WebviewMessage::OnDevToolsProtocol(handler, tx) => {
+                register_pending_protocol(&pending.handlers, handler, tx);
+            }
+            WebviewMessage::AddEventListener(id, handler) => {
+                pending.listeners.lock().unwrap().insert(id, handler);
+            }
+            WebviewMessage::Bounds(tx) => {
+                let _ = tx.send(Ok(pending.bounds));
+            }
+            WebviewMessage::Position(tx) => {
+                let _ = tx.send(Ok(pending.bounds.position.to_physical(scale)));
+            }
+            WebviewMessage::Size(tx) => {
+                let _ = tx.send(Ok(pending.bounds.size.to_physical(scale)));
+            }
+            WebviewMessage::Show => pending.visible = true,
+            WebviewMessage::Hide => pending.visible = false,
+            WebviewMessage::SetBounds(bounds) => {
+                pending.bounds = bounds;
+                pending.bounds_rate = compute_child_bounds_rate(
+                    Some(&pending.bounds),
+                    pending.bounds_rate.is_some(),
+                    parent_size,
+                    scale,
+                );
+            }
+            WebviewMessage::SetPosition(position) => {
+                pending.bounds.position = position;
+                pending.bounds_rate = compute_child_bounds_rate(
+                    Some(&pending.bounds),
+                    pending.bounds_rate.is_some(),
+                    parent_size,
+                    scale,
+                );
+            }
+            WebviewMessage::SetSize(size) => {
+                pending.bounds.size = size;
+                pending.bounds_rate = compute_child_bounds_rate(
+                    Some(&pending.bounds),
+                    pending.bounds_rate.is_some(),
+                    parent_size,
+                    scale,
+                );
+            }
+            WebviewMessage::SetAutoResize(auto) => {
+                pending.bounds_rate =
+                    compute_child_bounds_rate(Some(&pending.bounds), auto, parent_size, scale);
+            }
+            // No synchronous caller is ever queued behind a future CEF callback.
+            message @ (WebviewMessage::CanGoBack(_)
+            | WebviewMessage::CanGoForward(_)
+            | WebviewMessage::Url(_)
+            | WebviewMessage::Cookies(_)
+            | WebviewMessage::CookiesForUrl(..)
+            | WebviewMessage::Reparent(..)) => {
+                reject_pending_message(message, "CEF webview is not ready")
+            }
+            #[cfg(any(debug_assertions, feature = "devtools"))]
+            WebviewMessage::IsDevToolsOpen(tx) => {
+                let _ = tx.send(false);
+            }
+            message => {
+                let bytes = match &message {
+                    WebviewMessage::SendDevToolsMessage(bytes, _) => bytes.len(),
+                    WebviewMessage::EvaluateScript(script)
+                    | WebviewMessage::EvaluateScriptWithCallback(script, _) => script.len(),
+                    WebviewMessage::Navigate(url) => url.as_str().len(),
+                    WebviewMessage::SetCookie(cookie) | WebviewMessage::DeleteCookie(cookie) => {
+                        cookie.name().len()
+                            + cookie.value().len()
+                            + cookie.domain().map_or(0, str::len)
+                            + cookie.path().map_or(0, str::len)
+                    }
+                    _ => std::mem::size_of::<WebviewMessage>(),
+                };
+                if let Err(message) = pending.queue.push(message, bytes) {
+                    reject_pending_message(message, "CEF pending operation budget exceeded");
+                    self.fail_pending_creation(id, "ERR_DIVE_NATIVE_PENDING_OVERFLOW");
+                }
+            }
+        }
     }
 
     pub(crate) fn handle_webview_message(
@@ -870,6 +1310,10 @@ impl<T: UserEvent> WinitCefApp<T> {
         webview_id: u32,
         message: WebviewMessage,
     ) {
+        if self.state.pending_browsers.contains_key(&webview_id) {
+            self.handle_pending_message(window_id, webview_id, message);
+            return;
+        }
         // If the runtime is exiting, don't process any more messages to avoid macOS crash on exit.
         if self.state.exiting {
             return;
@@ -915,6 +1359,24 @@ impl<T: UserEvent> WinitCefApp<T> {
             return;
         };
 
+        if !child.initialization_ready
+            && matches!(
+                message,
+                WebviewMessage::Navigate(_)
+                    | WebviewMessage::Reload
+                    | WebviewMessage::GoBack
+                    | WebviewMessage::GoForward
+            )
+        {
+            let bytes = match &message {
+                WebviewMessage::Navigate(url) => url.as_str().len(),
+                _ => 0,
+            };
+            if child.initial_operations.push(message, bytes).is_err() {
+                self.fail_attached_creation(webview_id, "ERR_DIVE_NATIVE_PENDING_OVERFLOW");
+            }
+            return;
+        }
         match message {
             WebviewMessage::EvaluateScript(script) => {
                 if let Some(frame) = child.browser.main_frame() {
@@ -1112,6 +1574,10 @@ impl<T: UserEvent> WinitCefApp<T> {
                 }
             }
             WebviewMessage::Reparent(target_window_id, tx) => {
+                if child.closing.load(Ordering::Acquire) {
+                    let _ = tx.send(Err(Error::CreateWebview("CEF webview is closing".into())));
+                    return;
+                }
                 if window_id == target_window_id {
                     let _ = tx.send(Ok(()));
                     return;
@@ -1162,6 +1628,15 @@ impl<T: UserEvent> WinitCefApp<T> {
                 #[cfg(windows)]
                 child.raise_to_top();
 
+                child.creation.reparent(target_window_id);
+                if let Some(order) = self.state.window_orders.get_mut(&window_id) {
+                    order.retain(|id| *id != webview_id);
+                }
+                self.state
+                    .window_orders
+                    .entry(target_window_id)
+                    .or_default()
+                    .push(webview_id);
                 target_appwindow.children.push(child);
                 let _ = tx.send(Ok(()));
             }
@@ -1258,6 +1733,38 @@ fn rejected_devtools_reply(message: &[u8]) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod rejected_command_tests {
+    #[test]
+    fn pending_cdp_registration_acknowledges_without_native_creation() {
+        let handlers = Default::default();
+        let (tx, rx) = std::sync::mpsc::channel();
+        super::register_pending_protocol(&handlers, std::sync::Arc::new(|_| {}), tx);
+        assert!(rx.try_recv().unwrap().is_ok());
+        assert_eq!(handlers.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn pending_getters_and_reparent_fail_immediately() {
+        use super::{WebviewMessage, reject_pending_message};
+        let (tx, rx) = std::sync::mpsc::channel();
+        reject_pending_message(WebviewMessage::CanGoBack(tx), "CEF webview is not ready");
+        assert!(
+            rx.try_recv()
+                .unwrap()
+                .unwrap_err()
+                .to_string()
+                .contains("not ready")
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        reject_pending_message(WebviewMessage::Url(tx), "CEF webview is not ready");
+        assert!(rx.try_recv().unwrap().is_err());
+        let (tx, rx) = std::sync::mpsc::channel();
+        reject_pending_message(
+            WebviewMessage::Reparent(tauri_runtime::window::WindowId::from(9), tx),
+            "CEF webview is not ready",
+        );
+        assert!(rx.try_recv().unwrap().is_err());
+    }
+
     #[test]
     fn rejection_resolves_the_original_call_and_ignores_notifications() {
         let reply =
@@ -1777,7 +2284,8 @@ static NEXT_INIT_SCRIPT_DEVTOOLS_MESSAGE_ID: AtomicI32 = AtomicI32::new(1_000_00
 /// Maps a pending `Page.addScriptToEvaluateOnNewDocument` CDP message id to the
 /// `(browser, real_url)` whose real navigation is deferred until that message is
 /// acknowledged.
-pub(crate) type PendingInitialLoads = Arc<Mutex<HashMap<i32, (Browser, String)>>>;
+pub(crate) type InitialScriptCompletion = Box<dyn FnOnce(bool) + Send>;
+pub(crate) type PendingInitialLoads = Arc<Mutex<HashMap<i32, InitialScriptCompletion>>>;
 
 cef::wrap_dev_tools_message_observer! {
   struct TauriDevToolsProtocolObserver {
@@ -1814,13 +2322,13 @@ cef::wrap_dev_tools_message_observer! {
     ) {
       // The real navigation was deferred until the document-start script was
       // registered; this result acknowledges that, so kick off the real load.
-      if let Some((browser, initial_url)) = self
+      if let Some(completion) = self
         .pending_initial_loads
         .lock()
         .unwrap()
         .remove(&message_id)
       {
-        post_load_initial_url(browser, initial_url);
+        completion(success != 0);
       }
 
       // The raw message delivered to `on_dev_tools_message` already carries
@@ -1961,100 +2469,65 @@ fn register_initialization_scripts(
     initialization_scripts: &[CefInitScript],
     custom_protocol_scheme: &str,
     custom_scheme_domain_names: &[String],
-    initial_url: String,
+    completion: InitialScriptCompletion,
     pending_initial_loads: &PendingInitialLoads,
-) -> bool {
+) {
     let Some(source) = devtools_initialization_script_source(
         initialization_scripts,
         custom_protocol_scheme,
         custom_scheme_domain_names,
     ) else {
-        return false;
+        completion(true);
+        return;
     };
     let Some(host) = browser.host() else {
-        return false;
+        completion(false);
+        return;
     };
-
     let page_enable_message_id =
         NEXT_INIT_SCRIPT_DEVTOOLS_MESSAGE_ID.fetch_add(1, Ordering::Relaxed);
     let page_enable_message = serde_json::json!({
-      "id": page_enable_message_id,
-      "method": "Page.enable",
-      "params": {}
+        "id": page_enable_message_id, "method": "Page.enable", "params": {}
     })
     .to_string();
-    let _ = host.send_dev_tools_message(Some(page_enable_message.as_bytes()));
-
+    if host.send_dev_tools_message(Some(page_enable_message.as_bytes())) != 1 {
+        completion(false);
+        return;
+    }
     let message_id = NEXT_INIT_SCRIPT_DEVTOOLS_MESSAGE_ID.fetch_add(1, Ordering::Relaxed);
     let message = serde_json::json!({
-      "id": message_id,
-      "method": "Page.addScriptToEvaluateOnNewDocument",
-      "params": {
-        "source": source,
-      }
-    })
-    .to_string();
-
+        "id": message_id, "method": "Page.addScriptToEvaluateOnNewDocument", "params": { "source": source }
+    }).to_string();
     pending_initial_loads
         .lock()
         .unwrap()
-        .insert(message_id, (browser.clone(), initial_url));
-    if host.send_dev_tools_message(Some(message.as_bytes())) == 1 {
-        true
-    } else {
-        pending_initial_loads.lock().unwrap().remove(&message_id);
-        false
+        .insert(message_id, completion);
+    if host.send_dev_tools_message(Some(message.as_bytes())) != 1 {
+        let completion = pending_initial_loads.lock().unwrap().remove(&message_id);
+        if let Some(completion) = completion {
+            completion(false);
+        }
     }
 }
 
-wrap_task! {
-  struct LoadInitialUrlTask {
-    browser: Browser,
-    initial_url: String,
-  }
-
-  impl Task {
-    fn execute(&self) {
-      load_initial_url(&self.browser, &self.initial_url);
-    }
-  }
-}
-
-fn post_load_initial_url(browser: Browser, initial_url: String) {
-    let mut task = LoadInitialUrlTask::new(browser, initial_url);
-    cef::post_task(sys::cef_thread_id_t::TID_UI.into(), Some(&mut task));
-}
-
-// Browsers are created with an inert internal document so the BrowserHost exists
-// before the app's real first navigation starts. That gives us a chance to
-// register the CDP document-start script for remote/cross-site navigations; the
-// custom-protocol path still injects into HTML because CEF does not apply this
-// CDP hook to those documents reliably.
-//
-// The real load is posted as a CEF UI task instead of performed inline. This
-// keeps the browser creation/CDP setup stack from re-entering navigation.
+/// Completion posts back to the runtime; no callback may navigate independently
+/// of current cancellation, document-start or application setup state.
 pub(crate) fn load_initial_url_after_registering_initialization_scripts(
     browser: &Browser,
     initialization_scripts: &[CefInitScript],
     custom_protocol_scheme: &str,
     custom_scheme_domain_names: &[String],
-    initial_url: &str,
+    completion: InitialScriptCompletion,
     pending_initial_loads: &PendingInitialLoads,
 ) {
-    let browser_for_callback = browser.clone();
-    let initial_url = initial_url.to_string();
-    let is_waiting_for_initialization_scripts = register_initialization_scripts(
+    register_initialization_scripts(
         browser,
         initialization_scripts,
         custom_protocol_scheme,
         custom_scheme_domain_names,
-        initial_url.clone(),
+        completion,
         pending_initial_loads,
     );
-
-    if !is_waiting_for_initialization_scripts {
-        post_load_initial_url(browser_for_callback, initial_url);
-    }
 }
 
 fn load_initial_url(browser: &Browser, initial_url: &str) {

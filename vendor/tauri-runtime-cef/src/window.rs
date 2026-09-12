@@ -456,7 +456,7 @@ impl<T: UserEvent> WinitCefApp<T> {
             .map_err(|_| Error::CreateWindow)?;
 
         let winit_id = window.id();
-        let mut appwindow = AppWindow {
+        let appwindow = AppWindow {
             id: window_id,
             label: pending.label.clone(),
             #[cfg(windows)]
@@ -504,25 +504,24 @@ impl<T: UserEvent> WinitCefApp<T> {
             });
         }
 
-        // Build the initial webview against the not-yet-registered window so a
-        // creation failure surfaces to the caller without leaving the window in
-        // state to roll back.
-        if let (Some(webview_id), Some(webview)) = (webview_id, pending.webview) {
-            Self::build_and_attach_webview(
-                &self.context,
-                &self.scheme_registry,
-                &mut self.state.live_browsers,
-                &mut appwindow,
-                webview_id,
-                browser_client::DragDropEventTarget::Window,
-                webview,
-            )?;
-        }
-
+        // Pending native creation must own a registered parent before CEF sees
+        // its handle. Admission errors roll back this newly registered window.
         self.state
             .winid_id_to_window_id_map
             .insert(winit_id, window_id);
         self.state.windows.insert(window_id, appwindow);
+        if let (Some(webview_id), Some(webview)) = (webview_id, pending.webview) {
+            if let Err(error) = self.admit_webview(
+                window_id,
+                webview_id,
+                browser_client::DragDropEventTarget::Window,
+                webview,
+            ) {
+                self.state.windows.remove(&window_id);
+                self.state.winid_id_to_window_id_map.remove(&winit_id);
+                return Err(error);
+            }
+        }
 
         Ok(())
     }

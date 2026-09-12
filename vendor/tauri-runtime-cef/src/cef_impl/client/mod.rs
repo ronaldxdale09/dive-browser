@@ -14,10 +14,10 @@ use crate::{
 };
 
 mod context_menu;
-pub(crate) mod js_dialog;
 mod display;
 mod download;
 mod drag;
+pub(crate) mod js_dialog;
 mod keyboard;
 mod life_span;
 mod load;
@@ -35,11 +35,11 @@ pub(crate) use drag::{
     DragDropEventTarget, DragDropScriptEvent, DragDropState, WebDragDropResourceRequestHandler,
     drag_drop_initialization_script, event_from_script_event,
 };
+use js_dialog::TauriCefJsDialogHandler;
+pub use js_dialog::{JsDialogBridge, JsDialogKind, JsDialogRequest};
 use keyboard::TauriCefKeyboardHandler;
 use life_span::TauriCefChildLifeSpanHandler;
 use load::TauriCefLoadHandler;
-use js_dialog::TauriCefJsDialogHandler;
-pub use js_dialog::{JsDialogBridge, JsDialogKind, JsDialogRequest};
 use permission::TauriCefPermissionHandler;
 pub(crate) use process::TauriCefBrowserProcessHandler;
 
@@ -87,7 +87,7 @@ wrap_client! {
     pub(crate) window_id: WindowId,
     pub(crate) webview_id: u32,
     pub(crate) label: String,
-    initial_url: Option<String>,
+    creation_delivered: Arc<crate::pending_creation::CompletionToken>,
     devtools_enabled: bool,
     drag_drop_event_target: DragDropEventTarget,
     drag_drop_handler_enabled: bool,
@@ -127,7 +127,7 @@ wrap_client! {
         self.webview_id,
         self.context.clone(),
         self.handlers.new_window_handler.clone(),
-        self.initial_url.clone(),
+        self.creation_delivered.clone(),
         self.handlers.permissions.clone(),
       ))
     }
