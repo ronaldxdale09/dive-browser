@@ -25,12 +25,41 @@ const isVisible = (el) => {
     // default instead would treat a style the host does not report -- jsdom
     // leaves the `overflow` shorthand empty -- as a clip, and hide the whole
     // page from every locator.
-    if (!CLIPS.has(parent.overflow) && !CLIPS.has(parent.overflowX) && !CLIPS.has(parent.overflowY)) continue;
+    const clipsX = CLIPS.has(parent.overflowX || parent.overflow);
+    const clipsY = CLIPS.has(parent.overflowY || parent.overflow);
+    if (!clipsX && !clipsY) continue;
+
+    const doc = node.ownerDocument;
+    const root = doc && doc.documentElement;
+    // Root overflow is propagated to the viewport. In HTML documents whose
+    // root overflow is visible in both axes, BODY overflow is propagated
+    // instead. The source box then has used overflow: visible, so neither box
+    // is an ordinary clipping ancestor. Any containment on HTML or BODY
+    // disables the BODY special case.
+    if (node === root) continue;
+    if (doc && node === doc.body && root && root.tagName === "HTML" && node.parentElement === root) {
+      const rootStyle = getComputedStyle(root);
+      const noContainment = (value) => !value || value === "none";
+      const bodyOverflowPropagates = rootStyle.display !== "none"
+        && parent.display !== "none"
+        && (rootStyle.overflowX || rootStyle.overflow) === "visible"
+        && (rootStyle.overflowY || rootStyle.overflow) === "visible"
+        && noContainment(rootStyle.contain)
+        && noContainment(parent.contain);
+      if (bodyOverflowPropagates) continue;
+    }
+
     const clip = node.getBoundingClientRect();
-    if (clip.width <= 0 || clip.height <= 0) return false;
-    const overlapX = Math.min(rect.right, clip.right) - Math.max(rect.left, clip.left);
-    const overlapY = Math.min(rect.bottom, clip.bottom) - Math.max(rect.top, clip.top);
-    if (overlapX <= 0 || overlapY <= 0) return false;
+    if (clipsX) {
+      if (clip.width <= 0) return false;
+      const overlapX = Math.min(rect.right, clip.right) - Math.max(rect.left, clip.left);
+      if (overlapX <= 0) return false;
+    }
+    if (clipsY) {
+      if (clip.height <= 0) return false;
+      const overlapY = Math.min(rect.bottom, clip.bottom) - Math.max(rect.top, clip.top);
+      if (overlapY <= 0) return false;
+    }
   }
   return true;
 };

@@ -20,7 +20,11 @@ function withBox(el: Element, box: { x?: number; y?: number; width: number; heig
 
 beforeEach(() => {
   document.head.innerHTML = "";
+  document.documentElement.removeAttribute("style");
   document.body.innerHTML = "";
+  document.body.removeAttribute("style");
+  Reflect.deleteProperty(document.documentElement, "getBoundingClientRect");
+  Reflect.deleteProperty(document.body, "getBoundingClientRect");
 });
 
 describe("what counts as visible", () => {
@@ -29,6 +33,45 @@ describe("what counts as visible", () => {
     withBox(document.getElementById("b")!, { width: 60, height: 20 });
     expect(visible("css=#b")).toBe(true);
   });
+
+  it("does not treat BODY overflow propagated to the viewport as a zero-height clip", () => {
+    document.documentElement.style.overflow = "visible";
+    document.body.style.overflowX = "auto";
+    document.body.style.overflowY = "scroll";
+    document.body.innerHTML = `<button id="b">Play</button>`;
+    withBox(document.body, { width: 1000, height: 0 });
+    withBox(document.getElementById("b")!, { x: 100, y: 200, width: 68, height: 48 });
+
+    expect(visible("css=#b")).toBe(true);
+  });
+
+  it("treats BODY as an ordinary clipping box when root overflow prevents propagation", () => {
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    document.body.innerHTML = `<button id="b">Clipped</button>`;
+    withBox(document.documentElement, { width: 1000, height: 800 });
+    withBox(document.body, { width: 1000, height: 0 });
+    withBox(document.getElementById("b")!, { x: 100, y: 200, width: 68, height: 48 });
+
+    expect(visible("css=#b")).toBe(false);
+  });
+
+  it.each([
+    ["HTML", "size"],
+    ["BODY", "layout"],
+  ])(
+    "does not exempt BODY when %s has %s containment",
+    (element, contain) => {
+      document.documentElement.style.overflow = "visible";
+      document.body.style.overflow = "hidden";
+      (element === "HTML" ? document.documentElement : document.body).style.contain = contain;
+      document.body.innerHTML = `<button id="b">Contained</button>`;
+      withBox(document.body, { width: 1000, height: 0 });
+      withBox(document.getElementById("b")!, { x: 100, y: 200, width: 68, height: 48 });
+
+      expect(visible("css=#b")).toBe(false);
+    },
+  );
 
   it("does not see one an ancestor has clipped away to nothing", () => {
     // A collapsed accordion, a closed drawer, a carousel panel off to the
@@ -54,6 +97,16 @@ describe("what counts as visible", () => {
     document.body.innerHTML = `<div id="wrap" style="overflow:hidden"><button id="b">Here</button></div>`;
     withBox(document.getElementById("wrap")!, { x: 0, y: 0, width: 200, height: 100 });
     withBox(document.getElementById("b")!, { x: 10, y: 10, width: 60, height: 20 });
+    expect(visible("css=#b")).toBe(true);
+  });
+
+  it("applies an ordinary ancestor overflow clip only on its clipping axis", () => {
+    // visible/clip remains a one-axis clip at computed-value time. A
+    // visible/hidden pair would compute the visible axis to auto.
+    document.body.innerHTML = `<div id="wrap" style="overflow-x:clip;overflow-y:visible"><button id="b">Here</button></div>`;
+    withBox(document.getElementById("wrap")!, { x: 0, y: 0, width: 200, height: 0 });
+    withBox(document.getElementById("b")!, { x: 10, y: 200, width: 60, height: 20 });
+
     expect(visible("css=#b")).toBe(true);
   });
 
