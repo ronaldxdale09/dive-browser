@@ -373,7 +373,7 @@ jobs:
           rm -f assets/manifest-*.json
 
       - name: Publish to GitHub Releases
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # On a manual run this is what creates the tag, so the tag never
           # exists before the assets that justify it.
