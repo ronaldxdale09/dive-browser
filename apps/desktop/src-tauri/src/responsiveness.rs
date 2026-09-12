@@ -129,8 +129,46 @@ impl Detector {
             }
         }
         self.previous = Some(now);
+        if !self.observe_pending(now, sink, false) {
+            return false;
+        }
+        if self.pending.is_none()
+            && self
+                .last_send
+                .is_none_or(|sent| now.awake.saturating_sub(sent) >= SECOND)
+        {
+            let ack = Arc::new(Acknowledgement::default());
+            self.pending = Some(Pending {
+                sent: now.awake,
+                ack: ack.clone(),
+                reported: false,
+                fault,
+            });
+            self.last_send = Some(now.awake);
+            if fault {
+                sink(Record::new(now, Kind::FaultInjected, Some(4 * SECOND)));
+            }
+            if !dispatch(ack, fault) {
+                sink(Record::new(now, Kind::DispatchFailed, None));
+                return false;
+            }
+        }
+        true
+    }
+
+    // Shutdown takes one atomic snapshot and finalizes only a published ack;
+    // it neither waits for UI progress nor classifies a new pending interval.
+    fn observe_pending(
+        &mut self,
+        now: Sample,
+        sink: &mut impl FnMut(Record),
+        acknowledged_only: bool,
+    ) -> bool {
         if let Some(pending) = self.pending.as_mut() {
             let published = pending.ack.0.load(Ordering::Acquire);
+            if acknowledged_only && published == 0 {
+                return true;
+            }
             if published == u64::MAX {
                 sink(Record::new(now, Kind::ClockUnavailable, None));
                 return false;
@@ -161,31 +199,11 @@ impl Detector {
                 self.pending = None;
             }
         }
-        if self.pending.is_none()
-            && self
-                .last_send
-                .is_none_or(|sent| now.awake.saturating_sub(sent) >= SECOND)
-        {
-            let ack = Arc::new(Acknowledgement::default());
-            self.pending = Some(Pending {
-                sent: now.awake,
-                ack: ack.clone(),
-                reported: false,
-                fault,
-            });
-            self.last_send = Some(now.awake);
-            if fault {
-                sink(Record::new(now, Kind::FaultInjected, Some(4 * SECOND)));
-            }
-            if !dispatch(ack, fault) {
-                sink(Record::new(now, Kind::DispatchFailed, None));
-                return false;
-            }
-        }
         true
     }
 
     fn stop(&mut self, now: Sample, sink: &mut impl FnMut(Record)) {
+        self.observe_pending(now, sink, true);
         let duration = self
             .pending
             .take()
@@ -504,6 +522,40 @@ mod tests {
         assert!(!d.tick(sample(0), &mut |r| events.push(r), &mut |_, _| false, false));
         assert_eq!(events[0].kind, Kind::DispatchFailed);
     }
+    #[test]
+    fn stop_records_threshold_crossing_ack_before_observer_tick() {
+        let mut r = Rig::new();
+        r.tick(sample(0));
+        r.tick(sample(1000));
+        r.ack(2400);
+        r.detector
+            .stop(sample(2500), &mut |event| r.events.push(event));
+        assert_eq!(
+            r.kinds(),
+            [Kind::HangStarted, Kind::HangRecovered, Kind::MonitorStopped]
+        );
+        assert_eq!(r.events[0].duration_ms, Some(2400));
+        assert_eq!(r.events[1].duration_ms, Some(2400));
+        assert_eq!(r.pending.len(), 1, "shutdown must not dispatch");
+    }
+
+    #[test]
+    fn stop_records_recovery_of_already_reported_hang() {
+        let mut r = Rig::new();
+        r.tick(sample(0));
+        r.tick(sample(2000));
+        r.ack(2400);
+        r.detector
+            .stop(sample(2500), &mut |event| r.events.push(event));
+        assert_eq!(
+            r.kinds(),
+            [Kind::HangStarted, Kind::HangRecovered, Kind::MonitorStopped]
+        );
+        assert_eq!(r.events[0].duration_ms, Some(2000));
+        assert_eq!(r.events[1].duration_ms, Some(2400));
+        assert_eq!(r.pending.len(), 1, "shutdown must not dispatch");
+    }
+
     #[test]
     fn stop_does_not_require_pending_ack_and_late_ack_is_inert() {
         let mut r = Rig::new();
