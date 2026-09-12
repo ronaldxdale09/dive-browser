@@ -343,7 +343,7 @@ const CLOSE_ACK_GRACE: std::time::Duration = std::time::Duration::from_millis(15
 /// would leave a window the person asked to close sitting on screen. After
 /// this the exit proceeds regardless -- the same behaviour as before, just
 /// later and only when CEF really has stopped answering.
-const FINAL_ACK_GRACE: std::time::Duration = std::time::Duration::from_millis(2500);
+const FINAL_ACK_GRACE: std::time::Duration = std::time::Duration::from_millis(1000);
 
 pub(crate) enum Message<T: UserEvent> {
     EventLoop(EventLoopMessage),

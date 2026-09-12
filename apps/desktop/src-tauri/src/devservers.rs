@@ -37,14 +37,24 @@ pub const COMMON_PORTS: &[u16] = &[
 const MAX_PROBE_BODY: usize = 256 * 1024;
 /// How long a probe result is trusted.
 const PROBE_CACHE_TTL: Duration = Duration::from_secs(15);
-/// Gap between scans while anything is watching.
-const POLL_INTERVAL: Duration = Duration::from_secs(3);
+/// Gap between scans while anything is watching, when the last scan found
+/// something new. Each scan forks `lsof` and walks the socket table, so this
+/// is the floor, not the norm.
+const POLL_INTERVAL: Duration = Duration::from_secs(10);
+/// Scans that find nothing new stretch their gap by this factor, up to
+/// [`MAX_POLL_INTERVAL`]; a change resets it. Dev servers start and stop on
+/// a scale of minutes, not seconds, and polling at the floor for the length
+/// of a lease was measurable CPU spent confirming nothing had happened.
+const POLL_BACKOFF: u32 = 2;
+const MAX_POLL_INTERVAL: Duration = Duration::from_secs(60);
 /// How long one `watch(true)` keeps polling alive without another. A chrome
 /// reload drops the panel that would have sent `watch(false)`, so a watch
 /// is a lease, not a counter: it lapses on its own. The chrome renews it by
 /// calling `watch(true)` again; a panel open longer than this goes quiet
-/// until it does.
-const WATCH_LEASE: Duration = Duration::from_mins(15);
+/// until it does. A minute, not fifteen: the old lease kept `lsof` running
+/// every few seconds for a quarter of an hour after one look at the home
+/// page, while the page it served was long gone.
+const WATCH_LEASE: Duration = Duration::from_secs(60);
 /// Ceiling on concurrent HTTP probes, so a machine with a hundred listeners
 /// does not open a hundred sockets at once.
 const PROBE_CONCURRENCY: usize = 16;
@@ -321,15 +331,22 @@ impl Registry {
 pub fn start(app: AppHandle<Runtime>) {
     tauri::async_runtime::spawn(async move {
         use tauri::Manager as _;
+        let mut interval = POLL_INTERVAL;
         loop {
-            tokio::time::sleep(POLL_INTERVAL).await;
+            tokio::time::sleep(interval).await;
             let state = app.state::<crate::state::AppState>();
             if !state.devservers.watched() {
+                // Nobody looking: check back at the floor, cheaply, so a
+                // panel that opens is served promptly, and start fresh then.
+                interval = POLL_INTERVAL;
                 continue;
             }
             let (servers, changed) = state.devservers.refresh().await;
             if changed {
+                interval = POLL_INTERVAL;
                 let _ = DevServersChanged { servers }.emit(&app);
+            } else {
+                interval = (interval * POLL_BACKOFF).min(MAX_POLL_INTERVAL);
             }
         }
     });

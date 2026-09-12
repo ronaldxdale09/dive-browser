@@ -599,9 +599,17 @@ fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
     if private_session::is_private() {
         return None;
     }
+    // Release builds log at info: `dive=debug` matches every dive_* crate, so
+    // any debug! that lands on a feed loop becomes a per-event disk write for
+    // every user. Debug builds keep it. RUST_LOG overrides either.
+    let default_filter = if cfg!(debug_assertions) {
+        "info,dive=debug"
+    } else {
+        "info,dive=info"
+    };
     let filter = || {
         tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| "info,dive=debug".into())
+            .unwrap_or_else(|_| default_filter.into())
     };
     let logs = state::data_root().join("logs");
     let file = std::fs::create_dir_all(&logs).ok().and_then(|()| {
