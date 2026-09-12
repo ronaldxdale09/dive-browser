@@ -184,7 +184,7 @@ flags=(--target "${COMMIT}" --title "${NAME}" --generate-notes)
 [[ "${IS_PRERELEASE}" == "true" ]] && flags+=(--prerelease)
 [[ "${MAKE_LATEST}" == "true" ]] && flags+=(--latest) || flags+=(--latest=false)
 gh release create "${TAG}" "${flags[@]}" out/latest.json "${images[0]}" "${archives[0]}" \
-    "${signatures[0]}" "${WINDOWS_ASSETS[@]}"
+    "${signatures[0]}" ${WINDOWS_ASSETS[@]+"${WINDOWS_ASSETS[@]}"}
 PUBLISHED=1
 git fetch -q --tags origin
 
