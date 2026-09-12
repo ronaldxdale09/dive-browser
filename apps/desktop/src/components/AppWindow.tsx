@@ -1,3 +1,5 @@
+import { useCoversContent } from "../lib/overlay";
+import { JsDialogCard } from "./JsDialogCard";
 import { ArrowLeft, ArrowRight, Copy, EllipsisVertical, PanelsTopLeft, RotateCw, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { events, ipc } from "../lib/ipc";
@@ -40,6 +42,7 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
   const [menu, setMenu] = useState(false);
   const closeMenu = useCallback(() => setMenu(false), []);
   useDismiss(menuRoot, menu, closeMenu);
+  useCoversContent(menu);
   const uninstall = useWebApps((s) => s.uninstall);
 
   useEffect(() => {
@@ -140,6 +143,7 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
         )}
       </div>
       <div ref={body} className="relative min-h-0 flex-1 bg-surface">
+        <JsDialogCard tabId={tabId} />
         {navError && <NavErrorPanel url={navError.url} error={navError.error} onRetry={() => run(ipc.tabReload(tabId))} />}
       </div>
     </div>

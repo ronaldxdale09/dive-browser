@@ -1,3 +1,4 @@
+import { useJsDialog } from "../store/jsDialog";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
@@ -26,6 +27,7 @@ const tab: Tab = {
 const initial = useBrowser.getState();
 
 beforeEach(() => {
+  useJsDialog.setState({ byTab: {}, listening: true });
   useBrowser.setState({ tabs: [tab], activeTab: tab.id, activeWorkspace: tab.workspace_id, navError: {}, crashedTabs: {}, loading: {}, permissionRequests: {} });
   vi.spyOn(ipc, "permissionReply").mockResolvedValue(null);
   vi.spyOn(ipc, "setContentBounds").mockResolvedValue(null);
@@ -220,4 +222,12 @@ describe("Content permission dialog", () => {
     await waitFor(() => expect(screen.getByRole("dialog").textContent).toContain("microphone"));
     expect(screen.getByRole("dialog").textContent).not.toContain("location");
   });
+});
+
+it("leaves a detached tab's pending dialog to its owning window", () => {
+  useBrowser.setState({ detached: ["t1"] });
+  useJsDialog.setState({ byTab: { t1: [{ tab_id: "t1", dialog_id: "1", kind: "alert", origin: "", message: "Detached alert", default_value: "", is_reload: false }] } });
+  render(<Content />);
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(contentCoverDepth()).toBe(0);
 });

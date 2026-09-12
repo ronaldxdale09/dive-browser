@@ -57,6 +57,11 @@ impl Registry {
             .and_then(|list| list.first().cloned())
     }
 
+    /// Pending dialogs for one tab, in their native queue order.
+    pub fn pending(&self, tab: TabId) -> Vec<JsDialogAsked> {
+        lock(&self.open).get(&tab).cloned().unwrap_or_default()
+    }
+
     fn add(&self, dialog: JsDialogAsked) {
         lock(&self.open)
             .entry(dialog.tab_id)
@@ -196,6 +201,25 @@ mod tests {
             default_value: String::new(),
             is_reload: false,
         }
+    }
+
+    #[test]
+    fn pending_snapshot_keeps_order_and_isolated_tab_ownership() {
+        let registry = Registry::default();
+        let tab = TabId::new();
+        let other = TabId::new();
+        registry.add(asked(tab, "1"));
+        registry.add(asked(other, "2"));
+        registry.add(asked(tab, "3"));
+        assert_eq!(
+            registry.pending(tab),
+            vec![asked(tab, "1"), asked(tab, "3")]
+        );
+        registry.remove(tab, "1");
+        assert_eq!(registry.pending(tab), vec![asked(tab, "3")]);
+        registry.forget_tab(tab);
+        assert!(registry.pending(tab).is_empty());
+        assert_eq!(registry.pending(other), vec![asked(other, "2")]);
     }
 
     #[test]

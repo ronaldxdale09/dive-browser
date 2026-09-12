@@ -1,3 +1,4 @@
+import { JsDialogCard } from "./JsDialogCard";
 import { isPrivateWindow } from "../lib/privateMode";
 import { PrivateBadge, PrivateWelcome } from "./PrivateMode";
 import { useCoversContent } from "../lib/overlay";
@@ -263,6 +264,7 @@ export function Popout({ tabId }: { tabId: string }) {
         </div>}
       </div>
       <div ref={body} className="relative min-h-0 flex-1 bg-surface">
+        <JsDialogCard tabId={tabId} />
         {privateStart && <PrivateWelcome onBrowse={() => { inputRef.current?.focus(); inputRef.current?.select(); }} />}
         {navError && <NavErrorPanel url={navError.url} error={navError.error} onRetry={() => run(ipc.tabReload(tabId))} />}
       </div>

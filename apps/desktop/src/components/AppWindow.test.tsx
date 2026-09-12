@@ -1,3 +1,5 @@
+import { useJsDialog } from "../store/jsDialog";
+import { contentCoverDepth, resetContentCover } from "../lib/overlay";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab, WebApp } from "../lib/ipc";
@@ -18,6 +20,10 @@ const tab: Tab = { id: "a", workspace_id: "w", tier: "today", url: app.start_url
 let stateEvent: (payload: import("../lib/ipc").CoreEvent) => void;
 const initialBrowser = useBrowser.getState();
 beforeEach(() => {
+  useJsDialog.setState({ byTab: {}, listening: true });
+  vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);
+  vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
+  vi.spyOn(ipc, "jsDialogAnswer").mockResolvedValue(null);
   vi.clearAllMocks();
   useBrowser.setState({ ...initialBrowser, tabs: [tab], activeTab: tab.id }, true);
   usePrefs.setState({ load: vi.fn().mockResolvedValue(undefined) });
@@ -37,7 +43,7 @@ beforeEach(() => {
     return () => undefined;
   });
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); resetContentCover(); vi.restoreAllMocks(); });
 
 describe("AppWindow", () => {
   it("shows the app's name, no address bar, and no scope warning inside the app", async () => {
@@ -64,5 +70,39 @@ describe("AppWindow", () => {
     fireEvent.click(screen.getByRole("button", { name: "App menu" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Uninstall Mail" }));
     expect(useWebApps.getState().uninstall).toHaveBeenCalledWith(app.id);
+  });
+});
+
+describe("detached dialog overlays", () => {
+  it("shows only its owned prompt and answers with the typed text on Enter", async () => {
+    const prompt = { tab_id: "a", dialog_id: "7", kind: "prompt", origin: "https://example.com", message: "Your name?", default_value: "anon", is_reload: false };
+    useJsDialog.setState({ byTab: { a: [prompt], other: [{ ...prompt, tab_id: "other", message: "Other tab" }] } });
+    render(<AppWindow tabId="a" appId={app.id} />);
+    const field = screen.getByRole("textbox", { name: "Your answer" });
+    expect(screen.getAllByRole("alertdialog")).toHaveLength(1);
+    expect(screen.queryByText("Other tab")).toBeNull();
+    expect(contentCoverDepth()).toBe(1);
+    expect(document.activeElement).toBe(field);
+    fireEvent.change(field, { target: { value: "Dale" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(ipc.jsDialogAnswer).toHaveBeenCalledWith("a", "7", true, "Dale"));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(contentCoverDepth()).toBe(0);
+  });
+
+  it("keeps the menu above content until Escape or a menu action closes it", async () => {
+    render(<AppWindow tabId="a" appId={app.id} />);
+    await screen.findByText("Mail by Example");
+    fireEvent.click(screen.getByRole("button", { name: "App menu" }));
+    expect(screen.getByRole("menu")).toBeTruthy();
+    expect(contentCoverDepth()).toBe(1);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(contentCoverDepth()).toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: "App menu" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open in Dive" }));
+    expect(ipc.tabAttach).toHaveBeenCalledWith("a");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(contentCoverDepth()).toBe(0);
   });
 });

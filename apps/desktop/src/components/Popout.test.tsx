@@ -1,3 +1,5 @@
+import { useJsDialog } from "../store/jsDialog";
+import { contentCoverDepth, resetContentCover } from "../lib/overlay";
 import { prettyUrl } from "../lib/prettyUrl";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -29,6 +31,10 @@ const tab: Tab = {
 let stateEvent: (payload: import("../lib/ipc").CoreEvent) => void;
 let menuEvent: (command: string) => void;
 beforeEach(() => {
+  useJsDialog.setState({ byTab: {}, listening: true });
+  vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);
+  vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
+  vi.spyOn(ipc, "jsDialogAnswer").mockResolvedValue(null);
   vi.mocked(ipc.tabInfo).mockResolvedValue(tab);
   vi.mocked(ipc.popoutReady).mockResolvedValue(false);
   vi.mocked(ipc.windowCommand).mockResolvedValue(null);
@@ -49,7 +55,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  cleanup();
+  cleanup(); resetContentCover();
   useBrowser.setState(initialBrowserState, true);
   usePrefs.setState(initialPrefsState, true);
   vi.restoreAllMocks();
@@ -230,4 +236,22 @@ it("does not refocus a reattached page when an old popout navigation completes a
   view.unmount();
   await act(async () => finish());
   expect(activate).not.toHaveBeenCalled();
+});
+
+describe("detached dialog overlays", () => {
+  it("shows only its owned prompt and answers with the typed text on Enter", async () => {
+    const prompt = { tab_id: "a", dialog_id: "7", kind: "prompt", origin: "https://example.com", message: "Your name?", default_value: "anon", is_reload: false };
+    useJsDialog.setState({ byTab: { a: [prompt], other: [{ ...prompt, tab_id: "other", message: "Other tab" }] } });
+    render(<Popout tabId="a" />);
+    const field = screen.getByRole("textbox", { name: "Your answer" });
+    expect(screen.getAllByRole("alertdialog")).toHaveLength(1);
+    expect(screen.queryByText("Other tab")).toBeNull();
+    expect(contentCoverDepth()).toBe(1);
+    expect(document.activeElement).toBe(field);
+    fireEvent.change(field, { target: { value: "Dale" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(ipc.jsDialogAnswer).toHaveBeenCalledWith("a", "7", true, "Dale"));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(contentCoverDepth()).toBe(0);
+  });
 });

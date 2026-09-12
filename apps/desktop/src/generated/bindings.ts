@@ -280,6 +280,8 @@ export const commands = {
 	permissionSet: (scope: Scope, origin: string, kind: string, decision: Decision) => typedError<null, AppError>(__TAURI_INVOKE("permission_set", { scope, origin, kind, decision })),
 	/**  Resolve the original native request; its opaque ID carries trusted provenance. */
 	permissionReply: (tabId: TabId, requestId: string, decision: Decision, duration: Duration) => typedError<null, AppError>(__TAURI_INVOKE("permission_reply", { tabId, requestId, decision, duration })),
+	/**  Recover dialogs opened before this chrome subscribed to native events. */
+	jsDialogPending: (tabId: TabId) => typedError<JsDialogAsked[], AppError>(__TAURI_INVOKE("js_dialog_pending", { tabId })),
 	/**  Answer a page's JavaScript dialog (`JsDialogAsked`); the page's script resumes. */
 	jsDialogAnswer: (tabId: TabId, dialogId: string, accept: boolean, text: string | null) => typedError<null, AppError>(__TAURI_INVOKE("js_dialog_answer", { tabId, dialogId, accept, text })),
 	/**  Remembered permissions in the active profile and container. */

@@ -720,6 +720,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             bookmark_rename,
             permission_set,
             permission_reply,
+            js_dialog_pending,
             js_dialog_answer,
             permissions_list,
             crate::extensions::extensions_list,
@@ -2544,6 +2545,20 @@ pub(crate) fn permission_reply(
         crate::permissions::reply(state, tab_id, &request_id, decision, duration)
     })
 }
+/// Recover dialogs opened before this chrome subscribed to native events.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn js_dialog_pending(
+    app: AppHandle<Runtime>,
+    webview: tauri::Webview<Runtime>,
+    tab_id: TabId,
+) -> AppResult<Vec<crate::js_dialog::JsDialogAsked>> {
+    on_main(&app, move |_, _, state| {
+        crate::permissions::require_chrome(&webview)?;
+        Ok(state.js_dialogs.pending(tab_id))
+    })
+}
+
 /// Answer a page's JavaScript dialog (`JsDialogAsked`); the page's script resumes.
 #[tauri::command]
 #[specta::specta]

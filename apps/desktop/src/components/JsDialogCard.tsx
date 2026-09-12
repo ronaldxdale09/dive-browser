@@ -24,7 +24,7 @@ function heading(d: JsDialogAsked) {
  */
 export function JsDialogCard({ tabId }: { tabId: string | null }) {
   const dialog = useJsDialog((s) => (tabId ? s.byTab[tabId]?.[0] : undefined));
-  const init = useJsDialog((s) => s.init);
+  const recover = useJsDialog((s) => s.recover);
   const answer = useJsDialog((s) => s.answer);
   const panel = useRef<HTMLDivElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
@@ -34,7 +34,7 @@ export function JsDialogCard({ tabId }: { tabId: string | null }) {
   const [draft, setDraft] = useState<{ id: string; text: string }>();
   const open = dialog !== undefined;
   const text = dialog && draft?.id === dialog.dialog_id ? draft.text : (dialog?.default_value ?? "");
-  useEffect(() => void init(), [init]);
+  useEffect(() => { if (tabId) void recover(tabId); }, [recover, tabId]);
   useCoversContent(open);
   const prompt = dialog?.kind === "prompt";
   useFocusTrap(panel, { active: open, initialFocus: prompt ? field : primary, onEscape: () => dialog && void answer(dialog, false) });

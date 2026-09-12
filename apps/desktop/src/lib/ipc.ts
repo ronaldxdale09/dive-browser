@@ -222,6 +222,7 @@ export const ipc = {
   passwordsImportCsv: async (path: string) => unwrap(await commands.passwordsImportCsv(path)),
   permissionSet: async (scope: Scope, origin: string, kind: string, decision: Decision) => unwrap(await commands.permissionSet(scope, origin, kind, decision)),
   permissionReply: async (tabId: string, requestId: string, decision: Decision, duration: Duration) => unwrap(await commands.permissionReply(tabId, requestId, decision, duration)),
+  jsDialogPending: async (tabId: string) => unwrap(await commands.jsDialogPending(tabId)),
   jsDialogAnswer: async (tabId: string, dialogId: string, accept: boolean, text: string | null) => unwrap(await commands.jsDialogAnswer(tabId, dialogId, accept, text)),
   permissionsList: async () => unwrap(await commands.permissionsList()),
   extensionsList: async () => unwrap(await commands.extensionsList()),
