@@ -85,3 +85,16 @@ it("preserves native queue order when an older asked event overlaps the snapshot
   await act(async () => resolveSnapshot([prompt, { ...prompt, dialog_id: "8", message: "Next" }]));
   expect(useJsDialog.getState().byTab.a?.map((dialog) => dialog.dialog_id)).toEqual(["7", "8"]);
 });
+
+it("keeps the oldest recovered dialog visible after delayed and repeated asked events", async () => {
+  render(<JsDialogCard tabId="a" />);
+  await waitFor(() => expect(host.pending).toHaveBeenCalledWith("a"));
+  await act(async () => resolveSnapshot([prompt, { ...prompt, dialog_id: "8", message: "Next" }]));
+  const updated = { ...prompt, message: "Oldest updated" };
+  act(() => asked(updated));
+  expect(useJsDialog.getState().byTab.a?.map((dialog) => dialog.dialog_id)).toEqual(["7", "8"]);
+  expect(screen.getByRole("alertdialog").textContent).toContain("Oldest updated");
+  act(() => asked(updated));
+  expect(useJsDialog.getState().byTab.a?.map((dialog) => dialog.dialog_id)).toEqual(["7", "8"]);
+  expect(screen.getByRole("alertdialog").textContent).toContain("Oldest updated");
+});

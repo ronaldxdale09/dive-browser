@@ -53,7 +53,15 @@ export const useJsDialog = create<JsDialogStore>((set, get) => {
           stops.push(await events.jsDialogAsked.listen((e) => {
             const d = e.payload;
             changed(d.tab_id, d.dialog_id);
-            set((s) => ({ byTab: { ...s.byTab, [d.tab_id]: [...without(s.byTab[d.tab_id], d.dialog_id), d] } }));
+            set((s) => {
+              const current = s.byTab[d.tab_id] ?? [];
+              // Recovery may deliver this ID before its asked event. Update
+              // in place so delayed/repeated events cannot reorder the queue.
+              const list = current.some((open) => open.dialog_id === d.dialog_id)
+                ? current.map((open) => open.dialog_id === d.dialog_id ? d : open)
+                : [...current, d];
+              return { byTab: { ...s.byTab, [d.tab_id]: list } };
+            });
           }));
           set({ listening: true });
         } catch {
