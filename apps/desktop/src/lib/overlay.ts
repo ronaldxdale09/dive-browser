@@ -56,10 +56,28 @@ async function cover(token: number) {
     covering = false;
     return;
   }
+  if (frozen.length === 0 && liveOverlaysAvailable()) {
+    // Nothing came back to stand in for the page -- a capture that failed or
+    // timed out on a busy renderer, a playing video being the usual one.
+    // Hiding the page now would leave a black rectangle behind the modal's
+    // blur with no way back until it closes: the "click +, everything goes
+    // dark and stays" freeze. Where a live mask exists (macOS), keep the page
+    // live with the chrome masked above it instead. The blur has nothing to
+    // work on, but the page is there and the overlay is usable -- far better
+    // than a black screen. Without a mask there is no alternative to covering.
+    covering = false;
+    if (!stopLive) stopLive = beginLive();
+    return;
+  }
   publish(Object.fromEntries(frozen.map((preview) => [preview.tab_id, preview.data_url])));
   // Let React commit the frozen viewport before removing the native surface.
   await afterPaint();
-  if (depth === 0 || token !== generation) return;
+  if (depth === 0 || token !== generation) {
+    // Not resetting `covering` here left the flag stuck true, so no later
+    // overlay could ever cover the page again.
+    covering = false;
+    return;
+  }
   covered = true;
   covering = false;
   await ipc.setContentCovered(true).catch(() => undefined);

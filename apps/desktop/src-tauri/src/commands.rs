@@ -3331,6 +3331,10 @@ pub(crate) fn layout_set_content_bounds(app: AppHandle<Runtime>, bounds: Bounds)
 /// Freeze every page shown in the main window before a DOM overlay hides its
 /// native child view. Unlike a user capture, these previews stay in memory and
 /// never touch the captures folder or clipboard.
+/// A page capture for the overlay must not outrun the click that asked for
+/// it; past this the dialog opens over the live page instead.
+const COVER_CAPTURE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
+
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn layout_prepare_content_cover(
@@ -3347,15 +3351,25 @@ pub(crate) async fn layout_prepare_content_cover(
         // decoding it here only to encode it again costs two passes over the
         // image while the dialog's backdrop waits to paint. The quality is low
         // because what the person sees is this image behind a heavy blur.
-        let result = dive_cdp::page::capture_screenshot_base64(
+        // Bound the capture: it stands between a click and a blurred dialog,
+        // and `Page.captureScreenshot` on a busy renderer -- a playing video
+        // -- can take the session's full default timeout. Past this the
+        // dialog opens over the live page instead of a frozen one, which the
+        // chrome handles, rather than the click appearing to hang.
+        let capture = dive_cdp::page::capture_screenshot_base64(
             &session,
             dive_cdp::page::ScreenshotOptions {
                 format: dive_cdp::page::ImageFormat::Jpeg,
                 quality: Some(50),
                 ..Default::default()
             },
-        )
-        .await;
+        );
+        let result = match tokio::time::timeout(COVER_CAPTURE_TIMEOUT, capture).await {
+            Ok(result) => result,
+            Err(_) => Err(dive_cdp::CdpError::Timeout {
+                method: "Page.captureScreenshot".to_owned(),
+            }),
+        };
         (tab_id, result)
     }))
     .await;

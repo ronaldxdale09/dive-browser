@@ -76,6 +76,9 @@ describe("live overlays versus a modal", () => {
   beforeEach(() => {
     (window as Window & { __DIVE_LIVE_OVERLAYS__?: boolean }).__DIVE_LIVE_OVERLAYS__ = true;
     vi.spyOn(ipc, "setOverlayRegions").mockResolvedValue(null);
+    // A real capture, so the freeze path has something to show. An empty one
+    // is the failed-capture case, covered by its own test below.
+    vi.mocked(ipc.prepareContentCover).mockResolvedValue([{ tab_id: "t", data_url: "data:image/jpeg;base64,AA==" }]);
   });
   afterEach(() => {
     delete (window as Window & { __DIVE_LIVE_OVERLAYS__?: boolean }).__DIVE_LIVE_OVERLAYS__;
@@ -104,5 +107,17 @@ describe("live overlays versus a modal", () => {
     view.rerender(createElement("div", null, createElement(Menu, { key: "m" }), createElement(Modal, { key: "d" })));
     await waitFor(() => expect(ipc.setContentCovered).toHaveBeenLastCalledWith(true));
     expect(ipc.prepareContentCover).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the page live under a modal when the capture comes back empty", async () => {
+    // A capture that fails or times out -- a busy renderer, a playing video.
+    // The page must not be hidden with nothing to replace it (a black screen
+    // behind the blur that only closing the dialog clears). It stays live
+    // under the mask instead.
+    vi.mocked(ipc.prepareContentCover).mockResolvedValue([]);
+    render(createElement(Modal));
+    await waitFor(() => expect(ipc.prepareContentCover).toHaveBeenCalled());
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenCalled());
+    expect(ipc.setContentCovered).not.toHaveBeenCalledWith(true);
   });
 });
