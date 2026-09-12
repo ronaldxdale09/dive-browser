@@ -33,7 +33,14 @@ scripts/release/local-release.sh patch      # or minor, major, rc, or an exact v
 
 The same path as the workflow, run locally: resolve, preflight, stamp, build
 and sign, notarize, `latest.json`, publish (creating the tag), verify, then
-commit the bump to `main`. A failure before publishing restores the stamped
+commit the bump to `main`.
+
+Windows is built by the `release` workflow, which cannot sign a macOS app and
+so never publishes on its own; point `DIVE_WINDOWS_RUN` at the run that built
+`windows-x86_64` and its installer joins the release. `DIVE_SKIP_WINDOWS=1`
+cuts a macOS-only release instead: the manifest then carries one platform, so
+a Windows install is offered nothing rather than something broken, but the
+release page has no installer for it either. A failure before publishing restores the stamped
 files. It needs the updater keypair in `~/.tauri` (`dive.key`,
 `dive.key.password`, `dive.key.pub`), a Developer ID identity in the login
 keychain, and notarization credentials: `APPLE_ID`, `APPLE_PASSWORD` and

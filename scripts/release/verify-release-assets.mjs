@@ -13,6 +13,21 @@ import { pathToFileURL } from 'node:url'
 
 const API_VERSION = '2022-11-28'
 
+/** The platforms a release carries unless it says otherwise. */
+export const ALL_PLATFORMS = ['darwin', 'windows']
+
+const PER_PLATFORM = {
+  darwin: [
+    { name: 'DMG installer', match: (file) => file.endsWith('.dmg') },
+    { name: 'macOS updater archive', match: (file) => file.endsWith('.tar.gz') },
+    { name: 'macOS updater signature', match: (file) => file.endsWith('.tar.gz.sig') }
+  ],
+  windows: [
+    { name: 'Windows installer', match: (file) => file.endsWith('-setup.exe') },
+    { name: 'Windows updater signature', match: (file) => file.endsWith('-setup.exe.sig') }
+  ]
+}
+
 /**
  * Asset kinds a release has to carry to be installable and updatable, on every
  * platform it claims to ship.
@@ -21,15 +36,19 @@ const API_VERSION = '2022-11-28'
  * the result is a release whose download button is missing for one platform.
  * Naming each kind per platform is what turns that into a failed release rather
  * than a bad one.
+ *
+ * `platforms` narrows that claim. A release cut from one machine may ship a
+ * single platform deliberately; it still has to carry everything *that*
+ * platform needs, and asking for the other one's assets would fail a release
+ * that is complete.
  */
-export function requiredAssets() {
+export function requiredAssets(platforms = ALL_PLATFORMS) {
+  const unknown = platforms.filter((platform) => !(platform in PER_PLATFORM))
+  if (unknown.length > 0) throw new Error(`unknown platform: ${unknown.join(', ')}`)
+  if (platforms.length === 0) throw new Error('a release carries at least one platform')
   return [
     { name: 'update manifest', match: (file) => file === 'latest.json' },
-    { name: 'DMG installer', match: (file) => file.endsWith('.dmg') },
-    { name: 'macOS updater archive', match: (file) => file.endsWith('.tar.gz') },
-    { name: 'macOS updater signature', match: (file) => file.endsWith('.tar.gz.sig') },
-    { name: 'Windows installer', match: (file) => file.endsWith('-setup.exe') },
-    { name: 'Windows updater signature', match: (file) => file.endsWith('-setup.exe.sig') }
+    ...platforms.flatMap((platform) => PER_PLATFORM[platform])
   ]
 }
 
@@ -55,13 +74,19 @@ async function githubJson(url, token) {
 }
 
 /** Throw unless the release tagged `tag` carries every required asset. */
-export async function verifyRelease({ repo, tag, token, fetchRelease = null }) {
+export async function verifyRelease({
+  repo,
+  tag,
+  token,
+  platforms = ALL_PLATFORMS,
+  fetchRelease = null
+}) {
   const release = fetchRelease
     ? await fetchRelease(tag)
     : await githubJson(`https://api.github.com/repos/${repo}/releases/tags/${tag}`, token)
 
   const assets = release.assets ?? []
-  const missing = missingAssetKinds(assets)
+  const missing = missingAssetKinds(assets, requiredAssets(platforms))
   if (missing.length > 0) {
     throw new Error(
       `Release ${tag} is missing: ${missing.join(', ')}. ` +
@@ -82,13 +107,19 @@ export async function verifyRelease({ repo, tag, token, fetchRelease = null }) {
 // `file:///D:/a/x.mjs` that import.meta.url holds, so the naive form left
 // this whole block unreachable there and the script a silent no-op.
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  const [, , tag] = process.argv
+  const args = process.argv.slice(2)
+  const platformsAt = args.indexOf('--platforms')
+  const platforms =
+    platformsAt === -1 ? ALL_PLATFORMS : (args[platformsAt + 1] ?? '').split(',').filter(Boolean)
+  const tag = args.filter((arg, i) => !arg.startsWith('--') && i !== platformsAt + 1)[0]
   const repo = process.env.GITHUB_REPOSITORY
   const token = process.env.GITHUB_TOKEN
   if (!tag || !repo || !token) {
-    console.error('usage: GITHUB_REPOSITORY=o/r GITHUB_TOKEN=... verify-release-assets.mjs <tag>')
+    console.error(
+      'usage: GITHUB_REPOSITORY=o/r GITHUB_TOKEN=... verify-release-assets.mjs <tag> [--platforms darwin,windows]'
+    )
     process.exit(1)
   }
-  const result = await verifyRelease({ repo, tag, token })
+  const result = await verifyRelease({ repo, tag, token, platforms })
   console.log(`${tag} carries: ${result.assets.join(', ')}`)
 }

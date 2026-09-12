@@ -13,6 +13,11 @@
 # The versions have to match, and this checks that they do -- a release whose
 # two halves disagree offers each platform an update the other does not have.
 #
+# DIVE_SKIP_WINDOWS=1 cuts a macOS-only release. The manifest then carries one
+# platform, so a Windows install is offered nothing rather than something
+# broken, but the release page has no installer for it either -- which is why
+# this has to be asked for.
+#
 # Same path as .github/workflows/release.yml, in the same order: resolve the
 # version, run the fast preflight, stamp the version into this checkout, build
 # and sign, notarize, write latest.json, publish the GitHub release (which
@@ -48,7 +53,9 @@ step "preconditions"
 [[ "$(git branch --show-current)" == "main" ]] || die "release from main"
 # Every release carries both platforms, and the verifier after publishing says
 # so. Find that out here rather than after the tag exists.
-[[ -n "${DIVE_WINDOWS_RUN:-}" ]] || die "set DIVE_WINDOWS_RUN to the release workflow run that built windows-x86_64 (gh run list --workflow=release.yml)"
+if [[ -z "${DIVE_WINDOWS_RUN:-}" && "${DIVE_SKIP_WINDOWS:-}" != "1" ]]; then
+    die "set DIVE_WINDOWS_RUN to the release workflow run that built windows-x86_64 (gh run list --workflow=release.yml), or DIVE_SKIP_WINDOWS=1 for a macOS-only release"
+fi
 git diff --quiet && git diff --cached --quiet || die "working tree must be clean"
 # Release tags are created on GitHub by the publish step, so the local list
 # is only complete after a fetch; resolving against a stale list would try
@@ -166,7 +173,8 @@ git fetch -q --tags origin
 
 step "verify what GitHub stored"
 GITHUB_REPOSITORY="${REPO}" GITHUB_TOKEN="$(gh auth token)" \
-    node scripts/release/verify-release-assets.mjs "${TAG}"
+    node scripts/release/verify-release-assets.mjs "${TAG}" \
+    --platforms "$([[ "${#WINDOWS_ASSETS[@]}" -gt 0 ]] && echo darwin,windows || echo darwin)"
 
 step "record ${VERSION} on main"
 git add "${STAMPED[@]}"

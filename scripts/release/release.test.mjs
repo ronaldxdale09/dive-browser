@@ -26,7 +26,7 @@ import {
   mergeManifests,
   PLATFORM_KEYS
 } from './update-manifest.mjs'
-import { missingAssetKinds, verifyRelease } from './verify-release-assets.mjs'
+import { missingAssetKinds, requiredAssets, verifyRelease } from './verify-release-assets.mjs'
 
 describe('resolve-release', () => {
   it('reads stable and candidate tags, and rejects anything else', () => {
@@ -390,6 +390,28 @@ describe('verify-release-assets', () => {
         })
       })
     ).rejects.toThrow(/empty assets: latest\.json/)
+  })
+
+  it('asks only for the platforms the release claims to ship', async () => {
+    // A release cut from one Mac with DIVE_SKIP_WINDOWS carries no installer
+    // for Windows, and demanding one would fail a release that is complete.
+    const macOnly = complete.filter((a) => !a.name.includes('setup.exe'))
+    const result = await verifyRelease({
+      tag: 'v0.1.4',
+      platforms: ['darwin'],
+      fetchRelease: async () => ({ assets: macOnly })
+    })
+    expect(result.assets).toHaveLength(4)
+    // Narrowing the claim does not excuse that platform's own assets.
+    expect(missingAssetKinds(macOnly.slice(0, 2), requiredAssets(['darwin']))).toEqual([
+      'macOS updater archive',
+      'macOS updater signature'
+    ])
+  })
+
+  it('refuses a claim it cannot check', () => {
+    expect(() => requiredAssets(['linux'])).toThrow(/unknown platform: linux/)
+    expect(() => requiredAssets([])).toThrow(/at least one platform/)
   })
 
   it('fails with the published asset list, so the cause is visible in the log', async () => {
