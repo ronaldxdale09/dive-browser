@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
-import { BOOT_CHECK_DELAY_MS, resetBootCheck, scheduleBootCheck, useUpdates } from "./updates";
+import { BOOT_CHECK_DELAY_MS, PROGRESS_INTERVAL_MS, reportUpdateProgress, resetBootCheck, scheduleBootCheck, useUpdates } from "./updates";
 
 const initial = useUpdates.getState();
 
@@ -39,6 +39,35 @@ describe("useUpdates", () => {
     await useUpdates.getState().install();
     expect(install).toHaveBeenCalledTimes(1);
     expect(useUpdates.getState()).toMatchObject({ installing: false, error: "signature" });
+  });
+});
+
+describe("reportUpdateProgress", () => {
+  it("writes the store at most once per interval, keeps the latest count, and ends at once", () => {
+    const writes = vi.fn();
+    const unsubscribe = useUpdates.subscribe(writes);
+    const progress = (received: number) => ({ received, total: 1000, done: false });
+
+    // The first report shows straight away; the chunks behind it wait.
+    reportUpdateProgress(progress(10));
+    expect(writes).toHaveBeenCalledTimes(1);
+    expect(useUpdates.getState()).toMatchObject({ received: 10, total: 1000 });
+    for (const n of [20, 30, 40]) reportUpdateProgress(progress(n));
+    expect(writes).toHaveBeenCalledTimes(1);
+    expect(useUpdates.getState().received).toBe(10);
+
+    // When the interval lapses the newest count lands, not the first one queued.
+    vi.advanceTimersByTime(PROGRESS_INTERVAL_MS);
+    expect(writes).toHaveBeenCalledTimes(2);
+    expect(useUpdates.getState().received).toBe(40);
+
+    // The end of the download is not held back by the throttle.
+    reportUpdateProgress(progress(50));
+    reportUpdateProgress({ received: null, total: null, done: true });
+    expect(useUpdates.getState().applying).toBe(true);
+    vi.advanceTimersByTime(PROGRESS_INTERVAL_MS);
+    expect(useUpdates.getState()).toMatchObject({ applying: true, received: 40 });
+    unsubscribe();
   });
 });
 
