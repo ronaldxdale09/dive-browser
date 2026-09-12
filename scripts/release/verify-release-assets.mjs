@@ -111,7 +111,7 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   const platformsAt = args.indexOf('--platforms')
   const platforms =
     platformsAt === -1 ? ALL_PLATFORMS : (args[platformsAt + 1] ?? '').split(',').filter(Boolean)
-  const tag = args.filter((arg, i) => !arg.startsWith('--') && i !== platformsAt + 1)[0]
+  const tag = args.filter((arg, i) => !arg.startsWith('--') && (platformsAt === -1 || i !== platformsAt + 1))[0]
   const repo = process.env.GITHUB_REPOSITORY
   const token = process.env.GITHUB_TOKEN
   if (!tag || !repo || !token) {

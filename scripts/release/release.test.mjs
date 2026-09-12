@@ -345,6 +345,20 @@ describe('verify-release-assets', () => {
     { name: 'Dive_0.1.4_x64-setup.exe.sig', size: 100 }
   ]
 
+  it('accepts a tag without an explicit platforms flag through the CLI', async () => {
+    const { spawnSync } = await import('node:child_process')
+    const preload = `globalThis.fetch = async () => ({ok:true,json:async()=>(${JSON.stringify({ assets: complete })})})`
+    const result = spawnSync(process.execPath, [
+      '--import', `data:text/javascript,${encodeURIComponent(preload)}`,
+      resolve(import.meta.dirname, 'verify-release-assets.mjs'), 'v0.1.24'
+    ], {
+      encoding: 'utf8',
+      env: { ...process.env, GITHUB_REPOSITORY: 'test/repo', GITHUB_TOKEN: 'test' }
+    })
+    expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: '' })
+    expect(result.stdout).toContain('v0.1.24 carries:')
+  })
+
   it('accepts a release that carries everything an update needs', async () => {
     const result = await verifyRelease({
       tag: 'v0.1.4',
