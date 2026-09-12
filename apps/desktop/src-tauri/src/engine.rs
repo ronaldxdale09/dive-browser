@@ -1039,6 +1039,17 @@ impl TabHost {
         for chrome in self.live_overlays.keys() {
             self.update_overlay_mask(chrome, true)?;
         }
+        // A chrome that just left the live set keeps its mask otherwise: the
+        // loop above only rebuilds masks for chromes still in it. A stale mask
+        // punches transparent holes over the old page area, and once the page
+        // view is hidden under a modal, those holes show the black window
+        // behind the chrome instead of the frozen page -- the "click +,
+        // everything goes dark" freeze. Clearing it lets the chrome paint the
+        // whole content area, frozen page and all. Popouts clear their own in
+        // `set_live_overlay`.
+        if !self.live_overlays.contains_key(CHROME_LABEL) {
+            self.update_overlay_mask(CHROME_LABEL, false)?;
+        }
         Ok(())
     }
 
