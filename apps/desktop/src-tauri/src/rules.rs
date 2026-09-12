@@ -468,6 +468,17 @@ async fn request_id_or_reset(
     None
 }
 
+/// A paused request stands between the page and its resource, so its
+/// terminal call cannot wait out the session's generous default: a reply
+/// that has not come in this long is not coming, and the page is better off
+/// with the request released as failed than held for 30 s.
+const FETCH_ACTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// How many paused requests may be resolving at once per tab. Enough that a
+/// page's subresources overlap the way the network expects; bounded so a
+/// runaway page cannot spawn a task per request without limit.
+const MAX_IN_FLIGHT: usize = 32;
+
 /// Execute the selected terminal action. Any action that modifies or refuses
 /// a request gets exactly one plain-continue fallback when Chromium rejects
 /// it. A failed plain continue is not retried, which keeps failure bounded.
@@ -522,13 +533,20 @@ async fn execute_action(
         }
         InterceptAction::Continue => ("Fetch.continueRequest", json!({"requestId": request_id})),
     };
-    match session.call(method, params).await {
+    match session
+        .call_with_timeout(method, params, FETCH_ACTION_TIMEOUT)
+        .await
+    {
         Ok(_) => privacy_category,
         Err(error) => {
             tracing::debug!(%method, "intercept action failed: {error}");
             if !matches!(action, InterceptAction::Continue)
                 && let Err(fallback) = session
-                    .call("Fetch.continueRequest", json!({"requestId": request_id}))
+                    .call_with_timeout(
+                        "Fetch.continueRequest",
+                        json!({"requestId": request_id}),
+                        FETCH_ACTION_TIMEOUT,
+                    )
                     .await
             {
                 tracing::debug!("plain continue recovery failed: {fallback}");
@@ -567,6 +585,7 @@ pub fn attach(
             tracing::warn!(%tab_id, "fetch interception failed: {e}");
         }
         let mut top_frame = TopFrameContext::new(&initial_document_url);
+        let in_flight = Arc::new(tokio::sync::Semaphore::new(MAX_IN_FLIGHT));
         let _ = ready_tx.send(());
         loop {
             let event = match events.recv().await {
@@ -632,12 +651,26 @@ pub fn attach(
                     .buffers
                     .note_rewrite(tab_id, network_id, &note);
             }
-            if let Some(category) =
-                execute_action(&session, &request_id, &p["request"]["headers"], &action).await
-                && let Err(e) = (PrivacyEvent::Blocked { tab_id, category }).emit(&app)
-            {
-                tracing::warn!(%tab_id, "privacy event emit failed: {e}");
-            }
+            // The round trip is in resolving the request. Awaiting it here
+            // meant the next paused request was not even read until this
+            // one's reply came back, so a page's subresources loaded one at
+            // a time. Each now resolves on its own task, a bounded number in
+            // flight; the decision above stays in the loop, where it is cheap.
+            let Ok(permit) = Arc::clone(&in_flight).acquire_owned().await else {
+                break; // the semaphore is never closed; defensive
+            };
+            let session = session.clone();
+            let app = app.clone();
+            let headers = p["request"]["headers"].clone();
+            tauri::async_runtime::spawn(async move {
+                let _permit = permit;
+                if let Some(category) =
+                    execute_action(&session, &request_id, &headers, &action).await
+                    && let Err(e) = (PrivacyEvent::Blocked { tab_id, category }).emit(&app)
+                {
+                    tracing::warn!(%tab_id, "privacy event emit failed: {e}");
+                }
+            });
         }
     });
     ready_rx

@@ -148,7 +148,7 @@ where
 /// 2. We're on some other thread (e.g. a tokio IPC handler that called the
 ///    Tauri API directly). The CEF UI thread is running its own pump and will
 ///    pick up our queued init task on its own; we just block here on a sleep
-///    loop until the flag flips. We can't call `do_message_loop_work` from
+///    loop until the flag flips or the deadline passes. We can't call `do_message_loop_work` from
 ///    this thread - it asserts on the init thread.
 ///
 /// Spinning here keeps `create_webview` synchronous from the caller's
@@ -156,19 +156,37 @@ where
 /// `state.windows`, so any subsequent dispatcher call (e.g.
 /// `webview.open_devtools()`, `webview.on_dev_tools_protocol(...)`) can find
 /// the webview.
-pub(crate) fn wait_for_deferred_init(flag: &Arc<AtomicBool>) {
+/// How long webview creation may wait for the request context and then the
+/// browser. Creation normally takes well under a second; a cold profile on a
+/// slow disk takes a few. Past this something is wrong, and the thread must
+/// be given back rather than spun forever.
+pub(crate) const CREATION_DEADLINE: Duration = Duration::from_secs(15);
+
+/// Returns `false` if the deadline passed before the flag flipped.
+pub(crate) fn wait_for_deferred_init(flag: &Arc<AtomicBool>) -> bool {
     let on_ui_thread = cef::currently_on(cef::sys::cef_thread_id_t::TID_UI.into()) != 0;
+    let started = std::time::Instant::now();
 
     if on_ui_thread {
         let _allow = AllowNestableTasks::enter();
         while !flag.load(Ordering::SeqCst) {
+            if started.elapsed() > CREATION_DEADLINE {
+                return false;
+            }
             cef::do_message_loop_work();
+            // The init task runs on this loop, so pumping is what makes
+            // progress; the pause only keeps an idle pass from pegging a core.
+            std::thread::sleep(Duration::from_millis(1));
         }
     } else {
         while !flag.load(Ordering::SeqCst) {
+            if started.elapsed() > CREATION_DEADLINE {
+                return false;
+            }
             std::thread::sleep(Duration::from_millis(1));
         }
     }
+    true
 }
 
 /// RAII guard that scopes `CefSetNestableTasksAllowed(true)` for the current

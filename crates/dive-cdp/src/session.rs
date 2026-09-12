@@ -152,7 +152,11 @@ impl CdpSession {
         self.call_with_timeout(method, params, CALL_TIMEOUT).await
     }
 
-    async fn call_with_timeout(
+    /// Like [`call`](Self::call) with the caller's own deadline. The default
+    /// is generous because a script evaluation on a busy page legitimately
+    /// takes a while; a call that stands between a paused request and the
+    /// page loading wants something far shorter.
+    pub async fn call_with_timeout(
         &self,
         method: &str,
         params: Value,
