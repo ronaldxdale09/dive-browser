@@ -73,6 +73,19 @@ if ! printf 'int main(){return 0;}' | cc -x c - -o /dev/null >/dev/null 2>&1; th
     done
     [[ -n "${SDKROOT:-}" ]] || die "cc cannot link anything; check xcode-select -p and the Command Line Tools"
 fi
+# A failed bundle leaves its scratch image mounted, and the next run fails to
+# unmount its own with "couldn't unmount ... Resource busy" -- one flake then
+# costs every later attempt. Eject whatever this repo left behind first; other
+# people's disk images are none of our business.
+while read -r dev; do
+    [[ -n "${dev}" ]] || continue
+    echo "   ejecting a disk image left mounted by an earlier build: ${dev}"
+    hdiutil detach "${dev}" -force >/dev/null 2>&1 || true
+done < <(hdiutil info | awk -v root="${ROOT}/target" '
+    /^image-path/ { mine = index($0, root) > 0 }
+    mine && /^\/dev\/disk[0-9]+\t/ { print $1 }')
+rm -f target/release/bundle/macos/rw.*.dmg
+
 git diff --quiet && git diff --cached --quiet || die "working tree must be clean"
 # Release tags are created on GitHub by the publish step, so the local list
 # is only complete after a fetch; resolving against a stale list would try
