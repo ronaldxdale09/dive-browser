@@ -79,7 +79,8 @@ describe("Appearance", () => {
     fireEvent.blur(bad);
     expect(prefs().custom_highlight).toBe(DEFAULT_PREFS.custom_highlight);
 
-    fireEvent.change(screen.getByLabelText("Start from template"), { target: { value: "sepia" } });
+    fireEvent.click(screen.getByLabelText("Start from template"));
+    fireEvent.click(screen.getByRole("option", { name: "Sepia" }));
     fireEvent.click(screen.getByRole("button", { name: "Start from Sepia" }));
     await waitFor(() => expect(prefs().custom_ground).toBe("#231a14"));
     expect(prefs().custom_ink).toBe("#f0e4d2");
@@ -109,7 +110,8 @@ describe("Appearance", () => {
 
   it("sets font, density, corners, tabs, motion and welcome background", async () => {
     render(<Appearance />);
-    fireEvent.change(screen.getByLabelText("Font"), { target: { value: "mono" } });
+    fireEvent.click(screen.getByLabelText("Font"));
+    fireEvent.click(screen.getByRole("option", { name: "Mono" }));
     fireEvent.click(screen.getByRole("radio", { name: "Compact" }));
     fireEvent.click(screen.getByRole("radio", { name: "Sharp" }));
     fireEvent.click(screen.getByRole("radio", { name: "Flat" }));

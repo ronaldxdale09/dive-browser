@@ -75,6 +75,7 @@ describe("Setup", () => {
   it("uses only catalog providers and their names, without stale model labels", () => {
     useAgent.setState({ providers: [{ ...MOCK_PROVIDERS[0]!, name: "Catalog Anthropic", default_model: "catalog-model" }] });
     render(<Setup canGoBack={false} onDone={() => {}} />);
+    fireEvent.click(screen.getByRole("combobox", { name: "All providers" }));
     expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["Catalog Anthropic"]);
     expect(screen.getByText("catalog-model")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /OpenAI/ })).toBeNull();

@@ -98,7 +98,8 @@ describe("Subtitles dialog", () => {
   it("changes the language", async () => {
     render(<Subtitles />);
     await screen.findByText("Base");
-    fireEvent.change(screen.getByLabelText("Subtitle language"), { target: { value: "ja" } });
+    fireEvent.click(screen.getByLabelText("Subtitle language"));
+    fireEvent.click(screen.getByRole("option", { name: "Japanese" }));
     expect(useSubtitles.getState().language).toBe("ja");
   });
 
@@ -115,7 +116,8 @@ describe("Subtitles dialog", () => {
     await screen.findByText("Small");
     // Choose the downloaded model and set options.
     fireEvent.click(screen.getByRole("radio", { name: "Use Small" }));
-    fireEvent.change(screen.getByLabelText("Subtitle language"), { target: { value: "ja" } });
+    fireEvent.click(screen.getByLabelText("Subtitle language"));
+    fireEvent.click(screen.getByRole("option", { name: "Japanese" }));
     fireEvent.click(screen.getByRole("switch", { name: "Translate to English" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Start subtitles" }));

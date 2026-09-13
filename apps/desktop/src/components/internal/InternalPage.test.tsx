@@ -173,7 +173,8 @@ describe("capture internal page", () => {
     render(<InternalPage tab={capture} />);
     await screen.findByRole("img", { name: "Full-page capture preview" });
 
-    fireEvent.change(screen.getByRole("combobox", { name: "PDF page size" }), { target: { value: "a4" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "PDF page size" }));
+    fireEvent.click(screen.getByRole("option", { name: "A4 pages" }));
     fireEvent.click(screen.getByRole("button", { name: "Export PDF" }));
 
     await waitFor(() => expect(downloaded).toBe("example-docs-full-page.pdf"));

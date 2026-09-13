@@ -187,7 +187,8 @@ describe("Content permission dialog", () => {
   it("resumes the original request with a page-only choice without reloading", async () => {
     useBrowser.setState({ permissionRequests: { t1: [camera] } });
     render(<Content />);
-    fireEvent.change(screen.getByRole("combobox", {name:"Permission duration"}), {target:{value:"page"}});
+    fireEvent.click(screen.getByRole("combobox", { name: "Permission duration" }));
+    fireEvent.click(screen.getByRole("option", { name: "Until this page navigates or closes" }));
     fireEvent.click(screen.getByRole("button", { name: "Allow" }));
     expect(ipc.permissionReply).toHaveBeenCalledWith("t1", "r1", "allow", "page");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

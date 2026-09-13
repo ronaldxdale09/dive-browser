@@ -1,7 +1,6 @@
-import { ChevronDown } from "lucide-react";
 import { useId } from "react";
 import type { ReactNode } from "react";
-import { Icon } from "./Icon";
+export { Select } from "./Select";
 
 /**
  * Form primitives for the settings dialog. They exist so every setting is
@@ -74,43 +73,6 @@ export function Switch({
         style={checked ? { transform: "translateX(16px)", background: "var(--color-accent-ink)" } : undefined}
       />
     </button>
-  );
-}
-
-/** Dropdown for a closed set of choices. */
-export function Select<T extends string>({
-  value,
-  onChange,
-  options,
-  label,
-  id,
-  disabled = false,
-}: {
-  value: T;
-  onChange: (v: T) => void;
-  options: readonly { value: T; label: string }[];
-  label: string;
-  id?: string;
-  disabled?: boolean;
-}) {
-  return (
-    <span className="relative inline-flex items-center">
-      <select
-        id={id}
-        aria-label={label}
-        disabled={disabled}
-        value={value}
-        onChange={(e) => onChange(e.target.value as T)}
-        className="h-8 appearance-none rounded-lg border border-line bg-surface-2 py-0 pr-7 pl-2.5 text-xs text-ink outline-none hover:border-line-2 focus:border-highlight/60 disabled:opacity-40"
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-      <Icon icon={ChevronDown} size={13} className="pointer-events-none absolute right-2 text-ink-3" />
-    </span>
   );
 }
 

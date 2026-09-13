@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { isPrivateWindow } from "../lib/privateMode";
 import { PrivateWelcome } from "./PrivateMode";
 import { AlertTriangle, Check, RotateCw, Search, ShieldQuestion, WifiOff, X } from "lucide-react";
@@ -182,10 +183,7 @@ function PermissionDialog({ tabId, request }: { tabId: string; request: Permissi
         </div>
         <div className="mt-4 flex items-center gap-2">
           {request.page_lifetime ? (
-            <select aria-label="Permission duration" disabled={busy} value={duration} onChange={(e) => setDuration(e.target.value as "remember" | "page")} className="h-7 min-w-0 flex-1 rounded-md border border-line-2 bg-surface-2 px-2 text-ink">
-              <option value="remember">Remember in this profile and container</option>
-              <option value="page">Until this page navigates or closes</option>
-            </select>
+            <Select label="Permission duration" disabled={busy} value={duration} onChange={setDuration} options={[{ value: "remember", label: "Remember in this profile and container" }, { value: "page", label: "Until this page navigates or closes" }]} className="h-7 min-w-0 flex-1 rounded-md border border-line-2 bg-surface-2 px-2 text-ink disabled:opacity-40" />
           ) : (
             // A one-option dropdown reads as a broken control; this kind of permission is always remembered.
             <span className="flex-1 text-ink-3" title="This permission is remembered; page-only access is unavailable.">

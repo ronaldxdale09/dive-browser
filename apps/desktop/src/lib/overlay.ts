@@ -134,9 +134,11 @@ export function visibleOverlayRegions() {
     .filter((rect) => rect.width > 0 && rect.height > 0).slice(0, 64);
 }
 
-/** Modal input ownership is independent of the native painting region. */
+/** Modal dialogs and transient choice lists own native input independently
+ * of painting geometry. A listbox is not an ARIA modal; its internal marker
+ * keeps Windows page HWNDs from receiving keyboard or outside clicks. */
 function hasVisibleModal() {
-  return Array.from(document.querySelectorAll<HTMLElement>('[aria-modal="true"]')).some((element) => {
+  return Array.from(document.querySelectorAll<HTMLElement>('[aria-modal="true"], [data-native-input-owner="true"]')).some((element) => {
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
     return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
@@ -161,7 +163,7 @@ function sendLive(regions: ReturnType<typeof visibleOverlayRegions>, active: boo
 const MOTION_FOLLOW_MS = 500;
 
 /** Attributes whose change can move or resize an overlay without resizing it. */
-const MOTION_ATTRIBUTES = ["style", "class", "hidden", "role", "aria-modal", "data-native-overlay"];
+const MOTION_ATTRIBUTES = ["style", "class", "hidden", "role", "aria-modal", "data-native-input-owner", "data-native-overlay"];
 
 /**
  * Keep the native mask matched to the overlays on screen.

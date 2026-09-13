@@ -204,7 +204,8 @@ describe("SettingsDialog", () => {
   it("only offers a search URL for a custom engine, and warns when it has no {query}", async () => {
     render(<SettingsDialog />);
     expect(screen.queryByLabelText("Search URL")).toBeNull();
-    fireEvent.change(screen.getByLabelText("Search engine"), { target: { value: "custom" } });
+    fireEvent.click(screen.getByLabelText("Search engine"));
+    fireEvent.click(screen.getByRole("option", { name: "Custom…" }));
     const url = screen.getByLabelText("Search URL");
     fireEvent.change(url, { target: { value: "https://kagi.com/search?q=" } });
     fireEvent.blur(url);
@@ -241,11 +242,12 @@ describe("Site permissions", () => {
     render(<SettingsDialog />);
     fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
     await waitFor(() => expect(screen.getByText("https://meet.test")).toBeTruthy());
-    const select = screen.getByLabelText("https://maps.test Location") as HTMLSelectElement;
-    expect(select.value).toBe("deny");
-    fireEvent.change(select, { target: { value: "allow" } });
+    const select = screen.getByLabelText("https://maps.test Location") as HTMLButtonElement;
+    expect(select.textContent).toContain("Block");
+    fireEvent.click(select);
+    fireEvent.click(screen.getByRole("option", { name: "Allow" }));
     expect(ipc.permissionSet).toHaveBeenCalledWith({profile_id:"p1",container_id:"c1"}, "https://maps.test", "geolocation", "allow");
-    expect((screen.getByLabelText("https://maps.test Location") as HTMLSelectElement).value).toBe("allow");
+    expect(screen.getByLabelText("https://maps.test Location").textContent).toContain("Allow");
   });
 
   it("forgetting a decision sets it back to ask and drops the row", async () => {
@@ -274,10 +276,11 @@ describe("Site permissions", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
     await waitFor(() => expect(screen.getByText("https://maps.test")).toBeTruthy());
 
-    const select = screen.getByLabelText("https://maps.test Location") as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: "allow" } });
+    const select = screen.getByLabelText("https://maps.test Location") as HTMLButtonElement;
+    fireEvent.click(select);
+    fireEvent.click(screen.getByRole("option", { name: "Allow" }));
 
-    await waitFor(() => expect(select.value).toBe("deny"));
+    await waitFor(() => expect(select.textContent).toContain("Block"));
     expect(screen.getByRole("alert").textContent).toContain("permission write failed");
   });
 
@@ -290,8 +293,9 @@ describe("Site permissions", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
     await waitFor(() => expect(screen.getByText("https://maps.test")).toBeTruthy());
 
-    const select = screen.getByLabelText("https://maps.test Location") as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: "allow" } });
+    const select = screen.getByLabelText("https://maps.test Location") as HTMLButtonElement;
+    fireEvent.click(select);
+    fireEvent.click(screen.getByRole("option", { name: "Allow" }));
     expect(select.disabled).toBe(true);
 
     finish();

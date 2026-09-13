@@ -1,4 +1,5 @@
-import { ArrowLeft, ChevronDown, ExternalLink, Loader2 } from "lucide-react";
+import { Select } from "../Select";
+import { ArrowLeft, ExternalLink, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Provider, ProviderInfo } from "../../lib/ipc";
 import { useAgent } from "../../store/agent";
@@ -196,19 +197,9 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
 
           {/* Full provider dropdown */}
           <div className="relative">
-            <select
-              id="agent-provider-select"
-              aria-label="All providers"
-              value={selected}
-              disabled={busy}
-              onChange={(e) => choose(e.target.value as Provider)}
-              className="w-full appearance-none rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs text-ink outline-none transition-colors hover:border-line-2 focus:border-highlight pr-7 cursor-pointer"
-            >
-              {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
-            </select>
-            <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-ink-3">
-              <Icon icon={ChevronDown} size={13} />
-            </div>
+            <Select id="agent-provider-select" label="All providers" value={selected} disabled={busy} onChange={choose}
+              options={providers.map((provider) => ({ value: provider.id, label: provider.name }))}
+              className="w-full rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs text-ink outline-none transition-colors hover:border-line-2 focus:border-highlight cursor-pointer disabled:opacity-40" />
           </div>
         </div>
 

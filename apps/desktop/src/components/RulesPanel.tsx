@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { Rule, RuleAction } from "../lib/ipc";
@@ -56,16 +57,9 @@ export function RulesPanel() {
           <div className="flex items-center gap-2">
             <input type="checkbox" aria-label="Enabled" title={r.enabled ? "On. Untick to keep the rule without applying it." : "Off. Tick once the pattern is ready."} checked={r.enabled} onChange={(e) => update(r.id, { enabled: e.target.checked })} className="accent-ink" />
             <input aria-label="URL pattern" value={r.pattern} onChange={(e) => update(r.id, { pattern: e.target.value })} className={`${FIELD} min-w-0 flex-1`} spellCheck={false} />
-            <select
-              aria-label="Action"
-              value={r.action.kind}
-              onChange={(e) => update(r.id, { action: DEFAULT_ACTIONS[e.target.value as RuleAction["kind"]] })}
-              className={FIELD}
-            >
-              <option value="block">Block</option>
-              <option value="mock">Mock response</option>
-              <option value="header">Add header</option>
-            </select>
+            <Select label="Action" value={r.action.kind}
+              onChange={(value) => update(r.id, { action: DEFAULT_ACTIONS[value] })}
+              className={FIELD} options={[{ value: "block", label: "Block" }, { value: "mock", label: "Mock response" }, { value: "header", label: "Add header" }]} />
             <IconButton icon={Trash2} label="Delete rule" size={13} onClick={() => remove(r.id)} />
           </div>
           <ActionFields action={r.action} onChange={(action) => update(r.id, { action })} />

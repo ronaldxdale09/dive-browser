@@ -1,4 +1,5 @@
-import { ChevronDown, Crosshair, EyeOff, Gauge, MessageSquare, MousePointer2, Scissors, Wand2, ZoomIn } from "lucide-react";
+import { Select } from "../components/Select";
+import { Crosshair, EyeOff, Gauge, MessageSquare, MousePointer2, Scissors, Wand2, ZoomIn } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Icon } from "../components/Icon";
@@ -247,16 +248,9 @@ export function Timeline() {
         <Tool icon={Gauge} label="Change speed" shortcut="S" onClick={() => addSpeed()} />
         <Tool icon={EyeOff} label="Blur an area" shortcut="B" onClick={() => addAnnotation("blur")} />
         <span className="mx-2 h-5 w-px bg-line-2" />
-        <label className="relative flex h-7 items-center gap-1 rounded-lg px-2 text-xs text-ink-2 hover:bg-surface-2 hover:text-ink">
-          <select aria-label="Aspect ratio" value={e.aspectRatio} onChange={(ev) => update((ed) => ({ ...ed, aspectRatio: ev.target.value as typeof ed.aspectRatio }))} className="appearance-none bg-transparent pr-4 outline-none">
-            {ASPECT_RATIOS.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-          <Icon icon={ChevronDown} size={12} className="pointer-events-none absolute right-1.5 text-ink-3" />
-        </label>
+        <div className="flex items-center">
+          <Select label="Aspect ratio" value={e.aspectRatio} onChange={(value) => update((ed) => ({ ...ed, aspectRatio: value }))} options={ASPECT_RATIOS.map((r) => ({ value: r, label: r }))} className="h-7 rounded-lg bg-transparent px-2 text-xs text-ink-2 outline-none hover:bg-surface-2 hover:text-ink" />
+        </div>
         <span className="flex-1" />
         <span className="hidden items-center gap-2 text-[10.5px] text-ink-3 md:flex">
           <kbd className="rounded border border-line-2 bg-surface-2 px-1.5 py-0.5 font-mono">Scroll</kbd> Pan

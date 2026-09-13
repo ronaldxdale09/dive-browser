@@ -1,3 +1,4 @@
+import { Select } from "../Select";
 import { AppWindow, Check, FileText, Loader2, Mic, MicOff, Timer, Video } from "lucide-react";
 import { useRef } from "react";
 import type { ReactNode } from "react";
@@ -148,20 +149,10 @@ export function RecordDialog() {
             <Field label="Microphone">
               <div className="relative">
                 <Icon icon={live.microphone ? Mic : MicOff} size={13} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-ink-3" />
-                <select
-                  aria-label="Microphone"
-                  value={live.microphone ?? ""}
-                  disabled={noMic}
-                  onChange={(e) => setSettings({ microphone: e.target.value || null })}
-                  className="h-8 w-full appearance-none rounded-lg border border-line bg-surface-2 pr-2 pl-8 text-xs text-ink outline-none focus:border-highlight/60 disabled:opacity-50"
-                >
-                  <option value="">Off</option>
-                  {mics.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
+                <Select label="Microphone" value={live.microphone ?? ""} disabled={noMic}
+                  onChange={(value) => setSettings({ microphone: value || null })}
+                  options={[{ value: "", label: "Off" }, ...mics.map((m) => ({ value: m.id, label: m.name }))]}
+                  className="h-8 w-full rounded-lg border border-line bg-surface-2 pr-2 pl-8 text-xs text-ink outline-none focus:border-highlight/60 disabled:opacity-50" />
               </div>
               <p className="mt-1 text-[10.5px] text-ink-3">
                 {!canVideo ? "Install ffmpeg for video and voice." : live.format === "gif" ? "A GIF has no sound." : mics.length === 0 ? "No microphone found." : "Your voice, in sync with the page."}
