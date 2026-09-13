@@ -23,23 +23,45 @@ mod mac {
     use std::collections::HashSet;
     use std::sync::Mutex;
 
+    use objc2::rc::autoreleasepool;
     use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, Sel};
-    use objc2::sel;
+    use objc2::{MainThreadMarker, sel};
     use objc2_app_kit::{NSView, NSWindow};
 
     static PATCHED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
+    pub fn dispatch(window: &tauri::Window<crate::Runtime>) {
+        // Keep the original dispatcher: its runtime window ID is unique even
+        // if another window later reuses this label. Never carry a native view
+        // across the delay or substitute a manager lookup by label.
+        let original = window.clone();
+        let _ = window.run_on_main_thread(move || {
+            let Some(main_thread) = MainThreadMarker::new() else {
+                return;
+            };
+            keep_drags_in_chrome(&original, main_thread);
+        });
+    }
+
     /// Disable window drag-through for every view class under `window`
-    /// that currently allows it.
-    pub fn keep_drags_in_chrome(window: &tauri::Window<crate::Runtime>) {
-        let Ok(ptr) = window.ns_window() else { return };
-        // SAFETY: Tauri hands out the window's live `NSWindow`; this runs on
-        // the main thread, where AppKit objects may be used.
-        let ns_window: &NSWindow = unsafe { &*ptr.cast::<NSWindow>() };
-        let Some(content) = ns_window.contentView() else {
-            return;
-        };
-        walk(&content);
+    /// that currently allows it, entirely within the UI-thread callback.
+    fn keep_drags_in_chrome(
+        window: &tauri::Window<crate::Runtime>,
+        _main_thread: MainThreadMarker,
+    ) {
+        // Tauri autoreleases its NSWindow result and AppKit traversal creates
+        // temporary arrays. Release those on main before returning to the loop.
+        autoreleasepool(|_| {
+            let Ok(ptr) = window.ns_window() else { return };
+            // SAFETY: the original dispatcher's getter rejects absent, closing,
+            // or exiting CEF owners. Lookup and use happen synchronously in this
+            // main-thread callback, so native destruction cannot interleave.
+            let ns_window: &NSWindow = unsafe { &*ptr.cast::<NSWindow>() };
+            let Some(content) = ns_window.contentView() else {
+                return;
+            };
+            walk(&content);
+        });
     }
 
     fn walk(view: &NSView) {
@@ -86,11 +108,11 @@ mod mac {
 pub fn keep_drags_in_chrome_soon(window: &tauri::Window<crate::Runtime>) {
     #[cfg(target_os = "macos")]
     {
-        mac::keep_drags_in_chrome(window);
+        mac::dispatch(window);
         let window = window.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            mac::keep_drags_in_chrome(&window);
+            mac::dispatch(&window);
         });
     }
     #[cfg(not(target_os = "macos"))]

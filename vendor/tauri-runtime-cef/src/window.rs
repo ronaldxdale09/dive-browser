@@ -48,6 +48,25 @@ use crate::{
     window_handle::SendRawWindowHandle,
 };
 
+fn reply_raw_window_handle(
+    tx: Sender<Result<SendRawWindowHandle>>,
+    window: &(impl HasWindowHandle + ?Sized),
+    exiting: bool,
+    closing: bool,
+) {
+    // Closing windows remain registered until CEF acknowledges native teardown.
+    // Registration alone must not expose a borrowed handle during that interval.
+    if exiting || closing {
+        let _ = tx.send(Err(Error::WindowNotFound));
+        return;
+    }
+    let handle = window.window_handle();
+    let send_handle = handle
+        .map(|h| SendRawWindowHandle(h.as_raw()))
+        .map_err(|_| Error::FailedToSendMessage);
+    let _ = tx.send(send_handle);
+}
+
 type WindowEventListener = Box<dyn Fn(&WindowEvent) + Send>;
 type WindowEventListeners = Arc<Mutex<HashMap<WindowEventId, WindowEventListener>>>;
 
@@ -547,6 +566,8 @@ impl<T: UserEvent> WinitCefApp<T> {
             _ => {}
         }
 
+        let exiting = self.state.exiting;
+        let closing = self.state.is_window_closing(window_id);
         let Some(appwindow) = self.state.windows.get_mut(&window_id) else {
             return;
         };
@@ -635,11 +656,7 @@ impl<T: UserEvent> WinitCefApp<T> {
                 let _ = tx.send(Ok(monitors));
             }
             WindowMessage::RawWindowHandle(tx) => {
-                let handle = window.window_handle();
-                let send_handle = handle
-                    .map(|h| SendRawWindowHandle(h.as_raw()))
-                    .map_err(|_| Error::FailedToSendMessage);
-                let _ = tx.send(send_handle);
+                reply_raw_window_handle(tx, window, exiting, closing);
             }
             WindowMessage::Theme(tx) => {
                 let theme = window.theme();
@@ -1467,5 +1484,65 @@ fn tauri_cursor_to_winit_cursor(cursor: CursorIcon) -> winit::cursor::CursorIcon
         CursorIcon::ColResize => winit::cursor::CursorIcon::ColResize,
         CursorIcon::RowResize => winit::cursor::CursorIcon::RowResize,
         _ => winit::cursor::CursorIcon::Default,
+    }
+}
+
+#[cfg(test)]
+mod raw_handle_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    // Accessing a native handle can dereference an AppKit view. A rejected
+    // getter must reply without invoking that accessor, even while the runtime
+    // retains the window waiting for CEF's asynchronous close acknowledgement.
+    struct NativeAccessProbe(Cell<bool>);
+
+    impl HasWindowHandle for NativeAccessProbe {
+        fn window_handle(
+            &self,
+        ) -> std::result::Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError>
+        {
+            self.0.set(true);
+            Err(raw_window_handle::HandleError::Unavailable)
+        }
+    }
+
+    #[test]
+    fn closing_window_raw_handle_replies_without_native_access() {
+        let window = NativeAccessProbe(Cell::new(false));
+        let (tx, rx) = mpsc::channel();
+        reply_raw_window_handle(tx, &window, false, true);
+        assert!(!window.0.get(), "closing owner must not be accessed");
+        assert!(matches!(rx.try_recv(), Ok(Err(Error::WindowNotFound))));
+    }
+
+    #[test]
+    fn exiting_raw_handle_replies_without_native_access() {
+        let window = NativeAccessProbe(Cell::new(false));
+        let (tx, rx) = mpsc::channel();
+        reply_raw_window_handle(tx, &window, true, false);
+        assert!(!window.0.get(), "exiting owner must not be accessed");
+        assert!(matches!(rx.try_recv(), Ok(Err(Error::WindowNotFound))));
+    }
+
+    #[test]
+    fn exiting_closing_window_raw_handle_replies_without_native_access() {
+        let window = NativeAccessProbe(Cell::new(false));
+        let (tx, rx) = mpsc::channel();
+        reply_raw_window_handle(tx, &window, true, true);
+        assert!(
+            !window.0.get(),
+            "exiting closing owner must not be accessed"
+        );
+        assert!(matches!(rx.try_recv(), Ok(Err(Error::WindowNotFound))));
+    }
+
+    #[test]
+    fn live_raw_handle_preserves_native_accessor_errors() {
+        let window = NativeAccessProbe(Cell::new(false));
+        let (tx, rx) = mpsc::channel();
+        reply_raw_window_handle(tx, &window, false, false);
+        assert!(window.0.get());
+        assert!(matches!(rx.try_recv(), Ok(Err(Error::FailedToSendMessage))));
     }
 }
