@@ -58,7 +58,9 @@ OBSERVE_EXPRESSION = r"""(() => {
   if (player) {
     let data = null;
     try { data = typeof player.getVideoData === 'function' ? player.getVideoData() : null; } catch {}
-    content = {video_id: data && data.video_id || null, ad_showing: player.classList.contains('ad-showing')};
+    let playerState = null;
+    try { playerState = typeof player.getPlayerState === 'function' ? player.getPlayerState() : null; } catch {}
+    content = {video_id: data && data.video_id || null, ad_showing: player.classList.contains('ad-showing'), player_state: playerState};
   }
   if (video && !state.ids.has(video)) state.ids.set(video, `video-${state.nextId++}`);
   if (video) video.muted = true;
@@ -70,12 +72,14 @@ OBSERVE_EXPRESSION = r"""(() => {
   return {
     url: location.href,
     documentIdentity: state.documentId,
+    visibilityState: document.visibilityState,
+    hasFocus: document.hasFocus(),
     content,
     scroll: {x: scrollX, y: scrollY},
     viewport: {width: innerWidth, height: innerHeight},
     video: video ? {
       identity: state.ids.get(video), connected: video.isConnected,
-      currentTime: video.currentTime, readyState: video.readyState,
+      currentTime: video.currentTime, readyState: video.readyState, networkState: video.networkState,
       paused: video.paused, ended: video.ended, muted: video.muted,
       duration: Number.isFinite(video.duration) ? video.duration : null,
       error: video.error ? {code: video.error.code, message: video.error.message || null} : null,
@@ -145,6 +149,12 @@ class PlaybackVerifier:
         self.clicked_identities = set()
         self.action_count = 0
 
+    def release_unresolved_action(self, obs):
+        # Only an explicitly retryable target_not_found proves no input was sent.
+        identity = (obs.get("documentIdentity"), (obs.get("video") or {}).get("identity"))
+        self.clicked_identities.remove(identity)
+        self.action_count -= 1
+
     def _reset(self, obs, reason):
         video = obs.get("video") or {}
         self.identity = (obs.get("documentIdentity"), video.get("identity"))
@@ -203,6 +213,8 @@ class PlaybackVerifier:
                     return Decision("observing", "paused_with_visible_startup_control", {
                         "type": "trusted_click", "locator": locator
                     })
+            if video.get("paused") and target and identity in self.clicked_identities:
+                return Decision("observing", "paused_after_startup_action")
             reason = "paused_without_visible_startup_control" if video.get("paused") else "video_not_ready"
             return Decision("observing", reason)
 
@@ -278,6 +290,16 @@ def fixture_input_errors(evidence):
     return errors
 
 
+class McpError(RuntimeError):
+    def __init__(self, detail):
+        super().__init__(detail)
+        self.detail = detail
+
+    def is_retryable_target_not_found(self):
+        data = self.detail.get("data") if isinstance(self.detail, dict) else None
+        return isinstance(data, dict) and data.get("code") == "target_not_found" and data.get("retryable") is True
+
+
 class McpClient:
     def __init__(self, data_dir, port, timeout=15.0):
         deadline = time.monotonic() + timeout
@@ -335,26 +357,28 @@ class McpClient:
     def call(self, name, arguments, timeout=60):
         _, out = self._rpc("tools/call", {"name": name, "arguments": arguments}, timeout=timeout)
         if "error" in out:
-            raise RuntimeError(out["error"])
+            raise McpError(out["error"])
         result = out["result"]
         content = result.get("content", [])
         text = content[0].get("text", "") if content else ""
-        if result.get("isError"):
-            raise RuntimeError(text or "MCP tool failed")
         try:
-            return json.loads(text)
+            value = json.loads(text)
         except (TypeError, json.JSONDecodeError):
-            return text
+            value = text
+        if result.get("isError"):
+            raise McpError(value or "MCP tool failed")
+        return value
 
 
 def verify(client, tab_id, expected_url, timeout=15.0, poll_interval=0.2):
     verifier = PlaybackVerifier(expected_url)
+    max_resolution_retries = 2
     started = time.monotonic()
     deadline = started + timeout
     evidence = {
         "status": "failure", "reason": "timeout", "tab_id": tab_id,
         "required_advance_seconds": verifier.REQUIRED_ADVANCE,
-        "observations": [], "actions": [],
+        "observations": [], "actions": [], "target_resolution_failures": [],
     }
     while time.monotonic() < deadline:
         remaining = max(0.001, deadline - time.monotonic())
@@ -376,18 +400,37 @@ def verify(client, tab_id, expected_url, timeout=15.0, poll_interval=0.2):
         evidence["reason"] = decision.reason
         evidence["advanced_seconds"] = decision.advanced_seconds
         if decision.action:
+            if time.monotonic() >= deadline:
+                evidence["reason"] = "timeout"
+                break
             action = dict(decision.action)
+            action.update({
+                "started_at": time.monotonic() - started,
+                "documentIdentity": raw.get("documentIdentity"),
+                "videoIdentity": (raw.get("video") or {}).get("identity"),
+            })
             try:
                 remaining = max(0.001, deadline - time.monotonic())
                 action["result"] = client.call("page_click", {
                     "tab_id": tab_id, "locator": action["locator"]
                 }, timeout=remaining)
             except Exception as error:
-                action["error"] = str(error)
+                action["error"] = error.detail if isinstance(error, McpError) else str(error)
+                action["finished_at"] = time.monotonic() - started
+                if isinstance(error, McpError) and error.is_retryable_target_not_found():
+                    verifier.release_unresolved_action(raw)
+                    evidence["target_resolution_failures"].append(action)
+                    evidence["reason"] = "startup_target_disappeared"
+                    if len(evidence["target_resolution_failures"]) > max_resolution_retries:
+                        evidence["reason"] = "target_resolution_retry_limit_exceeded"
+                        break
+                else:
+                    evidence["actions"].append(action)
+                    evidence["reason"] = "trusted_click_failed"
+                    break
+            else:
+                action["finished_at"] = time.monotonic() - started
                 evidence["actions"].append(action)
-                evidence["reason"] = "trusted_click_failed"
-                break
-            evidence["actions"].append(action)
         if decision.status == "failure":
             break
         if decision.status == "success":

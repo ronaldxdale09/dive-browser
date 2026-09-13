@@ -187,6 +187,122 @@ class PlaybackVerifierTests(unittest.TestCase):
         self.assertEqual(decision.reason, "trusted_action_limit_exceeded")
 
 
+class TargetRecoveryTests(unittest.TestCase):
+    URL = "https://example.test/watch?v=one"
+    TARGET = {"locator": "css=[data-startup-play]", "rect": {"x": 246, "y": 151, "width": 68, "height": 48}}
+    MISSING = {"code": -32602, "message": "nothing matches locator", "data": {
+        "code": "target_not_found", "locator": "css=[data-startup-play]", "retryable": True,
+    }}
+
+    def run_script(self, steps, timeout=15):
+        # Exercise the real MCP error parser and verifier; only transport/time are fake.
+        clock = [0.0]
+        overall_timeout = timeout
+        pending = iter(steps)
+        client = object.__new__(media.McpClient)
+
+        def rpc(method, params, timeout):
+            self.assertEqual(method, "tools/call")
+            self.assertGreater(timeout, 0)
+            self.assertLessEqual(timeout, overall_timeout - clock[0])
+            name, result = next(pending)
+            self.assertEqual(params["name"], name)
+            clock[0] += 0.05
+            return None, result
+
+        def sleep(seconds):
+            clock[0] += seconds
+
+        client._rpc = rpc
+        with mock.patch.object(media.time, "monotonic", side_effect=lambda: clock[0]), mock.patch.object(media.time, "sleep", side_effect=sleep):
+            return media.verify(client, "tab-1", self.URL, timeout=timeout, poll_interval=0.5)
+
+    def sample(self, **kwargs):
+        obs = observation(at=0, time=kwargs.pop("time", 0), **kwargs)
+        return ("page_evaluate", {"result": {"content": [{"text": json.dumps(obs)}]}})
+
+    def click(self, error=None):
+        return ("page_click", {"error": error} if error is not None else {
+            "result": {"content": [{"text": '{"x":280,"y":175}'}]}})
+
+    def test_unresolved_target_reobserves_then_verifies_trusted_fixture_playback(self):
+        playing = observation(at=0, time=1.6)
+        playing["trusted_pointer_events"] = FixtureEvidenceTests().evidence()["observations"][-1]["trusted_pointer_events"]
+        steps = [self.sample(paused=True, target=self.TARGET), self.click(self.MISSING),
+                 self.sample(paused=True, target=self.TARGET), self.click(),
+                 self.sample(time=0), self.sample(time=0.55), self.sample(time=1.1),
+                 ("page_evaluate", {"result": {"content": [{"text": json.dumps(playing)}]}})]
+        result = self.run_script(steps)
+        self.assertEqual(result["status"], "success", result)
+        self.assertEqual(media.fixture_input_errors(result), [])
+        self.assertEqual(len(result["actions"]), 1)
+        self.assertEqual(result["target_resolution_failures"][0]["error"], self.MISSING)
+        action = result["actions"][0]
+        self.assertGreater(action["finished_at"], action["started_at"])
+        self.assertEqual(action["documentIdentity"], "document-1")
+        self.assertEqual(action["videoIdentity"], "video-1")
+
+    def test_reappearing_control_in_new_document_needs_fresh_playback_window(self):
+        steps = [self.sample(paused=True, target=self.TARGET), self.click(self.MISSING),
+                 self.sample(paused=True, target=self.TARGET, document="replacement"), self.click()]
+        steps.extend(self.sample(time=value, document="replacement") for value in (0, 0.55, 1.1, 1.65))
+        result = self.run_script(steps)
+        self.assertEqual(result["status"], "success", result)
+        self.assertGreaterEqual(result["advanced_seconds"], 1.5)
+        self.assertEqual(result["actions"][0]["documentIdentity"], "replacement")
+        # The local fixture contract still refuses document replacement/missing receipts.
+        self.assertTrue(media.fixture_input_errors(result))
+
+    def test_repeated_explicit_target_failures_are_bounded(self):
+        steps = []
+        for _ in range(3):
+            steps.extend([self.sample(paused=True, target=self.TARGET), self.click(self.MISSING)])
+        result = self.run_script(steps)
+        self.assertEqual(result["reason"], "target_resolution_retry_limit_exceeded")
+        self.assertEqual(result["actions"], [])
+        self.assertEqual(len(result["target_resolution_failures"]), 3)
+        self.assertLess(result["elapsed_seconds"], 15)
+
+    def test_unknown_or_nonretryable_error_fails_without_duplicate_input(self):
+        for error in [
+            {"code": -32602, "message": "target_not_found retryable:true"},
+            {**self.MISSING, "data": {**self.MISSING["data"], "retryable": False}},
+            {**self.MISSING, "data": {**self.MISSING["data"], "retryable": "true"}},
+            {**self.MISSING, "data": {"code": "dispatch_failed", "retryable": True}},
+        ]:
+            with self.subTest(error=error):
+                result = self.run_script([self.sample(paused=True, target=self.TARGET), self.click(error)])
+                self.assertEqual(result["reason"], "trusted_click_failed")
+                self.assertEqual(len(result["observations"]), 1)
+                self.assertEqual(len(result["actions"]), 1)
+                self.assertEqual(result["actions"][0]["error"], error)
+
+    def test_recovery_preserves_two_dispatched_actions_across_reloads(self):
+        steps = [self.sample(paused=True, target=self.TARGET), self.click(self.MISSING),
+                 self.sample(paused=True, target=self.TARGET, document="document-2"), self.click(),
+                 self.sample(paused=True, target=self.TARGET, document="document-3"), self.click(),
+                 self.sample(paused=True, target=self.TARGET, document="document-4")]
+        result = self.run_script(steps)
+        self.assertEqual(result["status"], "failure")
+        self.assertEqual(result["reason"], "trusted_action_limit_exceeded")
+        self.assertEqual(len(result["actions"]), 2)
+        self.assertEqual(len(result["target_resolution_failures"]), 1)
+        self.assertEqual(result["actions"][0]["documentIdentity"], "document-2")
+        self.assertEqual(result["actions"][1]["documentIdentity"], "document-3")
+
+    def test_visible_already_attempted_target_is_reported_truthfully(self):
+        result = self.run_script([self.sample(paused=True, target=self.TARGET), self.click(),
+                                  self.sample(paused=True, target=self.TARGET)], timeout=1)
+        self.assertEqual(result["reason"], "paused_after_startup_action")
+        self.assertEqual(len(result["actions"]), 1)
+
+    def test_target_recovery_keeps_original_deadline(self):
+        result = self.run_script([self.sample(paused=True, target=self.TARGET), self.click(self.MISSING)], timeout=0.4)
+        self.assertEqual(result["status"], "failure")
+        self.assertAlmostEqual(result["elapsed_seconds"], 0.4)
+        self.assertEqual(result["actions"], [])
+
+
 class NavigationIdentityTests(unittest.TestCase):
     URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
 
