@@ -252,10 +252,13 @@ impl Store {
                 }
             }
         }
+        // Append-only Windows handles cannot set_len. This observer exclusively
+        // owns the writer, so use read/write access and position writes explicitly.
         let mut current = OpenOptions::new()
             .create(true)
             .read(true)
-            .append(true)
+            .write(true)
+            .truncate(false)
             .open(directory.join("current.jsonl"))?;
         // Discard a partial trailing record left by process termination. Reading
         // is bounded above; a later append cannot combine it with a valid line.
@@ -285,6 +288,8 @@ impl Store {
             self.current.set_len(0)?;
             self.size = 0;
         }
+        // Trimming a partial tail or rotating does not reset the file cursor.
+        self.current.seek(SeekFrom::Start(self.size))?;
         self.current.write_all(&line)?;
         self.size += line.len() as u64;
         Ok(())
@@ -621,6 +626,51 @@ mod tests {
             app_version: env!("CARGO_PKG_VERSION").into(),
         }
     }
+    #[test]
+    fn reopened_partial_tail_is_trimmed_before_the_next_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = record();
+        let second = Record {
+            timestamp: 2,
+            ..record()
+        };
+        let first_line = format!("{}\n", serde_json::to_string(&first).unwrap());
+        let second_line = format!("{}\n", serde_json::to_string(&second).unwrap());
+        std::fs::write(
+            dir.path().join("current.jsonl"),
+            format!("{first_line}{{partial"),
+        )
+        .unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        store.write(&second).unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("current.jsonl")).unwrap(),
+            format!("{first_line}{second_line}").as_bytes()
+        );
+        assert_eq!(
+            read_records(false, || dir.path().to_owned()),
+            [first, second]
+        );
+    }
+
+    #[test]
+    fn rotation_writes_the_next_record_at_zero_without_padding() {
+        let dir = tempfile::tempdir().unwrap();
+        let line = format!("{}\n", serde_json::to_string(&record()).unwrap());
+        let retained = line.repeat(262_144 / line.len());
+        std::fs::write(dir.path().join("current.jsonl"), &retained).unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        store.write(&record()).unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("previous.jsonl")).unwrap(),
+            retained.as_bytes()
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("current.jsonl")).unwrap(),
+            line.as_bytes()
+        );
+    }
+
     #[test]
     fn rotation_and_reader_remain_bounded_and_allowlisted() {
         let dir = tempfile::tempdir().unwrap();
