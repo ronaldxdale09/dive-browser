@@ -3523,6 +3523,7 @@ pub(crate) fn layout_set_overlay_regions(
     webview: tauri::Webview<Runtime>,
     regions: Vec<OverlayRegion>,
     active: bool,
+    modal: bool,
 ) -> AppResult<()> {
     if regions.len() > 64
         || regions.iter().any(|b| {
@@ -3538,7 +3539,7 @@ pub(crate) fn layout_set_overlay_regions(
     }
     on_main(&app, move |_, _, state| {
         if let Some(host) = lock(&state.host).as_mut() {
-            host.set_live_overlay(webview.label(), regions, active)?;
+            host.set_live_overlay(webview.label(), regions, active, modal)?;
         }
         Ok(())
     })

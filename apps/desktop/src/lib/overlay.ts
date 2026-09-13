@@ -134,11 +134,20 @@ export function visibleOverlayRegions() {
     .filter((rect) => rect.width > 0 && rect.height > 0).slice(0, 64);
 }
 
-function sendLive(regions: ReturnType<typeof visibleOverlayRegions>, active: boolean) {
+/** Modal input ownership is independent of the native painting region. */
+function hasVisibleModal() {
+  return Array.from(document.querySelectorAll<HTMLElement>('[aria-modal="true"]')).some((element) => {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+  });
+}
+
+function sendLive(regions: ReturnType<typeof visibleOverlayRegions>, active: boolean, modal = false) {
   const revision = ++liveRevision;
   liveQueue = liveQueue.catch(() => undefined).then(async () => {
     if (revision !== liveRevision) return;
-    await ipc.setOverlayRegions(regions, active);
+    await ipc.setOverlayRegions(regions, active, modal);
   });
   // A closed native window may reject an already queued frame.
   void liveQueue.catch(() => undefined);
@@ -152,7 +161,7 @@ function sendLive(regions: ReturnType<typeof visibleOverlayRegions>, active: boo
 const MOTION_FOLLOW_MS = 500;
 
 /** Attributes whose change can move or resize an overlay without resizing it. */
-const MOTION_ATTRIBUTES = ["style", "class", "hidden", "role", "data-native-overlay"];
+const MOTION_ATTRIBUTES = ["style", "class", "hidden", "role", "aria-modal", "data-native-overlay"];
 
 /**
  * Keep the native mask matched to the overlays on screen.
@@ -173,8 +182,9 @@ function beginLive() {
   let motionUntil = 0;
   const measure = () => {
     const regions = visibleOverlayRegions();
-    const key = JSON.stringify([window.innerWidth, window.innerHeight, regions]);
-    if (key !== last) { last = key; sendLive(regions, true); }
+    const modal = hasVisibleModal();
+    const key = JSON.stringify([window.innerWidth, window.innerHeight, regions, modal]);
+    if (key !== last) { last = key; sendLive(regions, true, modal); }
   };
   const onFrame = () => {
     frame = 0;
@@ -242,15 +252,7 @@ function sync() {
     }
     return;
   }
-  const modalNeedsFallback = (window as Window & { __DIVE_LIVE_MODAL_OVERLAYS__?: boolean }).__DIVE_LIVE_MODAL_OVERLAYS__ === false
-    && document.querySelector('[aria-modal="true"]') !== null;
-  if (!liveOverlaysAvailable() || modalNeedsFallback) {
-    // A modal opened over a live overlay: drop the mask before capturing, or
-    // the capture races a page the chrome is still punching holes through.
-    if (stopLive) {
-      stopLive();
-      stopLive = null;
-    }
+  if (!liveOverlaysAvailable()) {
     if (!covered && !covering) {
       generation += 1;
       void cover(generation);

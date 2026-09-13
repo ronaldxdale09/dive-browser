@@ -2,7 +2,7 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "./ipc";
-import { contentCoverDepth, resetContentCover, useCoversContent } from "./overlay";
+import { contentCoverDepth, resetContentCover, resetOverlayElements, useCoversContent } from "./overlay";
 
 /** A component whose only job is to hold the cover while `active`. */
 function Cover({ active }: { active: boolean }) {
@@ -12,6 +12,7 @@ function Cover({ active }: { active: boolean }) {
 
 beforeEach(() => {
   resetContentCover();
+  resetOverlayElements();
   vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
 });
@@ -76,27 +77,54 @@ describe("live overlays versus a modal", () => {
   beforeEach(() => {
     (window as Window & { __DIVE_LIVE_OVERLAYS__?: boolean }).__DIVE_LIVE_OVERLAYS__ = true;
     vi.spyOn(ipc, "setOverlayRegions").mockResolvedValue(null);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 10, y: 10, width: 20, height: 20 } as DOMRect);
     // A real capture, so the freeze path has something to show. An empty one
     // is the failed-capture case, covered by its own test below.
     vi.mocked(ipc.prepareContentCover).mockResolvedValue([{ tab_id: "t", data_url: "data:image/jpeg;base64,AA==" }]);
   });
   afterEach(() => {
     delete (window as Window & { __DIVE_LIVE_OVERLAYS__?: boolean }).__DIVE_LIVE_OVERLAYS__;
-    Reflect.deleteProperty(window, "__DIVE_LIVE_MODAL_OVERLAYS__");
   });
 
-  it("releases and reacquires the Windows modal fallback over a live menu", async () => {
-    Object.defineProperty(window, "__DIVE_LIVE_MODAL_OVERLAYS__", { value: false, configurable: true });
+  it("keeps Windows modals live and updates native input ownership through nested transitions", async () => {
     const view = render(createElement("div", null, createElement(Menu, { key: "m" })));
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith(expect.any(Array), true, false));
     for (let attempt = 0; attempt < 2; attempt++) {
       view.rerender(createElement("div", null, createElement(Menu, { key: "m" }), createElement(Modal, { key: "d" })));
-      await waitFor(() => expect(ipc.setContentCovered).toHaveBeenLastCalledWith(true));
+      await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith(expect.any(Array), true, true));
       view.rerender(createElement("div", null, createElement(Menu, { key: "m" })));
-      await waitFor(() => expect(ipc.setContentCovered).toHaveBeenLastCalledWith(false));
+      await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith(expect.any(Array), true, false));
     }
-    expect(ipc.prepareContentCover).toHaveBeenCalledTimes(2);
+    expect(ipc.prepareContentCover).not.toHaveBeenCalled();
+    expect(ipc.setContentCovered).not.toHaveBeenCalled();
     view.unmount();
-    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith([], false));
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith([], false, false));
+  });
+
+  it("retains modal ownership until the last visible modal closes", async () => {
+    const view = render(createElement("div", null, createElement(Modal, { key: "a" }), createElement(Modal, { key: "b" })));
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith(expect.any(Array), true, true));
+    view.rerender(createElement("div", null, createElement(Modal, { key: "b" })));
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith([{ x: 10, y: 10, width: 20, height: 20 }], true, true));
+    view.unmount();
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith([], false, false));
+    expect(ipc.prepareContentCover).not.toHaveBeenCalled();
+    expect(ipc.setContentCovered).not.toHaveBeenCalled();
+  });
+
+  it("does not retain modal input ownership for a hidden or removed modal", async () => {
+    const view = render(createElement(Menu));
+    const stale = document.createElement("div");
+    stale.setAttribute("aria-modal", "true");
+    stale.style.visibility = "hidden";
+    document.body.append(stale);
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith(expect.any(Array), true, false));
+    stale.style.visibility = "visible";
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith(expect.any(Array), true, true));
+    stale.setAttribute("aria-modal", "false");
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith(expect.any(Array), true, false));
+    stale.remove();
+    view.unmount();
   });
 
   it("leaves the page live under a menu, so it keeps playing", async () => {
@@ -109,16 +137,16 @@ describe("live overlays versus a modal", () => {
   it("opens a modal over the live page without waiting on its renderer", async () => {
     vi.mocked(ipc.prepareContentCover).mockImplementation(() => new Promise(() => undefined));
     const view = render(createElement(Modal));
-    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenCalledWith([], true));
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenCalledWith(expect.any(Array), true, true));
     expect(ipc.prepareContentCover).not.toHaveBeenCalled();
     expect(ipc.setContentCovered).not.toHaveBeenCalled();
     view.unmount();
-    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith([], false));
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith([], false, false));
   });
 
   it("keeps nested modal reopenings live and releases the final native mask", async () => {
     const view = render(createElement("div", null, createElement(Menu, { key: "m" })));
-    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenCalledWith([], true));
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenCalledWith(expect.any(Array), true, false));
     for (let attempt = 0; attempt < 3; attempt++) {
       view.rerender(createElement("div", null, createElement(Menu, { key: "m" }), createElement(Modal, { key: "d" })));
       expect(contentCoverDepth()).toBe(2);
@@ -128,6 +156,6 @@ describe("live overlays versus a modal", () => {
     expect(ipc.prepareContentCover).not.toHaveBeenCalled();
     expect(ipc.setContentCovered).not.toHaveBeenCalled();
     view.unmount();
-    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith([], false));
+    await waitFor(() => expect(ipc.setOverlayRegions).toHaveBeenLastCalledWith([], false, false));
   });
 });

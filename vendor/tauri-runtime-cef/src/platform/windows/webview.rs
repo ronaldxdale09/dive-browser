@@ -12,7 +12,7 @@ use windows::Win32::{
         RGN_OR, SetWindowRgn,
     },
     UI::HiDpi::GetDpiForWindow,
-    UI::Shell::{DefSubclassProc, SetWindowSubclass},
+    UI::Shell::{DefSubclassProc, GetWindowSubclass, SetWindowSubclass},
     UI::WindowsAndMessaging::{
         DestroyWindow, GetParent, GetWindowRect, HWND_BOTTOM, HWND_TOP, SW_HIDE, SW_SHOW,
         SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetParent, SetWindowPos, ShowWindow,
@@ -89,6 +89,18 @@ pub(crate) fn restack_pinned(hwnd: HWND, after: HWND) {
     set_z_order_pinned(hwnd, true);
 }
 
+pub(super) fn is_runtime_view(hwnd: HWND) -> bool {
+    unsafe {
+        GetWindowSubclass(
+            hwnd,
+            Some(pin_z_order_subclass_proc),
+            PIN_Z_ORDER_SUBCLASS_ID,
+            None,
+        )
+        .as_bool()
+    }
+}
+
 impl AppWebview {
     pub(crate) fn hwnd(&self) -> HWND {
         let hwnd = self.host.window_handle();
@@ -137,6 +149,7 @@ impl AppWebview {
     }
 
     pub(crate) fn reparent(&self, parent: &AppWindow) {
+        super::modal_input::release_page(self.hwnd());
         let parent = parent.hwnd();
         let _ = unsafe { SetParent(self.hwnd(), Some(parent)) };
     }
@@ -181,6 +194,14 @@ impl AppWebview {
 }
 
 impl crate::webview::Webview {
+    /// Own page input independently of the region used for live painting.
+    pub fn set_chrome_modal_input(&self, active: bool) -> bool {
+        use cef::ImplBrowser;
+        self.browser()
+            .host()
+            .is_some_and(|host| super::modal_input::set_modal(host, active))
+    }
+
     /// Let the chrome paint over the page everywhere except `holes`.
     ///
     /// The Windows counterpart of the macOS layer mask. There the chrome is

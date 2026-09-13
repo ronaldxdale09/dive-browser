@@ -134,11 +134,11 @@ describe("live native overlays", () => {
     const capture = vi.spyOn(ipc, "prepareContentCover");
     const hide = vi.spyOn(ipc, "setContentCovered");
     const view = render(<Overlay />);
-    await waitFor(() => expect(geometry).toHaveBeenCalledWith([], true));
+    await waitFor(() => expect(geometry).toHaveBeenCalledWith([], true, false));
     expect(capture).not.toHaveBeenCalled();
     expect(hide).not.toHaveBeenCalled();
     view.unmount();
-    await waitFor(() => expect(geometry).toHaveBeenLastCalledWith([], false));
+    await waitFor(() => expect(geometry).toHaveBeenLastCalledWith([], false, false));
     Reflect.deleteProperty(window, "__DIVE_LIVE_OVERLAYS__");
   });
   it("keeps nested overlays raised and serializes rapid close/reopen", async () => {
@@ -153,9 +153,9 @@ describe("live native overlays", () => {
     nested.unmount();
     const reopened = render(<Overlay />);
     await act(async () => finish(null));
-    await waitFor(() => expect(geometry.mock.calls).toEqual([[[], true], [[], true]]));
+    await waitFor(() => expect(geometry.mock.calls).toEqual([[[], true, false], [[], true, false]]));
     reopened.unmount();
-    await waitFor(() => expect(geometry).toHaveBeenLastCalledWith([], false));
+    await waitFor(() => expect(geometry).toHaveBeenLastCalledWith([], false, false));
     expect(contentCoverDepth()).toBe(0);
   });
   it("measures on DOM changes, and runs a frame loop only while a transition is in flight", async () => {
@@ -172,7 +172,7 @@ describe("live native overlays", () => {
     const settle = () => act(() => new Promise<void>((resolve) => queueMicrotask(resolve)));
 
     const view = render(<Overlay />);
-    await waitFor(() => expect(geometry).toHaveBeenCalledWith([], true));
+    await waitFor(() => expect(geometry).toHaveBeenCalledWith([], true, false));
     // Nothing on screen changes, so nothing is scheduled: a static tooltip
     // must not cost a measurement sixty times a second.
     expect(frames).toHaveLength(0);
@@ -185,7 +185,7 @@ describe("live native overlays", () => {
     await settle();
     expect(frames).toHaveLength(1);
     await runFrame();
-    await waitFor(() => expect(geometry).toHaveBeenLastCalledWith([{ x: 5, y: 6, width: 70, height: 80 }], true));
+    await waitFor(() => expect(geometry).toHaveBeenLastCalledWith([{ x: 5, y: 6, width: 70, height: 80 }], true, false));
     expect(frames).toHaveLength(0);
 
     // A transition keeps the loop going until its end event, and no longer.
@@ -209,7 +209,7 @@ describe("live native overlays", () => {
 
     el.remove();
     view.unmount();
-    await waitFor(() => expect(geometry).toHaveBeenLastCalledWith([], false));
+    await waitFor(() => expect(geometry).toHaveBeenLastCalledWith([], false, false));
     resetOverlayElements();
   });
   it("uses the dialog surface once, not its nested menus or full-window scrim", () => {

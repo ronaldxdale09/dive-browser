@@ -4,6 +4,7 @@
 
 mod event_loop;
 mod icon;
+mod modal_input;
 mod monitor;
 mod webview;
 mod window;

@@ -508,7 +508,7 @@ export const commands = {
 	 */
 	windowSetBackground: (hex: string) => typedError<null, AppError>(__TAURI_INVOKE("window_set_background", { hex })),
 	/**  Regions belong to trusted chrome and use CSS logical pixels. */
-	layoutSetOverlayRegions: (regions: OverlayRegion[], active: boolean) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_overlay_regions", { regions, active })),
+	layoutSetOverlayRegions: (regions: OverlayRegion[], active: boolean, modal: boolean) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_overlay_regions", { regions, active, modal })),
 	/**
 	 *  Show these tabs side by side at these rectangles; an empty list returns
 	 *  to a single page. Sleeping tabs are woken so every pane has a page.

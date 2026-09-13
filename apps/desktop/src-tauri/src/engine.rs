@@ -397,7 +397,7 @@ pub struct TabHost {
     /// `apply_visibility` runs on every overlay region update, and focus
     /// belongs to the moment the page becomes covered, not to each frame.
     focused_for_cover: std::cell::Cell<bool>,
-    live_overlays: HashMap<String, Vec<OverlayRegion>>,
+    live_overlays: HashMap<String, (Vec<OverlayRegion>, bool)>,
     /// Corner radius of page views in the main window, in logical pixels,
     /// following the chrome's corner preference. Zero is square.
     corner_radius: f64,
@@ -974,10 +974,12 @@ impl TabHost {
         chrome: &str,
         regions: Vec<OverlayRegion>,
         active: bool,
+        modal: bool,
     ) -> tauri::Result<()> {
         let was_active = self.live_overlays.contains_key(chrome);
         if active {
-            self.live_overlays.insert(chrome.to_owned(), regions);
+            self.live_overlays
+                .insert(chrome.to_owned(), (regions, modal));
         } else {
             self.live_overlays.remove(chrome);
         }
@@ -988,11 +990,27 @@ impl TabHost {
         // so doing it here as well built the region twice and, on Windows,
         // repainted the whole chrome twice per frame of an animating menu.
         if chrome == CHROME_LABEL && was_active != active {
+            // Windows must re-enable page input before apply_visibility
+            // restores native focus. EnableWindow(false) rejects SetFocus.
+            #[cfg(all(feature = "cef", target_os = "windows"))]
+            if !active {
+                self.update_overlay_mask(chrome, false)?;
+            }
             self.apply_visibility()?;
         } else {
             // Animation only changes the mask. Do not re-show every tab and
             // restore Chromium accessibility trees on every animation frame.
             self.update_overlay_mask(chrome, active)?;
+            #[cfg(all(feature = "cef", target_os = "windows"))]
+            if was_active && !active && chrome != CHROME_LABEL {
+                for (id, popout) in &self.popouts {
+                    if popout.chrome == chrome {
+                        if let Some(view) = self.views.get(id) {
+                            let _ = view.set_focus();
+                        }
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -1024,7 +1042,7 @@ impl TabHost {
                 .live_overlays
                 .get(chrome)
                 .into_iter()
-                .flatten()
+                .flat_map(|(regions, _)| regions)
                 .map(|b| {
                     [
                         b.x,
@@ -1035,8 +1053,23 @@ impl TabHost {
                     ]
                 })
                 .collect::<Vec<_>>();
+            #[cfg(target_os = "windows")]
+            let modal = active
+                && self
+                    .live_overlays
+                    .get(chrome)
+                    .is_some_and(|(_, modal)| *modal);
             if let Some(view) = self.window.app_handle().get_webview(chrome) {
                 view.with_webview(move |native| {
+                    #[cfg(target_os = "windows")]
+                    if !native.set_chrome_modal_input(modal) {
+                        // Fail closed: keep chrome above the full window if
+                        // input ownership cannot be installed. Never expose
+                        // an interactive page behind a supposedly modal UI.
+                        tracing::error!("could not install native modal input ownership");
+                        native.set_chrome_overlay_mask(&[], &overlays, active);
+                        return;
+                    }
                     native.set_chrome_overlay_mask(&pages, &overlays, active);
                 })?;
             }
@@ -2332,10 +2365,6 @@ fn private_chrome(builder: WebviewBuilder<Runtime>) -> WebviewBuilder<Runtime> {
     #[cfg(all(feature = "cef", any(target_os = "macos", target_os = "windows")))]
     let builder = builder.initialization_script(
         "Object.defineProperty(window, '__DIVE_LIVE_OVERLAYS__', {value:true});",
-    );
-    #[cfg(all(feature = "cef", target_os = "windows"))]
-    let builder = builder.initialization_script(
-        "Object.defineProperty(window, '__DIVE_LIVE_MODAL_OVERLAYS__', {value:false});",
     );
     if crate::private_session::is_private() {
         builder.incognito(true)
