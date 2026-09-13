@@ -101,6 +101,8 @@ libc = "0.2"
 x11-dl = "2.21"
 
 [features]
+# Only standalone unit tests opt in; application builds use Tauri's manifest.
+native-test-manifest = []
 default = ["sandbox"]
 devtools = []
 macos-private-api = ["tauri-runtime/macos-private-api"]

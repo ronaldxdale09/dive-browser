@@ -112,7 +112,7 @@ jobs:
       # The patched runtime is excluded from the workspace. Its native HWND
       # ownership tests must run on Windows, not just compile as a dependency.
       - name: Test the patched native runtime
-        run: cargo test --manifest-path vendor/tauri-runtime-cef/Cargo.toml --lib
+        run: cargo test --manifest-path vendor/tauri-runtime-cef/Cargo.toml --lib --features native-test-manifest
       - run: cargo audit
         if: runner.os == 'macOS'
       - run: cargo deny check
