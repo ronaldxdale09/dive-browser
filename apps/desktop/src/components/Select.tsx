@@ -25,7 +25,7 @@ export function Select<T extends string>({ value, onChange, options, label, id, 
   const [highlight, setHighlight] = useState<T>(value);
   const [position, setPosition] = useState({ left: 8, top: 8, width: 160, maxHeight: 280 });
   const search = useRef({ text: "", time: 0 });
-  const dismissedTarget = useRef<EventTarget | null>(null);
+  const dismissal = useRef<{ pointerId: number } | null>(null);
   const open = expanded && !disabled && options.length > 0;
   const selected = options.find((option) => option.value === value);
   const highlightedIndex = options.findIndex((option) => option.value === highlight);
@@ -36,23 +36,49 @@ export function Select<T extends string>({ value, onChange, options, label, id, 
   useCoversContent(open);
 
   useEffect(() => {
-    // Consume the click following an outside pointerdown even after the list
-    // has closed. Otherwise it can activate a destructive control beneath it.
-    const onClick = (event: MouseEvent) => {
-      if (dismissedTarget.current === event.target) { event.preventDefault(); event.stopPropagation(); }
-      dismissedTarget.current = null;
+    // Keep gesture cleanup alive after the popup closes. A click can retarget
+    // to an ancestor of the pressed icon, or never arrive after cancellation.
+    let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+    const reset = () => { dismissal.current = null; clearTimeout(releaseTimer); };
+    const onActivate = (event: MouseEvent) => {
+      if (dismissal.current) { event.preventDefault(); event.stopPropagation(); }
+      reset();
     };
-    document.addEventListener("click", onClick, true);
-    return () => document.removeEventListener("click", onClick, true);
+    const onCancel = (event: PointerEvent) => {
+      if (dismissal.current && dismissal.current.pointerId === event.pointerId) reset();
+    };
+    const onUp = (event: PointerEvent) => {
+      if (dismissal.current && dismissal.current.pointerId === event.pointerId) {
+        // The browser dispatches the associated click after pointerup. If it
+        // does not produce one, do not retain suppression for a later action.
+        releaseTimer = setTimeout(reset, 0);
+      }
+    };
+    document.addEventListener("pointerdown", reset, true);
+    document.addEventListener("pointercancel", onCancel, true);
+    document.addEventListener("pointerup", onUp, true);
+    document.addEventListener("dragstart", reset, true);
+    document.addEventListener("keydown", reset, true);
+    for (const type of ["click", "auxclick", "contextmenu"] as const) document.addEventListener(type, onActivate, true);
+    window.addEventListener("blur", reset);
+    return () => {
+      reset();
+      document.removeEventListener("pointerdown", reset, true);
+      document.removeEventListener("pointercancel", onCancel, true);
+      document.removeEventListener("pointerup", onUp, true);
+      document.removeEventListener("dragstart", reset, true);
+      document.removeEventListener("keydown", reset, true);
+      for (const type of ["click", "auxclick", "contextmenu"] as const) document.removeEventListener(type, onActivate, true);
+      window.removeEventListener("blur", reset);
+    };
   }, []);
 
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => {
-      dismissedTarget.current = null;
       if (trigger.current?.contains(event.target as Node) || list.current?.contains(event.target as Node)) return;
       event.preventDefault(); event.stopPropagation();
-      dismissedTarget.current = event.target;
+      dismissal.current = { pointerId: event.pointerId };
       setExpanded(false);
     };
     const blur = () => setExpanded(false);
@@ -66,6 +92,12 @@ export function Select<T extends string>({ value, onChange, options, label, id, 
     const place = () => {
       const rect = trigger.current?.getBoundingClientRect();
       if (!rect) return;
+      // Once its anchor scrolls entirely out of view, the choice list no
+      // longer has a visible owner. Dismiss instead of following it offscreen.
+      if (rect.top >= window.innerHeight || rect.bottom < 0 || rect.left >= window.innerWidth || rect.right < 0) {
+        setExpanded(false);
+        return;
+      }
       const margin = 8, gap = 4;
       const width = Math.min(Math.max(rect.width, 160), Math.max(0, window.innerWidth - margin * 2));
       const below = window.innerHeight - rect.bottom - gap - margin;

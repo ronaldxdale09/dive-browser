@@ -145,3 +145,54 @@ it("returns highlighting to the selected option when the highlighted choice disa
   expect(active()).toContain("Banana");
   key("Enter"); expect(change).not.toHaveBeenCalled();
 });
+
+it("consumes the dismissal click when release retargets from a child to its button", () => {
+  const outside = vi.fn();
+  render(<><Select value="a" label="Fruit" options={options} onChange={() => undefined} /><button onClick={outside}><span>Outside icon</span>Outside action</button></>);
+  fireEvent.click(trigger());
+  fireEvent.pointerDown(screen.getByText("Outside icon"));
+  fireEvent.pointerUp(screen.getByRole("button", { name: "Outside iconOutside action" }));
+  fireEvent.click(screen.getByRole("button", { name: "Outside iconOutside action" }));
+  expect(screen.queryByRole("listbox")).toBeNull();
+  expect(outside).not.toHaveBeenCalled();
+});
+
+it.each(["pointerCancel", "next press", "dragStart", "contextMenu"])("clears a dismissal gesture on %s so a later independent click can activate", (ending) => {
+  const outside = vi.fn();
+  render(<><Select value="a" label="Fruit" options={options} onChange={() => undefined} /><button onClick={outside}>Outside</button></>);
+  const button = screen.getByRole("button", { name: "Outside" });
+  fireEvent.click(trigger());
+  fireEvent.pointerDown(button);
+  if (ending === "next press") fireEvent.pointerDown(button);
+  else if (ending === "pointerCancel") fireEvent.pointerCancel(button);
+  else if (ending === "dragStart") fireEvent.dragStart(button);
+  else fireEvent.contextMenu(button);
+  fireEvent.click(button);
+  expect(outside).toHaveBeenCalledOnce();
+});
+
+it("dismisses without committing when scrolling carries its trigger below the viewport", () => {
+  let top = 100;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) { return this.getAttribute("role") === "combobox" ? { x: 10, y: top, left: 10, top, right: 210, bottom: top + 32, width: 200, height: 32 } as DOMRect : { x: 0, y: 0, width: 200, height: 100 } as DOMRect; });
+  const change = vi.fn();
+  render(<Select value="a" label="Fruit" options={options} onChange={change} />);
+  fireEvent.click(trigger());
+  expect(screen.getByRole("listbox")).toBeTruthy();
+  top = window.innerHeight + 200;
+  fireEvent.scroll(document);
+  expect(screen.queryByRole("listbox")).toBeNull();
+  expect(contentCoverDepth()).toBe(0);
+  expect(change).not.toHaveBeenCalled();
+});
+
+it("expires dismissal after a release that produces no click", async () => {
+  const outside = vi.fn();
+  render(<><Select value="a" label="Fruit" options={options} onChange={() => undefined} /><button onClick={outside}>Outside</button></>);
+  const button = screen.getByRole("button", { name: "Outside" });
+  fireEvent.click(trigger());
+  fireEvent.pointerDown(button);
+  fireEvent.pointerUp(button);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  fireEvent.click(button);
+  expect(outside).toHaveBeenCalledOnce();
+});
