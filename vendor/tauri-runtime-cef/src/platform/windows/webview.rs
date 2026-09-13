@@ -9,14 +9,14 @@ use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{
         CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, MapWindowPoints, RGN_DIFF,
-        RGN_OR, SetWindowRgn,
+        RGN_ERROR, RGN_OR, SetWindowRgn,
     },
     UI::HiDpi::GetDpiForWindow,
-    UI::Shell::{DefSubclassProc, GetWindowSubclass, SetWindowSubclass},
+    UI::Shell::{DefSubclassProc, SetWindowSubclass},
     UI::WindowsAndMessaging::{
-        DestroyWindow, GetParent, GetWindowRect, HWND_BOTTOM, HWND_TOP, SW_HIDE, SW_SHOW,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetParent, SetWindowPos, ShowWindow,
-        WINDOWPOS, WM_WINDOWPOSCHANGING,
+        DestroyWindow, GetParent, GetWindowRect, HWND_BOTTOM, HWND_TOP, SW_HIDE, SWP_NOACTIVATE,
+        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetParent, SetWindowPos, ShowWindow, WINDOWPOS,
+        WM_WINDOWPOSCHANGING,
     },
 };
 
@@ -51,8 +51,8 @@ unsafe extern "system" fn pin_z_order_subclass_proc(
 /// Re-installing the same proc under the same id does not chain a second
 /// subclass, it just updates `dwRefData` — so this both installs the pin the
 /// first time and toggles it afterwards.
-fn set_z_order_pinned(hwnd: HWND, pinned: bool) {
-    let _ = unsafe {
+fn set_z_order_pinned(hwnd: HWND, pinned: bool) -> bool {
+    unsafe {
         SetWindowSubclass(
             hwnd,
             Some(pin_z_order_subclass_proc),
@@ -63,7 +63,8 @@ fn set_z_order_pinned(hwnd: HWND, pinned: bool) {
                 Z_ORDER_UNPINNED
             },
         )
-    };
+        .as_bool()
+    }
 }
 
 /// Move a webview in the sibling z-order and pin it where it lands.
@@ -73,9 +74,11 @@ fn set_z_order_pinned(hwnd: HWND, pinned: bool) {
 /// Raising the chrome over a page for an overlay goes through here for that
 /// reason: without the lift the `SetWindowPos` is silently dropped and the
 /// menu renders behind the page it is supposed to float over.
-pub(crate) fn restack_pinned(hwnd: HWND, after: HWND) {
-    set_z_order_pinned(hwnd, false);
-    let _ = unsafe {
+pub(crate) fn restack_pinned(hwnd: HWND, after: HWND) -> bool {
+    if !set_z_order_pinned(hwnd, false) {
+        return false;
+    }
+    let moved = unsafe {
         SetWindowPos(
             hwnd,
             Some(after),
@@ -85,20 +88,18 @@ pub(crate) fn restack_pinned(hwnd: HWND, after: HWND) {
             0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
         )
-    };
-    set_z_order_pinned(hwnd, true);
+    }
+    .is_ok();
+    let pinned = set_z_order_pinned(hwnd, true);
+    moved && pinned
 }
 
-pub(super) fn is_runtime_view(hwnd: HWND) -> bool {
-    unsafe {
-        GetWindowSubclass(
-            hwnd,
-            Some(pin_z_order_subclass_proc),
-            PIN_Z_ORDER_SUBCLASS_ID,
-            None,
-        )
-        .as_bool()
+pub(super) fn reset_chrome_region(hwnd: HWND) -> bool {
+    if super::modal_input::injected_failure(8) {
+        return false;
     }
+    let reset = unsafe { SetWindowRgn(hwnd, None, true) } != 0;
+    reset && restack_pinned(hwnd, HWND_TOP)
 }
 
 impl AppWebview {
@@ -149,26 +150,33 @@ impl AppWebview {
     }
 
     pub(crate) fn reparent(&self, parent: &AppWindow) {
-        super::modal_input::release_page(self.hwnd());
+        // Never expose an enabled moving page between its old and new owners.
+        unsafe {
+            let _ = ShowWindow(self.hwnd(), SW_HIDE);
+        }
+        let visible = super::modal_input::leave_parent(self.hwnd());
         let parent = parent.hwnd();
-        let _ = unsafe { SetParent(self.hwnd(), Some(parent)) };
+        if unsafe { SetParent(self.hwnd(), Some(parent)) }.is_ok() {
+            super::modal_input::show_view(self.hwnd(), visible);
+        }
     }
 
     pub(crate) fn apply_visible(&self, visible: bool) {
-        let _ = unsafe { ShowWindow(self.hwnd(), if visible { SW_SHOW } else { SW_HIDE }) };
+        super::modal_input::show_view(self.hwnd(), visible);
     }
 
     /// Destroys CEF's own window for this browser, completing a close that
     /// `do_close` took over. CEF's browser window procedure reports
     /// `WindowDestroyed` back to CEF on `WM_NCDESTROY`.
     pub(crate) fn destroy_host_window(&self) {
+        super::modal_input::destroying_view(self.hwnd());
         let _ = unsafe { DestroyWindow(self.hwnd()) };
     }
 
     /// Raises this webview above its siblings and pins it there, so nothing but
     /// this runtime can move it again. See [`pin_z_order_subclass_proc`].
     pub(crate) fn raise_to_top(&self) {
-        restack_pinned(self.hwnd(), HWND_TOP);
+        super::modal_input::raise_view(self.hwnd());
     }
 
     pub(crate) fn apply_physical_bounds(
@@ -194,12 +202,23 @@ impl AppWebview {
 }
 
 impl crate::webview::Webview {
-    /// Own page input independently of the region used for live painting.
-    pub fn set_chrome_modal_input(&self, active: bool) -> bool {
+    /// Commit input ownership and painting together. Failure keeps acquired
+    /// input disabled until an authoritative page-visibility barrier exists.
+    pub fn set_chrome_modal_overlay(
+        &self,
+        holes: &[[f64; 4]],
+        overlays: &[[f64; 5]],
+        active: bool,
+        modal: bool,
+    ) -> bool {
         use cef::ImplBrowser;
-        self.browser()
-            .host()
-            .is_some_and(|host| super::modal_input::set_modal(host, active))
+        let Some(host) = self.browser().host() else {
+            return false;
+        };
+        let hwnd = HWND(host.window_handle().0 as _);
+        let input = super::modal_input::set_modal(host, active && modal);
+        let painted = input && self.set_chrome_overlay_mask(holes, overlays, active);
+        super::modal_input::finish_overlay(hwnd, painted, active && modal)
     }
 
     /// Let the chrome paint over the page everywhere except `holes`.
@@ -232,11 +251,8 @@ impl crate::webview::Webview {
         if !active {
             // No region is "all of it", and the chrome drops back beneath the
             // pages so they take the clicks again.
-            unsafe {
-                let _ = SetWindowRgn(hwnd, None, true);
-            }
-            restack_pinned(hwnd, HWND_BOTTOM);
-            return true;
+            let reset = unsafe { SetWindowRgn(hwnd, None, true) } != 0;
+            return reset && restack_pinned(hwnd, HWND_BOTTOM);
         }
 
         let mut rect = RECT::default();
@@ -261,11 +277,20 @@ impl crate::webview::Webview {
         for [x, y, w, h] in holes {
             let hole = unsafe { CreateRectRgn(px(*x), px(*y), px(*x) + px(*w), px(*y) + px(*h)) };
             if hole.is_invalid() {
-                continue;
+                unsafe {
+                    let _ = DeleteObject(region.into());
+                }
+                return false;
             }
+            let combined = unsafe { CombineRgn(Some(region), Some(region), Some(hole), RGN_DIFF) };
             unsafe {
-                CombineRgn(Some(region), Some(region), Some(hole), RGN_DIFF);
                 let _ = DeleteObject(hole.into());
+            }
+            if combined == RGN_ERROR {
+                unsafe {
+                    let _ = DeleteObject(region.into());
+                }
+                return false;
             }
         }
         // Union rounded surfaces after subtracting page bounds. Combining each
@@ -286,11 +311,20 @@ impl crate::webview::Webview {
                 }
             };
             if surface.is_invalid() {
-                continue;
+                unsafe {
+                    let _ = DeleteObject(region.into());
+                }
+                return false;
             }
+            let combined = unsafe { CombineRgn(Some(region), Some(region), Some(surface), RGN_OR) };
             unsafe {
-                CombineRgn(Some(region), Some(region), Some(surface), RGN_OR);
                 let _ = DeleteObject(surface.into());
+            }
+            if combined == RGN_ERROR {
+                unsafe {
+                    let _ = DeleteObject(region.into());
+                }
+                return false;
             }
         }
         // The region belongs to the window once this succeeds, so it must not
@@ -304,7 +338,6 @@ impl crate::webview::Webview {
             return false;
         }
         // Above the pages, so what it paints is what shows through.
-        restack_pinned(hwnd, HWND_TOP);
-        true
+        restack_pinned(hwnd, HWND_TOP)
     }
 }

@@ -1004,10 +1004,10 @@ impl TabHost {
             #[cfg(all(feature = "cef", target_os = "windows"))]
             if was_active && !active && chrome != CHROME_LABEL {
                 for (id, popout) in &self.popouts {
-                    if popout.chrome == chrome {
-                        if let Some(view) = self.views.get(id) {
-                            let _ = view.set_focus();
-                        }
+                    if popout.chrome == chrome
+                        && let Some(view) = self.views.get(id)
+                    {
+                        let _ = view.set_focus();
                     }
                 }
             }
@@ -1062,14 +1062,12 @@ impl TabHost {
             if let Some(view) = self.window.app_handle().get_webview(chrome) {
                 view.with_webview(move |native| {
                     #[cfg(target_os = "windows")]
-                    if !native.set_chrome_modal_input(modal) {
-                        // Fail closed: keep chrome above the full window if
-                        // input ownership cannot be installed. Never expose
-                        // an interactive page behind a supposedly modal UI.
-                        tracing::error!("could not install native modal input ownership");
-                        native.set_chrome_overlay_mask(&[], &overlays, active);
-                        return;
+                    if !native.set_chrome_modal_overlay(&pages, &overlays, active, modal) {
+                        tracing::error!(
+                            "native modal overlay entered recoverable page-cover fallback"
+                        );
                     }
+                    #[cfg(target_os = "macos")]
                     native.set_chrome_overlay_mask(&pages, &overlays, active);
                 })?;
             }
