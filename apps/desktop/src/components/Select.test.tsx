@@ -105,7 +105,7 @@ it("dismisses outside clicks without choosing or activating the underlying contr
   expect(change).not.toHaveBeenCalled(); expect(outside).not.toHaveBeenCalled();
 });
 
-it("repositions on scrolling and resizing without a stationary animation loop", async () => {
+it("repositions on resizing without a stationary animation loop", async () => {
   let bottom = 740;
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) { return this.getAttribute("role") === "combobox" ? { x: 900, y: bottom - 32, left: 900, top: bottom - 32, right: 1100, bottom, width: 200, height: 32 } as DOMRect : { x: 0, y: 0, width: 200, height: 100 } as DOMRect; });
   render(<Select value="a" label="Fruit" options={options} onChange={() => undefined} />);
@@ -114,7 +114,7 @@ it("repositions on scrolling and resizing without a stationary animation loop", 
   expect(Number.parseFloat(list.style.left) + Number.parseFloat(list.style.width)).toBeLessThanOrEqual(window.innerWidth - 8);
   expect(Number.parseFloat(list.style.top)).toBeLessThan(708);
   bottom = 100;
-  fireEvent.scroll(document);
+  fireEvent.resize(window);
   await waitFor(() => expect(list.style.top).toBe("104px"));
   const frame = vi.spyOn(window, "requestAnimationFrame");
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
@@ -195,4 +195,37 @@ it("expires dismissal after a release that produces no click", async () => {
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
   fireEvent.click(button);
   expect(outside).toHaveBeenCalledOnce();
+});
+
+it("dismisses when an ancestor panel scrolls the anchor behind its clip while still inside the viewport", () => {
+  let top = 250;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) { return this.getAttribute("role") === "combobox" ? { x: 10, y: top, left: 10, top, right: 210, bottom: top + 32, width: 200, height: 32 } as DOMRect : { x: 0, y: 200, left: 0, top: 200, right: 300, bottom: 400, width: 300, height: 200 } as DOMRect; });
+  const change = vi.fn();
+  render(<section aria-label="Settings panel" style={{ overflowY: "auto", height: 200 }}><Select value="a" label="Fruit" options={options} onChange={change} /></section>);
+  fireEvent.click(trigger());
+  expect(screen.getByRole("listbox")).toBeTruthy();
+  top = 100;
+  expect(trigger().getBoundingClientRect().bottom).toBeLessThan(screen.getByRole("region", { name: "Settings panel" }).getBoundingClientRect().top);
+  expect(trigger().getBoundingClientRect().top).toBeGreaterThan(0);
+  fireEvent.scroll(screen.getByRole("region", { name: "Settings panel" }));
+  expect(screen.queryByRole("listbox")).toBeNull();
+  expect(contentCoverDepth()).toBe(0);
+  expect(change).not.toHaveBeenCalled();
+});
+
+it("keeps the list open while its options scroll, including keyboard scrollIntoView", () => {
+  const change = vi.fn();
+  render(<Select value="a" label="Fruit" options={options} onChange={change} />);
+  fireEvent.click(trigger());
+  const list = screen.getByRole("listbox");
+  const last = screen.getByRole("option", { name: "Cherry" });
+  fireEvent.scroll(list);
+  fireEvent.scroll(last);
+  last.scrollIntoView = () => { fireEvent.scroll(list); };
+  key("End");
+  expect(screen.getByRole("listbox")).toBe(list);
+  expect(active()).toContain("Cherry");
+  expect(change).not.toHaveBeenCalled();
+  key("Enter");
+  expect(change).toHaveBeenCalledWith("c");
 });

@@ -108,13 +108,22 @@ export function Select<T extends string>({ value, onChange, options, label, id, 
       const next = { left: Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin)), top: Math.max(margin, upwards ? rect.top - gap - height : rect.bottom + gap), width, maxHeight };
       setPosition((previous) => Object.keys(next).every((key) => previous[key as keyof typeof next] === next[key as keyof typeof next]) ? previous : next);
     };
+    const onScroll = (event: Event) => {
+      const target = event.target;
+      // The portal's own scrolling (including keyboard scrollIntoView) keeps
+      // its anchor intact. Scrolling an ancestor can hide the trigger under
+      // a clipped or sticky panel even when its viewport coordinates remain
+      // on screen, so dismiss that detached list instead of repositioning it.
+      if (!(target instanceof Node) || list.current?.contains(target)) return;
+      if (trigger.current && target.contains(trigger.current)) setExpanded(false);
+    };
     place();
     const observer = new ResizeObserver(place);
     if (trigger.current) observer.observe(trigger.current);
     if (list.current) observer.observe(list.current);
     window.addEventListener("resize", place);
-    document.addEventListener("scroll", place, true);
-    return () => { observer.disconnect(); window.removeEventListener("resize", place); document.removeEventListener("scroll", place, true); };
+    document.addEventListener("scroll", onScroll, true);
+    return () => { observer.disconnect(); window.removeEventListener("resize", place); document.removeEventListener("scroll", onScroll, true); };
   }, [open, options]);
 
   useLayoutEffect(() => {
