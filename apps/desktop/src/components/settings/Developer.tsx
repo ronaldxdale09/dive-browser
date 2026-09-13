@@ -74,7 +74,7 @@ export function Developer({ info }: { info: AppInfo | null }) {
 
       <Group title="Coding agents (MCP)" description="Claude Code, Cursor and Codex can read your tabs, console, network and screenshots. Run this once:">
         <div className="py-3">
-          <CopyBlock text={command} display={info ? shown : undefined} />
+          <CopyBlock text={command} display={info ? shown : undefined} displayTitle={info ? command : undefined} />
           {info && token && (
             <>
               <p className="mt-3 mb-1.5 text-[11px] text-ink-2">Cursor, and any client set up with JSON: add this to its mcp.json (Cursor keeps it at ~/.cursor/mcp.json).</p>

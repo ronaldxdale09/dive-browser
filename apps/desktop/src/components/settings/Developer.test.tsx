@@ -25,6 +25,6 @@ describe("Developer › MCP setup", () => {
     render(<Developer info={info} />);
     await waitFor(() => expect(screen.getByRole("button", { name: "Copy mcp.json entry" })).toBeTruthy());
     expect(document.body.textContent).toContain("••••••••");
-    expect(document.body.textContent).not.toContain("secret-token");
+    expect(document.body.innerHTML).not.toContain("secret-token");
   });
 });

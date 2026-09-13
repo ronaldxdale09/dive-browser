@@ -6,13 +6,14 @@ import { copyText } from "../../lib/clipboard";
 
 /**
  * A read-only command with a copy button. `display` is what the block shows
- * when the full text is too long to read; the clipboard always gets `text`.
+ * when the full text is too long or sensitive to show; the clipboard always gets `text`.
+ * Supply `displayTitle` only for a safe, intentionally visible hover preview.
  */
-export function CopyBlock({ text, label = "Copy command", display }: { text: string; label?: string; display?: ReactNode }) {
+export function CopyBlock({ text, label = "Copy command", display, displayTitle }: { text: string; label?: string; display?: ReactNode; displayTitle?: string | undefined }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex items-start gap-2 rounded-lg border border-line bg-surface-2 p-2">
-      <code title={display ? text : undefined} className="min-w-0 flex-1 font-mono text-[11px] break-all text-ink select-text">
+      <code title={displayTitle} className="min-w-0 flex-1 font-mono text-[11px] break-all text-ink select-text">
         {display ?? (text || "…")}
       </code>
       {copied && (

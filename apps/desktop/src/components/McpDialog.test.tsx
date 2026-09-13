@@ -1,8 +1,8 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import type { AppInfo } from "../lib/ipc";
-import { instruction, McpDialog } from "./McpDialog";
+import { McpDialog } from "./McpDialog";
 
 const info: AppInfo = {
   version: "0.1.19",
@@ -13,54 +13,137 @@ const info: AppInfo = {
   simulate: null,
 };
 
+function ready() {
+  vi.spyOn(ipc, "appInfo").mockResolvedValue(info);
+  vi.spyOn(ipc, "mcpToken").mockResolvedValue("secret-token");
+}
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-});
-
-describe("instruction", () => {
-  it("gives the agent everything it needs to register itself", () => {
-    const text = instruction(info.mcp_url, info.mcp_token_path, "secret-token");
-    expect(text).toContain(info.mcp_url);
-    expect(text).toContain("Authorization: Bearer secret-token");
-    expect(text).toContain(info.mcp_token_path);
-  });
-
-  it("is addressed to the agent and names the harnesses people ask about", () => {
-    // One block for every client: the agent picks the shape its own config
-    // wants, which is why there is no client to choose here.
-    const text = instruction(info.mcp_url, info.mcp_token_path, "secret-token");
-    expect(text.startsWith("Add the Dive browser to yourself as an MCP server")).toBe(true);
-    for (const client of ["Claude Code", "Cursor", "Codex"]) expect(text).toContain(client);
-  });
+  vi.unstubAllGlobals();
 });
 
 describe("McpDialog", () => {
-  it("shows the instruction with the token masked, and copies it whole", async () => {
-    vi.spyOn(ipc, "appInfo").mockResolvedValue(info);
-    vi.spyOn(ipc, "mcpToken").mockResolvedValue("secret-token");
-    render(<McpDialog onClose={() => {}} />);
+  it("keeps the token out of the DOM but copies the complete skill and MCP setup", async () => {
+    ready();
+    const write = vi.spyOn(ipc, "clipboardWriteText").mockResolvedValue(null);
+    const { container } = render(<McpDialog onClose={() => {}} />);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Copy instruction" })).toBeTruthy());
-    expect(document.body.textContent).toContain("Add the Dive browser to yourself");
-    expect(document.body.textContent).not.toContain("secret-token");
+    const button = await screen.findByRole("button", { name: "Copy setup" });
+    expect(button.textContent).toContain("Copy setup");
+    expect(container.innerHTML).not.toContain("secret-token");
+    expect(screen.getByRole("dialog").textContent).toContain("••••••••••••");
+    expect(write).not.toHaveBeenCalled();
+    fireEvent.click(button);
+
+    await screen.findByRole("button", { name: "Copied" });
+    const payload = write.mock.calls[0]?.[0];
+    expect(payload).toContain("https://github.com/ronaldxdale09/dive-skill");
+    expect(payload).toContain("npx skills add ronaldxdale09/dive-skill --skill dive");
+    expect(payload).toContain("--agent");
+    for (const id of ["claude-code", "codex", "cursor", "opencode", "zed", "windsurf"]) expect(payload).toContain(id);
+    expect(payload).toContain("Streamable HTTP");
+    expect(payload).toContain(info.mcp_url);
+    expect(payload).toContain("Authorization: Bearer secret-token");
+    expect(payload).toContain(info.mcp_token_path);
+    expect(payload).toContain("dive_capabilities");
+    expect(payload).toContain("tabs_list");
+    expect(container.innerHTML).not.toContain("secret-token");
   });
 
-  it("names the agents it is known to work with", async () => {
-    vi.spyOn(ipc, "appInfo").mockResolvedValue(info);
-    vi.spyOn(ipc, "mcpToken").mockResolvedValue("secret-token");
+  it("keeps a pending copy disabled and offers a visible retry after both clipboard methods fail", async () => {
+    ready();
+    let rejectWrite!: (reason: Error) => void;
+    const write = vi.spyOn(ipc, "clipboardWriteText").mockImplementationOnce(() => new Promise<null>((_, reject) => { rejectWrite = reject; }));
+    const fallback = vi.fn().mockRejectedValue(new Error("clipboard unavailable"));
+    vi.stubGlobal("navigator", { clipboard: { writeText: fallback } });
     render(<McpDialog onClose={() => {}} />);
 
-    await waitFor(() => expect(screen.getByTitle("Claude Code")).toBeTruthy());
-    for (const name of ["Cursor", "Codex", "Windsurf", "Zed"]) expect(screen.getByTitle(name)).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Copy setup" }));
+    expect((screen.getByRole("button", { name: "Copying…" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { rejectWrite(new Error("host unavailable")); });
+    const retry = await screen.findByRole("button", { name: "Copy failed · Retry" });
+    expect(retry.textContent).toContain("Retry");
+    expect(screen.getByRole("alert").textContent).toContain("copy");
+
+    write.mockResolvedValue(null);
+    fireEvent.click(retry);
+    await screen.findByRole("button", { name: "Copied" });
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("says the server is off rather than offering an instruction that cannot work", async () => {
+  it("shows loading until the runtime details and token are both available", async () => {
+    vi.spyOn(ipc, "appInfo").mockResolvedValue(info);
+    let resolveToken!: (token: string) => void;
+    vi.spyOn(ipc, "mcpToken").mockImplementation(() => new Promise<string>((resolve) => { resolveToken = resolve; }));
+    render(<McpDialog onClose={() => {}} />);
+
+    expect(screen.getByRole("status").textContent).toContain("Loading");
+    expect(screen.queryByRole("button", { name: "Copy setup" })).toBeNull();
+    await act(async () => { resolveToken("secret-token"); });
+    await screen.findByRole("button", { name: "Copy setup" });
+    expect(document.body.textContent).not.toContain("Loading");
+  });
+
+  it("includes OpenCode among the supported setup choices", async () => {
+    ready();
+    render(<McpDialog onClose={() => {}} />);
+    await screen.findByRole("button", { name: "Copy setup" });
+    for (const name of ["Claude Code", "Cursor", "Codex", "OpenCode", "Windsurf", "Zed"]) expect(screen.getByTitle(name)).toBeTruthy();
+  });
+
+  it("does not offer setup when the server is off in a private window", async () => {
     vi.spyOn(ipc, "appInfo").mockResolvedValue({ ...info, mcp_url: "" });
-    vi.spyOn(ipc, "mcpToken").mockResolvedValue("secret-token");
+    vi.spyOn(ipc, "mcpToken").mockResolvedValue("");
     render(<McpDialog onClose={() => {}} />);
 
     await waitFor(() => expect(document.body.textContent).toContain("MCP server is off"));
-    expect(screen.queryByRole("button", { name: "Copy instruction" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy setup" })).toBeNull();
+    expect(document.body.textContent).not.toContain("Loading");
+  });
+
+  it.each(["appInfo", "mcpToken"] as const)("reports a failed %s lookup instead of showing incomplete setup", async (method) => {
+    ready();
+    vi.mocked(ipc[method]).mockRejectedValue(new Error("unavailable"));
+    render(<McpDialog onClose={() => {}} />);
+
+    expect((await screen.findByRole("alert")).textContent).toContain("could not read");
+    expect(screen.queryByRole("button", { name: "Copy setup" })).toBeNull();
+    expect(document.body.textContent).not.toContain("Loading");
+  });
+
+  it("does not offer an authenticated connection with an empty token", async () => {
+    ready();
+    vi.mocked(ipc.mcpToken).mockResolvedValue("");
+    render(<McpDialog onClose={() => {}} />);
+    expect((await screen.findByRole("alert")).textContent).toContain("token");
+    expect(screen.queryByRole("button", { name: "Copy setup" })).toBeNull();
+  });
+
+  it("keeps keyboard focus in the dialog and closes on Escape without treating interior clicks as backdrop clicks", async () => {
+    ready();
+    const close = vi.fn();
+    render(<McpDialog onClose={close} />);
+    const copy = await screen.findByRole("button", { name: "Copy setup" });
+    const done = screen.getByRole("button", { name: "Done" });
+    fireEvent.mouseDown(copy);
+    expect(close).not.toHaveBeenCalled();
+    done.focus();
+    fireEvent.keyDown(done, { key: "Tab" });
+    expect(document.activeElement).toBe(copy);
+    fireEvent.keyDown(copy, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(done);
+    fireEvent.keyDown(done, { key: "Escape" });
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+  });
+
+  it("closes when the backdrop is pressed", async () => {
+    ready();
+    const close = vi.fn();
+    render(<McpDialog onClose={close} />);
+    fireEvent.mouseDown(screen.getByRole("dialog").parentElement!);
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
   });
 });
