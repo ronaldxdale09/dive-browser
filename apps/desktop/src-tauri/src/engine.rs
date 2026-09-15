@@ -837,6 +837,22 @@ impl TabHost {
                 .await;
                 crate::form_fill::attach(prefs_app.clone(), tab_id, session_for_prefs.clone())
                     .await;
+                crate::tab_audio::attach(prefs_app.clone(), tab_id, session_for_prefs.clone())
+                    .await;
+                // A tab that was muted before it was discarded wakes up muted:
+                // the view is new, and native mute belongs to the view.
+                if crate::tab_audio::is_muted(tab_id) {
+                    let app = prefs_app.clone();
+                    let _ = prefs_app.run_on_main_thread(move || {
+                        let Some(main) = MainThread::here() else {
+                            return;
+                        };
+                        let state = app.state::<AppState>();
+                        if let Some(host) = crate::state::lock(&state.host).as_ref() {
+                            let _ = crate::tab_audio::apply(&main, host, tab_id, true);
+                        }
+                    });
+                }
                 crate::prefs::apply(&session_for_prefs, &prefs, chrome_scheme.as_deref()).await;
                 tracing::debug!(%tab_id, "browser preferences complete before navigation");
                 if session_for_prefs.is_closed()
@@ -1656,6 +1672,7 @@ impl TabHost {
         state.activity.drop_tab(id);
         state.agent_presence.forget(id);
         state.js_dialogs.forget_tab(id);
+        crate::tab_audio::forget(id);
         Ok(())
     }
 

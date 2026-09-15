@@ -1,11 +1,12 @@
 import { SortableContext, horizontalListSortingStrategy, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AppWindow, Columns2, CopyPlus, Link, Loader2, Moon, Pin, Plus, Star, X } from "lucide-react";
+import { AppWindow, Columns2, CopyPlus, Link, Loader2, Moon, Pin, Plus, Star, Volume2, VolumeX, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBrowser } from "../store/browser";
 import { MAX_PANES, useLayout, type Split } from "../store/layout";
 import type { Tab } from "../lib/ipc";
 import { Favicon } from "./Favicon";
+import { useTabAudio } from "../store/tabAudio";
 import { DrivingMark } from "./agent/DrivingMark";
 import { useIsDriven } from "../store/agentPresence";
 import { Icon, IconButton } from "./Icon";
@@ -95,6 +96,8 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
   const removePane = useLayout((s) => s.remove);
   const split = useLayout((s) => (workspace ? s.splits[workspace] : undefined));
   const loading = useBrowser((s) => s.loading);
+  const muted = useTabAudio((s) => s.byTab);
+  const setMuted = useTabAudio((s) => s.setMuted);
   const tabs = useMemo(() => orderTabs(all), [all]);
   const paneIds = new Set((split?.tabs ?? []).filter((id) => !detached.includes(id)));
   const essentials = useMemo(() => essentialTabs(all), [all]);
@@ -248,6 +251,7 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
           y={menu.y}
           tier={all.find((t) => t.id === menu.id)?.tier ?? "today"}
           detached={detached.includes(menu.id)}
+          muted={muted[menu.id]?.muted === true}
           split={(() => { const t = all.find((x) => x.id === menu.id); return t ? splitAction(t, active, split, tabs, detached) : null; })()}
           onPin={(v) => {
             void setPinned(menu.id, v);
@@ -279,6 +283,10 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
             setMenu(null);
           }}
           onDismiss={() => setMenu(null)}
+          onMute={(value) => {
+            void setMuted(menu.id, value);
+            setMenu(null);
+          }}
           onDuplicate={() => {
             const t = all.find((x) => x.id === menu.id);
             if (t) void openTab(t.url);
@@ -423,6 +431,40 @@ export function revealScrollTop(list: { top: number; bottom: number; scrollTop: 
  * One tab in the strip. Memoised: the strip re-renders on every load-state
  * tick of any tab, and each tab only needs its own boolean.
  */
+/**
+ * The speaker on a tab that is making a sound, and the way to silence it.
+ *
+ * It is how you find the tab that started talking, so it shows on any tab
+ * that is audible -- pinned and icon-only ones included, where it sits over
+ * the corner of the favicon -- and stays on while a tab is muted, since a
+ * silenced tab that looks like every other tab is how you lose an hour.
+ */
+function TabSpeaker({ tab, pinned }: { tab: Tab; pinned: boolean }) {
+  const state = useTabAudio((s) => s.byTab[tab.id]);
+  const toggle = useTabAudio((s) => s.toggle);
+  if (!state?.audible && !state?.muted) return null;
+  const muted = state.muted;
+  const action = `${muted ? "Unmute" : "Mute"} ${label(tab)}`;
+  return (
+    <button
+      type="button"
+      aria-label={action}
+      title={action}
+      aria-pressed={muted}
+      data-tauri-drag-region="false"
+      tabIndex={-1}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        void toggle(tab.id);
+      }}
+      className={`grid size-5 shrink-0 place-items-center rounded-full hover:bg-surface-3 hover:text-ink ${muted ? "text-ink-3" : "text-ink-2"} ${pinned ? "absolute right-0 bottom-0 size-4 bg-surface-2" : "mr-0.5"}`}
+    >
+      <Icon icon={muted ? VolumeX : Volume2} size={pinned ? 9 : 11} />
+    </button>
+  );
+}
+
 const SortableTab = memo(function SortableTab({ tab: t, active, loading, detached, inSplit, narrow, vertical = false, inTabOrder, onFocus: focusTab, onActivate: activateTab, onClose: closeTab, onMenu: openMenu }: { tab: Tab; active: boolean; loading: boolean; detached: boolean; inSplit: boolean; narrow: Narrow; vertical?: boolean; inTabOrder: boolean; onFocus: (id: string) => void; onActivate: (id: string) => void; onClose: (id: string) => void; onMenu: (id: string, x: number, y: number) => void }) {
   // The active tab keeps its title however crowded the strip gets; only the
   // others fall back to a bare favicon.
@@ -543,6 +585,7 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
           </span>
         )}
       </button>
+      <TabSpeaker tab={t} pinned={pinned} />
       {!pinned && !bare && (!narrow.close || active) && (
         <button
           type="button"
@@ -651,7 +694,7 @@ export function roveMenu(key: string, items: readonly HTMLElement[], current: El
   }
 }
 
-function TabMenu({ x, y, tier, detached, split, onPin, onEssential, onWindow, onSplit, onClose, onCloseOthers, onDuplicate, onCopy, onDismiss }: { x: number; y: number; tier: Tab["tier"]; detached: boolean; split: SplitAction | null; onPin: (v: boolean) => void; onEssential: (v: boolean) => void; onWindow: (out: boolean) => void; onSplit: (action: SplitAction) => void; onClose: () => void; onCloseOthers: () => void; onDuplicate: () => void; onCopy: () => void; onDismiss: () => void }) {
+function TabMenu({ x, y, tier, detached, muted, split, onPin, onEssential, onWindow, onSplit, onMute, onClose, onCloseOthers, onDuplicate, onCopy, onDismiss }: { x: number; y: number; tier: Tab["tier"]; detached: boolean; muted: boolean; split: SplitAction | null; onPin: (v: boolean) => void; onEssential: (v: boolean) => void; onWindow: (out: boolean) => void; onSplit: (action: SplitAction) => void; onMute: (v: boolean) => void; onClose: () => void; onCloseOthers: () => void; onDuplicate: () => void; onCopy: () => void; onDismiss: () => void }) {
   useCoversContent(true);
   const ref = useRef<HTMLDivElement>(null);
   // Like every other menu: a press anywhere else or Escape puts it away.
@@ -711,6 +754,9 @@ function TabMenu({ x, y, tier, detached, split, onPin, onEssential, onWindow, on
         <MenuChord chord={chords["tab.detach"]} />
       </button>
       <div className="my-1 h-px bg-line" role="separator" />
+      <button type="button" role="menuitem" className={item} onClick={() => onMute(!muted)}>
+        <Icon icon={muted ? Volume2 : VolumeX} size={13} /> {muted ? "Unmute tab" : "Mute tab"}
+      </button>
       <button type="button" role="menuitem" className={item} onClick={onDuplicate}>
         <Icon icon={CopyPlus} size={13} /> Duplicate tab
       </button>

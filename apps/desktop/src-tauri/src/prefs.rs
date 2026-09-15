@@ -168,6 +168,11 @@ pub struct Prefs {
     /// leaving the window.
     #[serde(default = "default_true")]
     pub video_fill_tab: bool,
+    /// Ask the search engine to complete what is typed in the address bar.
+    /// Every keystroke goes to the engine while this is on, so it is a
+    /// preference; a private session never asks, whatever it says.
+    #[serde(default = "default_true")]
+    pub search_suggestions: bool,
     /// Sites allowed to open another app without asking again, written as
     /// `host|scheme` ("claude.ai|claude"). One entry allows one site to open
     /// one scheme; see [`crate::external_link`].
@@ -252,6 +257,7 @@ impl Default for Prefs {
             blocked_patterns: Vec::new(),
             youtube_protection: default_youtube_protection(),
             privacy_exceptions: Vec::new(),
+            search_suggestions: true,
             external_link_allowed: Vec::new(),
             javascript: true,
             history_days: 0,

@@ -153,7 +153,9 @@ fn protected(state: &AppState, host: &crate::engine::TabHost, tab: &Tab) -> bool
         showing: host.showing().contains(&tab.id).then_some(tab.id),
         recording: state.screencast.is_recording(tab.id) || state.buffers.is_recording(tab.id),
         agent_busy: !lock(&state.agent_runs).is_empty(),
-        audible: false, // Renderer snapshot and native audio are checked separately.
+        // The page's own report, which the tab strip's speaker also comes from;
+        // the renderer snapshot and native audio are checked separately.
+        audible: crate::tab_audio::is_audible(tab.id),
         protect_local: std::env::var("DIVE_DISCARD_LOCAL_TABS").as_deref() != Ok("1"),
     };
     keep_reason(tab, signals).is_some() || state.inspector.active(tab.id)

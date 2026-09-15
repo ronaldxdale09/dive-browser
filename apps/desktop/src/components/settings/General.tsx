@@ -74,6 +74,11 @@ export function General() {
             />
           }
         />
+        <Row
+          label="Suggestions from the search engine"
+          hint="Completes what you type in the address bar. While this is on, what you type there is sent to your search engine as you type it — never in a private window, and never when it looks like an address."
+          control={<Switch checked={prefs.search_suggestions} onChange={(search_suggestions) => set({ search_suggestions })} label="Suggestions from the search engine" />}
+        />
         {prefs.search_engine === "custom" && (
           <Row
             label="Search URL"

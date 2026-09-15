@@ -2,7 +2,7 @@ import { ArrowUpRight, History, Search, Star } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ipc } from "../lib/ipc";
 import type { Bookmark, HistoryEntry, Tab } from "../lib/ipc";
-import { SUGGESTION_DEBOUNCE_MS, SUGGESTION_LIMIT, buildSuggestions, placeOf, stepHighlight } from "../lib/omnibox";
+import { SUGGESTION_DEBOUNCE_MS, SUGGESTION_LIMIT, buildSuggestions, looksLikeUrl, placeOf, stepHighlight } from "../lib/omnibox";
 import type { Suggestion } from "../lib/omnibox";
 import { useCoversContent } from "../lib/overlay";
 import { Favicon } from "./Favicon";
@@ -18,6 +18,7 @@ import { Icon } from "./Icon";
 export function useAddressSuggestions(query: string, active: boolean, tabs: readonly Tab[]) {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const trimmed = active ? query.trim() : "";
   // Results from the last query stay around until the next answer; they are
   // re-filtered against the new text, so nothing stale shows meanwhile.
@@ -33,13 +34,21 @@ export function useAddressSuggestions(query: string, active: boolean, tabs: read
         .historySearch(trimmed, SUGGESTION_LIMIT)
         .then((found) => alive && setHistory(found))
         .catch(() => alive && setHistory([]));
+      // The engine is asked only for what could be a search. An address being
+      // typed out is nobody else's business.
+      if (looksLikeUrl(trimmed)) setSuggestions([]);
+      else
+        ipc
+          .searchSuggest(trimmed)
+          .then((found) => alive && setSuggestions(found))
+          .catch(() => alive && setSuggestions([]));
     }, SUGGESTION_DEBOUNCE_MS);
     return () => {
       alive = false;
       clearTimeout(timer);
     };
   }, [trimmed]);
-  const rows = useMemo(() => buildSuggestions(trimmed, { tabs, bookmarks, history }), [trimmed, tabs, bookmarks, history]);
+  const rows = useMemo(() => buildSuggestions(trimmed, { tabs, bookmarks, history, suggestions }), [trimmed, tabs, bookmarks, history, suggestions]);
   const [highlightState, setHighlightState] = useState({ query: trimmed, index: 0 });
   const highlight = highlightState.query === trimmed ? Math.min(highlightState.index, Math.max(rows.length - 1, 0)) : 0;
   const setHighlight = (index: number) => setHighlightState({ query: trimmed, index });
@@ -53,6 +62,7 @@ function rowGlyph(row: Suggestion) {
     case "open":
       return <Icon icon={ArrowUpRight} size={14} className="shrink-0 text-ink-3" />;
     case "search":
+    case "suggest":
       return <Icon icon={Search} size={14} className="shrink-0 text-ink-3" />;
     case "bookmark":
       return <Favicon src={row.favicon} size={14} fallback={Star} fallbackClassName="text-highlight" />;
@@ -104,10 +114,10 @@ export function AddressSuggestions({
           className={`flex cursor-default items-center gap-2 rounded-lg px-3 py-2 ${index === highlight ? "bg-surface-2 text-ink" : "text-ink"}`}
         >
           {rowGlyph(row)}
-          {row.kind === "open" || row.kind === "search" ? (
+          {row.kind === "open" || row.kind === "search" || row.kind === "suggest" ? (
             <>
               <span className="text-ink-2">{row.kind === "open" ? "Open" : "Search"}</span>
-              <span className="truncate font-mono">{row.title}</span>
+              <span className={`truncate ${row.kind === "suggest" ? "" : "font-mono"}`}>{row.title}</span>
             </>
           ) : (
             <>

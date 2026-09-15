@@ -70,6 +70,7 @@ mod responsiveness;
 mod rules;
 mod screen;
 mod screencast;
+mod search_suggest;
 mod snapshot;
 mod sourcemaps;
 mod stack;
@@ -77,6 +78,7 @@ pub mod startup;
 mod state;
 mod storage;
 mod subtitles;
+mod tab_audio;
 mod titlebar;
 #[cfg(feature = "cef")]
 mod ui_probe;

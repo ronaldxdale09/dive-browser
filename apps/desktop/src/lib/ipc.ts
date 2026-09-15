@@ -22,7 +22,7 @@ export const events = {
     once: (callback: EventCallback<string>) => generatedEvents.menuCommand(getCurrentWebview()).once(callback),
   },
 };
-export type { ExternalLinkAsked } from "../generated/bindings";
+export type { ExternalLinkAsked, TabAudio } from "../generated/bindings";
 export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, CsvImportSummary, FormEntry, JsDialogAsked, JsDialogClosed } from "../generated/bindings";
 export type { ExtensionInfo, ExtensionList };
 export type { WebApp, WebAppProbe } from "../generated/bindings";
@@ -210,6 +210,9 @@ export const ipc = {
   bookmarksSearch: async (query: string, limit = 20) => unwrap(await commands.bookmarksSearch(query, limit)),
   passwordsList: async () => unwrap(await commands.passwordsList()),
   passwordsForUrl: async (url: string) => unwrap(await commands.passwordsForUrl(url)),
+  searchSuggest: async (query: string) => unwrap(await commands.searchSuggest(query)),
+  tabSetMuted: async (id: string, muted: boolean) => unwrap(await commands.tabSetMuted(id, muted)),
+  tabAudioState: async (id: string) => commands.tabAudioState(id),
   externalLinkOpen: async (token: string, always: boolean) => unwrap(await commands.externalLinkOpen(token, always)),
   externalLinkDismiss: async (token: string) => commands.externalLinkDismiss(token),
   passwordsSave: async (url: string, username: string, password: string) => unwrap(await commands.passwordsSave(url, username, password)),

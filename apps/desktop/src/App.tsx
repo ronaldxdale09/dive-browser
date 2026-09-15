@@ -26,6 +26,7 @@ import { useChromeLayout, useViewportSize } from "./lib/adaptiveLayout";
 import { DialogLoading, PanelSkeleton, ToastViewport } from "./components/ChromeFeedback";
 import { usePicker } from "./store/simulator";
 import { startUpdateWatch } from "./store/updates";
+import { useTabAudio } from "./store/tabAudio";
 import { bootSubtitles } from "./store/subtitles";
 import { useRecording } from "./store/recording";
 import { useRecorder } from "./store/recorder";
@@ -94,6 +95,8 @@ export function App() {
   // the page it is one.
   useEffect(() => listenForEmulation(), []);
   useEffect(() => listenForUpdateProgress(), []);
+  // Which tabs are making a sound, so the strip can show and silence them.
+  useEffect(() => void useTabAudio.getState().init(), []);
   // Which panels were open last time is remembered here rather than in the
   // browser store, whose `open` map is per-window state. Applied once at
   // boot, then followed.

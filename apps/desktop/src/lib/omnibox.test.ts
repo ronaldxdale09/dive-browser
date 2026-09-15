@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Bookmark, HistoryEntry, Tab } from "./ipc";
-import { buildSuggestions, hostOf, looksLikeUrl, placeOf, stepHighlight } from "./omnibox";
+import { SUGGESTION_LIMIT, buildSuggestions, hostOf, looksLikeUrl, placeOf, stepHighlight } from "./omnibox";
 
 const tab = (id: string, url: string, title: string): Tab => ({
   id,
@@ -40,6 +40,27 @@ describe("looksLikeUrl", () => {
   });
   it.each(["", "  ", "how to fold a shirt", "rust", "a.b c"])("treats %j as a search", (input) => {
     expect(looksLikeUrl(input)).toBe(false);
+  });
+});
+
+describe("engine suggestions", () => {
+  const sources = { tabs: [] as never[], bookmarks: [] as never[], history: [] as never[] };
+
+  it("offers the engine's completions after what Dive knows", () => {
+    const rows = buildSuggestions("weat", { ...sources, suggestions: ["weather", "weather tomorrow"] });
+    expect(rows.map((r) => r.kind)).toEqual(["search", "suggest", "suggest"]);
+    expect(rows.map((r) => r.title)).toEqual(["weat", "weather", "weather tomorrow"]);
+  });
+
+  it("never repeats the literal row or a page already offered", () => {
+    const tabs = [{ id: "t1", url: "https://weather.com", title: "Weather", favicon: null }] as never[];
+    const rows = buildSuggestions("weather", { ...sources, tabs, suggestions: ["weather", "https://weather.com", "weather radar"] });
+    expect(rows.filter((r) => r.kind === "suggest").map((r) => r.title)).toEqual(["weather radar"]);
+  });
+
+  it("keeps the whole list within the limit", () => {
+    const many = Array.from({ length: 20 }, (_, n) => `q ${n}`);
+    expect(buildSuggestions("q", { ...sources, suggestions: many })).toHaveLength(SUGGESTION_LIMIT);
   });
 });
 

@@ -707,6 +707,9 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             passwords_reveal,
             passwords_delete,
             passwords_used,
+            search_suggest,
+            tab_set_muted,
+            tab_audio_state,
             external_link_open,
             external_link_dismiss,
             passwords_answer,
@@ -857,6 +860,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::permissions::PermissionAsked,
             crate::credential_fill::CredentialPrompt,
             crate::external_link::ExternalLinkAsked,
+            crate::tab_audio::TabAudio,
             crate::permissions::PermissionDismissed,
             crate::js_dialog::JsDialogAsked,
             crate::js_dialog::JsDialogClosed,
@@ -2378,6 +2382,46 @@ pub(crate) fn passwords_reveal(state: State<'_, AppState>, id: String) -> AppRes
 #[specta::specta]
 pub(crate) fn passwords_used(state: State<'_, AppState>, id: String) -> AppResult<()> {
     crate::passwords::touch(&state, &id)
+}
+
+/// What the search engine thinks this query might be. Empty when the person
+/// turned suggestions off, in a private session, or when the engine did not
+/// answer in time -- the address bar shows what it knows either way.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn search_suggest(
+    app: AppHandle<Runtime>,
+    query: String,
+) -> AppResult<Vec<String>> {
+    if crate::private_session::is_private() {
+        return Ok(Vec::new());
+    }
+    let (enabled, engine) = {
+        use tauri::Manager as _;
+        let state = app.state::<AppState>();
+        let prefs = state.prefs.snapshot(&state);
+        (prefs.search_suggestions, prefs.search_engine.clone())
+    };
+    if !enabled {
+        return Ok(Vec::new());
+    }
+    crate::search_suggest::suggest(&engine, &query).await
+}
+
+/// Silence a tab, or let it be heard again.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_set_muted(app: AppHandle<Runtime>, id: TabId, muted: bool) -> AppResult<()> {
+    on_main(&app, move |main, app, state| {
+        crate::tab_audio::set_muted(main, app, state, id, muted)
+    })
+}
+
+/// What a tab is doing with sound right now, for a chrome that just opened.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_audio_state(id: TabId) -> crate::tab_audio::TabAudio {
+    crate::tab_audio::snapshot(id)
 }
 
 /// Open a link that belongs to another app, optionally remembering the site.

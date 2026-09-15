@@ -7,7 +7,7 @@ export const SUGGESTION_LIMIT = 8;
 export const SUGGESTION_DEBOUNCE_MS = 120;
 
 export type Suggestion =
-  | { kind: "open" | "search"; url: string; title: string; favicon: null }
+  | { kind: "open" | "search" | "suggest"; url: string; title: string; favicon: null }
   | { kind: "tab"; url: string; title: string; favicon: string | null; tabId: string }
   | { kind: "bookmark" | "history"; url: string; title: string; favicon: string | null };
 
@@ -87,7 +87,7 @@ function matches(query: string, ...fields: (string | null | undefined)[]) {
  */
 export function buildSuggestions(
   query: string,
-  { tabs, bookmarks, history }: { tabs: readonly Tab[]; bookmarks: readonly Bookmark[]; history: readonly HistoryEntry[] },
+  { tabs, bookmarks, history, suggestions = [] }: { tabs: readonly Tab[]; bookmarks: readonly Bookmark[]; history: readonly HistoryEntry[]; suggestions?: readonly string[] },
   limit = SUGGESTION_LIMIT,
 ): Suggestion[] {
   const trimmed = query.trim();
@@ -108,6 +108,16 @@ export function buildSuggestions(
   }
   for (const entry of history) {
     if (matches(needle, entry.title, entry.url)) add({ kind: "history", url: entry.url, title: titleOf(entry), favicon: entry.favicon });
+  }
+  // The engine's completions come last: what Dive already knows about beats a
+  // guess, and they are what fills the list when it knows nothing. They are
+  // searches, not addresses, so they never take the first row from a site the
+  // letters lead to.
+  for (const phrase of suggestions) {
+    if (rows.length >= limit) break;
+    if (rows.some((row) => row.kind !== "suggest" && row.url.toLowerCase() === phrase.toLowerCase())) continue;
+    if (phrase.toLowerCase() === needle) continue;
+    rows.push({ kind: "suggest", url: phrase, title: phrase, favicon: null });
   }
   // A few letters that begin a known site lead there on Enter, not to a web
   // search for those letters: "exam" with example.com open goes to the tab.

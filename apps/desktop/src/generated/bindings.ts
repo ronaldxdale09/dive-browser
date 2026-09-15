@@ -236,6 +236,16 @@ export const commands = {
 	 *  comes first next time.
 	 */
 	passwordsUsed: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("passwords_used", { id })),
+	/**
+	 *  What the search engine thinks this query might be. Empty when the person
+	 *  turned suggestions off, in a private session, or when the engine did not
+	 *  answer in time -- the address bar shows what it knows either way.
+	 */
+	searchSuggest: (query: string) => typedError<string[], AppError>(__TAURI_INVOKE("search_suggest", { query })),
+	/**  Silence a tab, or let it be heard again. */
+	tabSetMuted: (id: TabId, muted: boolean) => typedError<null, AppError>(__TAURI_INVOKE("tab_set_muted", { id, muted })),
+	/**  What a tab is doing with sound right now, for a chrome that just opened. */
+	tabAudioState: (id: TabId) => __TAURI_INVOKE<TabAudio>("tab_audio_state", { id }),
 	/**  Open a link that belongs to another app, optionally remembering the site. */
 	externalLinkOpen: (token: string, always: boolean) => typedError<null, AppError>(__TAURI_INVOKE("external_link_open", { token, always })),
 	/**  Let go of a link the person did not want opened. */
@@ -675,6 +685,7 @@ export const events = {
 	subtitleCue: makeEvent<SubtitleCue>("subtitle-cue"),
 	subtitleModelProgress: makeEvent<SubtitleModelProgress>("subtitle-model-progress"),
 	subtitleState: makeEvent<SubtitleState>("subtitle-state"),
+	tabAudio: makeEvent<TabAudio>("tab-audio"),
 	tabCrashed: makeEvent<TabCrashed>("tab-crashed"),
 	tabHistoryChanged: makeEvent<TabHistoryChanged>("tab-history-changed"),
 	tabLoad: makeEvent<TabLoad>("tab-load"),
@@ -1850,6 +1861,12 @@ export type Prefs = {
 	 */
 	video_fill_tab?: boolean,
 	/**
+	 *  Ask the search engine to complete what is typed in the address bar.
+	 *  Every keystroke goes to the engine while this is on, so it is a
+	 *  preference; a private session never asks, whatever it says.
+	 */
+	search_suggestions?: boolean,
+	/**
 	 *  Sites allowed to open another app without asking again, written as
 	 *  `host|scheme` ("claude.ai|claude"). One entry allows one site to open
 	 *  one scheme; see [`crate::external_link`].
@@ -2400,6 +2417,18 @@ export type Tab = {
 	state: TabState,
 	/**  Last time the tab was focused. */
 	last_active_at: string,
+};
+
+/**
+ *  What the chrome draws on a tab: a speaker when it is making a sound, a
+ *  crossed speaker when it has been silenced.
+ */
+export type TabAudio = {
+	tab_id: TabId,
+	/**  The page is playing something a person would hear. */
+	audible: boolean,
+	/**  The host is silencing this tab. */
+	muted: boolean,
 };
 
 /**  Emitted when a tab's renderer dies, whether or not it is being recovered. */
