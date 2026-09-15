@@ -4,7 +4,7 @@ import type { ProviderInfo, Tab } from "../lib/ipc";
 import { useAgent } from "../store/agent";
 import { useBrowser } from "../store/browser";
 import { usePrefs } from "../store/prefs";
-import { Sidecar } from "./Sidecar";
+import { AgentDock } from "./AgentDock";
 
 const PROVIDERS: ProviderInfo[] = [
   {
@@ -78,10 +78,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("Sidecar", () => {
+describe("AgentDock", () => {
   it("shows initialization failure with retry and keeps its close control", () => {
     useAgent.setState({ loaded: true, initError: "Credential discovery timed out" });
-    render(<Sidecar />);
+    render(<AgentDock />);
     expect(screen.getByRole("alert").textContent).toContain("timed out");
     expect(screen.queryByText("Connect a model provider")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Retry loading agent" }));
@@ -91,7 +91,7 @@ describe("Sidecar", () => {
   });
 
   it("refreshes credentials only when Settings closes, not alongside initialization", () => {
-    render(<Sidecar />);
+    render(<AgentDock />);
     expect(useAgent.getState().refreshKeys).not.toHaveBeenCalled();
     act(() => useBrowser.setState({ open: { ...useBrowser.getState().open, settings: true } }));
     expect(useAgent.getState().refreshKeys).not.toHaveBeenCalled();
@@ -99,18 +99,13 @@ describe("Sidecar", () => {
     expect(useAgent.getState().refreshKeys).toHaveBeenCalledTimes(1);
   });
 
-  it("can be closed from its own header", () => {
-    render(<Sidecar />);
-    fireEvent.click(screen.getByRole("button", { name: "Close agent" }));
-    expect(useBrowser.getState().toggle).toHaveBeenCalledWith("sidecar", false);
-  });
-
   it("loads the provider catalog and shows the thread with the ready provider", () => {
-    render(<Sidecar />);
+    render(<AgentDock />);
     expect(useAgent.getState().init).toHaveBeenCalledTimes(1);
     expect(useAgent.getState().refreshKeys).not.toHaveBeenCalled();
-    expect(screen.getByRole("heading", { name: "Agent" })).toBeTruthy();
-    expect(screen.getByText("Anthropic")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Agent" })).toBeTruthy();
+    // The composer names the model in use, with its provider beside it.
+    expect(screen.getByText(/Anthropic/)).toBeTruthy();
     expect(screen.getByPlaceholderText("Ask about this page, or say what to do…")).toBeTruthy();
     expect(screen.queryByText("Connect a model provider")).toBeNull();
   });
@@ -122,20 +117,21 @@ describe("Sidecar", () => {
         { id: "m2", role: "assistant", content: "A **docs** site.", usage: { input_tokens: 1200, output_tokens: 40, cache_read_tokens: 0, cost_usd: null } },
       ],
     });
-    render(<Sidecar />);
+    render(<AgentDock />);
     expect(screen.getByText("What is this page?")).toBeTruthy();
     expect(screen.getByText("docs")).toBeTruthy();
     expect(screen.getByText(/1\.2k in · 40 out/)).toBeTruthy();
-    expect(screen.queryByText("Try one of these")).toBeNull();
+    // The ways-in chips belong to an empty dock only.
+    expect(screen.queryByRole("button", { name: /Summarize this page/ })).toBeNull();
   });
 
   it("puts focus in the composer when it opens", () => {
-    render(<Sidecar />);
+    render(<AgentDock />);
     expect(document.activeElement).toBe(screen.getByPlaceholderText("Ask about this page, or say what to do…"));
   });
 
   it("submits the composer to the store with the active tab", () => {
-    render(<Sidecar />);
+    render(<AgentDock />);
     const box = screen.getByPlaceholderText("Ask about this page, or say what to do…") as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "Explain the console errors" } });
     fireEvent.keyDown(box, { key: "Enter" });
@@ -143,26 +139,39 @@ describe("Sidecar", () => {
     expect(box.value).toBe("");
   });
 
-  it("offers a new conversation once there are messages, and opens settings", () => {
-    render(<Sidecar />);
-    expect((screen.getByRole("button", { name: "New conversation" }) as HTMLButtonElement).disabled).toBe(true);
+  it("offers a new conversation only once there is one to leave", () => {
+    render(<AgentDock />);
+    expect(screen.queryByRole("button", { name: "New" })).toBeNull();
     act(() => useAgent.setState({ messages: [{ id: "m1", role: "user", content: "hi" }] }));
-    fireEvent.click(screen.getByRole("button", { name: "New conversation" }));
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
     expect(useAgent.getState().clear).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Agent settings" }));
-    expect(useBrowser.getState().openSettings).toHaveBeenCalledWith("agent");
+  });
+
+  it("closes on Escape without trapping the page behind it", () => {
+    render(<AgentDock />);
+    fireEvent.keyDown(screen.getByRole("region", { name: "Agent" }), { key: "Escape" });
+    expect(useBrowser.getState().toggle).toHaveBeenCalledWith("sidecar", false);
+  });
+
+  it("floats over the page rather than taking a column, and lets clicks past it", () => {
+    const { container } = render(<AgentDock />);
+    const floated = container.querySelector(".fixed");
+    expect(floated).toBeTruthy();
+    // The frame is inert; only the dock itself takes the pointer.
+    expect(floated?.className).toContain("pointer-events-none");
+    expect(screen.getByRole("region", { name: "Agent" }).className).toContain("pointer-events-auto");
   });
 
   it("shows setup instead of the thread when the chosen provider has no key", () => {
     useAgent.setState({ keyed: [] });
-    render(<Sidecar />);
+    render(<AgentDock />);
     expect(screen.getByText("Connect a model provider")).toBeTruthy();
     expect(screen.queryByPlaceholderText("Ask about this page, or say what to do…")).toBeNull();
   });
 
   it("renders nothing but the frame until the catalog has loaded", () => {
     useAgent.setState({ loaded: false });
-    render(<Sidecar />);
+    render(<AgentDock />);
     expect(screen.queryByPlaceholderText("Ask about this page, or say what to do…")).toBeNull();
     expect(screen.queryByText("Connect a model provider")).toBeNull();
   });

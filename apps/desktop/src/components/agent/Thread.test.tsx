@@ -72,7 +72,6 @@ afterEach(() => {
 describe("Thread", () => {
   it("starts with quick actions that send their prompt for the active tab", () => {
     render(<Thread onAddProvider={() => {}} />);
-    expect(screen.getByText("Try one of these")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Summarize this page/ }));
     expect(useAgent.getState().send).toHaveBeenCalledWith(expect.stringMatching(/^Summarize this page/), "tab-1");
   });

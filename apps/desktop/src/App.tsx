@@ -15,7 +15,7 @@ import { Splash } from "./components/Splash";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { IsolatedPanel } from "./components/IsolatedPanel";
 import { UpdateDialog } from "./components/UpdateDialog";
-import { SIDECAR_LIMITS, clampSize, dockLimitsFor } from "./lib/resize";
+import { clampSize, dockLimitsFor } from "./lib/resize";
 import { useBrowser } from "./store/browser";
 import { useLayout } from "./store/layout";
 import { usePrefs, watchReducedMotion, watchSystemTheme } from "./store/prefs";
@@ -38,7 +38,7 @@ import { listenForAgentPresence } from "./store/agentPresence";
 import { listenForEmulation } from "./store/emulation";
 import { listenForUpdateProgress } from "./store/updates";
 
-const Sidecar = lazy(() => import("./components/Sidecar").then(({ Sidecar }) => ({ default: Sidecar })));
+const AgentDock = lazy(() => import("./components/AgentDock").then(({ AgentDock }) => ({ default: AgentDock })));
 const Dock = lazy(() => import("./components/Dock").then(({ Dock }) => ({ default: Dock })));
 const SettingsDialog = lazy(() => import("./components/SettingsDialog").then(({ SettingsDialog }) => ({ default: SettingsDialog })));
 const Library = lazy(() => import("./components/Library").then(({ Library }) => ({ default: Library })));
@@ -80,11 +80,9 @@ export function App() {
   const recorderOpen = useRecorder((s) => s.isOpen);
   const toggle = useBrowser((s) => s.toggle);
   const dockHeight = useLayout((s) => s.dockHeight);
-  const sidecarWidth = useLayout((s) => s.sidecarWidth);
   const setDockHeight = useLayout((s) => s.setDockHeight);
-  const setSidecarWidth = useLayout((s) => s.setSidecarWidth);
   // The size under the pointer mid-drag; the store gets it on release.
-  const [live, setLive] = useState<{ dock: number | null; sidecar: number | null }>({ dock: null, sidecar: null });
+  const [live, setLive] = useState<{ dock: number | null }>({ dock: null });
   useEffect(() => void boot(), [boot]);
   // Watch the release channel: once after startup has settled, then on.
   useEffect(() => { if (!isPrivateWindow()) return startUpdateWatch(); }, []);
@@ -131,7 +129,6 @@ export function App() {
   // agent wins while explicitly open; the dock preference is left intact and
   // returns when the sidecar closes.
   const showDock = open.dock && !(responsive.singleAuxPanel && (showSidecar || pickerOpen));
-  const shownSidecarWidth = Math.min(live.sidecar ?? sidecarWidth, Math.max(280, viewport.width - railWidth - 360));
   // The remembered dock height is kept as a preference; what shows is capped
   // by the window, so a short window still has page to look at.
   const dockLimits = dockLimitsFor(viewport.height);
@@ -227,7 +224,7 @@ export function App() {
           <Toolbar compact={responsive.compactToolbar} />
         </nav>
       )}
-      <main className={`col-start-2 grid min-h-0 min-w-0 bg-line ${oneBar ? "row-start-2" : "row-start-3"}`} style={{ gridTemplateColumns: showSidecar ? `minmax(0,1fr) auto ${shownSidecarWidth}px` : "minmax(0,1fr)" }}>
+      <main className={`col-start-2 grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] bg-line ${oneBar ? "row-start-2" : "row-start-3"}`}>
         <div
           className="relative grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] bg-line"
           style={{ gridTemplateRows: `${open.find ? "44px " : ""}minmax(0,1fr)${showDock ? ` auto ${shownDockHeight}px` : ""}` }}
@@ -253,21 +250,14 @@ export function App() {
           )}
           {showDock && <IsolatedPanel label="Developer dock" onClose={() => toggle("dock", false)}><Suspense fallback={<PanelSkeleton label="developer dock" horizontal />}><Dock /></Suspense></IsolatedPanel>}
         </div>
-        {showSidecar && (
-          <ResizeHandle
-            orientation="vertical"
-            label="Resize agent panel"
-            value={live.sidecar ?? sidecarWidth}
-            limits={SIDECAR_LIMITS}
-            onResize={(px) => setLive((l) => ({ ...l, sidecar: px }))}
-            onCommit={(px) => {
-              setLive((l) => ({ ...l, sidecar: null }));
-              setSidecarWidth(px);
-            }}
-          />
-        )}
-        {showSidecar && <IsolatedPanel label="Agent" onClose={() => toggle("sidecar", false)}><Suspense fallback={<PanelSkeleton label="agent" />}><Sidecar /></Suspense></IsolatedPanel>}
       </main>
+      {/* Over the page, not beside it: the agent is used in bursts, and the
+          page it works on should stay the size it was. */}
+      {showSidecar && (
+        <Suspense fallback={null}>
+          <AgentDock />
+        </Suspense>
+      )}
       <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || open.subtitles || open.import) ? <DialogLoading onClose={() => {
         for (const panel of ["palette", "settings", "library", "shortcuts", "defaultBrowser", "subtitles", "import"] as const) toggle(panel, false);
       }} /> : null}>

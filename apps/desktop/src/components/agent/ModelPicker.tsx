@@ -73,18 +73,18 @@ export function ModelPicker({ onAddProvider }: { onAddProvider: () => void }) {
   };
 
   return (
-    <div ref={ref} className="relative min-w-0">
+    <div ref={ref} className="relative min-w-0 max-w-[45%] flex-[0_1_auto] basis-auto">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="dialog"
-        className="flex h-6 max-w-full items-center gap-1.5 rounded-full px-2 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink aria-expanded:bg-surface-3 aria-expanded:text-ink transition-colors"
+        className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink aria-expanded:bg-surface-2 aria-expanded:text-ink"
         title="Model and provider"
       >
         {provider && <ProviderLogo id={provider.id} size={11} className="shrink-0" />}
         <span className="truncate">{current?.name ?? shortModel(prefs.agent_model)}</span>
-        {provider && <span className="hidden truncate text-ink-3 sm:inline">· {provider.name}</span>}
+        {provider && <span className="hidden shrink-0 text-ink-3 sm:inline">· {provider.name}</span>}
         <Icon icon={ChevronDown} size={11} className="shrink-0 text-ink-3" />
       </button>
       {open && (

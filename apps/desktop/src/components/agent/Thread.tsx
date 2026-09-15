@@ -54,6 +54,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
   const busy = useAgent((s) => s.busy);
   const send = useAgent((s) => s.send);
   const stop = useAgent((s) => s.stop);
+  const clear = useAgent((s) => s.clear);
   const sessionAutoApprove = useAgent((s) => s.sessionAutoApprove);
   const setSessionAutoApprove = useAgent((s) => s.setSessionAutoApprove);
   const includePage = usePrefs((s) => s.prefs.agent_include_page);
@@ -97,62 +98,72 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
 
   return (
     <>
-      <div
-        className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-3 py-3 select-text"
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK;
-        }}
-      >
-        {messages.length === 0 && (
-          <div className="flex flex-1 flex-col justify-end gap-4 py-2 animate-agent-slide-up">
-            {/* The header already says "Agent"; this says what to do with it,
-                in one plain sentence, and offers a few starts. */}
-            <p className="px-1 text-xs leading-relaxed text-ink-2">
-              {activeTab ? "Ask about the page you are on, or tell the agent what to do in it." : "Open a tab, then ask about it or tell the agent what to do in it."}
-            </p>
-            <div className="flex flex-col gap-1.5">
-              <span className="px-1 text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">Try one of these</span>
-              <div className="flex flex-col gap-1">
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s.label}
-                    type="button"
-                    disabled={!activeTab}
-                    onClick={() => submit(s.prompt)}
-                    className="group flex w-full flex-col items-start gap-0.5 rounded-lg border border-line bg-surface-2/40 px-3 py-2 text-left transition-colors hover:border-line-2 hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-highlight focus-visible:ring-inset focus-visible:outline-none disabled:opacity-40"
-                  >
-                    <span className="text-xs font-medium text-ink">{s.label}</span>
-                    <span className="text-[11px] text-ink-3">{s.hint}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
+      {messages.length > 0 && (
+        <div
+          className="mb-2 flex min-h-0 flex-col gap-4 overflow-auto rounded-[20px] border border-line-2 bg-surface/95 px-4 py-4 shadow-2xl backdrop-blur-xl select-text"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK;
+          }}
+        >
+          {messages.map((m) =>
+            m.role === "user" ? (
+              <UserBubble key={m.id} message={m} />
+            ) : (
+              <AssistantMessage key={m.id} message={m} onLink={onLink} />
+            ),
+          )}
+          <div ref={endRef} />
+        </div>
+      )}
 
-        {messages.map((m) =>
-          m.role === "user" ? (
-            <UserBubble key={m.id} message={m} />
-          ) : (
-            <AssistantMessage key={m.id} message={m} onLink={onLink} />
-          ),
-        )}
-        <div ref={endRef} />
-      </div>
+      {/* Nothing has been asked yet: four ways in, as quiet chips above the
+          composer rather than a panel of their own. */}
+      {messages.length === 0 && (
+        <div className="mb-2 flex flex-wrap justify-center gap-1.5">
+          {SUGGESTIONS.map((s) => (
+            <button
+              key={s.label}
+              type="button"
+              disabled={!activeTab}
+              title={s.hint}
+              onClick={() => submit(s.prompt)}
+              className="animate-agent-slide-up rounded-full border border-line-2 bg-surface/90 px-3 py-1.5 text-[11px] text-ink-2 shadow-lg backdrop-blur-xl transition-colors hover:bg-surface-2 hover:text-ink focus-visible:ring-2 focus-visible:ring-highlight focus-visible:outline-none disabled:opacity-40"
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {/* Floating Composer Area */}
-      <div className="border-t border-line/70 p-2.5 bg-surface/80 backdrop-blur-md">
-        {/* Context Badges Bar */}
-        <div className="mb-1.5 flex items-center gap-1.5 px-1">
+      {/* The composer: one card, a paragraph wide, over the page. */}
+      <div className="rounded-[20px] border border-line-2 bg-surface/95 px-4 pt-3.5 pb-2.5 shadow-2xl backdrop-blur-xl transition-[border-color] focus-within:border-line-3">
+        <textarea
+          ref={textRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          rows={Math.min(8, Math.max(2, draft.split("\n").length))}
+          placeholder={activeTab ? "Ask about this page, or say what to do…" : "Open a tab, then ask…"}
+          className="max-h-[38vh] w-full resize-none bg-transparent text-[13px] leading-6 text-ink outline-none placeholder:text-ink-3"
+        />
+
+        {/* What it can see and how it may act, then the one action. */}
+        <div className="mt-1.5 flex items-center gap-1.5">
+          <ModelPicker onAddProvider={onAddProvider} />
           {current && (
             <button
               type="button"
               onClick={() => void update({ agent_include_page: !includePage })}
               aria-pressed={includePage}
               title={includePage ? "The page goes with each message. Click to send only what you type." : "The page is not sent. Click to include its text, address and console."}
-              className={`flex h-6 min-w-0 max-w-[65%] items-center gap-1.5 rounded-full border px-2 text-[11px] transition-[color,background-color,border-color,box-shadow,opacity] ${
-                includePage ? "border-line-2 bg-surface-3 text-ink shadow-2xs" : "border-dashed border-line text-ink-3"
+              className={`flex h-7 min-w-0 max-w-[40%] items-center gap-1.5 rounded-full px-2.5 text-[11px] transition-[color,background-color,opacity] ${
+                includePage ? "bg-surface-2 text-ink-2 hover:text-ink" : "text-ink-3 line-through decoration-ink-3/50 hover:text-ink-2"
               }`}
             >
               <Favicon src={current.favicon} size={11} fallback={Globe} />
@@ -165,58 +176,47 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
             <button
               type="button"
               onClick={() => (alwaysAutoApprove ? useBrowser.getState().openSettings("agent") : setSessionAutoApprove(false))}
-              className="flex h-6 items-center gap-1 rounded-full bg-highlight-soft px-2 text-[11px] text-highlight ring-1 ring-highlight/20"
+              className="flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-highlight-soft px-2.5 text-[11px] text-highlight"
               title={alwaysAutoApprove ? "Act without asking is on in Settings. Click to change it." : "Every action is being approved for this session. Click to require confirmation."}
             >
-              <Icon icon={ShieldOff} size={10} /> {alwaysAutoApprove ? "Acts without asking" : "Auto-approve on"}
+              <Icon icon={ShieldOff} size={11} /> {alwaysAutoApprove ? "Acts without asking" : "Auto-approve on"}
             </button>
           )}
-        </div>
 
-        {/* Composer Card */}
-        <div className="rounded-2xl border border-line-2 bg-surface-2/90 p-2.5 shadow-sm transition-[border-color,box-shadow] focus-within:border-highlight/60 focus-within:ring-1 focus-within:ring-highlight/30">
-          <textarea
-            ref={textRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            rows={Math.min(6, Math.max(1, draft.split("\n").length))}
-            placeholder={activeTab ? "Ask about this page, or say what to do…" : "Open a tab, then ask…"}
-            className="max-h-40 w-full resize-none bg-transparent text-xs leading-relaxed text-ink outline-none placeholder:text-ink-3"
-          />
+          <span className="flex-1" />
 
-          <div className="mt-2 flex items-center gap-1 pt-1 border-t border-line/40">
-            <ModelPicker onAddProvider={onAddProvider} />
-            <span className="flex-1" />
+          {messages.length > 0 && !busy && (
+            <button
+              type="button"
+              onClick={clear}
+              title="Start a new conversation"
+              className="h-7 shrink-0 rounded-full px-2.5 text-[11px] text-ink-3 hover:bg-surface-2 hover:text-ink"
+            >
+              New
+            </button>
+          )}
 
-            {/* Send / Stop CTA */}
-            {busy ? (
-              <button
-                type="button"
-                aria-label="Stop"
-                onClick={() => void stop()}
-                className="grid size-7 place-items-center rounded-full bg-surface-3 text-ink hover:bg-danger hover:text-white transition-colors shadow-xs"
-                title="Stop generation"
-              >
-                <Icon icon={Square} size={11} />
-              </button>
-            ) : (
-              <button
-                type="button"
-                aria-label="Send"
-                disabled={!draft.trim()}
-                onClick={() => submit()}
-                className="grid size-7 place-items-center rounded-full bg-accent text-accent-ink shadow-xs transition-[opacity,transform] hover:opacity-90 disabled:opacity-35 active:scale-95"
-              >
-                <Icon icon={ArrowUp} size={14} />
-              </button>
-            )}
-          </div>
+          {busy ? (
+            <button
+              type="button"
+              aria-label="Stop"
+              onClick={() => void stop()}
+              title="Stop"
+              className="grid size-8 shrink-0 place-items-center rounded-full bg-danger text-white transition-transform active:scale-95"
+            >
+              <Icon icon={Square} size={12} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              aria-label="Send"
+              disabled={!draft.trim()}
+              onClick={() => submit()}
+              className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-accent-ink transition-[opacity,transform] hover:opacity-90 disabled:opacity-45 active:scale-95"
+            >
+              <Icon icon={ArrowUp} size={15} />
+            </button>
+          )}
         </div>
       </div>
     </>
