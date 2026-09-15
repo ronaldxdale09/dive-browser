@@ -39,10 +39,18 @@ export const useUpdates = create<UpdatesState>((set, get) => ({
   dismissed: false,
   check: async () => {
     if (get().status === "checking") return;
+    lastCheckAt = Date.now();
     set({ status: "checking", error: null });
     try {
       const update = await ipc.updateCheck();
-      set(update ? { status: "available", update, dismissed: false } : { status: "none", update: null, dismissed: false });
+      if (!update) {
+        set({ status: "none", update: null, dismissed: false });
+        return;
+      }
+      // A later check that finds the same release must not put a notice the
+      // person has already waved away back on screen; a newer one may.
+      const sameAsDismissed = get().dismissed && get().update?.version === update.version;
+      set({ status: "available", update, dismissed: sameAsDismissed });
     } catch (e) {
       set({ status: "error", error: errorMessage(e) });
     }
@@ -108,38 +116,75 @@ export function listenForUpdateProgress() {
     .catch(() => undefined);
 }
 
-/** Delay before the one automatic check after launch, so it never competes with startup. */
+/** Delay before the first automatic check after launch, so it never competes with startup. */
 export const BOOT_CHECK_DELAY_MS = 10_000;
+/** How often the release channel is looked at while the browser stays open. */
+export const CHECK_INTERVAL_MS = 60 * 60 * 1000;
+/** No two automatic checks closer together than this, however they were asked for. */
+export const MIN_CHECK_GAP_MS = 15 * 60 * 1000;
 
 let bootTimer: ReturnType<typeof setTimeout> | null = null;
-let bootScheduled = false;
+let interval: ReturnType<typeof setInterval> | null = null;
+let watching = false;
+let lastCheckAt = 0;
+let onWake: (() => void) | null = null;
 
 /**
- * Check once, a while after boot. Idempotent: a remount of the chrome does not
- * schedule a second check. Returns a cancel for the caller's cleanup; a
- * cancelled check stays "scheduled" only until the cancel runs.
+ * Check when it is worth checking: not while one is in flight, not while an
+ * update is being installed, and never twice inside [`MIN_CHECK_GAP_MS`].
+ * Exported for tests.
  */
-export function scheduleBootCheck(delay = BOOT_CHECK_DELAY_MS): () => void {
-  if (bootScheduled) return () => undefined;
-  bootScheduled = true;
+export function maybeCheck() {
+  const { status, installing } = useUpdates.getState();
+  if (status === "checking" || installing) return;
+  if (lastCheckAt && Date.now() - lastCheckAt < MIN_CHECK_GAP_MS) return;
+  void useUpdates.getState().check();
+}
+
+/**
+ * Watch the release channel for as long as this chrome is up: once shortly
+ * after boot, then every [`CHECK_INTERVAL_MS`].
+ *
+ * A browser people leave open for days used to learn about a release only
+ * when it was next started, so the notice appeared to need a restart. Waking
+ * from sleep and coming back online check too: an interval does not fire
+ * while the machine is asleep, and the boot check of a laptop opened away
+ * from a network finds nothing and would otherwise wait the whole interval.
+ *
+ * Idempotent: a remount of the chrome does not start a second watch. Returns
+ * a cancel for the caller's cleanup.
+ */
+export function startUpdateWatch(delay = BOOT_CHECK_DELAY_MS): () => void {
+  if (watching) return () => undefined;
+  watching = true;
   bootTimer = setTimeout(() => {
     bootTimer = null;
-    void useUpdates.getState().check();
+    maybeCheck();
   }, delay);
-  return () => {
-    if (bootTimer) {
-      clearTimeout(bootTimer);
-      bootTimer = null;
-      bootScheduled = false;
-    }
-  };
+  interval = setInterval(maybeCheck, CHECK_INTERVAL_MS);
+  onWake = () => maybeCheck();
+  window.addEventListener("focus", onWake);
+  window.addEventListener("online", onWake);
+  return stopUpdateWatch;
+}
+
+function stopUpdateWatch() {
+  if (bootTimer) clearTimeout(bootTimer);
+  bootTimer = null;
+  if (interval) clearInterval(interval);
+  interval = null;
+  if (onWake) {
+    window.removeEventListener("focus", onWake);
+    window.removeEventListener("online", onWake);
+    onWake = null;
+  }
+  watching = false;
 }
 
 /** Tests only. */
 export function resetBootCheck() {
-  if (bootTimer) clearTimeout(bootTimer);
-  bootTimer = null;
-  bootScheduled = false;
+  stopUpdateWatch();
+  lastCheckAt = 0;
   if (progressTimer) clearTimeout(progressTimer);
   progressTimer = null;
   progressPending = null;

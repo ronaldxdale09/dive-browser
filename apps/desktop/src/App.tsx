@@ -25,7 +25,7 @@ import { Palette } from "./components/Palette";
 import { useChromeLayout, useViewportSize } from "./lib/adaptiveLayout";
 import { DialogLoading, PanelSkeleton, ToastViewport } from "./components/ChromeFeedback";
 import { usePicker } from "./store/simulator";
-import { scheduleBootCheck } from "./store/updates";
+import { startUpdateWatch } from "./store/updates";
 import { bootSubtitles } from "./store/subtitles";
 import { useRecording } from "./store/recording";
 import { useRecorder } from "./store/recorder";
@@ -84,8 +84,8 @@ export function App() {
   // The size under the pointer mid-drag; the store gets it on release.
   const [live, setLive] = useState<{ dock: number | null; sidecar: number | null }>({ dock: null, sidecar: null });
   useEffect(() => void boot(), [boot]);
-  // One look at the release channel, well after startup has settled.
-  useEffect(() => { if (!isPrivateWindow()) return scheduleBootCheck(); }, []);
+  // Watch the release channel: once after startup has settled, then on.
+  useEffect(() => { if (!isPrivateWindow()) return startUpdateWatch(); }, []);
   // Subscribe once to the live-subtitles events.
   useEffect(() => void bootSubtitles(), []);
   // And once to "an agent is driving this tab", which marks the tab list.

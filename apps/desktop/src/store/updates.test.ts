@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
-import { BOOT_CHECK_DELAY_MS, PROGRESS_INTERVAL_MS, reportUpdateProgress, resetBootCheck, scheduleBootCheck, useUpdates } from "./updates";
+import { BOOT_CHECK_DELAY_MS, CHECK_INTERVAL_MS, MIN_CHECK_GAP_MS, PROGRESS_INTERVAL_MS, reportUpdateProgress, resetBootCheck, startUpdateWatch, useUpdates } from "./updates";
 
 const initial = useUpdates.getState();
 
@@ -71,22 +71,72 @@ describe("reportUpdateProgress", () => {
   });
 });
 
-describe("scheduleBootCheck", () => {
-  it("checks once after the delay, however many times it is scheduled", async () => {
+describe("startUpdateWatch", () => {
+  it("checks once after the delay, however many times it is started", async () => {
     const check = vi.spyOn(ipc, "updateCheck").mockResolvedValue(null);
-    scheduleBootCheck();
-    scheduleBootCheck();
+    startUpdateWatch();
+    startUpdateWatch();
     expect(check).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(BOOT_CHECK_DELAY_MS);
     expect(check).toHaveBeenCalledTimes(1);
     expect(useUpdates.getState().status).toBe("none");
   });
 
+  it("keeps checking while the browser stays open", async () => {
+    const check = vi.spyOn(ipc, "updateCheck").mockResolvedValue(null);
+    startUpdateWatch();
+    await vi.advanceTimersByTimeAsync(BOOT_CHECK_DELAY_MS);
+    expect(check).toHaveBeenCalledTimes(1);
+    // A release published while the window was open is found without a restart.
+    check.mockResolvedValue({ version: "0.2.0", notes: "Faster." });
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS);
+    expect(check).toHaveBeenCalledTimes(2);
+    expect(useUpdates.getState()).toMatchObject({ status: "available", update: { version: "0.2.0" }, dismissed: false });
+  });
+
+  it("checks on waking and coming back online, but not twice in a row", async () => {
+    const check = vi.spyOn(ipc, "updateCheck").mockResolvedValue(null);
+    startUpdateWatch();
+    await vi.advanceTimersByTimeAsync(BOOT_CHECK_DELAY_MS);
+    expect(check).toHaveBeenCalledTimes(1);
+    // Right after the boot check, focus is too soon to look again.
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(check).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(MIN_CHECK_GAP_MS);
+    window.dispatchEvent(new Event("online"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(check).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not put a dismissed notice back for the same release", async () => {
+    const check = vi.spyOn(ipc, "updateCheck").mockResolvedValue({ version: "0.2.0", notes: "Faster." });
+    startUpdateWatch();
+    await vi.advanceTimersByTimeAsync(BOOT_CHECK_DELAY_MS);
+    useUpdates.getState().dismiss();
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS);
+    expect(check).toHaveBeenCalledTimes(2);
+    expect(useUpdates.getState()).toMatchObject({ status: "available", dismissed: true });
+    // A newer release is worth showing again.
+    check.mockResolvedValue({ version: "0.3.0", notes: "Newer." });
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS);
+    expect(useUpdates.getState()).toMatchObject({ update: { version: "0.3.0" }, dismissed: false });
+  });
+
+  it("leaves an install alone", async () => {
+    const check = vi.spyOn(ipc, "updateCheck").mockResolvedValue(null);
+    startUpdateWatch();
+    await vi.advanceTimersByTimeAsync(BOOT_CHECK_DELAY_MS);
+    useUpdates.setState({ installing: true });
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS * 3);
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+
   it("can be cancelled before it fires", async () => {
     const check = vi.spyOn(ipc, "updateCheck").mockResolvedValue(null);
-    const cancel = scheduleBootCheck(1000);
+    const cancel = startUpdateWatch(1000);
     cancel();
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS + 2000);
     expect(check).not.toHaveBeenCalled();
   });
 });
