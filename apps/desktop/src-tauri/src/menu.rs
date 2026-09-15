@@ -136,6 +136,8 @@ fn file_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
             "CmdOrCtrl+D",
         )?)
         .separator()
+        .item(&item(app, "page.save", "Save Page As…", "CmdOrCtrl+S")?)
+        .separator()
         .item(&item(
             app,
             "capture.fullpage",

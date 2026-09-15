@@ -17,7 +17,7 @@ const subtitlesInitial = useSubtitles.getState();
 function openDialog() {
   useBrowser.setState({
     activeTab: "t1",
-    open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: true },
+    open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: true, tasks: false },
   });
 }
 

@@ -26,7 +26,7 @@ beforeEach(() => {
     activeWorkspace: personal.id,
     counts: { [personal.id]: 3, [client.id]: 1 },
     editing: null,
-    open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false },
+    open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false, tasks: false },
   });
   usePrefs.setState({ prefs: { ...DEFAULT_PREFS, rail_expanded: true }, loaded: true });
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);

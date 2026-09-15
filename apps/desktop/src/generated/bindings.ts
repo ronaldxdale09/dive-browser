@@ -236,6 +236,25 @@ export const commands = {
 	 *  comes first next time.
 	 */
 	passwordsUsed: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("passwords_used", { id })),
+	/**  Show just the article on a tab's page. */
+	pageReader: (id: TabId) => typedError<ReaderResult, AppError>(__TAURI_INVOKE("page_reader", { id })),
+	/**  Leave reader view, restoring the page. */
+	pageReaderLeave: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("page_reader_leave", { id })),
+	/**  Whether a tab is showing reader view. */
+	pageReaderOpen: (id: TabId) => typedError<boolean, AppError>(__TAURI_INVOKE("page_reader_open", { id })),
+	/**  Translate a tab's page into `target`, on this machine. */
+	pageTranslate: (id: TabId, target: string) => typedError<Translation, AppError>(__TAURI_INVOKE("page_translate", { id, target })),
+	/**  Put a translated page's own words back. */
+	pageTranslateRestore: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("page_translate_restore", { id })),
+	/**  What language a tab's page is in, and whether it has been translated. */
+	pageTranslateState: (id: TabId) => typedError<TranslateState, AppError>(__TAURI_INVOKE("page_translate_state", { id })),
+	/**  Every tab and what it is costing right now. */
+	tasksList: () => typedError<TaskRow[], AppError>(__TAURI_INVOKE("tasks_list")),
+	/**
+	 *  Save the tab's live page as a single MHTML archive. Returns where it went,
+	 *  or `None` when the person cancelled the dialog.
+	 */
+	pageSave: (id: TabId) => typedError<string | null, AppError>(__TAURI_INVOKE("page_save", { id })),
 	/**
 	 *  What the search engine thinks this query might be. Empty when the person
 	 *  turned suggestions off, in a private session, or when the engine did not
@@ -2034,6 +2053,20 @@ export type QuickLink = {
 	url: string,
 };
 
+/**  What happened when reader view was asked for. */
+export type ReaderResult = {
+	ok: boolean,
+	/**
+	 *  `no-article` when the page has nothing article-shaped in it, `empty`
+	 *  when it has no body yet.
+	 */
+	reason: string | null,
+	/**  Characters of article text shown. */
+	words: number | null,
+	/**  The page was already in reader view. */
+	already: boolean,
+};
+
 /**  What the person asked for in the recording dialog. */
 export type RecordOptions = {
 	/**  `mp4` or `gif`. */
@@ -2486,6 +2519,33 @@ export type TabWindowChanged = {
 	detached: boolean,
 };
 
+/**  One tab, as the task manager lists it. */
+export type TaskRow = {
+	tab_id: TabId,
+	/**  The tab's title, or its address when it has none yet. */
+	title: string,
+	url: string,
+	/**
+	 *  Bytes of JavaScript heap the renderer is holding. `None` for a tab
+	 *  with no live renderer to ask.
+	 */
+	memory_bytes: number | null,
+	/**
+	 *  Processor seconds this renderer's main thread has used since it
+	 *  started. Cumulative; the chrome turns two readings into a rate.
+	 */
+	cpu_seconds: number | null,
+	/**  Live DOM nodes, and documents, as a sense of what the page is holding. */
+	nodes: number | null,
+	documents: number | null,
+	/**  Registered event listeners, which is where a leaking page shows first. */
+	listeners: number | null,
+	/**  The tab is asleep: no renderer, and nothing to measure. */
+	sleeping: boolean,
+	/**  The tab is making a sound. */
+	audible: boolean,
+};
+
 /**  A tool call, as shown in the thread. */
 export type ToolStep = {
 	/**
@@ -2501,6 +2561,34 @@ export type ToolStep = {
 	action: boolean,
 	/**  Playwright-style locator for the target, when the tool used a ref. */
 	locator: string | null,
+};
+
+/**  What a tab could be translated from, and whether it already has been. */
+export type TranslateState = {
+	translated: boolean,
+	target: string | null,
+	/**  The page's own language, as it declares or reads. */
+	language: string | null,
+	/**  Whether this build can translate at all. */
+	supported: boolean,
+};
+
+/**  How a translation went, as the chrome reports it. */
+export type Translation = {
+	/**  The page is now translated. */
+	ok: boolean,
+	/**
+	 *  Why not, when it is not: `unsupported` (no translator in this build),
+	 *  `unsupported-pair`, `unavailable` (no model, or it would not download),
+	 *  `unknown-language`, `already` (the page is in that language), `empty`.
+	 */
+	reason: string | null,
+	/**  The language the page was in. */
+	from: string | null,
+	/**  The language it was translated to. */
+	target: string | null,
+	/**  How many pieces of text changed. */
+	changed: number | null,
 };
 
 /**  An update the release channel offers. */

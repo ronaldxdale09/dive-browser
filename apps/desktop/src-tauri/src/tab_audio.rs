@@ -19,7 +19,6 @@ use tauri::AppHandle;
 use tauri_specta::Event;
 
 use crate::Runtime;
-use crate::error::AppResult;
 
 const BINDING: &str = "__diveAudio";
 
@@ -87,9 +86,9 @@ pub fn set_muted(
     state: &crate::state::AppState,
     tab_id: TabId,
     muted: bool,
-) -> AppResult<()> {
+) {
     if let Some(host) = crate::state::lock(&state.host).as_ref() {
-        apply(main, host, tab_id, muted)?;
+        apply(main, host, tab_id, muted);
     }
     let next = with_tabs(|tabs| {
         let entry = tabs.entry(tab_id).or_default();
@@ -97,7 +96,6 @@ pub fn set_muted(
         *entry
     });
     publish(app, tab_id, next);
-    Ok(())
 }
 
 /// Put this tab's mute on its live view. Called when it changes and again
@@ -107,7 +105,7 @@ pub fn apply(
     host: &crate::engine::TabHost,
     tab_id: TabId,
     muted: bool,
-) -> AppResult<()> {
+) {
     #[cfg(feature = "cef")]
     {
         let result = host.with_view(tab_id, |view| {
@@ -125,7 +123,6 @@ pub fn apply(
     }
     #[cfg(not(feature = "cef"))]
     let _ = (host, tab_id, muted);
-    Ok(())
 }
 
 /// Report what this tab is doing now, for a chrome that just opened or a tab
@@ -137,6 +134,27 @@ pub fn snapshot(tab_id: TabId) -> TabAudio {
         audible: state.audible,
         muted: state.muted,
     }
+}
+
+/// What a call to *this* watcher's binding says, if that is what the event is.
+///
+/// Every page script shares one `Runtime.bindingCalled` stream, so the name
+/// has to be checked as well as the nonce: reusing another module's payload
+/// reader silently dropped every report, since it only recognised its own
+/// binding.
+fn reported_audible(event: &dive_cdp::CdpEvent, nonce: &str) -> Option<bool> {
+    if event.method != "Runtime.bindingCalled" || event.params["name"] != BINDING {
+        return None;
+    }
+    let encoded = event.params["payload"].as_str()?;
+    if encoded.len() > 1024 {
+        return None;
+    }
+    let payload: serde_json::Value = serde_json::from_str(encoded).ok()?;
+    if payload["nonce"].as_str() != Some(nonce) {
+        return None;
+    }
+    Some(payload["audible"].as_bool().unwrap_or(false))
 }
 
 /// Install the watcher on a tab and follow what it reports.
@@ -174,10 +192,9 @@ pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession)
     }
     tauri::async_runtime::spawn(async move {
         while let Ok(event) = events.recv().await {
-            let Some(payload) = crate::form_fill::binding_payload(&event, &nonce) else {
+            let Some(audible) = reported_audible(&event, &nonce) else {
                 continue;
             };
-            let audible = payload["audible"].as_bool().unwrap_or(false);
             let next = with_tabs(|tabs| {
                 let entry = tabs.entry(tab_id).or_default();
                 if entry.audible == audible {
@@ -208,6 +225,33 @@ pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_this_watchers_own_reports_are_read() {
+        let event = |name: &str, payload: &str| dive_cdp::CdpEvent {
+            method: "Runtime.bindingCalled".into(),
+            params: serde_json::json!({"name": name, "payload": payload}),
+            navigation_epoch: 0,
+        };
+        assert_eq!(
+            reported_audible(&event(BINDING, r#"{"nonce":"n1","audible":true}"#), "n1"),
+            Some(true)
+        );
+        // Another module's binding shares the stream and must be ignored.
+        assert_eq!(
+            reported_audible(
+                &event("__diveForms", r#"{"nonce":"n1","audible":true}"#),
+                "n1"
+            ),
+            None
+        );
+        // A page forging a report without the nonce gets nowhere.
+        assert_eq!(
+            reported_audible(&event(BINDING, r#"{"audible":true}"#), "n1"),
+            None
+        );
+        assert_eq!(reported_audible(&event(BINDING, "not json"), "n1"), None);
+    }
 
     #[test]
     fn a_tab_keeps_its_mute_and_loses_it_when_the_tab_goes() {

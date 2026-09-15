@@ -9,7 +9,7 @@ import type { DownloadNotice, CoreEvent, Decision, Duration, NavigationHistory, 
 import { errorMessage } from "../lib/errors";
 import { fileNameOr } from "../lib/paths";
 
-export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser" | "subtitles" | "import" | "apps";
+export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser" | "subtitles" | "tasks" | "import" | "apps";
 /** The sections of the library dialog. */
 export type LibraryTab = "bookmarks" | "history" | "downloads" | "recordings" | "apps";
 
@@ -86,6 +86,12 @@ interface BrowserState {
   forward: () => Promise<void>;
   reload: () => Promise<void>;
   capture: (fullPage: boolean) => Promise<void>;
+  /** Keep the active tab's page as a single file. */
+  savePage: () => Promise<void>;
+  /** Show just the article on the active tab, or put the page back. */
+  readerView: () => Promise<void>;
+  /** Translate the active tab into the browser's own language. */
+  translatePage: () => Promise<void>;
   /** A user capture is traversing/encoding; blocks duplicate requests. */
   capturing: boolean;
   /** Zoom factor per tab; absent means 1. */
@@ -470,7 +476,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       if (ordered.includes(opened.id)) await ipc.tabReorder(ws, ordered).catch(() => undefined);
     }
   },
-  open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false },
+  open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false, tasks: false },
   libraryTab: "bookmarks",
   openLibrary: (libraryTab) => set((s) => ({ libraryTab, open: togglePanel(s.open, "library", true) })),
   paletteFocus: "all",
@@ -782,6 +788,46 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       set({ error: errorMessage(cause) });
     } finally {
       set({ capturing: false });
+    }
+  },
+  savePage: async () => {
+    const id = get().activeTab;
+    if (!id) return;
+    try {
+      const path = await ipc.pageSave(id);
+      // No path means the save dialog was dismissed, which needs no notice.
+      if (path) get().notify(`Saved ${fileNameOr(path, path)}`, 4000);
+      set({ error: null });
+    } catch (cause) {
+      set({ error: errorMessage(cause) });
+    }
+  },
+  readerView: async () => {
+    const id = get().activeTab;
+    if (!id) return;
+    try {
+      // Asking twice leaves reader view, so the command is a toggle wherever
+      // it is invoked from -- the palette, the menu, the chord.
+      if (await ipc.pageReaderOpen(id)) await ipc.pageReaderLeave(id);
+      else {
+        const result = await ipc.pageReader(id);
+        if (!result.ok) get().notify(result.reason === "no-article" ? "There is no article on this page to read." : "This page could not be shown in reader view.", 4000);
+      }
+      set({ error: null });
+    } catch (cause) {
+      set({ error: errorMessage(cause) });
+    }
+  },
+  translatePage: async () => {
+    const id = get().activeTab;
+    if (!id) return;
+    const target = navigator.language.slice(0, 2).toLowerCase() || "en";
+    try {
+      const result = await ipc.pageTranslate(id, target);
+      if (!result.ok && result.reason !== "already") get().notify("This page could not be translated.", 4000);
+      set({ error: null });
+    } catch (cause) {
+      set({ error: errorMessage(cause) });
     }
   },
   reorderTabs: async (ordered) => {

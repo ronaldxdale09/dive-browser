@@ -26,9 +26,9 @@ const TIMEOUT: Duration = Duration::from_millis(2500);
 
 /// Where each engine answers completions, as a template.
 ///
-/// Every one of these returns the OpenSearch shape: `["typed", ["first",
-/// "second", ...]]`. Kagi has no public completion endpoint and Startpage's
-/// needs a session, so both fall back to DuckDuckGo's, which answers without
+/// Every one of these returns the `OpenSearch` shape: `["typed", ["first",
+/// "second", ...]]`. `Kagi` has no public completion endpoint and `Startpage`'s
+/// needs a session, so both fall back to `DuckDuckGo`'s, which answers without
 /// one -- a search engine's suggestions, not the searcher's identity.
 const ENDPOINTS: &[(&str, &str)] = &[
     (
@@ -56,10 +56,10 @@ fn endpoint_for(engine: &str) -> Option<&'static str> {
         .map(|(_, template)| *template)
 }
 
-/// The completions in an OpenSearch reply, cleaned up.
+/// The completions in an `OpenSearch` reply, cleaned up.
 ///
 /// Engines differ in what they put in the second element -- plain strings for
-/// most, objects with a `phrase` for Brave -- and any of them can send more,
+/// most, objects with a `phrase` for `Brave` -- and any of them can send more,
 /// longer, or emptier suggestions than are worth showing.
 pub fn parse(body: &str, typed: &str) -> Vec<String> {
     let Ok(value) = serde_json::from_str::<Value>(body) else {

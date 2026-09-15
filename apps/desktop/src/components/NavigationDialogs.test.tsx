@@ -164,7 +164,7 @@ describe("foreground navigation dialogs", () => {
   });
 
   it("shares the policy across navigation dialogs without resetting panels or drafts", () => {
-    const preserved = { sidecar: true, dock: true, find: true, extensions: true, subtitles: true, defaultBrowser: true };
+    const preserved = { sidecar: true, dock: true, find: true, extensions: true, subtitles: true, tasks: false, defaultBrowser: true };
     const drafts = { editing: { id: null }, editingProfile: { id: null }, recordingTab: "recorded" };
     useBrowser.setState({ ...drafts, open: { ...useBrowser.getState().open, ...preserved, menu: true } });
     const transitions = [

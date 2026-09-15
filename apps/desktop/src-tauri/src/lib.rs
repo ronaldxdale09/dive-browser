@@ -63,11 +63,13 @@ pub mod privacy;
 #[cfg(feature = "cef")]
 mod private_probe;
 mod private_session;
+mod reader;
 mod recorder;
 mod replay;
 mod report;
 mod responsiveness;
 mod rules;
+mod save_page;
 mod screen;
 mod screencast;
 mod search_suggest;
@@ -79,7 +81,9 @@ mod state;
 mod storage;
 mod subtitles;
 mod tab_audio;
+mod task_manager;
 mod titlebar;
+mod translate;
 #[cfg(feature = "cef")]
 mod ui_probe;
 mod vitals;

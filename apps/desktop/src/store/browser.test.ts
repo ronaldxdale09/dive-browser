@@ -600,7 +600,7 @@ describe("reopening closed tabs", () => {
 });
 
 describe("togglePanel", () => {
-  const closed = { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false };
+  const closed = { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: false, tasks: false };
   it("closes the main menu when anything else opens, and leaves panels alone otherwise", () => {
     const menu = togglePanel(closed, "menu");
     expect(menu.menu).toBe(true);

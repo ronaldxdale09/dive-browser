@@ -8,6 +8,7 @@ import { useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
 import { SharePopover } from "./SharePopover";
 import { BookmarkButton } from "./BookmarkButton";
+import { PageActions } from "./PageActions";
 import { AddressSuggestions, optionId, useAddressSuggestions } from "./AddressSuggestions";
 import type { Suggestion } from "../lib/omnibox";
 import { DownloadsMenu } from "./DownloadsMenu";
@@ -183,6 +184,7 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
             send it). They belong to the address they sit on, and out here
             they read as browser controls instead. */}
         <span className="ml-1 flex shrink-0 items-center gap-0.5">
+          <PageActions />
           <InstallAppButton />
           <ProtectionMenu compact />
           {!isPrivateWindow() && <BookmarkButton />}

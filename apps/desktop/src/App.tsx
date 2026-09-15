@@ -27,6 +27,7 @@ import { DialogLoading, PanelSkeleton, ToastViewport } from "./components/Chrome
 import { usePicker } from "./store/simulator";
 import { startUpdateWatch } from "./store/updates";
 import { useTabAudio } from "./store/tabAudio";
+import { TaskManager } from "./components/TaskManager";
 import { bootSubtitles } from "./store/subtitles";
 import { useRecording } from "./store/recording";
 import { useRecorder } from "./store/recorder";
@@ -301,6 +302,7 @@ export function App() {
         onDismissError={() => useBrowser.setState({ error: null })}
       />
       <UpdateDialog />
+      <TaskManager />
       <Suspense fallback={null}>
         <Onboarding />
       </Suspense>

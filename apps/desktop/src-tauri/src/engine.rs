@@ -849,7 +849,7 @@ impl TabHost {
                         };
                         let state = app.state::<AppState>();
                         if let Some(host) = crate::state::lock(&state.host).as_ref() {
-                            let _ = crate::tab_audio::apply(&main, host, tab_id, true);
+                            crate::tab_audio::apply(&main, host, tab_id, true);
                         }
                     });
                 }

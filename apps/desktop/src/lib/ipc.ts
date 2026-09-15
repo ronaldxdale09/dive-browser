@@ -22,7 +22,7 @@ export const events = {
     once: (callback: EventCallback<string>) => generatedEvents.menuCommand(getCurrentWebview()).once(callback),
   },
 };
-export type { ExternalLinkAsked, TabAudio } from "../generated/bindings";
+export type { ExternalLinkAsked, TabAudio, TaskRow } from "../generated/bindings";
 export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, CsvImportSummary, FormEntry, JsDialogAsked, JsDialogClosed } from "../generated/bindings";
 export type { ExtensionInfo, ExtensionList };
 export type { WebApp, WebAppProbe } from "../generated/bindings";
@@ -210,6 +210,14 @@ export const ipc = {
   bookmarksSearch: async (query: string, limit = 20) => unwrap(await commands.bookmarksSearch(query, limit)),
   passwordsList: async () => unwrap(await commands.passwordsList()),
   passwordsForUrl: async (url: string) => unwrap(await commands.passwordsForUrl(url)),
+  pageReader: async (id: string) => unwrap(await commands.pageReader(id)),
+  pageReaderLeave: async (id: string) => unwrap(await commands.pageReaderLeave(id)),
+  pageReaderOpen: async (id: string) => unwrap(await commands.pageReaderOpen(id)),
+  pageTranslate: async (id: string, target: string) => unwrap(await commands.pageTranslate(id, target)),
+  pageTranslateRestore: async (id: string) => unwrap(await commands.pageTranslateRestore(id)),
+  pageTranslateState: async (id: string) => unwrap(await commands.pageTranslateState(id)),
+  tasksList: async () => unwrap(await commands.tasksList()),
+  pageSave: async (id: string) => unwrap(await commands.pageSave(id)),
   searchSuggest: async (query: string) => unwrap(await commands.searchSuggest(query)),
   tabSetMuted: async (id: string, muted: boolean) => unwrap(await commands.tabSetMuted(id, muted)),
   tabAudioState: async (id: string) => commands.tabAudioState(id),
