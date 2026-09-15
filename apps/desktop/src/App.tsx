@@ -255,7 +255,7 @@ export function App() {
           page it works on should stay the size it was. */}
       {showSidecar && (
         <Suspense fallback={null}>
-          <AgentDock />
+          <AgentDock inset={railWidth} />
         </Suspense>
       )}
       <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || open.subtitles || open.import) ? <DialogLoading onClose={() => {

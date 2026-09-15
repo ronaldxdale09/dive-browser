@@ -18,9 +18,10 @@ import { Thread } from "./agent/Thread";
  * modal -- clicks outside it land on the page, as they should.
  *
  * The conversation grows upwards from the composer, capped so the page is
- * never more than half covered.
+ * never more than half covered. `inset` is the width of the rail, so the dock
+ * sits over the middle of the page rather than the middle of the window.
  */
-export function AgentDock() {
+export function AgentDock({ inset = 0 }: { inset?: number }) {
   const init = useAgent((s) => s.init);
   const refreshKeys = useAgent((s) => s.refreshKeys);
   const loaded = useAgent((s) => s.loaded);
@@ -47,7 +48,9 @@ export function AgentDock() {
   const showSetup = loaded && (!ready || wantsSetup);
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4">
+    // Centred on the page, not on the window: the rail is chrome, and the
+    // agent belongs over the thing it is being asked about.
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[45] flex justify-center px-4 pb-4" style={{ paddingLeft: inset + 16 }}>
       <section
         aria-label="Agent"
         // Escape closes it, the way it closes every other floating surface.
@@ -62,14 +65,14 @@ export function AgentDock() {
         className="animate-agent-slide-up pointer-events-auto flex max-h-[70vh] w-[min(760px,100%)] min-w-0 flex-col select-none"
       >
         {!loaded && (
-          <div role="status" aria-label="Loading agent" className="skeleton-enter rounded-[20px] border border-line-2 bg-surface/95 p-4 shadow-2xl backdrop-blur-xl">
+          <div data-native-overlay role="status" aria-label="Loading agent" className="skeleton-enter rounded-[20px] border border-line-2 bg-surface/95 p-4 shadow-2xl backdrop-blur-xl">
             <div className="h-11 rounded-xl bg-surface-2" />
             <div className="mt-3 h-6 w-2/3 rounded-lg bg-surface-2/70" />
           </div>
         )}
 
         {loaded && initError && (
-          <div className="rounded-[20px] border border-line-2 bg-surface/95 p-4 text-xs shadow-2xl backdrop-blur-xl">
+          <div data-native-overlay className="rounded-[20px] border border-line-2 bg-surface/95 p-4 text-xs shadow-2xl backdrop-blur-xl">
             <div className="flex items-start gap-3">
               <p role="alert" className="min-w-0 flex-1 text-ink-2">
                 {initError}
@@ -83,7 +86,7 @@ export function AgentDock() {
         )}
 
         {loaded && !initError && showSetup && (
-          <div className="flex max-h-[70vh] min-h-0 flex-col overflow-hidden rounded-[20px] border border-line-2 bg-surface/95 shadow-2xl backdrop-blur-xl">
+          <div data-native-overlay className="flex max-h-[70vh] min-h-0 flex-col overflow-hidden rounded-[20px] border border-line-2 bg-surface/95 shadow-2xl backdrop-blur-xl">
             <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
               <h2 className="text-xs font-semibold text-ink">Set up the agent</h2>
               <span className="flex-1" />

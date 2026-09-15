@@ -162,6 +162,17 @@ describe("AgentDock", () => {
     expect(screen.getByRole("region", { name: "Agent" }).className).toContain("pointer-events-auto");
   });
 
+  it("marks every card it paints, or the native page covers them", () => {
+    const { container } = render(<AgentDock />);
+    // The composer and each way in are let through the mask by name; the
+    // dock itself is not, so the mask follows the rounded cards rather than
+    // cutting one square hole around them.
+    expect(container.querySelectorAll("[data-native-overlay]").length).toBeGreaterThanOrEqual(5);
+    expect(screen.getByRole("region", { name: "Agent" }).hasAttribute("data-native-overlay")).toBe(false);
+    const composer = screen.getByPlaceholderText("Ask about this page, or say what to do…").closest("[data-native-overlay]");
+    expect(composer).toBeTruthy();
+  });
+
   it("shows setup instead of the thread when the chosen provider has no key", () => {
     useAgent.setState({ keyed: [] });
     render(<AgentDock />);

@@ -100,6 +100,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
     <>
       {messages.length > 0 && (
         <div
+          data-native-overlay
           className="mb-2 flex min-h-0 flex-col gap-4 overflow-auto rounded-[20px] border border-line-2 bg-surface/95 px-4 py-4 shadow-2xl backdrop-blur-xl select-text"
           onScroll={(e) => {
             const el = e.currentTarget;
@@ -124,6 +125,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
           {SUGGESTIONS.map((s) => (
             <button
               key={s.label}
+              data-native-overlay
               type="button"
               disabled={!activeTab}
               title={s.hint}
@@ -137,7 +139,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
       )}
 
       {/* The composer: one card, a paragraph wide, over the page. */}
-      <div className="rounded-[20px] border border-line-2 bg-surface/95 px-4 pt-3.5 pb-2.5 shadow-2xl backdrop-blur-xl transition-[border-color] focus-within:border-line-3">
+      <div data-native-overlay className="rounded-[20px] border border-line-2 bg-surface/95 px-4 pt-3.5 pb-2.5 shadow-2xl backdrop-blur-xl transition-[border-color] focus-within:border-line-3">
         <textarea
           ref={textRef}
           value={draft}
