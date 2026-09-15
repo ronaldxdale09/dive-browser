@@ -58,7 +58,9 @@ const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
  * list them.
  */
 export function visibleSections(privateWindow: boolean = isPrivateWindow()): typeof SECTIONS {
-  return privateWindow ? SECTIONS.filter((s) => s.id !== "agent" && s.id !== "subtitles" && s.id !== "passwords") : SECTIONS;
+  // A private window keeps nothing, so the places saved things live --
+  // logins, addresses and cards -- have nothing to show and no way to add.
+  return privateWindow ? SECTIONS.filter((s) => !["agent", "subtitles", "passwords", "wallet"].includes(s.id)) : SECTIONS;
 }
 
 /** Settings: a section list on the left, one panel of settings on the right. */
