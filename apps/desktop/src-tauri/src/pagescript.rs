@@ -33,6 +33,7 @@ const FRAGMENTS: &[(&str, &str)] = &[
     ("color.js", include_str!("inject/color.js")),
     ("agent_glow.js", include_str!("inject/agent_glow.js")),
     ("audio.js", include_str!("inject/audio.js")),
+    ("autofill.js", include_str!("inject/autofill.js")),
     ("reader.js", include_str!("inject/reader.js")),
     ("translate.js", include_str!("inject/translate.js")),
 ];

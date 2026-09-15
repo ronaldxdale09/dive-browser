@@ -6,7 +6,7 @@ import { useBrowser } from "../store/browser";
 import { PageActions, preferredLanguage, translationMessage } from "./PageActions";
 
 const initial = useBrowser.getState();
-const tab = { id: "t1", workspace_id: "w1", tier: "today", url: "https://example.com/article", title: "An article", favicon: null, position: 0, state: "live" } as never;
+const tab = { id: "t1", workspace_id: "w1", tier: "today", url: "https://example.com/article", title: "An article", favicon: null, position: 0, state: "live", last_active_at: "" };
 
 beforeEach(() => {
   vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);
@@ -15,7 +15,7 @@ beforeEach(() => {
   vi.spyOn(ipc, "pageReaderLeave").mockResolvedValue(null);
   vi.spyOn(ipc, "pageTranslate").mockResolvedValue({ ok: true, reason: null, from: "es", target: "en", changed: 120 });
   vi.spyOn(ipc, "pageTranslateRestore").mockResolvedValue(null);
-  useBrowser.setState({ tabs: [tab], activeTab: "t1" });
+  useBrowser.setState({ tabs: [tab] as never, activeTab: "t1" });
 });
 
 afterEach(() => {
@@ -44,7 +44,7 @@ describe("translationMessage", () => {
 
 describe("PageActions", () => {
   it("stays out of the way of anything that is not a web page", () => {
-    useBrowser.setState({ tabs: [{ ...tab, url: "dive://settings" } as never], activeTab: "t1" });
+    useBrowser.setState({ tabs: [{ ...tab, url: "dive://settings" }] as never, activeTab: "t1" });
     render(<PageActions />);
     expect(screen.queryByRole("button", { name: "Reader view" })).toBeNull();
   });
@@ -79,7 +79,7 @@ describe("PageActions", () => {
     const { rerender } = render(<PageActions />);
     fireEvent.click(screen.getByRole("button", { name: "Reader view" }));
     await screen.findByRole("button", { name: "Leave reader view" });
-    useBrowser.setState({ tabs: [{ ...tab, url: "https://example.com/other" } as never] });
+    useBrowser.setState({ tabs: [{ ...tab, url: "https://example.com/other" }] as never });
     rerender(<PageActions />);
     expect(screen.getByRole("button", { name: "Reader view" })).toBeTruthy();
   });

@@ -236,6 +236,43 @@ export const commands = {
 	 *  comes first next time.
 	 */
 	passwordsUsed: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("passwords_used", { id })),
+	/**  Saved addresses in the active profile. */
+	addressesList: () => typedError<Address[], AppError>(__TAURI_INVOKE("addresses_list")),
+	/**  Save an address; an empty id creates one. */
+	addressSave: (address: Address) => typedError<Address, AppError>(__TAURI_INVOKE("address_save", { address })),
+	/**  Forget an address. */
+	addressDelete: (id: string) => typedError<boolean, AppError>(__TAURI_INVOKE("address_delete", { id })),
+	/**  Put a saved address into the tab's form. */
+	addressFill: (tabId: TabId, id: string) => typedError<number, AppError>(__TAURI_INVOKE("address_fill", { tabId, id })),
+	/**  Saved cards in the active profile. Numbers are never included. */
+	cardsList: () => typedError<Card[], AppError>(__TAURI_INVOKE("cards_list")),
+	/**  Save a card: its listing here, its number in the keychain. */
+	cardSave: (draft: CardDraft) => typedError<Card, AppError>(__TAURI_INVOKE("card_save", { draft })),
+	/**  Forget a card, keychain item and all. */
+	cardDelete: (id: string) => typedError<boolean, AppError>(__TAURI_INVOKE("card_delete", { id })),
+	/**
+	 *  Put a saved card into the tab's form. This is the only path that reads a
+	 *  card number, and only for the fill the person just asked for.
+	 */
+	cardFill: (tabId: TabId, id: string) => typedError<number, AppError>(__TAURI_INVOKE("card_fill", { tabId, id })),
+	/**
+	 *  Write everything this profile knows to a file the person chooses.
+	 *  Returns where it went, or `None` when the dialog was dismissed.
+	 */
+	backupExport: () => typedError<string | null, AppError>(__TAURI_INVOKE("backup_export")),
+	/**
+	 *  Merge a backup file into this profile. `None` when the dialog was
+	 *  dismissed; otherwise what it added.
+	 */
+	backupRestore: (takePreferences: boolean) => typedError<{
+	bookmarks: number,
+	history: number,
+	form_entries: number,
+	workspaces: number,
+	tabs: number,
+	/**  Preferences were taken from the file. */
+	preferences: boolean,
+} | null, AppError>(__TAURI_INVOKE("backup_restore", { takePreferences })),
 	/**  Show just the article on a tab's page. */
 	pageReader: (id: TabId) => typedError<ReaderResult, AppError>(__TAURI_INVOKE("page_reader", { id })),
 	/**  Leave reader view, restoring the page. */
@@ -733,6 +770,45 @@ export type Access =
 "empty";
 
 /**
+ *  A postal address, for filling a checkout or a delivery form.
+ *
+ *  Ordinary data, so unlike a card or a password it lives in the database
+ *  whole; there is nothing here a person would not hand to a courier.
+ */
+export type Address = {
+	/**  Row id. */
+	id: string,
+	/**  The profile the address belongs to. */
+	profile_id: string,
+	/**  What the person calls it ("Home", "Work"). */
+	label: string,
+	/**  The full name the parcel is addressed to. */
+	name: string,
+	/**  Company or department, when a delivery needs one. */
+	organization: string,
+	/**  The street lines, newline-separated as they are typed. */
+	street: string,
+	/**  Town or city. */
+	city: string,
+	/**  State, province or county. */
+	region: string,
+	/**  Postcode or ZIP. */
+	postal_code: string,
+	/**  Country as written, or its two-letter code. */
+	country: string,
+	/**  Contact number for the delivery. */
+	phone: string,
+	/**  Contact address for the order. */
+	email: string,
+	/**  RFC 3339. */
+	created_at: string,
+	/**  RFC 3339, when it was last filled. */
+	last_used_at: string | null,
+	/**  How many times it has been filled. */
+	uses: number,
+};
+
+/**
  *  Where an agent is about to act, so the chrome can draw a cursor there.
  *  Emitted just before the input is dispatched. The `move` phase arrives
  *  first, then `click` once the pointer has notionally arrived.
@@ -824,6 +900,51 @@ export type BuildInfo = {
 };
 
 export type CancelResult = "cancelled" | "completed";
+
+/**
+ *  A payment card, as the list shows it.
+ *
+ *  The number is **not** here: only the last four digits, so a card can be
+ *  recognised, while the number itself lives in the OS keychain under the
+ *  row's id, exactly as a password does.
+ */
+export type Card = {
+	/**  Row id, also the keychain account name. */
+	id: string,
+	/**  The profile the card belongs to. */
+	profile_id: string,
+	/**  What the person calls it ("Personal", "Company"). */
+	label: string,
+	/**  The name on the card. */
+	cardholder: string,
+	/**  The last four digits, which is all a listing needs. */
+	last4: string,
+	/**  `visa`, `mastercard`, `amex`, `discover`, or empty when unknown. */
+	brand: string,
+	/**  Expiry month, 1 to 12. */
+	expiry_month: number,
+	/**  Expiry year, four digits. */
+	expiry_year: number,
+	/**  RFC 3339. */
+	created_at: string,
+	/**  RFC 3339, when it was last filled. */
+	last_used_at: string | null,
+	/**  How many times it has been filled. */
+	uses: number,
+};
+
+/**
+ *  A card as it is saved: the number is here, on its way to the keychain,
+ *  and nowhere else.
+ */
+export type CardDraft = {
+	label: string,
+	cardholder: string,
+	/**  Digits, with or without the spaces a person types. */
+	number: string,
+	expiry_month: number,
+	expiry_year: number,
+};
 
 /**  Where a technology sits in a stack, so the panel can group them. */
 export type Category =
@@ -2220,6 +2341,17 @@ export type RequestDetail = {
 	response_body_note: string | null,
 	/**  What workspace rules did to this request, in words. */
 	rewrites: string[],
+};
+
+/**  What a restore actually added. */
+export type RestoreSummary = {
+	bookmarks: number,
+	history: number,
+	form_entries: number,
+	workspaces: number,
+	tabs: number,
+	/**  Preferences were taken from the file. */
+	preferences: boolean,
 };
 
 /**  One rule; the first enabled match wins. */

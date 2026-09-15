@@ -16,7 +16,7 @@ use crate::error::{AppError, AppResult};
 use crate::state::{AppState, lock};
 
 /// Key holding the JSON blob in the settings table.
-const KEY: &str = "prefs";
+pub(crate) const KEY: &str = "prefs";
 
 /// A site pinned at the top of the rail.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]

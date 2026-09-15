@@ -164,6 +164,42 @@ const MIGRATIONS: &[&str] = &[
         bounds TEXT NOT NULL DEFAULT '',
         PRIMARY KEY (profile_id, id)
     );",
+    // v14: addresses and payment cards for filling checkout forms. An
+    // address is ordinary data and lives here; a card's number does not --
+    // only its last four digits are kept, and the number itself goes to the
+    // keychain under the row's id, the way a password does.
+    "CREATE TABLE addresses (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        name TEXT NOT NULL,
+        organization TEXT NOT NULL DEFAULT '',
+        street TEXT NOT NULL DEFAULT '',
+        city TEXT NOT NULL DEFAULT '',
+        region TEXT NOT NULL DEFAULT '',
+        postal_code TEXT NOT NULL DEFAULT '',
+        country TEXT NOT NULL DEFAULT '',
+        phone TEXT NOT NULL DEFAULT '',
+        email TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        last_used_at TEXT,
+        uses INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX addresses_profile ON addresses(profile_id);
+    CREATE TABLE cards (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        cardholder TEXT NOT NULL,
+        last4 TEXT NOT NULL,
+        brand TEXT NOT NULL DEFAULT '',
+        expiry_month INTEGER NOT NULL,
+        expiry_year INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        last_used_at TEXT,
+        uses INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX cards_profile ON cards(profile_id);",
 ];
 
 /// Setting that names the active workspace; the store reads it to know
@@ -304,6 +340,79 @@ pub struct Credential {
     pub origin: String,
     /// The account name as the site's form took it.
     pub username: String,
+    /// RFC 3339.
+    pub created_at: String,
+    /// RFC 3339, when it was last filled.
+    pub last_used_at: Option<String>,
+    /// How many times it has been filled.
+    pub uses: u32,
+}
+
+/// A postal address, for filling a checkout or a delivery form.
+///
+/// Ordinary data, so unlike a card or a password it lives in the database
+/// whole; there is nothing here a person would not hand to a courier.
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type,
+)]
+pub struct Address {
+    /// Row id.
+    pub id: String,
+    /// The profile the address belongs to.
+    pub profile_id: String,
+    /// What the person calls it ("Home", "Work").
+    pub label: String,
+    /// The full name the parcel is addressed to.
+    pub name: String,
+    /// Company or department, when a delivery needs one.
+    pub organization: String,
+    /// The street lines, newline-separated as they are typed.
+    pub street: String,
+    /// Town or city.
+    pub city: String,
+    /// State, province or county.
+    pub region: String,
+    /// Postcode or ZIP.
+    pub postal_code: String,
+    /// Country as written, or its two-letter code.
+    pub country: String,
+    /// Contact number for the delivery.
+    pub phone: String,
+    /// Contact address for the order.
+    pub email: String,
+    /// RFC 3339.
+    pub created_at: String,
+    /// RFC 3339, when it was last filled.
+    pub last_used_at: Option<String>,
+    /// How many times it has been filled.
+    pub uses: u32,
+}
+
+/// A payment card, as the list shows it.
+///
+/// The number is **not** here: only the last four digits, so a card can be
+/// recognised, while the number itself lives in the OS keychain under the
+/// row's id, exactly as a password does.
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type,
+)]
+pub struct Card {
+    /// Row id, also the keychain account name.
+    pub id: String,
+    /// The profile the card belongs to.
+    pub profile_id: String,
+    /// What the person calls it ("Personal", "Company").
+    pub label: String,
+    /// The name on the card.
+    pub cardholder: String,
+    /// The last four digits, which is all a listing needs.
+    pub last4: String,
+    /// `visa`, `mastercard`, `amex`, `discover`, or empty when unknown.
+    pub brand: String,
+    /// Expiry month, 1 to 12.
+    pub expiry_month: u32,
+    /// Expiry year, four digits.
+    pub expiry_year: u32,
     /// RFC 3339.
     pub created_at: String,
     /// RFC 3339, when it was last filled.
@@ -904,6 +1013,127 @@ impl Store {
     }
 
     /// Every form entry in `profile`, by field then most used.
+    /// Every saved address in `profile`, most used first.
+    pub fn addresses(&self, profile: ProfileId) -> Result<Vec<Address>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, profile_id, label, name, organization, street, city, region,
+                    postal_code, country, phone, email, created_at, last_used_at, uses
+             FROM addresses WHERE profile_id = ?1 ORDER BY uses DESC, created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![profile.to_string()], address_from_row)?;
+        rows.collect::<std::result::Result<_, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Save an address, replacing the one with the same id.
+    pub fn upsert_address(&self, address: &Address) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO addresses (id, profile_id, label, name, organization, street, city,
+                 region, postal_code, country, phone, email, created_at, last_used_at, uses)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+             ON CONFLICT(id) DO UPDATE SET label = excluded.label, name = excluded.name,
+                 organization = excluded.organization, street = excluded.street,
+                 city = excluded.city, region = excluded.region,
+                 postal_code = excluded.postal_code, country = excluded.country,
+                 phone = excluded.phone, email = excluded.email",
+            params![
+                address.id,
+                address.profile_id,
+                address.label,
+                address.name,
+                address.organization,
+                address.street,
+                address.city,
+                address.region,
+                address.postal_code,
+                address.country,
+                address.phone,
+                address.email,
+                address.created_at,
+                address.last_used_at,
+                address.uses,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Forget an address. False when it was not there.
+    pub fn remove_address(&self, profile: ProfileId, id: &str) -> Result<bool> {
+        let changed = self.conn.execute(
+            "DELETE FROM addresses WHERE id = ?1 AND profile_id = ?2",
+            params![id, profile.to_string()],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Count one use of an address.
+    pub fn address_used(&self, id: &str, at: Timestamp) -> Result<()> {
+        self.conn.execute(
+            "UPDATE addresses SET uses = uses + 1, last_used_at = ?2 WHERE id = ?1",
+            params![id, at.to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// Every saved card in `profile`, most used first. Numbers are not here.
+    pub fn cards(&self, profile: ProfileId) -> Result<Vec<Card>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, profile_id, label, cardholder, last4, brand, expiry_month, expiry_year,
+                    created_at, last_used_at, uses
+             FROM cards WHERE profile_id = ?1 ORDER BY uses DESC, created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![profile.to_string()], card_from_row)?;
+        rows.collect::<std::result::Result<_, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Save a card's listing row. The number belongs in the keychain.
+    pub fn upsert_card(&self, card: &Card) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO cards (id, profile_id, label, cardholder, last4, brand,
+                 expiry_month, expiry_year, created_at, last_used_at, uses)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(id) DO UPDATE SET label = excluded.label,
+                 cardholder = excluded.cardholder, last4 = excluded.last4,
+                 brand = excluded.brand, expiry_month = excluded.expiry_month,
+                 expiry_year = excluded.expiry_year",
+            params![
+                card.id,
+                card.profile_id,
+                card.label,
+                card.cardholder,
+                card.last4,
+                card.brand,
+                card.expiry_month,
+                card.expiry_year,
+                card.created_at,
+                card.last_used_at,
+                card.uses,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Forget a card's row. False when it was not there; the caller clears
+    /// the keychain item.
+    pub fn remove_card(&self, profile: ProfileId, id: &str) -> Result<bool> {
+        let changed = self.conn.execute(
+            "DELETE FROM cards WHERE id = ?1 AND profile_id = ?2",
+            params![id, profile.to_string()],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Count one use of a card.
+    pub fn card_used(&self, id: &str, at: Timestamp) -> Result<()> {
+        self.conn.execute(
+            "UPDATE cards SET uses = uses + 1, last_used_at = ?2 WHERE id = ?1",
+            params![id, at.to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// Everything remembered from forms in `profile`.
     pub fn form_entries(&self, profile: ProfileId) -> Result<Vec<FormEntry>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, profile_id, field, value, uses, last_used_at FROM form_entries
@@ -1036,6 +1266,51 @@ impl Store {
     }
 
     /// Bookmarks matching `query`, newest first.
+    /// Every bookmark in the active profile, newest first.
+    ///
+    /// A search asks for a page of matches; a backup asks for all of them,
+    /// which is why this is not `search_bookmarks("")`.
+    pub fn all_bookmarks(&self) -> Result<Vec<Bookmark>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT url, title, created_at FROM bookmarks
+             WHERE profile_id = ?1 ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![self.scope()?], |r| {
+            Ok(Bookmark {
+                url: r.get(0)?,
+                title: r.get(1)?,
+                created_at: r.get(2)?,
+                favicon: None,
+            })
+        })?;
+        rows.collect::<std::result::Result<_, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Every page in the active profile's history, one row per address,
+    /// newest first, up to `limit`.
+    pub fn all_history(&self, limit: usize) -> Result<Vec<HistoryEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT url, MAX(title), MAX(visited_at), COUNT(*) FROM history
+             WHERE profile_id = ?1 GROUP BY url ORDER BY MAX(visited_at) DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(
+            params![self.scope()?, i64::try_from(limit).unwrap_or(i64::MAX)],
+            |r| {
+                Ok(HistoryEntry {
+                    url: r.get(0)?,
+                    title: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    last_visited_at: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    visits: r.get::<_, i64>(3)?.try_into().unwrap_or(u32::MAX),
+                    favicon: None,
+                })
+            },
+        )?;
+        rows.collect::<std::result::Result<_, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Bookmarks whose address or title contains `query`, newest first.
     pub fn search_bookmarks(&self, query: &str, limit: usize) -> Result<Vec<Bookmark>> {
         let like = format!("%{}%", like_escape(query.trim()));
         let mut stmt = self.conn.prepare(
@@ -1649,6 +1924,42 @@ fn profile_from_row(r: &Row<'_>) -> rusqlite::Result<Profile> {
         container_id: parse_id(&r.get::<_, String>(5)?)?,
         position: r.get(6)?,
         created_at: parse_time(&r.get::<_, String>(7)?)?,
+    })
+}
+
+fn address_from_row(r: &Row<'_>) -> rusqlite::Result<Address> {
+    Ok(Address {
+        id: r.get(0)?,
+        profile_id: r.get(1)?,
+        label: r.get(2)?,
+        name: r.get(3)?,
+        organization: r.get(4)?,
+        street: r.get(5)?,
+        city: r.get(6)?,
+        region: r.get(7)?,
+        postal_code: r.get(8)?,
+        country: r.get(9)?,
+        phone: r.get(10)?,
+        email: r.get(11)?,
+        created_at: r.get(12)?,
+        last_used_at: r.get(13)?,
+        uses: r.get::<_, i64>(14)?.try_into().unwrap_or(u32::MAX),
+    })
+}
+
+fn card_from_row(r: &Row<'_>) -> rusqlite::Result<Card> {
+    Ok(Card {
+        id: r.get(0)?,
+        profile_id: r.get(1)?,
+        label: r.get(2)?,
+        cardholder: r.get(3)?,
+        last4: r.get(4)?,
+        brand: r.get(5)?,
+        expiry_month: r.get::<_, i64>(6)?.try_into().unwrap_or(0),
+        expiry_year: r.get::<_, i64>(7)?.try_into().unwrap_or(0),
+        created_at: r.get(8)?,
+        last_used_at: r.get(9)?,
+        uses: r.get::<_, i64>(10)?.try_into().unwrap_or(u32::MAX),
     })
 }
 
@@ -2646,6 +2957,7 @@ mod tests {
             0x755e_bc0a_ec8c_b672,
             0x4b69_716e_99b1_89aa,
             0xb4db_2559_061e_f61e,
+            0xbe92_5ee4_9bbb_2be8,
         ];
         assert!(
             MIGRATIONS.len() >= SHIPPED.len(),

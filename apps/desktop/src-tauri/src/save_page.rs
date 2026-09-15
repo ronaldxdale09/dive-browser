@@ -118,6 +118,10 @@ mod tests {
         let long = "x".repeat(400);
         let name = file_name(&long, "https://x.dev");
         assert!(name.len() <= 130, "{} chars", name.len());
-        assert!(std::path::Path::new(&name).extension().is_some_and(|e| e == "mhtml"));
+        assert!(
+            std::path::Path::new(&name)
+                .extension()
+                .is_some_and(|e| e == "mhtml")
+        );
     }
 }

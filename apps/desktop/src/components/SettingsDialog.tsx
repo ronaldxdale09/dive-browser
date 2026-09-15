@@ -1,4 +1,4 @@
-import {
+import { CreditCard,
   Captions,
   Info,
   Keyboard,
@@ -28,6 +28,7 @@ import { Developer } from "./settings/Developer";
 import { General } from "./settings/General";
 import { Privacy } from "./settings/Privacy";
 import { Passwords } from "./settings/Passwords";
+import { Wallet } from "./settings/Wallet";
 import { Shortcuts } from "./settings/Shortcuts";
 import { SubtitlesControls } from "./settings/SubtitlesControls";
 
@@ -43,6 +44,7 @@ const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
   { id: "appearance", label: "Appearance", icon: PaletteIcon },
   { id: "privacy", label: "Privacy", icon: ShieldCheck },
   { id: "passwords", label: "Passwords & forms", icon: KeyRound },
+  { id: "wallet", label: "Addresses & cards", icon: CreditCard },
   { id: "developer", label: "Developer", icon: Plug },
   { id: "agent", label: "Agent", icon: AgentIcon as LucideIcon },
   { id: "subtitles", label: "Live subtitles", icon: Captions },
@@ -169,6 +171,8 @@ function Panel({ section, info }: { section: SectionId; info: AppInfo | null }) 
       return <Privacy />;
     case "passwords":
       return <Passwords />;
+    case "wallet":
+      return <Wallet />;
     case "developer":
       return <Developer info={info} />;
     case "agent":

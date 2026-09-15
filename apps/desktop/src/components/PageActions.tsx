@@ -1,11 +1,12 @@
-import { BookOpen, Languages, Loader2 } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { BookOpen, CreditCard, Languages, Loader2, MapPin } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
 import { useCoversContent } from "../lib/overlay";
 import { useDismiss } from "../lib/useDismiss";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
+import { describeCard, useWallet } from "../store/wallet";
 import { Icon } from "./Icon";
 import { Tooltip } from "./Tooltip";
 
@@ -143,6 +144,7 @@ function Actions({ tabId }: { tabId: string }) {
   const button = "grid size-6 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-ink";
   return (
     <div ref={root} className="relative flex items-center gap-0.5">
+      <WalletButton tabId={tabId} className={button} />
       <Tooltip label={reading ? "Leave reader view" : "Reader view"}>
         <button type="button" aria-label={reading ? "Leave reader view" : "Reader view"} aria-pressed={reading} onClick={() => void toggleReader()} className={`${button} ${reading ? "text-highlight" : ""}`}>
           <Icon icon={busy && !menu ? Loader2 : BookOpen} size={13} className={busy && !menu ? "motion-safe:animate-spin" : undefined} />
@@ -164,6 +166,76 @@ function Actions({ tabId }: { tabId: string }) {
           {LANGUAGES.map(([code, name]) => (
             <button key={code} type="button" role="menuitem" onClick={() => void translate(code)} className={`w-full rounded-lg px-2.5 py-1.5 text-left hover:bg-surface-2 ${translated === code ? "text-highlight" : "text-ink"}`}>
               {name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A saved address or card, into the form on this page.
+ *
+ * It only appears once something is saved, so a browser nobody has filled in
+ * shows nothing, and filling is always this click -- the host reads a card
+ * number for exactly this one fill and never at any other time.
+ */
+function WalletButton({ tabId, className }: { tabId: string; className: string }) {
+  const addresses = useWallet((s) => s.addresses);
+  const cards = useWallet((s) => s.cards);
+  const loaded = useWallet((s) => s.loaded);
+  const load = useWallet((s) => s.load);
+  const fillAddress = useWallet((s) => s.fillAddress);
+  const fillCard = useWallet((s) => s.fillCard);
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const dismiss = useCallback(() => setOpen(false), []);
+  useDismiss(root, open, dismiss);
+  useCoversContent(open);
+  useFocusTrap(panel, { active: open, menu: true, onEscape: dismiss });
+  useEffect(() => {
+    if (!loaded) void load();
+  }, [loaded, load]);
+  if (loaded && addresses.length === 0 && cards.length === 0) return null;
+  return (
+    <div ref={root} className="relative">
+      <Tooltip label="Fill a saved address or card">
+        <button type="button" aria-label="Fill a saved address or card" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((was) => !was)} className={className}>
+          <Icon icon={CreditCard} size={13} />
+        </button>
+      </Tooltip>
+      {open && (
+        <div ref={panel} role="menu" aria-label="Saved addresses and cards" className="surface-enter absolute top-full right-0 z-50 mt-1.5 w-64 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl">
+          {addresses.map((address) => (
+            <button
+              key={address.id}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                void fillAddress(tabId, address.id);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-ink hover:bg-surface-2"
+            >
+              <Icon icon={MapPin} size={12} className="shrink-0 text-ink-3" />
+              <span className="truncate">{address.label || address.name}</span>
+            </button>
+          ))}
+          {cards.map((card) => (
+            <button
+              key={card.id}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                void fillCard(tabId, card.id);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-ink hover:bg-surface-2"
+            >
+              <Icon icon={CreditCard} size={12} className="shrink-0 text-ink-3" />
+              <span className="truncate">{card.label || describeCard(card)}</span>
             </button>
           ))}
         </div>

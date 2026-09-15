@@ -8,7 +8,7 @@ import type { EventCallback } from "@tauri-apps/api/event";
 import type { ChatDelta, SendOptions } from "../generated/bindings";
 import type { ExtensionInfo, ExtensionList } from "../generated/bindings";
 import { commands, events as generatedEvents } from "../generated/bindings";
-import type { ClearRequest, Decision, Duration, Scope, ExportRequest, NetworkProfile, PaneBounds, Prefs, RecordOptions, Rule, TabTier } from "../generated/bindings";
+import type { Address, CardDraft, ClearRequest, Decision, Duration, Scope, ExportRequest, NetworkProfile, PaneBounds, Prefs, RecordOptions, Rule, TabTier } from "../generated/bindings";
 
 /** Shape tauri-specta returns for fallible commands. */
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
@@ -22,7 +22,7 @@ export const events = {
     once: (callback: EventCallback<string>) => generatedEvents.menuCommand(getCurrentWebview()).once(callback),
   },
 };
-export type { ExternalLinkAsked, TabAudio, TaskRow } from "../generated/bindings";
+export type { ExternalLinkAsked, TabAudio, TaskRow, Address, Card, CardDraft, RestoreSummary } from "../generated/bindings";
 export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, CsvImportSummary, FormEntry, JsDialogAsked, JsDialogClosed } from "../generated/bindings";
 export type { ExtensionInfo, ExtensionList };
 export type { WebApp, WebAppProbe } from "../generated/bindings";
@@ -210,6 +210,16 @@ export const ipc = {
   bookmarksSearch: async (query: string, limit = 20) => unwrap(await commands.bookmarksSearch(query, limit)),
   passwordsList: async () => unwrap(await commands.passwordsList()),
   passwordsForUrl: async (url: string) => unwrap(await commands.passwordsForUrl(url)),
+  addressesList: async () => unwrap(await commands.addressesList()),
+  addressSave: async (address: Address) => unwrap(await commands.addressSave(address)),
+  addressDelete: async (id: string) => unwrap(await commands.addressDelete(id)),
+  addressFill: async (tabId: string, id: string) => unwrap(await commands.addressFill(tabId, id)),
+  cardsList: async () => unwrap(await commands.cardsList()),
+  cardSave: async (draft: CardDraft) => unwrap(await commands.cardSave(draft)),
+  cardDelete: async (id: string) => unwrap(await commands.cardDelete(id)),
+  cardFill: async (tabId: string, id: string) => unwrap(await commands.cardFill(tabId, id)),
+  backupExport: async () => unwrap(await commands.backupExport()),
+  backupRestore: async (takePreferences: boolean) => unwrap(await commands.backupRestore(takePreferences)),
   pageReader: async (id: string) => unwrap(await commands.pageReader(id)),
   pageReaderLeave: async (id: string) => unwrap(await commands.pageReaderLeave(id)),
   pageReaderOpen: async (id: string) => unwrap(await commands.pageReaderOpen(id)),

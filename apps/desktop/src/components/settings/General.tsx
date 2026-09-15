@@ -5,6 +5,8 @@ import { prettyBundleId } from "../DefaultBrowserDialog";
 import { isPrivateWindow } from "../../lib/privateMode";
 import { KeepSitesActive } from "./KeepSitesActive";
 import { usePref } from "./usePref";
+import { ipc } from "../../lib/ipc";
+import { errorMessage } from "../../lib/errors";
 
 const ENGINES = [
   { value: "duckduckgo", label: "DuckDuckGo" },
@@ -21,6 +23,33 @@ const ZOOMS = [50, 67, 75, 90, 100, 110, 125, 150, 175, 200].map((z) => ({ value
 /** Settings › General: startup, search and page defaults. */
 export function General() {
   const [prefs, set] = usePref();
+  const notify = useBrowser((s) => s.notify);
+  const saveBackup = async () => {
+    try {
+      const path = await ipc.backupExport();
+      if (path) notify(`Backup saved to ${path}`, 5000);
+    } catch (error) {
+      useBrowser.setState({ error: errorMessage(error) });
+    }
+  };
+  const restoreBackup = async () => {
+    try {
+      const summary = await ipc.backupRestore(false);
+      // No summary means the dialog was dismissed, which needs no notice.
+      if (summary) {
+        const parts = [
+          summary.bookmarks && `${summary.bookmarks} bookmarks`,
+          summary.history && `${summary.history} pages of history`,
+          summary.form_entries && `${summary.form_entries} form entries`,
+          summary.workspaces && `${summary.workspaces} workspaces`,
+          summary.tabs && `${summary.tabs} tabs`,
+        ].filter(Boolean);
+        notify(parts.length ? `Restored ${parts.join(", ")}.` : "That backup held nothing this profile did not have already.", 6000);
+      }
+    } catch (error) {
+      useBrowser.setState({ error: errorMessage(error) });
+    }
+  };
   const toggle = useBrowser((s) => s.toggle);
   return (
     <>
@@ -112,6 +141,20 @@ export function General() {
           label="From another browser"
           hint="Bookmarks, history, passwords and form entries from Chrome, Brave, Edge, Arc, Vivaldi, Opera or Firefox; bookmarks and history from Safari. Cookies and extensions stay behind."
           control={<Button onClick={() => toggle("import", true)}>Import…</Button>}
+        />
+      </Group>
+      )}
+      {!isPrivateWindow() && (
+      <Group title="Backup">
+        <Row
+          label="Save a backup"
+          hint="Bookmarks, history, form entries, preferences and every workspace's tabs, in one file. Saved passwords are not included — they stay in the Keychain; export those from Settings › Passwords if you need them."
+          control={<Button onClick={() => void saveBackup()}>Save…</Button>}
+        />
+        <Row
+          label="Restore from a backup"
+          hint="Merged into this profile: nothing here is removed, and anything already saved is left alone, so restoring the same file twice changes nothing the second time. Restored tabs arrive asleep."
+          control={<Button onClick={() => void restoreBackup()}>Restore…</Button>}
         />
       </Group>
       )}

@@ -707,6 +707,16 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             passwords_reveal,
             passwords_delete,
             passwords_used,
+            addresses_list,
+            address_save,
+            address_delete,
+            address_fill,
+            cards_list,
+            card_save,
+            card_delete,
+            card_fill,
+            backup_export,
+            backup_restore,
             page_reader,
             page_reader_leave,
             page_reader_open,
@@ -2414,6 +2424,202 @@ pub(crate) fn passwords_reveal(state: State<'_, AppState>, id: String) -> AppRes
 #[specta::specta]
 pub(crate) fn passwords_used(state: State<'_, AppState>, id: String) -> AppResult<()> {
     crate::passwords::touch(&state, &id)
+}
+
+/// Saved addresses in the active profile.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn addresses_list(state: State<'_, AppState>) -> AppResult<Vec<dive_core::Address>> {
+    let store = lock(&state.store);
+    let profile = active_profile(&store, *lock(&state.active_workspace))?;
+    Ok(store.addresses(profile.id)?)
+}
+
+/// Save an address; an empty id creates one.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn address_save(
+    state: State<'_, AppState>,
+    address: dive_core::Address,
+) -> AppResult<dive_core::Address> {
+    let profile = {
+        let store = lock(&state.store);
+        active_profile(&store, *lock(&state.active_workspace))?
+    };
+    crate::autofill::save_address(&state, profile.id, address)
+}
+
+/// Forget an address.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn address_delete(state: State<'_, AppState>, id: String) -> AppResult<bool> {
+    let store = lock(&state.store);
+    let profile = active_profile(&store, *lock(&state.active_workspace))?;
+    Ok(store.remove_address(profile.id, &id)?)
+}
+
+/// Put a saved address into the tab's form.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn address_fill(
+    app: AppHandle<Runtime>,
+    tab_id: TabId,
+    id: String,
+) -> AppResult<u32> {
+    use tauri::Manager as _;
+    let state = app.state::<AppState>();
+    let address = {
+        let store = lock(&state.store);
+        let profile = active_profile(&store, *lock(&state.active_workspace))?;
+        store
+            .addresses(profile.id)?
+            .into_iter()
+            .find(|address| address.id == id)
+            .ok_or_else(|| AppError::new("no such address"))?
+    };
+    let value = serde_json::to_value(&address).map_err(AppError::new)?;
+    let filled = crate::autofill::fill_into(&state, tab_id, "Address", &value).await?;
+    lock(&state.store).address_used(&id, dive_core::Timestamp::now())?;
+    Ok(filled)
+}
+
+/// Saved cards in the active profile. Numbers are never included.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn cards_list(state: State<'_, AppState>) -> AppResult<Vec<dive_core::Card>> {
+    let store = lock(&state.store);
+    let profile = active_profile(&store, *lock(&state.active_workspace))?;
+    Ok(store.cards(profile.id)?)
+}
+
+/// Save a card: its listing here, its number in the keychain.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn card_save(
+    state: State<'_, AppState>,
+    draft: crate::autofill::CardDraft,
+) -> AppResult<dive_core::Card> {
+    let profile = {
+        let store = lock(&state.store);
+        active_profile(&store, *lock(&state.active_workspace))?
+    };
+    crate::autofill::save_card(&state, profile.id, &draft)
+}
+
+/// Forget a card, keychain item and all.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn card_delete(state: State<'_, AppState>, id: String) -> AppResult<bool> {
+    let profile = {
+        let store = lock(&state.store);
+        active_profile(&store, *lock(&state.active_workspace))?
+    };
+    crate::autofill::delete_card(&state, profile.id, &id)
+}
+
+/// Put a saved card into the tab's form. This is the only path that reads a
+/// card number, and only for the fill the person just asked for.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn card_fill(
+    app: AppHandle<Runtime>,
+    tab_id: TabId,
+    id: String,
+) -> AppResult<u32> {
+    use tauri::Manager as _;
+    let state = app.state::<AppState>();
+    let profile = {
+        let store = lock(&state.store);
+        active_profile(&store, *lock(&state.active_workspace))?
+    };
+    let fill = crate::autofill::card_fill(&state, profile.id, &id)?;
+    let value = serde_json::to_value(&fill).map_err(AppError::new)?;
+    crate::autofill::fill_into(&state, tab_id, "Card", &value).await
+}
+
+/// Write everything this profile knows to a file the person chooses.
+/// Returns where it went, or `None` when the dialog was dismissed.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn backup_export(app: AppHandle<Runtime>) -> AppResult<Option<String>> {
+    let backup = {
+        use tauri::Manager as _;
+        let state = app.state::<AppState>();
+        crate::backup::export(&state)?
+    };
+    let suggested = format!(
+        "dive-backup-{}.json",
+        backup.exported_at.chars().take(10).collect::<String>()
+    );
+    let Some(file) = rfd::AsyncFileDialog::new()
+        .set_title("Save a backup of this profile")
+        .set_file_name(&suggested)
+        .add_filter("Dive backup", &["json"])
+        .save_file()
+        .await
+    else {
+        return Ok(None);
+    };
+    let text = serde_json::to_string_pretty(&backup).map_err(AppError::new)?;
+    let path = file.path().to_owned();
+    tokio::fs::write(&path, text)
+        .await
+        .map_err(|error| AppError::new(format!("could not write {}: {error}", path.display())))?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Merge a backup file into this profile. `None` when the dialog was
+/// dismissed; otherwise what it added.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn backup_restore(
+    app: AppHandle<Runtime>,
+    take_preferences: bool,
+) -> AppResult<Option<crate::backup::RestoreSummary>> {
+    let Some(file) = rfd::AsyncFileDialog::new()
+        .set_title("Restore a Dive backup")
+        .add_filter("Dive backup", &["json"])
+        .pick_file()
+        .await
+    else {
+        return Ok(None);
+    };
+    let path = file.path().to_owned();
+    let text = tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|error| AppError::new(format!("could not read {}: {error}", path.display())))?;
+    let backup = crate::backup::parse(&text)?;
+    let summary = {
+        use tauri::Manager as _;
+        let state = app.state::<AppState>();
+        let store = lock(&state.store);
+        let profile = active_profile(&store, *lock(&state.active_workspace))?;
+        crate::backup::restore(&store, profile.id, &backup, take_preferences)?
+    };
+    // Restored workspaces and their tabs have to reach the chrome, which
+    // draws from events rather than re-reading the store.
+    if summary.workspaces > 0 {
+        use tauri::Manager as _;
+        let state = app.state::<AppState>();
+        let restored: Vec<_> = {
+            let store = lock(&state.store);
+            store.workspaces()?
+        };
+        for workspace in restored {
+            let tabs = {
+                let store = lock(&state.store);
+                store.tabs_for_workspace(workspace.id)?
+            };
+            emit_state_changed(&app, CoreEvent::WorkspaceUpserted(workspace.clone()))?;
+            for tab in tabs
+                .into_iter()
+                .filter(|t| t.workspace_id == Some(workspace.id))
+            {
+                emit_state_changed(&app, CoreEvent::TabUpserted(tab))?;
+            }
+        }
+    }
+    Ok(Some(summary))
 }
 
 /// Show just the article on a tab's page.
