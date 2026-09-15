@@ -48,6 +48,21 @@ pub struct AxNode {
     pub depth: usize,
 }
 
+impl AxNode {
+    /// A line that is not an element: the header naming a frame whose nodes
+    /// follow it, so a reader can tell where the page stops and the frame
+    /// starts.
+    pub fn marker(label: impl Into<String>) -> Self {
+        Self {
+            reference: None,
+            backend_node_id: None,
+            role: label.into(),
+            name: String::new(),
+            depth: 0,
+        }
+    }
+}
+
 /// Flatten the CDP tree (`nodes` array) into ordered nodes with refs.
 pub fn flatten(result: &Value) -> Vec<AxNode> {
     let nodes = result["nodes"].as_array().cloned().unwrap_or_default();

@@ -240,6 +240,22 @@ pub const NOT_FOR_AGENT: &[(&str, &str)] = &[
         "tab_open",
         "the agent works in the tab the person is in; it may navigate it but not multiply tabs",
     ),
+    (
+        "tab_claim",
+        "the host claims the tab for this agent while a run is in flight; it is not the model's to decide",
+    ),
+    (
+        "tab_release",
+        "released by the host when the run ends, so a model that forgets cannot strand a tab",
+    ),
+    (
+        "tab_leases",
+        "who else is driving is the chrome's business to show, not something to reason over",
+    ),
+    (
+        "page_batch",
+        "a remote client batches to save round trips over HTTP; this agent is already in the browser",
+    ),
 ];
 
 /// Tools that change the page or leave it; the UI labels these as actions.

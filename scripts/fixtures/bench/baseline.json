@@ -1,0 +1,157 @@
+{
+  "rows": [
+    {
+      "task": "read",
+      "gap": false,
+      "ok": true,
+      "error": null,
+      "calls": 4,
+      "bytes": 2560,
+      "ms": 224,
+      "why": "Reading a page is the call agents make most."
+    },
+    {
+      "task": "read_budget",
+      "gap": false,
+      "ok": true,
+      "error": null,
+      "calls": 4,
+      "bytes": 3161,
+      "ms": 178,
+      "why": "A long page must not eat an agent's context."
+    },
+    {
+      "task": "locate",
+      "gap": false,
+      "ok": true,
+      "error": null,
+      "calls": 3,
+      "bytes": 951,
+      "ms": 208,
+      "why": "A locator has to find what a person would point at."
+    },
+    {
+      "task": "form",
+      "gap": false,
+      "ok": true,
+      "error": null,
+      "calls": 6,
+      "bytes": 1410,
+      "ms": 414,
+      "why": "Filling and submitting a form is the canonical agent task."
+    },
+    {
+      "task": "batch",
+      "gap": false,
+      "ok": true,
+      "error": null,
+      "calls": 4,
+      "bytes": 2451,
+      "ms": 404,
+      "why": "A form should cost one round trip, not five."
+    },
+    {
+      "task": "batch_stops",
+      "gap": false,
+      "ok": true,
+      "error": null,
+      "calls": 4,
+      "bytes": 2180,
+      "ms": 204,
+      "why": "A half-run batch must say where it stopped."
+    },
+    {
+      "task": "wait",
+      "gap": false,
+      "ok": true,
+      "error": null,
+      "calls": 5,
+      "bytes": 1008,
+      "ms": 1709,
+      "why": "Waiting is what separates a reliable agent from a flaky one."
+    },
+    {
+      "task": "diff",
+      "gap": false,
+      "ok": true,
+      "error": null,
+      "calls": 5,
+      "bytes": 1283,
+      "ms": 434,
+      "why": "A diff is how an agent reads a change cheaply."
+    },
+    {
+      "task": "errors",
+      "gap": false,
+      "ok": true,
+      "error": null,
+      "calls": 3,
+      "bytes": 1413,
+      "ms": 233,
+      "why": "Finding what is broken is the reason to have a browser here."
+    },
+    {
+      "task": "iframe",
+      "gap": false,
+      "ok": true,
+      "error": null,
+      "calls": 4,
+      "bytes": 2251,
+      "ms": 260,
+      "why": "Most checkouts put the important field in an iframe."
+    },
+    {
+      "task": "iframe_click",
+      "gap": true,
+      "ok": false,
+      "error": "McpError: page_click: nothing matches locator \"testid=inner\"; call page_inspect to see what is on the page",
+      "calls": 3,
+      "bytes": 717,
+      "ms": 262,
+      "why": "Acting inside a frame, not only reading it."
+    },
+    {
+      "task": "shadow",
+      "gap": false,
+      "ok": true,
+      "error": null,
+      "calls": 4,
+      "bytes": 785,
+      "ms": 395,
+      "why": "Design systems ship shadow DOM; agents still have to click it."
+    },
+    {
+      "task": "scroll",
+      "gap": false,
+      "ok": true,
+      "error": null,
+      "calls": 6,
+      "bytes": 1680,
+      "ms": 1644,
+      "why": "Infinite scroll is where naive agents stop early."
+    },
+    {
+      "task": "dialog",
+      "gap": false,
+      "ok": true,
+      "error": null,
+      "calls": 5,
+      "bytes": 1326,
+      "ms": 368,
+      "why": "A dialog blocks everything until it is answered."
+    },
+    {
+      "task": "lease",
+      "gap": false,
+      "ok": true,
+      "error": null,
+      "calls": 7,
+      "bytes": 2255,
+      "ms": 405,
+      "why": "Two agents must not drive one tab."
+    }
+  ],
+  "passed": 14,
+  "total": 15,
+  "bytes": 25431
+}

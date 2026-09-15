@@ -695,3 +695,35 @@ pub struct EvaluateParams {
     /// Expression; its JSON-serializable result is returned.
     pub expression: String,
 }
+
+/// Who is claiming a tab, and for how long.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ClaimParams {
+    /// Tab to claim; the active tab when left out.
+    #[serde(default)]
+    pub tab_id: Option<String>,
+    /// The name you are claiming under. Anything stable: an agent's name, a
+    /// session id. It appears in the refusal another client gets.
+    pub holder: String,
+    /// How long to hold it without acting, in seconds. Defaults to two
+    /// minutes and renews itself while you work.
+    #[serde(default)]
+    pub seconds: Option<u64>,
+}
+
+/// One call inside a batch.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct BatchStep {
+    /// The tool to call, by name.
+    pub tool: String,
+    /// Its arguments, exactly as the tool takes them.
+    #[serde(default)]
+    pub arguments: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+/// Several calls in one round trip.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct BatchParams {
+    /// The calls, in order. Stops at the first failure.
+    pub steps: Vec<BatchStep>,
+}

@@ -1,0 +1,17 @@
+<!doctype html><html lang=en><head><meta charset=utf-8><title>counter</title></head>
+<body>
+
+<h1>Rows</h1>
+<button id=add>Add row</button>
+<ul id=list></ul>
+<script>
+  let n = 0;
+  document.getElementById('add').addEventListener('click', () => {
+    n += 1;
+    const li = document.createElement('li');
+    li.textContent = 'Row ' + n;
+    document.getElementById('list').append(li);
+  });
+</script>
+
+</body></html>

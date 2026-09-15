@@ -73,6 +73,96 @@ const SUGGESTION_COUNT: usize = 4;
 const SUGGESTION_FLOOR: f64 = 0.34;
 /// How many matches a visibility check looks at. Past this the answer is the
 /// same either way: something is visible.
+/// The accessibility nodes of every child frame, in order, each preceded by a
+/// line naming the frame.
+///
+/// `Accessibility.getFullAXTree` answers for one frame, so a page whose
+/// important field lives in an iframe -- which is most checkouts, and every
+/// embedded payment form -- read as if that field did not exist. Asking each
+/// child frame separately is the whole fix for reading it.
+///
+/// A frame that cannot be read (cross-origin with no debugger access, or gone
+/// between the two calls) is skipped rather than failing the read: some of the
+/// page is worth more than none of it.
+async fn frame_nodes(session: &CdpSession) -> Vec<crate::ax::AxNode> {
+    let Ok(tree) = session.call("Page.getFrameTree", json!({})).await else {
+        return Vec::new();
+    };
+    let children = tree["frameTree"]["childFrames"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let mut out = Vec::new();
+    for child in children.iter().take(MAX_FRAMES) {
+        let frame = &child["frame"];
+        let Some(id) = frame["id"].as_str() else {
+            continue;
+        };
+        let Ok(subtree) = session
+            .call("Accessibility.getFullAXTree", json!({"frameId": id}))
+            .await
+        else {
+            continue;
+        };
+        let nodes = crate::ax::flatten(&subtree);
+        if nodes.is_empty() {
+            continue;
+        }
+        let url = frame["url"].as_str().unwrap_or_default();
+        let name = frame["name"].as_str().filter(|n| !n.is_empty());
+        out.push(crate::ax::AxNode::marker(format!(
+            "frame {}{}",
+            name.map(|n| format!("{n:?} ")).unwrap_or_default(),
+            url
+        )));
+        out.extend(nodes);
+    }
+    out
+}
+
+/// Each child frame as a row for `page_inspect`: what it is, and what an
+/// agent would find inside it.
+async fn frame_summaries(session: &CdpSession) -> Vec<Value> {
+    let nodes = frame_nodes(session).await;
+    let mut out: Vec<Value> = Vec::new();
+    let mut current: Option<(String, Vec<crate::ax::AxNode>)> = None;
+    for node in nodes {
+        if node.backend_node_id.is_none() && node.role.starts_with("frame ") {
+            if let Some((label, nodes)) = current.take() {
+                out.push(frame_row(&label, &nodes));
+            }
+            current = Some((node.role.clone(), Vec::new()));
+        } else if let Some((_, nodes)) = current.as_mut() {
+            nodes.push(node);
+        }
+    }
+    if let Some((label, nodes)) = current {
+        out.push(frame_row(&label, &nodes));
+    }
+    out
+}
+
+/// One frame's row: its label and its tree, rendered like the page's own.
+fn frame_row(label: &str, nodes: &[crate::ax::AxNode]) -> Value {
+    json!({
+        "frame": label.trim_start_matches("frame ").trim(),
+        "contents": crate::ax::render(nodes, FRAME_LINE_CAP),
+        "hint": "Locators resolve in the main document. To act inside this frame, address it by its own page, or use page_mouse with coordinates.",
+    })
+}
+
+/// Lines of a frame's tree shown in `page_inspect`.
+const FRAME_LINE_CAP: usize = 60;
+
+/// Frames read per page. A page with more than this is an ad farm, and an
+/// agent reading all of them would pay for it in context.
+const MAX_FRAMES: usize = 8;
+
+/// How long `tab_open` waits for the new tab to leave the blank page.
+const OPEN_COMMIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// What a tab reads as before it has navigated anywhere.
+const BLANK_PAGE: &str = "about:blank";
+
 /// Largest string condition accepted by `page_wait_for`.
 const WAIT_TEXT_CAP: usize = 8 * 1024;
 /// Largest wheel delta accepted in one action.
@@ -115,6 +205,48 @@ impl std::ops::Deref for ToolSession {
 }
 
 impl AppBrowser {
+    /// Whether the tab has been closed under us.
+    fn tab_is_gone(&self, tab: TabId) -> bool {
+        let state = self.state();
+        let store = lock(&state.store);
+        store.tab(tab).is_err()
+    }
+
+    /// The tab's URL once the page it was opened on is there to be read.
+    ///
+    /// Two things have to happen and neither is instant: the view has to
+    /// leave the blank page it starts on, and the document has to finish
+    /// loading. Returning before both means "open, then read" hands back an
+    /// empty page -- which is what every client does first, and what made it
+    /// look like the reader tools were unreliable.
+    ///
+    /// Bounded: a page that never settles is the caller's to wait on with
+    /// `page_wait_for`, not something to block a tool call forever.
+    async fn await_ready(&self, tab: TabId, wanted: &str) -> Option<String> {
+        let deadline = std::time::Instant::now() + OPEN_COMMIT_TIMEOUT;
+        let blank_was_asked_for = wanted == BLANK_PAGE;
+        while std::time::Instant::now() < deadline {
+            // The renderer's own URL, not the store's: the store learns the
+            // address when the navigation *starts*, so believing it means
+            // reading the page that is on its way out.
+            if let Ok(session) = self.session_for(tab).await
+                && let Ok(page) = locator::page(&session, 0).await
+            {
+                let url = page["url"].as_str().unwrap_or_default().to_owned();
+                let arrived = blank_was_asked_for || (!url.is_empty() && url != BLANK_PAGE);
+                if arrived && page["loading"] != Value::Bool(true) {
+                    return Some(url);
+                }
+            } else if self.tab_is_gone(tab) {
+                // The tab went away while we waited; there is nothing to
+                // return and nothing to wait for.
+                return None;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        None
+    }
+
     /// Wrap the app handle.
     pub fn new(app: AppHandle<Runtime>) -> Self {
         Self { app }
@@ -1151,6 +1283,7 @@ impl Browser for AppBrowser {
         url: String,
     ) -> Result<TabInfo, BrowserError> {
         let url = self.web_url(&url)?.to_string();
+        let asked_for = url.clone();
         let wanted = context.as_deref().map(parse_workspace_id).transpose()?;
         // Creating the native view has to happen on the main thread; from
         // the server's thread CEF takes the process down.
@@ -1174,9 +1307,15 @@ impl Browser for AppBrowser {
                 open_tab(&main, app, &state, workspace, &url).map_err(|e| other(e.message))
             })
             .await??;
+        // A fresh view starts on about:blank and is told to navigate a moment
+        // later, so returning here hands back a tab whose URL is not the one
+        // that was asked for. A client that then waits for load is told the
+        // truth -- nothing is loading -- and reads an empty page. Wait for the
+        // navigation to commit, so "open, then read" means what it says.
+        let settled = self.await_ready(tab.id, &asked_for).await;
         Ok(TabInfo {
             id: tab.id.to_string(),
-            url: tab.url,
+            url: settled.unwrap_or(tab.url),
             title: tab.title,
             active: true,
         })
@@ -1377,7 +1516,8 @@ impl Browser for AppBrowser {
             .call("Accessibility.getFullAXTree", json!({}))
             .await
             .map_err(other)?;
-        let nodes = crate::ax::flatten(&tree);
+        let mut nodes = crate::ax::flatten(&tree);
+        nodes.extend(frame_nodes(&session).await);
         let refs = nodes
             .iter()
             .filter_map(|n| {
@@ -1421,6 +1561,7 @@ impl Browser for AppBrowser {
         let session = self.session_for(tab).await?;
         let page = locator::page(&session, crate::snapshot::MAX_TEXT).await?;
         let elements = locator::elements(&session, INSPECT_ELEMENT_CAP).await?;
+        let frames = frame_summaries(&session).await;
         let state = self.state();
 
         // Warnings and errors only. An agent reading this wants to know what
@@ -1474,6 +1615,11 @@ impl Browser for AppBrowser {
             "visible_text": page["visible_text"],
             "elements": elements["elements"],
             "elements_truncated": elements["truncated"],
+            // What is inside the page's frames. The element list above is the
+            // main frame's, because a locator resolves in one document; a
+            // checkout's card field lives in an iframe, and an agent that
+            // cannot see it here concludes the page does not have one.
+            "frames": frames,
             "console": console,
             "failed_requests": failed,
             "request_count": total_requests,

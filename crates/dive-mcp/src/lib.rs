@@ -8,13 +8,18 @@ mod browser;
 mod catalog;
 mod error;
 mod http;
+pub mod kinds;
+pub mod lease;
 mod params;
+pub mod prompts;
 mod server;
 
 pub use browser::{Browser, TabInfo};
 pub use catalog::{CatalogEntry, tool_catalog};
 pub use error::BrowserError;
 pub use http::{Handle, serve};
+pub use kinds::{Kind, kind_of};
+pub use lease::{Conflict, Held, Leases};
 pub use params::{
     Addressed, AppearanceParams, BodyParams, ClickParams, ComponentParams, ContextCloseParams,
     ContextOpenParams, Cookie, CountCheck, DEFAULT_WAIT_MS, DialogParams, DownloadsParams,

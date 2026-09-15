@@ -1,0 +1,16 @@
+<!doctype html><html lang=en><head><meta charset=utf-8><title>slow</title></head>
+<body>
+
+<h1>Slow work</h1>
+<button id=go>Start</button>
+<div id=out>Idle</div>
+<script>
+  document.getElementById('go').addEventListener('click', () => {
+    document.getElementById('out').textContent = 'Working...';
+    setTimeout(() => {
+      document.getElementById('out').innerHTML = '<p data-testid="done">Finished</p>';
+    }, 1200);
+  });
+</script>
+
+</body></html>

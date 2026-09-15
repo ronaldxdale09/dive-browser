@@ -1,0 +1,14 @@
+<!doctype html><html lang=en><head><meta charset=utf-8><title>dialog</title></head>
+<body>
+
+<h1>Dialog</h1>
+<button id=go>Confirm</button>
+<div id=out>waiting</div>
+<script>
+  document.getElementById('go').addEventListener('click', () => {
+    const ok = confirm('Really?');
+    document.getElementById('out').textContent = ok ? 'accepted' : 'dismissed';
+  });
+</script>
+
+</body></html>

@@ -429,7 +429,24 @@ pub(crate) async fn agent_send(
         }
         runs.insert(run_id.clone(), Arc::clone(&run));
     }
+    // Hold the tab for as long as the run lasts, so a coding agent on the MCP
+    // port cannot navigate out from under this one mid-step. The claim is the
+    // host's to make and to give back: a model that forgets cannot strand a
+    // tab, and a run that panics still releases on the way out.
+    let claimed = tab_id.filter(|tab| {
+        dive_mcp::lease::shared()
+            .claim(
+                *tab,
+                dive_mcp::lease::DIVE_AGENT,
+                dive_mcp::lease::MAX_TTL,
+                std::time::Instant::now(),
+            )
+            .is_ok()
+    });
     let outcome = drive(&app, &state, &run, turns, tab_id, options, &on_delta).await;
+    if let Some(tab) = claimed {
+        dive_mcp::lease::shared().release(tab, dive_mcp::lease::DIVE_AGENT);
+    }
     lock(&state.agent_runs).remove(&run_id);
     outcome
 }

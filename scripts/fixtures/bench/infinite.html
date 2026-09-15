@@ -1,0 +1,23 @@
+<!doctype html><html lang=en><head><meta charset=utf-8><title>infinite</title></head>
+<body>
+
+<h1>Feed</h1>
+<ul id=list></ul>
+<script>
+  let n = 0;
+  const add = (count) => {
+    for (let i = 0; i < count; i += 1) {
+      n += 1;
+      const li = document.createElement('li');
+      li.textContent = 'Item ' + n;
+      li.style.height = '60px';
+      document.getElementById('list').append(li);
+    }
+  };
+  add(30);
+  addEventListener('scroll', () => {
+    if (window.scrollY + window.innerHeight > document.body.scrollHeight - 200) add(10);
+  });
+</script>
+
+</body></html>
