@@ -666,6 +666,26 @@ impl TabHost {
             tauri::webview::NewWindowResponse::Deny
         });
 
+        // A scheme the engine does not speak belongs to another app. Letting
+        // the navigation through ends at Chromium's ERR_UNKNOWN_URL_SCHEME
+        // page; the person is asked instead, off the engine's stack.
+        let external_app = app.clone();
+        builder = builder.on_navigation(move |url| {
+            if !crate::external_link::is_external(url) {
+                return true;
+            }
+            let app = external_app.clone();
+            let url = url.clone();
+            tauri::async_runtime::spawn(async move {
+                let origin = current_page_host(&app, tab_id);
+                let on_main = app.clone();
+                let _ = on_main.run_on_main_thread(move || {
+                    crate::external_link::intercept(&app, tab_id, &url, &origin);
+                });
+            });
+            false
+        });
+
         let dl_app = app.clone();
         let dl_nonce = activity_nonce.clone();
         builder = builder.on_download(move |_, event| {
@@ -2292,6 +2312,20 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
 
     forward_events(app.handle().clone(), state.bus.subscribe());
     Ok(())
+}
+
+/// The host of the page a tab is on, for naming the site that asked to open
+/// another app. Empty when the tab has no page, or its URL has no host.
+fn current_page_host(app: &AppHandle<Runtime>, tab_id: TabId) -> String {
+    let state = app.state::<AppState>();
+    let url = crate::state::lock(&state.store)
+        .tab(tab_id)
+        .map(|tab| tab.url)
+        .unwrap_or_default();
+    url::Url::parse(&url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .unwrap_or_default()
 }
 
 /// Whether a new-window request is a popup the page has to keep talking to

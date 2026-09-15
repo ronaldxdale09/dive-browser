@@ -26,6 +26,7 @@ mod emulate;
 mod engine;
 mod error;
 mod extensions;
+mod external_link;
 mod eyedropper;
 mod favicon;
 mod filltab;

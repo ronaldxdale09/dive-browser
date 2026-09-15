@@ -29,6 +29,7 @@ export const DEFAULT_PREFS: Prefs = {
   blocked_patterns: [],
   youtube_protection: true,
   privacy_exceptions: [],
+  external_link_allowed: [],
   javascript: true,
   history_days: 0,
   download_dir: "",

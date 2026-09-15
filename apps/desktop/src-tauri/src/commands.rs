@@ -707,6 +707,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             passwords_reveal,
             passwords_delete,
             passwords_used,
+            external_link_open,
+            external_link_dismiss,
             passwords_answer,
             passwords_fill,
             passwords_never,
@@ -854,6 +856,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::navigation::TabHistoryChanged,
             crate::permissions::PermissionAsked,
             crate::credential_fill::CredentialPrompt,
+            crate::external_link::ExternalLinkAsked,
             crate::permissions::PermissionDismissed,
             crate::js_dialog::JsDialogAsked,
             crate::js_dialog::JsDialogClosed,
@@ -2375,6 +2378,24 @@ pub(crate) fn passwords_reveal(state: State<'_, AppState>, id: String) -> AppRes
 #[specta::specta]
 pub(crate) fn passwords_used(state: State<'_, AppState>, id: String) -> AppResult<()> {
     crate::passwords::touch(&state, &id)
+}
+
+/// Open a link that belongs to another app, optionally remembering the site.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn external_link_open(
+    app: AppHandle<Runtime>,
+    token: String,
+    always: bool,
+) -> AppResult<()> {
+    crate::external_link::answer(&app, &token, always)
+}
+
+/// Let go of a link the person did not want opened.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn external_link_dismiss(token: String) {
+    crate::external_link::dismiss(&token);
 }
 
 /// Answer a save or update prompt: save the submitted login, or let it go.

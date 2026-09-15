@@ -168,6 +168,11 @@ pub struct Prefs {
     /// leaving the window.
     #[serde(default = "default_true")]
     pub video_fill_tab: bool,
+    /// Sites allowed to open another app without asking again, written as
+    /// `host|scheme` ("claude.ai|claude"). One entry allows one site to open
+    /// one scheme; see [`crate::external_link`].
+    #[serde(default)]
+    pub external_link_allowed: Vec<String>,
     /// Whether the first-run intro and onboarding have been completed.
     /// False only on a fresh install: a stored file that predates the field
     /// belongs to someone who has been using Dive already, so
@@ -247,6 +252,7 @@ impl Default for Prefs {
             blocked_patterns: Vec::new(),
             youtube_protection: default_youtube_protection(),
             privacy_exceptions: Vec::new(),
+            external_link_allowed: Vec::new(),
             javascript: true,
             history_days: 0,
             download_dir: String::new(),
@@ -371,6 +377,7 @@ impl Prefs {
             .take(MAX_PATTERNS)
             .collect();
         self.privacy_exceptions = normalize_privacy_exceptions(self.privacy_exceptions);
+        self.external_link_allowed = normalize_external_link_allowed(self.external_link_allowed);
         self.quick_links = normalize_quick_links(self.quick_links);
         let provider = if let Some(provider) = dive_agent::Provider::parse(&self.agent_provider) {
             provider
@@ -453,6 +460,32 @@ impl Prefs {
             .iter()
             .any(|exception| exception == host)
     }
+}
+
+/// Keep only well-formed `host|scheme` allowances, deduplicated and bounded.
+/// Anything else -- a bare host, an empty scheme, something hand-edited into
+/// the file -- is dropped rather than silently allowing more than it names.
+pub fn normalize_external_link_allowed(allowed: Vec<String>) -> Vec<String> {
+    let mut normalized = allowed
+        .into_iter()
+        .filter(|entry| {
+            let Some((host, scheme)) = entry.split_once('|') else {
+                return false;
+            };
+            !host.is_empty()
+                && !scheme.is_empty()
+                && host.len() <= 255
+                && scheme.len() <= 64
+                && !entry.chars().any(char::is_whitespace)
+                && scheme
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+        })
+        .collect::<Vec<_>>();
+    normalized.sort_unstable();
+    normalized.dedup();
+    normalized.truncate(MAX_PATTERNS);
+    normalized
 }
 
 /// Keep only exact, registrable hostnames or IP literals suitable for disabling `DivePrivacy`.
@@ -645,6 +678,7 @@ fn parse_stored(json: &str) -> Prefs {
         }
     }
     prefs.privacy_exceptions = normalize_privacy_exceptions(prefs.privacy_exceptions);
+    prefs.external_link_allowed = normalize_external_link_allowed(prefs.external_link_allowed);
     prefs
 }
 

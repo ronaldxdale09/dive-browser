@@ -18,6 +18,7 @@ import { useLayout, visibleSplit } from "../store/layout";
 import { usePicker } from "../store/simulator";
 import { DropZones, SplitView } from "./SplitView";
 import { CredentialPromptCard } from "./CredentialPromptCard";
+import { ExternalLinkDialog } from "./ExternalLinkDialog";
 import { JsDialogCard } from "./JsDialogCard";
 import { useTabDrag } from "./TabDnd";
 import { InternalPage, isInternalUrl } from "./internal/InternalPage";
@@ -71,6 +72,7 @@ export function Content() {
       {activeTab && crash && <CrashBanner attempt={crash.attempt} recovering={crash.recovering} />}
       {activeTab && <PermissionDialog key={`${activeTab}-${asked?.request_id ?? "none"}`} tabId={activeTab} request={asked} />}
       <CredentialPromptCard tabId={activeTab} />
+      <ExternalLinkDialog />
       <JsDialogCard tabId={activeTab && !detached.includes(activeTab) ? activeTab : null} />
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <div className="relative grid min-h-0 min-w-0 flex-1">

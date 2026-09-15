@@ -236,6 +236,10 @@ export const commands = {
 	 *  comes first next time.
 	 */
 	passwordsUsed: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("passwords_used", { id })),
+	/**  Open a link that belongs to another app, optionally remembering the site. */
+	externalLinkOpen: (token: string, always: boolean) => typedError<null, AppError>(__TAURI_INVOKE("external_link_open", { token, always })),
+	/**  Let go of a link the person did not want opened. */
+	externalLinkDismiss: (token: string) => __TAURI_INVOKE<void>("external_link_dismiss", { token }),
 	/**  Answer a save or update prompt: save the submitted login, or let it go. */
 	passwordsAnswer: (token: string, save: boolean) => typedError<{
 	/**  Row id, also the keychain account name. */
@@ -656,6 +660,7 @@ export const events = {
 	deviceEmulated: makeEvent<DeviceEmulated>("device-emulated"),
 	downloadNotice: makeEvent<DownloadNotice>("download-notice"),
 	downloadProgress: makeEvent<DownloadProgress>("download-progress"),
+	externalLinkAsked: makeEvent<ExternalLinkAsked>("external-link-asked"),
 	inspectEvent: makeEvent<InspectEvent>("inspect-event"),
 	jsDialogAsked: makeEvent<JsDialogAsked>("js-dialog-asked"),
 	jsDialogClosed: makeEvent<JsDialogClosed>("js-dialog-closed"),
@@ -1224,6 +1229,19 @@ export type ExtensionList = {
 	items: ExtensionInfo[],
 	/**  True when enabled paths differ from what this process started with. */
 	restart_required: boolean,
+};
+
+/**  What the chrome asks the person. */
+export type ExternalLinkAsked = {
+	tab_id: TabId,
+	/**  Handle for answering; the URL stays in the host. */
+	token: string,
+	/**  The app the system would open, when it could be named ("Claude"). */
+	app: string | null,
+	/**  The scheme being opened, without the colon ("claude"). */
+	scheme: string,
+	/**  The site that asked, as a host ("claude.ai"); empty when there is none. */
+	origin: string,
 };
 
 /**  Which family a browser belongs to, which decides the files and formats. */
@@ -1831,6 +1849,12 @@ export type Prefs = {
 	 *  leaving the window.
 	 */
 	video_fill_tab?: boolean,
+	/**
+	 *  Sites allowed to open another app without asking again, written as
+	 *  `host|scheme` ("claude.ai|claude"). One entry allows one site to open
+	 *  one scheme; see [`crate::external_link`].
+	 */
+	external_link_allowed?: string[],
 	/**
 	 *  Whether the first-run intro and onboarding have been completed.
 	 *  False only on a fresh install: a stored file that predates the field
