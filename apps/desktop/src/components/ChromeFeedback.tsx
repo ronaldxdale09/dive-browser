@@ -49,14 +49,15 @@ export function ToastViewport({
   onDismissNotice: () => void;
   onDismissError: () => void;
 }) {
-  // Bottom-right is the page's rectangle whenever the dock and sidecar are
-  // closed, and a native page paints above the chrome. Without a region the
-  // toast is drawn behind it -- which took every error message, "Saved ..."
-  // and the Undo on "Closed N tabs" with it.
+  // Notices hang from the chrome at the top right, below the toolbar they
+  // belong to and clear of the agent at the bottom of the window. They sit
+  // over the page's own rectangle, and a native page paints above the chrome,
+  // so without a region the toast is drawn behind it -- which took every
+  // error message, "Saved ..." and the Undo on "Closed N tabs" with it.
   useCoversContent(Boolean(notice || error));
   if (!notice && !error) return null;
   return (
-    <div className="pointer-events-none fixed right-4 bottom-4 z-[80] flex w-[min(360px,calc(100vw-24px))] flex-col gap-2" aria-label="Notifications">
+    <div className="pointer-events-none fixed top-[calc(var(--chrome-top,86px)+8px)] right-4 z-[80] flex w-[min(360px,calc(100vw-24px))] flex-col gap-2" aria-label="Notifications">
       {error && <Toast tone="danger" message={error} onDismiss={onDismissError} />}
       {notice && <Toast tone="success" message={notice} action={noticeAction} onDismiss={onDismissNotice} />}
     </div>

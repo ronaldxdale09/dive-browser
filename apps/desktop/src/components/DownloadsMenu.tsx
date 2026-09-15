@@ -12,7 +12,7 @@ import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { errorMessage } from "../lib/errors";
-import { formatBytes } from "../lib/paths";
+import { formatBytes, fileUrl, opensInTab} from "../lib/paths";
 
 /** Downloads: what this session saved, where it went, and a way to the file. */
 export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
@@ -52,12 +52,24 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
   // two windows for a document. A second click inside the system's
   // double-click interval is the same intent, not a second one.
   const lastOpen = useRef(0);
-  const openFile = useCallback((path: string) => {
-    const now = Date.now();
-    if (now - lastOpen.current < 500) return;
-    lastOpen.current = now;
-    void ipc.downloadsOpen(path).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
-  }, []);
+  const openTab = useBrowser((s) => s.openTab);
+  const openFile = useCallback(
+    (path: string) => {
+      const now = Date.now();
+      if (now - lastOpen.current < 500) return;
+      lastOpen.current = now;
+      // A PDF belongs in a tab: it came from the web, the browser renders it,
+      // and the page it came from is right there. Anything else is the
+      // system's to open.
+      if (opensInTab(path)) {
+        setOpen(false);
+        void openTab(fileUrl(path));
+        return;
+      }
+      void ipc.downloadsOpen(path).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+    },
+    [openTab],
+  );
   const cancel = (id: number) => {
     void ipc.downloadsCancel(id).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
   };

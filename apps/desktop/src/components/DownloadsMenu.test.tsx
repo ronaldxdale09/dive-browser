@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
+import { useBrowser } from "../store/browser";
 import { useDownloads } from "../store/downloads";
 import { DownloadsMenu } from "./DownloadsMenu";
 
@@ -84,17 +85,31 @@ describe("a download in flight", () => {
 });
 
 describe("opening a finished file", () => {
+  const finished = (name: string) => ({ name, path: `/tmp/${name}`, url: `http://a.dev/${name}`, status: "finished", at: Date.now(), startedAt: Date.now() });
+
   it("ignores the second half of a double-click, so the file opens once", () => {
     const open = vi.spyOn(ipc, "downloadsOpen").mockResolvedValue(null as never);
-    useDownloads.setState({
-      items: [{ name: "a.pdf", path: "/tmp/a.pdf", url: "http://a.dev/a.pdf", status: "finished", at: Date.now(), startedAt: Date.now() } as never],
-    });
+    useDownloads.setState({ items: [finished("sheet.csv") as never] });
     render(<DownloadsMenu />);
     fireEvent.click(screen.getByRole("button", { name: "Downloads" }));
-    const name = screen.getByRole("button", { name: "Open a.pdf" });
+    const name = screen.getByRole("button", { name: "Open sheet.csv" });
     fireEvent.click(name);
     fireEvent.click(name);
     expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens a PDF in a tab rather than handing it to a document app", () => {
+    const open = vi.spyOn(ipc, "downloadsOpen").mockResolvedValue(null as never);
+    const openTab = vi.fn().mockResolvedValue(undefined);
+    useBrowser.setState({ openTab });
+    useDownloads.setState({ items: [finished("a paper.pdf") as never] });
+    render(<DownloadsMenu />);
+    fireEvent.click(screen.getByRole("button", { name: "Downloads" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open a paper.pdf" }));
+    expect(openTab).toHaveBeenCalledWith("file:///tmp/a%20paper.pdf");
+    expect(open).not.toHaveBeenCalled();
+    // The panel gets out of the way of the tab it just opened.
+    expect(screen.queryByRole("dialog", { name: "Downloads" })).toBeNull();
   });
 });
 

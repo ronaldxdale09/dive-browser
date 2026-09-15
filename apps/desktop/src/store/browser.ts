@@ -7,7 +7,7 @@ import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
 import { useDownloads } from "./downloads";
 import type { DownloadNotice, CoreEvent, Decision, Duration, NavigationHistory, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
-import { fileNameOr } from "../lib/paths";
+import { fileNameOr, fileUrl, opensInTab} from "../lib/paths";
 
 export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser" | "subtitles" | "tasks" | "import" | "apps";
 /** The sections of the library dialog. */
@@ -538,8 +538,16 @@ export const useBrowser = create<BrowserState>((set, get) => ({
           const d = e.payload;
           useDownloads.getState().apply(d);
           const name = fileNameOr(d.path, d.url);
-          // A finished file is one click from the Finder; nothing to do about the others.
-          const show = d.status === "finished" && d.path ? { label: isWindows() ? "Show in Explorer" : "Show in Finder", run: () => void ipc.downloadsReveal(d.path).catch((err: unknown) => set({ error: errorMessage(err) })) } : undefined;
+          // A finished file is one click from the Finder; nothing to do about
+          // the others. A PDF is one click from being read instead, which is
+          // what was wanted from it -- the browser renders it, so it opens in
+          // a tab rather than in a document app.
+          const finished = d.status === "finished" && d.path;
+          const show = finished
+            ? opensInTab(d.path)
+              ? { label: "Open", run: () => void get().openTab(fileUrl(d.path)) }
+              : { label: isWindows() ? "Show in Explorer" : "Show in Finder", run: () => void ipc.downloadsReveal(d.path).catch((err: unknown) => set({ error: errorMessage(err) })) }
+            : undefined;
           get().notify(d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : `Download failed: ${name}`, show ? 8000 : 5000, show);
           // Closed once the file is on disk, not when it starts: the engine
           // reports a download's end through the page it came from, so a

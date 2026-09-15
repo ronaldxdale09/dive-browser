@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fileName, fileNameOr, formatBytes } from "./paths";
+import { fileName, fileNameOr, formatBytes, opensInTab, fileUrl} from "./paths";
 
 describe("fileName", () => {
   it("takes the name off a path from either platform", () => {
@@ -35,5 +35,27 @@ describe("formatBytes", () => {
   it("says nothing rather than something wrong", () => {
     expect(formatBytes(Number.NaN)).toBe("");
     expect(formatBytes(-1)).toBe("");
+  });
+});
+
+describe("opensInTab", () => {
+  it("claims the files Dive renders better than the system does", () => {
+    expect(opensInTab("/Users/me/Downloads/paper.pdf")).toBe(true);
+    expect(opensInTab("C:\\Users\\me\\Downloads\\PAPER.PDF")).toBe(true);
+    // Everything else is the system's job.
+    expect(opensInTab("/Users/me/Downloads/sheet.csv")).toBe(false);
+    expect(opensInTab("/Users/me/Downloads/pdf")).toBe(false);
+    expect(opensInTab("/Users/me/pdf.zip")).toBe(false);
+    expect(opensInTab("")).toBe(false);
+  });
+});
+
+describe("fileUrl", () => {
+  it("survives the characters a downloaded name actually has", () => {
+    expect(fileUrl("/Users/me/Downloads/paper.pdf")).toBe("file:///Users/me/Downloads/paper.pdf");
+    // A space or a hash would otherwise truncate the address.
+    expect(fileUrl("/Users/me/ICLR 2026 #3.pdf")).toBe("file:///Users/me/ICLR%202026%20%233.pdf");
+    // Windows paths take the slash their drive letter needs.
+    expect(fileUrl("C:\\Users\\me\\a.pdf")).toBe("file:///C%3A/Users/me/a.pdf");
   });
 });
