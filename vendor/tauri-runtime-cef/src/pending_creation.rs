@@ -155,6 +155,11 @@ impl CompletionToken {
                 )
                 .is_ok()
     }
+    /// Whether a browser has been claimed at all. Before that, a callback
+    /// cannot be attributed either way, so callers treat it as their own.
+    pub(crate) fn claimed(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Acquire) != 0
+    }
     pub(crate) fn matches(&self, browser: i32) -> bool {
         browser > 0 && self.0.load(std::sync::atomic::Ordering::Acquire) == browser
     }

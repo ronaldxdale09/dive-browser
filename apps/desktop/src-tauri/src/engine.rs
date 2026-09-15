@@ -622,12 +622,25 @@ impl TabHost {
                 });
             });
 
-        // CEF's default creates an unmanaged native popup that has no Dive tab,
-        // lifecycle, or MCP session. Cancel it and defer a normal tracked tab
-        // open to the event loop instead of re-entering CEF from its callback.
+        // A link that asks for a new window becomes a tracked tab: CEF's
+        // default is an unmanaged native popup with no Dive tab, lifecycle or
+        // MCP session. Cancel it and defer a normal tab open to the event loop
+        // instead of re-entering CEF from its callback.
+        //
+        // A *sized* `window.open()` is the exception. That is the shape of a
+        // sign-in or share window, and those only work as real popups: the new
+        // page needs `window.opener` to post its result back to the page that
+        // opened it and to close itself when it is done. Re-opened as a tab it
+        // has no opener, so the sign-in never returns and the tab stays behind
+        // -- the row of stranded "Sign In - Google Accounts" tabs. CEF creates
+        // it instead, inheriting this view's request context, so the popup
+        // shares the profile's cookies.
         let popup_app = app.clone();
         let popup_workspace = tab.workspace_id;
-        builder = builder.on_new_window(move |url, _features| {
+        builder = builder.on_new_window(move |url, features| {
+            if is_popup_window(&url, features.size().is_some()) {
+                return tauri::webview::NewWindowResponse::Allow;
+            }
             let app = popup_app.clone();
             tauri::async_runtime::spawn(async move {
                 let schedule = app.clone();
@@ -1053,7 +1066,8 @@ impl TabHost {
                     ]
                 })
                 .collect::<Vec<_>>();
-            #[cfg(target_os = "windows")]
+            // A modal overlay owns native input; a non-modal one only paints
+            // over the page and must leave its clicks alone.
             let modal = active
                 && self
                     .live_overlays
@@ -1068,7 +1082,7 @@ impl TabHost {
                         );
                     }
                     #[cfg(target_os = "macos")]
-                    native.set_chrome_overlay_mask(&pages, &overlays, active);
+                    native.set_chrome_overlay_mask(&pages, &overlays, active, modal);
                 })?;
             }
         }
@@ -2280,6 +2294,21 @@ pub fn create_main_window(app: &App<Runtime>) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Whether a new-window request is a popup the page has to keep talking to
+/// (sign-in, payment, share), rather than a link that belongs in a tab.
+///
+/// `window.open` with a width and a height is the signal every one of those
+/// flows uses; a plain `target="_blank"` link carries no size.
+///
+/// `about:blank` counts. Google's sign-in opens its window empty and navigates
+/// it from the opener a moment later, so judging that call by its URL alone
+/// sent the one flow this is for down the tab path -- an empty window that
+/// never became the sign-in page. Anything else (a file, a Dive URL, a custom
+/// scheme) is opened the way Dive opens links.
+fn is_popup_window(url: &url::Url, sized: bool) -> bool {
+    sized && (matches!(url.scheme(), "http" | "https") || url.as_str() == BLANK_URL)
+}
+
 /// Chrome links open tracked page tabs, never unmanaged popups inheriting
 /// the chrome's native client, labels, and application capabilities.
 fn open_chrome_link(
@@ -2559,6 +2588,23 @@ mod tests {
         // A failed configured destination must not silently fall back elsewhere.
         assert!(download_destination(&first.join("child"), suggestion, &url).is_err());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn only_sized_web_window_opens_are_popups() {
+        let sized = |raw: &str| is_popup_window(&url::Url::parse(raw).unwrap(), true);
+        let plain = |raw: &str| is_popup_window(&url::Url::parse(raw).unwrap(), false);
+        // A sign-in window: the page has to keep talking to it.
+        assert!(sized("https://accounts.google.com/o/oauth2/auth"));
+        assert!(sized("http://localhost:3000/login"));
+        // A link asking for a new window is a tab, however it was opened.
+        assert!(!plain("https://example.com/article"));
+        // An empty window the opener navigates itself is the Google flow.
+        assert!(sized(BLANK_URL));
+        // Anything else becomes a tab.
+        assert!(!sized("file:///etc/hosts"));
+        assert!(!sized("dive://settings"));
+        assert!(!plain(BLANK_URL));
     }
 
     #[test]

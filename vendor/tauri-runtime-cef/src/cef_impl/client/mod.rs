@@ -142,6 +142,7 @@ wrap_client! {
       Some(TauriCefDisplayHandler::new(
         self.handlers.document_title_changed_handler.clone(),
         self.handlers.address_changed_handler.clone(),
+        self.creation_delivered.clone(),
       ))
     }
 

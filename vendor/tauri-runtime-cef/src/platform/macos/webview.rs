@@ -232,11 +232,15 @@ impl crate::webview::Webview {
         true
     }
 
+    /// `modal` keeps every press on chrome, the way a modal dialog needs; a
+    /// non-modal overlay lets presses over the page reach it, matching the
+    /// Windows region mask.
     pub fn set_chrome_overlay_mask(
         &self,
         holes: &[[f64; 4]],
         overlays: &[[f64; 5]],
         active: bool,
+        modal: bool,
     ) -> bool {
         use cef::ImplBrowser;
         use objc2::MainThreadMarker;
@@ -303,7 +307,16 @@ impl crate::webview::Webview {
                 layer.setMask(Some(&mask));
             }
             parent.addSubview_positioned_relativeTo(&view, NSWindowOrderingMode::Above, None);
+            // Painting is masked; hit testing is not, so the page rectangles
+            // have to be cut out of the chrome's input as well or the page
+            // takes no clicks for as long as the overlay is up.
+            if modal {
+                super::overlay_input::clear_passthrough(&view);
+            } else {
+                super::overlay_input::set_passthrough(&view, holes, overlays);
+            }
         } else {
+            super::overlay_input::clear_passthrough(&view);
             // SAFETY: removing a mask cannot introduce a layer ownership cycle.
             unsafe {
                 layer.setMask(None);

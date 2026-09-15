@@ -6,6 +6,7 @@ mod application;
 mod dock;
 mod event_loop;
 mod monitor;
+mod overlay_input;
 mod progress;
 mod utils;
 mod webview;
