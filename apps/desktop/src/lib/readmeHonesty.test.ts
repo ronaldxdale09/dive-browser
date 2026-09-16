@@ -25,6 +25,12 @@ describe("README memory claim", () => {
     expect(readme).toMatch(/page_evaluate/i);
   });
 
+  it("does not say private by default", () => {
+    // Prefs::default().block_trackers is false. Skip and DIVE_SKIP_ONBOARDING
+    // leave it off. FeaturesStep preselects protection but only writes on finish.
+    expect(readme).not.toMatch(/private by default/i);
+  });
+
   it("does not say fingerprinting scripts are blocked", () => {
     // DivePrivacy matches listed ad and tracker hosts. The tracker list
     // includes fingerprinting infrastructure. It does not block scripts
