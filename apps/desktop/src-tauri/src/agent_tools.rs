@@ -33,7 +33,7 @@ pub fn specs() -> Vec<ToolSpec> {
         input_schema: schema,
     };
     vec![
-        spec("tabs_list", "List open tabs with ids, URLs and titles.".into(), obj(json!({}), &[])),
+        spec("tabs_list", "List open tabs in the active workspace with ids, URLs and titles. Sleeping tabs are omitted.".into(), obj(json!({}), &[])),
         spec(
             "page_inspect",
             "Everything about the page in one call: URL, title, loading state, visible text, every interactive element with the locator that addresses it, recent console warnings and errors, failed requests, and what you have already done to this tab. Start here.".into(),
@@ -837,6 +837,24 @@ async fn execute<B: Browser>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tabs_list_spec_names_the_active_workspace() {
+        let spec = super::specs()
+            .into_iter()
+            .find(|s| s.name == "tabs_list")
+            .expect("tabs_list");
+        assert!(
+            spec.description.contains("active workspace"),
+            "{}",
+            spec.description
+        );
+        assert!(
+            spec.description.contains("Sleeping tabs are omitted"),
+            "{}",
+            spec.description
+        );
+    }
+
     #[test]
     fn a_blank_tab_id_means_the_current_tab() {
         use serde_json::json;

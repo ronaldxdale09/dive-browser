@@ -9,6 +9,7 @@ describe("pendingLabel", () => {
     expect(pendingLabel('Clicked role=button[name="Save"]')).toBe('Click role=button[name="Save"]');
     expect(pendingLabel("Typed “hi” into label=Search")).toBe("Type “hi” into label=Search");
     expect(pendingLabel("Opened www.youtube.com")).toBe("Open www.youtube.com");
+    expect(pendingLabel("Listed this workspace's tabs")).toBe("List this workspace's tabs");
     expect(pendingLabel("Read the page text")).toBe("Read the page text");
     expect(pendingLabel("rules set")).toBe("rules set");
   });
@@ -28,6 +29,8 @@ describe("describeStep", () => {
     expect(describeStep(step("page_appearance", { color_scheme: "dark" })).label).toBe("Emulated dark mode");
     expect(describeStep(step("page_throttle", { profile: "slow-3g" })).label).toBe("Throttled the network to slow-3g");
     expect(describeStep(step("page_inspect", {})).label).toBe("Inspected the page");
+    expect(describeStep(step("tabs_list", {})).label).toBe("Listed this workspace's tabs");
+    expect(describeStep(step("tabs_list", {})).label).not.toMatch(/open tabs/i);
   });
   it("falls back to the host's resolved locator, then a ref, then coordinates", () => {
     expect(describeStep(step("page_click", { ref: "e4" }, { locator: "getByRole('link', { name: 'Docs' })" })).label).toBe("Clicked getByRole('link', { name: 'Docs' })");

@@ -99,7 +99,7 @@ export function describeStep(step: Step): StepView {
     case "tab_navigate":
       return { label: `Opened ${str(input.url) ? host(str(input.url) ?? "") : "a URL"}`, icon: Navigation };
     case "tabs_list":
-      return { label: "Listed open tabs", icon: Layers };
+      return { label: "Listed this workspace's tabs", icon: Layers };
     case "console_tail":
       return { label: "Read the console", icon: Terminal };
     case "network_list":
