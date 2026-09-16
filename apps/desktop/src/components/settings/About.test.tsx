@@ -36,6 +36,14 @@ describe("About updates", () => {
     expect(screen.queryByRole("button", { name: /Check for updates/ })).toBeNull();
   });
 
+  it("does not say Dive checks only once after launch", () => {
+    // startUpdateWatch also looks hourly, and on focus / online.
+    // "Once" is a cadence the host does not keep.
+    render(<About info={info("release")} />);
+    expect(document.body.textContent).not.toMatch(/checks once shortly after launch/);
+    expect(document.body.textContent).toMatch(/checks shortly after launch/);
+  });
+
   it("walks the release states: check, up to date once, error with a retry, available with install", () => {
     const check = vi.fn().mockResolvedValue(undefined);
     useUpdates.setState({ status: "idle", check });

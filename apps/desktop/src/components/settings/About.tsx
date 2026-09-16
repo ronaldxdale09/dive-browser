@@ -121,7 +121,7 @@ function Updates({ channel, updater }: { channel: string | null; updater: boolea
           ) : status === "error" ? (
             <span className="text-danger">{error}</span>
           ) : (
-            "Dive checks once shortly after launch."
+            "Dive checks shortly after launch."
           )
         }
         control={
