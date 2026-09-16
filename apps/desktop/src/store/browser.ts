@@ -731,7 +731,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     }
   },
   print: async () => {
-    const id = get().activeTab;
+    const id = tabInThisWindow(get().activeTab, get().detached);
     if (id) await run(set, () => ipc.tabPrint(id));
   },
   pictureInPicture: async () => {

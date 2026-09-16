@@ -683,3 +683,13 @@ describe("devtools", () => {
     expect(open).not.toHaveBeenCalled();
   });
 });
+
+describe("print", () => {
+  it("does not print a detached tab as this window's", async () => {
+    const print = vi.spyOn(ipc, "tabPrint").mockResolvedValue(undefined as never);
+    useBrowser.setState({ activeTab: "p1", detached: ["p1"], tabs: [tab("p1")] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await useBrowser.getState().print();
+    expect(print).not.toHaveBeenCalled();
+  });
+});
