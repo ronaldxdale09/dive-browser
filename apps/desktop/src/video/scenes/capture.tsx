@@ -182,8 +182,19 @@ const PARTS = [
   { at: 26, icon: "✕", label: "Console", detail: "1 error · TypeError at Checkout.tsx:48", danger: true },
   { at: 40, icon: "↯", label: "Network", detail: "1 failed · POST /api/checkout 500", danger: true },
   { at: 54, icon: "≡", label: "Steps to reproduce", detail: "4 recorded interactions" },
-  { at: 68, icon: "⌂", label: "Environment", detail: "Chromium 151 · macOS 15 · 1512×982" },
+  { at: 68, icon: "⌂", label: "Environment", detail: sampleBugReportEnvironment() },
 ];
+
+/**
+ * What the tour's sample report shows as Environment.
+ *
+ * The real composer writes `Dive {version} on {os} ({arch})` (`report.rs`).
+ * This is scenery for the fictional checkout, not this window — so it stays
+ * a macos sample and does not grow a viewport or a Chromium marketing line.
+ */
+export function sampleBugReportEnvironment(): string {
+  return "Dive on macos (arm64) · sample checkout";
+}
 
 export function BugReport({ index }: SceneProps) {
   const { frame } = useScene();
