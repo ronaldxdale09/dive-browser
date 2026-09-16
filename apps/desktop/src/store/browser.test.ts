@@ -725,3 +725,13 @@ describe("reload", () => {
     expect(reload).not.toHaveBeenCalled();
   });
 });
+
+describe("back", () => {
+  it("does not go back on a detached tab as this window's", async () => {
+    const back = vi.spyOn(ipc, "tabBack").mockResolvedValue(null);
+    useBrowser.setState({ activeTab: "h1", detached: ["h1"], tabs: [tab("h1")] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await useBrowser.getState().back();
+    expect(back).not.toHaveBeenCalled();
+  });
+});
