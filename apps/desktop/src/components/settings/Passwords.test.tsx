@@ -7,6 +7,7 @@ import { Passwords, describeCsvImport, siteLabel } from "./Passwords";
 
 const login: Credential = { id: "c1", profile_id: "p1", origin: "https://github.com", username: "dale", created_at: "2026-09-08T00:00:00Z", last_used_at: null, uses: 0 };
 const initial = useBrowser.getState();
+const platform = Object.getOwnPropertyDescriptor(navigator, "platform");
 
 beforeEach(() => {
   vi.spyOn(ipc, "passwordsList").mockResolvedValue([login]);
@@ -24,6 +25,7 @@ afterEach(() => {
   cleanup();
   useBrowser.setState(initial, true);
   vi.restoreAllMocks();
+  if (platform) Object.defineProperty(navigator, "platform", platform);
 });
 
 describe("Settings › Passwords", () => {
@@ -90,5 +92,12 @@ describe("Settings › Passwords", () => {
     expect(ipc.passwordsNeverRemove).toHaveBeenCalledWith("https://bank.example");
     await waitFor(() => expect(screen.queryByText("bank.example")).toBeNull());
     expect(screen.queryByText("Never saved")).toBeNull();
+  });
+
+  it("does not say passwords live only in the macOS Keychain on Windows", () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    render(<Passwords />);
+    expect(document.body.textContent).not.toMatch(/macOS Keychain/);
+    expect(document.body.textContent).toMatch(/Credential Manager/);
   });
 });

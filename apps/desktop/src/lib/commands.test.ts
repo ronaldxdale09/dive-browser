@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import menuSource from "../../src-tauri/src/menu.rs?raw";
-import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel } from "./commands";
+import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel, credentialStoreName } from "./commands";
 import { events, ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "./ipc";
@@ -409,5 +409,12 @@ describe("file manager reveal copy", () => {
     expect(fileManagerName(false)).toBe("Finder");
     expect(showInFileManagerLabel(true)).toBe("Show in Explorer");
     expect(showInFileManagerLabel(false)).toBe("Show in Finder");
+  });
+});
+
+describe("credential store copy", () => {
+  it("names Credential Manager on Windows and the Keychain elsewhere", () => {
+    expect(credentialStoreName(true)).toBe("Credential Manager");
+    expect(credentialStoreName(false)).toBe("the Keychain");
   });
 });

@@ -46,6 +46,7 @@ const MOCK_PROVIDERS: ProviderInfo[] = [
 ];
 const initialAgent = useAgent.getState();
 const initialPrefs = usePrefs.getState();
+const platform = Object.getOwnPropertyDescriptor(navigator, "platform");
 
 beforeEach(() => {
   useAgent.setState({
@@ -69,6 +70,7 @@ afterEach(() => {
   useAgent.setState(initialAgent, true);
   usePrefs.setState(initialPrefs, true);
   vi.restoreAllMocks();
+  if (platform) Object.defineProperty(navigator, "platform", platform);
 });
 
 describe("Setup", () => {
@@ -128,7 +130,14 @@ describe("Setup", () => {
     render(<Setup canGoBack={false} onDone={() => {}} />);
     expect(screen.getByText("Connect a model provider")).toBeTruthy();
     expect(screen.getByText(/a model you choose/)).toBeTruthy();
-    expect(screen.getByText(/stored in macOS Keychain/)).toBeTruthy();
+    expect(screen.getByText(/stored in the Keychain/)).toBeTruthy();
+  });
+
+  it("does not say keys live only in the macOS Keychain on Windows", () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    render(<Setup canGoBack={false} onDone={() => {}} />);
+    expect(document.body.textContent).not.toMatch(/macOS Keychain/);
+    expect(document.body.textContent).toMatch(/Credential Manager/);
   });
 
   it("allows selecting a local provider", () => {

@@ -8,6 +8,7 @@ import { Icon, IconButton } from "../Icon";
 import { Button, Group } from "../SettingsFields";
 import { FormEntries } from "./FormEntries";
 import { copyText } from "../../lib/clipboard";
+import { credentialStoreName } from "../../lib/commands";
 
 /** The site as the list shows it: the host, without the scheme. */
 export function siteLabel(origin: string): string {
@@ -70,7 +71,7 @@ export function Passwords() {
 
   return (
     <>
-      <Group title="Saved logins" description="Kept in this profile. Passwords live in the macOS Keychain; Dive never writes them to its own files.">
+      <Group title="Saved logins" description={`Kept in this profile. Passwords live in ${credentialStoreName()}; Dive never writes them to its own files.`}>
         {error && (
           <p role="alert" className="mb-2 text-[11px] text-danger">
             {error}

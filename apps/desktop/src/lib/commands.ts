@@ -459,6 +459,11 @@ export function showInFileManagerLabel(windows = isWindows()): string {
   return `Show in ${fileManagerName(windows)}`;
 }
 
+/** Keychain on macOS; Credential Manager on Windows. Agent keys and passwords share this store. */
+export function credentialStoreName(windows = isWindows()): string {
+  return windows ? "Credential Manager" : "the Keychain";
+}
+
 /** Whether a key event happened inside something the user types into. */
 export function isEditable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;

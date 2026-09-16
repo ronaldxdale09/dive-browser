@@ -8,6 +8,7 @@ import { useBrowser } from "../../store/browser";
 import { usePrefs } from "../../store/prefs";
 import { Icon } from "../Icon";
 import { errorMessage } from "../../lib/errors";
+import { credentialStoreName } from "../../lib/commands";
 
 const TOP_PROVIDERS: { id: Provider; badge?: string }[] = [
   { id: "anthropic", badge: "Recommended" },
@@ -291,7 +292,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
                   </div>
                 </div>
                 <p className="mt-1 text-[10.5px] text-ink-3">
-                  Encrypted and stored in macOS Keychain.
+                  Encrypted and stored in {credentialStoreName()}.
                 </p>
               </div>
             ) : (
