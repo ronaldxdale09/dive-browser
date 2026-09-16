@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ipc } from "../../lib/ipc";
-import { isEditable } from "../../lib/commands";
+import { isEditable, isWindows } from "../../lib/commands";
 import { useBrowser } from "../../store/browser";
 import { Icon } from "../Icon";
 import { errorMessage } from "../../lib/errors";
@@ -29,6 +29,11 @@ const TOOLS: { id: Tool; label: string; icon: typeof Crop }[] = [
   { id: "text", label: "Text", icon: Type },
   { id: "blur", label: "Blur sensitive content", icon: EyeOff },
 ];
+
+/** Label for revealing the source file in this OS's file manager. */
+export function originalInFileManagerLabel(windows = isWindows()): string {
+  return windows ? "Original in Explorer" : "Original in Finder";
+}
 
 /** Dive's local, full-resolution screenshot workspace. */
 export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProps) {
@@ -229,7 +234,7 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
         <aside aria-label="Tool settings" className="flex w-52 shrink-0 flex-col border-l border-line bg-surface p-4">
           <h2 className="text-xs font-semibold">{TOOLS.find((item) => item.id === tool)?.label}</h2><p className="mt-1 text-[11px] leading-relaxed text-ink-3">{toolHint(tool)}</p>
           {tool !== "crop" && tool !== "blur" && <><label className="mt-5 text-[10px] font-medium tracking-wider text-ink-3 uppercase">Color</label><div className="mt-2 flex flex-wrap gap-2">{COLORS.map((choice) => <button key={choice} type="button" aria-label={`Color ${COLOR_NAMES[choice] ?? choice}`} title={COLOR_NAMES[choice] ?? choice} aria-pressed={color === choice} onClick={() => setColor(choice)} className="size-6 rounded-full border border-line-2 aria-pressed:ring-2 aria-pressed:ring-highlight" style={{ background: choice }} />)}</div><label htmlFor="capture-stroke" className="mt-5 flex justify-between text-[10px] font-medium tracking-wider text-ink-3 uppercase"><span>Stroke</span><span>{width}px</span></label><input id="capture-stroke" aria-label="Stroke width" type="range" min="2" max="20" value={width} onChange={(event) => setWidth(Number(event.target.value))} className="mt-2 accent-[var(--color-highlight)]" /></>}
-          <div className="mt-auto space-y-2 border-t border-line pt-4 text-[11px] text-ink-3">{image && <p>{image.naturalWidth.toLocaleString()} × {image.naturalHeight.toLocaleString()} px</p>}{cropRegion && <p className="text-highlight">Crop: {Math.round(cropRegion.width)} × {Math.round(cropRegion.height)} px</p>}<button type="button" disabled={!src} onClick={() => src && void ipc.downloadsReveal(src)} className="flex items-center gap-1.5 text-ink-2 hover:text-ink disabled:opacity-40"><Icon icon={FolderOpen} size={13} /> Original in Finder</button></div>
+          <div className="mt-auto space-y-2 border-t border-line pt-4 text-[11px] text-ink-3">{image && <p>{image.naturalWidth.toLocaleString()} × {image.naturalHeight.toLocaleString()} px</p>}{cropRegion && <p className="text-highlight">Crop: {Math.round(cropRegion.width)} × {Math.round(cropRegion.height)} px</p>}<button type="button" disabled={!src} onClick={() => src && void ipc.downloadsReveal(src)} className="flex items-center gap-1.5 text-ink-2 hover:text-ink disabled:opacity-40"><Icon icon={FolderOpen} size={13} /> {originalInFileManagerLabel()}</button></div>
         </aside>
       </div>
       <footer className="flex h-10 shrink-0 items-center gap-2 border-t border-line bg-surface px-4 text-[11px] text-ink-3"><span>{operations.length} edit{operations.length === 1 ? "" : "s"}</span><span className="flex-1 text-center">Everything stays on this computer</span><button type="button" aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(0.1, value - 0.1))} className="grid size-7 place-items-center rounded-full hover:bg-surface-2"><Icon icon={Minus} size={13} /></button><button type="button" aria-label={zoomMode === "fit" ? "Fitted to width; click for actual size" : "Fit to width"} aria-pressed={zoomMode === "fit"} onClick={() => setZoomMode(zoomMode === "fit" ? 1 : "fit")} className="min-w-12 rounded px-1.5 py-1 text-center hover:bg-surface-2 aria-pressed:text-ink">{zoomMode === "fit" ? `Fit · ${Math.round(zoom * 100)}%` : `${Math.round(zoom * 100)}%`}</button><button type="button" aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(2, value + 0.1))} className="grid size-7 place-items-center rounded-full hover:bg-surface-2"><Icon icon={Plus} size={13} /></button></footer>
