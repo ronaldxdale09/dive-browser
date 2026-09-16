@@ -3,14 +3,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { useDownloads } from "../store/downloads";
+import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { DownloadsMenu } from "./DownloadsMenu";
 
 const initial = useDownloads.getState();
+const initialPrefs = usePrefs.getState();
+const platform = Object.getOwnPropertyDescriptor(navigator, "platform");
 
 afterEach(() => {
   cleanup();
   useDownloads.setState(initial, true);
+  usePrefs.setState(initialPrefs, true);
   vi.restoreAllMocks();
+  if (platform) Object.defineProperty(navigator, "platform", platform);
 });
 
 describe("DownloadsMenu", () => {
@@ -124,5 +129,17 @@ describe("clearing the list", () => {
     fireEvent.click(screen.getByRole("button", { name: /Clear list/ }));
     expect(clear).toHaveBeenCalled();
     expect(useDownloads.getState().items).toHaveLength(0);
+  });
+});
+
+describe("default download folder copy", () => {
+  it("does not show ~/Downloads on Windows when the pref is empty", () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, download_dir: "" } });
+    useDownloads.setState({ items: [] });
+    render(<DownloadsMenu />);
+    fireEvent.click(screen.getByRole("button", { name: "Downloads" }));
+    expect(screen.getByRole("dialog", { name: "Downloads" }).textContent).not.toMatch(/~\//);
+    expect(screen.getByRole("dialog", { name: "Downloads" }).textContent).toMatch(/Downloads folder|USERPROFILE/);
   });
 });

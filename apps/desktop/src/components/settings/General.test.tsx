@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFS, usePrefs } from "../../store/prefs";
 import { ipc } from "../../lib/ipc";
@@ -26,5 +26,13 @@ describe("Settings › General", () => {
     render(<General />);
     expect(document.body.textContent).not.toMatch(/Keychain/);
     expect(document.body.textContent).toMatch(/Credential Manager/);
+  });
+
+  it("does not say the default download folder is ~/Downloads on Windows", () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    render(<General />);
+    expect(document.body.textContent).not.toMatch(/~\//);
+    expect(screen.getByLabelText("Save files to").getAttribute("placeholder")).not.toBe("~/Downloads");
+    expect(document.body.textContent).toMatch(/Downloads folder/);
   });
 });

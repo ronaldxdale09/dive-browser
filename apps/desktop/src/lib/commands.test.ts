@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import menuSource from "../../src-tauri/src/menu.rs?raw";
-import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel, credentialStoreName, credentialStoreTitle, isMissingPasswordError, missingPasswordNotice } from "./commands";
+import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel, credentialStoreName, credentialStoreTitle, isMissingPasswordError, missingPasswordNotice, defaultDownloadsFolderLabel, defaultDownloadsHint, defaultDownloadsPlaceholder } from "./commands";
 import { events, ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "./ipc";
@@ -409,6 +409,19 @@ describe("file manager reveal copy", () => {
     expect(fileManagerName(false)).toBe("Finder");
     expect(showInFileManagerLabel(true)).toBe("Show in Explorer");
     expect(showInFileManagerLabel(false)).toBe("Show in Finder");
+  });
+});
+
+describe("default downloads folder copy", () => {
+  it("does not use a Unix home path on Windows", () => {
+    expect(defaultDownloadsPlaceholder(true)).toBe(String.raw`%USERPROFILE%\Downloads`);
+    expect(defaultDownloadsPlaceholder(false)).toBe("~/Downloads");
+    expect(defaultDownloadsHint(true)).toContain("your Downloads folder");
+    expect(defaultDownloadsHint(true)).not.toMatch(/~\//);
+    expect(defaultDownloadsHint(false)).toContain("~/Downloads");
+    expect(defaultDownloadsFolderLabel("", true)).toBe("your Downloads folder");
+    expect(defaultDownloadsFolderLabel("", false)).toBe("~/Downloads");
+    expect(defaultDownloadsFolderLabel("/tmp/out", true)).toBe("/tmp/out");
   });
 });
 

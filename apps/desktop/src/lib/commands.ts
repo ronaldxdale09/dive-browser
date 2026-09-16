@@ -459,6 +459,19 @@ export function showInFileManagerLabel(windows = isWindows()): string {
   return `Show in ${fileManagerName(windows)}`;
 }
 
+/** Empty `download_dir` is the user's Downloads folder (`HOME`/`USERPROFILE`). */
+export function defaultDownloadsPlaceholder(windows = isWindows()): string {
+  return windows ? String.raw`%USERPROFILE%\Downloads` : "~/Downloads";
+}
+
+export function defaultDownloadsHint(windows = isWindows()): string {
+  return `Leave empty for ${windows ? "your Downloads folder" : "~/Downloads"}. A name already taken gets a “ (2)” suffix rather than overwriting.`;
+}
+
+export function defaultDownloadsFolderLabel(dir: string, windows = isWindows()): string {
+  return dir || (windows ? "your Downloads folder" : "~/Downloads");
+}
+
 /** Keychain on macOS; Credential Manager on Windows. Agent keys and passwords share this store. */
 export function credentialStoreName(windows = isWindows()): string {
   return windows ? "Credential Manager" : "the Keychain";

@@ -13,6 +13,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { errorMessage } from "../lib/errors";
 import { formatBytes, fileUrl, opensInTab} from "../lib/paths";
+import { defaultDownloadsFolderLabel } from "../lib/commands";
 
 /** Downloads: this session's files. The chip counts this window, not a torn-off tab. */
 export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
@@ -28,7 +29,7 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
     clearList();
     void ipc.downloadsClear().catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
   }, [clearList]);
-  const folder = usePrefs((s) => s.prefs.download_dir) || "~/Downloads";
+  const folder = defaultDownloadsFolderLabel(usePrefs((s) => s.prefs.download_dir));
   const [open, setOpen] = useState(false);
   const dismiss = useCallback(() => setOpen(false), []);
   const ref = useRef<HTMLDivElement>(null);

@@ -7,7 +7,7 @@ import { KeepSitesActive } from "./KeepSitesActive";
 import { usePref } from "./usePref";
 import { ipc } from "../../lib/ipc";
 import { errorMessage } from "../../lib/errors";
-import { credentialStoreName } from "../../lib/commands";
+import { credentialStoreName, defaultDownloadsHint, defaultDownloadsPlaceholder } from "../../lib/commands";
 
 const ENGINES = [
   { value: "duckduckgo", label: "DuckDuckGo" },
@@ -163,7 +163,7 @@ export function General() {
         <Row
           label="Save files to"
           htmlFor="pref-downloads"
-          hint="Leave empty for ~/Downloads. A name already taken gets a “ (2)” suffix rather than overwriting."
+          hint={defaultDownloadsHint()}
           control={
             <TextInput
               id="pref-downloads"
@@ -171,7 +171,7 @@ export function General() {
               mono
               width="w-[300px]"
               value={prefs.download_dir}
-              placeholder="~/Downloads"
+              placeholder={defaultDownloadsPlaceholder()}
               onCommit={(download_dir) => set({ download_dir })}
             />
           }
