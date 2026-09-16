@@ -97,12 +97,13 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
         <IconButton icon={RotateCw} label="Reload" shortcut="⌘R" disabled={!current} onClick={() => void reload()} size={14} />
       )}
       <IconButton icon={House} label="Home" shortcut="⌘⇧H" disabled={!current && !homepage} onClick={() => void runCommand("tab.home")} size={14} />
-      {/* Capped rather than stretched. An address is a line of text, and a
-          pill three feet wide with six words floating at one end reads as a
-          mistake on a large display -- every browser that grew up on
-          widescreens caps it. What the cap leaves over is not wasted: it
-          becomes the part of the bar you can pick the window up by. */}
-      <div data-address-field className="relative mx-1 flex h-[calc(var(--row-h)-4px)] min-w-0 max-w-[46rem] flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2">
+      {/* The address takes the room the bar has. A cap tight enough to look
+          considered on a 27-inch display leaves a stripe of nothing between
+          the address and the buttons on a laptop, which reads as a layout
+          bug rather than as restraint -- so the limit is set where a line of
+          text genuinely stops being readable, and the fixed gutter after it
+          is what the window is picked up by. */}
+      <div data-address-field className="relative mx-1 flex h-[calc(var(--row-h)-4px)] min-w-0 max-w-[80rem] flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2">
         <form
           className="flex min-w-0 flex-1 items-center gap-2"
           onSubmit={(e) => {
@@ -214,8 +215,9 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
           <DownloadsIndicator />
         </>
       )}
-      {/* Whatever the cap left over, as window handle. */}
-      <span aria-hidden data-tauri-drag-region="true" className="min-w-2 flex-1 self-stretch" />
+      {/* A strip that is always there to pick the window up by, whatever the
+          address did with the rest of the row. */}
+      <span aria-hidden data-tauri-drag-region="true" className="w-10 shrink-0 self-stretch" />
       {trailing && <BrowserActions />}
       {loading && <LoadingLine />}
     </div>
