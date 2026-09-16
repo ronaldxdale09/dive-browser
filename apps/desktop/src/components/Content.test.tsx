@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { contentCoverDepth, resetContentCover, useCoversContent } from "../lib/overlay";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { Content, describePermission } from "./Content";
 
 // The welcome screen, the device simulator and its picker have tests of
@@ -28,7 +28,7 @@ const initial = useBrowser.getState();
 
 beforeEach(() => {
   useJsDialog.setState({ byTab: {}, listening: true });
-  useBrowser.setState({ tabs: [tab], activeTab: tab.id, activeWorkspace: tab.workspace_id, navError: {}, crashedTabs: {}, loading: {}, permissionRequests: {} });
+  useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [], activeWorkspace: tab.workspace_id, navError: {}, crashedTabs: {}, loading: {}, permissionRequests: {} });
   vi.spyOn(ipc, "permissionReply").mockResolvedValue(null);
   vi.spyOn(ipc, "setContentBounds").mockResolvedValue(null);
   vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);
@@ -80,6 +80,25 @@ describe("Content error panel", () => {
     await waitFor(() => expect(container.querySelector('img[src="data:image/jpeg;base64,real-page"]')).not.toBeNull());
     await waitFor(() => expect(ipc.setContentCovered).toHaveBeenCalledWith(true));
     expect(container.textContent).not.toContain("Loading page");
+  });
+
+  it("does not paint a detached tab's page preview as this window's", async () => {
+    useBrowser.setState({ ready: true, detached: ["t1"] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    vi.mocked(ipc.prepareContentCover).mockResolvedValue([{ tab_id: "t1", data_url: "data:image/jpeg;base64,torn-off" }]);
+    function DialogCover() {
+      useCoversContent(true);
+      return null;
+    }
+    const { container } = render(
+      <>
+        <Content />
+        <DialogCover />
+      </>,
+    );
+    await act(async () => { await vi.dynamicImportSettled(); });
+    expect(container.querySelector('img[src="data:image/jpeg;base64,torn-off"]')).toBeNull();
+    expect(await screen.findByText("Welcome fixture")).toBeTruthy();
   });
 
   it("shows nothing over the page while the tab is healthy", () => {

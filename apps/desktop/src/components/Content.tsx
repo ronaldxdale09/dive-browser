@@ -291,7 +291,7 @@ export function NavErrorPanel({ url, error, onRetry }: { url: string; error: str
 /** The page filling the area. Reports its own rectangle. */
 function FullPage() {
   const ref = useRef<HTMLDivElement>(null);
-  const activeTab = useBrowser((s) => s.activeTab);
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const ready = useBrowser((s) => s.ready);
   const preview = useContentPreview(activeTab);
   // On the frameless Windows window, hold the native page view a few pixels
