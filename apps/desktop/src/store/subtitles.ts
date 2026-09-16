@@ -185,25 +185,27 @@ export async function bootSubtitles(): Promise<void> {
     }));
     subscriptions.push(await events.subtitleState.listen((e) => {
       const st = e.payload;
-      const tab = useBrowser.getState().activeTab;
-      // Only the active tab's state drives the chrome; other tabs' state is
-      // theirs. When no tab is active yet, take it anyway.
-      if (tab && st.tab_id !== tab) return;
+      const tab = thisWindowTab();
+      // Only this window's tab drives the chrome; a torn-off tab's session
+      // stays in the window that owns it.
+      if (!tab || st.tab_id !== tab) return;
       stateRevision++;
       useSubtitles.setState({ active: st.active, error: st.error, ...(st.active ? {} : { lastCue: "" }) });
     }));
     subscriptions.push(await events.subtitleCue.listen((e) => {
       const cue = e.payload;
-      const tab = useBrowser.getState().activeTab;
-      if (tab && cue.tab_id !== tab) return;
+      const tab = thisWindowTab();
+      if (!tab || cue.tab_id !== tab) return;
       useSubtitles.setState({ lastCue: cue.text });
     }));
     subscriptions.push(useBrowser.subscribe((current, previous) => {
-      if (current.activeTab === previous.activeTab) return;
+      const now = tabInThisWindow(current.activeTab, current.detached);
+      const was = tabInThisWindow(previous.activeTab, previous.detached);
+      if (now === was) return;
       const revision = ++stateRevision;
       useSubtitles.setState({ active: false, lastCue: "", error: null });
-      if (current.activeTab) {
-        void ipc.subtitleRunning(current.activeTab).then((active) => {
+      if (now) {
+        void ipc.subtitleRunning(now).then((active) => {
           if (revision === stateRevision) useSubtitles.setState({ active });
         }).catch(() => undefined);
       }

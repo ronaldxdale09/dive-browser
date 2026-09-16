@@ -2,7 +2,7 @@ import { uiStorage } from "../lib/uiStorage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { events, ipc } from "../lib/ipc";
 import type { SubtitleCue, SubtitleModel, SubtitleModelProgress, SubtitleState } from "../lib/ipc";
-import { useBrowser } from "./browser";
+import { tabInThisWindow, useBrowser } from "./browser";
 import { bootSubtitles, resetSubtitlesListener, useSubtitles } from "./subtitles";
 
 const MODELS: SubtitleModel[] = [
@@ -40,7 +40,7 @@ function stubListeners(): Handlers {
 beforeEach(() => {
   resetSubtitlesListener();
   useSubtitles.setState(initial, true);
-  useBrowser.setState({ activeTab: "t1" });
+  useBrowser.setState({ activeTab: "t1", detached: [] });
 });
 
 afterEach(() => {
@@ -174,6 +174,17 @@ describe("useSubtitles", () => {
     useSubtitles.setState({ active: true });
     await useSubtitles.getState().stop();
     expect(stop).toHaveBeenCalledWith("t1");
+    expect(useSubtitles.getState().active).toBe(false);
+  });
+
+  it("does not paint a detached tab's caption as this window's", async () => {
+    useBrowser.setState({ activeTab: "t1", detached: ["t1"] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    const h = stubListeners();
+    await bootSubtitles();
+    h.cue?.({ payload: { tab_id: "t1", text: "Torn-off words", language: "en", is_final: false } });
+    expect(useSubtitles.getState().lastCue).toBe("");
+    h.state?.({ payload: { tab_id: "t1", active: true, error: null } });
     expect(useSubtitles.getState().active).toBe(false);
   });
 
