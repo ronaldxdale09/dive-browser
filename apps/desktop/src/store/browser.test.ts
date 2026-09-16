@@ -768,3 +768,14 @@ describe("navigate", () => {
     expect(useBrowser.getState().tabs.find((t) => t.id === "n1")?.url).toBe("https://x");
   });
 });
+
+describe("fillVideo", () => {
+  it("does not fill a detached tab as this window's", async () => {
+    const fill = vi.spyOn(ipc, "tabFillVideo").mockResolvedValue("no-video");
+    useBrowser.setState({ activeTab: "v1", detached: ["v1"], tabs: [tab("v1")], error: null });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await useBrowser.getState().fillVideo();
+    expect(fill).not.toHaveBeenCalled();
+    expect(useBrowser.getState().error).toBeNull();
+  });
+});

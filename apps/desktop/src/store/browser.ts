@@ -720,7 +720,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     if (id) await run(set, () => ipc.tabStop(id));
   },
   fillVideo: async () => {
-    const id = get().activeTab;
+    const id = tabInThisWindow(get().activeTab, get().detached);
     if (!id) return;
     try {
       const outcome = await ipc.tabFillVideo(id);
