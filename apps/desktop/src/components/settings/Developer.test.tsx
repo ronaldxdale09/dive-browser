@@ -37,6 +37,8 @@ describe("Developer › MCP setup", () => {
     render(<Developer info={info} />);
     expect(document.body.textContent).toMatch(/DIVE_MCP_ALLOW_EVAL=1/);
     expect(document.body.textContent).toMatch(/Page scripts are never run/i);
+    expect(document.body.textContent).not.toMatch(/this Mac/);
+    expect(document.body.textContent).toMatch(/this computer/);
   });
 
   it("shows the Cursor entry with the token masked once the token has loaded", async () => {

@@ -86,7 +86,7 @@ export function Developer({ info }: { info: AppInfo | null }) {
               </>
             )}
             <p className="mt-2 text-[11px] leading-relaxed text-ink-3">
-              Only processes on this Mac with the token file can connect. Page scripts are never run unless you start Dive with DIVE_MCP_ALLOW_EVAL=1.
+              Only processes on this computer with the token file can connect. Page scripts are never run unless you start Dive with DIVE_MCP_ALLOW_EVAL=1.
             </p>
           </div>
         )}

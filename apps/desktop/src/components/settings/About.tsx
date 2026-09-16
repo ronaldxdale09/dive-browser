@@ -42,7 +42,7 @@ export function About({ info }: { info: AppInfo | null }) {
         <Row
           stacked
           label="MCP endpoint"
-          hint={serveMcp ? "Coding agents on this Mac connect here; the Developer section has the full command." : isPrivateWindow() ? "Private windows do not serve MCP." : "Disabled in this build."}
+          hint={serveMcp ? "Coding agents on this computer connect here; the Developer section has the full command." : isPrivateWindow() ? "Private windows do not serve MCP." : "Disabled in this build."}
           control={serveMcp && info ? <CopyBlock text={info.mcp_url} label="Copy MCP URL" /> : <code className="block font-mono text-[11px] text-ink-2">disabled</code>}
         />
       </Group>

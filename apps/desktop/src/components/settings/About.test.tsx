@@ -76,6 +76,12 @@ describe("About engine line", () => {
     }
   });
 
+  it("does not say MCP is only for this Mac", () => {
+    render(<About info={{ ...info("release"), mcp_url: "http://127.0.0.1:7391/mcp", mcp_token_path: "/tmp/x/mcp-token" }} />);
+    expect(document.body.textContent).not.toMatch(/this Mac/);
+    expect(document.body.textContent).toMatch(/this computer/);
+  });
+
   it("does not say each container has its own process tree", () => {
     // A container is a cache directory and request context. Renderers are
     // process-per-site in the one browser process. Private windows are the
