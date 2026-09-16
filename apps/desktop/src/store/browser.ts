@@ -735,7 +735,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     if (id) await run(set, () => ipc.tabPrint(id));
   },
   pictureInPicture: async () => {
-    const id = get().activeTab;
+    const id = tabInThisWindow(get().activeTab, get().detached);
     if (!id) return;
     // The outcome is worth saying: "no video on this page to float" explains
     // a command that otherwise looks as though it did nothing.

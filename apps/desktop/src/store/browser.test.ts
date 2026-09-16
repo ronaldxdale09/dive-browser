@@ -693,3 +693,14 @@ describe("print", () => {
     expect(print).not.toHaveBeenCalled();
   });
 });
+
+describe("pictureInPicture", () => {
+  it("does not float a detached tab as this window's", async () => {
+    const pip = vi.spyOn(ipc, "tabPictureInPicture").mockResolvedValue("no video on this page to float");
+    useBrowser.setState({ activeTab: "v1", detached: ["v1"], tabs: [tab("v1")], notice: null });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await useBrowser.getState().pictureInPicture();
+    expect(pip).not.toHaveBeenCalled();
+    expect(useBrowser.getState().notice).toBeNull();
+  });
+});
