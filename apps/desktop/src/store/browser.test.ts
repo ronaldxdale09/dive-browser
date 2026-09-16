@@ -704,3 +704,14 @@ describe("pictureInPicture", () => {
     expect(useBrowser.getState().notice).toBeNull();
   });
 });
+
+describe("bugReport", () => {
+  it("does not compose a bug report for a detached tab as this window's", async () => {
+    const report = vi.spyOn(ipc, "tabBugReport").mockResolvedValue("/tmp/torn.md");
+    useBrowser.setState({ activeTab: "b1", detached: ["b1"], tabs: [tab("b1")], notice: null });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await useBrowser.getState().bugReport();
+    expect(report).not.toHaveBeenCalled();
+    expect(useBrowser.getState().notice).toBeNull();
+  });
+});

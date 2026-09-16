@@ -753,7 +753,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     await useRecording.getState().toggle();
   },
   bugReport: async () => {
-    const id = get().activeTab;
+    const id = tabInThisWindow(get().activeTab, get().detached);
     if (!id) return;
     await run(set, async () => {
       const path = await ipc.tabBugReport(id);
