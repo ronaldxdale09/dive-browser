@@ -18,6 +18,11 @@ export function proxySettingsPath(windows = isWindows()): string {
   return windows ? "Settings › Network & internet › Proxy" : "System Settings › Network";
 }
 
+/** Settings › Privacy hint for the System proxy mode. */
+export function systemProxyHint(windows = isWindows()): string {
+  return `System follows ${proxySettingsPath(windows)}.`;
+}
+
 export function describeNavError(error: string, url: string, windows = isWindows()): NavErrorText {
   const code = (error.match(/ERR_[A-Z0-9_]+/) ?? [error.replace(/^net::/, "")])[0] ?? error;
   const port = portOf(url);

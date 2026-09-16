@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { ipc } from "../../lib/ipc";
 import type { Decision, PermissionList, SitePermission } from "../../lib/ipc";
 import { errorMessage } from "../../lib/errors";
+import { systemProxyHint } from "../../lib/navError";
 import { useBrowser } from "../../store/browser";
 import { usePrivacy } from "../../store/privacy";
 import { Icon } from "../Icon";
@@ -223,7 +224,7 @@ export function Privacy() {
         <Row
           label="Proxy"
           htmlFor="pref-proxy-mode"
-          hint="System follows your Mac's network settings, which is what Dive has always done."
+          hint={systemProxyHint()}
           control={
             <Select
               id="pref-proxy-mode"

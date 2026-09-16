@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeNavError, searchTermFor } from "./navError";
+import { describeNavError, searchTermFor, systemProxyHint } from "./navError";
 
 describe("describeNavError", () => {
   it("names the common failures", () => {
@@ -26,6 +26,13 @@ describe("describeNavError", () => {
 
   it("explains a block as Dive's own doing", () => {
     expect(describeNavError("net::ERR_BLOCKED_BY_CLIENT", "https://httpbin.org/api/ping").title).toBe("Blocked by Dive");
+  });
+
+  it("does not send Windows to this Mac's network settings for the system proxy", () => {
+    expect(systemProxyHint(true)).not.toMatch(/Mac/);
+    expect(systemProxyHint(true)).toMatch(/Settings › Network & internet › Proxy/);
+    expect(systemProxyHint(false)).toMatch(/System Settings › Network/);
+    expect(systemProxyHint(false)).not.toMatch(/Mac/);
   });
 
   it("points a failed proxy at this OS's Settings page, not System Settings on Windows", () => {
