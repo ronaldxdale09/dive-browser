@@ -21,6 +21,19 @@ afterEach(() => {
 });
 
 describe("FindBar", () => {
+  it("does not keep a detached tab's match count as this window's", async () => {
+    render(<FindBar />);
+    fireEvent.change(screen.getByLabelText("Find in page"), { target: { value: "hello" } });
+    expect(await screen.findByLabelText("Match 1 of 3")).toBeTruthy();
+    const calls = vi.mocked(ipc.tabFind).mock.calls.length;
+    act(() => useBrowser.setState({ detached: ["t1"] }));
+    await waitFor(() => expect(screen.queryByLabelText("Match 1 of 3")).toBeNull());
+    expect(screen.queryByText("1/3")).toBeNull();
+    expect(screen.queryByText("0/0")).toBeNull();
+    expect(screen.queryByLabelText("No matches")).toBeNull();
+    expect(vi.mocked(ipc.tabFind).mock.calls.slice(calls).every((c) => c[0] !== "t1" || c[1] === "")).toBe(true);
+  });
+
   it("does not keep the last match count when this tab is sleeping", async () => {
     render(<FindBar />);
     fireEvent.change(screen.getByLabelText("Find in page"), { target: { value: "hello" } });
