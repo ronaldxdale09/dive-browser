@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { fold, foldProgress } from "./downloads";
+import { fold, foldProgress, selectActiveInWindow } from "./downloads";
 
 const started = { tab: null, url: "https://cdn.example.com/report.pdf", path: "/dl/report.pdf", status: "started" };
 
 describe("downloads fold", () => {
   it("adds a start and completes it in place", () => {
     const one = fold([], started, 1000);
-    expect(one).toEqual([{ url: started.url, path: started.path, name: "report.pdf", status: "started", at: 1000, startedAt: 1000 }]);
+    expect(one).toEqual([{ url: started.url, path: started.path, name: "report.pdf", status: "started", at: 1000, startedAt: 1000, tabId: null }]);
     const done = fold(one, { ...started, status: "finished" }, 2000);
     expect(done).toHaveLength(1);
     expect(done[0]).toMatchObject({ status: "finished", at: 2000 });
@@ -24,6 +24,30 @@ describe("downloads fold", () => {
     for (let i = 0; i < 60; i++) items = fold(items, { tab: null, url: `https://x/${i}`, path: `/dl/${i}`, status: "finished" }, i + 2);
     expect(items).toHaveLength(50);
     expect(items[0]?.name).toBe("59");
+  });
+
+  it("keeps the tab that asked for the file", () => {
+    const one = fold([], { ...started, tab: "tab-7" }, 1000);
+    expect(one[0]?.tabId).toBe("tab-7");
+    const done = fold(one, { ...started, tab: "tab-7", status: "finished" }, 2000);
+    expect(done[0]?.tabId).toBe("tab-7");
+  });
+});
+
+describe("this window's in-progress count", () => {
+  const row = (tabId: string | null, status: "started" | "finished" = "started") => ({
+    url: `https://x/${tabId ?? "none"}`,
+    path: `/dl/${tabId ?? "none"}`,
+    name: "f",
+    status,
+    at: 1,
+    startedAt: 1,
+    tabId,
+  });
+
+  it("counts this window's started rows and ones with no tab, not a detached tab's", () => {
+    const items = [row("here"), row("pop"), row(null), row("here", "finished")];
+    expect(selectActiveInWindow(items, new Set(["here"]))).toBe(2);
   });
 });
 

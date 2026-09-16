@@ -37,6 +37,7 @@ beforeEach(() => {
     recordingTab: null,
     zoom: {},
     loading: {},
+    detached: [],
   });
   useEmulation.setState({ byTab: {}, media: {}, throttle: {} });
   useDownloads.setState({ items: [] });
@@ -354,6 +355,20 @@ describe("Toolbar", () => {
     expect(ipc.downloadsReveal).toHaveBeenCalledWith("/Users/me/Downloads/report.pdf");
     fireEvent.click(screen.getByRole("button", { name: /Open folder/ }));
     expect(ipc.downloadsReveal).toHaveBeenCalledWith(null);
+  });
+
+  it("does not count a detached tab's in-progress download on this window's chip", () => {
+    const popped = { ...tab, id: "pop", title: "Popout" };
+    useBrowser.setState({ tabs: [tab, popped], activeTab: tab.id, detached: ["pop"] });
+    useDownloads.setState({
+      items: [
+        { url: "https://cdn.example.com/a.zip", path: "/tmp/a.zip", name: "a.zip", status: "started", at: 1, startedAt: 1, tabId: "pop" },
+        { url: "https://cdn.example.com/b.zip", path: "/tmp/b.zip", name: "b.zip", status: "started", at: 2, startedAt: 2, tabId: tab.id },
+      ],
+    });
+    render(<Toolbar />);
+    expect(screen.getByLabelText("1 in progress")).toBeTruthy();
+    expect(screen.queryByLabelText("2 in progress")).toBeNull();
   });
 
   it("renders the local guardian and an honest clean, globally-off state", () => {

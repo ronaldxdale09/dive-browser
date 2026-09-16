@@ -3,7 +3,7 @@ import { Download, FolderOpen, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
-import { selectActive, useDownloads } from "../store/downloads";
+import { selectActiveInWindow, useDownloads } from "../store/downloads";
 import type { Download as Item } from "../store/downloads";
 import { usePrefs } from "../store/prefs";
 import { EmptyState } from "./EmptyState";
@@ -14,10 +14,13 @@ import { useFocusTrap } from "../lib/useFocusTrap";
 import { errorMessage } from "../lib/errors";
 import { formatBytes, fileUrl, opensInTab} from "../lib/paths";
 
-/** Downloads: what this session saved, where it went, and a way to the file. */
+/** Downloads: this session's files. The chip counts this window, not a torn-off tab. */
 export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
   const items = useDownloads((s) => s.items);
-  const active = useDownloads(selectActive);
+  const tabs = useBrowser((s) => s.tabs);
+  const detached = useBrowser((s) => s.detached);
+  const here = new Set(tabs.filter((t) => !detached.includes(t.id)).map((t) => t.id));
+  const active = selectActiveInWindow(items, here);
   const clearList = useDownloads((s) => s.clear);
   // The engine keeps its own list, which is what an agent sees through MCP.
   // Clearing one and not the other means the button does not do what it says.

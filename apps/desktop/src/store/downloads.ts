@@ -14,6 +14,8 @@ export interface Download {
   at: number;
   /** When it began, for the elapsed time a row shows. */
   startedAt: number;
+  /** The tab that asked for the file, when a page did. Keeps this window's chip honest. */
+  tabId?: string | null;
   /** The engine's id for it, once progress has arrived. Cancelling needs it. */
   id?: number;
   /** Bytes written so far, while it is going. */
@@ -61,13 +63,14 @@ export function fold(items: Download[], notice: DownloadNotice, at = Date.now())
             // A finished download is whole by definition, whatever the last
             // progress report happened to say.
             ...(status === "finished" && d.total ? { received: d.total } : {}),
+            tabId: notice.tab ?? d.tabId,
             ...(status === "started" ? {} : { speed: 0, paused: false }),
           }
         : d,
     );
   }
   const name = fileNameOr(notice.path, notice.url);
-  return [{ url: notice.url, path: notice.path, name, status, at, startedAt: at }, ...items].slice(0, CAP);
+  return [{ url: notice.url, path: notice.path, name, status, at, startedAt: at, tabId: notice.tab }, ...items].slice(0, CAP);
 }
 
 /**
@@ -120,5 +123,16 @@ export const useDownloads = create<DownloadsState>((set) => ({
   clear: () => set({ items: [] }),
 }));
 
-/** Downloads still in flight. */
+/** Downloads still in flight in this window. A row with no tab was heard
+ * here; a row whose tab is in another window is not this chip's number. */
+export function selectActiveInWindow(items: Download[], tabIds: ReadonlySet<string>): number {
+  return items.filter((d) => d.status === "started" && belongsToWindow(d.tabId, tabIds)).length;
+}
+
+function belongsToWindow(tabId: string | null | undefined, tabIds: ReadonlySet<string>): boolean {
+  if (tabId == null || tabId === "") return true;
+  return tabIds.has(tabId);
+}
+
+/** Session-wide in-flight count. Prefer `selectActiveInWindow` for chrome. */
 export const selectActive = (s: DownloadsState) => s.items.filter((d) => d.status === "started").length;
