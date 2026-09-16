@@ -5,7 +5,7 @@ import { replayableSteps, toPlaywrightSpec } from "../../lib/playwright";
 import { Markdown } from "../../lib/markdown";
 import type { Message } from "../../store/agent";
 import { useAgent } from "../../store/agent";
-import { useBrowser } from "../../store/browser";
+import { tabInThisWindow, useBrowser } from "../../store/browser";
 import { usePrefs } from "../../store/prefs";
 import { Favicon } from "../Favicon";
 import { Icon } from "../Icon";
@@ -65,8 +65,11 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
   // The setting approves everything until it is turned off; say so here too.
   const alwaysAutoApprove = usePrefs((s) => s.prefs.agent_approvals === "never");
   const update = usePrefs((s) => s.update);
-  const activeTab = useBrowser((s) => s.activeTab);
-  const current = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
+  const current = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return id ? s.tabs.find((t) => t.id === id) : undefined;
+  });
   const openTab = useBrowser((s) => s.openTab);
   const [draft, setDraft] = useState("");
   // The transcript out of the way without losing it. The composer stays: the

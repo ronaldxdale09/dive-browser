@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderInfo, Tab } from "../../lib/ipc";
 import { useAgent } from "../../store/agent";
-import { useBrowser } from "../../store/browser";
+import { tabInThisWindow, useBrowser } from "../../store/browser";
 import { usePrefs } from "../../store/prefs";
 import { Thread } from "./Thread";
 
@@ -72,6 +72,18 @@ afterEach(() => {
 });
 
 describe("Thread", () => {
+  it("does not ask about a detached tab as this page", () => {
+    useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [tab.id] });
+    expect(useBrowser.getState().detached).toEqual([tab.id]);
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    render(<Thread onAddProvider={() => {}} />);
+    expect(screen.getByPlaceholderText("Open a tab, then ask…")).toBeTruthy();
+    expect(screen.queryByPlaceholderText(placeholder)).toBeNull();
+    expect((screen.getByRole("button", { name: /Summarize this page/ }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /Summarize this page/ }));
+    expect(useAgent.getState().send).not.toHaveBeenCalled();
+  });
+
   it("starts with quick actions that send their prompt for the active tab", () => {
     render(<Thread onAddProvider={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: /Summarize this page/ }));
