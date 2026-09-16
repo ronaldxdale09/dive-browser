@@ -7,6 +7,7 @@ import { IconButton } from "./Icon";
 /** Cmd+F bar: live count, Enter / Shift+Enter to step, Esc to close. */
 export function FindBar() {
   const activeTab = useBrowser((s) => s.activeTab);
+  const sleeping = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.state === "discarded");
   const toggle = useBrowser((s) => s.toggle);
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(1);
@@ -18,7 +19,10 @@ export function FindBar() {
   }, []);
 
   useEffect(() => {
-    if (!activeTab) return;
+    if (!activeTab || sleeping) {
+      setResult({ total: 0, current: 0 });
+      return;
+    }
     let alive = true;
     const t = setTimeout(() => {
       ipc
@@ -30,7 +34,7 @@ export function FindBar() {
       alive = false;
       clearTimeout(t);
     };
-  }, [activeTab, query, index]);
+  }, [activeTab, query, index, sleeping]);
 
   const close = () => {
     if (activeTab) {
@@ -61,8 +65,8 @@ export function FindBar() {
           placeholder="Find in page"
           className="h-7 w-52 bg-transparent px-2 text-xs outline-none placeholder:text-ink-3"
         />
-        <span role="status" aria-live="polite" aria-label={query ? (result.total ? `Match ${result.current} of ${result.total}` : "No matches") : undefined} className="w-14 text-center font-mono text-[11px] text-ink-3 tabular-nums">
-          {query ? `${result.current}/${result.total}` : ""}
+        <span role="status" aria-live="polite" aria-label={sleeping ? "This tab is sleeping" : query ? (result.total ? `Match ${result.current} of ${result.total}` : "No matches") : undefined} className="w-14 text-center font-mono text-[11px] text-ink-3 tabular-nums">
+          {sleeping || !query ? "" : `${result.current}/${result.total}`}
         </span>
         <IconButton icon={ChevronUp} label="Previous match" size={13} disabled={!result.total} onClick={() => setIndex((i) => i - 1)} />
         <IconButton icon={ChevronDown} label="Next match" size={13} disabled={!result.total} onClick={() => setIndex((i) => i + 1)} />
