@@ -239,6 +239,7 @@ function ZoomRow() {
 /** Everything the menu offers, built from the stores so states are live. */
 function useMenu(close: () => void): Group[] {
   const active = useBrowser((s) => s.activeTab);
+  const here = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const open = useBrowser((s) => s.open);
   const closedTabs = useBrowser((s) => s.closedTabs.length);
   const detached = useBrowser((s) => s.detached);
@@ -298,10 +299,10 @@ function useMenu(close: () => void): Group[] {
     {
       id: "page",
       items: [
-        { id: "print", label: "Print…", icon: Printer, shortcut: "⌘P", disabled: !active, run: done(() => runCommand("tab.print")) },
-        { id: "pip", label: "Picture in Picture", icon: PictureInPicture2, disabled: !active, run: done(() => runCommand("video.pip")) },
-        { id: "find", label: "Find in page", icon: TextSearch, shortcut: "⌘F", disabled: !active, run: done(() => b().toggle("find", true)) },
-        { id: "report", label: "Copy bug report", icon: Wand2, shortcut: "⌘⇧B", keywords: "issue compose report a bug", disabled: !active, run: done(() => runCommand("report.compose")) },
+        { id: "print", label: "Print…", icon: Printer, shortcut: "⌘P", disabled: !here, run: done(() => runCommand("tab.print")) },
+        { id: "pip", label: "Picture in Picture", icon: PictureInPicture2, disabled: !here, run: done(() => runCommand("video.pip")) },
+        { id: "find", label: "Find in page", icon: TextSearch, shortcut: "⌘F", disabled: !here, run: done(() => b().toggle("find", true)) },
+        { id: "report", label: "Copy bug report", icon: Wand2, shortcut: "⌘⇧B", keywords: "issue compose report a bug", disabled: !here, run: done(() => runCommand("report.compose")) },
         { id: "palette", label: "Command palette", icon: Search, shortcut: "⌘K", keywords: "search everything", run: done(() => b().toggle("palette", true)) },
       ],
     },

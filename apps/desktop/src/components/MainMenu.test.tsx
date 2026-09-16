@@ -55,6 +55,17 @@ describe("MainMenu", () => {
     expect((screen.getByRole("button", { name: "Zoom out" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("does not offer page actions for a detached tab as this window's", () => {
+    useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [tab.id] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    render(<MainMenu />);
+    expect((screen.getByRole("menuitem", { name: /Print/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("menuitem", { name: /Picture in Picture/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("menuitem", { name: /Find in page/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("menuitem", { name: /Copy bug report/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("menuitem", { name: /Bring tab back/ }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("lists the browser's pages and features with their shortcuts", () => {
     render(<MainMenu />);
     for (const name of ["New tab", "Bookmarks", "History", "Downloads", "Recordings", "Settings", "Apps", "Print…"]) {
