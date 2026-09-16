@@ -67,6 +67,15 @@ describe("ImportPanel", () => {
     expect(describeOutcome(0, 0, false, false, 1, true)).toBe("1 password");
   });
 
+  it("does not say Safari is looked for on Windows", async () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    vi.spyOn(ipc, "browserImportSources").mockResolvedValue([]);
+    render(<ImportPanel />);
+    expect(await screen.findByText("No other browsers with data were found")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/Safari are looked for/);
+    expect(document.body.textContent).toMatch(/AppData/);
+  });
+
   it("does not say it is looking for browsers on this Mac on Windows", () => {
     Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
     vi.spyOn(ipc, "browserImportSources").mockImplementation(() => new Promise(() => {}));

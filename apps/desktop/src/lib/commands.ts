@@ -498,6 +498,16 @@ export function importLookingLabel(windows = isWindows()): string {
 }
 
 /**
+ * Empty import panel: what the host actually walked.
+ * `browser_import.rs` `sources()` only looks under `~/Library`.
+ */
+export function importEmptyHint(windows = isWindows()): string {
+  return windows
+    ? "This build only looks under ~/Library, not AppData, so browsers on this PC are not found."
+    : "Chrome, Brave, Edge, Arc, Vivaldi, Opera, Firefox and Safari are looked for.";
+}
+
+/**
  * Where Chrome, Brave and Edge keep an unpacked extension folder on this OS.
  * Dive only loads a directory you pick; this is a hint, not a scan.
  *

@@ -1,7 +1,7 @@
 import { Check, FolderLock, History, KeyRound, Loader2, Star, TextCursorInput } from "lucide-react";
 import { useEffect } from "react";
 import type { ImportSource } from "../../lib/ipc";
-import { importDeniedNote, importLookingLabel, importPasswordNote, isWindows } from "../../lib/commands";
+import { importDeniedNote, importEmptyHint, importLookingLabel, importPasswordNote, isWindows } from "../../lib/commands";
 import { useBrowserImport } from "../../store/browserImport";
 import { Icon } from "../Icon";
 import { Switch } from "../SettingsFields";
@@ -85,7 +85,7 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
     return (
       <div className="rounded-2xl border border-line bg-surface-2/60 px-4 py-5 text-center">
         <p className="text-xs font-medium text-ink">No other browsers with data were found</p>
-        <p className="mt-1 text-[11px] text-ink-3">Chrome, Brave, Edge, Arc, Vivaldi, Opera, Firefox and Safari are looked for.</p>
+        <p className="mt-1 text-[11px] text-ink-3">{importEmptyHint()}</p>
       </div>
     );
   }
