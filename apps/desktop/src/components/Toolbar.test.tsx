@@ -432,6 +432,17 @@ describe("Toolbar", () => {
     expect(screen.getByLabelText("4 privacy actions on this page")).toBeTruthy();
   });
 
+  it("does not count a detached tab's privacy actions as this window's", () => {
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, block_trackers: true }, loaded: true });
+    usePrivacy.setState({ byTab: { [tab.id]: { ads: 2, trackers: 1, youtube: 1 } } });
+    useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [tab.id] });
+    render(<Toolbar />);
+    expect(screen.queryByLabelText("4 privacy actions on this page")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+    expect(screen.queryByText("4 privacy actions so far")).toBeNull();
+    expect(screen.getByText("Protection unavailable here")).toBeTruthy();
+  });
+
   it("does not keep a privacy count when this tab is sleeping", () => {
     usePrefs.setState({ prefs: { ...DEFAULT_PREFS, block_trackers: true }, loaded: true });
     usePrivacy.setState({ byTab: { [tab.id]: { ads: 2, trackers: 1, youtube: 1 } } });

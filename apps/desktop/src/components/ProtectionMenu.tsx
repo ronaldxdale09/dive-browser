@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { useCoversContent } from "../lib/overlay";
 import { privacyGuardian } from "../lib/privacyAvatar";
 import { useFocusTrap } from "../lib/useFocusTrap";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { selectPrivacyCounts, usePrivacy } from "../store/privacy";
 import { usePrefs } from "../store/prefs";
 import { FeatureButton } from "./FeatureBar";
@@ -18,7 +18,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
   const prefs = usePrefs((s) => s.prefs);
   const update = usePrefs((s) => s.update);
   const tabs = useBrowser((s) => s.tabs);
-  const activeTab = useBrowser((s) => s.activeTab);
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const openSettings = useBrowser((s) => s.openSettings);
   const counts = usePrivacy(selectPrivacyCounts(activeTab));
   const info = usePrivacy((s) => s.info);
