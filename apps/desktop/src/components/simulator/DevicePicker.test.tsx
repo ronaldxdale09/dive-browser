@@ -20,7 +20,7 @@ const tab: Tab = {
 };
 
 beforeEach(() => {
-  useBrowser.setState({ tabs: [tab], activeTab: tab.id, activeWorkspace: tab.workspace_id, error: null });
+  useBrowser.setState({ tabs: [tab], activeTab: tab.id, activeWorkspace: tab.workspace_id, error: null, detached: [] });
   useEmulation.setState({ byTab: {}, scale: {}, media: {}, throttle: {}, environment: {}, recent: [] });
   usePicker.setState({ open: true });
   resetPushed();
@@ -37,6 +37,12 @@ afterEach(() => {
 });
 
 describe("DevicePicker", () => {
+  it("does not put a device on a detached tab from this window", () => {
+    useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [tab.id] });
+    render(<DevicePicker />);
+    expect(screen.queryByRole("region", { name: "Device simulator" })).toBeNull();
+  });
+
   it("lists every group with its devices", () => {
     render(<DevicePicker />);
     for (const group of ["Apple phones", "Android phones", "Foldables", "Tablets", "Laptops and desktops"]) {

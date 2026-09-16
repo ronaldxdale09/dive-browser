@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { DEVICE_GROUPS, devicesIn, searchDevices } from "../../data/devices";
 import type { DeviceGroup, DevicePreset } from "../../data/devices";
-import { useBrowser } from "../../store/browser";
+import { tabInThisWindow, useBrowser } from "../../store/browser";
 import { usePicker } from "../../store/simulator";
 import { PLACES, baseFor, selectDevice, selectEnvironment, selectMedia, selectThrottle, useEmulation } from "../../store/emulation";
 import { Icon, IconButton } from "../Icon";
@@ -31,7 +31,7 @@ const GROUP_ICON: Record<DeviceGroup, LucideIcon> = {
 export function DevicePicker() {
   const open = usePicker((s) => s.open);
   const setOpen = usePicker((s) => s.setOpen);
-  const activeTab = useBrowser((s) => s.activeTab);
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const sel = useEmulation(selectDevice(activeTab));
   const recent = useEmulation((s) => s.recent);
   const setDevice = useEmulation((s) => s.setDevice);
