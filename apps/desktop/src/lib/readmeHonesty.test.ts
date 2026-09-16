@@ -37,4 +37,11 @@ describe("README memory claim", () => {
     // as a class and it is not a fingerprint randomizer.
     expect(readme).not.toMatch(/fingerprinting scripts/i);
   });
+
+  it("does not send Windows install-as-app only to Applications and the Dock", () => {
+    // webapp.rs: macOS is ~/Applications/Dive Apps; Windows is
+    // %APPDATA%\Microsoft\Windows\Start Menu\Programs\Dive Apps.
+    expect(readme).not.toContain("~/Applications/Dive Apps` for Spotlight and the Dock");
+    expect(readme).toContain("Start Menu");
+  });
 });
