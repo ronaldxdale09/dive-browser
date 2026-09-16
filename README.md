@@ -34,7 +34,7 @@
   <img src="assets/screenshots/home-dark.png" alt="The Dive home page with detected dev servers listed and ready to open" width="100%" />
 </p>
 
-Dive is a native browser for macOS and Windows, built on the Chromium Embedded Framework, with a Rust core and a React chrome. It is fast, keyboard-first and private by default. The difference is what sits beside the page: network, console, storage and accessibility panels, a device simulator, a screen studio, and an AI agent that can read and operate the tab. Every tab is also reachable by Claude Code, Cursor or any MCP client.
+Dive is a native browser for macOS and Windows, built on the Chromium Embedded Framework, with a Rust core and a React chrome. It is keyboard-first and private by default. The difference is what sits beside the page: network, console, storage and accessibility panels, a device simulator, a screen studio, and an AI agent that can read and operate the tab. Every tab is also reachable by Claude Code, Cursor or any MCP client.
 
 ## What you get
 

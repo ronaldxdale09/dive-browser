@@ -11,4 +11,10 @@ describe("README memory claim", () => {
     // process-per-site, so a sibling on the same origin can keep the renderer.
     expect(readme).not.toMatch(/drop their Chromium process/i);
   });
+
+  it("does not call Dive fast", () => {
+    // docs/performance/RESULTS.md is a spent bank: startup and reload lose
+    // to Chrome and Brave on the registered fixture. Do not re-score it.
+    expect(readme).not.toMatch(/It is fast,/);
+  });
 });
