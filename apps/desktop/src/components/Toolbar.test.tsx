@@ -412,6 +412,19 @@ describe("Toolbar", () => {
     expect(screen.getByLabelText("4 privacy actions on this page")).toBeTruthy();
   });
 
+  it("does not keep a privacy count when this tab is sleeping", () => {
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, block_trackers: true }, loaded: true });
+    usePrivacy.setState({ byTab: { [tab.id]: { ads: 2, trackers: 1, youtube: 1 } } });
+
+    render(<Toolbar />);
+    expect(screen.getByLabelText("4 privacy actions on this page")).toBeTruthy();
+    act(() => useBrowser.setState({ tabs: [{ ...tab, state: "discarded" }], activeTab: tab.id }));
+    expect(screen.queryByLabelText("4 privacy actions on this page")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+    expect(screen.queryByText("4 privacy actions so far")).toBeNull();
+    expect(screen.getByText(/sleeping/i)).toBeTruthy();
+  });
+
   it("does not present a working zero state when privacy events are unavailable", () => {
     usePrefs.setState({ prefs: { ...DEFAULT_PREFS, block_trackers: true }, loaded: true });
     usePrivacy.setState({ eventError: "privacy events unavailable" });

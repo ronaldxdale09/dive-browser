@@ -36,16 +36,27 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
   useFocusTrap(panel, { active: open, onEscape: () => setOpen(false) });
 
   const tab = tabs.find((candidate) => candidate.id === activeTab);
+  const sleeping = tab?.state === "discarded";
   const host = pageHost(tab?.url);
   const globalOn = prefs.block_trackers;
   const paused = host !== null && prefs.privacy_exceptions.includes(host);
-  const siteOn = globalOn && host !== null && !paused;
+  const siteOn = globalOn && host !== null && !paused && !sleeping;
   const youtubeSite = host === "www.youtube.com" || host === "m.youtube.com";
   const youtubeActive = siteOn && youtubeSite && prefs.youtube_protection;
-  const total = counts.ads + counts.trackers + counts.youtube;
-  const headline = !globalOn ? "DivePrivacy is off" : !host ? "Protection unavailable here" : paused ? "Protection paused here" : "Protected on this site";
+  const total = sleeping ? 0 : counts.ads + counts.trackers + counts.youtube;
+  const headline = sleeping ? "This tab is sleeping" : !globalOn ? "DivePrivacy is off" : !host ? "Protection unavailable here" : paused ? "Protection paused here" : "Protected on this site";
   // Paused, the zeros mean nothing was looked at, not that the site is clean.
-  const summary = !globalOn ? "Turn it on to block ads and trackers" : eventError ? "Activity unavailable" : paused ? "Nothing is blocked while paused" : total === 0 ? "Clean so far" : `${total} privacy actions so far`;
+  const summary = sleeping
+    ? "Wake it to count this page"
+    : !globalOn
+      ? "Turn it on to block ads and trackers"
+      : eventError
+        ? "Activity unavailable"
+        : paused
+          ? "Nothing is blocked while paused"
+          : total === 0
+            ? "Clean so far"
+            : `${total} privacy actions so far`;
 
   useEffect(() => {
     if (open && !info) void loadInfo().catch(() => undefined);
@@ -87,7 +98,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
         onClick={() => setOpen((value) => !value)}
         tooltipAlign="end"
       >
-        {globalOn && total > 0 && (
+        {globalOn && !sleeping && total > 0 && (
           <span
             key={total}
             className="privacy-count privacy-motion ml-0.5 rounded-full bg-highlight-soft px-1.5 py-px font-mono text-[10px] leading-4 text-highlight"
@@ -126,6 +137,10 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
           </header>
 
           <section aria-label="Protection layers" className="px-3 py-2">
+            {sleeping ? (
+              <p className="px-2.5 py-2 text-[11px] text-ink-3">This page is unloaded. Wake the tab to count ads and trackers again.</p>
+            ) : (
+              <>
             <Layer icon={Megaphone} label="Ads blocked" value={String(counts.ads)} countKey={counts.ads} />
             <Layer icon={Radar} label="Trackers stopped" value={String(counts.trackers)} countKey={counts.trackers} />
             <Layer
@@ -146,6 +161,8 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
                 </span>
               }
             />
+              </>
+            )}
           </section>
 
           <section className="border-t border-line px-4 py-3">
