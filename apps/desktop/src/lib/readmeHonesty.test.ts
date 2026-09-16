@@ -65,6 +65,13 @@ describe("README memory claim", () => {
     expect(readme).toMatch(/off until you turn it on/i);
   });
 
+  it("does not say DivePrivacy lists run as if they are on", () => {
+    // Same default as the screenshot caption. The pipeline can apply the
+    // lists; Prefs::default().block_trackers is false.
+    expect(readme).not.toContain("ads and tracker lists run in the request pipeline");
+    expect(readme).toContain("ads and tracker lists can run in the request pipeline");
+  });
+
   it("does not say every tab is reachable by MCP", () => {
     // AppBrowser::tabs filters TabState::Discarded. The sidecar already
     // says sleeping tabs are omitted; the README must not upgrade that.
