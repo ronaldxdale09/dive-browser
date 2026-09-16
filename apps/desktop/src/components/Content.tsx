@@ -10,7 +10,7 @@ import { RESIZE_GUTTER, useWindowMaximized } from "../lib/windowResize";
 import { describeNavError, searchTermFor } from "../lib/navError";
 import { useContentPreview, useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import type { PermissionRequest } from "../store/browser";
 import { Icon } from "./Icon";
 import { selectDevice, useEmulation } from "../store/emulation";
@@ -36,7 +36,7 @@ const Welcome = lazy(() => import("./Welcome").then(({ Welcome }) => ({ default:
  * for the active tab.
  */
 export function Content() {
-  const activeTab = useBrowser((s) => s.activeTab);
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const workspace = useBrowser((s) => s.activeWorkspace);
   const tabs = useBrowser((s) => s.tabs);
   const detached = useBrowser((s) => s.detached);

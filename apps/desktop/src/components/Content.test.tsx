@@ -121,6 +121,12 @@ describe("Content error panel", () => {
     render(<Content />);
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  it("does not explain a detached tab's failed URL as this window's", () => {
+    useBrowser.setState({ detached: ["t1"], navError: { t1: { url: "http://localhost:3000/", error: "net::ERR_CONNECTION_REFUSED" } } });
+    render(<Content />);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });
 
 describe("Content crash banner", () => {
@@ -151,6 +157,12 @@ describe("Content crash banner", () => {
     useBrowser.setState({ crashedTabs: { t1: { attempt: 1, recovering: true } } });
     render(<Content />);
     act(() => useBrowser.getState().applyLoad({ tab_id: "t1", phase: "stopped", url: null, error: null }));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("does not report a detached tab's crash as this window's", () => {
+    useBrowser.setState({ detached: ["t1"], crashedTabs: { t1: { attempt: 2, recovering: true } } });
+    render(<Content />);
     expect(screen.queryByRole("status")).toBeNull();
   });
 });
