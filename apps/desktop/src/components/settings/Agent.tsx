@@ -1,7 +1,7 @@
 import { KeyRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ProviderInfo } from "../../lib/ipc";
-import { credentialStoreName } from "../../lib/commands";
+import { credentialStoreName, displayChord } from "../../lib/commands";
 import { errorMessage } from "../../lib/errors";
 import { isReady, useAgent } from "../../store/agent";
 import { Icon } from "../Icon";
@@ -127,7 +127,7 @@ export function Agent() {
         />
       </Group>
 
-      <Group title="API keys" description={`One key per provider, in ${credentialStoreName()}. A key leaves this computer only in calls to its own provider. The Agent panel (⌘J) can add these too.`}>
+      <Group title="API keys" description={`One key per provider, in ${credentialStoreName()}. A key leaves this computer only in calls to its own provider. The Agent panel (${displayChord("⌘J")}) can add these too.`}>
         {providers
           .filter((p) => p.needs_key)
           .map((p) => (

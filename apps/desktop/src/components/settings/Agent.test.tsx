@@ -49,4 +49,11 @@ describe("Settings › Agent", () => {
     expect(document.body.textContent).not.toMatch(/keychain/i);
     expect(document.body.textContent).toMatch(/Credential Manager/);
   });
+
+  it("does not name ⌘J for the Agent panel on Windows", () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    render(<Agent />);
+    expect(document.body.textContent).not.toMatch(/⌘/);
+    expect(document.body.textContent).toMatch(/Ctrl\+J/);
+  });
 });
