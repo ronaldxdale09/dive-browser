@@ -49,7 +49,7 @@ export function describeNavError(error: string, url: string): NavErrorText {
     case "ERR_INVALID_URL":
       return { title: "That is not a valid address", detail: "The address could not be parsed.", hint: "Check for stray characters or a missing scheme." };
     case "ERR_CERT_DATE_INVALID":
-      return { title: "Certificate expired", detail: "The site's certificate is past its dates, or not yet valid.", hint: "If the site is fine elsewhere, check this Mac's date and time." };
+      return { title: "Certificate expired", detail: "The site's certificate is past its dates, or not yet valid.", hint: "If the site is fine elsewhere, check this computer's date and time." };
     case "ERR_CERT_COMMON_NAME_INVALID":
       return { title: "Certificate is for another site", detail: "The certificate the server sent does not name this host.", hint: "A dev server answering on a different hostname than its certificate does this." };
     case "ERR_HTTP_RESPONSE_CODE_FAILURE":

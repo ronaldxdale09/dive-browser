@@ -28,6 +28,12 @@ describe("describeNavError", () => {
     expect(describeNavError("net::ERR_BLOCKED_BY_CLIENT", "https://httpbin.org/api/ping").title).toBe("Blocked by Dive");
   });
 
+  it("points a date-invalid certificate at this computer's clock, not this Mac", () => {
+    const hint = describeNavError("net::ERR_CERT_DATE_INVALID", "https://expired.badssl.com/").hint;
+    expect(hint).not.toMatch(/this Mac/);
+    expect(hint).toMatch(/this computer/);
+  });
+
   it("turns an unresolved host into a search term without its domain suffix", () => {
     expect(searchTermFor("http://nonexistent-host-dive.invalid/page")).toBe("nonexistent-host-dive");
     expect(searchTermFor("https://www.docs.example.com/")).toBe("docs example");
