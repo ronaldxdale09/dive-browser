@@ -87,6 +87,18 @@ describe("Appearance", () => {
     expect(prefs().custom_highlight).toBe("#e0a04a");
   });
 
+  it("starts custom colours from Graphite's light seeds when the window is light", async () => {
+    // Graphite is auto. Copying the dark set claims this window is dark.
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, theme: "light" }, loaded: true });
+    render(<Appearance />);
+    fireEvent.click(screen.getByRole("radio", { name: "Custom" }));
+    await waitFor(() => expect(prefs().appearance_preset).toBe("custom"));
+    fireEvent.click(screen.getByRole("button", { name: "Start from Graphite" }));
+    await waitFor(() => expect(prefs().custom_ground).toBe("#f3f3f1"));
+    expect(prefs().custom_ink).toBe("#161616");
+    expect(prefs().custom_highlight).toBe("#0f8f7e");
+  });
+
   it("keeps the accent swatches and adds a custom well", async () => {
     render(<Appearance />);
     fireEvent.click(screen.getByRole("radio", { name: "Sky" }));

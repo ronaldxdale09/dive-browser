@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Icon } from "../Icon";
 import { Button, Group, Row, Segmented, Select, Switch } from "../SettingsFields";
-import { DEFAULT_APPEARANCE, DEFAULT_PREFS, usePrefs } from "../../store/prefs";
+import { DEFAULT_APPEARANCE, DEFAULT_PREFS, systemTheme, usePrefs } from "../../store/prefs";
 import { colorName } from "../../lib/profileAvatar";
 import type { Prefs } from "../../store/prefs";
 import { CUSTOM_PRESET_ID, PRESETS, contrastRatio, exportTheme, findPreset, importTheme, isHex, presetSeeds, resolveScheme } from "../../lib/theme";
@@ -320,7 +320,8 @@ function CustomColours({ prefs, set }: { prefs: Prefs; set: (patch: Partial<Pref
             <Select label="Start from template" value={from} onChange={setFrom} options={PRESETS.map((p) => ({ value: p.id, label: p.name }))} />
             <Button
               onClick={() => {
-                const seeds = presetSeeds(fromPreset, fromPreset.scheme === "light" ? "light" : "dark") ?? fromPreset.dark ?? fromPreset.light!;
+                const scheme = fromPreset.scheme !== "auto" ? fromPreset.scheme : resolveScheme({ ...prefs, appearance_preset: fromPreset.id }, systemTheme);
+                const seeds = presetSeeds(fromPreset, scheme) ?? fromPreset.dark ?? fromPreset.light!;
                 set({ custom_ground: seeds.ground, custom_ink: seeds.ink, custom_highlight: seeds.highlight });
               }}
             >
