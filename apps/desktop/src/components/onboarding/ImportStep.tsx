@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Download } from "lucide-react";
+import { importFromWhere } from "../../lib/commands";
 import { useBrowserImport } from "../../store/browserImport";
 import { useOnboarding } from "../../store/onboarding";
 import { Icon } from "../Icon";
@@ -31,7 +32,7 @@ export function ImportStep() {
         <div className="min-w-0">
           <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">{stepLabel("import")}</p>
           <h2 ref={heading} tabIndex={-1} className="mt-1 text-lg font-semibold tracking-[-0.02em] outline-none">Bring your bookmarks, history, passwords and form entries</h2>
-          <p className="mt-0.5 text-xs text-ink-3">From the browser you have been using. Nothing there changes, and you can do this later from Settings.</p>
+          <p className="mt-0.5 text-xs text-ink-3">From {importFromWhere()}. Nothing there changes, and you can do this later from Settings.</p>
         </div>
       </div>
       <div className="mt-5">
