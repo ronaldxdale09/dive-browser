@@ -1,6 +1,6 @@
 import { DEFAULT_START_URL } from "../lib/constants";
 import { recordedToSteps, toPlaywrightSpec } from "../lib/playwright";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { useRecorder } from "../store/recorder";
 import { SpecModal } from "./SpecModal";
 
@@ -12,7 +12,7 @@ export function RecorderModal() {
   const startedOn = useRecorder((s) => s.startTitle);
   const clear = useRecorder((s) => s.clear);
   const tabs = useBrowser((s) => s.tabs);
-  const activeTabId = useBrowser((s) => s.activeTab);
+  const activeTabId = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
 
   if (!isOpen) return null;
 
