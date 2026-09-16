@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../../lib/ipc";
 import type { AppInfo } from "../../lib/ipc";
-import { cursorConfig, Developer, mcpCommand, shortTokenPath } from "./Developer";
+import { cursorConfig, cursorMcpJsonPath, Developer, mcpCommand, shortTokenPath } from "./Developer";
 
 const info: AppInfo = { version: "0.1.16", build: { channel: "dev", number: "1", commit: "abc", built_at: null }, data_dir: "/tmp/x", mcp_url: "http://127.0.0.1:7391/mcp", mcp_token_path: "/tmp/x/mcp-token", simulate: null, updater: false };
 
@@ -12,6 +12,12 @@ afterEach(() => {
 });
 
 describe("Developer › MCP setup", () => {
+  it("does not send Windows to ~/.cursor/mcp.json", () => {
+    expect(cursorMcpJsonPath(true)).not.toMatch(/~\//);
+    expect(cursorMcpJsonPath(true)).toMatch(/%USERPROFILE%/);
+    expect(cursorMcpJsonPath(false)).toBe("~/.cursor/mcp.json");
+  });
+
   it("does not tell Windows to cat the token", () => {
     const win = "C:\\Users\\a\\AppData\\Roaming\\dive\\mcp-token";
     expect(mcpCommand(info, win, true)).not.toMatch(/\$\(cat /);

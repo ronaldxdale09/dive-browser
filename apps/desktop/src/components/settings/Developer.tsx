@@ -22,6 +22,11 @@ export function cursorConfig(info: Pick<AppInfo, "mcp_url">, token: string): str
   return JSON.stringify({ mcpServers: { dive: { url: info.mcp_url, headers: { Authorization: `Bearer ${token}` } } } }, null, 2);
 }
 
+/** Where Cursor keeps mcp.json on this OS. */
+export function cursorMcpJsonPath(windows = isWindows()): string {
+  return windows ? String.raw`%USERPROFILE%\.cursor\mcp.json` : "~/.cursor/mcp.json";
+}
+
 /** The token path as the block shows it: just the file, so the command fits on a line or two. */
 export function shortTokenPath(path: string): string {
   const name = path.split(/[/\\]/).filter(Boolean).pop();
@@ -83,7 +88,7 @@ export function Developer({ info }: { info: AppInfo | null }) {
             <CopyBlock text={command} display={shown || undefined} displayTitle={command || undefined} />
             {info && token && (
               <>
-                <p className="mt-3 mb-1.5 text-[11px] text-ink-2">Cursor, and any client set up with JSON: add this to its mcp.json (Cursor keeps it at ~/.cursor/mcp.json).</p>
+                <p className="mt-3 mb-1.5 text-[11px] text-ink-2">Cursor, and any client set up with JSON: add this to its mcp.json (Cursor keeps it at {cursorMcpJsonPath()}).</p>
                 <CopyBlock text={cursorConfig(info, token)} label="Copy mcp.json entry" display={cursorConfig(info, "••••••••")} />
               </>
             )}
