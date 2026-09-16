@@ -417,6 +417,7 @@ describe("Toolbar", () => {
     expect(screen.getByTestId("privacy-halo").className).toContain("privacy-halo");
     expect(screen.getByText("Ads blocked").parentElement?.nextSibling?.textContent).toBe("2");
     expect(screen.getByText("Trackers stopped").parentElement?.nextSibling?.textContent).toBe("1");
+    expect(screen.getByText("YouTube protection").parentElement?.nextSibling?.textContent).toBe("1");
     expect(screen.getByLabelText("4 privacy actions on this page")).toBeTruthy();
   });
 
@@ -509,13 +510,15 @@ describe("Toolbar", () => {
 
     render(<Toolbar />);
     fireEvent.click(screen.getByRole("button", { name: "Protection" }));
-    expect(screen.getByText("YouTube protection").parentElement?.nextSibling?.textContent).toBe("Active");
+    expect(screen.getByText("YouTube protection").parentElement?.nextSibling?.textContent).toBe("2");
+    expect(screen.getByText("Active")).toBeTruthy();
     const youtube = screen.getByRole("switch", { name: "YouTube protection" });
     expect(youtube.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(youtube);
 
     await waitFor(() => expect(ipc.prefsSet).toHaveBeenCalledWith({ ...DEFAULT_PREFS, block_trackers: true, youtube_protection: false }));
-    expect(screen.getByText("YouTube protection").parentElement?.nextSibling?.textContent).toBe("Inactive");
+    expect(screen.getByText("YouTube protection").parentElement?.nextSibling?.textContent).toBe("2");
+    expect(screen.getByText("Inactive")).toBeTruthy();
   });
 
   it.each(["dive://screen", "not a valid URL"])("disables host-specific controls for %s", (url) => {

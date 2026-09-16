@@ -146,8 +146,9 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
             <Layer
               icon={Play}
               label="YouTube protection"
-              value={!youtubeSite ? "" : youtubeActive ? "Active" : "Inactive"}
-              note={youtubeSite ? undefined : "Applies on youtube.com"}
+              value={String(counts.youtube)}
+              countKey={counts.youtube}
+              note={!youtubeSite ? "Applies on youtube.com" : youtubeActive ? "Active" : "Inactive"}
               control={
                 // The preference keeps its value on every site; the switch only
                 // turns muted where it cannot change what the page sees.
