@@ -17,12 +17,14 @@ const TRACKER_RULES: &str = include_str!("../privacy/trackers.txt");
 const EXCEPTION_RULES: &str = include_str!("../privacy/exceptions.txt");
 const COSMETIC_RULES: &str = include_str!("../privacy/cosmetic.json");
 const YOUTUBE_SCRIPT: &str = include_str!("inject/youtube_privacy.js");
-const _: &str = include_str!("../privacy/VERSION");
+const VERSION_FILE: &str = include_str!("../privacy/VERSION");
 const PAGE_BINDING_PREFIX: &str = "__divePrivacy_";
 const MAX_PAGE_EVENT: usize = 64;
 
 /// Version of the rule assets bundled with this application.
-pub const DIVE_PRIVACY_VERSION: &str = "2026.09.04.3";
+pub fn bundled_version() -> &'static str {
+    VERSION_FILE.trim()
+}
 
 /// Categories reported for network requests blocked by `DivePrivacy`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Type)]
@@ -73,7 +75,7 @@ pub struct PrivacyInfo {
 #[specta::specta]
 pub fn privacy_info() -> PrivacyInfo {
     PrivacyInfo {
-        version: DIVE_PRIVACY_VERSION.to_owned(),
+        version: bundled_version().to_owned(),
         ad_rules: network_rule_count(ADS_RULES),
         tracker_rules: network_rule_count(TRACKER_RULES),
         cosmetic_hosts: serde_json::from_str::<serde_json::Value>(COSMETIC_RULES)
@@ -833,10 +835,8 @@ mod tests {
 
     #[test]
     fn bundled_version_matches_public_version() {
-        assert_eq!(
-            include_str!("../privacy/VERSION").trim(),
-            DIVE_PRIVACY_VERSION
-        );
+        assert_eq!(bundled_version(), include_str!("../privacy/VERSION").trim());
+        assert_eq!(privacy_info().version, "2026.09.04.3");
     }
 
     #[test]
