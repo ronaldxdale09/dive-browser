@@ -2,7 +2,7 @@ import { Boxes, Info, RefreshCw } from "lucide-react";
 import { useCallback, useState } from "react";
 import { ipc } from "../lib/ipc";
 import type { Category, Detection, StackReport } from "../lib/ipc";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { errorMessage } from "../lib/errors";
 import { Icon } from "./Icon";
 import { Tooltip } from "./Tooltip";
@@ -26,8 +26,11 @@ const ORDER: { id: Category; label: string }[] = [
  * this built in rather than as an extension.
  */
 export function StackPanel() {
-  const activeTab = useBrowser((s) => s.activeTab);
-  const url = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.url ?? "");
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
+  const url = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return id ? (s.tabs.find((t) => t.id === id)?.url ?? "") : "";
+  });
   // Keyed by tab *and* URL: a reading belongs to the page it was taken on,
   // so navigating away drops it without an effect that clears state.
   const [reports, setReports] = useState<Record<string, StackReport>>({});
