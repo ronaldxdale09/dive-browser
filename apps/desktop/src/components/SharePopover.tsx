@@ -71,7 +71,7 @@ export function SharePopover() {
           {error && <p role="alert" className="text-danger">{error}</p>}
           {!info && !error && (
             <p role="status" className="text-[11px] text-ink-3">
-              Finding this Mac's address…
+              Finding this computer's address…
             </p>
           )}
           {info && (
@@ -102,7 +102,7 @@ export function SharePopover() {
                   {copied ? "Link copied" : ""}
                 </span>
               </div>
-              <p className="mt-2 text-[11px] text-ink-3">Same Wi-Fi required. Localhost is rewritten to this Mac's LAN address.</p>
+              <p className="mt-2 text-[11px] text-ink-3">Same Wi-Fi required. Localhost is rewritten to this computer's LAN address.</p>
             </>
           )}
         </div>

@@ -46,9 +46,12 @@ describe("SharePopover", () => {
     Object.defineProperty(navigator, "clipboard", { value: { writeText: write }, configurable: true });
     render(<SharePopover />);
     fireEvent.click(screen.getByRole("button", { name: "Share to another device" }));
-    expect(screen.getByRole("status").textContent).toContain("Finding this Mac's address");
+    expect(screen.getByRole("status").textContent).toContain("Finding this computer's address");
+    expect(screen.queryByText(/this Mac/)).toBeNull();
     resolve({ lan_url: "http://192.168.1.2:3000/docs", qr_svg: "<svg></svg>" });
     expect(await screen.findByRole("img", { name: "QR code for http://192.168.1.2:3000/docs" })).toBeTruthy();
+    expect(screen.getByText(/this computer's LAN address/)).toBeTruthy();
+    expect(screen.queryByText(/this Mac/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
     await waitFor(() => expect(write).toHaveBeenCalledWith("http://192.168.1.2:3000/docs"));
     expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
