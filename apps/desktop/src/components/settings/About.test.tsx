@@ -44,6 +44,19 @@ describe("About updates", () => {
     expect(document.body.textContent).toMatch(/checks shortly after launch/);
   });
 
+  it("does not claim the launch check in a private window", () => {
+    // App.tsx skips startUpdateWatch when DIVE_PRIVATE_SESSION is set.
+    const privateWindow = window as Window & { __DIVE_PRIVATE__?: boolean };
+    privateWindow.__DIVE_PRIVATE__ = true;
+    try {
+      render(<About info={info("release")} />);
+      expect(document.body.textContent).not.toMatch(/shortly after launch/);
+      expect(document.body.textContent).toMatch(/Private windows do not check for updates on their own/);
+    } finally {
+      delete privateWindow.__DIVE_PRIVATE__;
+    }
+  });
+
   it("walks the release states: check, up to date once, error with a retry, available with install", () => {
     const check = vi.fn().mockResolvedValue(undefined);
     useUpdates.setState({ status: "idle", check });

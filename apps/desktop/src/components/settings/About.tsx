@@ -101,6 +101,7 @@ function StartOver() {
  */
 function Updates({ channel, updater }: { channel: string | null; updater: boolean }) {
   const silent = channel === "dev" || !updater;
+  const privateWindow = isPrivateWindow();
   const status = useUpdates((s) => s.status);
   const update = useUpdates((s) => s.update);
   const error = useUpdates((s) => s.error);
@@ -121,7 +122,7 @@ function Updates({ channel, updater }: { channel: string | null; updater: boolea
           ) : status === "error" ? (
             <span className="text-danger">{error}</span>
           ) : (
-            "Dive checks shortly after launch."
+            privateWindow ? "Private windows do not check for updates on their own." : "Dive checks shortly after launch."
           )
         }
         control={
