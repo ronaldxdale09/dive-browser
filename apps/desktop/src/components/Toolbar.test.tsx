@@ -184,6 +184,14 @@ describe("Toolbar", () => {
     expect(screen.getByRole("button", { name: "Reset zoom" }).textContent).toBe("200%");
   });
 
+  it("does not keep the last zoom percent when this tab is sleeping", () => {
+    useBrowser.setState({ tabs: [tab], activeTab: tab.id, zoom: { [tab.id]: 1.5 }, defaultZoom: 1 });
+    render(<Toolbar />);
+    expect(screen.getByRole("button", { name: "Reset zoom" }).textContent).toBe("150%");
+    act(() => useBrowser.setState({ tabs: [{ ...tab, state: "discarded" }], activeTab: tab.id }));
+    expect(screen.queryByRole("button", { name: "Reset zoom" })).toBeNull();
+  });
+
   it("shows the address that failed to load, not the last one that worked", () => {
     useBrowser.setState({ navError: { [tab.id]: { url: "http://nonexistent.invalid/", error: "net::ERR_NAME_NOT_RESOLVED" } } });
     render(<Toolbar />);

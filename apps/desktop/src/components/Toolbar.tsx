@@ -289,10 +289,11 @@ function LoadingLine() {
 /** Shows the active tab's zoom when it is not the default; click resets. */
 function ZoomBadge() {
   const active = useBrowser((s) => s.activeTab);
+  const sleeping = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.state === "discarded");
   const zoom = useBrowser((s) => (active ? (s.zoom[active] ?? s.defaultZoom) : s.defaultZoom));
   const defaultZoom = useBrowser((s) => s.defaultZoom);
   const zoomStep = useBrowser((s) => s.zoomStep);
-  if (Math.abs(zoom - defaultZoom) < 0.001) return null;
+  if (sleeping || Math.abs(zoom - defaultZoom) < 0.001) return null;
   return (
     <Tooltip label="Reset zoom" shortcut="⌘0">
       <button
