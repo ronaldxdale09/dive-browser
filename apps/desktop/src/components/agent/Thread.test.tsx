@@ -262,4 +262,69 @@ describe("Thread", () => {
     render(<Thread onAddProvider={() => {}} />);
     expect(screen.queryByRole("button", { name: /Example docs/ })).toBeNull();
   });
+  it("folds a finished run's steps to one line, and never folds away what needs an answer", () => {
+    const step = (id: string, over: Record<string, unknown> = {}) => ({
+      id,
+      name: "page_click",
+      input: '{"locator":"text=Go"}',
+      action: true,
+      summary: "clicked",
+      ...over,
+    });
+    useAgent.setState({
+      messages: [
+        { id: "u1", role: "user", content: "open youtube" },
+        {
+          id: "a1",
+          role: "assistant",
+          content: "Opened YouTube in a new tab.",
+          steps: [step("s1"), step("s2"), step("s3"), step("s4"), step("s5")],
+        },
+      ],
+    });
+    render(<Thread onAddProvider={() => {}} />);
+    // Five rows would push the conversation off the top of the dock.
+    expect(screen.getByRole("button", { name: /5 steps/ })).toBeTruthy();
+    expect(screen.queryByText("Clicked text=Go")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /5 steps/ }));
+    expect(screen.getAllByText("Clicked text=Go").length).toBe(5);
+
+    // A failure is not history: it stays out even while the rest is folded.
+    cleanup();
+    useAgent.setState({
+      messages: [
+        { id: "u1", role: "user", content: "open youtube" },
+        {
+          id: "a1",
+          role: "assistant",
+          content: "That did not work.",
+          steps: [step("s1"), step("s2"), step("s3", { error: true, summary: "no match" })],
+        },
+      ],
+    });
+    render(<Thread onAddProvider={() => {}} />);
+    expect(screen.getByRole("button", { name: /3 steps.*1 to look at/ })).toBeTruthy();
+    expect(screen.getAllByText("Click text=Go").length).toBe(1);
+  });
+
+  it("minimises the conversation while keeping the composer", () => {
+    useAgent.setState({
+      messages: [
+        { id: "u1", role: "user", content: "open youtube" },
+        { id: "a1", role: "assistant", content: "Done." },
+      ],
+    });
+    render(<Thread onAddProvider={() => {}} />);
+    expect(screen.getByText("open youtube")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Minimise the conversation" }));
+    expect(screen.queryByText("open youtube")).toBeNull();
+    // The composer is the point of staying open at all.
+    expect(screen.getByPlaceholderText(placeholder)).toBeTruthy();
+
+    // And there is a way back that says what is waiting.
+    fireEvent.click(screen.getByRole("button", { name: /2 messages/ }));
+    expect(screen.getByText("open youtube")).toBeTruthy();
+  });
 });

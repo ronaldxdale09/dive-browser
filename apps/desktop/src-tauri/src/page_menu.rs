@@ -94,6 +94,7 @@ fn carry_out(
             )?;
             open_beside(&main, app, &state, tab_id, &url, true)
         }
+        ContextMenuAction::CaptureFullPage => chrome(app, "capture.fullpage"),
         ContextMenuAction::QrCode => chrome(app, "share.open"),
         ContextMenuAction::AskAgent => chrome(app, "sidecar.open"),
         ContextMenuAction::DeviceSimulator => chrome(app, "simulator.toggle"),

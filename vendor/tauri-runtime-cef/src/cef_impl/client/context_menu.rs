@@ -32,6 +32,7 @@ pub enum ContextMenuAction {
     CopyImageAddress,
     SearchSelection,
     SavePage,
+    CaptureFullPage,
     QrCode,
     AskAgent,
     DeviceSimulator,
@@ -43,7 +44,7 @@ pub enum ContextMenuAction {
 }
 
 impl ContextMenuAction {
-    const ALL: [Self; 12] = [
+    const ALL: [Self; 13] = [
         Self::OpenLinkInNewTab,
         Self::CopyLink,
         Self::OpenImageInNewTab,
@@ -51,6 +52,7 @@ impl ContextMenuAction {
         Self::CopyImageAddress,
         Self::SearchSelection,
         Self::SavePage,
+        Self::CaptureFullPage,
         Self::QrCode,
         Self::AskAgent,
         Self::DeviceSimulator,
@@ -242,8 +244,12 @@ wrap_context_menu_handler! {
       native(model, MenuId::BACK, "Back", browser.can_go_back() != 0);
       native(model, MenuId::FORWARD, "Forward", browser.can_go_forward() != 0);
       native(model, MenuId::RELOAD, "Reload", true);
+      // The reload that throws the cache away, which is the one a developer
+      // reaches for when the page is serving them yesterday's script.
+      native(model, MenuId::RELOAD_NOCACHE, "Hard Reload", true);
       model.add_separator();
       item(model, ContextMenuAction::SavePage, "Save As…");
+      item(model, ContextMenuAction::CaptureFullPage, "Capture Full Page");
       native(model, MenuId::PRINT, "Print…", true);
       model.add_separator();
       item(model, ContextMenuAction::QrCode, "Create QR Code for This Page");
@@ -304,6 +310,19 @@ mod tests {
         assert!(bridge.options().agent);
         bridge.set_options(ContextMenuOptions { agent: false });
         assert!(!bridge.options().agent);
+    }
+
+    #[test]
+    fn every_action_the_menu_offers_has_an_id_of_its_own() {
+        // Two actions sharing an id would silently run the wrong one, and the
+        // ids are positions in ALL -- so adding an item in the middle has to
+        // keep them distinct.
+        let mut ids: Vec<i32> = ContextMenuAction::ALL.iter().map(|a| a.id()).collect();
+        let total = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), total, "two menu actions share an id");
+        assert!(ContextMenuAction::ALL.contains(&ContextMenuAction::CaptureFullPage));
     }
 
     #[test]

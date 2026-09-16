@@ -5,20 +5,66 @@ import type { Step } from "../../store/agent";
 import { useAgent } from "../../store/agent";
 import { Icon } from "../Icon";
 
+/** A step still waiting on the person, or one that failed, is never folded away. */
+function demandsAttention(step: Step): boolean {
+  return Boolean(step.awaiting) || Boolean(step.error);
+}
+
+/** Past this many, a finished run's steps are worth folding. */
+const FOLD_OVER = 2;
+
 /**
  * What the agent did, as a timeline inside its reply. Each row is a verb
  * phrase; opening one shows the raw call and its result. Actions waiting on
  * the person get their Allow / Deny right there in the row, so approving
  * never means finding another pane.
+ *
+ * While the run is going the steps are the interesting part, so they are all
+ * there. Once it has finished they are history, and ten of them in every
+ * reply push the conversation off the top of a dock that is only ever a
+ * paragraph tall -- so a finished run folds to one line and opens again on a
+ * click. Anything failed or waiting stays out: those are not history.
  */
-export function StepList({ steps }: { steps: Step[] }) {
+export function StepList({ steps, live = false }: { steps: Step[]; live?: boolean }) {
+  const [opened, setOpened] = useState(false);
   if (steps.length === 0) return null;
+  const notable = steps.filter(demandsAttention);
+  const foldable = !live && !opened && steps.length > FOLD_OVER && notable.length < steps.length;
+  if (!foldable) {
+    return (
+      <ol className="mb-2 space-y-px">
+        {steps.map((s) => (
+          <StepRow key={s.id} step={s} />
+        ))}
+      </ol>
+    );
+  }
   return (
-    <ol className="mb-2 space-y-px">
-      {steps.map((s) => (
-        <StepRow key={s.id} step={s} />
-      ))}
-    </ol>
+    <div className="mb-2">
+      <button
+        type="button"
+        onClick={() => setOpened(true)}
+        aria-expanded={false}
+        className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1 text-left text-[11px] text-ink-3 hover:bg-surface-2 hover:text-ink-2"
+      >
+        <span className="grid size-5 shrink-0 place-items-center rounded-md text-ink-3">
+          <Icon icon={Check} size={12} />
+        </span>
+        <span className="min-w-0 flex-1 truncate">
+          {steps.length} steps
+          {notable.length > 0 && <span className="text-danger"> · {notable.length} to look at</span>}
+        </span>
+        <Icon icon={ChevronRight} size={11} className="shrink-0 text-ink-3" />
+      </button>
+      {/* Folded is not hidden: whatever failed or is waiting is still here. */}
+      {notable.length > 0 && (
+        <ol className="space-y-px">
+          {notable.map((s) => (
+            <StepRow key={s.id} step={s} />
+          ))}
+        </ol>
+      )}
+    </div>
   );
 }
 

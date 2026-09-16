@@ -1,4 +1,4 @@
-import { ArrowUp, Brain, ChevronRight, EyeOff, FlaskConical, Globe, ShieldAlert, ShieldOff, Square } from "lucide-react";
+import { ArrowUp, Brain, ChevronDown, ChevronRight, ChevronUp, EyeOff, FlaskConical, Globe, ShieldAlert, ShieldOff, Square } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { compactNumber, formatCost } from "../../lib/agentSteps";
 import { replayableSteps, toPlaywrightSpec } from "../../lib/playwright";
@@ -69,6 +69,9 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
   const current = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
   const openTab = useBrowser((s) => s.openTab);
   const [draft, setDraft] = useState("");
+  // The transcript out of the way without losing it. The composer stays: the
+  // point of minimising is to see the page, not to leave the conversation.
+  const [minimized, setMinimized] = useState(false);
   // The model panel opens upward, into the space the ways in occupy.
   const [pickerOpen, setPickerOpen] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
@@ -104,7 +107,20 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
 
   return (
     <>
-      {messages.length > 0 && (
+      {messages.length > 0 && minimized && (
+        <button
+          type="button"
+          data-native-overlay
+          onClick={() => setMinimized(false)}
+          className="animate-agent-slide-up mb-2 flex items-center gap-2 self-center rounded-full border border-line-2 bg-surface/95 px-3 py-1.5 text-[11px] text-ink-2 shadow-2xl backdrop-blur-xl hover:text-ink"
+        >
+          <Icon icon={ChevronUp} size={12} />
+          {messages.length} message{messages.length === 1 ? "" : "s"}
+          {busy && <span className="text-highlight">· working</span>}
+        </button>
+      )}
+
+      {messages.length > 0 && !minimized && (
         <div
           data-native-overlay
           className="mb-2 flex min-h-0 flex-col gap-4 overflow-auto rounded-[20px] border border-line-2 bg-surface/95 px-4 py-4 shadow-2xl backdrop-blur-xl select-text"
@@ -222,6 +238,19 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
 
           <span className="flex-1" />
 
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setMinimized((v) => !v)}
+              aria-expanded={!minimized}
+              title={minimized ? "Show the conversation" : "Hide the conversation and keep the composer"}
+              className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink"
+            >
+              <Icon icon={minimized ? ChevronUp : ChevronDown} size={13} />
+              <span className="sr-only">{minimized ? "Show the conversation" : "Minimise the conversation"}</span>
+            </button>
+          )}
+
           {messages.length > 0 && !busy && (
             <button
               type="button"
@@ -290,7 +319,7 @@ const AssistantMessage = memo(function AssistantMessage({
   return (
     <div className="max-w-full text-xs leading-relaxed text-ink animate-agent-slide-up">
       {m.reasoning && <Reasoning text={m.reasoning} live={Boolean(m.pending && !m.content)} />}
-      {m.steps && <StepList steps={m.steps} />}
+      {m.steps && <StepList steps={m.steps} live={Boolean(m.pending)} />}
       {m.content && <Markdown text={m.content} onLink={onLink} />}
       {!m.pending && !m.content && !m.error && !m.stopped && !m.reasoning && !(m.steps && m.steps.length > 0) && (
         <p className="py-1 text-ink-3 italic">The model sent nothing back. Ask again, or pick a larger model.</p>
