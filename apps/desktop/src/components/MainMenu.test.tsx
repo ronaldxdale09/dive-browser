@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { MainMenu } from "./MainMenu";
 
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ isFullscreen: () => Promise.resolve(false), setFullscreen: () => Promise.resolve() }) }));
@@ -43,6 +43,16 @@ describe("MainMenu", () => {
     } finally {
       Reflect.deleteProperty(window, "__DIVE_PRIVATE__");
     }
+  });
+
+  it("does not show a detached tab's zoom as this window's", () => {
+    useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [tab.id], zoom: { [tab.id]: 1.5 }, defaultZoom: 1 });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    render(<MainMenu />);
+    expect(screen.getByRole("button", { name: "Reset zoom" }).textContent).toBe("100%");
+    expect((screen.getByRole("button", { name: "Reset zoom" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Zoom in" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Zoom out" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("lists the browser's pages and features with their shortcuts", () => {

@@ -36,7 +36,7 @@ import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { screenUrl } from "./internal/InternalPage";
 import { useImportVideo } from "../screen/importVideo";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 
 /**
@@ -183,9 +183,15 @@ export function MainMenu() {
 
 /** − 100% + and a fullscreen toggle, as one row like a browser menu's. */
 function ZoomRow() {
-  const active = useBrowser((s) => s.activeTab);
-  const sleeping = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.state === "discarded");
-  const zoom = useBrowser((s) => (s.activeTab ? (s.zoom[s.activeTab] ?? s.defaultZoom) : s.defaultZoom));
+  const active = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
+  const sleeping = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return id ? s.tabs.find((t) => t.id === id)?.state === "discarded" : false;
+  });
+  const zoom = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return id ? (s.zoom[id] ?? s.defaultZoom) : s.defaultZoom;
+  });
   const zoomStep = useBrowser((s) => s.zoomStep);
   const [full, setFull] = useState(false);
   useEffect(() => {
@@ -203,7 +209,7 @@ function ZoomRow() {
       <button type="button" aria-label="Zoom out" title={`Zoom out (${displayChord("⌘−")})`} disabled={!active || sleeping} onClick={() => void zoomStep(-1)} className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
         <Icon icon={Minus} size={14} />
       </button>
-      <button type="button" aria-label="Reset zoom" title={`Reset zoom (${displayChord("⌘0")})`} disabled={sleeping} onClick={() => void zoomStep(0)} className="w-12 rounded-md py-1 text-center font-mono text-[12px] tabular-nums hover:bg-surface-2 disabled:opacity-40">
+      <button type="button" aria-label="Reset zoom" title={`Reset zoom (${displayChord("⌘0")})`} disabled={!active || sleeping} onClick={() => void zoomStep(0)} className="w-12 rounded-md py-1 text-center font-mono text-[12px] tabular-nums hover:bg-surface-2 disabled:opacity-40">
         {sleeping ? "—" : `${Math.round(zoom * 100)}%`}
       </button>
       <button type="button" aria-label="Zoom in" title={`Zoom in (${displayChord("⌘=")})`} disabled={!active || sleeping} onClick={() => void zoomStep(1)} className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
