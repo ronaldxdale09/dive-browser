@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { ipc } from "../../lib/ipc";
 import type { AppInfo } from "../../lib/ipc";
+import { isWindows } from "../../lib/commands";
 import { isPrivateWindow } from "../../lib/privateMode";
 import { Group, Row, Select, Switch } from "../SettingsFields";
 import { CopyBlock } from "./CopyBlock";
 import { usePref } from "./usePref";
 
 /** The `claude mcp add` line for this build, with the token read from `tokenPath`. */
-export function mcpCommand(info: Pick<AppInfo, "mcp_url">, tokenPath: string): string {
-  return `claude mcp add --transport http dive ${info.mcp_url} --header "Authorization: Bearer $(cat '${tokenPath}')"`;
+export function mcpCommand(info: Pick<AppInfo, "mcp_url">, tokenPath: string, windows = isWindows()): string {
+  const read = windows ? `$(Get-Content '${tokenPath}')` : `$(cat '${tokenPath}')`;
+  return `claude mcp add --transport http dive ${info.mcp_url} --header "Authorization: Bearer ${read}"`;
 }
 
 /**
@@ -22,7 +24,7 @@ export function cursorConfig(info: Pick<AppInfo, "mcp_url">, token: string): str
 
 /** The token path as the block shows it: just the file, so the command fits on a line or two. */
 export function shortTokenPath(path: string): string {
-  const name = path.split("/").filter(Boolean).pop();
+  const name = path.split(/[/\\]/).filter(Boolean).pop();
   return name ? `…/${name}` : path;
 }
 

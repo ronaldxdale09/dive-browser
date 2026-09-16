@@ -12,6 +12,13 @@ afterEach(() => {
 });
 
 describe("Developer › MCP setup", () => {
+  it("does not tell Windows to cat the token", () => {
+    const win = "C:\\Users\\a\\AppData\\Roaming\\dive\\mcp-token";
+    expect(mcpCommand(info, win, true)).not.toMatch(/\$\(cat /);
+    expect(mcpCommand(info, win, true)).toMatch(/Get-Content/);
+    expect(shortTokenPath(win)).toBe("…/mcp-token");
+  });
+
   it("builds the claude command around the token file and a JSON entry around the token itself", () => {
     expect(mcpCommand(info, info.mcp_token_path)).toBe(`claude mcp add --transport http dive http://127.0.0.1:7391/mcp --header "Authorization: Bearer $(cat '/tmp/x/mcp-token')"`);
     expect(shortTokenPath(info.mcp_token_path)).toBe("…/mcp-token");
