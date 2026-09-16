@@ -4,7 +4,7 @@ import { Captions, Globe, House, ScrollText, Lock, MoreHorizontal, RotateCw, Sea
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FOCUS_ADDRESS } from "../lib/commands";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
 import { SharePopover } from "./SharePopover";
 import { BookmarkButton } from "./BookmarkButton";
@@ -288,8 +288,11 @@ function LoadingLine() {
 
 /** Shows the active tab's zoom when it is not the default; click resets. */
 function ZoomBadge() {
-  const active = useBrowser((s) => s.activeTab);
-  const sleeping = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.state === "discarded");
+  const active = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
+  const sleeping = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return id ? s.tabs.find((t) => t.id === id)?.state === "discarded" : false;
+  });
   const zoom = useBrowser((s) => (active ? (s.zoom[active] ?? s.defaultZoom) : s.defaultZoom));
   const defaultZoom = useBrowser((s) => s.defaultZoom);
   const zoomStep = useBrowser((s) => s.zoomStep);
