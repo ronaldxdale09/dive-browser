@@ -46,7 +46,7 @@ export function About({ info }: { info: AppInfo | null }) {
           control={serveMcp && info ? <CopyBlock text={info.mcp_url} label="Copy MCP URL" /> : <code className="block font-mono text-[11px] text-ink-2">disabled</code>}
         />
       </Group>
-      <Updates channel={info?.build.channel ?? null} />
+      <Updates channel={info?.build.channel ?? null} updater={info?.updater ?? true} />
       <StartOver />
     </>
   );
@@ -98,8 +98,8 @@ function StartOver() {
  * Check for a newer build and install it. A dev build has no updater to
  * speak to, so it says where updates go instead of pretending to look.
  */
-function Updates({ channel }: { channel: string | null }) {
-  const dev = channel === "dev";
+function Updates({ channel, updater }: { channel: string | null; updater: boolean }) {
+  const silent = channel === "dev" || !updater;
   const status = useUpdates((s) => s.status);
   const update = useUpdates((s) => s.update);
   const error = useUpdates((s) => s.error);
@@ -113,8 +113,8 @@ function Updates({ channel }: { channel: string | null }) {
         hint={
           status === "available" ? (
             update?.notes ? <span className="block whitespace-pre-wrap">{update.notes}</span> : "Installing restarts Dive."
-          ) : dev ? (
-            "Updates are delivered to release builds."
+          ) : silent ? (
+            channel === "dev" ? "Updates are delivered to release builds." : "This build has no updater."
           ) : status === "none" ? (
             "Nothing newer on the release channel."
           ) : status === "error" ? (
@@ -128,14 +128,14 @@ function Updates({ channel }: { channel: string | null }) {
             <Button variant="primary" disabled={installing} onClick={() => void install()}>
               {installing ? "Installing…" : "Install and restart"}
             </Button>
-          ) : dev ? null : (
+          ) : silent ? null : (
             <Button variant="quiet" disabled={status === "checking"} onClick={() => void check()}>
               {status === "checking" ? "Checking…" : status === "none" ? "Check again" : status === "error" ? "Try again" : "Check for updates"}
             </Button>
           )
         }
       />
-      {status === "none" && !dev && (
+      {status === "none" && !silent && (
         <p role="status" className="flex items-center gap-1.5 py-2.5 text-[11px] text-ink-2">
           <Icon icon={CheckIcon} size={12} className="text-highlight" /> You're up to date
         </p>

@@ -90,6 +90,9 @@ pub struct AppInfo {
     /// Lets automation and smoke tests bring the simulator up without a
     /// click, the way `DIVE_OPEN_URL` opens a tab.
     pub simulate: Option<String>,
+    /// Whether this binary registered the updater. A release-channel label
+    /// without a pubkey still cannot check; About must not say we are current.
+    pub updater: bool,
 }
 
 /// Last element picked in a tab plus the live style experiment on it.
@@ -183,6 +186,7 @@ pub(crate) fn app_info() -> AppInfo {
             .ok()
             .map(|s| s.trim().to_owned())
             .filter(|s| !s.is_empty()),
+        updater: updater_configured(option_env!("DIVE_UPDATER_PUBKEY")),
     }
 }
 
@@ -4416,6 +4420,14 @@ mod tests {
         assert!(!updater_configured(Some("")));
         assert!(!updater_configured(Some("   ")));
         assert!(updater_configured(Some("release-public-key")));
+    }
+
+    #[test]
+    fn app_info_reports_whether_the_updater_is_configured() {
+        assert_eq!(
+            app_info().updater,
+            updater_configured(option_env!("DIVE_UPDATER_PUBKEY")),
+        );
     }
 
     #[test]

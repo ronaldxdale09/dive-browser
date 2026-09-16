@@ -4,7 +4,7 @@ import { ipc } from "../../lib/ipc";
 import type { AppInfo } from "../../lib/ipc";
 import { cursorConfig, Developer, mcpCommand, shortTokenPath } from "./Developer";
 
-const info: AppInfo = { version: "0.1.16", build: { channel: "dev", number: "1", commit: "abc", built_at: null }, data_dir: "/tmp/x", mcp_url: "http://127.0.0.1:7391/mcp", mcp_token_path: "/tmp/x/mcp-token", simulate: null };
+const info: AppInfo = { version: "0.1.16", build: { channel: "dev", number: "1", commit: "abc", built_at: null }, data_dir: "/tmp/x", mcp_url: "http://127.0.0.1:7391/mcp", mcp_token_path: "/tmp/x/mcp-token", simulate: null, updater: false };
 
 afterEach(() => {
   cleanup();

@@ -266,7 +266,7 @@ export const ipc = {
   extensionSetEnabled: async (id: string, enabled: boolean) => unwrap(await commands.extensionSetEnabled(id, enabled)),
   extensionRemove: async (id: string) => unwrap(await commands.extensionRemove(id)),
   appRestart: () => commands.appRestart(),
-  /** The update the release channel offers, or null when current or when this build has no updater. */
+  /** The update the release channel offers, or null when current. An unconfigured updater also returns null — trust `appInfo().updater`, not this. */
   updateCheck: async () => unwrap(await commands.updateCheck()),
   defaultBrowserStatus: () => commands.defaultBrowserStatus(),
   defaultBrowserSet: async () => unwrap(await commands.defaultBrowserSet()),

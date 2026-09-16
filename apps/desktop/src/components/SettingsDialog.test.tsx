@@ -18,6 +18,7 @@ beforeEach(() => {
     mcp_url: "http://127.0.0.1:7391/mcp",
     mcp_token_path: "/tmp/dive/mcp-token",
     simulate: null,
+    updater: false,
   });
   vi.spyOn(ipc, "prefsGet").mockResolvedValue(DEFAULT_PREFS);
   vi.spyOn(ipc, "prefsSet").mockImplementation((prefs) => Promise.resolve(prefs));
@@ -345,6 +346,7 @@ describe("About and updates", () => {
       mcp_url: "http://127.0.0.1:7391/mcp",
       mcp_token_path: "/tmp/dive/mcp-token",
       simulate: null,
+      updater: true,
     });
     useBrowser.getState().openSettings("about");
     render(<SettingsDialog />);
@@ -397,6 +399,15 @@ describe("About and updates", () => {
   });
 
   it("offers to install an update it finds", async () => {
+    vi.mocked(ipc.appInfo).mockResolvedValue({
+      version: "0.1.0",
+      build: { channel: "beta", number: "1", commit: "abc1234", built_at: 0 },
+      data_dir: "/tmp/dive",
+      mcp_url: "http://127.0.0.1:7391/mcp",
+      mcp_token_path: "/tmp/dive/mcp-token",
+      simulate: null,
+      updater: true,
+    });
     vi.mocked(ipc.updateCheck).mockResolvedValue({ version: "0.2.0", notes: "Faster tabs." });
     useBrowser.getState().openSettings("about");
     render(<SettingsDialog />);

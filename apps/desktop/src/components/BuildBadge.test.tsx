@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import { BuildBadge, formatBuilt } from "./BuildBadge";
 
-const info = { version: "0.1.5", build: { channel: "beta", number: "212", commit: "9966239ab", built_at: 1_788_684_000 }, data_dir: "/tmp", mcp_url: "", mcp_token_path: "", simulate: null };
+const info = { version: "0.1.5", build: { channel: "beta", number: "212", commit: "9966239ab", built_at: 1_788_684_000 }, data_dir: "/tmp", mcp_url: "", mcp_token_path: "", simulate: null, updater: true };
 
 afterEach(() => vi.restoreAllMocks());
 

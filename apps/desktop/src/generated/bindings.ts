@@ -921,6 +921,11 @@ export type AppInfo = {
 	 *  click, the way `DIVE_OPEN_URL` opens a tab.
 	 */
 	simulate: string | null,
+	/**
+	 *  Whether this binary registered the updater. A release-channel label
+	 *  without a pubkey still cannot check; About must not say we are current.
+	 */
+	updater: boolean,
 };
 
 /**  A saved page. */

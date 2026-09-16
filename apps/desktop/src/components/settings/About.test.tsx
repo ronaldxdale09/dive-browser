@@ -4,7 +4,7 @@ import type { AppInfo } from "../../lib/ipc";
 import { useUpdates } from "../../store/updates";
 import { About, engineLabel } from "./About";
 
-const info = (channel: string): AppInfo => ({ version: "0.1.16", build: { channel, number: "1", commit: "abc", built_at: null }, data_dir: "/tmp/x", mcp_url: "", mcp_token_path: "", simulate: null });
+const info = (channel: string, updater = channel !== "dev"): AppInfo => ({ version: "0.1.16", build: { channel, number: "1", commit: "abc", built_at: null }, data_dir: "/tmp/x", mcp_url: "", mcp_token_path: "", simulate: null, updater });
 const initial = useUpdates.getState();
 
 afterEach(() => {
@@ -25,6 +25,14 @@ describe("About updates", () => {
   it("says a dev build has no updater instead of offering a check", () => {
     render(<About info={info("dev")} />);
     expect(screen.getByText("Updates are delivered to release builds.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Check for updates/ })).toBeNull();
+  });
+
+  it("does not say up to date when this build has no updater", () => {
+    useUpdates.setState({ status: "none" });
+    render(<About info={info("beta", false)} />);
+    expect(screen.queryByText(/You're up to date/)).toBeNull();
+    expect(screen.getByText("This build has no updater.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Check for updates/ })).toBeNull();
   });
 

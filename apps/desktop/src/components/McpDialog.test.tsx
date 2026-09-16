@@ -11,6 +11,7 @@ const info: AppInfo = {
   mcp_url: "http://127.0.0.1:7391/mcp",
   mcp_token_path: "/tmp/x/mcp-token",
   simulate: null,
+  updater: false,
 };
 
 function ready() {
