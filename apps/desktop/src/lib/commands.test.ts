@@ -203,7 +203,7 @@ describe("command dispatch", () => {
 
   it("toggles a bookmark and gives visible confirmation", async () => {
     vi.spyOn(ipc, "bookmarkToggle").mockResolvedValue(true);
-    useBrowser.setState({ tabs: [tab("a")], activeTab: "a" });
+    useBrowser.setState({ tabs: [tab("a")], activeTab: "a", detached: [] });
 
     await UI_COMMANDS["bookmark.toggle"]!();
 
@@ -214,6 +214,15 @@ describe("command dispatch", () => {
     expect(useBrowser.getState().noticeAction?.label).toBe("Edit");
     useBrowser.getState().noticeAction?.run();
     expect(edits).toHaveLength(1);
+  });
+
+  it("does not bookmark a detached tab as this window's", async () => {
+    const toggle = vi.spyOn(ipc, "bookmarkToggle").mockResolvedValue(true);
+    useBrowser.setState({ tabs: [tab("a")], activeTab: "a", detached: ["a"], notice: null });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await UI_COMMANDS["bookmark.toggle"]!();
+    expect(toggle).not.toHaveBeenCalled();
+    expect(useBrowser.getState().notice).toBeNull();
   });
 
   it("routes the new commands to the store", async () => {

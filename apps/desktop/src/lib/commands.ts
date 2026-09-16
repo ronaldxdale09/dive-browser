@@ -147,7 +147,8 @@ async function openWindow() {
 
 /** Toggle the active page's bookmark and confirm the result visibly. */
 async function toggleBookmark() {
-  const tab = useBrowser.getState().activeTab;
+  const { activeTab, detached } = useBrowser.getState();
+  const tab = tabInThisWindow(activeTab, detached);
   if (!tab) return;
   try {
     const saved = await ipc.bookmarkToggle(tab);
