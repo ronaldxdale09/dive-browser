@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import source from "../../src-tauri/src/inject/activity-guard.js?raw";
 
 type Snapshot = { known: boolean; reasons: string[]; scroll: number[]; url: string };
-type Page = Window & { __diveActivitySnapshot?: () => Snapshot; __diveActivityChanged?: (payload: string) => void };
+type Page = Window & {
+  __diveActivitySnapshot?: () => Snapshot;
+  __diveActivityChanged?: (payload: string) => void;
+  __diveActivityAdopt?: (object: object, name: string) => void;
+};
 
 function install(page?: Page) {
   if (!page) {
@@ -110,6 +114,26 @@ describe("discard activity guard", () => {
     expect(snapshot().reasons).toContain("media");
     navigator.webkitGetUserMedia({}, () => {}, () => {});
     expect(snapshot().reasons).toContain("capture");
+  });
+
+  it("adopts a global another Dive script wrapped, and still notices a page doing it", () => {
+    const { page, snapshot } = install();
+    const host = page as unknown as Record<string, unknown>;
+    // Audio is the constructor the audible-tab watcher wraps; the guard
+    // proxied it first.
+    const native = host["Audio"] as new () => unknown;
+    expect(snapshot().known).toBe(true);
+
+    // Unadopted this reads as tampering and protects the tab for ever, which
+    // is how every tab stopped being discarded.
+    host["Audio"] = new Proxy(native, {});
+    expect(snapshot().known).toBe(false);
+    page.__diveActivityAdopt!(page, "Audio");
+    expect(snapshot().known).toBe(true);
+
+    // A page replacing it afterwards is still tampering.
+    host["Audio"] = new Proxy(native, {});
+    expect(snapshot().known).toBe(false);
   });
 
   it("treats replaced instrumentation as unknown", () => {

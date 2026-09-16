@@ -175,5 +175,18 @@
       scroll: [Math.round(window.scrollX), Math.round(window.scrollY)], url: window.location.href };
   }
   Object.defineProperty(window, "__diveActivitySnapshot", { value: snapshot });
+  // Another Dive script may wrap a global this guard already proxied -- the
+  // audible-tab watcher wraps Audio and AudioContext, which are two of them.
+  // The identity check above is there to notice a *page* replacing a global,
+  // and it cannot tell the two apart: left alone it reads our own script as
+  // tampering, reports unknown coverage for every tab, and no tab is ever
+  // discarded again. So a first-party wrapper says so, and the guard adopts
+  // the new value as the one it expects to keep seeing.
+  Object.defineProperty(window, "__diveActivityAdopt", {
+    value: (object, name) => {
+      const entry = installed.find((held) => held[0] === object && held[1] === name);
+      if (entry) entry[2] = object[name];
+    },
+  });
   signal();
 })();

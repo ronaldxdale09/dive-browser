@@ -81,6 +81,10 @@
           return made;
         },
       });
+      // This wrapper replaces a global the activity guard may have proxied
+      // first. Telling it so keeps its coverage known; without this every
+      // tab looks tampered with and none is ever discarded.
+      window.__diveActivityAdopt?.(window, name);
     } catch {
       // A page that froze the global keeps its own constructor; the document
       // scan below still covers everything it puts in the page.
