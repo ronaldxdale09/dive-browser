@@ -2,7 +2,7 @@ import { ChevronRight, ExternalLink, Locate, Play } from "lucide-react";
 import { useState } from "react";
 import { ipc } from "../lib/ipc";
 import type { A11yReport } from "../lib/ipc";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { errorMessage } from "../lib/errors";
 import { InternalPageNote, isInternalPage } from "./InternalPageNote";
@@ -16,8 +16,11 @@ const IMPACT: Record<string, string> = {
 
 /** Runs axe-core in the page on demand and lists violations. */
 export function A11yPanel() {
-  const activeTab = useBrowser((s) => s.activeTab);
-  const tab = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
+  const tab = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return id ? s.tabs.find((t) => t.id === id) : undefined;
+  });
   const url = tab?.url;
   const sleeping = tab?.state === "discarded";
   const openTab = useBrowser((s) => s.openTab);

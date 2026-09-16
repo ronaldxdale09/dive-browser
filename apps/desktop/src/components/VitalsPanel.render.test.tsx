@@ -35,6 +35,14 @@ describe("VitalsPanel", () => {
     expect(await screen.findByText("(not on the page now)")).toBeTruthy();
   });
 
+  it("does not show a detached tab's vitals as this window's dock", () => {
+    useBrowser.setState({ tabs: [tab], activeTab: "t1", detached: ["t1"], loading: {} });
+    render(<VitalsPanel />);
+    expect(screen.getByText("Open a tab to measure its Web Vitals.")).toBeTruthy();
+    expect(screen.queryByLabelText(/Time to First Byte/)).toBeNull();
+    expect(ipc.tabVitals).not.toHaveBeenCalled();
+  });
+
   it("does not keep the last reading when this tab is sleeping", async () => {
     render(<VitalsPanel />);
     expect(await screen.findByLabelText("Time to First Byte: 945 ms, needs work")).toBeTruthy();

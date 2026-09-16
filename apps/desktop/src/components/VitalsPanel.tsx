@@ -3,7 +3,7 @@ import { useState } from "react";
 import { ipc } from "../lib/ipc";
 import { useTabData } from "../lib/useTabData";
 import type { Vitals } from "../lib/ipc";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
 import { InternalPageNote, isInternalPage } from "./InternalPageNote";
 import { ReadError } from "./ReadError";
@@ -50,13 +50,19 @@ const TILES: { key: keyof Vitals; label: string; hint: string }[] = [
 
 /** Core Web Vitals from the page's buffered performance entries. */
 export function VitalsPanel() {
-  const activeTab = useBrowser((s) => s.activeTab);
-  const tab = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
+  const tab = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return id ? s.tabs.find((t) => t.id === id) : undefined;
+  });
   const url = tab?.url;
   const sleeping = tab?.state === "discarded";
   // Load-event timings only exist once the page has finished loading, so
   // read again when the spinner stops instead of leaving them blank.
-  const loading = useBrowser((s) => Boolean(s.activeTab && s.loading[s.activeTab]));
+  const loading = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return Boolean(id && s.loading[id]);
+  });
   const internal = isInternalPage(url);
   const { data, error, refresh } = useTabData(internal || sleeping ? null : activeTab, url, ipc.tabVitals, 600, loading);
   const [lcpGone, setLcpGone] = useState(false);

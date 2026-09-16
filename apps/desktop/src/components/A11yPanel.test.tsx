@@ -85,6 +85,21 @@ describe("A11yPanel", () => {
     expect(screen.getByRole("status").textContent).toBe("0 violations · 3 passed · 0 to review");
   });
 
+  it("does not keep a detached tab's audit as this window's dock", async () => {
+    vi.spyOn(ipc, "tabA11y").mockResolvedValue({
+      violations: [{ id: "image-alt", impact: "critical", help: "Images must have alternative text", help_url: "https://x/image-alt", targets: ["img"], notes: [""], count: 1 }],
+      passes: 14,
+      incomplete: 0,
+    });
+    render(<A11yPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Run audit" }));
+    expect((await screen.findByRole("status")).textContent).toBe("1 violation · 14 passed · 0 to review");
+    act(() => useBrowser.setState({ activeTab: "t1", detached: ["t1"] }));
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByText("Open a tab to audit it.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Run audit" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("does not keep the last count when this tab is sleeping", async () => {
     vi.spyOn(ipc, "tabA11y").mockResolvedValue({
       violations: [{ id: "image-alt", impact: "critical", help: "Images must have alternative text", help_url: "https://x/image-alt", targets: ["img"], notes: [""], count: 1 }],
