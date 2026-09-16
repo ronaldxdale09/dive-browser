@@ -23,8 +23,13 @@ describe("apps", () => {
     expect(passwords?.blurb.length ?? MAX_BLURB + 1).toBeLessThanOrEqual(MAX_BLURB);
   });
 
-  it("does not say DivePrivacy blocks fingerprinting as a class", () => {
+  it("does not say DivePrivacy is already blocking in the engine", () => {
+    // Prefs::default().block_trackers is false. Skip and DIVE_SKIP_ONBOARDING
+    // leave it off. FeaturesStep only writes on Start browsing. The launcher
+    // card is a static line, so it must not upgrade that default.
     const privacy = appsFor(false).find((app) => app.id === "privacy");
+    expect(privacy?.blurb).not.toMatch(/blocked in the engine/i);
+    expect(privacy?.blurb).toMatch(/off until you turn it on/i);
     expect(privacy?.blurb).not.toMatch(/fingerprint/i);
   });
 
