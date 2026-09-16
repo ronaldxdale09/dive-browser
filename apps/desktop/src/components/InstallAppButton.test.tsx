@@ -26,6 +26,14 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("InstallAppButton", () => {
+  it("does not offer a detached tab's install as this window's", () => {
+    useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [tab.id], loading: {} });
+    useWebApps.setState({ probes: { [tab.id]: { url: tab.url, probe: installable } } });
+    render(<InstallAppButton />);
+    expect(screen.queryByRole("button", { name: "Install Mail" })).toBeNull();
+    expect(ipc.webappProbe).not.toHaveBeenCalled();
+  });
+
   it("shows nothing while the page is loading or when it is not installable", async () => {
     vi.mocked(ipc.webappProbe).mockResolvedValue({ ...installable, installable: false, reason: "no manifest" });
     useBrowser.setState({ loading: { a: true } });

@@ -1,6 +1,6 @@
 import { AppWindow, MonitorDown } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { WEBAPPS_CHANGED, useWebApps } from "../store/webapps";
 import { FeatureButton } from "./FeatureBar";
 import { InstallAppDialog } from "./InstallAppDialog";
@@ -12,9 +12,15 @@ import { InstallAppDialog } from "./InstallAppDialog";
  * appears with the page rather than flickering while it loads.
  */
 export function InstallAppButton() {
-  const activeTab = useBrowser((s) => s.activeTab);
-  const url = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.url ?? "");
-  const loading = useBrowser((s) => (s.activeTab ? s.loading[s.activeTab] === true : false));
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
+  const url = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return id ? (s.tabs.find((t) => t.id === id)?.url ?? "") : "";
+  });
+  const loading = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return id ? s.loading[id] === true : false;
+  });
   const probe = useWebApps((s) => (activeTab ? s.probes[activeTab] : undefined));
   const ask = useWebApps((s) => s.probe);
   const forget = useWebApps((s) => s.forgetTab);
