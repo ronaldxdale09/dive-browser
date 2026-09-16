@@ -1,5 +1,5 @@
 import { Smartphone } from "lucide-react";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { selectDevice, useEmulation } from "../store/emulation";
 import { Icon } from "./Icon";
 import { Tooltip } from "./Tooltip";
@@ -10,7 +10,7 @@ import { usePicker } from "../store/simulator";
  * stage. `label` renders it as an icon-and-word button, for the feature bar.
  */
 export function DeviceMenu({ label }: { label?: string } = {}) {
-  const activeTab = useBrowser((s) => s.activeTab);
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const sel = useEmulation(selectDevice(activeTab));
   const open = usePicker((s) => s.open);
   const setOpen = usePicker((s) => s.setOpen);
