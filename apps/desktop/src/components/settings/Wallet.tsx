@@ -4,6 +4,7 @@ import { Button, Group, Row } from "../SettingsFields";
 import { Icon } from "../Icon";
 import type { Address } from "../../lib/ipc";
 import { BLANK_ADDRESS, describeCard, useWallet } from "../../store/wallet";
+import { credentialStoreName } from "../../lib/commands";
 
 /**
  * Addresses and payment cards, for the forms that ask for them.
@@ -58,7 +59,7 @@ export function Wallet() {
           <Row
             key={card.id}
             label={card.label || describeCard(card)}
-            hint={`${card.cardholder} · ${describeCard(card)} · the number is kept in the Keychain, not in Dive's database`}
+            hint={`${card.cardholder} · ${describeCard(card)} · the number is kept in ${credentialStoreName()}, not in Dive's database`}
             control={
               <button type="button" aria-label={`Delete ${card.label || describeCard(card)}`} onClick={() => void deleteCard(card.id)} className="grid size-7 place-items-center rounded-lg text-ink-3 hover:bg-surface-2 hover:text-warn">
                 <Icon icon={Trash2} size={13} />
@@ -68,7 +69,7 @@ export function Wallet() {
         ))}
         <Row
           label={cards.length === 0 ? "No saved cards" : "Add another"}
-          hint="The number goes to the Keychain under this profile and is read only for the fill you ask for. Dive never saves a card on its own, and never stores the security code."
+          hint={`The number goes to ${credentialStoreName()} under this profile and is read only for the fill you ask for. Dive never saves a card on its own, and never stores the security code.`}
           control={<Button onClick={() => setAddingCard(true)}>Add card…</Button>}
         />
       </Group>
@@ -143,7 +144,7 @@ function CardForm({ onClose }: { onClose: () => void }) {
         <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
           <Icon icon={CreditCard} size={14} /> Add card
         </h2>
-        <p className="mb-3 text-[11px] text-ink-3">The number goes straight to the Keychain; Dive's database keeps only the last four digits. The security code is never saved.</p>
+        <p className="mb-3 text-[11px] text-ink-3">The number goes straight to {credentialStoreName()}; Dive's database keeps only the last four digits. The security code is never saved.</p>
         <div className="grid grid-cols-2 gap-2.5">
           <label className="flex flex-col gap-1 text-[11px] text-ink-3">
             Label

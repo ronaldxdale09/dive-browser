@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { APP_CATEGORIES, MAX_BLURB, appsFor, chordOf, searchApps } from "./apps";
+
+const platform = Object.getOwnPropertyDescriptor(navigator, "platform");
+
+afterEach(() => {
+  if (platform) Object.defineProperty(navigator, "platform", platform);
+});
 
 describe("apps", () => {
   it("keeps every blurb short enough that the launcher's clamp does not cut it", () => {
@@ -7,6 +13,14 @@ describe("apps", () => {
     // behind an ellipsis, which is what this pins.
     const tooLong = appsFor(false).filter((app) => app.blurb.length > MAX_BLURB);
     expect(tooLong.map((a) => `${a.name}: ${a.blurb.length}`)).toEqual([]);
+  });
+
+  it("does not say passwords live only in the Keychain on Windows", () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    const passwords = appsFor(false).find((app) => app.id === "passwords");
+    expect(passwords?.blurb).not.toMatch(/Keychain/);
+    expect(passwords?.blurb).toMatch(/Credential Manager/);
+    expect(passwords?.blurb.length ?? MAX_BLURB + 1).toBeLessThanOrEqual(MAX_BLURB);
   });
 
   it("does not say DivePrivacy blocks fingerprinting as a class", () => {

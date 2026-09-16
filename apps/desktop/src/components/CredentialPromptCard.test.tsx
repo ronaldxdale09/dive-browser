@@ -9,6 +9,7 @@ import { CredentialPromptCard } from "./CredentialPromptCard";
 
 const save: CredentialPrompt = { tab_id: "t1", kind: "save", origin: "https://github.com", username: "dale", usernames: [], token: "tok1" };
 const initialBrowser = useBrowser.getState();
+const platform = Object.getOwnPropertyDescriptor(navigator, "platform");
 
 beforeEach(() => {
   vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);
@@ -29,6 +30,7 @@ afterEach(() => {
   resetContentCover();
   useBrowser.setState(initialBrowser, true);
   vi.restoreAllMocks();
+  if (platform) Object.defineProperty(navigator, "platform", platform);
 });
 
 describe("CredentialPromptCard", () => {
@@ -96,6 +98,14 @@ describe("CredentialPromptCard", () => {
     useBrowser.getState().noticeAction?.run();
     await waitFor(() => expect(remove).toHaveBeenCalledWith("c2"));
     await waitFor(() => expect(useBrowser.getState().notice).toContain("Forgot the login for eve"));
+  });
+
+  it("does not say a saved login lives only in the Keychain on Windows", () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    useCredentialPrompt.setState({ byTab: { t1: save } });
+    render(<CredentialPromptCard tabId="t1" />);
+    expect(document.body.textContent).not.toMatch(/Keychain/);
+    expect(document.body.textContent).toMatch(/Credential Manager/);
   });
 
   it("walks the saved logins with the arrow keys", () => {

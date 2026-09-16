@@ -1,5 +1,5 @@
 import type { BuiltinAppId } from "../components/BuiltinAppIcon";
-import { COMMAND_TITLES, chordsByCommand, formatChord, runCommand } from "./commands";
+import { COMMAND_TITLES, chordsByCommand, credentialStoreName, formatChord, runCommand } from "./commands";
 import { isPrivateWindow } from "./privateMode";
 
 /**
@@ -55,7 +55,7 @@ const APPS: AppEntry[] = [
   { id: "simulator", name: "Device simulator", blurb: "Phones and tablets with real frames, touch and throttling.", category: "developer", command: "simulator.toggle", keywords: "mobile responsive emulate iphone", needsTab: true },
   { id: "extensions", name: "Extensions", blurb: "Chrome extensions loaded into Dive.", category: "developer", command: "extensions.open", keywords: "addons plugins" },
   { id: "privacy", name: "DivePrivacy", blurb: "Ads and trackers, blocked in the engine.", category: "yours", command: "settings.privacy", keywords: "tracking blocker ads shield fingerprint" },
-  { id: "passwords", name: "Passwords & forms", blurb: "Saved logins and form entries, kept in the Keychain.", category: "yours", command: "settings.passwords", keywords: "logins autofill keychain" },
+  { id: "passwords", name: "Passwords & forms", blurb: "Saved logins and form entries, kept in the Keychain.", category: "yours", command: "settings.passwords", keywords: "logins autofill keychain credential" },
   { id: "library", name: "Library", blurb: "Bookmarks, history, downloads and recordings, by profile.", category: "yours", command: "library.open", keywords: "bookmarks history downloads recordings" },
 ];
 
@@ -70,7 +70,9 @@ export function registerAppAction(command: string, run: () => void) {
 /** The cards this window can show: a private window keeps its own list short. */
 export function appsFor(privateWindow = isPrivateWindow()): AppEntry[] {
   const refused = new Set(["sidecar.toggle", "extensions.open", "subtitles.open", "settings.passwords", "library.open"]);
-  return APPS.filter((a) => !privateWindow || !refused.has(a.command));
+  return APPS.filter((a) => !privateWindow || !refused.has(a.command)).map((a) =>
+    a.id === "passwords" ? { ...a, blurb: `Saved logins and form entries, kept in ${credentialStoreName()}.` } : a,
+  );
 }
 
 /** The shortcut a card shows, in the platform's notation, if its command has one. */

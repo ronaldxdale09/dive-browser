@@ -7,6 +7,7 @@ import { KeepSitesActive } from "./KeepSitesActive";
 import { usePref } from "./usePref";
 import { ipc } from "../../lib/ipc";
 import { errorMessage } from "../../lib/errors";
+import { credentialStoreName } from "../../lib/commands";
 
 const ENGINES = [
   { value: "duckduckgo", label: "DuckDuckGo" },
@@ -148,7 +149,7 @@ export function General() {
       <Group title="Backup">
         <Row
           label="Save a backup"
-          hint="Bookmarks, history, form entries, preferences and every workspace's tabs, in one file. Saved passwords are not included — they stay in the Keychain; export those from Settings › Passwords if you need them."
+          hint={`Bookmarks, history, form entries, preferences and every workspace's tabs, in one file. Saved passwords are not included — they stay in ${credentialStoreName()}; export those from Settings › Passwords if you need them.`}
           control={<Button onClick={() => void saveBackup()}>Save…</Button>}
         />
         <Row

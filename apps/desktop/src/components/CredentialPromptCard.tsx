@@ -4,6 +4,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useCredentialPrompt } from "../store/credentialPrompt";
 import { Icon } from "./Icon";
+import { credentialStoreName } from "../lib/commands";
 
 /** The site as the card names it. */
 function site(origin: string) {
@@ -51,7 +52,7 @@ export function CredentialPromptCard({ tabId }: { tabId: string | null }) {
               <p className="mt-0.5 truncate text-[11px] text-ink-2" title={prompt.username}>
                 {prompt.username || "No username"}
               </p>
-              <p className="text-[11px] text-ink-3">Kept in the Keychain for this profile.</p>
+              <p className="text-[11px] text-ink-3">Kept in {credentialStoreName()} for this profile.</p>
             </>
           )}
         </div>
