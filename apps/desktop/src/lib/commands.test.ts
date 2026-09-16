@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import menuSource from "../../src-tauri/src/menu.rs?raw";
-import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel, credentialStoreName } from "./commands";
+import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel, credentialStoreName, credentialStoreTitle, isMissingPasswordError, missingPasswordNotice } from "./commands";
 import { events, ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "./ipc";
@@ -416,5 +416,12 @@ describe("credential store copy", () => {
   it("names Credential Manager on Windows and the Keychain elsewhere", () => {
     expect(credentialStoreName(true)).toBe("Credential Manager");
     expect(credentialStoreName(false)).toBe("the Keychain");
+    expect(credentialStoreTitle(true)).toBe("Credential Manager");
+    expect(credentialStoreTitle(false)).toBe("The Keychain");
+    expect(missingPasswordNotice("eve", true)).toBe("Credential Manager no longer has the password for eve.");
+    expect(missingPasswordNotice("eve", false)).toBe("The Keychain no longer has the password for eve.");
+    expect(isMissingPasswordError("The Keychain no longer has this password. Forget the login and save it again.")).toBe(true);
+    expect(isMissingPasswordError("Credential Manager no longer has this password. Forget the login and save it again.")).toBe(true);
+    expect(isMissingPasswordError("The Keychain would not hand over this password: denied")).toBe(false);
   });
 });

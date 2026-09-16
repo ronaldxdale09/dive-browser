@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { CredentialPrompt } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
+import { isMissingPasswordError, missingPasswordNotice } from "../lib/commands";
 import { useBrowser } from "./browser";
 
 /**
@@ -65,11 +66,11 @@ export const useCredentialPrompt = create<CredentialPromptStore>((set, get) => (
       try {
         await ipc.passwordsFill(prompt.tab_id, login.id);
       } catch (e) {
-        // A login whose Keychain item is gone can only be forgotten; offer
+        // A login whose OS-store item is gone can only be forgotten; offer
         // that right here instead of sending the person to Settings.
-        if (!/keychain no longer/i.test(errorMessage(e))) throw e;
+        if (!isMissingPasswordError(errorMessage(e))) throw e;
         const site = prompt.origin.replace(/^https?:\/\//, "");
-        useBrowser.getState().notify(`The Keychain no longer has the password for ${username}.`, 8000, {
+        useBrowser.getState().notify(missingPasswordNotice(username), 8000, {
           label: "Forget login",
           run: () => {
             void ipc

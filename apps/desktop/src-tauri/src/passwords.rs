@@ -9,6 +9,36 @@ use dive_core::{Credential, ProfileId, Timestamp};
 
 const SERVICE: &str = "app.dive.browser.passwords";
 
+fn credential_store_name_for(windows: bool) -> &'static str {
+    if windows {
+        "Credential Manager"
+    } else {
+        "The Keychain"
+    }
+}
+
+fn credential_store_name() -> &'static str {
+    credential_store_name_for(cfg!(windows))
+}
+
+fn missing_password_error_for(windows: bool) -> String {
+    format!(
+        "{} no longer has this password. Forget the login and save it again.",
+        credential_store_name_for(windows)
+    )
+}
+
+fn missing_password_error() -> String {
+    missing_password_error_for(cfg!(windows))
+}
+
+fn password_read_error(error: impl std::fmt::Display) -> String {
+    format!(
+        "{} would not hand over this password: {error}",
+        credential_store_name()
+    )
+}
+
 fn entry(id: &str) -> AppResult<keyring_core::Entry> {
     keyring_core::Entry::new(SERVICE, id).map_err(AppError::new)
 }
@@ -97,12 +127,8 @@ pub fn save(
 pub fn reveal(state: &AppState, profile: ProfileId, id: &str) -> AppResult<String> {
     owned(state, profile, id)?;
     entry(id)?.get_password().map_err(|e| match e {
-        keyring_core::Error::NoEntry => AppError::new(
-            "The Keychain no longer has this password. Forget the login and save it again.",
-        ),
-        e => AppError::new(format!(
-            "The Keychain would not hand over this password: {e}"
-        )),
+        keyring_core::Error::NoEntry => AppError::new(missing_password_error()),
+        e => AppError::new(password_read_error(e)),
     })
 }
 
@@ -317,6 +343,16 @@ pub fn import_csv(state: &AppState, profile: ProfileId, text: &str) -> AppResult
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn missing_password_error_names_this_os_store() {
+        let windows = super::missing_password_error_for(true);
+        assert!(!windows.contains("Keychain"), "{windows}");
+        assert!(windows.contains("Credential Manager"), "{windows}");
+        let other = super::missing_password_error_for(false);
+        assert!(other.contains("The Keychain"), "{other}");
+        assert!(!other.contains("Credential Manager"), "{other}");
+    }
+
     #[test]
     fn a_login_needs_both_halves() {
         assert!(super::check_login("dale", "x").is_ok());

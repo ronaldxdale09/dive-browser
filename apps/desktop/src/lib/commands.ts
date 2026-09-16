@@ -464,6 +464,20 @@ export function credentialStoreName(windows = isWindows()): string {
   return windows ? "Credential Manager" : "the Keychain";
 }
 
+/** Sentence-case name of that store, for a toast that starts with it. */
+export function credentialStoreTitle(windows = isWindows()): string {
+  return windows ? "Credential Manager" : "The Keychain";
+}
+
+/** Host reveal/fill errors that mean the OS store no longer has the secret. */
+export function isMissingPasswordError(message: string): boolean {
+  return /(?:the keychain|credential manager) no longer/i.test(message);
+}
+
+export function missingPasswordNotice(username: string, windows = isWindows()): string {
+  return `${credentialStoreTitle(windows)} no longer has the password for ${username}.`;
+}
+
 /** Whether a key event happened inside something the user types into. */
 export function isEditable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
