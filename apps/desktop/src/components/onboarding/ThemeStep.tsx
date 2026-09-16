@@ -1,7 +1,7 @@
 import { Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { CUSTOM_PRESET_ID, PRESETS, type Preset, type Seeds } from "../../lib/theme";
-import { usePrefs } from "../../store/prefs";
+import { CUSTOM_PRESET_ID, PRESETS, presetSeeds, resolveScheme, type Preset, type Scheme, type Seeds } from "../../lib/theme";
+import { systemTheme, usePrefs } from "../../store/prefs";
 import { useOnboarding } from "../../store/onboarding";
 import { Icon } from "../Icon";
 import { StepActions, stepLabel } from "./Shell";
@@ -29,6 +29,7 @@ export function ThemeStep() {
     heading.current?.focus({ preventScroll: true });
   }, []);
   const selected = prefs.appearance_preset;
+  const scheme = resolveScheme(prefs, systemTheme);
   const custom: Preset = { id: CUSTOM_PRESET_ID, name: "Custom", description: "", scheme: "auto" };
   const customSeeds: Seeds = { ground: prefs.custom_ground, ink: prefs.custom_ink, highlight: prefs.custom_highlight };
 
@@ -61,9 +62,9 @@ export function ThemeStep() {
 
       <div role="radiogroup" aria-label="Template" className="mt-5 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
         {PRESETS.map((preset) => (
-          <TemplateTile key={preset.id} preset={preset} selected={selected === preset.id} onSelect={() => choose(preset.id)} />
+          <TemplateTile key={preset.id} preset={preset} scheme={scheme} selected={selected === preset.id} onSelect={() => choose(preset.id)} />
         ))}
-        <TemplateTile preset={custom} seeds={customSeeds} selected={selected === CUSTOM_PRESET_ID} onSelect={() => choose(CUSTOM_PRESET_ID)} />
+        <TemplateTile preset={custom} seeds={customSeeds} scheme={scheme} selected={selected === CUSTOM_PRESET_ID} onSelect={() => choose(CUSTOM_PRESET_ID)} />
       </div>
 
       <p className="mt-3 text-[11px] text-ink-3">Mode, accent, font and density live in Settings › Appearance.</p>
@@ -77,8 +78,8 @@ export function ThemeStep() {
  * alone, so the chosen one still reads at a glance on a light template where
  * a highlight ring is faint.
  */
-function TemplateTile({ preset, seeds, selected, onSelect }: { preset: Preset; seeds?: Seeds; selected: boolean; onSelect: () => void }) {
-  const dots = seeds ?? preset.dark ?? preset.light!;
+function TemplateTile({ preset, seeds, scheme, selected, onSelect }: { preset: Preset; seeds?: Seeds; scheme: Scheme; selected: boolean; onSelect: () => void }) {
+  const dots = seeds ?? presetSeeds(preset, scheme) ?? preset.dark ?? preset.light!;
   return (
     <button
       type="button"

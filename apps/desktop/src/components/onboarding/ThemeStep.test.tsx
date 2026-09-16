@@ -49,4 +49,12 @@ describe("ThemeStep", () => {
     render(<ThemeStep />);
     expect(screen.getByText(/Settings › Appearance/)).toBeTruthy();
   });
+
+  it("shows Graphite's light seeds when the window is light", () => {
+    // Graphite is auto. The dark dots are not the colours this window gets.
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, theme: "light" }, loaded: true });
+    render(<ThemeStep />);
+    const swatch = screen.getByRole("radio", { name: "Graphite" }).querySelector("[style]") as HTMLElement;
+    expect(swatch.style.background).toBe("rgb(243, 243, 241)");
+  });
 });
