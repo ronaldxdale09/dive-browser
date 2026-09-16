@@ -12,6 +12,11 @@ export const INTRO_EXIT_FRAMES = Math.round((INTRO_EXIT_MS / 1000) * INTRO_FPS);
 /** Under reduced motion the poster holds this long, then the flow moves on. */
 export const INTRO_STILL_MS = 1600;
 
+/** How long Skip waits before the start screen. A still poster must not fade. */
+export function introLeaveDelayMs(reduced: boolean): number {
+  return reduced ? 0 : INTRO_EXIT_MS;
+}
+
 /**
  * The five-second sting, full window. It plays once, then hands over to the
  * start screen; Skip, Enter, Space or Escape hand over early. With reduced
@@ -25,8 +30,12 @@ export function IntroScene() {
 
   // Leave once, whatever asked for it: the end of the reel, a key, or the button.
   const leave = () => {
+    if (reduced) {
+      skip();
+      return;
+    }
     setLeaving((was) => {
-      if (!was) window.setTimeout(skip, INTRO_EXIT_MS);
+      if (!was) window.setTimeout(skip, introLeaveDelayMs(false));
       return true;
     });
   };
@@ -77,7 +86,7 @@ export function IntroScene() {
       role="dialog"
       aria-label="Welcome to Dive"
       className="onboarding-intro fixed inset-0 z-[61] bg-ground"
-      style={{ opacity: leaving ? 0 : 1, transition: `opacity ${INTRO_EXIT_MS}ms ease-in` }}
+      style={{ opacity: leaving ? 0 : 1, transition: reduced ? "none" : `opacity ${INTRO_EXIT_MS}ms ease-in` }}
     >
       <Player
         ref={ref}
