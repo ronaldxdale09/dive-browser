@@ -19,10 +19,12 @@ export function sortRows(rows: [string, string, string][]): [string, string, str
 /** Cookies, localStorage and sessionStorage for the active tab. */
 export function StoragePanel() {
   const activeTab = useBrowser((s) => s.activeTab);
-  const url = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.url);
+  const tab = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
+  const url = tab?.url;
+  const sleeping = tab?.state === "discarded";
   // Cookies and storage are written as the page runs; read again once it has loaded.
   const loading = useBrowser((s) => Boolean(s.activeTab && s.loading[s.activeTab]));
-  const { data, error, refresh } = useTabData(activeTab, url, ipc.tabStorage, 0, loading);
+  const { data, error, refresh } = useTabData(sleeping ? null : activeTab, url, ipc.tabStorage, 0, loading);
   const [section, setSection] = useState<"cookies" | "local" | "session">("cookies");
 
   const rows = sortRows(
@@ -39,6 +41,8 @@ export function StoragePanel() {
       .then(refresh)
       .catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
   };
+
+  if (sleeping) return <div className="px-3 py-2 text-xs text-ink-3">This tab is sleeping. Wake it to inspect this page&rsquo;s storage.</div>;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

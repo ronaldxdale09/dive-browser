@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
@@ -35,6 +35,16 @@ describe("StoragePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Session (0)" }));
     expect(screen.getByText("Nothing stored.")).toBeTruthy();
     expect(screen.queryByText("Key")).toBeNull();
+  });
+
+  it("does not keep the last cookie count when this tab is sleeping", async () => {
+    render(<StoragePanel />);
+    expect(await screen.findByRole("button", { name: "Cookies (1)" })).toBeTruthy();
+    await act(async () => {
+      useBrowser.setState({ tabs: [{ ...tab, state: "discarded" }], activeTab: "t1" });
+    });
+    expect(screen.queryByRole("button", { name: "Cookies (1)" })).toBeNull();
+    expect(screen.getByText(/sleeping/i)).toBeTruthy();
   });
 });
 
