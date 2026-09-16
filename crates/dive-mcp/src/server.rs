@@ -111,7 +111,7 @@ impl<B: Browser> DiveServer<B> {
     /// List tabs.
     #[tool(
         name = "tabs_list",
-        description = "List open tabs in the active workspace with ids, URLs and titles.",
+        description = "List open tabs in the active workspace with ids, URLs and titles. Sleeping tabs are omitted.",
         annotations(title = "Tabs list", read_only_hint = true, destructive_hint = false)
     )]
     async fn tabs_list(&self) -> Result<CallToolResult, ErrorData> {

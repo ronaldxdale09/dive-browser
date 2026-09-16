@@ -19,6 +19,19 @@ fn the_catalog_lists_every_tool_once_with_a_schema() {
 }
 
 #[test]
+fn tabs_list_says_sleeping_tabs_are_omitted() {
+    let entry = tool_catalog()
+        .into_iter()
+        .find(|e| e.name == "tabs_list")
+        .expect("tabs_list");
+    assert!(
+        entry.description.contains("Sleeping tabs are omitted"),
+        "{}",
+        entry.description
+    );
+}
+
+#[test]
 fn an_argument_the_tool_does_not_declare_is_named_in_the_error() {
     let catalog = tool_catalog();
     let schema = |name: &str| {
