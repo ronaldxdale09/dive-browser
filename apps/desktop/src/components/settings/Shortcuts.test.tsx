@@ -1,5 +1,19 @@
-import { describe, expect, it } from "vitest";
-import { chromeChords } from "./Shortcuts";
+import { cleanup, render } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ipc } from "../../lib/ipc";
+import { chromeChords, Shortcuts } from "./Shortcuts";
+
+const platform = Object.getOwnPropertyDescriptor(navigator, "platform");
+
+beforeEach(() => {
+  vi.spyOn(ipc, "commandsList").mockResolvedValue([]);
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  if (platform) Object.defineProperty(navigator, "platform", platform);
+});
 
 describe("Settings › Shortcuts chrome rows", () => {
   it("lists chrome-only chords, skips what the host binds, and folds the workspace jumps", () => {
@@ -11,5 +25,14 @@ describe("Settings › Shortcuts chrome rows", () => {
     expect(titles).toContain("New workspace");
     expect(titles.filter((t) => t === "Switch to workspace 1–9")).toHaveLength(1);
     expect(rows.find((r) => r.title === "Pin or unpin tab")?.keys).toMatch(/P$/);
+  });
+});
+
+describe("Settings › Shortcuts", () => {
+  it("does not name ⌘K for the command palette on Windows", () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    render(<Shortcuts />);
+    expect(document.body.textContent).not.toMatch(/⌘K/);
+    expect(document.body.textContent).toMatch(/Ctrl\+K/);
   });
 });
