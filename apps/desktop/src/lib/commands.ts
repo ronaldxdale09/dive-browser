@@ -497,6 +497,13 @@ export function importLookingLabel(windows = isWindows()): string {
   return windows ? "Looking for other browsers…" : "Looking for browsers on this Mac…";
 }
 
+export function importDeniedNote(browserName: string, windows = isWindows()): string {
+  if (windows) {
+    return `${browserName}'s files could not be read. Full Disk Access is a macOS permission, and this build cannot open it.`;
+  }
+  return `macOS keeps ${browserName}’s files private. Switch Dive on under System Settings › Privacy & Security › Full Disk Access, then come back here.`;
+}
+
 export function importPasswordNote(args: { firefox: boolean; browserName: string; windows?: boolean }): string {
   const windows = args.windows ?? isWindows();
   const dest = `Passwords go into this profile's ${windows ? "Credential Manager" : "Keychain"}.`;

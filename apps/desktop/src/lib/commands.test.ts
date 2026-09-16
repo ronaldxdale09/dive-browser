@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import menuSource from "../../src-tauri/src/menu.rs?raw";
-import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel, credentialStoreName, credentialStoreTitle, isMissingPasswordError, missingPasswordNotice, defaultDownloadsFolderLabel, defaultDownloadsHint, defaultDownloadsPlaceholder, importFromWhere, importLookingLabel, importPasswordNote } from "./commands";
+import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel, credentialStoreName, credentialStoreTitle, isMissingPasswordError, missingPasswordNotice, defaultDownloadsFolderLabel, defaultDownloadsHint, defaultDownloadsPlaceholder, importFromWhere, importLookingLabel, importDeniedNote, importPasswordNote } from "./commands";
 import { events, ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "./ipc";
@@ -449,5 +449,8 @@ describe("import copy", () => {
     expect(importPasswordNote({ firefox: false, browserName: "Chrome", windows: true })).toMatch(/Credential Manager/);
     expect(importPasswordNote({ firefox: false, browserName: "Chrome", windows: false })).toMatch(/Keychain/);
     expect(importPasswordNote({ firefox: false, browserName: "Chrome", windows: false })).toMatch(/macOS will ask/);
+    expect(importDeniedNote("Brave", true)).toMatch(/could not be read/);
+    expect(importDeniedNote("Brave", true)).not.toMatch(/System Settings/);
+    expect(importDeniedNote("Brave", false)).toMatch(/System Settings › Privacy/);
   });
 });

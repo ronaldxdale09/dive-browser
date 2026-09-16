@@ -84,4 +84,13 @@ describe("ImportPanel", () => {
     expect(document.body.textContent).not.toMatch(/macOS/);
     expect(document.body.textContent).toMatch(/Credential Manager/);
   });
+
+  it("does not send Windows to System Settings for Full Disk Access", async () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    vi.spyOn(ipc, "browserImportSources").mockResolvedValue([brave]);
+    render(<ImportPanel />);
+    expect(await screen.findByText(/could not be read/)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/System Settings/);
+    expect(screen.queryByRole("button", { name: /Allow access/ })).toBeNull();
+  });
 });

@@ -1,7 +1,7 @@
 import { Check, FolderLock, History, KeyRound, Loader2, Star, TextCursorInput } from "lucide-react";
 import { useEffect } from "react";
 import type { ImportSource } from "../../lib/ipc";
-import { importLookingLabel, importPasswordNote } from "../../lib/commands";
+import { importDeniedNote, importLookingLabel, importPasswordNote, isWindows } from "../../lib/commands";
 import { useBrowserImport } from "../../store/browserImport";
 import { Icon } from "../Icon";
 import { Switch } from "../SettingsFields";
@@ -104,19 +104,21 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
         <div className="mt-3 rounded-xl border border-line bg-surface-2/70 px-3 py-2.5">
           <p className="flex items-start gap-2 text-[11px] leading-snug text-ink-2">
             <Icon icon={FolderLock} size={13} className="mt-0.5 shrink-0 text-ink-3" />
-            <span>
-              macOS keeps {current.name}&rsquo;s files private. Switch Dive on under System Settings › Privacy &amp; Security › Full Disk Access, then come back here.
-            </span>
+            <span>{importDeniedNote(current.name)}</span>
           </p>
-          <div className="mt-2 flex flex-wrap gap-2 pl-5">
-            <button type="button" onClick={() => void openPrivacySettings()} className="pressable h-7 rounded-full bg-accent px-3 text-[11px] font-medium text-accent-ink hover:brightness-110">
-              Allow access in System Settings…
-            </button>
-            <button type="button" disabled={loading} onClick={() => void load(prefer ?? undefined)} className="pressable h-7 rounded-full border border-line-2 px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40">
-              {loading ? "Checking…" : "Check again"}
-            </button>
-          </div>
-          <p className="mt-2 pl-5 text-[10.5px] text-ink-3">If it still says so after switching Dive on, quit and reopen Dive once.</p>
+          {!isWindows() && (
+            <>
+              <div className="mt-2 flex flex-wrap gap-2 pl-5">
+                <button type="button" onClick={() => void openPrivacySettings()} className="pressable h-7 rounded-full bg-accent px-3 text-[11px] font-medium text-accent-ink hover:brightness-110">
+                  Allow access in System Settings…
+                </button>
+                <button type="button" disabled={loading} onClick={() => void load(prefer ?? undefined)} className="pressable h-7 rounded-full border border-line-2 px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40">
+                  {loading ? "Checking…" : "Check again"}
+                </button>
+              </div>
+              <p className="mt-2 pl-5 text-[10.5px] text-ink-3">If it still says so after switching Dive on, quit and reopen Dive once.</p>
+            </>
+          )}
         </div>
       )}
 
