@@ -6,6 +6,13 @@ import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { originOf, useWebApps } from "../store/webapps";
 import type { WebAppProbe } from "../lib/ipc";
+import { isWindows } from "../lib/commands";
+
+/** Where the host put the launcher. Spotlight is Launch Services; Windows is the Start Menu. */
+export function installAppLauncherCopy(windows = isWindows()): string {
+  const place = windows ? "the Start Menu" : "Spotlight";
+  return `Opens in its own window and appears in ${place}. Signed in as you are now.`;
+}
 
 /**
  * "Install app": the manifest's icon, name and origin, and one decision.
@@ -48,7 +55,7 @@ export function InstallAppDialog({ tabId, probe, onClose }: { tabId: string; pro
             </div>
           </div>
           {probe.description && <p className="mt-3 line-clamp-2 text-xs text-ink-2">{probe.description}</p>}
-          <p className="mt-3 text-xs text-ink-3">Opens in its own window and appears in Spotlight. Signed in as you are now.</p>
+          <p className="mt-3 text-xs text-ink-3">{installAppLauncherCopy()}</p>
           {error && <p role="alert" className="mt-3 text-xs text-danger">{error}</p>}
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-line bg-surface-2/60 px-4 py-3">

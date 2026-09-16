@@ -48,6 +48,38 @@ describe("InstallAppButton", () => {
     expect(dialog.textContent).toContain("Your inbox");
   });
 
+  it("names Spotlight on macOS instead of the Start Menu", async () => {
+    const platform = Object.getOwnPropertyDescriptor(navigator, "platform");
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "MacIntel" });
+    try {
+      vi.mocked(ipc.webappProbe).mockResolvedValue(installable);
+      render(<InstallAppButton />);
+      fireEvent.click(await screen.findByRole("button", { name: "Install Mail" }));
+      const dialog = await screen.findByRole("dialog", { name: "Install app" });
+      expect(dialog.textContent).toContain("Spotlight");
+      expect(dialog.textContent).not.toContain("Start Menu");
+    } finally {
+      if (platform) Object.defineProperty(navigator, "platform", platform);
+      else delete (navigator as { platform?: string }).platform;
+    }
+  });
+
+  it("names the Start Menu on Windows instead of Spotlight", async () => {
+    const platform = Object.getOwnPropertyDescriptor(navigator, "platform");
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    try {
+      vi.mocked(ipc.webappProbe).mockResolvedValue(installable);
+      render(<InstallAppButton />);
+      fireEvent.click(await screen.findByRole("button", { name: "Install Mail" }));
+      const dialog = await screen.findByRole("dialog", { name: "Install app" });
+      expect(dialog.textContent).toContain("Start Menu");
+      expect(dialog.textContent).not.toContain("Spotlight");
+    } finally {
+      if (platform) Object.defineProperty(navigator, "platform", platform);
+      else delete (navigator as { platform?: string }).platform;
+    }
+  });
+
   it("installs from the dialog and closes it on success", async () => {
     vi.mocked(ipc.webappProbe).mockResolvedValue(installable);
     vi.mocked(ipc.webappInstall).mockResolvedValue(app);
