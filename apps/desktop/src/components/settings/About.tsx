@@ -30,7 +30,7 @@ export function About({ info }: { info: AppInfo | null }) {
         </div>
       </div>
       <Group title="This build">
-        <Row label="Engine" hint="Chromium through CEF, one process tree per container." control={<span className="font-mono text-[11px] text-ink-2 select-text">{engineLabel()}</span>} />
+        <Row label="Engine" hint="Chromium through CEF. Containers isolate cookies and cache, not processes." control={<span className="font-mono text-[11px] text-ink-2 select-text">{engineLabel()}</span>} />
         <Row
           stacked
           label="Data folder"

@@ -52,4 +52,13 @@ describe("About engine line", () => {
     expect(engineLabel("Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")).toBe("Chromium 151 · CEF");
     expect(engineLabel("Mozilla/5.0 (X11) Gecko/20100101 Firefox/130.0")).toBe("CEF");
   });
+
+  it("does not say each container has its own process tree", () => {
+    // A container is a cache directory and request context. Renderers are
+    // process-per-site in the one browser process. Private windows are the
+    // exception that starts a second OS process.
+    render(<About info={info("release")} />);
+    expect(document.body.textContent).not.toMatch(/one process tree per container/i);
+    expect(document.body.textContent).toMatch(/Containers isolate cookies and cache, not processes/);
+  });
 });
