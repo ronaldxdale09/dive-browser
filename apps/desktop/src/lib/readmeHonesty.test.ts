@@ -18,6 +18,13 @@ describe("README memory claim", () => {
     expect(readme).not.toMatch(/It is fast,/);
   });
 
+  it("says page_evaluate stays off unless DIVE_MCP_ALLOW_EVAL is set", () => {
+    // crates/dive-mcp Config.allow_evaluate is false unless that env is set.
+    // Settings › Developer already says so; the README connect path must too.
+    expect(readme).toMatch(/DIVE_MCP_ALLOW_EVAL/);
+    expect(readme).toMatch(/page_evaluate/i);
+  });
+
   it("does not say fingerprinting scripts are blocked", () => {
     // DivePrivacy matches listed ad and tracker hosts. The tracker list
     // includes fingerprinting infrastructure. It does not block scripts

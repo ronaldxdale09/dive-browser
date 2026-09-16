@@ -20,6 +20,12 @@ describe("Developer › MCP setup", () => {
     expect(json.mcpServers.dive.headers.Authorization).toBe("Bearer abc123");
   });
 
+  it("says page scripts stay off unless DIVE_MCP_ALLOW_EVAL is set", () => {
+    render(<Developer info={info} />);
+    expect(document.body.textContent).toMatch(/DIVE_MCP_ALLOW_EVAL=1/);
+    expect(document.body.textContent).toMatch(/Page scripts are never run/i);
+  });
+
   it("shows the Cursor entry with the token masked once the token has loaded", async () => {
     vi.spyOn(ipc, "mcpToken").mockResolvedValue("secret-token");
     render(<Developer info={info} />);
