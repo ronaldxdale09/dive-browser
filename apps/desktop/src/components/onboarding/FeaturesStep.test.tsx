@@ -41,6 +41,11 @@ describe("FeaturesStep", () => {
     expect(document.body.textContent).toMatch(/when you start browsing/i);
   });
 
+  it("names the MCP clients Settings › Developer names, not only Claude Code", () => {
+    render(<FeaturesStep />);
+    expect(document.body.textContent).toMatch(/over MCP from Claude Code, Cursor or Codex/);
+  });
+
   it("does not name ⌘ chords for workspaces, the agent, the dock, or the palette on Windows", () => {
     Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
     render(<FeaturesStep />);

@@ -15,7 +15,7 @@ const FeatureReel = lazy(() => import("../FeatureReel").then(({ FeatureReel }) =
 /** What is inside, four lines: each names the surfaces that go together. */
 export const FEATURES: { icon: LucideIcon; title: string; text: string; keys: string }[] = [
   { icon: LayoutGrid, title: "Workspaces and profiles", text: "Tabs per project, logins per person.", keys: "⌘1–9" },
-  { icon: Bot, title: "Agent and coding agents", text: "In your tabs, or over MCP from Claude Code.", keys: "⌘J" },
+  { icon: Bot, title: "Agent and coding agents", text: "In your tabs, or over MCP from Claude Code, Cursor or Codex.", keys: "⌘J" },
   { icon: PanelBottom, title: "Developer dock and simulator", text: "Network, console, rules, phone frames.", keys: "⌘⇧D" },
   { icon: Clapperboard, title: "Record, DiveScreen, subtitles", text: "Record a tab, cut a demo, add captions.", keys: "⌘⇧R" },
 ];
