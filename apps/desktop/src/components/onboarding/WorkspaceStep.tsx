@@ -1,3 +1,4 @@
+import { displayChord } from "../../lib/commands";
 import { colorName } from "../../lib/profileAvatar";
 import { useEffect, useRef, useState } from "react";
 import { AVATAR_SEEDS, seedFromName } from "../../lib/workspaceAvatar";
@@ -57,7 +58,7 @@ export function WorkspaceStep() {
         <div className="min-w-0">
           <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">{stepLabel("workspace")}</p>
           <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em]">Your first workspace</h2>
-          <p className="mt-0.5 text-xs text-ink-3">A workspace is a set of tabs for one thing you do. Switch between them with ⌘1 to ⌘9.</p>
+          <p className="mt-0.5 text-xs text-ink-3">A workspace is a set of tabs for one thing you do. Switch between them with {displayChord("⌘1")} to {displayChord("⌘9")}.</p>
         </div>
       </div>
       <label className="mt-6 block text-[11px] text-ink-2">
