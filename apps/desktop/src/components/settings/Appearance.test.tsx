@@ -181,4 +181,15 @@ describe("Appearance", () => {
     const swatch = screen.getByRole("radio", { name: "Graphite" }).querySelector("[style]") as HTMLElement;
     expect(swatch.style.background).toBe("rgb(243, 243, 241)");
   });
+
+  it("shows Mode as the scheme Custom actually paints, not the leftover Light pref", async () => {
+    // Factory custom ground is dark. Mode saying Light claims this window stayed light.
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, theme: "light" }, loaded: true });
+    render(<Appearance />);
+    fireEvent.click(screen.getByRole("radio", { name: "Custom" }));
+    await waitFor(() => expect(prefs().appearance_preset).toBe("custom"));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(screen.getByRole("radio", { name: "Dark" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Light" }).getAttribute("aria-checked")).toBe("false");
+  });
 });

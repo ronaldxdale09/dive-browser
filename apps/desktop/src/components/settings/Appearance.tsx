@@ -62,9 +62,9 @@ export function Appearance() {
             <div className={fixed || custom ? "opacity-40" : undefined} aria-disabled={fixed || custom || undefined}>
               <Segmented
                 label="Mode"
-                // A fixed template decides the scheme, so show that rather
-                // than a System choice the template is overriding.
-                value={fixed ? preset.scheme : prefs.theme}
+                // A fixed template or Custom's ground decides the scheme, so
+                // show that rather than a leftover System / Light / Dark pref.
+                value={fixed ? preset.scheme : custom ? scheme : prefs.theme}
                 onChange={(theme) => !(fixed || custom) && set({ theme })}
                 options={[
                   { value: "system", label: "System" },
