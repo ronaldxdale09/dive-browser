@@ -126,7 +126,7 @@ export function Agent() {
         />
       </Group>
 
-      <Group title="API keys" description="One key per provider, in your OS keychain. A key leaves this Mac only in calls to its own provider. The Agent panel (⌘J) can add these too.">
+      <Group title="API keys" description="One key per provider, in your OS keychain. A key leaves this computer only in calls to its own provider. The Agent panel (⌘J) can add these too.">
         {providers
           .filter((p) => p.needs_key)
           .map((p) => (
