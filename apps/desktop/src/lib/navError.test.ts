@@ -28,6 +28,14 @@ describe("describeNavError", () => {
     expect(describeNavError("net::ERR_BLOCKED_BY_CLIENT", "https://httpbin.org/api/ping").title).toBe("Blocked by Dive");
   });
 
+  it("points a failed proxy at this OS's Settings page, not System Settings on Windows", () => {
+    const windows = describeNavError("net::ERR_PROXY_CONNECTION_FAILED", "https://x", true).hint;
+    expect(windows).not.toMatch(/System Settings/);
+    expect(windows).toMatch(/Settings › Network & internet › Proxy/);
+    const other = describeNavError("net::ERR_PROXY_CONNECTION_FAILED", "https://x", false).hint;
+    expect(other).toMatch(/System Settings › Network/);
+  });
+
   it("points a date-invalid certificate at this computer's clock, not this Mac", () => {
     const hint = describeNavError("net::ERR_CERT_DATE_INVALID", "https://expired.badssl.com/").hint;
     expect(hint).not.toMatch(/this Mac/);

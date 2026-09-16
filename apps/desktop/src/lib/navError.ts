@@ -1,3 +1,5 @@
+import { isWindows } from "./commands";
+
 /**
  * Friendly wording for Chromium's network error codes, the ones the page
  * itself never gets to render because the document request failed.
@@ -11,7 +13,12 @@ export type NavErrorText = {
   hint?: string;
 };
 
-export function describeNavError(error: string, url: string): NavErrorText {
+/** Where this OS lists the HTTP proxy. Windows: Settings › Network & internet › Proxy. */
+export function proxySettingsPath(windows = isWindows()): string {
+  return windows ? "Settings › Network & internet › Proxy" : "System Settings › Network";
+}
+
+export function describeNavError(error: string, url: string, windows = isWindows()): NavErrorText {
   const code = (error.match(/ERR_[A-Z0-9_]+/) ?? [error.replace(/^net::/, "")])[0] ?? error;
   const port = portOf(url);
   switch (code) {
@@ -43,7 +50,7 @@ export function describeNavError(error: string, url: string): NavErrorText {
     case "ERR_NETWORK_CHANGED":
       return { title: "Network changed", detail: "The connection changed while the page was loading.", hint: "Retry now that it has settled." };
     case "ERR_PROXY_CONNECTION_FAILED":
-      return { title: "Proxy unreachable", detail: "The configured proxy did not answer.", hint: "Check the proxy in System Settings › Network." };
+      return { title: "Proxy unreachable", detail: "The configured proxy did not answer.", hint: `Check the proxy in ${proxySettingsPath(windows)}.` };
     case "ERR_FILE_NOT_FOUND":
       return { title: "File not found", detail: "There is no file at that path." };
     case "ERR_INVALID_URL":
