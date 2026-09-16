@@ -673,3 +673,13 @@ describe("zoomStep", () => {
     expect(zoom).toHaveBeenLastCalledWith("z1", 1.25);
   });
 });
+
+describe("devtools", () => {
+  it("does not open DevTools on a detached tab as this window's", async () => {
+    const open = vi.spyOn(ipc, "tabDevtools").mockResolvedValue(null);
+    useBrowser.setState({ activeTab: "d1", detached: ["d1"], tabs: [tab("d1")] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await useBrowser.getState().devtools();
+    expect(open).not.toHaveBeenCalled();
+  });
+});
