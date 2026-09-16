@@ -51,6 +51,13 @@ describe("README memory claim", () => {
     expect(readme).toMatch(/private windows do not serve MCP/i);
   });
 
+  it("does not say updates install themselves in the background", () => {
+    // updater_configured is the pubkey gate. A check does not install;
+    // About's Install and restart does. Dev builds have no updater.
+    expect(readme).not.toMatch(/installs them in the background/i);
+    expect(readme).toMatch(/Installing one restarts Dive/);
+  });
+
   it("does not say every tab is reachable by MCP", () => {
     // AppBrowser::tabs filters TabState::Discarded. The sidecar already
     // says sleeping tabs are omitted; the README must not upgrade that.

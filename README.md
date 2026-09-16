@@ -71,7 +71,7 @@ Dive is a native browser for macOS and Windows, built on the Chromium Embedded F
 | macOS 13 or newer, Apple Silicon | [Download the DMG](https://github.com/ronaldxdale09/dive-browser/releases/latest) |
 | Windows 10 or newer, x64 | [Download the installer](https://github.com/ronaldxdale09/dive-browser/releases/latest) |
 
-Dive checks for updates and installs them in the background.
+Release builds check for updates shortly after launch. Installing one restarts Dive.
 
 macOS builds are signed with an Apple Developer ID certificate and notarized.
 Windows builds are being set up for code signing through the
