@@ -33,7 +33,7 @@ export function Privacy() {
       >
         <Row
           label="DivePrivacy protection"
-          hint="Blocks common advertising, analytics, fingerprinting, telemetry, cryptomining, and popup infrastructure with bundled rules."
+          hint="Blocks listed advertising and tracker hosts in the request pipeline."
           control={
             <Switch
               label="DivePrivacy protection"

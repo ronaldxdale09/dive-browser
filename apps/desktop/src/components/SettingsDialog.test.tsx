@@ -102,6 +102,14 @@ describe("SettingsDialog", () => {
     expect(screen.queryByText(/Permissions from earlier versions/)).toBeNull();
   });
 
+  it("does not say DivePrivacy hides popups as a class", () => {
+    // privacy.rs reports Ads and Tracker only. ads.txt and trackers.txt
+    // have no popup rules. FingerprintJS-style hosts live on the tracker list.
+    render(<SettingsDialog />);
+    fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
+    expect(document.body.textContent).not.toMatch(/popup/i);
+  });
+
   it("persists a toggled preference", async () => {
     render(<SettingsDialog />);
     fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
