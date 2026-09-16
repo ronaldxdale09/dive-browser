@@ -185,6 +185,15 @@ describe("NetworkPanel", () => {
     expect(screen.getByText("2 requests")).toBeTruthy();
     expect(screen.queryByText("b.dev")).toBeNull();
   });
+
+  it("does not count a detached tab's requests as this window's dock", () => {
+    // A torn-off tab lives in the other window. Its capture is not this dock.
+    useBrowser.setState({ activeTab: "tab-2", detached: ["tab-2"] });
+    useNetwork.setState({ byTab: { "tab-2": rows(3), "tab-1": rows(1) } });
+    render(<NetworkPanel />);
+    expect(screen.queryByText("3 requests")).toBeNull();
+    expect(screen.getByText("Open a tab to see its traffic.")).toBeTruthy();
+  });
 });
 
 describe("socket frames", () => {

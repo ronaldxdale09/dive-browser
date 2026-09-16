@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@tauri-apps/api/event";
-import { CLOSED_TABS_LIMIT, orderWithAt, reduceCrash, sameSiteTab, togglePanel, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, useBrowser, withoutRequest } from "./browser";
+import { CLOSED_TABS_LIMIT, orderWithAt, reduceCrash, sameSiteTab, togglePanel, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, tabInThisWindow, useBrowser, withoutRequest } from "./browser";
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
 import type { PermissionAsked, PermissionDismissed, Snapshot, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
@@ -76,6 +76,14 @@ describe("reduceWindowChange", () => {
 
   it("forgets a tab that came back", () => {
     expect(reduceWindowChange({ detached: ["a", "b"], activeTab: null }, "a", false)).toEqual({ detached: ["b"], activeTab: null });
+  });
+});
+
+describe("tabInThisWindow", () => {
+  it("treats a detached active tab as not this window's", () => {
+    expect(tabInThisWindow("a", [])).toBe("a");
+    expect(tabInThisWindow("a", ["a"])).toBeNull();
+    expect(tabInThisWindow(null, ["a"])).toBeNull();
   });
 });
 

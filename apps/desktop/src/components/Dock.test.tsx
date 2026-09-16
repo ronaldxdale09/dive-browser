@@ -175,6 +175,14 @@ describe("Dock console panel", () => {
     expect(screen.queryByLabelText("1 times")).toBeNull();
   });
 
+  it("does not show a detached tab's console as this window's dock", () => {
+    useBrowser.setState({ activeTab: "tab-2", detached: ["tab-2"] });
+    push([{ ...entry(1, "theirs"), tab_id: "tab-2" }]);
+    render(<Dock />);
+    expect(screen.queryByText("theirs")).toBeNull();
+    expect(screen.getByText("Open a tab to see its console.")).toBeTruthy();
+  });
+
   it("ignores console output for other tabs", () => {
     push([entry(1, "mine")]);
     render(<Dock />);

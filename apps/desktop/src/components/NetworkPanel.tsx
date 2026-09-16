@@ -2,7 +2,7 @@ import { ArrowDownLeft, ArrowUpRight, Ban, Copy, FileDown, FileJson, Repeat, Ter
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { isReady, useAgent } from "../store/agent";
 import { usePrefs } from "../store/prefs";
 import { selectFrames, selectRequests, useNetwork } from "../store/network";
@@ -17,7 +17,7 @@ import { prettyJson, toCurl } from "../lib/curl";
 import { copyText } from "../lib/clipboard";
 
 export function NetworkTools() {
-  const activeTab = useBrowser((s) => s.activeTab);
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const clear = useNetwork((s) => s.clear);
   const exportWith = (run: (tab: string) => Promise<string>, label: string) => () => {
     if (!activeTab) return;
@@ -119,7 +119,7 @@ const ROW_HEIGHT = 21;
 const REPLAY_DOCK_HEIGHT = 440;
 
 export function NetworkPanel() {
-  const activeTab = useBrowser((s) => s.activeTab);
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const rows = useNetwork(selectRequests(activeTab));
   const preserve = useNetwork((s) => s.preserve);
   const setPreserve = useNetwork((s) => s.setPreserve);

@@ -4,7 +4,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useLayout } from "../store/layout";
 import type { Level } from "../lib/ipc";
 import { jumpToSource, editorLabel } from "../lib/editor";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { selectEntries, useConsole } from "../store/console";
 import type { ConsoleRow } from "../store/console";
 import { usePrefs } from "../store/prefs";
@@ -115,7 +115,7 @@ export function Dock() {
 }
 
 function ConsoleTools() {
-  const activeTab = useBrowser((s) => s.activeTab);
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const clear = useConsole((s) => s.clear);
   const bugReport = useBrowser((s) => s.bugReport);
   return (
@@ -189,7 +189,7 @@ export function coalesce(rows: readonly ConsoleRow[]): ShownRow[] {
 }
 
 function ConsolePanel() {
-  const activeTab = useBrowser((s) => s.activeTab);
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const entries = useConsole(selectEntries(activeTab));
   const preserve = useConsole((s) => s.preserve);
   const setPreserve = useConsole((s) => s.setPreserve);

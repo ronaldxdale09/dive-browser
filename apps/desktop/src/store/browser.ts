@@ -321,6 +321,11 @@ export function reduceWindowChange(state: Pick<BrowserState, "detached" | "activ
   };
 }
 
+/** The active tab if it still lives in this window. A torn-off tab is the other window's dock. */
+export function tabInThisWindow(activeTab: string | null, detached: readonly string[]): string | null {
+  return activeTab && !detached.includes(activeTab) ? activeTab : null;
+}
+
 let unlisten: (() => void) | null = null;
 let unlistenLoad: (() => void) | null = null;
 let unlistenCrash: (() => void) | null = null;
