@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { isWindows } from "../lib/commands";
+import { showInFileManagerLabel } from "../lib/commands";
 import { ipc, events } from "../lib/ipc";
 import { listenConsole, useConsole, usesNativeConsoleBatch } from "./console";
 import { listenNetwork, useNetwork } from "./network";
@@ -111,7 +111,7 @@ interface BrowserState {
   recordingTab: string | null;
   screencastToggle: () => Promise<void>;
   notice: string | null;
-  /** A button on the notice, when there is something to do about it ("Show in Finder"). */
+  /** A button on the notice, when there is something to do about it ("Show in Finder" / Explorer). */
   noticeAction: NoticeAction | null;
   /** Show a transient toast; a newer notice replaces the old one and its timer. */
   notify: (text: string, ms?: number, action?: NoticeAction) => void;
@@ -551,7 +551,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
           const show = finished
             ? opensInTab(d.path)
               ? { label: "Open", run: () => void get().openTab(fileUrl(d.path)) }
-              : { label: isWindows() ? "Show in Explorer" : "Show in Finder", run: () => void ipc.downloadsReveal(d.path).catch((err: unknown) => set({ error: errorMessage(err) })) }
+              : { label: showInFileManagerLabel(), run: () => void ipc.downloadsReveal(d.path).catch((err: unknown) => set({ error: errorMessage(err) })) }
             : undefined;
           get().notify(d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : `Download failed: ${name}`, show ? 8000 : 5000, show);
           // Closed once the file is on disk, not when it starts: the engine

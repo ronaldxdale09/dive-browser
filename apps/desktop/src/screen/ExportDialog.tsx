@@ -2,6 +2,7 @@ import { Check, Download, ExternalLink, FolderOpen, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { ipc } from "../lib/ipc";
+import { showInFileManagerLabel } from "../lib/commands";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import type { RecordingResult } from "../lib/ipc";
 import { recordingBytes, recordingClock } from "../lib/recordingFormat";
@@ -166,7 +167,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 <Icon icon={ExternalLink} size={13} /> Open
               </button>
               <button type="button" onClick={() => void ipc.downloadsReveal(result.path)} className="flex h-8 items-center gap-1.5 rounded-lg bg-surface-2 px-3 text-ink hover:bg-surface-3">
-                <Icon icon={FolderOpen} size={13} /> Show in Finder
+                <Icon icon={FolderOpen} size={13} /> {showInFileManagerLabel()}
               </button>
               <span className="flex-1" />
               <button ref={doneButton} type="button" onClick={onClose} className="h-8 rounded-lg bg-accent px-4 font-medium text-accent-ink">

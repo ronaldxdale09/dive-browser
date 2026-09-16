@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import menuSource from "../../src-tauri/src/menu.rs?raw";
-import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord } from "./commands";
+import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel } from "./commands";
 import { events, ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "./ipc";
@@ -400,5 +400,14 @@ describe("displayChord", () => {
   it("leaves a chord that is already plain text untouched", () => {
     expect(displayChord("F12", false)).toBe("F12");
     expect(displayChord("Enter", false)).toBe("Enter");
+  });
+});
+
+describe("file manager reveal copy", () => {
+  it("names Explorer on Windows and Finder elsewhere", () => {
+    expect(fileManagerName(true)).toBe("Explorer");
+    expect(fileManagerName(false)).toBe("Finder");
+    expect(showInFileManagerLabel(true)).toBe("Show in Explorer");
+    expect(showInFileManagerLabel(false)).toBe("Show in Finder");
   });
 });

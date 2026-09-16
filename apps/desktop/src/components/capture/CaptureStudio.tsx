@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ipc } from "../../lib/ipc";
-import { isEditable, isWindows } from "../../lib/commands";
+import { fileManagerName, isEditable, isWindows } from "../../lib/commands";
 import { useBrowser } from "../../store/browser";
 import { Icon } from "../Icon";
 import { errorMessage } from "../../lib/errors";
@@ -32,7 +32,7 @@ const TOOLS: { id: Tool; label: string; icon: typeof Crop }[] = [
 
 /** Label for revealing the source file in this OS's file manager. */
 export function originalInFileManagerLabel(windows = isWindows()): string {
-  return windows ? "Original in Explorer" : "Original in Finder";
+  return `Original in ${fileManagerName(windows)}`;
 }
 
 /** Dive's local, full-resolution screenshot workspace. */

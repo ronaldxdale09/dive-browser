@@ -3,7 +3,7 @@ import { AppWindow, Clapperboard, Download, FolderOpen, History, LayoutGrid, Sea
 import { useWebAppIcon } from "../lib/useWebAppIcon";
 import { WEBAPPS_CHANGED, useWebApps } from "../store/webapps";
 import type { WebApp } from "../lib/ipc";
-import { displayChord, BOOKMARKS_CHANGED } from "../lib/commands";
+import { displayChord, BOOKMARKS_CHANGED, fileManagerName } from "../lib/commands";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ipc } from "../lib/ipc";
@@ -366,7 +366,7 @@ function DownloadsList({ query }: { query: string }) {
             <span className="truncate text-ink">{d.name}</span>
             <span className="ml-auto shrink-0 pl-3 text-[11px] text-ink-3">{d.status}</span>
           </button>
-          <button type="button" aria-label={`Show ${d.name} in Finder`} onClick={() => reveal(d.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
+          <button type="button" aria-label={`Show ${d.name} in ${fileManagerName()}`} onClick={() => reveal(d.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
             <Icon icon={FolderOpen} size={13} />
           </button>
         </li>
@@ -474,7 +474,7 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
                   <Icon icon={Wand2} size={13} />
                 </button>
               )}
-              <button type="button" aria-label={`Show ${r.name} in Finder`} onClick={() => reveal(r.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
+              <button type="button" aria-label={`Show ${r.name} in ${fileManagerName()}`} onClick={() => reveal(r.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
                 <Icon icon={FolderOpen} size={13} />
               </button>
               <button type="button" aria-label={`Delete ${r.name}`} onClick={() => setConfirming(r.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100">

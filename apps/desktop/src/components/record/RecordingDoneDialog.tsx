@@ -2,6 +2,7 @@ import { Check, Copy, ExternalLink, FolderOpen, Trash2, Video, Wand2 } from "luc
 import { screenUrl } from "../internal/InternalPage";
 import { useRef, useState } from "react";
 import { ipc } from "../../lib/ipc";
+import { showInFileManagerLabel } from "../../lib/commands";
 import { captureMediaUrl } from "../../lib/mediaUrl";
 import { recordingBytes, recordingClock } from "../../lib/recordingFormat";
 import { useCoversContent } from "../../lib/overlay";
@@ -88,7 +89,7 @@ export function RecordingDoneDialog() {
 
         <footer className="flex items-center gap-1.5 px-5 py-4">
           <Action icon={ExternalLink} label="Open" onClick={() => ipc.recordingOpen(result.path).catch(fail)} />
-          <Action icon={FolderOpen} label="Show in Finder" onClick={() => ipc.downloadsReveal(result.path).catch(fail)} />
+          <Action icon={FolderOpen} label={showInFileManagerLabel()} onClick={() => ipc.downloadsReveal(result.path).catch(fail)} />
           <Action
             icon={copied ? Check : Copy}
             label={copied ? "Copied" : "Copy path"}

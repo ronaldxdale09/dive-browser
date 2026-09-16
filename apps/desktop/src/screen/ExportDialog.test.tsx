@@ -34,6 +34,18 @@ describe("Export dialog keyboard ownership", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
+  it("names Explorer when revealing the export on Windows", async () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    vi.mocked(exportProject).mockImplementation(async (input) => {
+      input.onProgress({ phase: "done", progress: 1 });
+      return { path: "/tmp/edited.mp4", duration_secs: 3, bytes: 1000, width: 640, height: 360, format: "mp4", frames: 90, has_audio: true, events: null, preview: null };
+    });
+    render(<ExportDialog onClose={vi.fn()} />);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Export" })); });
+    expect(screen.getByRole("button", { name: "Show in Explorer" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Show in Finder" })).toBeNull();
+  });
+
   it("focuses Done when the export completes", async () => {
     vi.mocked(exportProject).mockImplementation(async (input) => {
       input.onProgress({ phase: "done", progress: 1 });

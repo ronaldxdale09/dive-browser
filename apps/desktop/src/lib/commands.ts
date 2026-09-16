@@ -450,6 +450,15 @@ export function isWindows(): boolean {
   return /Win/.test(navigator.platform || navigator.userAgent);
 }
 
+/** Finder on macOS; Explorer on Windows. `downloadsReveal` opens that manager. */
+export function fileManagerName(windows = isWindows()): string {
+  return windows ? "Explorer" : "Finder";
+}
+
+export function showInFileManagerLabel(windows = isWindows()): string {
+  return `Show in ${fileManagerName(windows)}`;
+}
+
 /** Whether a key event happened inside something the user types into. */
 export function isEditable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
