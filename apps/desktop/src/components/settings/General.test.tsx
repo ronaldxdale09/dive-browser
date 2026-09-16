@@ -35,4 +35,12 @@ describe("Settings › General", () => {
     expect(screen.getByLabelText("Save files to").getAttribute("placeholder")).not.toBe("~/Downloads");
     expect(document.body.textContent).toMatch(/Downloads folder/);
   });
+
+  it("does not name ⌘ chords for zoom and fill-tab on Windows", () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    render(<General />);
+    expect(document.body.textContent).not.toMatch(/⌘/);
+    expect(document.body.textContent).toMatch(/Ctrl\+=/);
+    expect(document.body.textContent).toMatch(/Ctrl\+Shift\+F/);
+  });
 });

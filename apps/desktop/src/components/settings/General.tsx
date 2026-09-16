@@ -7,7 +7,7 @@ import { KeepSitesActive } from "./KeepSitesActive";
 import { usePref } from "./usePref";
 import { ipc } from "../../lib/ipc";
 import { errorMessage } from "../../lib/errors";
-import { credentialStoreName, defaultDownloadsHint, defaultDownloadsPlaceholder } from "../../lib/commands";
+import { chordsByCommand, credentialStoreName, defaultDownloadsHint, defaultDownloadsPlaceholder, formatChord } from "../../lib/commands";
 
 const ENGINES = [
   { value: "duckduckgo", label: "DuckDuckGo" },
@@ -52,6 +52,10 @@ export function General() {
     }
   };
   const toggle = useBrowser((s) => s.toggle);
+  const chords = chordsByCommand();
+  const zoomIn = formatChord(chords["zoom.in"] ?? "mod+=");
+  const zoomOut = formatChord(chords["zoom.out"] ?? "mod+-");
+  const fillVideo = formatChord(chords["tab.fillVideo"] ?? "mod+shift+f");
   return (
     <>
       <Group title="Startup">
@@ -182,7 +186,7 @@ export function General() {
         <Row
           label="Default zoom"
           htmlFor="pref-zoom"
-          hint="Zoom new tabs open at. ⌘+ and ⌘− still change the tab in front of you."
+          hint={`Zoom new tabs open at. ${zoomIn} and ${zoomOut} still change the tab in front of you.`}
           control={
             <Select
               id="pref-zoom"
@@ -195,7 +199,7 @@ export function General() {
         />
         <Row
           label="Fill tab with videos"
-          hint="Hover a video for a control that makes it fill the tab, without taking over the screen. ⌘⇧F toggles it; Escape leaves."
+          hint={`Hover a video for a control that makes it fill the tab, without taking over the screen. ${fillVideo} toggles it; Escape leaves.`}
           control={<Switch label="Fill tab with videos" checked={prefs.video_fill_tab} onChange={(video_fill_tab) => set({ video_fill_tab })} />}
         />
       </Group>
