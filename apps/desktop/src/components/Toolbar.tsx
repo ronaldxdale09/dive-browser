@@ -97,7 +97,12 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
         <IconButton icon={RotateCw} label="Reload" shortcut="⌘R" disabled={!current} onClick={() => void reload()} size={14} />
       )}
       <IconButton icon={House} label="Home" shortcut="⌘⇧H" disabled={!current && !homepage} onClick={() => void runCommand("tab.home")} size={14} />
-      <div data-address-field className="relative mx-1 flex h-[calc(var(--row-h)-4px)] min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2">
+      {/* Capped rather than stretched. An address is a line of text, and a
+          pill three feet wide with six words floating at one end reads as a
+          mistake on a large display -- every browser that grew up on
+          widescreens caps it. What the cap leaves over is not wasted: it
+          becomes the part of the bar you can pick the window up by. */}
+      <div data-address-field className="relative mx-1 flex h-[calc(var(--row-h)-4px)] min-w-0 max-w-[46rem] flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition-colors focus-within:border-line-2 focus-within:bg-surface-2">
         <form
           className="flex min-w-0 flex-1 items-center gap-2"
           onSubmit={(e) => {
@@ -209,6 +214,8 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
           <DownloadsIndicator />
         </>
       )}
+      {/* Whatever the cap left over, as window handle. */}
+      <span aria-hidden data-tauri-drag-region="true" className="min-w-2 flex-1 self-stretch" />
       {trailing && <BrowserActions />}
       {loading && <LoadingLine />}
     </div>

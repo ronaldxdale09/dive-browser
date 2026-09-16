@@ -1,4 +1,5 @@
 import { useCoversContent } from "../lib/overlay";
+import { windowDrag } from "../lib/windowDrag";
 import { JsDialogCard } from "./JsDialogCard";
 import { ArrowLeft, ArrowRight, Copy, EllipsisVertical, PanelsTopLeft, RotateCw, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -103,7 +104,7 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
   return (
     <div className="grid h-full bg-ground text-ink" style={{ gridTemplateRows: rows }}>
       <WindowResizeEdges top={outside ? 72 : 40} />
-      <header className={`flex min-w-0 items-center gap-1.5 border-b border-line/70 ${captionGutter}`} data-tauri-drag-region="true">
+      <header className={`flex min-w-0 items-center gap-1.5 border-b border-line/70 ${captionGutter}`} data-tauri-drag-region="true" {...windowDrag()}>
         <IconButton icon={ArrowLeft} label="Back" disabled={!canBack} onClick={() => run(ipc.tabBack(tabId))} />
         <IconButton icon={ArrowRight} label="Forward" disabled={!canForward} onClick={() => run(ipc.tabForward(tabId))} />
         {loading

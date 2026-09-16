@@ -1,4 +1,5 @@
 import { JsDialogCard } from "./JsDialogCard";
+import { windowDrag } from "../lib/windowDrag";
 import { isPrivateWindow } from "../lib/privateMode";
 import { PrivateBadge, PrivateWelcome } from "./PrivateMode";
 import { useCoversContent } from "../lib/overlay";
@@ -192,7 +193,7 @@ export function Popout({ tabId }: { tabId: string }) {
   return (
     <div className="grid h-full grid-rows-[40px_44px_auto_minmax(0,1fr)] bg-ground text-ink">
       <WindowResizeEdges top={84} />
-      <header className={`flex min-w-0 items-center gap-1.5 border-b border-line/70 ${captionGutter}`}>
+      <header className={`flex min-w-0 items-center gap-1.5 border-b border-line/70 ${captionGutter}`} {...windowDrag()}>
         <div role="tablist" aria-label="Window tabs" className="flex min-w-0 max-w-72 flex-1 items-center">
           <div className="group flex h-8 min-w-0 flex-1 items-center rounded-lg bg-surface-2 text-xs text-ink ring-1 ring-line-2">
             <button

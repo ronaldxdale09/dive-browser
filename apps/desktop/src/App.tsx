@@ -1,3 +1,4 @@
+import { windowDrag } from "./lib/windowDrag";
 import { isPrivateWindow } from "./lib/privateMode";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Rail, RAIL_WIDTH, RailToggle } from "./components/Rail";
@@ -157,7 +158,7 @@ export function App() {
           elsewhere or while maximized. */}
       <WindowResizeEdges top={oneBar ? 44 : 84} />
       {!oneBar && (
-        <header className={`col-span-2 row-start-1 flex items-center gap-2 ${captionGutter}`} data-tauri-drag-region="true">
+        <header className={`col-span-2 row-start-1 flex items-center gap-2 ${captionGutter}`} data-tauri-drag-region="true" {...windowDrag()}>
           {isPrivateWindow() && <span className="px-2 font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
           <BuildBadge align="start" />
           <div className="h-full min-w-0 flex-1">
@@ -171,7 +172,7 @@ export function App() {
         {/* A full-height rail starts under the traffic lights: that strip is
             the window's handle, and the rail's own content begins below it. */}
         {oneBar && (
-          <div className={`flex h-10 items-center gap-1.5 pr-2 ${captionGutter}`} data-tauri-drag-region="true">
+          <div className={`flex h-10 items-center gap-1.5 pr-2 ${captionGutter}`} data-tauri-drag-region="true" {...windowDrag()}>
             {/* With the rail wide there is room past the traffic lights for
                 the collapse control and the name, on one row, the way every
                 sidebar app does it. A narrow rail is all traffic lights up
@@ -201,7 +202,7 @@ export function App() {
         />
       </div>
       {oneBar ? (
-        <header className="col-start-2 row-start-1 flex min-w-0 items-center" data-tauri-drag-region="true">
+        <header className="col-start-2 row-start-1 flex min-w-0 items-center" data-tauri-drag-region="true" {...windowDrag()}>
           {/* The build badge lives at the foot of an open rail; with the rail
               collapsed there is no room for it there, so it leads this row. */}
           {!effectiveRailExpanded && <span className="pl-2"><BuildBadge align="start" /></span>}
