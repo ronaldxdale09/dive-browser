@@ -8,7 +8,7 @@ import { DEFAULT_APPEARANCE, DEFAULT_PREFS, usePrefs } from "../../store/prefs";
 import { colorName } from "../../lib/profileAvatar";
 import type { Prefs } from "../../store/prefs";
 import { CUSTOM_PRESET_ID, PRESETS, contrastRatio, exportTheme, findPreset, importTheme, isHex, presetSeeds, resolveScheme } from "../../lib/theme";
-import type { Preset, Seeds } from "../../lib/theme";
+import type { Preset, Scheme, Seeds } from "../../lib/theme";
 import { copyText } from "../../lib/clipboard";
 
 const ACCENTS = ["#7FD8C8", "#8FB8F0", "#B79CF0", "#F0B35E", "#E58C8C", "#9ED67B", "#E9E9E9"];
@@ -42,11 +42,12 @@ export function Appearance() {
       <Group title="Templates" description="A template is three colours; the rest of the chrome is mixed from them.">
         <div role="radiogroup" aria-label="Template" className="grid grid-cols-2 gap-2 py-3 sm:grid-cols-3">
           {PRESETS.map((p) => (
-            <TemplateCard key={p.id} preset={p} selected={prefs.appearance_preset === p.id} onSelect={() => set({ appearance_preset: p.id })} />
+            <TemplateCard key={p.id} preset={p} scheme={scheme} selected={prefs.appearance_preset === p.id} onSelect={() => set({ appearance_preset: p.id })} />
           ))}
           <TemplateCard
             preset={{ id: CUSTOM_PRESET_ID, name: "Custom", description: "Your own three colours.", scheme: "auto" }}
             seeds={{ ground: prefs.custom_ground, ink: prefs.custom_ink, highlight: prefs.custom_highlight }}
+            scheme={scheme}
             selected={custom}
             onSelect={() => set({ appearance_preset: CUSTOM_PRESET_ID })}
           />
@@ -266,8 +267,8 @@ function Preview({ scheme, note }: { scheme: "dark" | "light"; note?: string | u
   );
 }
 
-function TemplateCard({ preset, seeds, selected, onSelect }: { preset: Preset; seeds?: Seeds; selected: boolean; onSelect: () => void }) {
-  const dots = seeds ?? preset.dark ?? preset.light!;
+function TemplateCard({ preset, seeds, scheme, selected, onSelect }: { preset: Preset; seeds?: Seeds; scheme: Scheme; selected: boolean; onSelect: () => void }) {
+  const dots = seeds ?? presetSeeds(preset, scheme) ?? preset.dark ?? preset.light!;
   return (
     <button
       type="button"

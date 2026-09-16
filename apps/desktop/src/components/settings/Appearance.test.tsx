@@ -161,4 +161,12 @@ describe("Appearance", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Sepia" }));
     await waitFor(() => expect((screen.getByRole("switch", { name: "Tell pages the theme" }) as HTMLButtonElement).disabled).toBe(false));
   });
+
+  it("shows Graphite's light seeds when the window is light", () => {
+    // Graphite is auto. The dark dots are not the colours this window gets.
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, theme: "light" }, loaded: true });
+    render(<Appearance />);
+    const swatch = screen.getByRole("radio", { name: "Graphite" }).querySelector("[style]") as HTMLElement;
+    expect(swatch.style.background).toBe("rgb(243, 243, 241)");
+  });
 });
