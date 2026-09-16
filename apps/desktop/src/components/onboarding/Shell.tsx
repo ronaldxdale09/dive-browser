@@ -29,7 +29,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <div className="relative z-10 flex h-full flex-col">
         <ol aria-label="Setup steps" className="flex shrink-0 items-center justify-center gap-6 pt-7">
           {STEPS.map((step, i) => {
-            const state = i < at ? "done" : i === at ? "current" : "todo";
+            const state = i < at ? "past" : i === at ? "current" : "todo";
             return (
               <li key={step} aria-current={state === "current" ? "step" : undefined} data-state={state} className="onboarding-step flex items-center gap-2 font-mono text-[10.5px] tracking-[0.16em] uppercase">
                 <span className="onboarding-step-dot grid size-5 place-items-center rounded-full border text-[9px]">{i + 1}</span>

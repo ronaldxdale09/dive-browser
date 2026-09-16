@@ -611,7 +611,7 @@ button:not(:disabled):active,
 .onboarding-step-dot { border-color: var(--color-line-2); }
 .onboarding-step[data-state="current"] { color: var(--color-ink); }
 .onboarding-step[data-state="current"] .onboarding-step-dot { border-color: var(--color-highlight); color: var(--color-highlight); }
-.onboarding-step[data-state="done"] .onboarding-step-dot { background: var(--color-highlight); border-color: var(--color-highlight); color: var(--color-highlight-ink); }
+.onboarding-step[data-state="past"] .onboarding-step-dot { border-color: var(--color-ink-3); }
 @keyframes feature-in {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: none; }

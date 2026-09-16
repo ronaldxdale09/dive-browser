@@ -145,4 +145,15 @@ describe("Onboarding", () => {
     expect(await screen.findByRole("heading", { name: "Who's diving?" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
   });
+
+  it("does not mark a skipped setup step as done", async () => {
+    // Skip writes nothing. A filled "done" dot claims the step ran.
+    usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
+    act(() => useOnboarding.setState({ stage: "profile" }));
+    render(<Onboarding />);
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    expect(await screen.findByRole("heading", { name: "Make it yours" })).toBeTruthy();
+    expect(screen.getByText("Profile").closest("li")?.getAttribute("data-state")).toBe("past");
+    expect(screen.getByText("Profile").closest("li")?.getAttribute("data-state")).not.toBe("done");
+  });
 });
