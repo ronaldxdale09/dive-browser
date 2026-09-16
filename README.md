@@ -42,7 +42,7 @@ Dive is a native browser for macOS and Windows, built on the Chromium Embedded F
 - **MCP built in.** Claude Code, Cursor and other Model Context Protocol clients can open tabs, read pages, click, type, take screenshots and tail the console and network over localhost, behind a bearer token.
 - **A developer dock, not a bolt-on.** Network with request bodies, SSE and WebSocket frames and HAR export. Console, storage, request mocking and rewriting, axe-core accessibility audits, Core Web Vitals, and an OpenAPI spec inferred from the traffic you just watched. Full Chrome DevTools one shortcut away.
 - **Device simulator.** Real phone and tablet frames, user agents, pixel ratios, touch, and Offline, Slow 3G and Fast 3G throttling.
-- **DivePrivacy.** Ads, trackers and fingerprinting scripts are blocked in the engine's request pipeline, with per-site controls. No extension needed.
+- **DivePrivacy.** First-party ads and tracker lists run in the request pipeline, with per-site controls. No extension needed.
 - **DiveScreen.** Record any tab as video or GIF, then crop, zoom and add cursor effects to make a clip that looks like a product demo.
 - **Workspaces and profiles.** Separate cookies, tabs and mock rules per project, switchable with a keystroke. Profiles keep whole identities apart. Private windows run in their own process.
 - **Idle Today tabs unload.** After an hour away they drop their page and keep their place; click one and it comes back. Same-site tabs can still share a renderer.

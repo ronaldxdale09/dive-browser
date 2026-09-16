@@ -17,4 +17,11 @@ describe("README memory claim", () => {
     // to Chrome and Brave on the registered fixture. Do not re-score it.
     expect(readme).not.toMatch(/It is fast,/);
   });
+
+  it("does not say fingerprinting scripts are blocked", () => {
+    // DivePrivacy matches listed ad and tracker hosts. The tracker list
+    // includes fingerprinting infrastructure. It does not block scripts
+    // as a class and it is not a fingerprint randomizer.
+    expect(readme).not.toMatch(/fingerprinting scripts/i);
+  });
 });

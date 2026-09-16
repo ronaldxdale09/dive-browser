@@ -54,7 +54,7 @@ const APPS: AppEntry[] = [
   { id: "devtools", name: "DevTools", blurb: "Chrome's full inspector, in its own window.", category: "developer", command: "tab.devtools", keywords: "inspect elements", needsTab: true },
   { id: "simulator", name: "Device simulator", blurb: "Phones and tablets with real frames, touch and throttling.", category: "developer", command: "simulator.toggle", keywords: "mobile responsive emulate iphone", needsTab: true },
   { id: "extensions", name: "Extensions", blurb: "Chrome extensions loaded into Dive.", category: "developer", command: "extensions.open", keywords: "addons plugins" },
-  { id: "privacy", name: "DivePrivacy", blurb: "Ads, trackers and fingerprinting, blocked in the engine.", category: "yours", command: "settings.privacy", keywords: "tracking blocker ads shield" },
+  { id: "privacy", name: "DivePrivacy", blurb: "Ads and trackers, blocked in the engine.", category: "yours", command: "settings.privacy", keywords: "tracking blocker ads shield fingerprint" },
   { id: "passwords", name: "Passwords & forms", blurb: "Saved logins and form entries, kept in the Keychain.", category: "yours", command: "settings.passwords", keywords: "logins autofill keychain" },
   { id: "library", name: "Library", blurb: "Bookmarks, history, downloads and recordings, by profile.", category: "yours", command: "library.open", keywords: "bookmarks history downloads recordings" },
 ];

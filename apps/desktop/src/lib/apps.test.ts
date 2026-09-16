@@ -9,6 +9,11 @@ describe("apps", () => {
     expect(tooLong.map((a) => `${a.name}: ${a.blurb.length}`)).toEqual([]);
   });
 
+  it("does not say DivePrivacy blocks fingerprinting as a class", () => {
+    const privacy = appsFor(false).find((app) => app.id === "privacy");
+    expect(privacy?.blurb).not.toMatch(/fingerprint/i);
+  });
+
   it("ends every blurb as a sentence, so a tile never trails off", () => {
     for (const app of appsFor(false)) {
       expect(app.blurb.endsWith("."), `${app.name}: ${app.blurb}`).toBe(true);
