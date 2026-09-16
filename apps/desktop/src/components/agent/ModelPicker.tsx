@@ -1,5 +1,5 @@
 import { Check, ChevronDown, Loader2, Plus, RefreshCw, Search } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {useCallback,  useEffect, useMemo, useRef, useState } from "react";
 import { compactNumber, shortModel } from "../../lib/agentSteps";
 import type { ModelInfo, Provider } from "../../lib/ipc";
 import { useCoversContent } from "../../lib/overlay";
@@ -23,7 +23,7 @@ const EFFORTS = [
  * own listing, set how hard it thinks. Everything here writes straight to
  * preferences, so Settings and the panel never disagree.
  */
-export function ModelPicker({ onAddProvider }: { onAddProvider: () => void }) {
+export function ModelPicker({ onAddProvider, onOpenChange }: { onAddProvider: () => void; onOpenChange?: (open: boolean) => void }) {
   const prefs = usePrefs((s) => s.prefs);
   const update = usePrefs((s) => s.update);
   const providers = useAgent((s) => s.providers);
@@ -33,12 +33,21 @@ export function ModelPicker({ onAddProvider }: { onAddProvider: () => void }) {
   const error = useAgent((s) => s.modelsError);
   const loadModels = useAgent((s) => s.loadModels);
   const [open, setOpen] = useState(false);
+  // Reported so the composer can get out of the way: this panel opens upward,
+  // over whatever the composer has above it.
+  const show = useCallback(
+    (next: boolean) => {
+      setOpen(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange],
+  );
   const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
 
   useCoversContent(open);
-  useFocusTrap(dialog, { active: open, onEscape: () => setOpen(false) });
+  useFocusTrap(dialog, { active: open, onEscape: () => show(false) });
 
   const provider = providers.find((p) => p.id === prefs.agent_provider);
   const listed = models[prefs.agent_provider];
@@ -52,11 +61,11 @@ export function ModelPicker({ onAddProvider }: { onAddProvider: () => void }) {
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+      if (!ref.current?.contains(e.target as Node)) show(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
+  }, [open, show]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -76,7 +85,7 @@ export function ModelPicker({ onAddProvider }: { onAddProvider: () => void }) {
     <div ref={ref} className="relative min-w-0 max-w-[45%] flex-[0_1_auto] basis-auto">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => show(!open)}
         aria-expanded={open}
         aria-haspopup="dialog"
         className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink aria-expanded:bg-surface-2 aria-expanded:text-ink"

@@ -101,10 +101,27 @@ let watcher: MutationObserver | null = null;
 function overlayElements(): HTMLElement[] {
   if (matched) return matched;
   watcher ??= new MutationObserver(() => { matched = null; });
-  watcher.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["role", "data-native-overlay"] });
-  matched = Array.from(document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR))
-    .filter((element) => !element.parentElement?.closest(OVERLAY_SELECTOR));
+  watcher.observe(document.body, { childList: true, subtree: true, attributeFilter: ["role", "data-native-overlay"], attributes: true });
+  // Every match, nested ones included. A nested overlay used to be dropped
+  // here on the grounds that its parent's rectangle already covered it --
+  // which is false for the ones that pop *out* of their parent: a menu above
+  // a composer, a tooltip beside a card. Those were left out of the mask
+  // entirely, so the page showed through where they were drawn. Containment
+  // is judged on the measured rectangles instead, in `visibleOverlayRegions`,
+  // where the truth is known.
+  matched = Array.from(document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR));
   return matched;
+}
+
+/** Whether `inner` is entirely inside `outer`, so masking both says nothing new. */
+function within(inner: DOMRect, outer: DOMRect): boolean {
+  return (
+    inner !== outer &&
+    inner.left >= outer.left &&
+    inner.right <= outer.right &&
+    inner.top >= outer.top &&
+    inner.bottom <= outer.bottom
+  );
 }
 
 /** Drop the cached elements; tests only. */
@@ -115,12 +132,19 @@ export function resetOverlayElements() {
 }
 
 export function visibleOverlayRegions() {
-  return overlayElements()
+  const measured = overlayElements()
     // One style read, not two: a `display: none` element measures 0x0 and is
     // dropped by the size filter below, but a hidden one still has a box.
     .filter((element) => getComputedStyle(element).visibility !== "hidden")
-    .map((element) => {
-      const { x, y, width, height } = element.getBoundingClientRect();
+    .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+    .filter(({ rect }) => rect.width > 0 && rect.height > 0);
+  // A surface wholly inside another adds nothing to the mask; one that
+  // escapes its parent is the whole reason this list is not pruned by
+  // ancestry.
+  return measured
+    .filter(({ rect }) => !measured.some((other) => within(rect, other.rect)))
+    .map(({ element, rect }) => {
+      const { x, y, width, height } = rect;
       // Floating chrome surfaces use uniform circular corners. Carry their
       // painted shape through IPC; a rectangular native mask exposes the
       // chrome's opaque background in the otherwise transparent corners.

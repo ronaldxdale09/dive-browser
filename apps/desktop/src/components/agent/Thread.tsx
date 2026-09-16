@@ -65,6 +65,8 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
   const current = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
   const openTab = useBrowser((s) => s.openTab);
   const [draft, setDraft] = useState("");
+  // The model panel opens upward, into the space the ways in occupy.
+  const [pickerOpen, setPickerOpen] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   // Whether the person was reading the newest text the last time they scrolled.
@@ -120,7 +122,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
 
       {/* Nothing has been asked yet: four ways in, as quiet chips above the
           composer rather than a panel of their own. */}
-      {messages.length === 0 && (
+      {messages.length === 0 && !pickerOpen && (
         <div className="mb-2 flex flex-wrap justify-center gap-1.5">
           {SUGGESTIONS.map((s) => (
             <button
@@ -157,7 +159,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
 
         {/* What it can see and how it may act, then the one action. */}
         <div className="mt-1.5 flex items-center gap-1.5">
-          <ModelPicker onAddProvider={onAddProvider} />
+          <ModelPicker onAddProvider={onAddProvider} onOpenChange={setPickerOpen} />
           {current && (
             <button
               type="button"
