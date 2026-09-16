@@ -835,7 +835,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     }
   },
   readerView: async () => {
-    const id = get().activeTab;
+    const id = tabInThisWindow(get().activeTab, get().detached);
     if (!id) return;
     try {
       // Asking twice leaves reader view, so the command is a toggle wherever

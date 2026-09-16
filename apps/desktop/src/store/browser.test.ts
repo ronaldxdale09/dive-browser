@@ -802,3 +802,16 @@ describe("savePage", () => {
     expect(useBrowser.getState().notice).toBeNull();
   });
 });
+
+describe("readerView", () => {
+  it("does not open reader view on a detached tab as this window's", async () => {
+    const open = vi.spyOn(ipc, "pageReaderOpen").mockResolvedValue(false);
+    const read = vi.spyOn(ipc, "pageReader").mockResolvedValue({ ok: false, reason: "no-article" });
+    useBrowser.setState({ activeTab: "r1", detached: ["r1"], tabs: [tab("r1")], notice: null });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await useBrowser.getState().readerView();
+    expect(open).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    expect(useBrowser.getState().notice).toBeNull();
+  });
+});
