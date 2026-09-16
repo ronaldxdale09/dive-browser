@@ -100,7 +100,11 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "tasks.open": () => useBrowser.getState().toggle("tasks", true),
   "page.reader": () => useBrowser.getState().readerView(),
   "page.translate": () => useBrowser.getState().translatePage(),
-  "find.open": () => useBrowser.getState().toggle("find", true),
+  "find.open": () => {
+    const { activeTab, detached, toggle } = useBrowser.getState();
+    if (!tabInThisWindow(activeTab, detached)) return;
+    toggle("find", true);
+  },
   "library.open": () => useBrowser.getState().toggle("library", true),
   "bookmarks.open": () => useBrowser.getState().openLibrary("bookmarks"),
   "history.open": () => useBrowser.getState().openLibrary("history"),

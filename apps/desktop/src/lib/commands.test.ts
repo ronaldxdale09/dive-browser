@@ -244,6 +244,18 @@ describe("command dispatch", () => {
     expect(useBrowser.getState().notice).toBeNull();
   });
 
+  it("does not open find on a detached tab as this window's", async () => {
+    useBrowser.setState({
+      tabs: [tab("a")],
+      activeTab: "a",
+      detached: ["a"],
+      open: { ...useBrowser.getState().open, find: false },
+    });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await UI_COMMANDS["find.open"]!();
+    expect(useBrowser.getState().open.find).toBe(false);
+  });
+
   it("routes the new commands to the store", async () => {
     const print = vi.spyOn(ipc, "tabPrint").mockResolvedValue(null);
     const stop = vi.spyOn(ipc, "tabStop").mockResolvedValue(null);
