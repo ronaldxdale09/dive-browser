@@ -631,6 +631,14 @@ describe("openOrSwitch", () => {
   });
 });
 
+describe("applyZoom", () => {
+  it("records this tab's engine zoom and leaves a sibling alone", () => {
+    useBrowser.setState({ zoom: { a: 1.25 }, defaultZoom: 1 });
+    useBrowser.getState().applyZoom("b", 1.5);
+    expect(useBrowser.getState().zoom).toEqual({ a: 1.25, b: 1.5 });
+  });
+});
+
 describe("zoomStep", () => {
   it("sends one zoom command at a time and follows up with the latest level", async () => {
     let settle!: () => void;

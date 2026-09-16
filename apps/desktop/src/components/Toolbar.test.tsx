@@ -172,6 +172,17 @@ describe("Toolbar", () => {
     useBrowser.setState({ defaultZoom: 1 });
   });
 
+  it("shows a site-restored zoom for this tab, not a sibling's", () => {
+    const other = { ...tab, id: "tab-2", url: "https://other.test/" };
+    useBrowser.setState({ tabs: [tab, other], activeTab: tab.id, zoom: { [other.id]: 2 }, defaultZoom: 1 });
+    render(<Toolbar />);
+    expect(screen.queryByRole("button", { name: "Reset zoom" })).toBeNull();
+    act(() => useBrowser.getState().applyZoom(tab.id, 1.5));
+    expect(screen.getByRole("button", { name: "Reset zoom" }).textContent).toBe("150%");
+    act(() => useBrowser.setState({ activeTab: other.id }));
+    expect(screen.getByRole("button", { name: "Reset zoom" }).textContent).toBe("200%");
+  });
+
   it("shows the address that failed to load, not the last one that worked", () => {
     useBrowser.setState({ navError: { [tab.id]: { url: "http://nonexistent.invalid/", error: "net::ERR_NAME_NOT_RESOLVED" } } });
     render(<Toolbar />);

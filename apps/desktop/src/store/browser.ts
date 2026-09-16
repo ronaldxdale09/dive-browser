@@ -96,11 +96,13 @@ interface BrowserState {
   translatePage: () => Promise<void>;
   /** A user capture is traversing/encoding; blocks duplicate requests. */
   capturing: boolean;
-  /** Zoom factor per tab; absent means 1. */
+  /** Zoom factor per tab; absent means the default new tabs open at. */
   zoom: Record<string, number>;
   /** The zoom new tabs open at (the Default zoom preference), mirrored here so the badge and the steps agree with the engine. */
   defaultZoom: number;
   zoomStep: (direction: 1 | -1 | 0) => Promise<void>;
+  /** The engine applied this tab's zoom (site restore). Ignored while a step is in flight. */
+  applyZoom: (id: string, factor: number) => void;
   /** The active tab's zoom as the engine has it: an explicit step, else the default new tabs open at. */
   zoomOf: (id: string | null) => number;
   devtools: () => Promise<void>;
@@ -327,6 +329,7 @@ let unlistenPermissionDismissed: (() => void) | null = null;
 let unlistenWindowChanged: (() => void) | null = null;
 let unlistenDownload: (() => void) | null = null;
 let unlistenDownloadProgress: (() => void) | null = null;
+let unlistenZoom: (() => void) | null = null;
 /** The boot in flight, so a remount that boots again waits for it instead of subscribing twice. */
 let booting: Promise<void> | null = null;
 /** The one toast timer: a newer notice cancels the older one's clearing. */
@@ -580,6 +583,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
           }), (off) => { unlistenWindowChanged = off; }),
           once(unlistenDownload, () => events.downloadNotice.listen(downloadNotice), (off) => { unlistenDownload = off; }),
           once(unlistenDownloadProgress, () => events.downloadProgress.listen((e) => useDownloads.getState().progress(e.payload)), (off) => { unlistenDownloadProgress = off; }),
+          once(unlistenZoom, () => events.tabZoom.listen((e) => get().applyZoom(e.payload.tab_id, e.payload.factor)), (off) => { unlistenZoom = off; }),
         ]);
         const [, , , candidate] = await Promise.all([listenConsole(), listenNetwork(), listenPrivacy(), snapshotCandidate(), usePrivacy.getState().loadInfo()]);
         if (candidate.isCurrent()) set(replaySnapshot(candidate.snapshot, candidate.events));
@@ -754,6 +758,11 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   devtools: async () => {
     const id = get().activeTab;
     if (id) await run(set, () => ipc.tabDevtools(id));
+  },
+  applyZoom: (id, factor) => {
+    if (zoomInFlight.has(id) || zoomWanted.has(id)) return;
+    if (!Number.isFinite(factor)) return;
+    set((s) => (s.zoom[id] === factor ? s : { zoom: { ...s.zoom, [id]: factor } }));
   },
   zoomStep: async (direction) => {
     const id = get().activeTab;

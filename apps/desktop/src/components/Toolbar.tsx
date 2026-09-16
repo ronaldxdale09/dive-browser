@@ -286,7 +286,7 @@ function LoadingLine() {
 
 /** Hostname plus path, scheme dropped, for the resting omnibox. */
 
-/** Shows the active tab's zoom when it is not 100%; click resets. */
+/** Shows the active tab's zoom when it is not the default; click resets. */
 function ZoomBadge() {
   const active = useBrowser((s) => s.activeTab);
   const zoom = useBrowser((s) => (active ? (s.zoom[active] ?? s.defaultZoom) : s.defaultZoom));

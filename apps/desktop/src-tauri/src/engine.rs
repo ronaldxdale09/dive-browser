@@ -1948,6 +1948,16 @@ fn popout_chrome_label(seq: u64, id: TabId) -> String {
     format!("chrome-pop-{seq}-{id}")
 }
 
+/// The engine applied a zoom factor to a tab. The chrome badge reads this so
+/// a site-restored level is this tab's, not a leftover from a sibling.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
+pub struct TabZoom {
+    /// Tab whose view was zoomed.
+    pub tab_id: TabId,
+    /// Factor the engine set (`1.0` is 100%).
+    pub factor: f64,
+}
+
 /// Settings key prefix for a site's remembered zoom factor.
 pub const SITE_ZOOM_PREFIX: &str = "zoom:";
 
@@ -1972,9 +1982,12 @@ fn apply_site_zoom(app: &AppHandle<Runtime>, tab_id: TabId, url: &str) {
     };
     if let Ok(host) = state.host.try_lock()
         && let Some(host) = host.as_ref()
-        && let Err(e) = host.with_view(tab_id, |v| v.set_zoom(factor))
     {
-        tracing::debug!(%tab_id, "site zoom not applied: {e}");
+        if let Err(e) = host.with_view(tab_id, |v| v.set_zoom(factor)) {
+            tracing::debug!(%tab_id, "site zoom not applied: {e}");
+            return;
+        }
+        let _ = TabZoom { tab_id, factor }.emit(app);
     }
 }
 

@@ -790,6 +790,7 @@ export const events = {
 	tabHistoryChanged: makeEvent<TabHistoryChanged>("tab-history-changed"),
 	tabLoad: makeEvent<TabLoad>("tab-load"),
 	tabWindowChanged: makeEvent<TabWindowChanged>("tab-window-changed"),
+	tabZoom: makeEvent<TabZoom>("tab-zoom"),
 	updateProgress: makeEvent<UpdateProgress>("update-progress"),
 };
 
@@ -910,7 +911,7 @@ export type AppInfo = {
 	build: BuildInfo,
 	/**  Application data directory. */
 	data_dir: string,
-	/**  MCP endpoint, empty when disabled. */
+	/**  MCP endpoint, empty when the server is off or this window is private. */
 	mcp_url: string,
 	/**  Path of the bearer token file. */
 	mcp_token_path: string,
@@ -2782,6 +2783,17 @@ export type TabWindowChanged = {
 	tab: TabId,
 	/**  Whether it now lives in its own window. */
 	detached: boolean,
+};
+
+/**
+ *  The engine applied a zoom factor to a tab. The chrome badge reads this so
+ *  a site-restored level is this tab's, not a leftover from a sibling.
+ */
+export type TabZoom = {
+	/**  Tab whose view was zoomed. */
+	tab_id: TabId,
+	/**  Factor the engine set (`1.0` is 100%). */
+	factor: number | null,
 };
 
 /**  One tab, as the task manager lists it. */

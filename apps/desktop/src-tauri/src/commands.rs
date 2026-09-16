@@ -896,6 +896,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::emulate::DeviceEmulated,
             crate::engine::DownloadProgress,
             crate::engine::UpdateProgress,
+            crate::engine::TabZoom,
         ])
 }
 
