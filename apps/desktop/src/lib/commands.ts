@@ -1,6 +1,6 @@
 import { isPrivateWindow } from "./privateMode";
 import { ipc } from "./ipc";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { useLayout } from "../store/layout";
 import { usePrefs } from "../store/prefs";
 import { useRecording } from "../store/recording";
@@ -28,8 +28,9 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "private.exit": () => ipc.windowExitPrivate().then(() => undefined).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) })),
   "window.private": () => ipc.windowPrivate().then(() => undefined).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) })),
   "tab.close": () => {
-    const { activeTab, closeTab } = useBrowser.getState();
-    return activeTab ? closeTab(activeTab) : (isPrivateWindow() ? ipc.windowClose().then(() => undefined) : undefined);
+    const { activeTab, detached, closeTab } = useBrowser.getState();
+    const here = tabInThisWindow(activeTab, detached);
+    return here ? closeTab(here) : (isPrivateWindow() ? ipc.windowClose().then(() => undefined) : undefined);
   },
   "tab.reopen": () => useBrowser.getState().reopenClosedTab(),
   "tab.pin": () => {

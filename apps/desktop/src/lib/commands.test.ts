@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import menuSource from "../../src-tauri/src/menu.rs?raw";
 import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel, credentialStoreName, credentialStoreTitle, isMissingPasswordError, missingPasswordNotice, defaultDownloadsFolderLabel, defaultDownloadsHint, defaultDownloadsPlaceholder, importFromWhere, importLookingLabel, importDeniedNote, importPasswordNote, importEmptyHint, importSourcesHint, importPasswordsHint, unpackedExtensionHint } from "./commands";
 import { events, ipc } from "./ipc";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import type { Tab } from "./ipc";
 
 const tab = (id: string): Tab => ({
@@ -17,7 +17,7 @@ beforeEach(() => platform("MacIntel"));
 
 afterEach(() => {
   vi.restoreAllMocks();
-  useBrowser.setState({ tabs: [], activeTab: null });
+  useBrowser.setState({ tabs: [], activeTab: null, detached: [] });
   platform("");
   Reflect.deleteProperty(window, "__DIVE_PRIVATE__");
 });
@@ -40,6 +40,14 @@ describe("command dispatch", () => {
     useBrowser.setState({activeTab:null, tabs:[]});
     await UI_COMMANDS["tab.close"]!();
     expect(close).toHaveBeenCalledOnce();
+  });
+  it("does not close a detached tab as this window's", async () => {
+    const close = vi.spyOn(ipc, "tabClose").mockResolvedValue(null);
+    vi.spyOn(ipc, "tabScrollPosition").mockResolvedValue(null);
+    useBrowser.setState({ activeTab: "t1", detached: ["t1"], tabs: [tab("t1")] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await UI_COMMANDS["tab.close"]!();
+    expect(close).not.toHaveBeenCalled();
   });
   it("sends New Window and New private window to separate native commands", async () => {
     Object.defineProperty(window, "__DIVE_PRIVATE__", {value:true, configurable:true});
