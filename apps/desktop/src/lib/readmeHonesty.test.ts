@@ -44,4 +44,11 @@ describe("README memory claim", () => {
     expect(readme).not.toContain("~/Applications/Dive Apps` for Spotlight and the Dock");
     expect(readme).toContain("Start Menu");
   });
+
+  it("does not say every tab is reachable by MCP", () => {
+    // AppBrowser::tabs filters TabState::Discarded. The sidecar already
+    // says sleeping tabs are omitted; the README must not upgrade that.
+    expect(readme).not.toMatch(/Every tab is also reachable/i);
+    expect(readme).toMatch(/sleeping tabs/i);
+  });
 });
