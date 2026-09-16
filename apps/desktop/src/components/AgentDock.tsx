@@ -2,7 +2,7 @@ import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useCoversContent } from "../lib/overlay";
 import { isReady, useAgent } from "../store/agent";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { usePrefs } from "../store/prefs";
 import { IconButton } from "./Icon";
 import { Setup } from "./agent/Setup";
@@ -30,7 +30,7 @@ export function AgentDock({ inset = 0 }: { inset?: number }) {
   const keyed = useAgent((s) => s.keyed);
   const providerId = usePrefs((s) => s.prefs.agent_provider);
   const toggle = useBrowser((s) => s.toggle);
-  const activeTab = useBrowser((s) => s.activeTab);
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const loadFor = useAgent((s) => s.loadFor);
   const settingsOpen = useBrowser((s) => s.open.settings);
   const [wantsSetup, setWantsSetup] = useState(false);

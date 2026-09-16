@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderInfo, Tab } from "../lib/ipc";
 import { useAgent } from "../store/agent";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { usePrefs } from "../store/prefs";
 import { AgentDock } from "./AgentDock";
 
@@ -68,7 +68,7 @@ beforeEach(() => {
     clear: vi.fn(),
   });
   usePrefs.setState({ prefs: { ...usePrefs.getState().prefs, agent_provider: "anthropic", agent_model: "claude-opus-5" } });
-  useBrowser.setState({ tabs: [tab], activeTab: tab.id, open: { ...useBrowser.getState().open, settings: false }, toggle: vi.fn(), openSettings: vi.fn() });
+  useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [], open: { ...useBrowser.getState().open, settings: false }, toggle: vi.fn(), openSettings: vi.fn() });
 });
 
 afterEach(() => {
@@ -82,6 +82,14 @@ afterEach(() => {
 });
 
 describe("AgentDock", () => {
+  it("does not load a detached tab's conversation as this window's", () => {
+    useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [tab.id] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    render(<AgentDock />);
+    expect(useAgent.getState().loadFor).toHaveBeenCalledWith(null);
+    expect(useAgent.getState().loadFor).not.toHaveBeenCalledWith(tab.id);
+  });
+
   it("shows initialization failure with retry and keeps its close control", () => {
     useAgent.setState({ loaded: true, initError: "Credential discovery timed out" });
     render(<AgentDock />);
