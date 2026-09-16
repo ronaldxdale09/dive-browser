@@ -30,6 +30,14 @@ afterEach(() => {
 });
 
 describe("MetaPanel", () => {
+  it("does not show a detached tab's metadata as this window's dock", () => {
+    useBrowser.setState({ tabs: [tab], activeTab: "t1", detached: ["t1"], loading: {} });
+    render(<MetaPanel />);
+    expect(screen.getByText("Open a tab to inspect its metadata.")).toBeTruthy();
+    expect(screen.queryByText("Hello page")).toBeNull();
+    expect(ipc.tabMeta).not.toHaveBeenCalled();
+  });
+
   it("does not keep the last title when this tab is sleeping", async () => {
     render(<MetaPanel />);
     expect((await screen.findAllByText("Hello page")).length).toBeGreaterThan(0);

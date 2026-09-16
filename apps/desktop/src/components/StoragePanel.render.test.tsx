@@ -24,6 +24,14 @@ afterEach(() => {
 });
 
 describe("StoragePanel", () => {
+  it("does not count a detached tab's cookies as this window's dock", () => {
+    useBrowser.setState({ tabs: [tab], activeTab: "t1", detached: ["t1"], loading: {} });
+    render(<StoragePanel />);
+    expect(screen.getByText("Open a tab to inspect its storage.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Cookies (1)" })).toBeNull();
+    expect(ipc.tabStorage).not.toHaveBeenCalled();
+  });
+
   it("heads the columns and explains a cookie's flags, then switches to local storage", async () => {
     render(<StoragePanel />);
     expect(await screen.findByText("session")).toBeTruthy();

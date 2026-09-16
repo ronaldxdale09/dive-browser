@@ -2,7 +2,7 @@ import { RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { ipc } from "../lib/ipc";
 import { useTabData } from "../lib/useTabData";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
 import { errorMessage } from "../lib/errors";
 import { ReadError } from "./ReadError";
@@ -18,12 +18,18 @@ export function sortRows(rows: [string, string, string][]): [string, string, str
 
 /** Cookies, localStorage and sessionStorage for the active tab. */
 export function StoragePanel() {
-  const activeTab = useBrowser((s) => s.activeTab);
-  const tab = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
+  const tab = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return id ? s.tabs.find((t) => t.id === id) : undefined;
+  });
   const url = tab?.url;
   const sleeping = tab?.state === "discarded";
   // Cookies and storage are written as the page runs; read again once it has loaded.
-  const loading = useBrowser((s) => Boolean(s.activeTab && s.loading[s.activeTab]));
+  const loading = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return Boolean(id && s.loading[id]);
+  });
   const { data, error, refresh } = useTabData(sleeping ? null : activeTab, url, ipc.tabStorage, 0, loading);
   const [section, setSection] = useState<"cookies" | "local" | "session">("cookies");
 

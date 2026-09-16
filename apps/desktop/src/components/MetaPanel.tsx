@@ -2,7 +2,7 @@ import { RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { ipc } from "../lib/ipc";
 import { useTabData } from "../lib/useTabData";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
 import { InternalPageNote, isInternalPage } from "./InternalPageNote";
 import { ReadError } from "./ReadError";
@@ -42,12 +42,18 @@ function CardImage({ src }: { src: string | undefined }) {
 
 /** Head metadata with a search-result and a social-card preview. */
 export function MetaPanel() {
-  const activeTab = useBrowser((s) => s.activeTab);
-  const tab = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
+  const tab = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return id ? s.tabs.find((t) => t.id === id) : undefined;
+  });
   const url = tab?.url ?? "";
   const sleeping = tab?.state === "discarded";
   // Head tags settle when the document has loaded; read again then.
-  const loading = useBrowser((s) => Boolean(s.activeTab && s.loading[s.activeTab]));
+  const loading = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return Boolean(id && s.loading[id]);
+  });
   const internal = isInternalPage(url);
   const { data: meta, error, refresh } = useTabData(internal || sleeping ? null : activeTab, url, ipc.tabMeta, 0, loading);
 
