@@ -34,4 +34,15 @@ describe("FeaturesStep", () => {
     expect(document.body.textContent).not.toMatch(/macOS/);
     expect(document.body.textContent).toMatch(/Settings › Apps › Default apps/);
   });
+
+  it("does not name ⌘ chords for workspaces, the agent, the dock, or the palette on Windows", () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    render(<FeaturesStep />);
+    expect(document.body.textContent).not.toMatch(/⌘/);
+    expect(document.body.textContent).toMatch(/Ctrl\+1–9/);
+    expect(document.body.textContent).toMatch(/Ctrl\+J/);
+    expect(document.body.textContent).toMatch(/Ctrl\+Shift\+D/);
+    expect(document.body.textContent).toMatch(/Ctrl\+Shift\+R/);
+    expect(document.body.textContent).toMatch(/Ctrl\+K finds the rest/);
+  });
 });

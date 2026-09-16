@@ -1,7 +1,7 @@
 import { Bot, Clapperboard, Globe, LayoutGrid, PanelBottom, ShieldCheck } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useState, useRef } from "react";
-import { FOCUS_ADDRESS } from "../../lib/commands";
+import { displayChord, FOCUS_ADDRESS } from "../../lib/commands";
 import { defaultBrowserOnboardingHint } from "../DefaultBrowserDialog";
 import { useDefaultBrowser } from "../../store/defaultBrowser";
 import { useOnboarding } from "../../store/onboarding";
@@ -59,7 +59,7 @@ export function FeaturesStep() {
     <div>
       <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">{stepLabel("features")}</p>
       <h2 ref={heading} tabIndex={-1} className="mt-1 text-lg font-semibold tracking-[-0.02em] outline-none">What's inside</h2>
-      <p className="mt-0.5 text-xs text-ink-3">Everything is a keystroke away, and ⌘K finds the rest.</p>
+      <p className="mt-0.5 text-xs text-ink-3">Everything is a keystroke away, and {displayChord("⌘K")} finds the rest.</p>
       <ul className="mt-4 divide-y divide-line" aria-label="Features">
         {FEATURES.map((f, i) => (
           <li key={f.title} className="feature-card flex items-center gap-3 py-2" style={{ "--i": i } as React.CSSProperties}>
@@ -70,7 +70,7 @@ export function FeaturesStep() {
               <span className="font-medium text-ink">{f.title}</span>
               <span className="text-ink-3"> · {f.text}</span>
             </span>
-            <kbd className="shrink-0 rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-3">{f.keys}</kbd>
+            <kbd className="shrink-0 rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-3">{displayChord(f.keys)}</kbd>
           </li>
         ))}
       </ul>
