@@ -745,6 +745,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             permission_reply,
             js_dialog_pending,
             js_dialog_answer,
+            http_auth_pending,
+            http_auth_answer,
             permissions_list,
             crate::extensions::extensions_list,
             crate::extensions::extension_pick,
@@ -887,6 +889,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::tab_audio::TabAudio,
             crate::permissions::PermissionDismissed,
             crate::js_dialog::JsDialogAsked,
+            crate::http_auth::HttpAuthAsked,
+            crate::http_auth::HttpAuthClosed,
             crate::js_dialog::JsDialogClosed,
             crate::privacy::PrivacyEvent,
             crate::subtitles::SubtitleModelProgress,
@@ -3044,6 +3048,37 @@ pub(crate) fn js_dialog_answer(
         crate::permissions::require_chrome(&webview)?;
         crate::js_dialog::answer(app, state, tab_id, &dialog_id, accept, text).map(|_| ())
     })
+}
+
+/// Challenges opened before this chrome subscribed to native events.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn http_auth_pending(
+    app: AppHandle<Runtime>,
+    webview: tauri::Webview<Runtime>,
+    tab_id: TabId,
+) -> AppResult<Vec<crate::http_auth::HttpAuthAsked>> {
+    on_main(&app, move |_, _, state| {
+        crate::permissions::require_chrome(&webview)?;
+        Ok(state.http_auth.for_tab(tab_id))
+    })
+}
+
+/// Answer a server's sign-in request (`HttpAuthAsked`). Without a username
+/// the challenge is cancelled and the page sees the server's refusal.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn http_auth_answer(
+    app: AppHandle<Runtime>,
+    webview: tauri::Webview<Runtime>,
+    tab_id: TabId,
+    request_id: String,
+    username: Option<String>,
+    password: Option<String>,
+) -> AppResult<()> {
+    crate::permissions::require_chrome(&webview)?;
+    let credentials = username.map(|user| (user, password.unwrap_or_default()));
+    crate::http_auth::answer(&app, tab_id, &request_id, credentials).await
 }
 
 /// Remembered permissions in the active profile and container.

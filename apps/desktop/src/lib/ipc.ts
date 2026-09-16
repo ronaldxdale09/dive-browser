@@ -23,7 +23,7 @@ export const events = {
   },
 };
 export type { ExternalLinkAsked, TabAudio, TaskRow, Address, Card, CardDraft, RestoreSummary } from "../generated/bindings";
-export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, CsvImportSummary, FormEntry, JsDialogAsked, JsDialogClosed } from "../generated/bindings";
+export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, CsvImportSummary, FormEntry, HttpAuthAsked, HttpAuthClosed, JsDialogAsked, JsDialogClosed } from "../generated/bindings";
 export type { ExtensionInfo, ExtensionList };
 export type { WebApp, WebAppProbe } from "../generated/bindings";
 export type { StackReport, Detection, Category, Palette, PaletteEntry, ColorFormats } from "../generated/bindings";
@@ -113,6 +113,11 @@ export const ipc = {
   tabReload: async (id: string) => unwrap(await commands.tabReload(id)),
   tabStop: async (id: string) => unwrap(await commands.tabStop(id)),
   tabPrint: async (id: string) => unwrap(await commands.tabPrint(id)),
+  /** Sign-in requests still waiting in this tab. */
+  httpAuthPending: async (tabId: string) => unwrap(await commands.httpAuthPending(tabId)),
+  /** Answer a sign-in request; a null username cancels it. */
+  httpAuthAnswer: async (tabId: string, requestId: string, username: string | null, password: string | null) =>
+    unwrap(await commands.httpAuthAnswer(tabId, requestId, username, password)),
   /** Float this tab's video over everything else, or bring it back. */
   tabPictureInPicture: async (id: string) => unwrap(await commands.tabPictureInPicture(id)),
   /** The host this tab was upgraded to https for, when the last navigation was one. */

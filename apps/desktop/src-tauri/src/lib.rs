@@ -40,6 +40,7 @@ mod find;
 mod form_fill;
 mod har;
 mod housekeeping;
+mod http_auth;
 mod https_only;
 mod inspect;
 mod ipc_security;

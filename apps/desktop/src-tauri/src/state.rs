@@ -70,6 +70,8 @@ pub struct AppState {
     pub permissions: crate::permissions::Registry,
     /// JavaScript dialogs pages have open, answered from the chrome or MCP.
     pub js_dialogs: crate::js_dialog::Registry,
+    /// Servers and proxies waiting to be told who we are.
+    pub http_auth: crate::http_auth::Registry,
     /// Live-subtitle transcription sessions per tab.
     pub subtitles: crate::subtitles::Registry,
 }
@@ -152,6 +154,7 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
         agent_presence: std::sync::Arc::default(),
         permissions: crate::permissions::Registry::default(),
         js_dialogs: crate::js_dialog::Registry::default(),
+        http_auth: crate::http_auth::Registry::default(),
         subtitles: crate::subtitles::Registry::default(),
     };
     crate::commands::register_builtin(&state.commands);

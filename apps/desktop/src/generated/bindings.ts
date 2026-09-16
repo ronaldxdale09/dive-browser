@@ -354,6 +354,13 @@ export const commands = {
 	jsDialogPending: (tabId: TabId) => typedError<JsDialogAsked[], AppError>(__TAURI_INVOKE("js_dialog_pending", { tabId })),
 	/**  Answer a page's JavaScript dialog (`JsDialogAsked`); the page's script resumes. */
 	jsDialogAnswer: (tabId: TabId, dialogId: string, accept: boolean, text: string | null) => typedError<null, AppError>(__TAURI_INVOKE("js_dialog_answer", { tabId, dialogId, accept, text })),
+	/**  Challenges opened before this chrome subscribed to native events. */
+	httpAuthPending: (tabId: TabId) => typedError<HttpAuthAsked[], AppError>(__TAURI_INVOKE("http_auth_pending", { tabId })),
+	/**
+	 *  Answer a server's sign-in request (`HttpAuthAsked`). Without a username
+	 *  the challenge is cancelled and the page sees the server's refusal.
+	 */
+	httpAuthAnswer: (tabId: TabId, requestId: string, username: string | null, password: string | null) => typedError<null, AppError>(__TAURI_INVOKE("http_auth_answer", { tabId, requestId, username, password })),
 	/**  Remembered permissions in the active profile and container. */
 	permissionsList: () => typedError<PermissionList, AppError>(__TAURI_INVOKE("permissions_list")),
 	/**  List installed extensions. */
@@ -762,6 +769,8 @@ export const events = {
 	downloadNotice: makeEvent<DownloadNotice>("download-notice"),
 	downloadProgress: makeEvent<DownloadProgress>("download-progress"),
 	externalLinkAsked: makeEvent<ExternalLinkAsked>("external-link-asked"),
+	httpAuthAsked: makeEvent<HttpAuthAsked>("http-auth-asked"),
+	httpAuthClosed: makeEvent<HttpAuthClosed>("http-auth-closed"),
 	inspectEvent: makeEvent<InspectEvent>("inspect-event"),
 	jsDialogAsked: makeEvent<JsDialogAsked>("js-dialog-asked"),
 	jsDialogClosed: makeEvent<JsDialogClosed>("js-dialog-closed"),
@@ -1520,6 +1529,33 @@ export type HistoryEntry = {
 	visits: number,
 	/**  The site's remembered icon as a `data:` URL, when one is known. */
 	favicon: string | null,
+};
+
+/**  A server or proxy is asking who you are. */
+export type HttpAuthAsked = {
+	tab_id: TabId,
+	/**  Opaque; pass it back to `http_auth_answer`. */
+	request_id: string,
+	/**  The host asking, with its port when it is not the usual one. */
+	host: string,
+	/**
+	 *  The server's name for the protected area. Often empty, and shown only
+	 *  when it is not: it is the one thing that distinguishes two prompts
+	 *  from the same host.
+	 */
+	realm: string,
+	/**  `basic`, `digest`, `ntlm`, `negotiate`. */
+	scheme: string,
+	/**  The proxy is asking, not the site. */
+	is_proxy: boolean,
+	/**  The connection carrying the password is encrypted. */
+	secure: boolean,
+};
+
+/**  A challenge that is no longer waiting. */
+export type HttpAuthClosed = {
+	tab_id: TabId,
+	request_id: string,
 };
 
 /**  What to bring over. Four independent switches, as the panel shows them. */

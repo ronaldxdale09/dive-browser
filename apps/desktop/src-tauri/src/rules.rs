@@ -438,19 +438,45 @@ fn interception_patterns(rules: &[Rule]) -> serde_json::Value {
     )
 }
 
-/// Enable shared interception when workspace rules or `DivePrivacy` need it.
-pub async fn apply(session: &CdpSession, rules: &[Rule], prefs: &Prefs) -> AppResult<()> {
-    let result = if interception_required(rules, prefs) {
-        session
-            .call(
-                "Fetch.enable",
-                json!({"patterns": interception_patterns(rules)}),
-            )
-            .await
+/// The least interception that can still hear a server ask who you are.
+///
+/// `handleAuthRequests` does not raise a challenge for a request the pipeline
+/// is not intercepting -- measured, not assumed: with a pattern matching
+/// nothing, a real 401 produced no event, and with every request intercepted
+/// the same 401 produced one immediately. So an idle pipeline still has to
+/// pause something, and the honest smallest choice is the top-level document:
+/// one request per navigation, never a stream.
+///
+/// `Fetch.enable` with no patterns at all would pause *everything*, which is
+/// what once stalled video, and Media stays off this pipeline for the same
+/// reason.
+fn documents_only() -> Value {
+    json!([{"urlPattern": "*", "resourceType": "Document"}])
+}
+
+/// What the Fetch domain is asked for: the rules' patterns when something
+/// needs interception, otherwise nothing at all -- and in both cases the
+/// authentication challenges, which is the only way this browser can answer
+/// a server that asks who you are.
+fn fetch_arguments(rules: &[Rule], prefs: &Prefs) -> Value {
+    let patterns = if interception_required(rules, prefs) {
+        interception_patterns(rules)
     } else {
-        session.call0("Fetch.disable").await
+        documents_only()
     };
-    result.map(|_| ()).map_err(AppError::new)
+    json!({"patterns": patterns, "handleAuthRequests": true})
+}
+
+/// Enable the shared Fetch pipeline.
+///
+/// It is always on now, because authentication rides on it; what changes is
+/// whether it pauses requests. See [`fetch_arguments`].
+pub async fn apply(session: &CdpSession, rules: &[Rule], prefs: &Prefs) -> AppResult<()> {
+    session
+        .call("Fetch.enable", fetch_arguments(rules, prefs))
+        .await
+        .map(|_| ())
+        .map_err(AppError::new)
 }
 
 /// Release every currently paused request and restore the one Fetch owner
@@ -463,14 +489,13 @@ async fn reset_interception(session: &CdpSession, rules: &[Rule], prefs: &Prefs)
     {
         tracing::debug!("Fetch.disable recovery failed: {error}");
     }
-    if interception_required(rules, prefs)
-        && let Err(error) = session
-            .call_with_timeout(
-                "Fetch.enable",
-                json!({"patterns": interception_patterns(rules)}),
-                FETCH_RECOVERY_TIMEOUT,
-            )
-            .await
+    if let Err(error) = session
+        .call_with_timeout(
+            "Fetch.enable",
+            fetch_arguments(rules, prefs),
+            FETCH_RECOVERY_TIMEOUT,
+        )
+        .await
     {
         tracing::debug!("Fetch recovery re-enable failed: {error}");
     }
@@ -740,6 +765,14 @@ pub fn attach(
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             };
             top_frame.observe(&event);
+            // A server or a proxy asking who we are rides on the same Fetch
+            // pipeline. It is not a paused request and has nothing to do with
+            // the rules: it goes straight to the chrome, which asks the
+            // person and answers it.
+            if event.method == "Fetch.authRequired" {
+                crate::http_auth::on_auth_required(&app, tab_id, &event.params);
+                continue;
+            }
             if event.method != "Fetch.requestPaused" {
                 continue;
             }
@@ -1474,7 +1507,20 @@ mod tests {
                     .as_str()
                     .is_some_and(|kind| kind != "Media"))
         );
-        assert_eq!(sent[2]["method"], "Fetch.disable");
+        // Fetch stays on so a server that asks who you are can still be
+        // answered; what goes away is the pausing of requests.
+        assert_eq!(sent[2]["method"], "Fetch.enable");
+        assert_eq!(sent[2]["params"]["handleAuthRequests"], true);
+        // Idle means the top-level document and nothing else: enough for a
+        // server's challenge to reach us, never a stream.
+        let idle = sent[2]["params"]["patterns"].as_array().unwrap();
+        assert_eq!(idle.len(), 1);
+        assert_eq!(idle[0]["resourceType"], "Document");
+        assert!(
+            idle.iter()
+                .all(|pattern| pattern["resourceType"] != "Media"),
+            "media must never be paused: {idle:?}"
+        );
     }
 
     #[tokio::test]
@@ -1604,6 +1650,8 @@ mod tests {
             .iter()
             .map(|message| message["method"].as_str().unwrap().to_owned())
             .collect::<Vec<_>>();
-        assert_eq!(methods, vec!["Fetch.disable"]);
+        // Recovery releases whatever was paused and puts the pipeline back:
+        // idle for requests, still listening for authentication.
+        assert_eq!(methods, vec!["Fetch.disable", "Fetch.enable"]);
     }
 }

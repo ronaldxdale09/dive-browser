@@ -19,6 +19,7 @@ import { usePicker } from "../store/simulator";
 import { DropZones, SplitView } from "./SplitView";
 import { CredentialPromptCard } from "./CredentialPromptCard";
 import { ExternalLinkDialog } from "./ExternalLinkDialog";
+import { HttpAuthCard } from "./HttpAuthCard";
 import { JsDialogCard } from "./JsDialogCard";
 import { useTabDrag } from "./TabDnd";
 import { InternalPage, isInternalUrl } from "./internal/InternalPage";
@@ -74,6 +75,7 @@ export function Content() {
       <CredentialPromptCard tabId={activeTab} />
       <ExternalLinkDialog />
       <JsDialogCard tabId={activeTab && !detached.includes(activeTab) ? activeTab : null} />
+      <HttpAuthCard tabId={activeTab && !detached.includes(activeTab) ? activeTab : null} />
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <div className="relative grid min-h-0 min-w-0 flex-1">
           {internal ? (
