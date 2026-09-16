@@ -58,6 +58,13 @@ describe("README memory claim", () => {
     expect(readme).toMatch(/Installing one restarts Dive/);
   });
 
+  it("does not say the privacy screenshot is blocking by default", () => {
+    // Prefs::default().block_trackers is false. The popover can block
+    // when the person turns it on; the caption must not upgrade that.
+    expect(readme).not.toContain("DivePrivacy</b> blocking ads and trackers per site");
+    expect(readme).toMatch(/off until you turn it on/i);
+  });
+
   it("does not say every tab is reachable by MCP", () => {
     // AppBrowser::tabs filters TabState::Discarded. The sidecar already
     // says sleeping tabs are omitted; the README must not upgrade that.

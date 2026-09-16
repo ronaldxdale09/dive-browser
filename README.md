@@ -60,7 +60,7 @@ Dive is a native browser for macOS and Windows, built on the Chromium Embedded F
   </tr>
   <tr>
     <td><img src="assets/screenshots/simulator.png" alt="Device simulator showing an iPhone frame" /><br /><sub><b>Device simulator</b> with real frames and throttling.</sub></td>
-    <td><img src="assets/screenshots/privacy.png" alt="DivePrivacy popover on a news site" /><br /><sub><b>DivePrivacy</b> blocking ads and trackers per site.</sub></td>
+    <td><img src="assets/screenshots/privacy.png" alt="DivePrivacy popover on a news site" /><br /><sub><b>DivePrivacy</b> per-site controls. Off until you turn it on.</sub></td>
   </tr>
 </table>
 
