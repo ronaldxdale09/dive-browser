@@ -124,6 +124,7 @@ export function McpDialog({ onClose }: { onClose: () => void }) {
               </span>
             ))}
           </div>
+          <p className="mt-2 text-[11px] text-ink-3">Skill --agent IDs. Any local Streamable HTTP client gets the same catalog.</p>
 
           <p className="mt-4 mb-2 text-xs text-ink-2">Paste this setup into your agent.</p>
           {loading && <p role="status" className="text-xs text-ink-3">Loading connection details…</p>}

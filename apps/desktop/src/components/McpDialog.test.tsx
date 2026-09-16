@@ -95,6 +95,16 @@ describe("McpDialog", () => {
     for (const name of ["Claude Code", "Cursor", "Codex", "OpenCode", "Windsurf", "Zed"]) expect(screen.getByTitle(name)).toBeTruthy();
   });
 
+  it("labels the agent names as skill install IDs, not extra catalog clients", async () => {
+    // OpenCode, Windsurf and Zed sit in the same row as Cursor. Without a
+    // label they look like extra MCP surfaces. They are --agent IDs.
+    ready();
+    render(<McpDialog onClose={() => {}} />);
+    await screen.findByRole("button", { name: "Copy setup" });
+    expect(screen.getByText(/skill --agent IDs/i)).toBeTruthy();
+    expect(screen.getByRole("dialog").textContent).not.toMatch(/OpenCode can read/);
+  });
+
   it("does not offer setup when the server is off in a private window", async () => {
     vi.spyOn(ipc, "appInfo").mockResolvedValue({ ...info, mcp_url: "" });
     vi.spyOn(ipc, "mcpToken").mockResolvedValue("");
