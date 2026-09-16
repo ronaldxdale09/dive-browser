@@ -80,7 +80,7 @@ describe("command dispatch", () => {
     vi.spyOn(events.recorderEvent, "listen").mockResolvedValue(() => undefined);
     const start = vi.spyOn(ipc, "tabRecordStart").mockResolvedValue(null);
     const stop = vi.spyOn(ipc, "tabRecordStop").mockResolvedValue([{ kind: "click", locator: "role=button[name='Go']", value: null, url: "https://a.dev/", at: 1 }] as never);
-    useBrowser.setState({ activeTab: "t1", tabs: [{ id: "t1", url: "https://example.com/", title: "Example Domain" } as unknown as Tab] });
+    useBrowser.setState({ activeTab: "t1", detached: [], tabs: [{ id: "t1", url: "https://example.com/", title: "Example Domain" } as unknown as Tab] });
     await UI_COMMANDS["recorder.toggle"]!();
     expect(start).toHaveBeenCalledWith("t1");
     expect(useRecorder.getState().recordingTab).toBe("t1");
@@ -90,6 +90,17 @@ describe("command dispatch", () => {
     expect(useRecorder.getState().recordingTab).toBeNull();
     expect(useRecorder.getState().isOpen).toBe(true);
     useRecorder.getState().clear();
+  });
+  it("does not start step recording on a detached tab as this window's", async () => {
+    const { useRecorder } = await import("../store/recorder");
+    vi.spyOn(events.recorderEvent, "listen").mockResolvedValue(() => undefined);
+    const start = vi.spyOn(ipc, "tabRecordStart").mockResolvedValue(null);
+    useRecorder.setState({ recordingTab: null, isOpen: false, steps: [] });
+    useBrowser.setState({ activeTab: "t1", detached: ["t1"], tabs: [tab("t1")] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await UI_COMMANDS["recorder.toggle"]!();
+    expect(start).not.toHaveBeenCalled();
+    expect(useRecorder.getState().recordingTab).toBeNull();
   });
   it("says so when a recording stops with nothing in it", async () => {
     const { useRecorder } = await import("../store/recorder");

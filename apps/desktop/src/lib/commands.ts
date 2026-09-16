@@ -82,7 +82,8 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
       if (useRecorder.getState().steps.length === 0) useBrowser.getState().notify("Nothing was recorded. Click or type on the page while recording.", 5000);
       return;
     }
-    const tab = useBrowser.getState().activeTab;
+    const { activeTab, detached } = useBrowser.getState();
+    const tab = tabInThisWindow(activeTab, detached);
     if (!tab) {
       useBrowser.getState().notify("Open a tab to record steps in.");
       return;
