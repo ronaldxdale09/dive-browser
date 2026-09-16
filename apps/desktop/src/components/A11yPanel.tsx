@@ -20,22 +20,24 @@ export function A11yPanel() {
   const url = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.url);
   const openTab = useBrowser((s) => s.openTab);
   const [missing, setMissing] = useState<string | null>(null);
-  // One report per tab, so switching tabs never shows another page's
-  // findings, and switching back keeps the ones already gathered.
-  const [reports, setReports] = useState<Record<string, A11yReport>>({});
-  const report = activeTab ? (reports[activeTab] ?? null) : null;
+  // One report per tab and URL: switching tabs never shows another page's
+  // findings, navigating this tab drops the last page's count, and
+  // switching back to the same URL keeps what was already gathered.
+  const [reports, setReports] = useState<Record<string, { url: string; report: A11yReport }>>({});
+  const report = activeTab && url && reports[activeTab]?.url === url ? reports[activeTab].report : null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const run = async () => {
     if (!activeTab) return;
+    const audited = useBrowser.getState().tabs.find((t) => t.id === activeTab)?.url ?? url ?? "";
     setBusy(true);
     setError(null);
     setMissing(null);
     try {
       const { default: axeSource } = await import("axe-core/axe.min.js?raw");
       const next = await ipc.tabA11y(activeTab, axeSource);
-      setReports((all) => ({ ...all, [activeTab]: next }));
+      setReports((all) => ({ ...all, [activeTab]: { url: audited, report: next } }));
     } catch (e) {
       setError(errorMessage(e));
     } finally {

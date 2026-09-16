@@ -57,6 +57,20 @@ describe("A11yPanel", () => {
     expect(await screen.findByText("Not on the page any more. Run the audit again.")).toBeTruthy();
   });
 
+  it("does not keep another page's violations after this tab navigates", async () => {
+    vi.spyOn(ipc, "tabA11y").mockResolvedValue({
+      violations: [{ id: "image-alt", impact: "critical", help: "Images must have alternative text", help_url: "https://x/image-alt", targets: ["img"], notes: [""], count: 1 }],
+      passes: 14,
+      incomplete: 0,
+    });
+    render(<A11yPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Run audit" }));
+    expect((await screen.findByRole("status")).textContent).toBe("1 violation · 14 passed · 0 to review");
+    act(() => useBrowser.setState({ tabs: [{ ...tab, url: "https://b.test/" }], activeTab: "t1" }));
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByText("Run axe-core against the current page.")).toBeTruthy();
+  });
+
   it("keeps a report with the tab it was run on", async () => {
     vi.spyOn(ipc, "tabA11y").mockResolvedValue({ violations: [], passes: 3, incomplete: 0 });
     const other = { ...tab, id: "t2", url: "https://b.test/" };
