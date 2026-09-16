@@ -58,6 +58,9 @@ beforeEach(() => {
     loaded: true,
     messages: [],
     busy: false,
+    // The conversation on screen is the one belonging to the tab in front.
+    tabId: tab.id,
+    loadFor: vi.fn().mockResolvedValue(undefined),
     init: vi.fn().mockResolvedValue(undefined),
     refreshKeys: vi.fn().mockResolvedValue(undefined),
     send: vi.fn().mockResolvedValue(undefined),

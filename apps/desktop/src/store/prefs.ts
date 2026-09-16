@@ -46,6 +46,7 @@ export const DEFAULT_PREFS: Prefs = {
   agent_reasoning: "default",
   agent_max_steps: 25,
   agent_auto_approve: false,
+  agent_approvals: "risk",
   agent_include_page: true,
   agent_custom_base_url: "",
   preferred_editor: "vscode",

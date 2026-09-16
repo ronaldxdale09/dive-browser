@@ -51,6 +51,8 @@ beforeEach(() => {
     send: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
     setSessionAutoApprove: vi.fn(),
+    cleanSession: false,
+    setCleanSession: vi.fn(),
   });
   usePrefs.setState({
     prefs: { ...usePrefs.getState().prefs, agent_provider: "anthropic", agent_model: "claude-opus-5", agent_include_page: true },
@@ -205,12 +207,59 @@ describe("Thread", () => {
   });
 
   it("says when the setting approves everything, and sends the user to change it in Settings", () => {
-    usePrefs.setState({ prefs: { ...usePrefs.getState().prefs, agent_auto_approve: true } });
+    usePrefs.setState({ prefs: { ...usePrefs.getState().prefs, agent_approvals: "never" } });
     const openSettings = vi.fn();
     useBrowser.setState({ openSettings });
     render(<Thread onAddProvider={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: /Acts without asking/ }));
     expect(openSettings).toHaveBeenCalledWith("agent");
     expect(useAgent.getState().setSessionAutoApprove).not.toHaveBeenCalled();
+  });
+  it("offers the run as a Playwright test once it has changed the page, and not before", () => {
+    const reads = [{ id: "s1", name: "page_text", input: "{}", action: false, summary: "hello" }];
+    const acted = [
+      ...reads,
+      { id: "s2", name: "page_click", input: '{"locator":"text=Sign in"}', action: true, summary: "clicked" },
+    ];
+    useAgent.setState({
+      messages: [
+        { id: "u1", role: "user", content: "Sign me in" },
+        { id: "a1", role: "assistant", content: "Done.", steps: reads },
+      ],
+    });
+    render(<Thread onAddProvider={() => {}} />);
+    // Reading the page is how it found its way, not a flow worth keeping.
+    expect(screen.queryByRole("button", { name: /Export as test/ })).toBeNull();
+
+    cleanup();
+    useAgent.setState({
+      messages: [
+        { id: "u1", role: "user", content: "Sign me in" },
+        { id: "a1", role: "assistant", content: "Done.", steps: acted },
+      ],
+    });
+    render(<Thread onAddProvider={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Export as test/ }));
+
+    const dialog = screen.getByRole("dialog", { name: /Playwright Test From This Run/ });
+    // The request names the test, the tab is where it starts, and the step
+    // the agent took is the line in the middle.
+    expect(dialog.textContent).toContain('test("Sign me in"');
+    expect(dialog.textContent).toContain('await page.goto("https://example.com/docs")');
+    expect(dialog.textContent).toContain("getByText('Sign in').click()");
+    expect(dialog.textContent).not.toContain("page_text");
+  });
+  it("runs signed out when clean session is on, and hides the page it would have sent", () => {
+    render(<Thread onAddProvider={() => {}} />);
+    // The tab chip is there while the run works in the person's session.
+    expect(screen.getByRole("button", { name: /Example docs/ })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clean session" }));
+    expect(useAgent.getState().setCleanSession).toHaveBeenCalledWith(true);
+
+    cleanup();
+    useAgent.setState({ cleanSession: true });
+    render(<Thread onAddProvider={() => {}} />);
+    expect(screen.queryByRole("button", { name: /Example docs/ })).toBeNull();
   });
 });

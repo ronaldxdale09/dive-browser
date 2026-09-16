@@ -4,7 +4,11 @@
 mod a11y;
 mod activity;
 mod agent;
+mod agent_guard;
 mod agent_presence;
+#[cfg(feature = "cef")]
+mod agent_probe;
+mod agent_risk;
 mod agent_tools;
 mod autofill;
 mod automation;
@@ -453,6 +457,8 @@ pub fn run() {
             private_probe::start(app.handle().clone());
             #[cfg(feature = "cef")]
             ui_probe::start(app.handle().clone());
+            #[cfg(feature = "cef")]
+            agent_probe::start(app.handle().clone());
             Ok(())
         })
         .build(tauri::generate_context!());

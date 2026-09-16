@@ -122,8 +122,15 @@ pub struct Prefs {
     pub agent_reasoning: String,
     /// Most tool calls one message may make before the run is stopped.
     pub agent_max_steps: i32,
-    /// Let the agent act on a page without asking first.
+    /// Legacy "act without asking" switch, kept only so an existing profile
+    /// can be carried over: [`Prefs::clamp`] turns it into
+    /// `agent_approvals = "never"` and clears it.
+    #[serde(default)]
     pub agent_auto_approve: bool,
+    /// When the agent stops to ask before acting: `every` action, only the
+    /// ones that look costly (`risk`), or `never`.
+    #[serde(default = "default_agent_approvals")]
+    pub agent_approvals: String,
     /// Send the current tab's title, URL, console and text with each message.
     pub agent_include_page: bool,
     /// Base URL of the custom OpenAI-compatible endpoint.
@@ -233,6 +240,12 @@ fn default_welcome_background() -> String {
     "orbs".into()
 }
 
+/// Ask about the steps that look costly, and let the rest run. Asking about
+/// everything is what makes people turn approvals off.
+fn default_agent_approvals() -> String {
+    "risk".into()
+}
+
 fn default_editor() -> String {
     "vscode".into()
 }
@@ -270,6 +283,7 @@ impl Default for Prefs {
             agent_reasoning: "default".into(),
             agent_max_steps: 25,
             agent_auto_approve: false,
+            agent_approvals: default_agent_approvals(),
             agent_include_page: true,
             agent_custom_base_url: String::new(),
             preferred_editor: default_editor(),
@@ -314,6 +328,7 @@ impl Prefs {
     #[allow(clippy::assigning_clones)] // Trimming in place would complicate Unicode boundaries.
     fn clamp(mut self) -> Self {
         let d = Self::default();
+        self = self.clamp_agent(&d);
         if !matches!(self.theme.as_str(), "system" | "dark" | "light") {
             self.theme = d.theme;
         }
@@ -385,10 +400,20 @@ impl Prefs {
         self.privacy_exceptions = normalize_privacy_exceptions(self.privacy_exceptions);
         self.external_link_allowed = normalize_external_link_allowed(self.external_link_allowed);
         self.quick_links = normalize_quick_links(self.quick_links);
+        if !matches!(self.preferred_editor.as_str(), "vscode" | "cursor" | "zed") {
+            self.preferred_editor = d.preferred_editor;
+        }
+        self
+    }
+
+    /// The agent's own settings, kept together because they constrain each
+    /// other: the model has to belong to the provider, and the approval mode
+    /// has to absorb the boolean it replaced.
+    fn clamp_agent(mut self, d: &Self) -> Self {
         let provider = if let Some(provider) = dive_agent::Provider::parse(&self.agent_provider) {
             provider
         } else {
-            self.agent_provider = d.agent_provider;
+            self.agent_provider.clone_from(&d.agent_provider);
             dive_agent::Provider::Anthropic
         };
         self.agent_model = self.agent_model.trim().chars().take(256).collect();
@@ -397,10 +422,19 @@ impl Prefs {
             // leaves a model name from another provider's naming behind.
             self.agent_model = provider.info().default_model;
         }
-        self.agent_reasoning = dive_agent::Effort::parse(&self.agent_reasoning)
-            .as_str()
-            .to_owned();
+        let effort = dive_agent::Effort::parse(&self.agent_reasoning);
+        effort.as_str().clone_into(&mut self.agent_reasoning);
         self.agent_max_steps = self.agent_max_steps.clamp(1, 200);
+        if !matches!(self.agent_approvals.as_str(), "every" | "risk" | "never") {
+            self.agent_approvals.clone_from(&d.agent_approvals);
+        }
+        // A profile saved before approvals had modes said "act without
+        // asking" with a boolean. Carry the person's answer across once,
+        // then stop reading it.
+        if self.agent_auto_approve {
+            self.agent_approvals = "never".into();
+            self.agent_auto_approve = false;
+        }
         self.agent_custom_base_url = self
             .agent_custom_base_url
             .trim()
@@ -408,9 +442,6 @@ impl Prefs {
             .chars()
             .take(2048)
             .collect();
-        if !matches!(self.preferred_editor.as_str(), "vscode" | "cursor" | "zed") {
-            self.preferred_editor = d.preferred_editor;
-        }
         self
     }
 
@@ -1177,6 +1208,34 @@ mod tests {
                 "com" | "co.uk" | "has whitespace.test" | "double..label.test"
             )
         }));
+    }
+
+    #[test]
+    fn the_old_act_without_asking_switch_becomes_the_never_mode_once() {
+        let carried = Prefs {
+            agent_auto_approve: true,
+            ..Prefs::default()
+        }
+        .clamp();
+        assert_eq!(carried.agent_approvals, "never");
+        // Cleared, so the next save does not keep overriding a later choice.
+        assert!(!carried.agent_auto_approve);
+        let back = Prefs {
+            agent_approvals: "every".into(),
+            ..carried
+        }
+        .clamp();
+        assert_eq!(back.agent_approvals, "every");
+    }
+
+    #[test]
+    fn an_unknown_approval_mode_falls_back_to_the_default() {
+        let prefs = Prefs {
+            agent_approvals: "sometimes".into(),
+            ..Prefs::default()
+        }
+        .clamp();
+        assert_eq!(prefs.agent_approvals, "risk");
     }
 
     #[test]

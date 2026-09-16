@@ -8,8 +8,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::model::{
-    Container, ContainerId, Profile, ProfileId, Tab, TabId, TabState, TabTier, Timestamp,
-    Workspace, WorkspaceId,
+    AgentThread, Container, ContainerId, Profile, ProfileId, Tab, TabId, TabState, TabTier,
+    Timestamp, Workspace, WorkspaceId,
 };
 use crate::{CoreError, Result};
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -200,6 +200,14 @@ const MIGRATIONS: &[&str] = &[
         uses INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX cards_profile ON cards(profile_id);",
+    // v15
+    "CREATE TABLE agent_threads (
+        tab_id TEXT PRIMARY KEY REFERENCES tabs(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        messages TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX agent_threads_updated ON agent_threads(updated_at);",
 ];
 
 /// Setting that names the active workspace; the store reads it to know
@@ -819,6 +827,78 @@ impl Store {
             self.fill_favicon(tab);
         }
         Ok(tabs)
+    }
+
+    // ----- agent threads -----
+
+    /// The conversation held in `tab`, if there is one.
+    ///
+    /// Stored as one JSON document per tab rather than a row per message.
+    /// The chrome owns the shape of a message -- text, steps, token usage,
+    /// whether it was stopped -- and that shape changes with the agent; a
+    /// column per field would mean a migration every time it did, for data
+    /// nothing ever queries by field. What is wanted here is only "give me
+    /// back the conversation this tab was having", and a document answers
+    /// that exactly.
+    pub fn agent_thread(&self, tab: TabId) -> Result<Option<AgentThread>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT tab_id, title, messages, updated_at FROM agent_threads WHERE tab_id = ?1",
+                [tab.to_string()],
+                |row| {
+                    Ok(AgentThread {
+                        tab_id: row.get::<_, String>(0)?,
+                        title: row.get(1)?,
+                        messages: row.get(2)?,
+                        updated_at: row.get(3)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    /// Keep `tab`'s conversation, replacing whatever was there.
+    pub fn agent_thread_save(&self, tab: TabId, title: &str, messages: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO agent_threads (tab_id, title, messages, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(tab_id) DO UPDATE SET
+                title = excluded.title,
+                messages = excluded.messages,
+                updated_at = excluded.updated_at",
+            params![
+                tab.to_string(),
+                title,
+                messages,
+                Timestamp::now().to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Throw away `tab`'s conversation. False when there was none.
+    pub fn agent_thread_delete(&self, tab: TabId) -> Result<bool> {
+        let n = self.conn.execute(
+            "DELETE FROM agent_threads WHERE tab_id = ?1",
+            [tab.to_string()],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Drop conversations untouched since `before`, and any whose tab is gone.
+    ///
+    /// The foreign key takes care of closed tabs where foreign keys are on;
+    /// the explicit delete makes a database where they are off tidy too.
+    pub fn agent_threads_prune(&self, before: &str) -> Result<usize> {
+        let tx = self.conn.unchecked_transaction()?;
+        let mut gone = tx.execute(
+            "DELETE FROM agent_threads WHERE tab_id NOT IN (SELECT id FROM tabs)",
+            [],
+        )?;
+        gone += tx.execute("DELETE FROM agent_threads WHERE updated_at < ?1", [before])?;
+        tx.commit()?;
+        Ok(gone)
     }
 
     /// Remove a tab.
@@ -2154,6 +2234,61 @@ mod tests {
     }
 
     #[test]
+    fn a_tab_keeps_its_conversation_until_the_tab_or_the_time_runs_out() {
+        let (store, w) = seeded();
+        let tab = Tab::new(w.id, "https://a.dev/", 0);
+        store.upsert_tab(&tab).unwrap();
+        assert!(store.agent_thread(tab.id).unwrap().is_none());
+
+        store
+            .agent_thread_save(tab.id, "Find what is broken", r#"[{"role":"user"}]"#)
+            .unwrap();
+        let kept = store.agent_thread(tab.id).unwrap().unwrap();
+        assert_eq!(kept.title, "Find what is broken");
+        assert_eq!(kept.messages, r#"[{"role":"user"}]"#);
+        assert_eq!(kept.tab_id, tab.id.to_string());
+
+        // Saving again replaces rather than accumulating.
+        store
+            .agent_thread_save(tab.id, "Find what is broken", "[]")
+            .unwrap();
+        assert_eq!(store.agent_thread(tab.id).unwrap().unwrap().messages, "[]");
+
+        // A conversation nobody asked to keep goes when it is asked to.
+        assert!(store.agent_thread_delete(tab.id).unwrap());
+        assert!(!store.agent_thread_delete(tab.id).unwrap());
+    }
+
+    #[test]
+    fn pruning_forgets_conversations_whose_tab_is_gone_or_that_are_stale() {
+        let (store, w) = seeded();
+        let live = Tab::new(w.id, "https://a.dev/", 0);
+        let closed = Tab::new(w.id, "https://b.dev/", 1);
+        store.upsert_tab(&live).unwrap();
+        store.upsert_tab(&closed).unwrap();
+        store.agent_thread_save(live.id, "live", "[]").unwrap();
+        store.agent_thread_save(closed.id, "closed", "[]").unwrap();
+
+        // Closing the tab takes its conversation with it: the cascade does
+        // it here, and the sweep below is what catches a database whose
+        // foreign keys are off.
+        store.remove_tab(closed.id).unwrap();
+        assert!(store.agent_thread(closed.id).unwrap().is_none());
+        assert_eq!(
+            store.agent_threads_prune("1970-01-01T00:00:00Z").unwrap(),
+            0
+        );
+        assert!(store.agent_thread(live.id).unwrap().is_some());
+
+        // Far enough in the future, everything is stale.
+        assert_eq!(
+            store.agent_threads_prune("2999-01-01T00:00:00Z").unwrap(),
+            1
+        );
+        assert!(store.agent_thread(live.id).unwrap().is_none());
+    }
+
+    #[test]
     fn keep_active_sites_are_canonical_origin_and_profile_scoped() {
         let (store, w) = seeded();
         let other = Profile::new("Other", w.container_id, 1);
@@ -2958,6 +3093,7 @@ mod tests {
             0x4b69_716e_99b1_89aa,
             0xb4db_2559_061e_f61e,
             0xbe92_5ee4_9bbb_2be8,
+            0x721f_a6d6_e53a_606b,
         ];
         assert!(
             MIGRATIONS.len() >= SHIPPED.len(),

@@ -192,6 +192,11 @@ pub fn specs() -> Vec<ToolSpec> {
             "The React component that rendered an element and the source file it is in. Needs a development build.".into(),
             obj(json!({"tab_id": tab, "locator": locator, "ref": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}}), &[]),
         ),
+        spec(
+            "tab_open",
+            format!("Open a URL in a new tab and return its id, leaving the tab you were in as it was. Use it to compare two pages, or to follow a result without losing the list -- not as a substitute for tab_navigate. One run may open {} tabs.", crate::agent::MAX_OPENED_TABS),
+            obj(json!({"url": {"type": "string", "description": "Absolute URL (https://...)."}}), &["url"]),
+        ),
         spec("tab_navigate", "Navigate the tab to a URL.".into(), obj(json!({"tab_id": tab, "url": {"type": "string"}}), &["url"])),
         spec("tab_activate", "Bring a tab to the front so the person sees it.".into(), obj(json!({"tab_id": tab}), &[])),
         spec("tab_close", "Close a tab you opened.".into(), obj(json!({"tab_id": tab}), &[])),
@@ -237,10 +242,6 @@ pub const NOT_FOR_AGENT: &[(&str, &str)] = &[
         "MCP clients ask what the server can do; the agent is told in its system prompt",
     ),
     (
-        "tab_open",
-        "the agent works in the tab the person is in; it may navigate it but not multiply tabs",
-    ),
-    (
         "tab_claim",
         "the host claims the tab for this agent while a run is in flight; it is not the model's to decide",
     ),
@@ -257,6 +258,19 @@ pub const NOT_FOR_AGENT: &[(&str, &str)] = &[
         "a remote client batches to save round trips over HTTP; this agent is already in the browser",
     ),
 ];
+
+/// Arguments an MCP client may pass that the agent may not, and why.
+///
+/// The agent's tools are the server's tools, and the test below holds them to
+/// that. An argument withheld here is a deliberate exception: something the
+/// host decides on the run's behalf rather than something the model is left
+/// to get right.
+pub const WITHHELD_ARGUMENTS: &[(&str, &str, &str)] = &[(
+    "tab_open",
+    "context_id",
+    "which context a run's tabs go into is the run's, not the model's: a clean session would \
+     be undone by one tab opened in the person's",
+)];
 
 /// Tools that change the page or leave it; the UI labels these as actions.
 pub fn is_action(name: &str) -> bool {
@@ -283,6 +297,7 @@ pub fn is_action(name: &str) -> bool {
             | "page_storage_set"
             | "page_storage_clear"
             | "tab_history"
+            | "tab_open"
             | "tab_navigate"
             | "tab_activate"
             | "tab_close"
@@ -318,9 +333,10 @@ fn resolve_tab(argument: Option<&str>, current: Option<TabId>) -> Result<TabId, 
 pub async fn run<B: Browser>(
     browser: &B,
     default_tab: Option<TabId>,
+    scope: &crate::agent::Scope,
     call: &ToolUse,
 ) -> ToolResult {
-    let outcome = execute(browser, default_tab, call).await;
+    let outcome = execute(browser, default_tab, scope, call).await;
     match outcome {
         Ok(content) => ToolResult {
             tool_use_id: call.id.clone(),
@@ -377,6 +393,7 @@ fn target_of(input: &Value) -> Target {
 async fn execute<B: Browser>(
     browser: &B,
     default_tab: Option<TabId>,
+    scope: &crate::agent::Scope,
     call: &ToolUse,
 ) -> Result<Value, String> {
     let input = &call.input;
@@ -744,6 +761,30 @@ async fn execute<B: Browser>(
                 .await
                 .map_err(err)?,
         ),
+        "tab_open" => {
+            // A model that has seen the server's schema may send context_id
+            // anyway. Answering with the reason is better than ignoring it:
+            // it would otherwise believe it chose the context.
+            if !input["context_id"].is_null()
+                && let Some((_, _, why)) = WITHHELD_ARGUMENTS
+                    .iter()
+                    .find(|(tool, argument, _)| *tool == "tab_open" && *argument == "context_id")
+            {
+                return Err(format!("context_id is not yours to pass: {why}."));
+            }
+            let url = input["url"]
+                .as_str()
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+                .ok_or("give url, an absolute address")?;
+            let opened = scope.open(browser, url.to_owned()).await?;
+            text(json!({
+                "id": opened.id,
+                "url": opened.url,
+                "title": opened.title,
+                "tabs_left": crate::agent::MAX_OPENED_TABS.saturating_sub(scope.opened().len()),
+            }))
+        }
         "tab_close" => browser
             .close(tab()?)
             .await
@@ -872,7 +913,20 @@ mod tests {
                     spec.name
                 )
             });
-            let (agent, server) = (props(&spec.input_schema), props(&entry.input_schema));
+            let (agent, mut server) = (props(&spec.input_schema), props(&entry.input_schema));
+            for (tool, argument, why) in WITHHELD_ARGUMENTS {
+                if *tool == spec.name {
+                    assert!(!why.is_empty());
+                    assert!(
+                        server.remove(*argument),
+                        "{tool} no longer takes {argument}; drop the exception"
+                    );
+                    assert!(
+                        !agent.contains(*argument),
+                        "{tool} withholds {argument} but offers it anyway"
+                    );
+                }
+            }
             if agent != server {
                 drift.push(format!(
                     "{}: agent {agent:?} vs server {server:?}",

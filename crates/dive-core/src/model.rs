@@ -247,6 +247,23 @@ pub enum TabState {
     Discarded,
 }
 
+/// One tab's conversation with the agent, as it was left.
+///
+/// `messages` is the chrome's own JSON: the host keeps it and hands it back
+/// without reading it, so what a message contains stays the chrome's to
+/// decide. See `Store::agent_thread`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct AgentThread {
+    /// The tab this conversation belongs to.
+    pub tab_id: String,
+    /// What was first asked, for a list of past conversations.
+    pub title: String,
+    /// The conversation, as JSON the chrome wrote.
+    pub messages: String,
+    /// When it was last added to, RFC 3339.
+    pub updated_at: String,
+}
+
 /// A browsing tab.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct Tab {

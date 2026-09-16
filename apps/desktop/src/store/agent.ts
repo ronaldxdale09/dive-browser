@@ -10,6 +10,8 @@ export interface Step {
   input: string;
   action: boolean;
   locator?: string | null;
+  /** Why the step was put to the person before it ran, when it was. */
+  caution?: string | null;
   summary?: string;
   error?: boolean;
   /** Waiting for the user's Allow / Deny. */
@@ -29,6 +31,8 @@ export interface Message {
   usage?: Usage;
   /** The user stopped this reply before the model finished. */
   stopped?: boolean;
+  /** Pages that tried to give the agent instructions during this reply. */
+  flagged?: string[];
 }
 
 interface AgentState {
@@ -49,6 +53,17 @@ interface AgentState {
   runId: string | null;
   /** Approve every action for the rest of this session. Not persisted. */
   sessionAutoApprove: boolean;
+  /**
+   * Run in a context of the agent's own: no cookies, nobody signed in, the
+   * person's tabs untouched, and everything thrown away when the run ends.
+   */
+  cleanSession: boolean;
+  /**
+   * The tab `messages` belongs to. A conversation is about the page it was
+   * had over, so each tab keeps its own and the browser hands it back when
+   * you come back to that tab -- including after a restart.
+   */
+  tabId: string | null;
 
   init: () => Promise<void>;
   refreshKeys: () => Promise<void>;
@@ -59,6 +74,8 @@ interface AgentState {
   stop: () => Promise<void>;
   approve: (id: string, allow: boolean) => Promise<void>;
   setSessionAutoApprove: (v: boolean) => void;
+  setCleanSession: (v: boolean) => void;
+  loadFor: (tabId: string | null) => Promise<void>;
   clear: () => void;
 }
 
@@ -102,6 +119,11 @@ export function applyDelta(messages: Message[], delta: ChatDeltaOut): Message[] 
       break;
     case "tool_done":
       patch = { steps: (last.steps ?? []).map((s) => (s.id === delta.data.id ? { ...s, summary: delta.data.summary, error: delta.data.error, awaiting: false } : s)) };
+      break;
+    case "flagged":
+      // Worth seeing once. A page that repeats itself in three reads is one
+      // page, and three chips saying so is noise.
+      patch = (last.flagged ?? []).includes(delta.data) ? {} : { flagged: [...(last.flagged ?? []), delta.data] };
       break;
     case "usage":
       patch = { usage: delta.data };
@@ -186,6 +208,53 @@ export function isReady(provider: ProviderInfo | undefined, keyed: Provider[]): 
   return !provider.needs_key || keyed.includes(provider.id);
 }
 
+/**
+ * A conversation as it is kept: the transient parts of a message belong to
+ * the run that produced them, not to the record of it.
+ *
+ * `pending` and `awaiting` describe something in flight; restoring them would
+ * show a thinking indicator for a run that ended days ago, and a step waiting
+ * for an approval nobody can give.
+ */
+export function settledForStorage(messages: Message[]): Message[] {
+  const without = <T extends object, K extends keyof T>(value: T, key: K): Omit<T, K> => {
+    const copy = { ...value };
+    delete copy[key];
+    return copy;
+  };
+  return messages
+    .filter((m) => m.content || m.error || (m.steps && m.steps.length > 0))
+    .map((m) => {
+      const settled = without(m, "pending");
+      return m.steps ? { ...settled, steps: m.steps.map((s) => without(s, "awaiting")) } : settled;
+    });
+}
+
+/** What a conversation is called in a list of them: what was first asked. */
+export function threadTitle(messages: Message[]): string {
+  const first = messages.find((m) => m.role === "user")?.content ?? "";
+  return first.replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+/** Keep the conversation for the tab it belongs to, if there is anything to keep. */
+function persist(state: { tabId: string | null; messages: Message[] }): void {
+  const { tabId, messages } = state;
+  if (!tabId) return;
+  const keep = settledForStorage(messages);
+  if (keep.length === 0) return;
+  void ipc.agentThreadSave(tabId, threadTitle(keep), JSON.stringify(keep)).catch(() => undefined);
+}
+
+/** Messages read back from the host, or none if they are not what we wrote. */
+export function parseThread(messages: string): Message[] {
+  try {
+    const parsed: unknown = JSON.parse(messages);
+    return Array.isArray(parsed) ? (parsed as Message[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 export const useAgent = create<AgentState>((set, get) => ({
   providers: [],
   keyed: [],
@@ -198,6 +267,8 @@ export const useAgent = create<AgentState>((set, get) => ({
   busy: false,
   runId: null,
   sessionAutoApprove: false,
+  cleanSession: false,
+  tabId: null,
 
   init: () => {
     if (initializing) return initializing;
@@ -249,10 +320,16 @@ export const useAgent = create<AgentState>((set, get) => ({
     const user: Message = { id: nextId(), role: "user", content: prompt };
     const reply: Message = { id: nextId(), role: "assistant", content: "", pending: true };
     const runId = newRunId();
-    set({ messages: [...history, user, reply], busy: true, runId });
+    set({ messages: [...history, user, reply], busy: true, runId, tabId });
     const turns = [...history, user].map((m) => ({ role: m.role, content: m.content }));
     const prefs = usePrefs.getState().prefs;
-    const options = { include_page: prefs.agent_include_page, auto_approve: get().sessionAutoApprove };
+    const cleanSession = get().cleanSession;
+    const options = {
+      // A clean run has no page of the person's to send.
+      include_page: prefs.agent_include_page && !cleanSession,
+      auto_approve: get().sessionAutoApprove,
+      clean_session: cleanSession,
+    };
     const stream = batchDeltas((deltas) => set((s) => ({ messages: deltas.reduce(applyDelta, s.messages) })));
     try {
       await ipc.agentSend(runId, turns, tabId, options, stream.push);
@@ -262,6 +339,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       // Nothing may be left waiting once the reply is over.
       stream.flush();
       set((s) => ({ busy: false, runId: null, messages: applyDelta(s.messages, { type: "done", data: "end_turn" }) }));
+      persist(get());
     }
   },
   stop: async () => {
@@ -274,5 +352,29 @@ export const useAgent = create<AgentState>((set, get) => ({
     await ipc.agentApprove(id, allow).catch(() => undefined);
   },
   setSessionAutoApprove: (sessionAutoApprove) => set({ sessionAutoApprove }),
-  clear: () => set({ messages: [] }),
+  setCleanSession: (cleanSession) => set({ cleanSession }),
+  loadFor: async (tabId) => {
+    const { tabId: current, busy } = get();
+    if (tabId === current) return;
+    // A run in flight owns the panel until it finishes: swapping the
+    // transcript underneath it would strand the reply being streamed.
+    if (busy) return;
+    persist(get());
+    set({ tabId, messages: [] });
+    if (!tabId) return;
+    try {
+      const thread = await ipc.agentThreadLoad(tabId);
+      // The tab may have changed again while the host was answering.
+      if (get().tabId !== tabId) return;
+      set({ messages: thread ? parseThread(thread.messages) : [] });
+    } catch {
+      // A conversation we cannot read back is not worth an error in the
+      // panel; the tab simply starts a new one.
+    }
+  },
+  clear: () => {
+    const { tabId } = get();
+    set({ messages: [] });
+    if (tabId) void ipc.agentThreadClear(tabId).catch(() => undefined);
+  },
 }));

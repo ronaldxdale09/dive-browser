@@ -12,8 +12,8 @@ pub use commands::{Command, CommandId, CommandRegistry, CommandScope};
 pub use error::CoreError;
 pub use events::{CoreEvent, EventBus};
 pub use model::{
-    Container, ContainerId, Profile, ProfileId, Tab, TabId, TabState, TabTier, Timestamp,
-    Workspace, WorkspaceId,
+    AgentThread, Container, ContainerId, Profile, ProfileId, Tab, TabId, TabState, TabTier,
+    Timestamp, Workspace, WorkspaceId,
 };
 pub use store::{
     ACTIVE_WORKSPACE_SETTING, Address, Bookmark, Card, Credential, FormEntry, HistoryEntry,

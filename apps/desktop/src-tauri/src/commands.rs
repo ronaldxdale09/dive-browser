@@ -858,6 +858,9 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::agent::agent_send,
             crate::agent::agent_approve,
             crate::agent::agent_stop,
+            crate::agent::agent_thread_load,
+            crate::agent::agent_thread_save,
+            crate::agent::agent_thread_clear,
         ])
         .events(collect_events![
             crate::automation::AgentPointer,

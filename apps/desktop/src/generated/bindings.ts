@@ -714,6 +714,26 @@ export const commands = {
 	agentApprove: (id: string, allow: boolean) => typedError<null, AppError>(__TAURI_INVOKE("agent_approve", { id, allow })),
 	/**  Stop a run. The loop notices at its next await and reports `stopped`. */
 	agentStop: (runId: string) => typedError<null, AppError>(__TAURI_INVOKE("agent_stop", { runId })),
+	/**  The conversation held in this tab, as the chrome last left it. */
+	agentThreadLoad: (tabId: TabId) => typedError<{
+	/**  The tab this conversation belongs to. */
+	tab_id: string,
+	/**  What was first asked, for a list of past conversations. */
+	title: string,
+	/**  The conversation, as JSON the chrome wrote. */
+	messages: string,
+	/**  When it was last added to, RFC 3339. */
+	updated_at: string,
+} | null, AppError>(__TAURI_INVOKE("agent_thread_load", { tabId })),
+	/**
+	 *  Keep this tab's conversation, so closing the panel or quitting the browser
+	 *  is not the same as throwing it away.
+	 *
+	 *  A private session keeps nothing: that is what makes it private.
+	 */
+	agentThreadSave: (tabId: TabId, title: string, messages: string) => typedError<null, AppError>(__TAURI_INVOKE("agent_thread_save", { tabId, title, messages })),
+	/**  Forget this tab's conversation. */
+	agentThreadClear: (tabId: TabId) => typedError<boolean, AppError>(__TAURI_INVOKE("agent_thread_clear", { tabId })),
 };
 
 /** Events */
@@ -832,6 +852,24 @@ export type AgentPresence = {
 	tab_id: TabId,
 	/**  Whether an agent is working in it right now. */
 	driving: boolean,
+};
+
+/**
+ *  One tab's conversation with the agent, as it was left.
+ *
+ *  `messages` is the chrome's own JSON: the host keeps it and hands it back
+ *  without reading it, so what a message contains stays the chrome's to
+ *  decide. See `Store::agent_thread`.
+ */
+export type AgentThread = {
+	/**  The tab this conversation belongs to. */
+	tab_id: string,
+	/**  What was first asked, for a list of past conversations. */
+	title: string,
+	/**  The conversation, as JSON the chrome wrote. */
+	messages: string,
+	/**  When it was last added to, RFC 3339. */
+	updated_at: string,
 };
 
 /**  A failure reported to the chrome as a plain message. */
@@ -984,6 +1022,11 @@ export type ChatDelta =
 } } |
 /**  Running token totals for this reply. */
 { type: "usage"; data: Usage } |
+/**
+ *  A page tried to give the agent instructions. The text is for the
+ *  person: what it tried, and the line it tried it on.
+ */
+{ type: "flagged"; data: string } |
 /**  Finished with a stop reason (`end_turn`, `max_tokens`, `refusal`, `stopped`). */
 { type: "done"; data: string } |
 /**  Failed. */
@@ -1965,8 +2008,17 @@ export type Prefs = {
 	agent_reasoning: string,
 	/**  Most tool calls one message may make before the run is stopped. */
 	agent_max_steps: number,
-	/**  Let the agent act on a page without asking first. */
-	agent_auto_approve: boolean,
+	/**
+	 *  Legacy "act without asking" switch, kept only so an existing profile
+	 *  can be carried over: [`Prefs::clamp`] turns it into
+	 *  `agent_approvals = "never"` and clears it.
+	 */
+	agent_auto_approve?: boolean,
+	/**
+	 *  When the agent stops to ask before acting: `every` action, only the
+	 *  ones that look costly (`risk`), or `never`.
+	 */
+	agent_approvals?: string,
 	/**  Send the current tab's title, URL, console and text with each message. */
 	agent_include_page: boolean,
 	/**  Base URL of the custom OpenAI-compatible endpoint. */
@@ -2383,6 +2435,11 @@ export type SendOptions = {
 	include_page: boolean,
 	/**  Run actions without asking, for this message only. */
 	auto_approve: boolean,
+	/**
+	 *  Work in a context of the run's own -- no cookies, nobody signed in,
+	 *  and the person's tab left alone -- thrown away when the run ends.
+	 */
+	clean_session: boolean,
 };
 
 /**  LAN address plus a QR code for it. */
@@ -2693,6 +2750,11 @@ export type ToolStep = {
 	action: boolean,
 	/**  Playwright-style locator for the target, when the tool used a ref. */
 	locator: string | null,
+	/**
+	 *  Why this step is being shown before it runs, when it is. `None` for a
+	 *  step that was allowed to run on its own.
+	 */
+	caution: string | null,
 };
 
 /**  What a tab could be translated from, and whether it already has been. */

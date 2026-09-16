@@ -64,6 +64,7 @@ pub fn start(app: AppHandle<Runtime>) {
                 Ok(n) => tracing::info!(n, "pruned history past the retention window"),
                 Err(e) => tracing::warn!("history prune failed: {e}"),
             }
+            crate::agent::prune_threads(&state);
         }
     });
 }

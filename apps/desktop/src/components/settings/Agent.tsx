@@ -15,6 +15,12 @@ const EFFORTS = [
   { value: "max", label: "Max" },
 ] as const;
 
+const APPROVALS = [
+  { value: "every", label: "Every action" },
+  { value: "risk", label: "Costly ones" },
+  { value: "never", label: "Never" },
+] as const;
+
 const STEP_LIMITS = ["10", "25", "50", "100", "200"] as const;
 
 /** Settings › Agent: provider, model, behaviour and API keys. */
@@ -103,9 +109,9 @@ export function Agent() {
 
       <Group title="Behaviour">
         <Row
-          label="Act without asking"
-          hint="Off, every click, keystroke or navigation the agent wants waits for you. A page can steer the model, so leave this off unless you are watching."
-          control={<Switch label="Act without asking" checked={prefs.agent_auto_approve} onChange={(agent_auto_approve) => set({ agent_auto_approve })} />}
+          label="Ask before acting"
+          hint="Costly ones is the default: the agent gets on with ordinary clicking and typing, and stops for anything that spends money, destroys something, hands over a secret or happens on a page about money. Every action asks about all of it, which is thorough but wearing. Never asks about nothing — a page can steer the model, so leave that for work you are watching."
+          control={<Segmented label="Ask before acting" value={prefs.agent_approvals} onChange={(agent_approvals) => set({ agent_approvals })} options={APPROVALS} />}
         />
         <Row
           label="Send page context"

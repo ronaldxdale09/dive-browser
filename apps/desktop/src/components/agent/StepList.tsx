@@ -49,7 +49,9 @@ function StepRow({ step }: { step: Step }) {
       </button>
       {step.awaiting && (
         <div className="px-1.5 pt-0.5 pb-1.5">
-          <p className="mb-1.5 text-[11px] text-ink-2">This changes the page. Allow it?</p>
+          <p className="mb-1.5 text-[11px] text-ink-2">
+            {step.caution ? `${step.caution[0]?.toUpperCase()}${step.caution.slice(1)}. Allow it?` : "This changes the page. Allow it?"}
+          </p>
           <div className="flex flex-wrap items-center gap-1.5">
             <button type="button" onClick={() => void approve(step.id, true)} className="h-6 rounded-full bg-accent px-3 text-[11px] font-medium text-accent-ink">
               Allow

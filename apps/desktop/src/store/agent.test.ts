@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyDelta, coalesceDeltas, isReady, STREAM_FLUSH_MS, useAgent } from "./agent";
+import { applyDelta, coalesceDeltas, isReady, parseThread, settledForStorage, STREAM_FLUSH_MS, threadTitle, useAgent } from "./agent";
 import type { Message } from "./agent";
 import type { ChatDeltaOut, ProviderInfo } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
@@ -47,7 +47,7 @@ describe("applyDelta", () => {
 
 describe("tool steps", () => {
   it("records calls and their results on the assistant message", () => {
-    let m = applyDelta(base, { type: "tool_call", data: { id: "tu1", name: "page_click", input: '{"ref":"e1"}', action: true, locator: null } });
+    let m = applyDelta(base, { type: "tool_call", data: { id: "tu1", name: "page_click", input: '{"ref":"e1"}', action: true, locator: null, caution: null } });
     m = applyDelta(m, { type: "tool_done", data: { id: "tu1", summary: "clicked", error: false } });
     expect(m[1]?.steps).toHaveLength(1);
     expect(m[1]?.steps?.[0]).toMatchObject({ id: "tu1", name: "page_click", action: true, summary: "clicked", error: false });
@@ -56,15 +56,15 @@ describe("tool steps", () => {
 
 describe("approval", () => {
   it("marks a step as awaiting and clears it when done", () => {
-    let m = applyDelta(base, { type: "tool_call", data: { id: "tu2", name: "tab_navigate", input: "{}", action: true, locator: null } });
-    m = applyDelta(m, { type: "needs_approval", data: { id: "tu2", name: "tab_navigate", input: "{}", action: true, locator: null } });
+    let m = applyDelta(base, { type: "tool_call", data: { id: "tu2", name: "tab_navigate", input: "{}", action: true, locator: null, caution: null } });
+    m = applyDelta(m, { type: "needs_approval", data: { id: "tu2", name: "tab_navigate", input: "{}", action: true, locator: null, caution: null } });
     expect(m[1]?.steps?.[0]?.awaiting).toBe(true);
     m = applyDelta(m, { type: "tool_done", data: { id: "tu2", summary: "denied", error: true } });
     expect(m[1]?.steps?.[0]).toMatchObject({ awaiting: false, error: true });
   });
   it("clears a dangling approval when the reply ends or fails", () => {
-    let m = applyDelta(base, { type: "tool_call", data: { id: "tu3", name: "page_type", input: "{}", action: true, locator: null } });
-    m = applyDelta(m, { type: "needs_approval", data: { id: "tu3", name: "page_type", input: "{}", action: true, locator: null } });
+    let m = applyDelta(base, { type: "tool_call", data: { id: "tu3", name: "page_type", input: "{}", action: true, locator: null, caution: null } });
+    m = applyDelta(m, { type: "needs_approval", data: { id: "tu3", name: "page_type", input: "{}", action: true, locator: null, caution: null } });
     expect(applyDelta(m, { type: "done", data: "stopped" })[1]?.steps?.[0]?.awaiting).toBe(false);
     expect(applyDelta(m, { type: "error", data: "gone" })[1]?.steps?.[0]?.awaiting).toBe(false);
   });
@@ -72,7 +72,7 @@ describe("approval", () => {
 
 describe("coalesceDeltas", () => {
   it("joins adjacent text and reasoning pieces but keeps a tool call between them", () => {
-    const call: ChatDeltaOut = { type: "tool_call", data: { id: "t", name: "page_click", input: "{}", action: true, locator: null } };
+    const call: ChatDeltaOut = { type: "tool_call", data: { id: "t", name: "page_click", input: "{}", action: true, locator: null, caution: null } };
     expect(coalesceDeltas([
       { type: "reasoning", data: "Fi" }, { type: "reasoning", data: "rst" },
       { type: "text", data: "a" }, { type: "text", data: "b" }, call, { type: "text", data: "c" },
@@ -114,7 +114,7 @@ describe("streaming", () => {
 
     // A tool call is shown at once, with the text that was waiting before it.
     emit({ type: "text", data: "ld" });
-    emit({ type: "tool_call", data: { id: "t1", name: "page_click", input: "{}", action: true, locator: null } });
+    emit({ type: "tool_call", data: { id: "t1", name: "page_click", input: "{}", action: true, locator: null, caution: null } });
     expect(useAgent.getState().messages.at(-1)).toMatchObject({ content: "Hello, world", steps: [{ id: "t1" }] });
 
     // Text still in the buffer when the stream ends is not dropped.
@@ -124,6 +124,84 @@ describe("streaming", () => {
     expect(useAgent.getState().messages.at(-1)).toMatchObject({ content: "Hello, world!", pending: false });
     expect(useAgent.getState().busy).toBe(false);
     unsubscribe();
+  });
+});
+
+describe("a page that addresses the agent", () => {
+  it("is reported once per reply, however many reads saw it", () => {
+    const note = 'evil.dev told the agent to ignore its instructions: "ignore previous instructions"';
+    let m = applyDelta(base, { type: "flagged", data: note });
+    expect(m[1]?.flagged).toEqual([note]);
+    m = applyDelta(m, { type: "flagged", data: note });
+    expect(m[1]?.flagged).toEqual([note]);
+    m = applyDelta(m, { type: "flagged", data: "other.dev tried to give the agent a new role: \"you are now\"" });
+    expect(m[1]?.flagged).toHaveLength(2);
+  });
+});
+
+describe("a conversation that belongs to a tab", () => {
+  const initial = useAgent.getState();
+
+  afterEach(() => {
+    useAgent.setState(initial, true);
+    vi.restoreAllMocks();
+  });
+
+  it("keeps only what is worth reading back", () => {
+    const kept = settledForStorage([
+      { id: "1", role: "user", content: "hi" },
+      { id: "2", role: "assistant", content: "there", pending: true, steps: [{ id: "s", name: "page_click", input: "{}", action: true, awaiting: true }] },
+      // A reply that never arrived is not a conversation.
+      { id: "3", role: "assistant", content: "", pending: true },
+    ]);
+    expect(kept).toHaveLength(2);
+    expect(kept[1]).not.toHaveProperty("pending");
+    expect(kept[1]?.steps?.[0]).not.toHaveProperty("awaiting");
+    expect(threadTitle(kept)).toBe("hi");
+  });
+
+  it("survives a saved document it cannot read", () => {
+    expect(parseThread("not json")).toEqual([]);
+    expect(parseThread('{"role":"user"}')).toEqual([]);
+    expect(parseThread('[{"id":"1","role":"user","content":"hi"}]')).toHaveLength(1);
+  });
+
+  it("writes the tab it is leaving back and reads the one it arrives at", async () => {
+    const save = vi.spyOn(ipc, "agentThreadSave").mockResolvedValue(null);
+    const load = vi.spyOn(ipc, "agentThreadLoad").mockResolvedValue({
+      tab_id: "tab-2",
+      title: "older",
+      messages: '[{"id":"9","role":"user","content":"older"}]',
+      updated_at: "2026-09-01T00:00:00Z",
+    });
+    useAgent.setState({ tabId: "tab-1", messages: [{ id: "1", role: "user", content: "about this page" }] });
+
+    await useAgent.getState().loadFor("tab-2");
+    expect(save).toHaveBeenCalledWith("tab-1", "about this page", expect.stringContaining("about this page"));
+    expect(load).toHaveBeenCalledWith("tab-2");
+    expect(useAgent.getState().messages).toEqual([{ id: "9", role: "user", content: "older" }]);
+
+    // Arriving where we already are changes nothing.
+    load.mockClear();
+    await useAgent.getState().loadFor("tab-2");
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it("leaves a run in flight alone", async () => {
+    const load = vi.spyOn(ipc, "agentThreadLoad").mockResolvedValue(null);
+    useAgent.setState({ tabId: "tab-1", busy: true, messages: [{ id: "1", role: "user", content: "working" }] });
+    await useAgent.getState().loadFor("tab-2");
+    expect(load).not.toHaveBeenCalled();
+    expect(useAgent.getState().tabId).toBe("tab-1");
+    expect(useAgent.getState().messages).toHaveLength(1);
+  });
+
+  it("forgets the kept conversation when the thread is cleared", () => {
+    const forget = vi.spyOn(ipc, "agentThreadClear").mockResolvedValue(true);
+    useAgent.setState({ tabId: "tab-1", messages: [{ id: "1", role: "user", content: "hi" }] });
+    useAgent.getState().clear();
+    expect(useAgent.getState().messages).toEqual([]);
+    expect(forget).toHaveBeenCalledWith("tab-1");
   });
 });
 

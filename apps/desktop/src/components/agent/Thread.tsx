@@ -1,6 +1,7 @@
-import { ArrowUp, Brain, ChevronRight, Globe, ShieldOff, Square } from "lucide-react";
+import { ArrowUp, Brain, ChevronRight, EyeOff, FlaskConical, Globe, ShieldAlert, ShieldOff, Square } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { compactNumber, formatCost } from "../../lib/agentSteps";
+import { replayableSteps, toPlaywrightSpec } from "../../lib/playwright";
 import { Markdown } from "../../lib/markdown";
 import type { Message } from "../../store/agent";
 import { useAgent } from "../../store/agent";
@@ -8,6 +9,7 @@ import { useBrowser } from "../../store/browser";
 import { usePrefs } from "../../store/prefs";
 import { Favicon } from "../Favicon";
 import { Icon } from "../Icon";
+import { SpecModal } from "../SpecModal";
 import { ModelPicker } from "./ModelPicker";
 import { StepList } from "./StepList";
 
@@ -57,9 +59,11 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
   const clear = useAgent((s) => s.clear);
   const sessionAutoApprove = useAgent((s) => s.sessionAutoApprove);
   const setSessionAutoApprove = useAgent((s) => s.setSessionAutoApprove);
+  const cleanSession = useAgent((s) => s.cleanSession);
+  const setCleanSession = useAgent((s) => s.setCleanSession);
   const includePage = usePrefs((s) => s.prefs.agent_include_page);
   // The setting approves everything until it is turned off; say so here too.
-  const alwaysAutoApprove = usePrefs((s) => s.prefs.agent_auto_approve);
+  const alwaysAutoApprove = usePrefs((s) => s.prefs.agent_approvals === "never");
   const update = usePrefs((s) => s.update);
   const activeTab = useBrowser((s) => s.activeTab);
   const current = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
@@ -109,11 +113,19 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
             atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK;
           }}
         >
-          {messages.map((m) =>
+          {messages.map((m, i) =>
             m.role === "user" ? (
               <UserBubble key={m.id} message={m} />
             ) : (
-              <AssistantMessage key={m.id} message={m} onLink={onLink} />
+              <AssistantMessage
+                key={m.id}
+                message={m}
+                onLink={onLink}
+                // What was asked names the exported test, and where the tab
+                // is now is where a replay of it would start.
+                askedFor={messages[i - 1]?.role === "user" ? messages[i - 1]?.content : undefined}
+                startUrl={current?.url}
+              />
             ),
           )}
           <div ref={endRef} />
@@ -160,7 +172,28 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
         {/* What it can see and how it may act, then the one action. */}
         <div className="mt-1.5 flex items-center gap-1.5">
           <ModelPicker onAddProvider={onAddProvider} onOpenChange={setPickerOpen} />
-          {current && (
+          {/* Signed out of everything, in a context that goes when the run
+              does. The page chip disappears with it: there is no page of the
+              person's in a clean run. */}
+          <button
+            type="button"
+            onClick={() => setCleanSession(!cleanSession)}
+            aria-pressed={cleanSession}
+            aria-label="Clean session"
+            title={
+              cleanSession
+                ? "Working signed out, in tabs of its own, thrown away when the run ends. Click to work in your session again."
+                : "Work in your session, signed in as you. Click to run signed out instead."
+            }
+            className={`flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] transition-colors ${
+              cleanSession ? "bg-highlight-soft text-highlight" : "text-ink-3 hover:bg-surface-2 hover:text-ink-2"
+            }`}
+          >
+            <Icon icon={EyeOff} size={11} />
+            {cleanSession ? "Clean session" : ""}
+          </button>
+
+          {!cleanSession && current && (
             <button
               type="button"
               onClick={() => void update({ agent_include_page: !includePage })}
@@ -240,11 +273,20 @@ const UserBubble = memo(function UserBubble({ message }: { message: Message }) {
 const AssistantMessage = memo(function AssistantMessage({
   message: m,
   onLink,
+  askedFor,
+  startUrl,
 }: {
   message: Message;
   onLink: (href: string) => void;
+  askedFor?: string | undefined;
+  startUrl?: string | undefined;
 }) {
   const waiting = m.pending && !m.content && !m.reasoning && !(m.steps && m.steps.length > 0);
+  // A run that changed the page is a flow somebody may want to keep. The
+  // agent already addressed every element by locator, so the test writes
+  // itself -- no recording pass, no selectors invented after the fact.
+  const replayable = replayableSteps(m.steps ?? []);
+  const [exporting, setExporting] = useState(false);
   return (
     <div className="max-w-full text-xs leading-relaxed text-ink animate-agent-slide-up">
       {m.reasoning && <Reasoning text={m.reasoning} live={Boolean(m.pending && !m.content)} />}
@@ -262,6 +304,17 @@ const AssistantMessage = memo(function AssistantMessage({
           Thinking…
         </span>
       )}
+      {/* A page that addressed the agent is the person's to judge: they are
+          the one who can decide the site is not to be trusted. The agent was
+          told to carry on with their task regardless. */}
+      {m.flagged?.map((note) => (
+        <div key={note} className="mt-1.5 flex items-start gap-2 rounded-xl border border-warn/40 bg-warn/10 px-3 py-2 text-[11px] text-ink-2">
+          <Icon icon={ShieldAlert} size={13} className="mt-px shrink-0 text-warn" />
+          <span className="min-w-0 select-text">
+            <span className="font-medium text-ink">This page tried to instruct the agent.</span> {note}
+          </span>
+        </div>
+      ))}
       {m.error && (
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-danger/40 bg-danger/10 px-3 py-2 text-[11px] text-danger">
           <span className="min-w-0 flex-1">{m.error}</span>
@@ -274,8 +327,8 @@ const AssistantMessage = memo(function AssistantMessage({
           </button>
         </div>
       )}
-      {(m.stopped || (m.usage && !m.pending)) && (
-        <div className="mt-1.5 flex items-center gap-2 text-[10.5px] text-ink-3">
+      {(m.stopped || replayable.length > 0 || (m.usage && !m.pending)) && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10.5px] text-ink-3">
           {m.stopped && (
             <span className="rounded-full bg-surface-3 px-1.5 py-px tracking-wider uppercase text-[9px]">
               stopped
@@ -289,11 +342,38 @@ const AssistantMessage = memo(function AssistantMessage({
               {m.usage.cost_usd != null ? ` · ${formatCost(m.usage.cost_usd)}` : ""}
             </span>
           )}
+          {replayable.length > 0 && !m.pending && (
+            <button
+              type="button"
+              onClick={() => setExporting(true)}
+              title="Write these steps as a Playwright test"
+              className="flex items-center gap-1 rounded-full px-1.5 py-px text-ink-3 hover:bg-surface-2 hover:text-ink"
+            >
+              <Icon icon={FlaskConical} size={11} />
+              Export as test
+            </button>
+          )}
         </div>
+      )}
+      {exporting && (
+        <SpecModal
+          title="Playwright Test From This Run"
+          subtitle={`${replayable.length} step${replayable.length === 1 ? "" : "s"} the agent took`}
+          spec={toPlaywrightSpec(replayable, startUrl, testTitle(askedFor))}
+          filename="agent-run.spec.ts"
+          onClose={() => setExporting(false)}
+        />
       )}
     </div>
   );
 });
+
+/** The request, trimmed to one line, as the test's name. */
+function testTitle(askedFor: string | undefined): string {
+  const one = (askedFor ?? "").replace(/\s+/g, " ").trim();
+  if (!one) return "agent run";
+  return one.length > 80 ? `${one.slice(0, 79)}…` : one;
+}
 
 /** The model's reasoning summary: open while it is the only thing there, folded once the answer starts. */
 function Reasoning({ text, live }: { text: string; live: boolean }) {

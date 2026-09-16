@@ -277,6 +277,12 @@ export const ipc = {
   agentModels: async (provider: string, refresh = false) => unwrap(await commands.agentModels(provider, refresh)),
   agentApprove: async (id: string, allow: boolean) => unwrap(await commands.agentApprove(id, allow)),
   agentStop: async (runId: string) => unwrap(await commands.agentStop(runId)),
+  /** The conversation this tab was having, or null. */
+  agentThreadLoad: async (tabId: string) => unwrap(await commands.agentThreadLoad(tabId)),
+  /** Keep this tab's conversation. A private session keeps nothing. */
+  agentThreadSave: async (tabId: string, title: string, messages: string) => unwrap(await commands.agentThreadSave(tabId, title, messages)),
+  /** Forget this tab's conversation. */
+  agentThreadClear: async (tabId: string) => unwrap(await commands.agentThreadClear(tabId)),
   /** Stream a reply; `onDelta` fires for each piece. Resolves when the stream ends. */
   agentSend: async (runId: string, turns: ChatTurnInput[], tabId: string | null, options: SendOptions, onDelta: (d: ChatDeltaOut) => void) => {
     const channel = new Channel<ChatDeltaOut>();

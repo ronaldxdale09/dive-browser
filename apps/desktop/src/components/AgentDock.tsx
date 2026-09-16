@@ -30,12 +30,18 @@ export function AgentDock({ inset = 0 }: { inset?: number }) {
   const keyed = useAgent((s) => s.keyed);
   const providerId = usePrefs((s) => s.prefs.agent_provider);
   const toggle = useBrowser((s) => s.toggle);
+  const activeTab = useBrowser((s) => s.activeTab);
+  const loadFor = useAgent((s) => s.loadFor);
   const settingsOpen = useBrowser((s) => s.open.settings);
   const [wantsSetup, setWantsSetup] = useState(false);
   const previousSettings = useRef(settingsOpen);
   useCoversContent(true);
 
   useEffect(() => void init(), [init]);
+  // Each tab keeps its own conversation, so moving between tabs brings the
+  // one that belongs to the page in front of you -- and the one you left is
+  // written back rather than lost.
+  useEffect(() => void loadFor(activeTab), [activeTab, loadFor]);
   // A key added in Settings is the reason the agent was unusable a moment
   // ago, so the keys are read again when Settings closes -- not on open.
   useEffect(() => {
