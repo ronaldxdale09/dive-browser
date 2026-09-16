@@ -804,7 +804,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     await flight;
   },
   capture: async (fullPage) => {
-    const id = get().activeTab;
+    const id = tabInThisWindow(get().activeTab, get().detached);
     if (!id || get().capturing) return;
     const tab = get().tabs.find((candidate) => candidate.id === id);
     const workspace = get().activeWorkspace;

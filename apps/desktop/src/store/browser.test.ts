@@ -779,3 +779,15 @@ describe("fillVideo", () => {
     expect(useBrowser.getState().error).toBeNull();
   });
 });
+
+describe("capture", () => {
+  it("does not capture a detached tab as this window's", async () => {
+    const capture = vi.spyOn(ipc, "tabCapture").mockResolvedValue("/tmp/torn.png");
+    useBrowser.setState({ activeTab: "c1", detached: ["c1"], tabs: [tab("c1")], capturing: false, notice: null });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await useBrowser.getState().capture(true);
+    expect(capture).not.toHaveBeenCalled();
+    expect(useBrowser.getState().notice).toBeNull();
+    expect(useBrowser.getState().capturing).toBe(false);
+  });
+});
