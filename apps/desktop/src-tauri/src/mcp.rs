@@ -3101,12 +3101,26 @@ impl Browser for AppBrowser {
     }
 }
 
-/// Start the MCP server unless `DIVE_MCP_PORT=0`. Default port 7391.
-pub fn start(app: AppHandle<Runtime>) {
-    let port: u16 = std::env::var("DIVE_MCP_PORT")
+/// Port the MCP server binds, or `0` to stay off.
+pub fn advertised_port() -> u16 {
+    std::env::var("DIVE_MCP_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
-        .unwrap_or(7391);
+        .unwrap_or(7391)
+}
+
+/// URL this window may show. Empty when the server is off or this process is private.
+pub fn advertised_url(port: u16, private: bool) -> String {
+    if port == 0 || private {
+        String::new()
+    } else {
+        format!("http://127.0.0.1:{port}/mcp")
+    }
+}
+
+/// Start the MCP server unless `DIVE_MCP_PORT=0`. Default port 7391.
+pub fn start(app: AppHandle<Runtime>) {
+    let port = advertised_port();
     if port == 0 {
         tracing::info!("mcp server disabled");
         return;
@@ -3206,6 +3220,15 @@ mod tool_session_tests {
         width: 800.0,
         height: 600.0,
     };
+
+    #[test]
+    fn a_private_window_does_not_advertise_the_mcp_url() {
+        // lib.rs starts the server only when !is_private(). Showing :7391
+        // from a private Settings pane would be the other process.
+        assert_eq!(advertised_url(7391, true), "");
+        assert_eq!(advertised_url(0, false), "");
+        assert_eq!(advertised_url(7391, false), "http://127.0.0.1:7391/mcp");
+    }
 
     #[test]
     fn a_step_with_no_coordinates_happens_where_the_last_one_left_the_pointer() {

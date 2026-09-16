@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ipc } from "../../lib/ipc";
 import type { AppInfo } from "../../lib/ipc";
+import { isPrivateWindow } from "../../lib/privateMode";
 import { Group, Row, Select, Switch } from "../SettingsFields";
 import { CopyBlock } from "./CopyBlock";
 import { usePref } from "./usePref";
@@ -28,10 +29,12 @@ export function shortTokenPath(path: string): string {
 /** Settings › Developer: DevTools, editor and the MCP hookup. */
 export function Developer({ info }: { info: AppInfo | null }) {
   const [prefs, set] = usePref();
-  const command = info ? mcpCommand(info, info.mcp_token_path) : "";
-  const shown = info ? mcpCommand(info, shortTokenPath(info.mcp_token_path)) : "";
+  const serveMcp = Boolean(info?.mcp_url) && !isPrivateWindow();
+  const command = serveMcp && info ? mcpCommand(info, info.mcp_token_path) : "";
+  const shown = serveMcp && info ? mcpCommand(info, shortTokenPath(info.mcp_token_path)) : "";
   const [token, setToken] = useState<string | null>(null);
   useEffect(() => {
+    if (!serveMcp) return;
     let alive = true;
     ipc
       .mcpToken()
@@ -40,7 +43,7 @@ export function Developer({ info }: { info: AppInfo | null }) {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [serveMcp]);
   return (
     <>
       <Group title="Tabs">
@@ -72,19 +75,21 @@ export function Developer({ info }: { info: AppInfo | null }) {
         />
       </Group>
 
-      <Group title="Coding agents (MCP)" description="Claude Code, Cursor and Codex can read your tabs, console, network and screenshots. Run this once:">
-        <div className="py-3">
-          <CopyBlock text={command} display={info ? shown : undefined} displayTitle={info ? command : undefined} />
-          {info && token && (
-            <>
-              <p className="mt-3 mb-1.5 text-[11px] text-ink-2">Cursor, and any client set up with JSON: add this to its mcp.json (Cursor keeps it at ~/.cursor/mcp.json).</p>
-              <CopyBlock text={cursorConfig(info, token)} label="Copy mcp.json entry" display={cursorConfig(info, "••••••••")} />
-            </>
-          )}
-          <p className="mt-2 text-[11px] leading-relaxed text-ink-3">
-            Only processes on this Mac with the token file can connect. Page scripts are never run unless you start Dive with DIVE_MCP_ALLOW_EVAL=1.
-          </p>
-        </div>
+      <Group title="Coding agents (MCP)" description={serveMcp ? "Claude Code, Cursor and Codex can read your tabs, console, network and screenshots. Run this once:" : isPrivateWindow() ? "Private windows do not serve MCP." : "MCP is off in this build."}>
+        {serveMcp && (
+          <div className="py-3">
+            <CopyBlock text={command} display={shown || undefined} displayTitle={command || undefined} />
+            {info && token && (
+              <>
+                <p className="mt-3 mb-1.5 text-[11px] text-ink-2">Cursor, and any client set up with JSON: add this to its mcp.json (Cursor keeps it at ~/.cursor/mcp.json).</p>
+                <CopyBlock text={cursorConfig(info, token)} label="Copy mcp.json entry" display={cursorConfig(info, "••••••••")} />
+              </>
+            )}
+            <p className="mt-2 text-[11px] leading-relaxed text-ink-3">
+              Only processes on this Mac with the token file can connect. Page scripts are never run unless you start Dive with DIVE_MCP_ALLOW_EVAL=1.
+            </p>
+          </div>
+        )}
       </Group>
     </>
   );

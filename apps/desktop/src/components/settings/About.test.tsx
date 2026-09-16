@@ -53,6 +53,21 @@ describe("About engine line", () => {
     expect(engineLabel("Mozilla/5.0 (X11) Gecko/20100101 Firefox/130.0")).toBe("CEF");
   });
 
+  it("does not advertise the main-window MCP URL in a private window", () => {
+    // lib.rs starts MCP only when !private_session::is_private().
+    // A private Settings pane that still shows :7391 is the other process.
+    const privateWindow = window as Window & { __DIVE_PRIVATE__?: boolean };
+    privateWindow.__DIVE_PRIVATE__ = true;
+    try {
+      render(<About info={{ ...info("release"), mcp_url: "http://127.0.0.1:7391/mcp", mcp_token_path: "/tmp/x/mcp-token" }} />);
+      expect(document.body.textContent).not.toMatch(/7391/);
+      expect(document.body.textContent).toMatch(/Private windows do not serve MCP/);
+      expect(screen.queryByRole("button", { name: "Copy MCP URL" })).toBeNull();
+    } finally {
+      delete privateWindow.__DIVE_PRIVATE__;
+    }
+  });
+
   it("does not say each container has its own process tree", () => {
     // A container is a cache directory and request context. Renderers are
     // process-per-site in the one browser process. Private windows are the

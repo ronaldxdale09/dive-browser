@@ -1,6 +1,7 @@
 import { ArrowDownToLine, Check as CheckIcon, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import type { AppInfo } from "../../lib/ipc";
+import { isPrivateWindow } from "../../lib/privateMode";
 import { useBrowser } from "../../store/browser";
 import { useOnboarding } from "../../store/onboarding";
 import { useUpdates } from "../../store/updates";
@@ -17,6 +18,7 @@ export function engineLabel(userAgent: string = navigator.userAgent): string {
 
 /** Settings › About: build facts and the updater. */
 export function About({ info }: { info: AppInfo | null }) {
+  const serveMcp = Boolean(info?.mcp_url) && !isPrivateWindow();
   return (
     <>
       <div className="mb-4 flex items-center gap-3.5 rounded-2xl border border-line bg-surface-2/50 px-4 py-3.5">
@@ -40,8 +42,8 @@ export function About({ info }: { info: AppInfo | null }) {
         <Row
           stacked
           label="MCP endpoint"
-          hint={info?.mcp_url ? "Coding agents on this Mac connect here; the Developer section has the full command." : "Disabled in this build."}
-          control={info?.mcp_url ? <CopyBlock text={info.mcp_url} label="Copy MCP URL" /> : <code className="block font-mono text-[11px] text-ink-2">disabled</code>}
+          hint={serveMcp ? "Coding agents on this Mac connect here; the Developer section has the full command." : isPrivateWindow() ? "Private windows do not serve MCP." : "Disabled in this build."}
+          control={serveMcp && info ? <CopyBlock text={info.mcp_url} label="Copy MCP URL" /> : <code className="block font-mono text-[11px] text-ink-2">disabled</code>}
         />
       </Group>
       <Updates channel={info?.build.channel ?? null} />

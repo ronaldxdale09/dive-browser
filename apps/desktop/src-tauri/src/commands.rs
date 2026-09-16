@@ -82,7 +82,7 @@ pub struct AppInfo {
     pub build: BuildInfo,
     /// Application data directory.
     pub data_dir: String,
-    /// MCP endpoint, empty when disabled.
+    /// MCP endpoint, empty when the server is off or this window is private.
     pub mcp_url: String,
     /// Path of the bearer token file.
     pub mcp_token_path: String,
@@ -157,10 +157,7 @@ pub(crate) fn favicons_for(state: State<'_, AppState>, urls: Vec<String>) -> Vec
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn app_info() -> AppInfo {
-    let port: u16 = std::env::var("DIVE_MCP_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(7391);
+    let private = crate::private_session::is_private();
     AppInfo {
         version: env!("CARGO_PKG_VERSION").to_owned(),
         build: BuildInfo {
@@ -176,12 +173,12 @@ pub(crate) fn app_info() -> AppInfo {
             built_at: env!("DIVE_BUILD_UNIX").parse::<u64>().unwrap_or(0) as f64,
         },
         data_dir: crate::state::data_root().to_string_lossy().into_owned(),
-        mcp_url: if port == 0 {
+        mcp_url: crate::mcp::advertised_url(crate::mcp::advertised_port(), private),
+        mcp_token_path: if private {
             String::new()
         } else {
-            format!("http://127.0.0.1:{port}/mcp")
+            crate::mcp::token_path().to_string_lossy().into_owned()
         },
-        mcp_token_path: crate::mcp::token_path().to_string_lossy().into_owned(),
         simulate: std::env::var("DIVE_SIMULATE")
             .ok()
             .map(|s| s.trim().to_owned())
