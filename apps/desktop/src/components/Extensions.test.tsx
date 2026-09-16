@@ -7,6 +7,7 @@ import { useBrowser } from "../store/browser";
 import { Extensions } from "./Extensions";
 
 const initial = useBrowser.getState();
+const platform = Object.getOwnPropertyDescriptor(navigator, "platform");
 const fixture: ExtensionInfo = {
   id: "fixture-id",
   name: "Fixture helper",
@@ -35,6 +36,7 @@ afterEach(() => {
   resetContentCover();
   useBrowser.setState(initial, true);
   vi.restoreAllMocks();
+  if (platform) Object.defineProperty(navigator, "platform", platform);
 });
 
 describe("Extensions", () => {
@@ -58,6 +60,15 @@ describe("Extensions", () => {
     await waitFor(() => expect(ipc.extensionRemove).toHaveBeenCalledWith("fixture-id"));
     expect(screen.getByText("No extensions loaded")).toBeTruthy();
     expect(screen.getByText(/Where to find one/).textContent).toContain("Extensions");
+  });
+
+  it("does not send Windows to Library › Application Support for unpacked extensions", async () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    vi.mocked(ipc.extensionsList).mockResolvedValue(listed([], false));
+    render(<Extensions />);
+    const hint = await screen.findByText(/Where to find one/);
+    expect(hint.textContent).not.toMatch(/Library/);
+    expect(hint.textContent).toMatch(/LOCALAPPDATA/);
   });
 
   it("loads a directory selected by the native picker", async () => {

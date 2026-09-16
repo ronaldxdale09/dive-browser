@@ -497,6 +497,19 @@ export function importLookingLabel(windows = isWindows()): string {
   return windows ? "Looking for other browsers…" : "Looking for browsers on this Mac…";
 }
 
+/**
+ * Where Chrome, Brave and Edge keep an unpacked extension folder on this OS.
+ * Dive only loads a directory you pick; this is a hint, not a scan.
+ *
+ * macOS: ~/Library/Application Support/<browser>/Default/Extensions/<id>/<ver>
+ * Windows: %LOCALAPPDATA%\<browser>\User Data\Default\Extensions\<id>\<ver>
+ */
+export function unpackedExtensionHint(windows = isWindows()): string {
+  return windows
+    ? String.raw`%LOCALAPPDATA% › that browser › User Data › Default › Extensions › its id › version`
+    : "Library › Application Support › that browser › Default › Extensions › its id › version";
+}
+
 export function importDeniedNote(browserName: string, windows = isWindows()): string {
   if (windows) {
     return `${browserName}'s files could not be read. Full Disk Access is a macOS permission, and this build cannot open it.`;

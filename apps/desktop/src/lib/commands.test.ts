@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import menuSource from "../../src-tauri/src/menu.rs?raw";
-import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel, credentialStoreName, credentialStoreTitle, isMissingPasswordError, missingPasswordNotice, defaultDownloadsFolderLabel, defaultDownloadsHint, defaultDownloadsPlaceholder, importFromWhere, importLookingLabel, importDeniedNote, importPasswordNote } from "./commands";
+import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel, credentialStoreName, credentialStoreTitle, isMissingPasswordError, missingPasswordNotice, defaultDownloadsFolderLabel, defaultDownloadsHint, defaultDownloadsPlaceholder, importFromWhere, importLookingLabel, importDeniedNote, importPasswordNote, unpackedExtensionHint } from "./commands";
 import { events, ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "./ipc";
@@ -452,5 +452,15 @@ describe("import copy", () => {
     expect(importDeniedNote("Brave", true)).toMatch(/could not be read/);
     expect(importDeniedNote("Brave", true)).not.toMatch(/System Settings/);
     expect(importDeniedNote("Brave", false)).toMatch(/System Settings › Privacy/);
+  });
+});
+
+describe("unpacked extension hint", () => {
+  it("does not send Windows to Library › Application Support", () => {
+    expect(unpackedExtensionHint(true)).not.toMatch(/Library/);
+    expect(unpackedExtensionHint(true)).toMatch(/%LOCALAPPDATA%/);
+    expect(unpackedExtensionHint(true)).toMatch(/User Data/);
+    expect(unpackedExtensionHint(false)).toMatch(/Library › Application Support/);
+    expect(unpackedExtensionHint(false)).not.toMatch(/User Data/);
   });
 });

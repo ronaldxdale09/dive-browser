@@ -1,5 +1,7 @@
 import { AlertTriangle, FolderOpen, Puzzle, RotateCw, ShieldCheck, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { unpackedExtensionHint } from "../lib/commands";
+import { errorMessage } from "../lib/errors";
 import { ipc } from "../lib/ipc";
 import type { ExtensionInfo, ExtensionList } from "../lib/ipc";
 import { useCoversContent } from "../lib/overlay";
@@ -7,7 +9,6 @@ import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
 import { Icon, IconButton } from "./Icon";
-import { errorMessage } from "../lib/errors";
 
 /** Manage unpacked Chromium extensions loaded into CEF on restart. */
 export function Extensions() {
@@ -71,6 +72,6 @@ function ExtensionCard({ item, busy, onToggle, onRemove }: { item: ExtensionInfo
 }
 
 function EmptyState() {
-  return <div className="grid min-h-72 place-items-center text-center"><div className="max-w-sm"><span className="mx-auto grid size-14 place-items-center rounded-2xl border border-line bg-surface-2 text-ink-3"><Icon icon={Puzzle} size={24} /></span><h3 className="mt-4 text-sm font-medium text-ink">No extensions loaded</h3><p className="mt-1.5 text-xs leading-5 text-ink-3">Choose a folder holding an unpacked extension, the one with its <code>manifest.json</code>.</p><p className="mt-2 text-xs leading-5 text-ink-3">Where to find one: the extension&rsquo;s source from GitHub, unzipped; or one Chrome, Brave or Edge already has, kept unpacked under Library &rsaquo; Application Support &rsaquo; that browser &rsaquo; Default &rsaquo; Extensions &rsaquo; its id &rsaquo; version.</p><p className="mt-2 text-xs leading-5 text-ink-3">Web Store installs and Google-only services are not available in embedded Chromium.</p></div></div>;
+  return <div className="grid min-h-72 place-items-center text-center"><div className="max-w-sm"><span className="mx-auto grid size-14 place-items-center rounded-2xl border border-line bg-surface-2 text-ink-3"><Icon icon={Puzzle} size={24} /></span><h3 className="mt-4 text-sm font-medium text-ink">No extensions loaded</h3><p className="mt-1.5 text-xs leading-5 text-ink-3">Choose a folder holding an unpacked extension, the one with its <code>manifest.json</code>.</p><p className="mt-2 text-xs leading-5 text-ink-3">Where to find one: the extension&rsquo;s source from GitHub, unzipped; or one Chrome, Brave or Edge already has, kept unpacked under {unpackedExtensionHint()}.</p><p className="mt-2 text-xs leading-5 text-ink-3">Web Store installs and Google-only services are not available in embedded Chromium.</p></div></div>;
 }
 
