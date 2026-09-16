@@ -791,3 +791,14 @@ describe("capture", () => {
     expect(useBrowser.getState().capturing).toBe(false);
   });
 });
+
+describe("savePage", () => {
+  it("does not save a detached tab as this window's", async () => {
+    const save = vi.spyOn(ipc, "pageSave").mockResolvedValue("/tmp/torn.html");
+    useBrowser.setState({ activeTab: "p1", detached: ["p1"], tabs: [tab("p1")], notice: null });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await useBrowser.getState().savePage();
+    expect(save).not.toHaveBeenCalled();
+    expect(useBrowser.getState().notice).toBeNull();
+  });
+});

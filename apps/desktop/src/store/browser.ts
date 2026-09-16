@@ -823,7 +823,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     }
   },
   savePage: async () => {
-    const id = get().activeTab;
+    const id = tabInThisWindow(get().activeTab, get().detached);
     if (!id) return;
     try {
       const path = await ipc.pageSave(id);
