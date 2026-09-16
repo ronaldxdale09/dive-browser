@@ -745,3 +745,13 @@ describe("forward", () => {
     expect(forward).not.toHaveBeenCalled();
   });
 });
+
+describe("stop", () => {
+  it("does not stop a detached tab as this window's", async () => {
+    const stop = vi.spyOn(ipc, "tabStop").mockResolvedValue(null);
+    useBrowser.setState({ activeTab: "s1", detached: ["s1"], tabs: [tab("s1")] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await useBrowser.getState().stop();
+    expect(stop).not.toHaveBeenCalled();
+  });
+});
