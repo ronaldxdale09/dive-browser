@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import { resetContentCover } from "../lib/overlay";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { PageActions, preferredLanguage, translationMessage } from "./PageActions";
 
 const initial = useBrowser.getState();
@@ -43,6 +43,14 @@ describe("translationMessage", () => {
 });
 
 describe("PageActions", () => {
+  it("does not offer reader view for a detached tab", () => {
+    useBrowser.setState({ tabs: [tab] as never, activeTab: "t1", detached: ["t1"] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    render(<PageActions />);
+    expect(screen.queryByRole("button", { name: "Reader view" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Translate this page" })).toBeNull();
+  });
+
   it("stays out of the way of anything that is not a web page", () => {
     useBrowser.setState({ tabs: [{ ...tab, url: "dive://settings" }] as never, activeTab: "t1" });
     render(<PageActions />);

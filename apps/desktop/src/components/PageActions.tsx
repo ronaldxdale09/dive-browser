@@ -5,7 +5,7 @@ import { errorMessage } from "../lib/errors";
 import { useCoversContent } from "../lib/overlay";
 import { useDismiss } from "../lib/useDismiss";
 import { useFocusTrap } from "../lib/useFocusTrap";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { describeCard, useWallet } from "../store/wallet";
 import { Icon } from "./Icon";
 import { Tooltip } from "./Tooltip";
@@ -72,8 +72,11 @@ function nameOf(code: string): string {
  * page itself does to them.
  */
 export function PageActions() {
-  const tabId = useBrowser((s) => s.activeTab);
-  const url = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.url ?? "");
+  const tabId = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
+  const url = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return id ? (s.tabs.find((t) => t.id === id)?.url ?? "") : "";
+  });
   // Keyed by tab and address: a page that navigated is neither in reader view
   // nor translated any more, and a fresh pair of buttons is exactly that.
   if (!tabId || !/^https?:/i.test(url)) return null;
