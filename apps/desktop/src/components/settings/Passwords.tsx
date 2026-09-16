@@ -8,7 +8,7 @@ import { Icon, IconButton } from "../Icon";
 import { Button, Group } from "../SettingsFields";
 import { FormEntries } from "./FormEntries";
 import { copyText } from "../../lib/clipboard";
-import { credentialStoreName } from "../../lib/commands";
+import { credentialStoreName, importPasswordsHint } from "../../lib/commands";
 
 /** The site as the list shows it: the host, without the scheme. */
 export function siteLabel(origin: string): string {
@@ -112,7 +112,7 @@ export function Passwords() {
       </Group>
       <NeverSaved />
       <FormEntries />
-      <Group title="Bringing passwords over" description="Chrome, Brave, Edge, Arc, Vivaldi, Opera and Firefox are read directly by Import from another browser. Safari and password managers export a CSV: Safari under File › Export › Passwords, 1Password and Bitwarden from their export pages. Import it here, then delete the file: it holds every password in plain text.">
+      <Group title="Bringing passwords over" description={importPasswordsHint()}>
         <div className="py-2.5">
           <Button onClick={() => void importCsv()} disabled={importing}>
             <span className="inline-flex items-center gap-1.5">

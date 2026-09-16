@@ -519,6 +519,16 @@ export function importSourcesHint(windows = isWindows()): string {
 }
 
 /**
+ * Settings › Passwords "Bringing passwords over". Direct browser read is
+ * the same Library-only scan. CSV import is a file you pick.
+ */
+export function importPasswordsHint(windows = isWindows()): string {
+  return windows
+    ? "Import from another browser only looks under Library, not AppData. Export a CSV from Chrome, Edge or a password manager, import it here, then delete the file: it holds every password in plain text."
+    : "Chrome, Brave, Edge, Arc, Vivaldi, Opera and Firefox are read directly by Import from another browser. Safari and password managers export a CSV: Safari under File › Export › Passwords, 1Password and Bitwarden from their export pages. Import it here, then delete the file: it holds every password in plain text.";
+}
+
+/**
  * Where Chrome, Brave and Edge keep an unpacked extension folder on this OS.
  * Dive only loads a directory you pick; this is a hint, not a scan.
  *

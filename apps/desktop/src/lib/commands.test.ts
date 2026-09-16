@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import menuSource from "../../src-tauri/src/menu.rs?raw";
-import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel, credentialStoreName, credentialStoreTitle, isMissingPasswordError, missingPasswordNotice, defaultDownloadsFolderLabel, defaultDownloadsHint, defaultDownloadsPlaceholder, importFromWhere, importLookingLabel, importDeniedNote, importPasswordNote, importEmptyHint, importSourcesHint, unpackedExtensionHint } from "./commands";
+import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel, credentialStoreName, credentialStoreTitle, isMissingPasswordError, missingPasswordNotice, defaultDownloadsFolderLabel, defaultDownloadsHint, defaultDownloadsPlaceholder, importFromWhere, importLookingLabel, importDeniedNote, importPasswordNote, importEmptyHint, importSourcesHint, importPasswordsHint, unpackedExtensionHint } from "./commands";
 import { events, ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "./ipc";
@@ -452,6 +452,9 @@ describe("import copy", () => {
     expect(importSourcesHint(true)).toMatch(/AppData/);
     expect(importSourcesHint(true)).not.toMatch(/~\//);
     expect(importSourcesHint(false)).toMatch(/from Safari/);
+    expect(importPasswordsHint(true)).not.toMatch(/are read directly/);
+    expect(importPasswordsHint(true)).toMatch(/AppData/);
+    expect(importPasswordsHint(false)).toMatch(/are read directly/);
     expect(importPasswordNote({ firefox: false, browserName: "Chrome", windows: true })).not.toMatch(/Keychain|macOS/);
     expect(importPasswordNote({ firefox: false, browserName: "Chrome", windows: true })).toMatch(/Credential Manager/);
     expect(importPasswordNote({ firefox: false, browserName: "Chrome", windows: false })).toMatch(/Keychain/);

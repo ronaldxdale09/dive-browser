@@ -94,6 +94,13 @@ describe("Settings › Passwords", () => {
     expect(screen.queryByText("Never saved")).toBeNull();
   });
 
+  it("does not say Chrome passwords are read directly on Windows", () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    render(<Passwords />);
+    expect(document.body.textContent).not.toMatch(/are read directly/);
+    expect(document.body.textContent).toMatch(/AppData/);
+  });
+
   it("does not say passwords live only in the macOS Keychain on Windows", () => {
     Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
     render(<Passwords />);
