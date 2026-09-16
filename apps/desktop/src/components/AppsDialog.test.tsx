@@ -6,6 +6,8 @@ import { useBrowser } from "../store/browser";
 import { usePicker } from "../store/simulator";
 import { AppsDialog } from "./AppsDialog";
 
+const platform = Object.getOwnPropertyDescriptor(navigator, "platform");
+
 beforeEach(() => {
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
   vi.spyOn(ipc, "appInfo").mockResolvedValue({ version: "0.1.17", build: { channel: "beta", number: "1", built_at: 0 } } as never);
@@ -16,6 +18,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  if (platform) Object.defineProperty(navigator, "platform", platform);
 });
 
 describe("AppsDialog", () => {
@@ -72,5 +75,13 @@ describe("AppsDialog", () => {
     expect(ids).toContain("dock");
     expect(ids).not.toContain("library");
     expect(searchApps(appsFor(false), "loom").map((a) => a.id)).toEqual(["divescreen"]);
+  });
+
+  it("does not name ⌘K for the command palette on Windows", () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    render(<AppsDialog />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Search apps" }), { target: { value: "zzzznoapp" } });
+    expect(document.body.textContent).not.toMatch(/⌘K/);
+    expect(document.body.textContent).toMatch(/Ctrl\+K/);
   });
 });

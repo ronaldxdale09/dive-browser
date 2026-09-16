@@ -3,6 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { APP_CATEGORIES, appsFor, chordOf, launchApp, searchApps } from "../lib/apps";
 import type { AppEntry } from "../lib/apps";
+import { chordsByCommand, formatChord } from "../lib/commands";
 import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
@@ -41,6 +42,7 @@ export function AppsDialog() {
   const [query, setQuery] = useState("");
   const all = useMemo(() => appsFor(), []);
   const shown = useMemo(() => searchApps(all, query), [all, query]);
+  const palette = formatChord(chordsByCommand()["palette.open"] ?? "mod+k");
   // Shelves keep their order; a search just empties the ones nothing matched.
   const shelves = APP_CATEGORIES.map((c) => ({ ...c, apps: shown.filter((a) => a.category === c.id) })).filter((c) => c.apps.length > 0);
 
@@ -104,7 +106,7 @@ export function AppsDialog() {
         </header>
         <div ref={grid} onKeyDown={onGridKey} className="min-h-0 flex-1 overflow-y-auto p-4">
           {shown.length === 0 ? (
-            <p className="py-12 text-center text-xs text-ink-3">No app called “{query.trim()}”. Commands like find, print and settings live in the menu and the command palette (⌘K).</p>
+            <p className="py-12 text-center text-xs text-ink-3">No app called “{query.trim()}”. Commands like find, print and settings live in the menu and the command palette ({palette}).</p>
           ) : (
             <div className="flex flex-col gap-6">
               {shelves.map((shelf) => (
