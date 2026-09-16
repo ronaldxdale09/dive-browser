@@ -342,7 +342,8 @@ function DownloadsIndicator() {
 
 /** Shown while steps are being recorded in the current tab; a click stops and opens the spec. */
 function RecorderIndicator() {
-  const recording = useRecorder((s) => s.recordingTab !== null);
-  if (!recording) return null;
+  const recordingTab = useRecorder((s) => s.recordingTab);
+  const here = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
+  if (!recordingTab || recordingTab !== here) return null;
   return <IconButton icon={ScrollText} label="Stop recording steps" active onClick={() => runCommand("recorder.toggle")} />;
 }

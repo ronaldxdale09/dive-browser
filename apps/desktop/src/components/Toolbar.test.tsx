@@ -338,10 +338,17 @@ describe("Toolbar", () => {
     const stop = vi.spyOn(ipc, "tabRecordStop").mockResolvedValue([]);
     render(<Toolbar />);
     expect(screen.queryByRole("button", { name: "Stop recording steps" })).toBeNull();
-    act(() => useRecorder.setState({ recordingTab: "t1" }));
+    act(() => useRecorder.setState({ recordingTab: tab.id }));
     fireEvent.click(screen.getByRole("button", { name: "Stop recording steps" }));
-    await waitFor(() => expect(stop).toHaveBeenCalledWith("t1"));
+    await waitFor(() => expect(stop).toHaveBeenCalledWith(tab.id));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Stop recording steps" })).toBeNull());
+  });
+
+  it("does not show a detached tab's step recording as this window's", () => {
+    useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [tab.id] });
+    useRecorder.setState({ recordingTab: tab.id });
+    render(<Toolbar />);
+    expect(screen.queryByRole("button", { name: "Stop recording steps" })).toBeNull();
   });
 
   it("shows that live subtitles are running and reopens their dialog", () => {
