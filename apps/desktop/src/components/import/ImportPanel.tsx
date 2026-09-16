@@ -1,6 +1,7 @@
 import { Check, FolderLock, History, KeyRound, Loader2, Star, TextCursorInput } from "lucide-react";
 import { useEffect } from "react";
 import type { ImportSource } from "../../lib/ipc";
+import { importLookingLabel, importPasswordNote } from "../../lib/commands";
 import { useBrowserImport } from "../../store/browserImport";
 import { Icon } from "../Icon";
 import { Switch } from "../SettingsFields";
@@ -76,7 +77,7 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
   if (sources === null || (loading && sources.length === 0)) {
     return (
       <p role="status" className="flex items-center gap-2 py-6 text-xs text-ink-3">
-        <Icon icon={Loader2} size={13} className="animate-spin" /> Looking for browsers on this Mac…
+        <Icon icon={Loader2} size={13} className="animate-spin" /> {importLookingLabel()}
       </p>
     );
   }
@@ -168,9 +169,7 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
       )}
       <p className="mt-3 text-[10.5px] text-ink-3">
         {canPasswords && passwords
-          ? current?.family === "firefox"
-            ? "Passwords go into this profile's Keychain. Firefox logins guarded by a primary password cannot be read; export them as a CSV from about:logins instead. Cookies and extensions stay behind."
-            : `Passwords go into this profile's Keychain; macOS will ask once to let Dive read ${current?.name ?? "the browser"}'s password key. Cookies and extensions stay behind.`
+          ? importPasswordNote({ firefox: current?.family === "firefox", browserName: current?.name ?? "the browser" })
           : "Cookies and extensions stay in the other browser."}
       </p>
     </div>

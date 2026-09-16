@@ -482,6 +482,33 @@ export function credentialStoreTitle(windows = isWindows()): string {
   return windows ? "Credential Manager" : "The Keychain";
 }
 
+/**
+ * Where the import dialog says it reads from.
+ *
+ * The host only looks under `~/Library`, so "this Mac" is true on macOS.
+ * Windows is not scanned (no AppData walk), so the copy does not name this
+ * computer as if Chrome profiles there were found.
+ */
+export function importFromWhere(windows = isWindows()): string {
+  return windows ? "another browser" : "a browser on this Mac";
+}
+
+export function importLookingLabel(windows = isWindows()): string {
+  return windows ? "Looking for other browsers…" : "Looking for browsers on this Mac…";
+}
+
+export function importPasswordNote(args: { firefox: boolean; browserName: string; windows?: boolean }): string {
+  const windows = args.windows ?? isWindows();
+  const dest = `Passwords go into this profile's ${windows ? "Credential Manager" : "Keychain"}.`;
+  if (args.firefox) {
+    return `${dest} Firefox logins guarded by a primary password cannot be read; export them as a CSV from about:logins instead. Cookies and extensions stay behind.`;
+  }
+  if (windows) {
+    return `${dest} Cookies and extensions stay behind.`;
+  }
+  return `${dest} macOS will ask once to let Dive read ${args.browserName}'s password key. Cookies and extensions stay behind.`;
+}
+
 /** Host reveal/fill errors that mean the OS store no longer has the secret. */
 export function isMissingPasswordError(message: string): boolean {
   return /(?:the keychain|credential manager) no longer/i.test(message);

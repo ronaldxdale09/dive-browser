@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import menuSource from "../../src-tauri/src/menu.rs?raw";
-import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel, credentialStoreName, credentialStoreTitle, isMissingPasswordError, missingPasswordNotice, defaultDownloadsFolderLabel, defaultDownloadsHint, defaultDownloadsPlaceholder } from "./commands";
+import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel, credentialStoreName, credentialStoreTitle, isMissingPasswordError, missingPasswordNotice, defaultDownloadsFolderLabel, defaultDownloadsHint, defaultDownloadsPlaceholder, importFromWhere, importLookingLabel, importPasswordNote } from "./commands";
 import { events, ipc } from "./ipc";
 import { useBrowser } from "../store/browser";
 import type { Tab } from "./ipc";
@@ -436,5 +436,18 @@ describe("credential store copy", () => {
     expect(isMissingPasswordError("The Keychain no longer has this password. Forget the login and save it again.")).toBe(true);
     expect(isMissingPasswordError("Credential Manager no longer has this password. Forget the login and save it again.")).toBe(true);
     expect(isMissingPasswordError("The Keychain would not hand over this password: denied")).toBe(false);
+  });
+});
+
+describe("import copy", () => {
+  it("does not claim this Mac or the Keychain on Windows", () => {
+    expect(importFromWhere(true)).toBe("another browser");
+    expect(importFromWhere(false)).toBe("a browser on this Mac");
+    expect(importLookingLabel(true)).toBe("Looking for other browsers…");
+    expect(importLookingLabel(false)).toBe("Looking for browsers on this Mac…");
+    expect(importPasswordNote({ firefox: false, browserName: "Chrome", windows: true })).not.toMatch(/Keychain|macOS/);
+    expect(importPasswordNote({ firefox: false, browserName: "Chrome", windows: true })).toMatch(/Credential Manager/);
+    expect(importPasswordNote({ firefox: false, browserName: "Chrome", windows: false })).toMatch(/Keychain/);
+    expect(importPasswordNote({ firefox: false, browserName: "Chrome", windows: false })).toMatch(/macOS will ask/);
   });
 });

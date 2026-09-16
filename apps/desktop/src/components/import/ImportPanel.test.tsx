@@ -8,11 +8,13 @@ import { ImportPanel, describeOutcome } from "./ImportPanel";
 const brave: ImportSource = { id: "brave:Default", browser: "brave", name: "Brave", family: "chromium", profile: null, dir: "/x/brave", access: "denied", passwords: true, forms: true, icon: null };
 const chrome: ImportSource = { id: "chrome:Profile 1", browser: "chrome", name: "Chrome", family: "chromium", profile: "Work", dir: "/x/chrome", access: "ok", passwords: true, forms: true, icon: "data:image/png;base64,AAAA" };
 const initial = useBrowserImport.getState();
+const platform = Object.getOwnPropertyDescriptor(navigator, "platform");
 
 afterEach(() => {
   cleanup();
   useBrowserImport.setState(initial, true);
   vi.restoreAllMocks();
+  if (platform) Object.defineProperty(navigator, "platform", platform);
 });
 
 describe("ImportPanel", () => {
@@ -63,5 +65,23 @@ describe("ImportPanel", () => {
     expect(describeOutcome(2, 0, true, true, 5, true)).toBe("2 bookmarks, 0 pages of history and 5 passwords");
     expect(describeOutcome(0, 0, false, false, 0, false, 1, true)).toBe("1 form entry");
     expect(describeOutcome(0, 0, false, false, 1, true)).toBe("1 password");
+  });
+
+  it("does not say it is looking for browsers on this Mac on Windows", () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    vi.spyOn(ipc, "browserImportSources").mockImplementation(() => new Promise(() => {}));
+    render(<ImportPanel />);
+    expect(document.body.textContent).toMatch(/Looking for other browsers/);
+    expect(document.body.textContent).not.toMatch(/this Mac/);
+  });
+
+  it("does not say imported passwords go into the Keychain on Windows", async () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    vi.spyOn(ipc, "browserImportSources").mockResolvedValue([chrome]);
+    render(<ImportPanel />);
+    expect(await screen.findByRole("radio", { name: "Chrome · Work" })).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/Keychain/);
+    expect(document.body.textContent).not.toMatch(/macOS/);
+    expect(document.body.textContent).toMatch(/Credential Manager/);
   });
 });
