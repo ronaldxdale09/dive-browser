@@ -35,6 +35,12 @@ describe("FeaturesStep", () => {
     expect(document.body.textContent).toMatch(/Settings › Apps › Default apps/);
   });
 
+  it("does not say ads are blocked in the engine before finish writes the pref", () => {
+    render(<FeaturesStep />);
+    expect(document.body.textContent).not.toMatch(/In the engine/);
+    expect(document.body.textContent).toMatch(/when you start browsing/i);
+  });
+
   it("does not name ⌘ chords for workspaces, the agent, the dock, or the palette on Windows", () => {
     Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
     render(<FeaturesStep />);

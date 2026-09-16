@@ -82,7 +82,7 @@ export function FeaturesStep() {
           </span>
           <span className="min-w-0 flex-1 truncate text-xs">
             <span className="text-ink">Block ads and trackers</span>
-            <span className="text-ink-3"> · In the engine, pausable per site.</span>
+            <span className="text-ink-3"> · Written when you start browsing. Pausable per site.</span>
           </span>
           <Switch label="Block ads and trackers" checked={protect} onChange={setProtect} />
         </div>
