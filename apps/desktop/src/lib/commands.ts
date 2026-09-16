@@ -34,8 +34,9 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   },
   "tab.reopen": () => useBrowser.getState().reopenClosedTab(),
   "tab.pin": () => {
-    const { tabs, activeTab, setPinned } = useBrowser.getState();
-    const tab = tabs.find((t) => t.id === activeTab);
+    const { tabs, activeTab, detached, setPinned } = useBrowser.getState();
+    const id = tabInThisWindow(activeTab, detached);
+    const tab = id ? tabs.find((t) => t.id === id) : undefined;
     return tab && tab.tier !== "essential" ? setPinned(tab.id, tab.tier !== "pinned") : undefined;
   },
   "tab.detach": () => {

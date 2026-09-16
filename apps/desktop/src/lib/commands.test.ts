@@ -189,6 +189,14 @@ describe("command dispatch", () => {
     useBrowser.setState({ detached: [] });
   });
 
+  it("does not pin a detached tab as this window's", async () => {
+    const setPinned = vi.fn().mockResolvedValue(undefined);
+    useBrowser.setState({ tabs: [tab("a")], activeTab: "a", detached: ["a"], setPinned });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await UI_COMMANDS["tab.pin"]!();
+    expect(setPinned).not.toHaveBeenCalled();
+  });
+
   it("opens a fresh window using the engine's authoritative workspace", async () => {
     const open = vi.spyOn(ipc, "windowOpen").mockResolvedValue(null);
     useBrowser.setState({ activeWorkspace: null });
