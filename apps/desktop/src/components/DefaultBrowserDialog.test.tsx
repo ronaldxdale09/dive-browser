@@ -4,10 +4,11 @@ import type { DefaultBrowserStatus } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { useDefaultBrowser } from "../store/defaultBrowser";
-import { DefaultBrowserDialog, POLL_INTERVAL_MS, WAIT_TIMEOUT_MS, prettyBundleId } from "./DefaultBrowserDialog";
+import { DefaultBrowserDialog, POLL_INTERVAL_MS, WAIT_TIMEOUT_MS, defaultBrowserAskCopy, defaultBrowserSettingsPath, defaultBrowserTimeoutCopy, defaultBrowserWaitingCopy, prettyBundleId } from "./DefaultBrowserDialog";
 
 const notDefault: DefaultBrowserStatus = { supported: true, is_default: false, current: "com.apple.Safari" };
 const isDefault: DefaultBrowserStatus = { supported: true, is_default: true, current: "com.dive.browser" };
+const platform = Object.getOwnPropertyDescriptor(navigator, "platform");
 
 function openWith(status: DefaultBrowserStatus) {
   useDefaultBrowser.setState({ status, phase: "idle", error: null, declined: false });
@@ -25,6 +26,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.useRealTimers();
+  if (platform) Object.defineProperty(navigator, "platform", platform);
 });
 
 describe("DefaultBrowserDialog", () => {
@@ -103,6 +105,27 @@ describe("DefaultBrowserDialog", () => {
     expect(vi.mocked(ipc.defaultBrowserStatus).mock.calls.length).toBe(polls);
   });
 
+  it("points a timed-out ask at Windows Settings, not Desktop & Dock", async () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    vi.useFakeTimers();
+    openWith(notDefault);
+    render(<DefaultBrowserDialog />);
+    expect(screen.getByText(/Windows Settings will open so you can pick Dive/)).toBeTruthy();
+    expect(screen.queryByText(/macOS will ask/)).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Make default" }));
+    });
+    expect(screen.getByText(/Waiting for Windows/)).toBeTruthy();
+    expect(screen.queryByText(/Waiting for macOS/)).toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(WAIT_TIMEOUT_MS + POLL_INTERVAL_MS);
+    });
+    expect(screen.getByText(/Still not the default/)).toBeTruthy();
+    expect(screen.getByText(/Settings › Apps › Default apps/)).toBeTruthy();
+    expect(screen.queryByText(/Desktop & Dock/)).toBeNull();
+    expect(screen.queryByText(/System Settings/)).toBeNull();
+  });
+
   it("shows the host's message when asking fails, with a way to retry", async () => {
     vi.mocked(ipc.defaultBrowserSet).mockRejectedValue(new Error("Launch Services refused"));
     openWith(notDefault);
@@ -128,5 +151,16 @@ describe("DefaultBrowserDialog", () => {
     expect(prettyBundleId("com.brave.Browser")).toBe("Brave");
     expect(prettyBundleId("org.mozilla.firefox")).toBe("Firefox");
     expect(prettyBundleId("com.vivaldi.Vivaldi")).toBe("com.vivaldi.Vivaldi");
+  });
+
+  it("names this OS's default-browser Settings page", () => {
+    expect(defaultBrowserSettingsPath(true)).toBe("Settings › Apps › Default apps");
+    expect(defaultBrowserSettingsPath(false)).toBe("System Settings › Desktop & Dock › Default web browser");
+    expect(defaultBrowserAskCopy(true)).toContain("Windows Settings");
+    expect(defaultBrowserAskCopy(false)).toContain("macOS will ask");
+    expect(defaultBrowserWaitingCopy(true)).toContain("Waiting for Windows");
+    expect(defaultBrowserWaitingCopy(false)).toContain("Waiting for macOS");
+    expect(defaultBrowserTimeoutCopy(true)).toContain("Settings › Apps › Default apps");
+    expect(defaultBrowserTimeoutCopy(false)).toContain("Desktop & Dock");
   });
 });

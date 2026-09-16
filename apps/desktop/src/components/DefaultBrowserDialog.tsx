@@ -7,6 +7,7 @@ import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
+import { isWindows } from "../lib/commands";
 
 /** How long to wait for macOS's own confirmation before giving up. */
 export const WAIT_TIMEOUT_MS = 20_000;
@@ -23,6 +24,29 @@ const KNOWN: Record<string, string> = {
 /** A bundle id as a name, for the handful of browsers people actually have. */
 export function prettyBundleId(id: string): string {
   return KNOWN[id.toLowerCase()] ?? id;
+}
+
+/** Where this OS lets someone pick the default browser. Windows opens `ms-settings:defaultapps`. */
+export function defaultBrowserSettingsPath(windows = isWindows()): string {
+  return windows
+    ? "Settings › Apps › Default apps"
+    : "System Settings › Desktop & Dock › Default web browser";
+}
+
+export function defaultBrowserAskCopy(windows = isWindows()): string {
+  return windows
+    ? "Links from other apps will open in Dive. Windows Settings will open so you can pick Dive."
+    : "Links from other apps will open in Dive. macOS will ask you to confirm.";
+}
+
+export function defaultBrowserWaitingCopy(windows = isWindows()): string {
+  return windows
+    ? "Waiting for Windows… pick Dive under Settings › Apps › Default apps."
+    : "Waiting for macOS… choose “Use Dive” in the system dialog.";
+}
+
+export function defaultBrowserTimeoutCopy(windows = isWindows()): string {
+  return `Still not the default. You can set it under ${defaultBrowserSettingsPath(windows)}.`;
 }
 
 function isDive(id: string): boolean {
@@ -150,7 +174,7 @@ export function DefaultBrowserDialog() {
   } else if (phase === "waiting" && timedOut) {
     body = (
       <p className="text-xs text-ink-2" role="status">
-        Still not the default. You can set it under System Settings › Desktop & Dock › Default web browser.
+        {defaultBrowserTimeoutCopy()}
       </p>
     );
     actions = (
@@ -166,7 +190,7 @@ export function DefaultBrowserDialog() {
   } else if (phase === "waiting") {
     body = (
       <p className="text-xs text-ink-2" role="status">
-        Waiting for macOS… choose “Use Dive” in the system dialog.
+        {defaultBrowserWaitingCopy()}
       </p>
     );
     actions = (
@@ -177,7 +201,7 @@ export function DefaultBrowserDialog() {
   } else {
     body = (
       <>
-        <p className="text-xs text-ink-2">Links from other apps will open in Dive. macOS will ask you to confirm.</p>
+        <p className="text-xs text-ink-2">{defaultBrowserAskCopy()}</p>
         {current && <p className="mt-1.5 text-[11px] text-ink-3">Currently: {current}</p>}
         {importRow}
       </>
