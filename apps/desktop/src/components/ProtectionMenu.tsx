@@ -191,7 +191,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
           </section>
 
           <footer className="flex items-center gap-2 border-t border-line bg-surface-2/45 px-3 py-2">
-            <span className="font-mono text-[9.5px] text-ink-3">{infoError ? "Rules unavailable" : `Rules ${info?.version ?? "bundled"}`}</span>
+            <span className="font-mono text-[9.5px] text-ink-3">{infoError ? "Rules unavailable" : info ? `Rules ${info.version}` : "Rules …"}</span>
             <span className="min-w-0 flex-1 text-[9.5px] leading-tight text-ink-3">Across workspaces; site pauses stay host-specific.</span>
             <button
               type="button"

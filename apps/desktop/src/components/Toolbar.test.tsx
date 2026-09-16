@@ -401,8 +401,19 @@ describe("Toolbar", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(trigger.getAttribute("aria-pressed")).toBeNull();
     expect(screen.getByText("Rules 2026.09.04")).toBeTruthy();
+    expect(screen.queryByText("Rules bundled")).toBeNull();
     expect((screen.getByRole("switch", { name: "Protection on this site" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole("switch", { name: "DivePrivacy protection" }).getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("does not say Rules bundled before PrivacyInfo loads", () => {
+    // "bundled" is not a version. Settings uses an ellipsis until the receipt lands.
+    vi.spyOn(ipc, "privacyInfo").mockReturnValue(new Promise(() => {}));
+    usePrivacy.setState({ info: null, infoError: null });
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Protection" }));
+    expect(screen.queryByText("Rules bundled")).toBeNull();
+    expect(screen.getByText("Rules …")).toBeTruthy();
   });
 
   it("reports typed per-layer counts without treating generic network failures as privacy actions", () => {
