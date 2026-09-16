@@ -72,6 +72,17 @@ describe("README memory claim", () => {
     expect(readme).toContain("ads and tracker lists can run in the request pipeline");
   });
 
+  it("does not present the macOS token path as the only MCP connect command", () => {
+    // state.rs: macOS is ~/Library/Application Support/app.dive.browser;
+    // Windows is %APPDATA%\dive. Developer already uses Get-Content there.
+    // An unlabeled cat ~/Library snippet reads as the command for every OS.
+    expect(readme).toMatch(/Get-Content/);
+    expect(readme).toMatch(/%APPDATA%/);
+    const catAt = readme.indexOf("$(cat ~/Library");
+    expect(catAt).toBeGreaterThan(-1);
+    expect(readme.slice(Math.max(0, catAt - 240), catAt)).toMatch(/macOS/i);
+  });
+
   it("does not say every tab is reachable by MCP", () => {
     // AppBrowser::tabs filters TabState::Discarded. The sidecar already
     // says sleeping tabs are omitted; the README must not upgrade that.

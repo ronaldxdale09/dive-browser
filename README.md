@@ -85,6 +85,8 @@ anyway**.
 
 Dive serves MCP on `127.0.0.1:7391` and requires the token it writes to its data directory. Private windows do not serve MCP.
 
+On macOS the token is under `~/Library/Application Support/app.dive.browser/mcp-token`:
+
 ```bash
 claude mcp add --transport http dive http://127.0.0.1:7391/mcp \
   --header "Authorization: Bearer $(cat ~/Library/Application\ Support/app.dive.browser/mcp-token)"
