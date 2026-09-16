@@ -124,7 +124,7 @@ describe("reduceLoad", () => {
 
   it("clears the error when the user navigates the tab", async () => {
     vi.spyOn(ipc, "tabNavigate").mockResolvedValue(null);
-    useBrowser.setState({ activeTab: "a", tabs: [tab("a")], navError: { a: { url: "https://x", error: "net::ERR_CONNECTION_REFUSED" } } });
+    useBrowser.setState({ activeTab: "a", detached: [], tabs: [tab("a")], navError: { a: { url: "https://x", error: "net::ERR_CONNECTION_REFUSED" } } });
     await useBrowser.getState().navigate("https://y");
     expect(useBrowser.getState().navError).toEqual({});
     expect(ipc.tabNavigate).toHaveBeenCalledWith("a", "https://y");
@@ -358,7 +358,7 @@ describe("optimistic switching", () => {
 
   it("optimistically updates tab URL on navigate and rolls back if the engine refuses", async () => {
     vi.spyOn(ipc, "tabNavigate").mockRejectedValue(new Error("invalid protocol"));
-    useBrowser.setState({ activeTab: "a", tabs: [tab("a", "https://prev.test")] });
+    useBrowser.setState({ activeTab: "a", detached: [], tabs: [tab("a", "https://prev.test")] });
     await useBrowser.getState().navigate("bad://protocol");
     expect(useBrowser.getState().tabs.find((t) => t.id === "a")?.url).toBe("https://prev.test");
     expect(useBrowser.getState().error).toBe("invalid protocol");
@@ -753,5 +753,18 @@ describe("stop", () => {
     expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
     await useBrowser.getState().stop();
     expect(stop).not.toHaveBeenCalled();
+  });
+});
+
+describe("navigate", () => {
+  it("does not navigate a detached tab as this window's", async () => {
+    const nav = vi.spyOn(ipc, "tabNavigate").mockResolvedValue(null);
+    const open = vi.spyOn(ipc, "tabOpen").mockResolvedValue({} as never);
+    useBrowser.setState({ activeTab: "n1", detached: ["n1"], tabs: [tab("n1")], activeWorkspace: "w" });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await useBrowser.getState().navigate("https://example.com/");
+    expect(nav).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledWith("w", "https://example.com/");
+    expect(useBrowser.getState().tabs.find((t) => t.id === "n1")?.url).toBe("https://x");
   });
 });

@@ -683,7 +683,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     }
   },
   navigate: async (url) => {
-    const id = get().activeTab;
+    const id = tabInThisWindow(get().activeTab, get().detached);
     if (!id) return get().openTab(url);
     const prevTab = get().tabs.find((candidate) => candidate.id === id);
     const prevUrl = prevTab?.url;
