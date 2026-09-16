@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
@@ -40,6 +40,9 @@ describe("SharePopover", () => {
     fireEvent.click(screen.getByRole("button", { name: "Share to another device" }));
     expect(ipc.shareUrl).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => void window.dispatchEvent(new CustomEvent(OPEN_SHARE)));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(ipc.shareUrl).not.toHaveBeenCalled();
   });
 
   it("opens when the page menu asks for a QR code", async () => {

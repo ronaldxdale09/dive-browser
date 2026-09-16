@@ -29,10 +29,12 @@ export function SharePopover() {
 
   // The page's right-click menu asks for the QR code through the host.
   useEffect(() => {
-    const show = () => setOpen(true);
+    const show = () => {
+      if (current) setOpen(true);
+    };
     window.addEventListener(OPEN_SHARE, show);
     return () => window.removeEventListener(OPEN_SHARE, show);
-  }, []);
+  }, [current]);
 
   useEffect(() => {
     if (!open || !current) return;
