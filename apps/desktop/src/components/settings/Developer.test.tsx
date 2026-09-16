@@ -40,6 +40,12 @@ describe("Developer › MCP setup", () => {
     }
   });
 
+  it("does not say agents can read discarded tabs", () => {
+    render(<Developer info={info} />);
+    expect(document.body.textContent).not.toMatch(/can read your tabs/);
+    expect(document.body.textContent).toMatch(/sleeping/i);
+  });
+
   it("says page scripts stay off unless DIVE_MCP_ALLOW_EVAL is set", () => {
     render(<Developer info={info} />);
     expect(document.body.textContent).toMatch(/DIVE_MCP_ALLOW_EVAL=1/);

@@ -77,7 +77,7 @@ export function Developer({ info }: { info: AppInfo | null }) {
         />
       </Group>
 
-      <Group title="Coding agents (MCP)" description={serveMcp ? "Claude Code, Cursor and Codex can read your tabs, console, network and screenshots. Run this once:" : isPrivateWindow() ? "Private windows do not serve MCP." : "MCP is off in this build."}>
+      <Group title="Coding agents (MCP)" description={serveMcp ? "Claude Code, Cursor and Codex can read open tabs in the workspace in front, plus console, network and screenshots. Sleeping tabs are omitted. Run this once:" : isPrivateWindow() ? "Private windows do not serve MCP." : "MCP is off in this build."}>
         {serveMcp && (
           <div className="py-3">
             <CopyBlock text={command} display={shown || undefined} displayTitle={command || undefined} />
