@@ -4,7 +4,7 @@ import type { DefaultBrowserStatus } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { useDefaultBrowser } from "../store/defaultBrowser";
-import { DefaultBrowserDialog, POLL_INTERVAL_MS, WAIT_TIMEOUT_MS, defaultBrowserAskCopy, defaultBrowserSettingsPath, defaultBrowserTimeoutCopy, defaultBrowserWaitingCopy, prettyBundleId } from "./DefaultBrowserDialog";
+import { DefaultBrowserDialog, POLL_INTERVAL_MS, WAIT_TIMEOUT_MS, defaultBrowserAskCopy, defaultBrowserOnboardingHint, defaultBrowserSettingsPath, defaultBrowserTimeoutCopy, defaultBrowserWaitingCopy, prettyBundleId } from "./DefaultBrowserDialog";
 
 const notDefault: DefaultBrowserStatus = { supported: true, is_default: false, current: "com.apple.Safari" };
 const isDefault: DefaultBrowserStatus = { supported: true, is_default: true, current: "com.dive.browser" };
@@ -162,5 +162,9 @@ describe("DefaultBrowserDialog", () => {
     expect(defaultBrowserWaitingCopy(false)).toContain("Waiting for macOS");
     expect(defaultBrowserTimeoutCopy(true)).toContain("Settings › Apps › Default apps");
     expect(defaultBrowserTimeoutCopy(false)).toContain("Desktop & Dock");
+    expect(defaultBrowserOnboardingHint(false, true)).toContain("Windows Settings");
+    expect(defaultBrowserOnboardingHint(false, false)).toContain("macOS will ask");
+    expect(defaultBrowserOnboardingHint(true, true)).toContain("Settings › Apps › Default apps");
+    expect(defaultBrowserOnboardingHint(true, false)).toContain("macOS is asking");
   });
 });

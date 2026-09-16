@@ -2,6 +2,7 @@ import { Bot, Clapperboard, Globe, LayoutGrid, PanelBottom, ShieldCheck } from "
 import type { LucideIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useState, useRef } from "react";
 import { FOCUS_ADDRESS } from "../../lib/commands";
+import { defaultBrowserOnboardingHint } from "../DefaultBrowserDialog";
 import { useDefaultBrowser } from "../../store/defaultBrowser";
 import { useOnboarding } from "../../store/onboarding";
 import { usePrefs } from "../../store/prefs";
@@ -91,7 +92,7 @@ export function FeaturesStep() {
           </span>
           <span className="min-w-0 flex-1 truncate text-xs">
             <span className="text-ink">{isDefault ? "Dive is your default browser" : "Open links from other apps in Dive"}</span>
-            <span className="text-ink-3">{isDefault ? " · Links already open here." : phase === "waiting" ? " · macOS is asking you to confirm." : " · macOS will ask to confirm."}</span>
+            <span className="text-ink-3">{isDefault ? " · Links already open here." : defaultBrowserOnboardingHint(phase === "waiting")}</span>
           </span>
           {!isDefault && (
             <button type="button" disabled={!canAsk} onClick={() => void makeDefault()} className="pressable h-7 shrink-0 rounded-full border border-line-2 px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40">

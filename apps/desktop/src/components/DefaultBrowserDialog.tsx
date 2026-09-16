@@ -49,6 +49,18 @@ export function defaultBrowserTimeoutCopy(windows = isWindows()): string {
   return `Still not the default. You can set it under ${defaultBrowserSettingsPath(windows)}.`;
 }
 
+/** Short hint on first-run Features, next to Set as default. */
+export function defaultBrowserOnboardingHint(waiting: boolean, windows = isWindows()): string {
+  if (waiting) {
+    return windows
+      ? " · pick Dive under Settings › Apps › Default apps."
+      : " · macOS is asking you to confirm.";
+  }
+  return windows
+    ? " · Windows Settings will open so you can pick Dive."
+    : " · macOS will ask to confirm.";
+}
+
 function isDive(id: string): boolean {
   return /dive/i.test(id);
 }
