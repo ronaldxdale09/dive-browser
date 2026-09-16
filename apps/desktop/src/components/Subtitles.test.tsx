@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { events, ipc } from "../lib/ipc";
 import type { SubtitleModel, SubtitleModelProgress } from "../lib/ipc";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { bootSubtitles, resetSubtitlesListener, useSubtitles } from "../store/subtitles";
 import { Subtitles } from "./Subtitles";
 
@@ -17,6 +17,7 @@ const subtitlesInitial = useSubtitles.getState();
 function openDialog() {
   useBrowser.setState({
     activeTab: "t1",
+    detached: [],
     open: { sidecar: false, dock: false, palette: false, find: false, settings: false, library: false, extensions: false, shortcuts: false, menu: false, defaultBrowser: false, subtitles: true, tasks: false },
   });
 }
@@ -108,6 +109,17 @@ describe("Subtitles dialog", () => {
     await screen.findByText("Base");
     fireEvent.click(screen.getByRole("switch", { name: "Translate to English" }));
     expect(useSubtitles.getState().translate).toBe(true);
+  });
+
+  it("does not start subtitles on a detached tab as this window's", async () => {
+    useBrowser.setState({ activeTab: "t1", detached: ["t1"] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    useSubtitles.setState({ model: "small" });
+    render(<Subtitles />);
+    await screen.findByText("Small");
+    expect((screen.getByRole("button", { name: "Start subtitles" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/Open a tab with a playing video/)).toBeTruthy();
+    expect(ipc.subtitleRunning).not.toHaveBeenCalledWith("t1");
   });
 
   it("starts with the chosen model, language and translate, then closes", async () => {

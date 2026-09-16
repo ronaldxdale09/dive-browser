@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { uiStorage } from "../lib/uiStorage";
 import { ipc, events } from "../lib/ipc";
 import type { SubtitleModel } from "../lib/ipc";
-import { useBrowser } from "./browser";
+import { tabInThisWindow, useBrowser } from "./browser";
 import { errorMessage } from "../lib/errors";
 
 /** Bytes seen and expected for a model that is downloading; `total` is null until the server reports a length. */
@@ -37,6 +37,11 @@ interface SubtitlesState {
 }
 
 const MODEL_KEY = "dive.subtitles.model";
+
+function thisWindowTab() {
+  const { activeTab, detached } = useBrowser.getState();
+  return tabInThisWindow(activeTab, detached);
+}
 
 /** The model chosen last time, so a download made once stays selected. */
 export function rememberedModel(): string {
@@ -101,7 +106,7 @@ export const useSubtitles = create<SubtitlesState>((set, get) => ({
 
   start: async () => {
     if (get().starting) return false;
-    const tab = useBrowser.getState().activeTab;
+    const tab = thisWindowTab();
     if (!tab) {
       set({ error: "Open a tab with a playing video first." });
       return false;
@@ -117,11 +122,11 @@ export const useSubtitles = create<SubtitlesState>((set, get) => ({
     try {
       await ipc.subtitleStart(tab, model, language, translate);
       if (attempt !== startAttempt) return false;
-      if (useBrowser.getState().activeTab === tab) set({ active: true, error: null, lastCue: "Waiting for video audio…" });
+      if (thisWindowTab() === tab) set({ active: true, error: null, lastCue: "Waiting for video audio…" });
       return true;
     } catch (e) {
       if (attempt !== startAttempt) return false;
-      if (useBrowser.getState().activeTab === tab) set({ active: false, error: errorMessage(e), lastCue: "" });
+      if (thisWindowTab() === tab) set({ active: false, error: errorMessage(e), lastCue: "" });
       return false;
     } finally {
       if (attempt === startAttempt) set({ starting: false });
@@ -129,13 +134,13 @@ export const useSubtitles = create<SubtitlesState>((set, get) => ({
   },
 
   stop: async () => {
-    const tab = useBrowser.getState().activeTab;
+    const tab = thisWindowTab();
     if (!tab) return;
     ++startAttempt;
     set({ starting: false });
     try {
       await ipc.subtitleStop(tab);
-      if (useBrowser.getState().activeTab === tab) set({ active: false, error: null, lastCue: "" });
+      if (thisWindowTab() === tab) set({ active: false, error: null, lastCue: "" });
     } catch (e) {
       set({ error: errorMessage(e) });
     }

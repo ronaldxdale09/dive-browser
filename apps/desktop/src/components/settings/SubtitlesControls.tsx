@@ -1,6 +1,6 @@
 import { Check, Download } from "lucide-react";
 import { useEffect } from "react";
-import { useBrowser } from "../../store/browser";
+import { tabInThisWindow, useBrowser } from "../../store/browser";
 import { useSubtitles } from "../../store/subtitles";
 import { ipc } from "../../lib/ipc";
 import { Icon } from "../Icon";
@@ -41,7 +41,7 @@ export function modelSize(sizeMb: number): string {
  * after a session begins; the Settings section leaves it out and stays put.
  */
 export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?: () => void; autoFocusPrimary?: React.Ref<HTMLButtonElement> }) {
-  const activeTab = useBrowser((s) => s.activeTab);
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const models = useSubtitles((s) => s.models);
   const model = useSubtitles((s) => s.model);
   const language = useSubtitles((s) => s.language);
