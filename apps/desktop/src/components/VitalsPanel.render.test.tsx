@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
@@ -33,5 +33,15 @@ describe("VitalsPanel", () => {
     reveal.mockResolvedValue(false);
     fireEvent.click(lcp);
     expect(await screen.findByText("(not on the page now)")).toBeTruthy();
+  });
+
+  it("does not keep the last reading when this tab is sleeping", async () => {
+    render(<VitalsPanel />);
+    expect(await screen.findByLabelText("Time to First Byte: 945 ms, needs work")).toBeTruthy();
+    await act(async () => {
+      useBrowser.setState({ tabs: [{ ...tab, state: "discarded" }], activeTab: "t1" });
+    });
+    expect(screen.queryByLabelText(/Time to First Byte/)).toBeNull();
+    expect(screen.getByText(/sleeping/i)).toBeTruthy();
   });
 });

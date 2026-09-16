@@ -51,12 +51,14 @@ const TILES: { key: keyof Vitals; label: string; hint: string }[] = [
 /** Core Web Vitals from the page's buffered performance entries. */
 export function VitalsPanel() {
   const activeTab = useBrowser((s) => s.activeTab);
-  const url = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.url);
+  const tab = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
+  const url = tab?.url;
+  const sleeping = tab?.state === "discarded";
   // Load-event timings only exist once the page has finished loading, so
   // read again when the spinner stops instead of leaving them blank.
   const loading = useBrowser((s) => Boolean(s.activeTab && s.loading[s.activeTab]));
   const internal = isInternalPage(url);
-  const { data, error, refresh } = useTabData(internal ? null : activeTab, url, ipc.tabVitals, 600, loading);
+  const { data, error, refresh } = useTabData(internal || sleeping ? null : activeTab, url, ipc.tabVitals, 600, loading);
   const [lcpGone, setLcpGone] = useState(false);
 
   // Scroll the page to the LCP element and flash it, the way A11y findings do.
@@ -70,6 +72,7 @@ export function VitalsPanel() {
   };
 
   if (internal) return <InternalPageNote what="Web Vitals" />;
+  if (sleeping) return <div className="px-3 py-2 text-xs text-ink-3">This tab is sleeping. Wake it to measure this page.</div>;
   if (!activeTab) return <div className="px-3 py-2 text-xs text-ink-3">Open a tab to measure its Web Vitals.</div>;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
