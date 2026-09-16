@@ -85,6 +85,21 @@ describe("A11yPanel", () => {
     expect(screen.getByRole("status").textContent).toBe("0 violations · 3 passed · 0 to review");
   });
 
+  it("does not keep the last count when this tab is sleeping", async () => {
+    vi.spyOn(ipc, "tabA11y").mockResolvedValue({
+      violations: [{ id: "image-alt", impact: "critical", help: "Images must have alternative text", help_url: "https://x/image-alt", targets: ["img"], notes: [""], count: 1 }],
+      passes: 14,
+      incomplete: 0,
+    });
+    render(<A11yPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Run audit" }));
+    expect((await screen.findByRole("status")).textContent).toBe("1 violation · 14 passed · 0 to review");
+    act(() => useBrowser.setState({ tabs: [{ ...tab, state: "discarded" }], activeTab: "t1" }));
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByText(/sleeping/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Run audit" })).toBeNull();
+  });
+
   it("reports a failed run as an alert", async () => {
     vi.spyOn(ipc, "tabA11y").mockRejectedValue(new Error("page went away"));
     render(<A11yPanel />);

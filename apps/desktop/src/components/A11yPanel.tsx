@@ -17,7 +17,9 @@ const IMPACT: Record<string, string> = {
 /** Runs axe-core in the page on demand and lists violations. */
 export function A11yPanel() {
   const activeTab = useBrowser((s) => s.activeTab);
-  const url = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab)?.url);
+  const tab = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
+  const url = tab?.url;
+  const sleeping = tab?.state === "discarded";
   const openTab = useBrowser((s) => s.openTab);
   const [missing, setMissing] = useState<string | null>(null);
   // One report per tab and URL: switching tabs never shows another page's
@@ -57,6 +59,7 @@ export function A11yPanel() {
   };
 
   if (isInternalPage(url)) return <InternalPageNote what="accessibility audits" />;
+  if (sleeping) return <div className="px-3 py-2 text-xs text-ink-3">This tab is sleeping. Wake it to audit this page.</div>;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-3 px-2 pb-1 text-[11px] text-ink-3">
