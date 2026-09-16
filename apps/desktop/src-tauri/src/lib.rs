@@ -40,6 +40,7 @@ mod find;
 mod form_fill;
 mod har;
 mod housekeeping;
+mod https_only;
 mod inspect;
 mod ipc_security;
 #[cfg(feature = "cef")]
@@ -52,6 +53,7 @@ mod memory_probe;
 mod menu;
 mod meta;
 mod navigation;
+mod netconfig;
 mod network;
 #[cfg(feature = "cef")]
 mod network_probe;
@@ -63,6 +65,7 @@ mod passwords;
 #[cfg(feature = "cef")]
 mod permission_probe;
 mod permissions;
+mod pip;
 mod prefs;
 /// Dive-owned network privacy matching.
 pub mod privacy;

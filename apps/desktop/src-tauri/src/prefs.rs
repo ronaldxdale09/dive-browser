@@ -135,6 +135,36 @@ pub struct Prefs {
     pub agent_include_page: bool,
     /// Base URL of the custom OpenAI-compatible endpoint.
     pub agent_custom_base_url: String,
+    /// Ask for every page over https, and stop rather than fall back.
+    /// Loopback, private addresses and the development top-level domains are
+    /// never upgraded: see [`crate::https_only`].
+    #[serde(default)]
+    pub https_only: bool,
+    /// Hosts the person chose to keep reaching in the clear.
+    #[serde(default)]
+    pub https_only_allowed: Vec<String>,
+    /// How DNS is resolved: `system` | `automatic` | `secure`. Applied at the
+    /// next launch, because Chromium reads it once when it starts.
+    #[serde(default = "default_dns_mode")]
+    pub dns_mode: String,
+    /// Which resolver: a name from `netconfig::DNS_PROVIDERS`, or `custom`.
+    #[serde(default = "default_dns_provider")]
+    pub dns_provider: String,
+    /// The `DoH` template used when `dns_provider` is `custom`.
+    #[serde(default)]
+    pub dns_template: String,
+    /// Where requests go: `system` | `direct` | `manual` | `pac`.
+    #[serde(default = "default_proxy_mode")]
+    pub proxy_mode: String,
+    /// `host:port` for the manual proxy.
+    #[serde(default)]
+    pub proxy_server: String,
+    /// The PAC script's address.
+    #[serde(default)]
+    pub proxy_pac_url: String,
+    /// Hosts that skip the proxy, comma separated.
+    #[serde(default)]
+    pub proxy_bypass: String,
     /// Preferred code editor for Jump-to-Source: `vscode` | `cursor` | `zed`.
     #[serde(default = "default_editor")]
     pub preferred_editor: String,
@@ -246,6 +276,25 @@ fn default_agent_approvals() -> String {
     "risk".into()
 }
 
+/// A preference trimmed and capped, so nothing arrives at the engine longer
+/// than it should be.
+fn trimmed(value: &str, max: usize) -> String {
+    value.trim().chars().take(max).collect()
+}
+
+/// The system resolver, which is what every other browser starts on.
+fn default_dns_mode() -> String {
+    "system".into()
+}
+
+fn default_dns_provider() -> String {
+    "cloudflare".into()
+}
+
+fn default_proxy_mode() -> String {
+    "system".into()
+}
+
 fn default_editor() -> String {
     "vscode".into()
 }
@@ -286,6 +335,15 @@ impl Default for Prefs {
             agent_approvals: default_agent_approvals(),
             agent_include_page: true,
             agent_custom_base_url: String::new(),
+            https_only: false,
+            https_only_allowed: Vec::new(),
+            dns_mode: default_dns_mode(),
+            dns_provider: default_dns_provider(),
+            dns_template: String::new(),
+            proxy_mode: default_proxy_mode(),
+            proxy_server: String::new(),
+            proxy_pac_url: String::new(),
+            proxy_bypass: String::new(),
             preferred_editor: default_editor(),
             appearance_preset: default_preset(),
             custom_ground: default_custom_ground(),
@@ -329,6 +387,7 @@ impl Prefs {
     fn clamp(mut self) -> Self {
         let d = Self::default();
         self = self.clamp_agent(&d);
+        self = self.clamp_network(&d);
         if !matches!(self.theme.as_str(), "system" | "dark" | "light") {
             self.theme = d.theme;
         }
@@ -404,6 +463,44 @@ impl Prefs {
             self.preferred_editor = d.preferred_editor;
         }
         self
+    }
+
+    /// Where traffic goes. Anything the engine would not accept is put back
+    /// to the default here rather than left to be dropped silently at launch,
+    /// so the settings screen and the running browser agree.
+    fn clamp_network(mut self, d: &Self) -> Self {
+        if !crate::netconfig::DNS_MODES.contains(&self.dns_mode.as_str()) {
+            self.dns_mode.clone_from(&d.dns_mode);
+        }
+        let known = crate::netconfig::DNS_PROVIDERS
+            .iter()
+            .any(|(name, _)| *name == self.dns_provider);
+        if !known && self.dns_provider != "custom" {
+            self.dns_provider.clone_from(&d.dns_provider);
+        }
+        if !crate::netconfig::PROXY_MODES.contains(&self.proxy_mode.as_str()) {
+            self.proxy_mode.clone_from(&d.proxy_mode);
+        }
+        self.https_only_allowed =
+            crate::https_only::normalize_allowed(std::mem::take(&mut self.https_only_allowed));
+        self.dns_template = trimmed(&self.dns_template, 512);
+        self.proxy_server = trimmed(&self.proxy_server, 255);
+        self.proxy_pac_url = trimmed(&self.proxy_pac_url, 512);
+        self.proxy_bypass = trimmed(&self.proxy_bypass, 1024);
+        self
+    }
+
+    /// The network settings as the next launch will read them.
+    pub fn network(&self) -> crate::netconfig::NetworkConfig {
+        crate::netconfig::NetworkConfig {
+            dns_mode: self.dns_mode.clone(),
+            dns_provider: self.dns_provider.clone(),
+            dns_template: self.dns_template.clone(),
+            proxy_mode: self.proxy_mode.clone(),
+            proxy_server: self.proxy_server.clone(),
+            proxy_pac_url: self.proxy_pac_url.clone(),
+            proxy_bypass: self.proxy_bypass.clone(),
+        }
     }
 
     /// The agent's own settings, kept together because they constrain each
@@ -639,12 +736,26 @@ impl Registry {
             .ok()
             .flatten()
             .map_or_else(fresh_profile_prefs, |json| parse_stored(&json));
-        Arc::clone(crate::state::lock(&self.cached).get_or_insert_with(|| Arc::new(stored)))
+        let prefs =
+            Arc::clone(crate::state::lock(&self.cached).get_or_insert_with(|| Arc::new(stored)));
+        // The first read is also where the navigation path's mirror is
+        // seeded: without this the setting only takes effect once something
+        // saves preferences, which from the person's side is never.
+        crate::https_only::apply_settings(prefs.https_only, &prefs.https_only_allowed);
+        prefs
     }
 
     /// Persist `prefs` and return them as stored (clamped).
     pub fn set(&self, state: &AppState, prefs: Prefs) -> AppResult<Prefs> {
         let prefs = prefs.clamp();
+        // The engine reads its switches once at launch, before the database
+        // is open, so the network settings are mirrored beside the profile as
+        // they are saved. A mirror that fails to write is worth a line in the
+        // log, not a refused preference change.
+        crate::https_only::apply_settings(prefs.https_only, &prefs.https_only_allowed);
+        if let Err(error) = crate::netconfig::save(&prefs.network()) {
+            tracing::warn!(%error, "could not mirror the network settings for the next launch");
+        }
         let json = serde_json::to_string(&prefs).map_err(AppError::new)?;
         crate::state::lock(&state.store).set_setting(KEY, &json)?;
         *crate::state::lock(&self.cached) = Some(Arc::new(prefs.clone()));
@@ -1226,6 +1337,33 @@ mod tests {
         }
         .clamp();
         assert_eq!(back.agent_approvals, "every");
+    }
+
+    #[test]
+    fn network_settings_the_engine_would_not_accept_go_back_to_the_default() {
+        let prefs = Prefs {
+            dns_mode: "encrypted-ish".into(),
+            dns_provider: "my-isp".into(),
+            proxy_mode: "socks".into(),
+            proxy_server: "  10.0.0.2:8080  ".into(),
+            ..Prefs::default()
+        }
+        .clamp();
+        assert_eq!(prefs.dns_mode, "system");
+        assert_eq!(prefs.dns_provider, "cloudflare");
+        assert_eq!(prefs.proxy_mode, "system");
+        assert_eq!(prefs.proxy_server, "10.0.0.2:8080");
+
+        // A custom resolver is a real choice and survives.
+        let custom = Prefs {
+            dns_mode: "secure".into(),
+            dns_provider: "custom".into(),
+            dns_template: "https://dns.example/dns-query".into(),
+            ..Prefs::default()
+        }
+        .clamp();
+        assert_eq!(custom.dns_provider, "custom");
+        assert_eq!(crate::netconfig::flags(&custom.network()).len(), 3);
     }
 
     #[test]

@@ -6,7 +6,7 @@ import { errorMessage } from "../../lib/errors";
 import { useBrowser } from "../../store/browser";
 import { usePrivacy } from "../../store/privacy";
 import { Icon } from "../Icon";
-import { Button, Check, Group, Row, Select, Switch, TextArea } from "../SettingsFields";
+import { Button, Check, Group, Row, Select, Switch, TextArea, TextInput } from "../SettingsFields";
 import { usePref } from "./usePref";
 
 const RETENTION = [
@@ -125,6 +125,174 @@ export function Privacy() {
             />
           }
         />
+      </Group>
+
+      <Group title="Connections">
+        <Row
+          label="Secure connections"
+          hint="Asks for every page over https, and stops rather than quietly loading it in the clear. Your own machine is never upgraded — localhost, private addresses and .local, .test and .internal keep working as they are."
+          control={<Switch label="Secure connections" checked={prefs.https_only} onChange={(https_only) => set({ https_only })} />}
+        />
+        {prefs.https_only_allowed.length > 0 && (
+          <Row
+            stacked
+            label="Allowed in the clear"
+            hint="Sites you chose to keep loading over http. Remove one to ask for https again."
+            control={
+              <div className="flex flex-wrap gap-1.5">
+                {prefs.https_only_allowed.map((host) => (
+                  <button
+                    key={host}
+                    type="button"
+                    onClick={() => set({ https_only_allowed: prefs.https_only_allowed.filter((h) => h !== host) })}
+                    className="flex h-7 items-center gap-1.5 rounded-full border border-line px-2.5 font-mono text-[11px] text-ink-2 hover:border-line-2 hover:text-ink"
+                    title={`Ask for ${host} over https again`}
+                  >
+                    {host}
+                    <Icon icon={X} size={11} />
+                  </button>
+                ))}
+              </div>
+            }
+          />
+        )}
+      </Group>
+
+      <Group
+        title="Network"
+        description="Chromium reads these once when it starts, so a change takes effect the next time Dive opens."
+      >
+        <Row
+          label="Secure DNS"
+          htmlFor="pref-dns-mode"
+          hint="Encrypts the lookups that turn an address into a server, so the network you are on cannot read or rewrite them. Automatic falls back to the system resolver when encryption is unavailable; Secure refuses to, which is the point of choosing it."
+          control={
+            <Select
+              id="pref-dns-mode"
+              label="Secure DNS"
+              value={prefs.dns_mode}
+              onChange={(dns_mode) => set({ dns_mode })}
+              options={[
+                { value: "system", label: "Use the system resolver" },
+                { value: "automatic", label: "Automatic" },
+                { value: "secure", label: "Secure" },
+              ]}
+            />
+          }
+        />
+        {prefs.dns_mode !== "system" && (
+          <Row
+            label="Resolver"
+            htmlFor="pref-dns-provider"
+            hint="Where lookups are sent."
+            control={
+              <Select
+                id="pref-dns-provider"
+                label="Resolver"
+                value={prefs.dns_provider}
+                onChange={(dns_provider) => set({ dns_provider })}
+                options={[
+                  { value: "cloudflare", label: "Cloudflare" },
+                  { value: "google", label: "Google" },
+                  { value: "quad9", label: "Quad9" },
+                  { value: "custom", label: "Custom…" },
+                ]}
+              />
+            }
+          />
+        )}
+        {prefs.dns_mode !== "system" && prefs.dns_provider === "custom" && (
+          <Row
+            stacked
+            label="Resolver address"
+            htmlFor="pref-dns-template"
+            hint="The DoH template, over https. An address that is not encrypted is ignored rather than used — that would be the opposite of this setting."
+            control={
+              <TextInput
+                id="pref-dns-template"
+                mono
+                label="Resolver address"
+                value={prefs.dns_template}
+                placeholder="https://dns.example.com/dns-query"
+                onCommit={(dns_template) => set({ dns_template })}
+              />
+            }
+          />
+        )}
+
+        <Row
+          label="Proxy"
+          htmlFor="pref-proxy-mode"
+          hint="System follows your Mac's network settings, which is what Dive has always done."
+          control={
+            <Select
+              id="pref-proxy-mode"
+              label="Proxy"
+              value={prefs.proxy_mode}
+              onChange={(proxy_mode) => set({ proxy_mode })}
+              options={[
+                { value: "system", label: "Use system settings" },
+                { value: "direct", label: "No proxy" },
+                { value: "manual", label: "Manual" },
+                { value: "pac", label: "Automatic (PAC script)" },
+              ]}
+            />
+          }
+        />
+        {prefs.proxy_mode === "manual" && (
+          <Row
+            stacked
+            label="Proxy address"
+            htmlFor="pref-proxy-server"
+            hint="host:port, or a scheme and address such as socks5://10.0.0.2:1080."
+            control={
+              <TextInput
+                id="pref-proxy-server"
+                mono
+                label="Proxy address"
+                value={prefs.proxy_server}
+                placeholder="10.0.0.2:8080"
+                onCommit={(proxy_server) => set({ proxy_server })}
+              />
+            }
+          />
+        )}
+        {prefs.proxy_mode === "manual" && (
+          <Row
+            stacked
+            label="Skip the proxy for"
+            htmlFor="pref-proxy-bypass"
+            hint="Comma separated. Your local servers belong here."
+            control={
+              <TextInput
+                id="pref-proxy-bypass"
+                mono
+                label="Skip the proxy for"
+                value={prefs.proxy_bypass}
+                placeholder="localhost, 127.0.0.1, *.internal"
+                onCommit={(proxy_bypass) => set({ proxy_bypass })}
+              />
+            }
+          />
+        )}
+        {prefs.proxy_mode === "pac" && (
+          <Row
+            stacked
+            label="PAC script"
+            htmlFor="pref-proxy-pac"
+            hint="The address of the script that decides which proxy to use."
+            control={
+              <TextInput
+                id="pref-proxy-pac"
+                mono
+                label="PAC script"
+                value={prefs.proxy_pac_url}
+                placeholder="http://wpad/proxy.pac"
+                onCommit={(proxy_pac_url) => set({ proxy_pac_url })}
+              />
+            }
+          />
+        )}
       </Group>
 
       <Group title="History">

@@ -1,7 +1,7 @@
 import { Select } from "./Select";
 import { isPrivateWindow } from "../lib/privateMode";
 import { PrivateWelcome } from "./PrivateMode";
-import { AlertTriangle, Check, RotateCw, Search, ShieldQuestion, WifiOff, X } from "lucide-react";
+import { AlertTriangle, Check, RotateCw, Search, ShieldOff, ShieldQuestion, WifiOff, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
 import { createBoundsReporter, elementBounds } from "../lib/boundsReporter";
@@ -216,8 +216,29 @@ export function NavErrorPanel({ url, error, onRetry }: { url: string; error: str
   useCoversContent(true);
   const reload = useBrowser((s) => s.reload);
   const navigate = useBrowser((s) => s.navigate);
+  const activeTab = useBrowser((s) => s.activeTab);
   const retry = onRetry ?? (() => void reload());
   const text = describeNavError(error, url);
+  // An https page that failed may be one Dive asked for over https itself.
+  // The host knows; asking it here keeps the upgrade out of every load event
+  // for the sake of a button that is almost never needed.
+  const [upgraded, setUpgraded] = useState<string | null>(null);
+  useEffect(() => {
+    if (!activeTab || !url.startsWith("https://")) return;
+    let alive = true;
+    void ipc
+      .httpsOnlyUpgraded(activeTab)
+      .then((host) => {
+        if (alive) setUpgraded(host);
+      })
+      .catch(() => undefined);
+    return () => {
+      // The answer belongs to the failure that asked for it; a later one
+      // starts again rather than showing the last page's way out.
+      alive = false;
+      setUpgraded(null);
+    };
+  }, [activeTab, url, error]);
   const offline = /ERR_INTERNET_DISCONNECTED/.test(error);
   // A host that does not exist is often a typo for one that does.
   const term = /ERR_NAME_NOT_RESOLVED/.test(error) ? searchTermFor(url) : "";
@@ -243,7 +264,23 @@ export function NavErrorPanel({ url, error, onRetry }: { url: string; error: str
               <Icon icon={Search} size={13} /> Search for “{term}”
             </button>
           )}
+          {upgraded && activeTab && (
+            <button
+              type="button"
+              onClick={() => void ipc.httpsOnlyAllow(activeTab, url)}
+              title={`Load ${upgraded} over http from now on. Anything on the network between you and it can read and change the page.`}
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-warn/50 px-3 text-sm text-ink hover:bg-warn/10"
+            >
+              <Icon icon={ShieldOff} size={13} /> Continue without encryption
+            </button>
+          )}
         </div>
+        {upgraded && (
+          <p className="text-xs text-ink-3">
+            Dive asked for this page over https because Secure connections is on. {upgraded} did not answer over
+            https; continuing means the page can be read and changed on the way to you.
+          </p>
+        )}
       </div>
     </div>
   );

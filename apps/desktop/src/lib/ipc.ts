@@ -113,6 +113,12 @@ export const ipc = {
   tabReload: async (id: string) => unwrap(await commands.tabReload(id)),
   tabStop: async (id: string) => unwrap(await commands.tabStop(id)),
   tabPrint: async (id: string) => unwrap(await commands.tabPrint(id)),
+  /** Float this tab's video over everything else, or bring it back. */
+  tabPictureInPicture: async (id: string) => unwrap(await commands.tabPictureInPicture(id)),
+  /** The host this tab was upgraded to https for, when the last navigation was one. */
+  httpsOnlyUpgraded: (id: string) => commands.httpsOnlyUpgraded(id),
+  /** Keep reaching this host in the clear, and go back to its http address. */
+  httpsOnlyAllow: async (id: string, url: string) => unwrap(await commands.httpsOnlyAllow(id, url)),
   tabFillVideo: async (id: string) => unwrap(await commands.tabFillVideo(id)),
   tabSetTier: async (id: string, tier: TabTier) => unwrap(await commands.tabSetTier(id, tier)),
   tabZoom: async (id: string, factor: number) => unwrap(await commands.tabZoom(id, factor)),

@@ -858,6 +858,9 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::agent::agent_send,
             crate::agent::agent_approve,
             crate::agent::agent_stop,
+            tab_picture_in_picture,
+            https_only_upgraded,
+            https_only_allow,
             crate::agent::agent_thread_load,
             crate::agent::agent_thread_save,
             crate::agent::agent_thread_clear,
@@ -957,6 +960,12 @@ pub fn register_builtin(registry: &dive_core::CommandRegistry) {
             "page.save",
             "Save page as a file",
             Some("mod+s"),
+            CommandScope::Tab,
+        ),
+        (
+            "video.pip",
+            "Picture in picture: float this page's video",
+            None,
             CommandScope::Tab,
         ),
         (
@@ -1991,6 +2000,58 @@ pub(crate) fn tab_navigate(
         .ok_or_else(|| AppError::new("engine not ready"))?
         .navigate(id, url)?;
     Ok(())
+}
+
+/// Float this tab's video over everything else, or bring it back.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_picture_in_picture(
+    state: State<'_, AppState>,
+    id: TabId,
+) -> AppResult<String> {
+    let session = lock(&state.host)
+        .as_ref()
+        .and_then(|host| host.cdp(id))
+        .ok_or_else(|| AppError::new("no devtools session"))?;
+    Ok(crate::pip::describe(&crate::pip::toggle(&session).await).to_owned())
+}
+
+/// The host this tab was sent to https for, when the newest navigation was
+/// an upgrade. The error page asks, so a failure can offer a way out without
+/// the host having to push anything.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn https_only_upgraded(id: TabId) -> Option<String> {
+    crate::https_only::upgraded_host(id)
+}
+
+/// Keep reaching `host` in the clear, and go back to the http address.
+///
+/// The exception is per host and permanent until the person removes it; that
+/// is what makes it a decision rather than a fallback.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn https_only_allow(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: TabId,
+    url: String,
+) -> AppResult<()> {
+    let parsed =
+        url::Url::parse(&url).map_err(|e| AppError::new(format!("not an address: {e}")))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| AppError::new("that address has no host"))?
+        .to_ascii_lowercase();
+    let mut prefs = state.prefs.get(&state);
+    prefs.https_only_allowed.push(host);
+    state.prefs.set(&state, prefs)?;
+    crate::https_only::forget(id);
+    let mut plain = parsed;
+    plain
+        .set_scheme("http")
+        .map_err(|()| AppError::new("that address cannot be loaded in the clear"))?;
+    tab_navigate(app, state, id, plain.to_string())
 }
 
 /// What a `dive://` page is called in the strip.

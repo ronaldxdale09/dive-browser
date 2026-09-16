@@ -376,11 +376,19 @@ pub fn build_chromium_args(renderer_limit: Option<&str>) -> Vec<(&'static str, O
         crate::extensions::startup_paths()
     };
     crate::extensions::mark_started(&extension_paths);
+    let mut network = crate::netconfig::flags(&crate::netconfig::load());
     let mut args = build_chromium_args_with(
         renderer_limit,
         &std::env::var("DIVE_CHROMIUM_FLAGS").unwrap_or_default(),
         std::env::var_os("DIVE_USE_MOCK_KEYCHAIN").is_some(),
         &extension_paths,
+    );
+    // Leaked to 'static: the switch table is borrowed for the life of the
+    // launch, and these few names live exactly that long.
+    args.extend(
+        network
+            .drain(..)
+            .map(|(name, value)| (&*String::leak(name), value)),
     );
     if crate::private_session::is_private() {
         args.extend([

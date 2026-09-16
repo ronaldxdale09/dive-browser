@@ -533,6 +533,25 @@ fn popout_label(seq: u64, id: TabId) -> String {
     format!("pop-{seq}-{id}")
 }
 
+/// The https address this navigation should be sent to instead, if the
+/// setting is on and the address is not the person's own machine.
+///
+/// The settings are read from the mirror rather than the preference store:
+/// this runs on the engine's thread with a navigation waiting on it.
+fn upgrade_to_https(
+    app: &tauri::AppHandle<Runtime>,
+    tab_id: TabId,
+    url: &url::Url,
+) -> Option<url::Url> {
+    let _ = app;
+    let secure = crate::https_only::upgrade_now(url.as_str())?;
+    let secure = url::Url::parse(&secure).ok()?;
+    if let Some(host) = url.host_str() {
+        crate::https_only::note(tab_id, host);
+    }
+    Some(secure)
+}
+
 /// The tab a popout window label belongs to, if it is one.
 pub fn popout_tab(label: &str) -> Option<TabId> {
     let (_, id) = label.strip_prefix("pop-")?.split_once('-')?;
@@ -671,6 +690,27 @@ impl TabHost {
         // page; the person is asked instead, off the engine's stack.
         let external_app = app.clone();
         builder = builder.on_navigation(move |url| {
+            // Before anything else: a page asked for in the clear is asked
+            // for again over https, unless it is the person's own machine.
+            if let Some(secure) = upgrade_to_https(&external_app, tab_id, url) {
+                let app = external_app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = app.clone().run_on_main_thread(move || {
+                        let state = app.state::<AppState>();
+                        let sent = lock(&state.host)
+                            .as_ref()
+                            .map(|host| host.navigate(tab_id, secure.clone()));
+                        match sent {
+                            Some(Err(error)) => {
+                                tracing::warn!(%error, "https upgrade could not be sent");
+                            }
+                            None => tracing::warn!("https upgrade arrived before the engine"),
+                            Some(Ok(())) => {}
+                        }
+                    });
+                });
+                return false;
+            }
             if !crate::external_link::is_external(url) {
                 return true;
             }

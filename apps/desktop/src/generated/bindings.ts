@@ -714,6 +714,21 @@ export const commands = {
 	agentApprove: (id: string, allow: boolean) => typedError<null, AppError>(__TAURI_INVOKE("agent_approve", { id, allow })),
 	/**  Stop a run. The loop notices at its next await and reports `stopped`. */
 	agentStop: (runId: string) => typedError<null, AppError>(__TAURI_INVOKE("agent_stop", { runId })),
+	/**  Float this tab's video over everything else, or bring it back. */
+	tabPictureInPicture: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_picture_in_picture", { id })),
+	/**
+	 *  The host this tab was sent to https for, when the newest navigation was
+	 *  an upgrade. The error page asks, so a failure can offer a way out without
+	 *  the host having to push anything.
+	 */
+	httpsOnlyUpgraded: (id: TabId) => __TAURI_INVOKE<string | null>("https_only_upgraded", { id }),
+	/**
+	 *  Keep reaching `host` in the clear, and go back to the http address.
+	 *
+	 *  The exception is per host and permanent until the person removes it; that
+	 *  is what makes it a decision rather than a fallback.
+	 */
+	httpsOnlyAllow: (id: TabId, url: string) => typedError<null, AppError>(__TAURI_INVOKE("https_only_allow", { id, url })),
 	/**  The conversation held in this tab, as the chrome last left it. */
 	agentThreadLoad: (tabId: TabId) => typedError<{
 	/**  The tab this conversation belongs to. */
@@ -2023,6 +2038,31 @@ export type Prefs = {
 	agent_include_page: boolean,
 	/**  Base URL of the custom OpenAI-compatible endpoint. */
 	agent_custom_base_url: string,
+	/**
+	 *  Ask for every page over https, and stop rather than fall back.
+	 *  Loopback, private addresses and the development top-level domains are
+	 *  never upgraded: see [`crate::https_only`].
+	 */
+	https_only?: boolean,
+	/**  Hosts the person chose to keep reaching in the clear. */
+	https_only_allowed?: string[],
+	/**
+	 *  How DNS is resolved: `system` | `automatic` | `secure`. Applied at the
+	 *  next launch, because Chromium reads it once when it starts.
+	 */
+	dns_mode?: string,
+	/**  Which resolver: a name from `netconfig::DNS_PROVIDERS`, or `custom`. */
+	dns_provider?: string,
+	/**  The `DoH` template used when `dns_provider` is `custom`. */
+	dns_template?: string,
+	/**  Where requests go: `system` | `direct` | `manual` | `pac`. */
+	proxy_mode?: string,
+	/**  `host:port` for the manual proxy. */
+	proxy_server?: string,
+	/**  The PAC script's address. */
+	proxy_pac_url?: string,
+	/**  Hosts that skip the proxy, comma separated. */
+	proxy_bypass?: string,
 	/**  Preferred code editor for Jump-to-Source: `vscode` | `cursor` | `zed`. */
 	preferred_editor?: string,
 	/**  Chrome palette template; one of [`APPEARANCE_PRESETS`] or `custom`. */

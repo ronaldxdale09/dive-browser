@@ -63,6 +63,8 @@ interface BrowserState {
   stop: () => Promise<void>;
   /** Open the print dialog for the active tab. */
   print: () => Promise<void>;
+  /** Float this tab's video over everything else, or bring it back. */
+  pictureInPicture: () => Promise<void>;
   /** Fill the tab with the page's video, or leave that state. */
   fillVideo: () => Promise<void>;
   setTier: (id: string, tier: TabTier) => Promise<void>;
@@ -722,6 +724,14 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   print: async () => {
     const id = get().activeTab;
     if (id) await run(set, () => ipc.tabPrint(id));
+  },
+  pictureInPicture: async () => {
+    const id = get().activeTab;
+    if (!id) return;
+    // The outcome is worth saying: "no video on this page to float" explains
+    // a command that otherwise looks as though it did nothing.
+    const said = await run(set, () => ipc.tabPictureInPicture(id));
+    if (typeof said === "string") get().notify(said);
   },
   setTier: async (id, tier) => {
     await run(set, () => ipc.tabSetTier(id, tier));
