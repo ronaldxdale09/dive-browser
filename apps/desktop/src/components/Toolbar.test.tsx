@@ -184,6 +184,13 @@ describe("Toolbar", () => {
     expect(screen.getByRole("button", { name: "Reset zoom" }).textContent).toBe("200%");
   });
 
+  it("does not show a detached tab's address as this window's", () => {
+    useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [tab.id] });
+    render(<Toolbar />);
+    expect((screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement).value).toBe("");
+    expect(screen.queryByText("example.com")).toBeNull();
+  });
+
   it("does not show a detached tab's zoom as this window's", () => {
     useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [tab.id], zoom: { [tab.id]: 1.5 }, defaultZoom: 1 });
     render(<Toolbar />);

@@ -28,15 +28,21 @@ import { NavigationButtons } from "./NavigationButtons";
 /** Navigation row: nav icons, the omnibox pill and, as glyphs, the actions that act on the page. */
 export function Toolbar({ compact = false, trailing = true }: { compact?: boolean; singleAuxPanel?: boolean; /** Render the browser's own controls (downloads, privacy, menu) at the end; off when the bar places them after the feature cluster. */ trailing?: boolean }) {
   const tabs = useBrowser((s) => s.tabs);
-  const activeTab = useBrowser((s) => s.activeTab);
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const navigate = useBrowser((s) => s.navigate);
   const activateTab = useBrowser((s) => s.activateTab);
   const reload = useBrowser((s) => s.reload);
   const stop = useBrowser((s) => s.stop);
   const homepage = usePrefs((s) => s.prefs.homepage.trim());
-  const loading = useBrowser((s) => (s.activeTab ? s.loading[s.activeTab] === true : false));
+  const loading = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return id ? s.loading[id] === true : false;
+  });
   const current = tabs.find((t) => t.id === activeTab);
-  const failedUrl = useBrowser((s) => (s.activeTab ? s.navError[s.activeTab]?.url : undefined));
+  const failedUrl = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return id ? s.navError[id]?.url : undefined;
+  });
   // A load that failed leaves the bar on the address that failed, as every
   // browser does, so it can be corrected in place; the store still holds the
   // last committed URL for everything else.
