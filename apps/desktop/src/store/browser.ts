@@ -851,7 +851,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     }
   },
   translatePage: async () => {
-    const id = get().activeTab;
+    const id = tabInThisWindow(get().activeTab, get().detached);
     if (!id) return;
     const target = navigator.language.slice(0, 2).toLowerCase() || "en";
     try {

@@ -815,3 +815,14 @@ describe("readerView", () => {
     expect(useBrowser.getState().notice).toBeNull();
   });
 });
+
+describe("translatePage", () => {
+  it("does not translate a detached tab as this window's", async () => {
+    const translate = vi.spyOn(ipc, "pageTranslate").mockResolvedValue({ ok: false, reason: "no-text" });
+    useBrowser.setState({ activeTab: "t1", detached: ["t1"], tabs: [tab("t1")], notice: null });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await useBrowser.getState().translatePage();
+    expect(translate).not.toHaveBeenCalled();
+    expect(useBrowser.getState().notice).toBeNull();
+  });
+});
