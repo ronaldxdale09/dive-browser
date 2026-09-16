@@ -3,7 +3,7 @@ import { OPEN_SHARE } from "../lib/commands";
 import { useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
 import type { ShareInfo } from "../lib/ipc";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { Tooltip } from "./Tooltip";
 import { useCoversContent } from "../lib/overlay";
@@ -13,7 +13,10 @@ import { copyText } from "../lib/clipboard";
 
 /** Share button: the current URL rewritten to this machine's LAN address, as a QR code. */
 export function SharePopover() {
-  const current = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
+  const current = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return id ? s.tabs.find((t) => t.id === id) : undefined;
+  });
   const [open, setOpen] = useState(false);
   const [info, setInfo] = useState<ShareInfo | null>(null);
   const [error, setError] = useState<string | null>(null);

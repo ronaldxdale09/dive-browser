@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { SharePopover } from "./SharePopover";
 import { OPEN_SHARE } from "../lib/commands";
 
@@ -19,7 +19,7 @@ const tab: Tab = {
 };
 
 beforeEach(() => {
-  useBrowser.setState({ tabs: [tab], activeTab: tab.id });
+  useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [] });
   vi.spyOn(ipc, "shareUrl").mockResolvedValue({
     lan_url: "http://192.168.1.2:3000/docs",
     qr_svg: "<svg></svg>",
@@ -32,6 +32,16 @@ afterEach(() => {
 });
 
 describe("SharePopover", () => {
+  it("does not share a detached tab as this window's page", () => {
+    useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [tab.id] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    render(<SharePopover />);
+    expect((screen.getByRole("button", { name: "Share to another device" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Share to another device" }));
+    expect(ipc.shareUrl).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("opens when the page menu asks for a QR code", async () => {
     render(<SharePopover />);
     expect(screen.queryByRole("dialog")).toBeNull();

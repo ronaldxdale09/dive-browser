@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { contentCoverDepth, resetContentCover } from "../lib/overlay";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { BookmarkButton } from "./BookmarkButton";
 import { BOOKMARKS_CHANGED } from "../lib/commands";
 
@@ -20,7 +20,7 @@ const tab: Tab = {
 };
 
 beforeEach(() => {
-  useBrowser.setState({ tabs: [tab], activeTab: tab.id, error: null, notice: null });
+  useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [], error: null, notice: null });
   vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
   vi.spyOn(ipc, "bookmarkStatus").mockResolvedValue(false);
@@ -45,6 +45,14 @@ async function openPopover() {
 }
 
 describe("BookmarkButton", () => {
+  it("does not bookmark a detached tab as this window's page", () => {
+    useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [tab.id] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    render(<BookmarkButton />);
+    expect((screen.getByRole("button", { name: "Bookmark this page" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(ipc.bookmarkStatus).not.toHaveBeenCalled();
+  });
+
   it("saves a new page and opens the popover with its title and host", async () => {
     const dialog = await openPopover();
     expect(ipc.bookmarkToggle).toHaveBeenCalledWith(tab.id);

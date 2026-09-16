@@ -2,7 +2,7 @@ import { useDismiss } from "../lib/useDismiss";
 import { Star } from "lucide-react";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ipc } from "../lib/ipc";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { Tooltip } from "./Tooltip";
 import { errorMessage } from "../lib/errors";
@@ -18,7 +18,10 @@ import { useFocusTrap } from "../lib/useFocusTrap";
  * silently removing the bookmark.
  */
 export function BookmarkButton() {
-  const current = useBrowser((s) => s.tabs.find((t) => t.id === s.activeTab));
+  const current = useBrowser((s) => {
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    return id ? s.tabs.find((t) => t.id === id) : undefined;
+  });
   const [saved, setSaved] = useState(false);
   const [open, setOpen] = useState(false);
   const dismiss = useCallback(() => setOpen(false), []);
