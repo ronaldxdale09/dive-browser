@@ -1,5 +1,6 @@
 import { AbsoluteFill, Easing, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
 import type { CSSProperties, ReactNode } from "react";
+import { displayChord } from "../lib/commands";
 
 /**
  * Building blocks for the feature reel.
@@ -280,6 +281,7 @@ export function Typed({
 
 /** Keycap. */
 export function Kbd({ children, size = 12 }: { children: ReactNode; size?: number }) {
+  const label = typeof children === "string" ? displayChord(children) : children;
   return (
     <span
       style={{
@@ -294,7 +296,7 @@ export function Kbd({ children, size = 12 }: { children: ReactNode; size?: numbe
         lineHeight: 1,
       }}
     >
-      {children}
+      {label}
     </span>
   );
 }
