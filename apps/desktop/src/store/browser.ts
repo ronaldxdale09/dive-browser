@@ -770,7 +770,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     set((s) => (s.zoom[id] === factor ? s : { zoom: { ...s.zoom, [id]: factor } }));
   },
   zoomStep: async (direction) => {
-    const id = get().activeTab;
+    const id = tabInThisWindow(get().activeTab, get().detached);
     if (!id) return;
     const current = get().zoomOf(id);
     const next = direction === 0 ? get().defaultZoom : nextZoom(current, direction);

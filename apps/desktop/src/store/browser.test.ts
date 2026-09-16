@@ -648,10 +648,19 @@ describe("applyZoom", () => {
 });
 
 describe("zoomStep", () => {
+  it("does not zoom a detached tab as this window's", async () => {
+    const zoom = vi.spyOn(ipc, "tabZoom").mockResolvedValue(null);
+    useBrowser.setState({ activeTab: "z1", detached: ["z1"], tabs: [tab("z1")], zoom: { z1: 1.5 }, defaultZoom: 1 });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await useBrowser.getState().zoomStep(1);
+    expect(zoom).not.toHaveBeenCalled();
+    expect(useBrowser.getState().zoom.z1).toBe(1.5);
+  });
+
   it("sends one zoom command at a time and follows up with the latest level", async () => {
     let settle!: () => void;
     const zoom = vi.spyOn(ipc, "tabZoom").mockImplementationOnce(() => new Promise<null>((r) => (settle = () => r(null)))).mockResolvedValue(null as never);
-    useBrowser.setState({ activeTab: "z1", tabs: [tab("z1")], zoom: {}, defaultZoom: 1 });
+    useBrowser.setState({ activeTab: "z1", detached: [], tabs: [tab("z1")], zoom: {}, defaultZoom: 1 });
     const first = useBrowser.getState().zoomStep(1);
     const second = useBrowser.getState().zoomStep(1);
     // The badge shows two steps at once; the engine has heard only the first.
