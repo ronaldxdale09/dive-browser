@@ -76,6 +76,14 @@ describe("About engine line", () => {
     }
   });
 
+  it("does not say Reset Dive walks through setup again", () => {
+    // DIVE_SKIP_ONBOARDING and skip of earlier steps set onboarded without
+    // writing a profile, workspace or protection. "Again" upgrades that.
+    render(<About info={info("release")} />);
+    expect(document.body.textContent).not.toMatch(/setup again/i);
+    expect(document.body.textContent).toMatch(/walk through setup/i);
+  });
+
   it("does not say MCP is only for this Mac", () => {
     render(<About info={{ ...info("release"), mcp_url: "http://127.0.0.1:7391/mcp", mcp_token_path: "/tmp/x/mcp-token" }} />);
     expect(document.body.textContent).not.toMatch(/this Mac/);

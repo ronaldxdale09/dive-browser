@@ -53,8 +53,9 @@ export function About({ info }: { info: AppInfo | null }) {
 }
 
 /**
- * Back to the first launch: the intro plays and the setup steps run again.
+ * Back to the first launch: the intro plays and the setup steps run.
  * Nothing is deleted; the steps edit the profile and workspace already here.
+ * onboarded can be true after DIVE_SKIP_ONBOARDING without those steps.
  */
 function StartOver() {
   const replay = useOnboarding((s) => s.replay);
@@ -64,7 +65,7 @@ function StartOver() {
     <Group title="Start over">
       <Row
         label="Reset Dive"
-        hint="Play the intro and walk through setup again. Your tabs, history, profiles and workspaces stay."
+        hint="Play the intro and walk through setup. Your tabs, history, profiles and workspaces stay."
         control={
           confirming ? (
             <span className="flex items-center gap-2">
