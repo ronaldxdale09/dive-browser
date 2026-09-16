@@ -83,7 +83,7 @@ anyway**.
 
 ## Connect an agent
 
-Dive serves MCP on `127.0.0.1:7391` and requires the token it writes to its data directory.
+Dive serves MCP on `127.0.0.1:7391` and requires the token it writes to its data directory. Private windows do not serve MCP.
 
 ```bash
 claude mcp add --transport http dive http://127.0.0.1:7391/mcp \

@@ -45,6 +45,12 @@ describe("README memory claim", () => {
     expect(readme).toContain("Start Menu");
   });
 
+  it("says private windows do not serve MCP", () => {
+    // lib.rs starts the server only when !is_private(). advertised_url
+    // is empty in a private window. About and Developer already say so.
+    expect(readme).toMatch(/private windows do not serve MCP/i);
+  });
+
   it("does not say every tab is reachable by MCP", () => {
     // AppBrowser::tabs filters TabState::Discarded. The sidecar already
     // says sleeping tabs are omitted; the README must not upgrade that.
