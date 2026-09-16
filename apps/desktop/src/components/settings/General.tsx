@@ -7,7 +7,7 @@ import { KeepSitesActive } from "./KeepSitesActive";
 import { usePref } from "./usePref";
 import { ipc } from "../../lib/ipc";
 import { errorMessage } from "../../lib/errors";
-import { chordsByCommand, credentialStoreName, defaultDownloadsHint, defaultDownloadsPlaceholder, formatChord } from "../../lib/commands";
+import { chordsByCommand, credentialStoreName, defaultDownloadsHint, defaultDownloadsPlaceholder, formatChord, importSourcesHint } from "../../lib/commands";
 
 const ENGINES = [
   { value: "duckduckgo", label: "DuckDuckGo" },
@@ -144,7 +144,7 @@ export function General() {
       <Group title="Import">
         <Row
           label="From another browser"
-          hint="Bookmarks, history, passwords and form entries from Chrome, Brave, Edge, Arc, Vivaldi, Opera or Firefox; bookmarks and history from Safari. Cookies and extensions stay behind."
+          hint={importSourcesHint()}
           control={<Button onClick={() => toggle("import", true)}>Import…</Button>}
         />
       </Group>

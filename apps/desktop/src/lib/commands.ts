@@ -508,6 +508,17 @@ export function importEmptyHint(windows = isWindows()): string {
 }
 
 /**
+ * Settings › General import row. Same scan as `importEmptyHint`:
+ * `sources()` only walks `~/Library`. Avoid `~/` on Windows so the
+ * downloads placeholder guard stays a Downloads claim, not a page-wide ban.
+ */
+export function importSourcesHint(windows = isWindows()): string {
+  return windows
+    ? "This build only looks under Library, not AppData, so browsers on this PC are not found. Cookies and extensions stay behind."
+    : "Bookmarks, history, passwords and form entries from Chrome, Brave, Edge, Arc, Vivaldi, Opera or Firefox; bookmarks and history from Safari. Cookies and extensions stay behind.";
+}
+
+/**
  * Where Chrome, Brave and Edge keep an unpacked extension folder on this OS.
  * Dive only loads a directory you pick; this is a hint, not a scan.
  *

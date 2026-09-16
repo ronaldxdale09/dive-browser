@@ -21,6 +21,13 @@ afterEach(() => {
 });
 
 describe("Settings › General", () => {
+  it("does not say Safari bookmarks can be read on Windows", () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    render(<General />);
+    expect(document.body.textContent).not.toMatch(/from Safari/);
+    expect(document.body.textContent).toMatch(/AppData/);
+  });
+
   it("does not say a backup leaves passwords only in the Keychain on Windows", () => {
     Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
     render(<General />);
