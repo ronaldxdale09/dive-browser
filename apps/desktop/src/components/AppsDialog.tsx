@@ -7,7 +7,7 @@ import { chordsByCommand, formatChord } from "../lib/commands";
 import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { BuiltinAppIcon } from "./BuiltinAppIcon";
 import { Icon, IconButton } from "./Icon";
 
@@ -32,7 +32,7 @@ function columnsOf(grid: HTMLElement | null): number {
  */
 export function AppsDialog() {
   const toggle = useBrowser((s) => s.toggle);
-  const activeTab = useBrowser((s) => s.activeTab);
+  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const root = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
   const grid = useRef<HTMLDivElement>(null);

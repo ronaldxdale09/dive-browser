@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import { appsFor, searchApps } from "../lib/apps";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 import { usePicker } from "../store/simulator";
 import { AppsDialog } from "./AppsDialog";
 
@@ -11,7 +11,7 @@ const platform = Object.getOwnPropertyDescriptor(navigator, "platform");
 beforeEach(() => {
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
   vi.spyOn(ipc, "appInfo").mockResolvedValue({ version: "0.1.17", build: { channel: "beta", number: "1", built_at: 0 } } as never);
-  useBrowser.setState({ activeTab: "t1", open: { ...useBrowser.getState().open, apps: true, dock: false, sidecar: false } });
+  useBrowser.setState({ activeTab: "t1", detached: [], open: { ...useBrowser.getState().open, apps: true, dock: false, sidecar: false } });
   usePicker.setState({ open: false });
 });
 
@@ -45,6 +45,14 @@ describe("AppsDialog", () => {
     fireEvent.keyDown(search, { key: "Enter" });
     expect(usePicker.getState().open).toBe(true);
     await waitFor(() => expect(useBrowser.getState().open.apps).toBe(false));
+  });
+
+  it("greys out what needs a tab when the active tab is torn off", () => {
+    useBrowser.setState({ activeTab: "t1", detached: ["t1"] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    render(<AppsDialog />);
+    expect((screen.getByRole("button", { name: /^Screenshot/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /^Library/ }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("greys out what needs a tab when none is open, and the arrows skip those", () => {
