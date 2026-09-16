@@ -712,7 +712,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     if (id) await run(set, () => ipc.tabForward(id));
   },
   reload: async () => {
-    const id = get().activeTab;
+    const id = tabInThisWindow(get().activeTab, get().detached);
     if (id) await run(set, () => ipc.tabReload(id));
   },
   stop: async () => {

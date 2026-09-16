@@ -715,3 +715,13 @@ describe("bugReport", () => {
     expect(useBrowser.getState().notice).toBeNull();
   });
 });
+
+describe("reload", () => {
+  it("does not reload a detached tab as this window's", async () => {
+    const reload = vi.spyOn(ipc, "tabReload").mockResolvedValue(null);
+    useBrowser.setState({ activeTab: "r1", detached: ["r1"], tabs: [tab("r1")] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    await useBrowser.getState().reload();
+    expect(reload).not.toHaveBeenCalled();
+  });
+});
