@@ -92,6 +92,13 @@ describe("Welcome", () => {
     view.unmount();
   });
 
+  it("does not claim the palette searches every command", () => {
+    render(<Welcome />);
+    const line = screen.getByText(/search tabs/).textContent ?? "";
+    expect(line).not.toMatch(/every command/);
+    expect(line).toMatch(/commands that apply here/);
+  });
+
   it("contains a broken tour while browsing controls remain usable", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     reelState.broken = true;

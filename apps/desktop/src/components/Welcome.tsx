@@ -62,7 +62,7 @@ export function Welcome() {
 
         <OptionalFeatureTour />
         <p className="mt-4 text-[11px] text-ink-3">
-          Press <Kbd dim>⌘K</Kbd> anywhere to search tabs, history, bookmarks, local servers and every command.
+          Press <Kbd dim>⌘K</Kbd> anywhere to search tabs, history, bookmarks, local servers and commands that apply here.
         </p>
       </div>
     </div>
