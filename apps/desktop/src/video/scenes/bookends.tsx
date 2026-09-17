@@ -81,13 +81,13 @@ export function Outro() {
     <AbsoluteFill style={{ background: T.ground, color: T.ink, fontFamily: T.sans, alignItems: "center", justifyContent: "center" }}>
       <Glow />
       <h2 style={{ margin: 0, fontSize: 40, fontWeight: 600, letterSpacing: "-0.03em", opacity: title, translate: `0px ${(1 - title) * 18}px` }}>
-        Everything is a keystroke away.
+        The palette is one keystroke away.
       </h2>
       <div style={{ marginTop: 30, opacity: key, scale: String((0.9 + 0.1 * key) * (1 - press * 0.08)) }}>
         <Kbd size={30}>⌘K</Kbd>
       </div>
       <p style={{ margin: "26px 0 0", fontSize: 15, color: T.ink2, opacity: after, translate: `0px ${(1 - after) * 10}px` }}>
-        Tabs, history, bookmarks, local servers and every command — one palette.
+        Tabs, history, bookmarks, local servers and commands that apply here.
       </p>
       <div style={{ position: "absolute", bottom: 40, fontFamily: T.mono, fontSize: 11, letterSpacing: "0.22em", textTransform: "uppercase", color: T.ink3, opacity: after }}>
         Dive
