@@ -132,6 +132,16 @@ describe("address bar suggestions", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 
+  it("names a clipped suggestion on hover so a pick can still be read", async () => {
+    render(<Toolbar />);
+    const input = address();
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "rust" } });
+    const book = await screen.findByRole("option", { name: /The Rust Book/ });
+    expect(book.getAttribute("title")).toBe("The Rust Book — doc.rust-lang.org/book");
+    expect(screen.getByRole("option", { name: /Learn Rust/ }).getAttribute("title")).toBe("Learn Rust — rust-lang.org/learn");
+  });
+
   it("hides the page only while the list is on screen", async () => {
     render(<Toolbar />);
     const input = address();

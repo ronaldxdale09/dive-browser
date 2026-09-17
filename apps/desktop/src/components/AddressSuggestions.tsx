@@ -56,6 +56,14 @@ export function useAddressSuggestions(query: string, active: boolean, tabs: read
   return { rows, highlight, setHighlight, move };
 }
 
+/** Hover name for a clipped row: the page, and its place when that is different. */
+export function suggestionHoverTitle(row: Suggestion): string {
+  if (row.kind === "open" || row.kind === "search" || row.kind === "suggest") return row.title;
+  const name = row.title || row.url;
+  const place = placeOf(row.url);
+  return place && place !== name ? `${name} — ${place}` : name;
+}
+
 /** Rows and icons that say what the row does. */
 function rowGlyph(row: Suggestion) {
   switch (row.kind) {
@@ -111,6 +119,7 @@ export function AddressSuggestions({
           aria-selected={index === highlight}
           onMouseEnter={() => onHighlight(index)}
           onClick={() => onPick(row)}
+          title={suggestionHoverTitle(row)}
           className={`flex cursor-default items-center gap-2 rounded-lg px-3 py-2 ${index === highlight ? "bg-surface-2 text-ink" : "text-ink"}`}
         >
           {rowGlyph(row)}
