@@ -21,11 +21,11 @@ export function FindBar() {
     inputRef.current?.focus();
   }, []);
 
+  const idle = !activeTab || sleeping;
+  const shown = idle ? { total: 0, current: 0 } : result;
+
   useEffect(() => {
-    if (!activeTab || sleeping) {
-      setResult({ total: 0, current: 0 });
-      return;
-    }
+    if (!activeTab || sleeping) return;
     let alive = true;
     const t = setTimeout(() => {
       ipc
@@ -68,11 +68,11 @@ export function FindBar() {
           placeholder="Find in page"
           className="h-7 w-52 bg-transparent px-2 text-xs outline-none placeholder:text-ink-3"
         />
-        <span role="status" aria-live="polite" aria-label={!activeTab ? undefined : sleeping ? "This tab is sleeping" : query ? (result.total ? `Match ${result.current} of ${result.total}` : "No matches") : undefined} className="w-14 text-center font-mono text-[11px] text-ink-3 tabular-nums">
-          {!activeTab || sleeping || !query ? "" : `${result.current}/${result.total}`}
+        <span role="status" aria-live="polite" aria-label={!activeTab ? undefined : sleeping ? "This tab is sleeping" : query ? (shown.total ? `Match ${shown.current} of ${shown.total}` : "No matches") : undefined} className="w-14 text-center font-mono text-[11px] text-ink-3 tabular-nums">
+          {idle || !query ? "" : `${shown.current}/${shown.total}`}
         </span>
-        <IconButton icon={ChevronUp} label="Previous match" size={13} disabled={!result.total} onClick={() => setIndex((i) => i - 1)} />
-        <IconButton icon={ChevronDown} label="Next match" size={13} disabled={!result.total} onClick={() => setIndex((i) => i + 1)} />
+        <IconButton icon={ChevronUp} label="Previous match" size={13} disabled={!shown.total} onClick={() => setIndex((i) => i - 1)} />
+        <IconButton icon={ChevronDown} label="Next match" size={13} disabled={!shown.total} onClick={() => setIndex((i) => i + 1)} />
         <IconButton icon={X} label="Close find" size={13} onClick={close} />
       </div>
     </div>
