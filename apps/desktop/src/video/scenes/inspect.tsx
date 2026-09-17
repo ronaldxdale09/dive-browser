@@ -166,7 +166,7 @@ const LANE = [
 export function Rules({ index }: SceneProps) {
   const { frame } = useScene();
   return (
-    <Scene index={index} eyebrow="Control" title="Mock and rewrite rules" text="Block a script, answer an endpoint with a canned response, or add a header — per workspace, applied before the request leaves.">
+    <Scene index={index} eyebrow="Control" title="Mock and rewrite rules" text="Block a script, answer an endpoint with a canned response, or add a header — per workspace, on matching requests. Media is not intercepted.">
       <Window url="Rules · Client">
         <div style={{ position: "absolute", inset: 0, padding: "14px 18px", fontFamily: T.mono, fontSize: 11.5 }}>
           {RULES.map((r, i) => (

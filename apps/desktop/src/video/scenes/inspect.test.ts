@@ -15,5 +15,11 @@ describe("feature tour inspect scene", () => {
     expect(source).not.toMatch(/Every request with headers, bodies/);
     expect(source).toMatch(/This page's requests/);
   });
+
+  it("does not claim workspace rules intercept every request before it leaves", () => {
+    expect(source).not.toMatch(/applied before the request leaves/);
+    expect(source).toMatch(/media is not intercepted/i);
+  });
 });
+
 
