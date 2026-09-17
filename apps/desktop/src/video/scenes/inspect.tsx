@@ -17,7 +17,7 @@ export function Network({ index }: SceneProps) {
   const open = frame >= 74;
   const replayed = frame >= 108;
   return (
-    <Scene index={index} eyebrow="Inspect" title="Network, replayable" text="Every request with headers, bodies and WebSocket frames. Edit and replay one, copy it as cURL, or export the lot as HAR." keys="⌘⇧D">
+    <Scene index={index} eyebrow="Inspect" title="Network, replayable" text="This page's requests — headers, kept bodies and WebSocket frames. Edit and replay one, copy it as cURL, or export the lot as HAR." keys="⌘⇧D">
       <Window url="acme.test/checkout">
         <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
           <div style={{ height: 96, position: "relative", borderBottom: `1px solid ${T.line}` }}>

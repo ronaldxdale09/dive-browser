@@ -10,4 +10,10 @@ describe("feature tour inspect scene", () => {
     expect(source).not.toMatch(/every cookie/);
     expect(source).toMatch(/this page's cookies/);
   });
+
+  it("does not claim every request has headers and bodies", () => {
+    expect(source).not.toMatch(/Every request with headers, bodies/);
+    expect(source).toMatch(/This page's requests/);
+  });
 });
+
