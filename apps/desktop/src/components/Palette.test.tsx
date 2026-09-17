@@ -88,6 +88,22 @@ describe("Palette", () => {
     expect(useBrowser.getState().paletteFocus).toBe("all");
   });
 
+  it("names a clipped jump on hover so a pick can still be read", async () => {
+    vi.spyOn(ipc, "commandsList").mockResolvedValue([]);
+    vi.spyOn(ipc, "devServersWatch").mockResolvedValue([]);
+    vi.spyOn(events.devServersChanged, "listen").mockResolvedValue(() => undefined);
+    vi.spyOn(ipc, "bookmarksSearch").mockResolvedValue([]);
+    vi.spyOn(ipc, "historySearch").mockResolvedValue([
+      { url: "https://example.com/docs", title: "Example docs", last_visited_at: "2026-09-03T00:00:00Z", visits: 3, favicon: null },
+    ]);
+    const tab = { id: "t1", workspace_id: "w", url: "https://a.test/", title: "Alpha", favicon: null, tier: "today", position: 0, state: "active", last_active_at: "2026-09-01T00:00:00Z" } as unknown as Tab;
+    useBrowser.setState({ tabs: [tab], activeTab: "t1" });
+    render(<Palette />);
+    const page = await screen.findByText("Example docs");
+    expect(page.closest("[role='option']")?.getAttribute("title")).toBe("Example docs — example.com");
+    expect(screen.getByText("Alpha").closest("[role='option']")?.getAttribute("title")).toBe("Alpha — a.test");
+  });
+
   it("is an accessible new-tab dialog with a URL field and recent history", async () => {
     vi.spyOn(ipc, "commandsList").mockResolvedValue([]);
     vi.spyOn(ipc, "devServersWatch").mockResolvedValue([]);

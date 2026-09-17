@@ -33,6 +33,20 @@ const HISTORY_LIMIT = 5;
  */
 export const ROW_ID = "\t";
 
+function host(url: string) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "";
+  }
+}
+
+/** Hover name for a clipped palette row: the page, and its host when that is different. */
+export function paletteRowTitle(name: string, url: string): string {
+  const place = host(url);
+  return place && place !== name ? `${name} — ${place}` : name;
+}
+
 export function paletteFilter(value: string, search: string): number {
   const haystack = value.split(ROW_ID)[0]!.toLowerCase();
   const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
@@ -133,6 +147,7 @@ export function Palette() {
         <Command.Item
           key={t.id}
           value={`${titleOf(t)} ${t.url}${ROW_ID}${t.id}`}
+          title={paletteRowTitle(titleOf(t), t.url)}
           onSelect={() => {
             close();
             void activateTab(t.id);
@@ -173,14 +188,14 @@ export function Palette() {
           {lead && (
             <Command.Group value="lead">
               {lead.kind === "tab" ? (
-                <Command.Item value={`${titleOf(lead.tab)} ${lead.tab.url}${ROW_ID}${lead.tab.id}`} onSelect={() => { close(); void activateTab(lead.tab.id); }} className="flex items-center gap-2 rounded-lg px-3 py-2">
+                <Command.Item value={`${titleOf(lead.tab)} ${lead.tab.url}${ROW_ID}${lead.tab.id}`} title={paletteRowTitle(titleOf(lead.tab), lead.tab.url)} onSelect={() => { close(); void activateTab(lead.tab.id); }} className="flex items-center gap-2 rounded-lg px-3 py-2">
                   <Favicon src={lead.tab.favicon} size={14} />
                   <span className="truncate">{titleOf(lead.tab)}</span>
                   <span className="rounded-md bg-surface-3 px-1.5 py-0.5 text-[10px] text-ink-2">Switch to tab</span>
                   <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(lead.tab.url)}</span>
                 </Command.Item>
               ) : (
-                <Command.Item value={`${lead.kind} ${titleOf(lead.entry)} ${lead.entry.url}`} onSelect={() => void go(lead.entry.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
+                <Command.Item value={`${lead.kind} ${titleOf(lead.entry)} ${lead.entry.url}`} title={paletteRowTitle(titleOf(lead.entry), lead.entry.url)} onSelect={() => void go(lead.entry.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
                   {lead.kind === "bookmark" ? <Favicon src={lead.entry.favicon} size={14} fallback={Star} fallbackClassName="text-highlight" /> : <Favicon src={lead.entry.favicon} size={14} fallback={History} />}
                   <span className="truncate">{titleOf(lead.entry)}</span>
                   <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(lead.entry.url)}</span>
@@ -191,7 +206,7 @@ export function Palette() {
           {tabsFirst && tabGroup}
           {query.trim() && (
             <Command.Group value="open">
-              <Command.Item value={`open ${query}`} onSelect={() => void go(query)} className="flex items-center gap-2 rounded-lg px-3 py-2">
+              <Command.Item value={`open ${query}`} title={query} onSelect={() => void go(query)} className="flex items-center gap-2 rounded-lg px-3 py-2">
                 <Icon icon={looksLikeUrl ? ArrowUpRight : Search} size={14} className="text-ink-3" />
                 <span className="text-ink-2">{looksLikeUrl ? "Open" : "Search"}</span>
                 <span className="truncate font-mono text-ink">{query}</span>
@@ -214,7 +229,7 @@ export function Palette() {
           {shownHistory.length > 0 && (
             <Command.Group heading="History">
               {shownHistory.map((h) => (
-                <Command.Item key={h.url} value={`history ${titleOf(h)} ${h.url}`} onSelect={() => void go(h.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
+                <Command.Item key={h.url} value={`history ${titleOf(h)} ${h.url}`} title={paletteRowTitle(titleOf(h), h.url)} onSelect={() => void go(h.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
                   <Favicon src={h.favicon} size={14} fallback={History} />
                   <span className="truncate">{titleOf(h)}</span>
                   <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(h.url)}</span>
@@ -225,7 +240,7 @@ export function Palette() {
           {shownBookmarks.length > 0 && (
             <Command.Group heading="Bookmarks">
               {shownBookmarks.map((b) => (
-                <Command.Item key={b.url} value={`bookmark ${titleOf(b)} ${b.url}`} onSelect={() => void go(b.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
+                <Command.Item key={b.url} value={`bookmark ${titleOf(b)} ${b.url}`} title={paletteRowTitle(titleOf(b), b.url)} onSelect={() => void go(b.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
                   <Favicon src={b.favicon} size={14} fallback={Star} fallbackClassName="text-highlight" />
                   <span className="truncate">{titleOf(b)}</span>
                   <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(b.url)}</span>
@@ -259,12 +274,4 @@ export function Palette() {
       </Command>
     </div>
   );
-}
-
-function host(url: string) {
-  try {
-    return new URL(url).host;
-  } catch {
-    return "";
-  }
 }
