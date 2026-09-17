@@ -30,6 +30,11 @@ describe("feature tour agent scene", () => {
     expect(source).not.toMatch(/Any page becomes a QR/);
     expect(source).toMatch(/http or https/);
   });
+
+  it("does not say every listener appears in the palette by itself", () => {
+    expect(source).not.toMatch(/by themselves/);
+    expect(source).toMatch(/serve a page/);
+  });
 });
 
 
