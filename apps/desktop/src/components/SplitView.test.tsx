@@ -53,6 +53,16 @@ describe("SplitView", () => {
     expect(resize).toHaveBeenLastCalledWith("ws", [0.5 - NUDGE, 0.5 + NUDGE]);
   });
 
+  it("names a clipped pane on hover so the page can still be read", () => {
+    render(
+      <DndContext>
+        <SplitView split={{ tabs: ["a", "b"], sizes: [0.5, 0.5] }} workspace="ws" />
+      </DndContext>,
+    );
+    expect(screen.getByText(/^App with a very long/).getAttribute("title")).toBe("App with a very long title that goes on");
+    expect(screen.getByText("Docs").getAttribute("title")).toBe("Docs");
+  });
+
   it("activates a pane from its header and closes a pane without closing the tab", () => {
     const remove = vi.fn();
     useLayout.setState({ remove });

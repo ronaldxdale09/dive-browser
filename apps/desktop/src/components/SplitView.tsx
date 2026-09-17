@@ -153,7 +153,7 @@ function PaneAndDivider({ tab, active, last, divider, onActivate, onClose, onRes
       <section aria-label={tabLabel(tab)} aria-current={active ? "true" : undefined} className={`flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border ${active ? "border-line-2" : "border-line"} ${isDragging ? "opacity-50" : ""}`}>
         <header ref={setNodeRef} {...attributes} {...listeners} onClick={onActivate} className={`flex h-7 shrink-0 cursor-grab items-center gap-2 px-2 text-[11px] ${active ? "bg-surface-2 text-ink shadow-[inset_0_2px_0_var(--color-highlight)]" : "bg-surface text-ink-2"}`}>
           <Favicon src={tab.favicon} size={12} />
-          <span className="min-w-0 flex-1 truncate">{tabLabel(tab)}</span>
+          <span className="min-w-0 flex-1 truncate" title={tabLabel(tab)}>{tabLabel(tab)}</span>
           <button
             type="button"
             aria-label={`Close pane ${tabLabel(tab)}`}
