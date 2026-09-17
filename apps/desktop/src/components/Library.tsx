@@ -367,7 +367,7 @@ function DownloadsList({ query }: { query: string }) {
     <ul className="flex flex-col">
       {shown.map((d) => (
         <li key={`${d.url}-${d.at}`} className="group flex items-center gap-1">
-          <button type="button" onClick={() => reveal(d.path)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
+          <button type="button" title={d.name} onClick={() => reveal(d.path)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
             <Icon icon={Download} size={14} className="shrink-0 text-ink-3" />
             <span className="truncate text-ink">{d.name}</span>
             <span className="ml-auto shrink-0 pl-3 text-[11px] text-ink-3">{d.status}</span>
@@ -444,7 +444,7 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
     <ul className="flex flex-col">
       {shown.map((r) => (
         <li key={r.path} className="group flex items-center gap-1">
-          <button type="button" onClick={() => openRecording(r.path)} className="flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
+          <button type="button" title={r.name} onClick={() => openRecording(r.path)} className="flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
             <Icon icon={Clapperboard} size={14} className="shrink-0 text-ink-3" />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-ink">{r.name}</span>

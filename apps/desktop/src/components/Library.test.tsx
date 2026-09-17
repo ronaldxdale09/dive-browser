@@ -4,12 +4,14 @@ import { ipc } from "../lib/ipc";
 import { contentCoverDepth, resetContentCover } from "../lib/overlay";
 import { useImportVideo } from "../screen/importVideo";
 import { useBrowser } from "../store/browser";
+import { useDownloads } from "../store/downloads";
 import { useWebApps } from "../store/webapps";
 import { screenUrl } from "./internal/InternalPage";
 import { Library, dayLabel, groupByDay, matches, timeLabel } from "./Library";
 
 const initial = useBrowser.getState();
 const initialWebApps = useWebApps.getState();
+const initialDownloads = useDownloads.getState();
 // Local-time dates: day boundaries depend on the machine's zone.
 const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h).toISOString();
 const now = new Date(2026, 8, 4, 12);
@@ -36,6 +38,7 @@ afterEach(() => {
   resetContentCover();
   useBrowser.setState(initial, true);
   useWebApps.setState(initialWebApps, true);
+  useDownloads.setState(initialDownloads, true);
   useImportVideo.setState({ busy: false });
   vi.restoreAllMocks();
 });
@@ -195,6 +198,24 @@ describe("Library dialog", () => {
     expect(useBrowser.getState().open.settings).toBe(true);
     expect(useBrowser.getState().settingsSection).toBe("privacy");
     expect(useBrowser.getState().settingsAnchor).toBe("clear-browsing-data");
+  });
+
+  it("names a clipped download and recording on hover so a file can still be read", async () => {
+    useDownloads.setState({
+      items: [
+        { name: "a-very-long-report.json", path: "/tmp/a-very-long-report.json", url: "http://a.dev/report.json", status: "finished", at: Date.now(), startedAt: Date.now() },
+      ],
+    });
+    vi.spyOn(ipc, "recordingsList").mockResolvedValue([
+      { path: "/captures/a-very-long-clip.mov", name: "a-very-long-clip.mov", format: "mov", bytes: 10, modified_ms: 1, editable: true, has_project: false },
+    ]);
+    render(<Library />);
+    fireEvent.click(screen.getByRole("tab", { name: "Downloads" }));
+    const file = (await screen.findByText("a-very-long-report.json")).closest("button");
+    expect(file?.getAttribute("title")).toBe("a-very-long-report.json");
+    fireEvent.click(screen.getByRole("tab", { name: "Recordings" }));
+    const clip = (await screen.findByText("a-very-long-clip.mov")).closest("button");
+    expect(clip?.getAttribute("title")).toBe("a-very-long-clip.mov");
   });
 
   it("closes on Escape and releases the page", async () => {
