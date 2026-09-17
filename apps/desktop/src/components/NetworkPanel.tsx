@@ -145,14 +145,11 @@ export function NetworkPanel() {
   }, [rows, filter]);
   // One pass per flush for both the total and the lookup, so selecting a
   // row is a map read rather than another walk of a thousand rows.
-  const { transferred, byId } = useMemo(() => {
-    let transferred = 0;
-    const byId = new Map<string, RequestRow>();
-    for (const r of rows) {
-      transferred += r.size ?? 0;
-      byId.set(r.id, r);
-    }
-    return { transferred, byId };
+  const transferred = useMemo(() => shown.reduce((sum, r) => sum + (r.size ?? 0), 0), [shown]);
+  const byId = useMemo(() => {
+    const map = new Map<string, RequestRow>();
+    for (const r of rows) map.set(r.id, r);
+    return map;
   }, [rows]);
   const detail = selected ? byId.get(selected) : undefined;
   const frames = useNetwork(selectFrames(activeTab, selected));

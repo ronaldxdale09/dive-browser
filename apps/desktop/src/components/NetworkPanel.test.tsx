@@ -171,6 +171,15 @@ describe("NetworkPanel", () => {
     expect(screen.getByText("No requests match.")).toBeTruthy();
   });
 
+  it("does not present the capture transfer as the filtered set", () => {
+    useNetwork.setState({ byTab: { "tab-1": rows(3) } });
+    render(<NetworkPanel />);
+    expect(screen.getByText("300 B transferred")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Filter requests"), { target: { value: "ITEM-2" } });
+    expect(screen.queryByText("300 B transferred")).toBeNull();
+    expect(screen.getByText("100 B transferred")).toBeTruthy();
+  });
+
   it("mounts only a window of rows when given 1000 requests", () => {
     useNetwork.setState({ byTab: { "tab-1": rows(1000) } });
     const { container } = render(<NetworkPanel />);
