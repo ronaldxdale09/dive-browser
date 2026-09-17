@@ -111,7 +111,7 @@ const TOOLS = ["page_state", "page_screenshot", "console_tail", "network_body", 
 
 export function Mcp({ index }: SceneProps) {
   return (
-    <Scene index={index} eyebrow="Connect" title="Built for coding agents" text="Claude Code, Cursor and Codex plug in over MCP and read your tabs, console, network and screenshots.">
+    <Scene index={index} eyebrow="Connect" title="Built for coding agents" text="Claude Code, Cursor and Codex plug in over MCP and read open tabs in the workspace in front, plus console, network and screenshots. Sleeping tabs are omitted.">
       <Window url="MCP · 127.0.0.1:7391">
         <div style={{ position: "absolute", inset: 0, padding: "18px 22px", fontFamily: T.mono, fontSize: 12.5, lineHeight: 1.75, color: T.ink2 }}>
           <div>

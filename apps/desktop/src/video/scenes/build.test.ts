@@ -14,5 +14,12 @@ describe("feature tour agent scene", () => {
   it("does not invent an MCP tool count", () => {
     expect(source).not.toMatch(/\d+ tools/);
   });
+
+  it("does not claim MCP reads every tab", () => {
+    expect(source).not.toMatch(/read your tabs/);
+    expect(source).toMatch(/Sleeping tabs are omitted/);
+    expect(source).toMatch(/workspace in front/);
+  });
 });
+
 
