@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 import { lazy, Suspense, useEffect, useId, useState } from "react";
 import { events, ipc } from "../lib/ipc";
 import type { DevServer } from "../lib/ipc";
+import { useReducedMotion } from "../lib/useReducedMotion";
 import { useBrowser } from "../store/browser";
 import { usePrefs } from "../store/prefs";
 import { OrbBurst } from "./OrbBurst";
@@ -77,16 +78,22 @@ function useWelcomeBackground(): WelcomeBackground {
   return value === "plain" || value === "gradient" ? value : "orbs";
 }
 
+/** Instant when motion is off; a smooth slide only when the chrome is allowed to move. */
+export function tourRevealBehavior(reduced: boolean): ScrollBehavior {
+  return reduced ? "auto" : "smooth";
+}
+
 /** Each visit stays quiet until the person explicitly opens the tour. */
 function OptionalFeatureTour() {
   const [open, setOpen] = useState(false);
+  const reduced = useReducedMotion();
   const id = useId();
   return (
     <section className="mt-6 w-full text-center">
       <button type="button" aria-expanded={open} aria-controls={id} onClick={() => setOpen((value) => !value)} className="h-9 rounded-full border border-line-2 px-4 text-xs font-medium text-ink-2 hover:bg-surface-2 hover:text-ink">
         {open ? "Hide tour" : "Watch the feature tour"}
       </button>
-      <div id={id} ref={(node) => { if (open && node && typeof node.scrollIntoView === "function") node.scrollIntoView({ block: "start", behavior: "smooth" }); }}>
+      <div id={id} ref={(node) => { if (open && node && typeof node.scrollIntoView === "function") node.scrollIntoView({ block: "start", behavior: tourRevealBehavior(reduced) }); }}>
         {open && <div className="mt-4 aspect-[16/9] w-full rounded-2xl">
           <PanelErrorBoundary label="The feature tour">
           <Suspense fallback={<div role="status" aria-label="Loading feature tour" className="size-full rounded-2xl bg-surface-2/35" />}>

@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { events, ipc } from "../lib/ipc";
 import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
-import { Welcome, visibleDevServers } from "./Welcome";
+import { Welcome, tourRevealBehavior, visibleDevServers } from "./Welcome";
 
 // The feature reel is a Remotion Player with its own tests; jsdom cannot
 // drive it and this test is about the background layer.
@@ -36,6 +36,8 @@ vi.stubGlobal("matchMedia", (media: string) => ({
 }));
 vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
 
+const scrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView");
+
 beforeEach(() => {
   vi.spyOn(ipc, "devServersWatch").mockResolvedValue([]);
   vi.spyOn(ipc, "devServers").mockResolvedValue([]);
@@ -47,6 +49,8 @@ afterEach(() => {
   reelState.broken = false;
   usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
   vi.restoreAllMocks();
+  if (scrollIntoView) Object.defineProperty(Element.prototype, "scrollIntoView", scrollIntoView);
+  else delete (Element.prototype as unknown as Record<string, unknown>).scrollIntoView;
 });
 
 describe("Welcome", () => {
@@ -92,6 +96,11 @@ describe("Welcome", () => {
     view.unmount();
   });
 
+  it("picks an instant tour reveal when motion is off", () => {
+    expect(tourRevealBehavior(true)).toBe("auto");
+    expect(tourRevealBehavior(false)).toBe("smooth");
+  });
+
   it("does not claim the palette searches every command", () => {
     render(<Welcome />);
     const line = screen.getByText(/search tabs/).textContent ?? "";
@@ -108,6 +117,27 @@ describe("Welcome", () => {
     expect(screen.getByRole("button", { name: /Open a tab/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Hide tour" }));
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("does not smooth-scroll the tour into view under reduced motion", async () => {
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, motion: "reduce" }, loaded: true });
+    render(<Welcome />);
+    fireEvent.click(screen.getByRole("button", { name: "Watch the feature tour" }));
+    await waitFor(() => expect(scrolled).toHaveBeenCalled());
+    expect(scrolled).toHaveBeenCalledWith(expect.objectContaining({ block: "start", behavior: "auto" }));
+    expect(scrolled.mock.calls.some((call) => call[0]?.behavior === "smooth")).toBe(false);
+  });
+
+  it("smooth-scrolls the tour into view when motion is full", async () => {
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, motion: "full" }, loaded: true });
+    render(<Welcome />);
+    fireEvent.click(screen.getByRole("button", { name: "Watch the feature tour" }));
+    await waitFor(() => expect(scrolled).toHaveBeenCalled());
+    expect(scrolled).toHaveBeenCalledWith(expect.objectContaining({ block: "start", behavior: "smooth" }));
   });
 
   it("mounts the tour only on request and removes it when hidden", async () => {
