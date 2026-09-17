@@ -95,7 +95,7 @@ export function Privacy() {
       <Group title="Requests">
         <Row
           label="Send “Do Not Track”"
-          hint="Adds DNT: 1 and Sec-GPC: 1 to every request. Most sites ignore both."
+          hint="Adds DNT: 1 and Sec-GPC: 1 to page requests. Most sites ignore both."
           control={<Switch label="Send Do Not Track" checked={prefs.do_not_track} onChange={(do_not_track) => set({ do_not_track })} />}
         />
         <Row

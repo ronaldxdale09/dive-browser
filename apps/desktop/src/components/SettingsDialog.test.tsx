@@ -148,6 +148,16 @@ describe("SettingsDialog", () => {
     expect(screen.queryByLabelText("Blocked hosts")).toBeNull();
   });
 
+  it("does not claim Do Not Track on every request", () => {
+    render(<SettingsDialog />);
+    fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
+    const hint = screen.getByText(/DNT: 1/).textContent ?? "";
+    expect(hint).not.toMatch(/every request/);
+    expect(hint).toMatch(/DNT: 1/);
+    expect(hint).toMatch(/Sec-GPC: 1/);
+    expect(hint).toMatch(/page requests/);
+  });
+
   it("does not say older visits leave only the address bar and palette", () => {
     render(<SettingsDialog />);
     fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
