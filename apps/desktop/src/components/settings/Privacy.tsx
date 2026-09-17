@@ -100,7 +100,7 @@ export function Privacy() {
         />
         <Row
           label="Run page JavaScript"
-          hint="Off loads every page with scripting disabled — useful for checking what a page does without it."
+          hint="Off loads pages with scripting disabled — useful for checking what a page does without it."
           control={<Switch label="Run page JavaScript" checked={prefs.javascript} onChange={(javascript) => set({ javascript })} />}
         />
       </Group>

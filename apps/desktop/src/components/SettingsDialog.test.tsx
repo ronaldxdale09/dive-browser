@@ -148,6 +148,14 @@ describe("SettingsDialog", () => {
     expect(screen.queryByLabelText("Blocked hosts")).toBeNull();
   });
 
+  it("does not claim scripting off loads every page", () => {
+    render(<SettingsDialog />);
+    fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
+    const hint = screen.getByText(/scripting disabled/).textContent ?? "";
+    expect(hint).not.toMatch(/every page/);
+    expect(hint).toMatch(/scripting disabled/);
+  });
+
   it("does not claim Do Not Track on every request", () => {
     render(<SettingsDialog />);
     fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
