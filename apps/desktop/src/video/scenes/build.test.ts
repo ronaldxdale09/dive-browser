@@ -10,4 +10,9 @@ describe("feature tour agent scene", () => {
     expect(source).not.toMatch(/asks before anything irreversible/);
     expect(source).toMatch(/floor, not a guarantee/);
   });
+
+  it("does not invent an MCP tool count", () => {
+    expect(source).not.toMatch(/\d+ tools/);
+  });
 });
+

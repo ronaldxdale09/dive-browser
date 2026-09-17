@@ -119,7 +119,7 @@ export function Mcp({ index }: SceneProps) {
             <Typed text="claude mcp add --transport http dive http://127.0.0.1:7391/mcp" start={4} cps={60} style={{ color: T.ink }} />
           </div>
           <Reveal at={44}>
-            <div style={{ color: T.ok }}>✓ Connected to Dive · 18 tools</div>
+            <div style={{ color: T.ok }}>✓ Connected to Dive</div>
           </Reveal>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "6px 0 10px" }}>
             {TOOLS.map((t, i) => (
