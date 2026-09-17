@@ -156,8 +156,19 @@ describe("NetworkPanel", () => {
     fireEvent.change(screen.getByLabelText("Filter requests"), { target: { value: "ITEM-2" } });
     expect(mountedRows(container)).toHaveLength(1);
     expect(screen.getByText("item-2")).toBeTruthy();
-    // The summary still describes the whole capture.
-    expect(screen.getByText("3 requests")).toBeTruthy();
+    expect(screen.getByText("1 of 3 requests")).toBeTruthy();
+  });
+
+  it("does not present the capture count as the filtered set", () => {
+    useNetwork.setState({ byTab: { "tab-1": rows(3) } });
+    render(<NetworkPanel />);
+    fireEvent.change(screen.getByLabelText("Filter requests"), { target: { value: "ITEM-2" } });
+    expect(screen.queryByText("3 requests")).toBeNull();
+    expect(screen.getByText("1 of 3 requests")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Filter requests"), { target: { value: "zzzz" } });
+    expect(screen.getByText("0 of 3 requests")).toBeTruthy();
+    expect(screen.queryByText("No requests yet.")).toBeNull();
+    expect(screen.getByText("No requests match.")).toBeTruthy();
   });
 
   it("mounts only a window of rows when given 1000 requests", () => {

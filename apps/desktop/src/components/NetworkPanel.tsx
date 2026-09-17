@@ -190,7 +190,7 @@ export function NetworkPanel() {
           placeholder="Filter"
           className="h-6 w-56 rounded-md border border-line bg-surface-2 px-2 text-[11px] text-ink outline-none placeholder:text-ink-3 focus:border-highlight/60"
         />
-        <span>{rows.length} requests</span>
+        <span>{filter.trim() ? `${shown.length} of ${rows.length} requests` : `${rows.length} requests`}</span>
         <span>{size(transferred)} transferred</span>
         <label className="ml-auto flex items-center gap-1.5 text-ink-3 select-none">
           <input type="checkbox" checked={preserve} onChange={(e) => setPreserve(e.target.checked)} className="accent-highlight" />
@@ -212,7 +212,7 @@ export function NetworkPanel() {
           <tbody>
             {shown.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-2 text-ink-3">{activeTab ? "No requests yet." : "Open a tab to see its traffic."}</td>
+                <td colSpan={6} className="px-3 py-2 text-ink-3">{activeTab ? (filter.trim() ? "No requests match." : "No requests yet.") : "Open a tab to see its traffic."}</td>
               </tr>
             )}
             {above > 0 && <tr aria-hidden style={{ height: above }} />}
