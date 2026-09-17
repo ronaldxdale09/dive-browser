@@ -27,4 +27,10 @@ describe("feature tour recording scene", () => {
     expect(source).not.toMatch(/Copied the moment you are done/);
     expect(source).toMatch(/Copy puts/);
   });
+
+  it("does not claim the recorder picks labels and test ids", () => {
+    expect(source).not.toMatch(/stable locators/);
+    expect(source).not.toMatch(/getByLabel/);
+    expect(source).toMatch(/role and accessible name/);
+  });
 });

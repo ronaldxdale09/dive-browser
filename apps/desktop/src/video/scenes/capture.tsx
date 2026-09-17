@@ -125,8 +125,8 @@ export function FullPage({ index }: SceneProps) {
 }
 
 const STEPS = [
-  { at: 22, code: "await page.getByLabel('Email').fill('dev@acme.test');" },
-  { at: 52, code: "await page.getByLabel('Password').fill(process.env.PW);" },
+  { at: 22, code: "await page.getByRole('textbox', { name: 'Email' }).fill('dev@acme.test');" },
+  { at: 52, code: "await page.getByRole('textbox', { name: 'Password' }).fill(process.env.PW);" },
   { at: 82, code: "await page.getByRole('button', { name: 'Sign in' }).click();" },
   { at: 104, code: "await expect(page).toHaveURL('/dashboard');" },
 ];
@@ -135,7 +135,7 @@ export function Recorder({ index }: SceneProps) {
   const { frame, fps } = useScene();
   const finished = frame >= 110;
   return (
-    <Scene index={index} eyebrow="Automate" title="Recorder to Playwright" text="Click through a flow once. Dive picks stable locators — roles, labels, test ids — and writes the test you would have written.">
+    <Scene index={index} eyebrow="Automate" title="Recorder to Playwright" text="Click through a flow once. Dive records role and accessible name, then writes a Playwright test from those.">
       <Window url="acme.test/login">
         <div style={{ position: "absolute", inset: 0, display: "flex" }}>
           <div style={{ flex: 1, padding: "30px 34px" }}>
