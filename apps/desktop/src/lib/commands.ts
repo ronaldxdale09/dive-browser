@@ -360,11 +360,40 @@ export function chordsByCommand(shortcuts: Record<string, string> = SHORTCUTS): 
  * list, so the palette has to add them itself. Anything the host already
  * names is left out to avoid two rows for one command.
  */
+/** Commands that act on the page in this window. A torn-off tab is the other window's. */
+const NEEDS_THIS_WINDOW = new Set([
+  "tab.pin",
+  "tab.reload",
+  "tab.devtools",
+  "report.compose",
+  "screencast.toggle",
+  "zoom.in",
+  "zoom.out",
+  "zoom.reset",
+  "share.open",
+  "simulator.toggle",
+  "recorder.toggle",
+  "capture.fullpage",
+  "page.save",
+  "page.reader",
+  "page.translate",
+  "find.open",
+  "bookmark.toggle",
+  "tab.print",
+  "video.pip",
+  "tab.fillVideo",
+  "tab.stop",
+  "tab.back",
+  "tab.forward",
+]);
+
 export function chromeCommands(known: Command[] = []): Command[] {
   const seen = new Set(known.map((c) => c.id));
   const chords = chordsByCommand();
+  const { activeTab, detached } = useBrowser.getState();
+  const here = tabInThisWindow(activeTab, detached);
   return Object.keys(UI_COMMANDS)
-    .filter((id) => !seen.has(id) && id in COMMAND_TITLES && !id.startsWith("workspace.jump.") && (id !== "private.exit" || isPrivateWindow()) && !(isPrivateWindow() && PRIVATE_REFUSED.includes(id)))
+    .filter((id) => !seen.has(id) && id in COMMAND_TITLES && !id.startsWith("workspace.jump.") && (id !== "private.exit" || isPrivateWindow()) && !(isPrivateWindow() && PRIVATE_REFUSED.includes(id)) && (here || !NEEDS_THIS_WINDOW.has(id)))
     .map((id) => ({ id, title: COMMAND_TITLES[id]!, keybinding: chords[id] ?? null, scope: "global" as const }));
 }
 

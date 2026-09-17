@@ -287,7 +287,20 @@ describe("command dispatch", () => {
     expect(formatChord("mod+t")).toBe("⌘T");
   });
 
+  it("does not offer page commands for a detached tab as this window's", () => {
+    useBrowser.setState({ tabs: [tab("a")], activeTab: "a", detached: ["a"] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    const ids = chromeCommands().map((c) => c.id);
+    expect(ids).not.toContain("tab.print");
+    expect(ids).not.toContain("find.open");
+    expect(ids).not.toContain("video.pip");
+    expect(ids).not.toContain("report.compose");
+    expect(ids).toContain("tab.detach");
+    expect(ids).toContain("tab.home");
+  });
+
   it("offers the palette only the chrome commands the host does not list", () => {
+    useBrowser.setState({ tabs: [tab("a")], activeTab: "a", detached: [] });
     const known = [{ id: "tab.new", title: "New tab", keybinding: "mod+t", scope: "workspace" as const }];
     const extra = chromeCommands(known);
     const ids = extra.map((c) => c.id);
