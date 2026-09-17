@@ -83,7 +83,7 @@ export function ConsoleVitals({ index }: SceneProps) {
   const { frame } = useScene();
   const grow = ramp(frame, 30, 70);
   return (
-    <Scene index={index} eyebrow="Debug" title="Console, vitals, a11y, storage" text="Errors with source-mapped frames, Core Web Vitals as they happen, an axe audit and every cookie — one dock beside the page.">
+    <Scene index={index} eyebrow="Debug" title="Console, vitals, a11y, storage" text="Errors with source-mapped frames, Core Web Vitals as they happen, an axe audit and this page's cookies — one dock beside the page.">
       <Window url="acme.test/checkout">
         <div style={{ position: "absolute", inset: 0, display: "grid", gridTemplateColumns: "1.3fr 1fr", gridTemplateRows: "1fr 1fr", fontFamily: T.mono, fontSize: 11.5 }}>
           <Panel title="Console" style={{ gridRow: "1 / 3", borderRight: `1px solid ${T.line}` }}>
