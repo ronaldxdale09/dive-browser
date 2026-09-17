@@ -95,4 +95,13 @@ describe("TaskManager", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(ipc.tasksList).not.toHaveBeenCalled();
   });
+
+  it("names a clipped tab on hover so Close is not a guess", async () => {
+    const long = "A very long documentation page title that will clip at 320px";
+    vi.spyOn(ipc, "tasksList").mockResolvedValue([row({ title: long })]);
+    useBrowser.setState({ open: { ...initial.open, tasks: true } });
+    render(<TaskManager />);
+    const name = await screen.findByRole("button", { name: long });
+    expect(name.getAttribute("title")).toBe(long);
+  });
 });

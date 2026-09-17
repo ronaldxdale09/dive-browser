@@ -115,7 +115,7 @@ export function TaskManager() {
               {rows.map((row) => (
                 <tr key={row.tab_id} className="border-t border-line align-middle hover:bg-surface-2">
                   <td className={cell}>
-                    <button type="button" onClick={() => void activateTab(row.tab_id)} className="flex min-w-0 max-w-[320px] items-center gap-1.5 text-left hover:underline">
+                    <button type="button" title={row.title} onClick={() => void activateTab(row.tab_id)} className="flex min-w-0 max-w-[320px] items-center gap-1.5 text-left hover:underline">
                       {row.sleeping && <Icon icon={Moon} size={11} className="shrink-0 text-ink-3" />}
                       {row.audible && <Icon icon={Volume2} size={11} className="shrink-0 text-ink-2" />}
                       <span className="truncate">{row.title}</span>
