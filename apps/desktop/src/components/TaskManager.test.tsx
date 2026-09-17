@@ -69,6 +69,8 @@ describe("TaskManager", () => {
     const dialog = await screen.findByRole("dialog", { name: "Task manager" });
     await waitFor(() => expect(screen.getByText("A heavy page")).toBeTruthy());
     expect(dialog.textContent).toContain("48 MB");
+    expect(dialog.textContent).not.toMatch(/JavaScript across 2 tabs/);
+    expect(dialog.textContent).toContain("48 MB of JavaScript in 1 tab");
     expect(dialog.textContent).toContain("asleep");
     // The first sample has no rate to show yet.
     expect(dialog.textContent).toContain("—");

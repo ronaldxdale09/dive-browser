@@ -81,6 +81,7 @@ export function TaskManager() {
 
   if (!open) return null;
   const total = rows.reduce((sum, row) => sum + (row.memory_bytes ?? 0), 0);
+  const holders = rows.filter((row) => row.memory_bytes != null).length;
   const cell = "px-3 py-2 text-left";
   return (
     <div ref={root} className="overlay-backdrop fixed inset-0 z-50 grid place-items-center" onMouseDown={() => toggle("tasks", false)}>
@@ -93,7 +94,7 @@ export function TaskManager() {
       >
         <div className="flex items-center gap-2 border-b border-line px-4 py-3">
           <h2 className="text-sm font-semibold">Task manager</h2>
-          <span className="text-[11px] text-ink-3">{formatMemory(total)} of JavaScript across {rows.length} tabs</span>
+          <span className="text-[11px] text-ink-3">{formatMemory(total)} of JavaScript{holders > 0 ? ` in ${holders} ${holders === 1 ? "tab" : "tabs"}` : ""}</span>
           <button type="button" aria-label="Close" onClick={() => toggle("tasks", false)} className="ml-auto grid size-6 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink">
             <Icon icon={X} size={12} />
           </button>
