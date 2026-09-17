@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
-import { useBrowser } from "./browser";
+import { tabInThisWindow, useBrowser } from "./browser";
 import { DEFAULT_SETTINGS, describeLimits, effectiveSettings, elapsedSeconds, useRecording } from "./recording";
 
 const caps = { ffmpeg: true, microphones: [{ id: "0", name: "Built-in" }], video_max_seconds: 600, gif_max_seconds: 60 };
 
 beforeEach(() => {
-  useBrowser.setState({ activeTab: "tab-1", recordingTab: null, error: null });
+  useBrowser.setState({ activeTab: "tab-1", detached: [], recordingTab: null, error: null });
   useRecording.setState({ phase: "idle", tab: null, error: null, result: null, settings: { ...DEFAULT_SETTINGS, countdown: false }, startedAt: null, pausedAt: null, pausedTotal: 0 });
 });
 
@@ -45,6 +45,23 @@ describe("describeLimits", () => {
     expect(describeLimits(DEFAULT_SETTINGS, caps)).toContain("Up to 10 min");
     expect(describeLimits({ ...DEFAULT_SETTINGS, format: "gif" }, caps)).toContain("Up to 1 min");
     expect(describeLimits({ ...DEFAULT_SETTINGS, source: "window" }, caps)).toContain("pointer included");
+  });
+});
+
+describe("recording setup target", () => {
+  it("does not start setup on a detached tab as this window's", () => {
+    useBrowser.setState({ activeTab: "tab-1", detached: ["tab-1"] });
+    expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
+    useRecording.getState().openSetup();
+    expect(useRecording.getState().phase).toBe("idle");
+    expect(useRecording.getState().tab).toBeNull();
+  });
+
+  it("starts setup on a named tab even when that tab is detached", () => {
+    useBrowser.setState({ activeTab: "tab-1", detached: ["tab-1"] });
+    useRecording.getState().openSetup("tab-1");
+    expect(useRecording.getState().phase).toBe("setup");
+    expect(useRecording.getState().tab).toBe("tab-1");
   });
 });
 

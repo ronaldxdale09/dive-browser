@@ -5,7 +5,6 @@ import { Icon } from "../components/Icon";
 import { Tooltip } from "../components/Tooltip";
 import { ipc } from "../lib/ipc";
 import { showInFileManagerLabel } from "../lib/commands";
-import { useBrowser } from "../store/browser";
 import { useRecording } from "../store/recording";
 import { ExportDialog } from "./ExportDialog";
 import { IMPORT_BUSY, useImportVideo } from "./importVideo";
@@ -45,7 +44,7 @@ export function DiveScreen({ src, tabId }: { src: string | null; tabId: string }
 
   useShortcuts(project !== null && !exporting);
 
-  if (!src) return <Empty />;
+  if (!src) return <Empty tabId={tabId} />;
   if (error) {
     return (
       <div className="grid h-full place-items-center p-8 text-center text-sm text-ink-3">
@@ -211,16 +210,15 @@ function useShortcuts(active: boolean) {
   }, [active]);
 }
 
-function Empty() {
+function Empty({ tabId }: { tabId: string }) {
   const openSetup = useRecording((s) => s.openSetup);
-  const active = useBrowser((s) => s.activeTab);
   const importing = useImportVideo((s) => s.busy);
   return (
     <div className="grid h-full place-items-center text-sm text-ink-3">
       <div className="text-center">
         <p>Open a recording or a video file to edit it.</p>
         <div className="mt-3 flex items-center justify-center gap-2">
-          <button type="button" disabled={!active} onClick={() => openSetup()} className="h-8 rounded-lg bg-surface-2 px-3 text-xs text-ink hover:bg-surface-3 disabled:opacity-40">
+          <button type="button" disabled={!tabId} onClick={() => openSetup(tabId)} className="h-8 rounded-lg bg-surface-2 px-3 text-xs text-ink hover:bg-surface-3 disabled:opacity-40">
             Record a tab
           </button>
           <OpenVideoButton className="flex h-8 items-center gap-1.5 rounded-lg bg-surface-2 px-3 text-xs text-ink hover:bg-surface-3 disabled:opacity-60" />

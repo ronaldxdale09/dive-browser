@@ -3,7 +3,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { uiStorage } from "../lib/uiStorage";
 import { events, ipc } from "../lib/ipc";
 import type { RecordingCapabilities, RecordingResult } from "../lib/ipc";
-import { useBrowser } from "./browser";
+import { tabInThisWindow, useBrowser } from "./browser";
 
 /**
  * Screen recording, start to finish: the setup dialog, a countdown, the
@@ -123,7 +123,8 @@ export const useRecording = create<RecordingState>()(
       openSetup: (tab) => {
         const { phase } = get();
         if (phase !== "idle" && phase !== "done") return;
-        const target = tab ?? useBrowser.getState().activeTab;
+        const { activeTab, detached } = useBrowser.getState();
+        const target = tab ?? tabInThisWindow(activeTab, detached);
         if (!target) return;
         listen();
         set({ phase: "setup", tab: target, result: null, error: null, limitHit: false });
