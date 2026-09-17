@@ -5,6 +5,16 @@ import { useBrowser } from "../../store/browser";
 import { KeepSitesActive } from "./KeepSitesActive";
 vi.mock("../../lib/ipc", () => ({ ipc: { keepSitesList: vi.fn(), keepSiteSet: vi.fn() } }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
+it("does not claim host and port without scheme", async () => {
+  useBrowser.setState({ activeProfile: "personal" });
+  vi.mocked(ipc.keepSitesList).mockResolvedValue([]);
+  render(<KeepSitesActive />);
+  await waitFor(() => expect(ipc.keepSitesList).toHaveBeenCalledWith("personal"));
+  const text = screen.getByText(/These site exceptions apply to this profile/).textContent ?? "";
+  expect(text).toMatch(/same origin/);
+  expect(text).not.toMatch(/address and port/);
+});
+
 it("adds and removes a site for the current profile and shows persistence errors", async () => {
   useBrowser.setState({ activeProfile: "personal" });
   vi.mocked(ipc.keepSitesList).mockResolvedValue([]);

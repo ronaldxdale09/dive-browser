@@ -29,7 +29,7 @@ function Sites({ profile }: { profile: string }) {
     } catch (cause) { setError(errorMessage(cause)); }
     finally { setBusy(false); }
   }
-  return <Group title="Keep sites active" description="Inactive Today tabs may unload after one hour and restore when opened. Pinned tabs and pages with ongoing activity stay active. These site exceptions apply to this profile, including every page at the same address and port.">
+  return <Group title="Keep sites active" description="Inactive Today tabs may unload after one hour and restore when opened. Pinned tabs and pages with ongoing activity stay active. These site exceptions apply to this profile, including every page at the same origin.">
     <form className="flex gap-2 py-3" onSubmit={(event) => { event.preventDefault(); if (!busy && url.trim()) void save(url.trim(), true); }}>
       <input aria-label="Site to keep active" type="url" placeholder="https://example.com" value={url} onChange={(event) => setUrl(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-line-2 bg-ground px-2 py-1.5 text-xs" />
       <button type="submit" disabled={busy || !url.trim()} className="rounded-lg border border-line-2 px-3 text-xs disabled:opacity-40">Add site</button>
