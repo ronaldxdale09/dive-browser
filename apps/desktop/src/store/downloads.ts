@@ -63,7 +63,7 @@ export function fold(items: Download[], notice: DownloadNotice, at = Date.now())
             // A finished download is whole by definition, whatever the last
             // progress report happened to say.
             ...(status === "finished" && d.total ? { received: d.total } : {}),
-            tabId: notice.tab ?? d.tabId,
+            tabId: notice.tab ?? d.tabId ?? null,
             ...(status === "started" ? {} : { speed: 0, paused: false }),
           }
         : d,

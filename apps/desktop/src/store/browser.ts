@@ -588,7 +588,10 @@ export const useBrowser = create<BrowserState>((set, get) => ({
           }), (off) => { unlistenWindowChanged = off; }),
           once(unlistenDownload, () => events.downloadNotice.listen(downloadNotice), (off) => { unlistenDownload = off; }),
           once(unlistenDownloadProgress, () => events.downloadProgress.listen((e) => useDownloads.getState().progress(e.payload)), (off) => { unlistenDownloadProgress = off; }),
-          once(unlistenZoom, () => events.tabZoom.listen((e) => get().applyZoom(e.payload.tab_id, e.payload.factor)), (off) => { unlistenZoom = off; }),
+          once(unlistenZoom, () => events.tabZoom.listen((e) => {
+            if (e.payload.factor == null) return;
+            get().applyZoom(e.payload.tab_id, e.payload.factor);
+          }), (off) => { unlistenZoom = off; }),
         ]);
         const [, , , candidate] = await Promise.all([listenConsole(), listenNetwork(), listenPrivacy(), snapshotCandidate(), usePrivacy.getState().loadInfo()]);
         if (candidate.isCurrent()) set(replaySnapshot(candidate.snapshot, candidate.events));
