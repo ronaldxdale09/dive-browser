@@ -15,7 +15,7 @@ export function Workspaces({ index }: SceneProps) {
   const { frame } = useScene();
   const active = frame >= 52 ? 1 : 0;
   return (
-    <Scene index={index} eyebrow="Organise" title="A workspace per project" text="Tabs, cookies and logins kept apart. Be signed in as two people at once without a second browser." keys="⌘1 – ⌘9">
+    <Scene index={index} eyebrow="Organise" title="A workspace per project" text="Tabs per project. Cookies stay with the profile unless a workspace asks for its own jar." keys="⌘1 – ⌘9">
       <Window>
         <div style={{ position: "absolute", inset: 0, display: "flex" }}>
           <div style={{ width: 180, borderRight: `1px solid ${T.line}`, padding: "10px 8px", background: T.ground }}>

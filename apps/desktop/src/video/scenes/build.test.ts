@@ -20,6 +20,12 @@ describe("feature tour agent scene", () => {
     expect(source).toMatch(/Sleeping tabs are omitted/);
     expect(source).toMatch(/workspace in front/);
   });
+
+  it("does not say every workspace keeps cookies apart", () => {
+    expect(source).not.toMatch(/Tabs, cookies and logins kept apart/);
+    expect(source).toMatch(/unless/);
+  });
 });
+
 
 
