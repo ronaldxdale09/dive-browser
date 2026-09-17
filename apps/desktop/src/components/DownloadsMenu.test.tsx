@@ -114,7 +114,7 @@ describe("opening a finished file", () => {
     expect(openTab).toHaveBeenCalledWith("file:///tmp/a%20paper.pdf");
     expect(open).not.toHaveBeenCalled();
     // The panel gets out of the way of the tab it just opened.
-    expect(screen.queryByRole("dialog", { name: "Downloads" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Downloads this session" })).toBeNull();
   });
 });
 
@@ -132,6 +132,44 @@ describe("clearing the list", () => {
   });
 });
 
+describe("this window's chip vs this session's list", () => {
+  const here = {
+    id: "tab-here",
+    workspace_id: "w",
+    tier: "today" as const,
+    url: "https://a.test/",
+    title: "Here",
+    favicon: null,
+    position: 0,
+    state: "active" as const,
+    last_active_at: "2026-09-03T00:00:00Z",
+  };
+  const away = { ...here, id: "tab-away", title: "Away", position: 1 };
+  const initialBrowser = useBrowser.getState();
+
+  afterEach(() => {
+    useBrowser.setState(initialBrowser, true);
+  });
+
+  it("does not present the session list as this window's in-progress count", () => {
+    useBrowser.setState({ tabs: [here, away], activeTab: here.id, detached: [away.id] });
+    useDownloads.setState({
+      items: [
+        { name: "here.bin", path: "/tmp/here.bin", url: "http://a.dev/here.bin", status: "started", at: 1, startedAt: 1, tabId: here.id } as never,
+        { name: "away.bin", path: "/tmp/away.bin", url: "http://a.dev/away.bin", status: "started", at: 2, startedAt: 2, tabId: away.id } as never,
+      ],
+    });
+    render(<DownloadsMenu />);
+    expect(screen.getByLabelText("1 in progress in this window")).toBeTruthy();
+    expect(screen.queryByLabelText("2 in progress in this window")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Downloads" }));
+    const dialog = screen.getByRole("dialog", { name: "Downloads this session" });
+    expect(dialog.textContent).toMatch(/This session/);
+    expect(screen.getByRole("progressbar", { name: "here.bin download" })).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "away.bin download" })).toBeTruthy();
+  });
+});
+
 describe("default download folder copy", () => {
   it("does not show ~/Downloads on Windows when the pref is empty", () => {
     Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
@@ -139,7 +177,7 @@ describe("default download folder copy", () => {
     useDownloads.setState({ items: [] });
     render(<DownloadsMenu />);
     fireEvent.click(screen.getByRole("button", { name: "Downloads" }));
-    expect(screen.getByRole("dialog", { name: "Downloads" }).textContent).not.toMatch(/~\//);
-    expect(screen.getByRole("dialog", { name: "Downloads" }).textContent).toMatch(/Downloads folder|USERPROFILE/);
+    expect(screen.getByRole("dialog", { name: "Downloads this session" }).textContent).not.toMatch(/~\//);
+    expect(screen.getByRole("dialog", { name: "Downloads this session" }).textContent).toMatch(/Downloads folder|USERPROFILE/);
   });
 });

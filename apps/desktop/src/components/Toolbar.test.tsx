@@ -375,9 +375,9 @@ describe("Toolbar", () => {
       ],
     });
     render(<Toolbar />);
-    expect(screen.getByLabelText("1 in progress")).toBeTruthy();
+    expect(screen.getByLabelText("1 in progress in this window")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Downloads" }));
-    expect(screen.getByRole("dialog", { name: "Downloads" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Downloads this session" })).toBeTruthy();
     expect(screen.getByText("report.pdf")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Show report.pdf in folder" }));
     expect(ipc.downloadsReveal).toHaveBeenCalledWith("/Users/me/Downloads/report.pdf");
@@ -395,8 +395,8 @@ describe("Toolbar", () => {
       ],
     });
     render(<Toolbar />);
-    expect(screen.getByLabelText("1 in progress")).toBeTruthy();
-    expect(screen.queryByLabelText("2 in progress")).toBeNull();
+    expect(screen.getByLabelText("1 in progress in this window")).toBeTruthy();
+    expect(screen.queryByLabelText("2 in progress in this window")).toBeNull();
   });
 
   it("renders the local guardian and an honest clean, globally-off state", () => {

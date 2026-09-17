@@ -82,15 +82,15 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
     <div ref={ref} className="relative">
       <FeatureButton icon={Download} label="Downloads" iconOnly={compact} active={open} hasPopup="dialog" onClick={() => setOpen((o) => !o)}>
         {active > 0 && (
-          <span className="ml-0.5 rounded-full bg-highlight px-1.5 py-px font-mono text-[10px] leading-4 text-highlight-ink" aria-label={`${active} in progress`}>
+          <span className="ml-0.5 rounded-full bg-highlight px-1.5 py-px font-mono text-[10px] leading-4 text-highlight-ink" aria-label={`${active} in progress in this window`}>
             {active}
           </span>
         )}
       </FeatureButton>
       {open && (
-        <div ref={panel} role="dialog" aria-label="Downloads" className="absolute right-0 z-50 mt-1 w-80 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl">
+        <div ref={panel} role="dialog" aria-label="Downloads this session" className="absolute right-0 z-50 mt-1 w-80 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl">
           <div className="flex items-center px-2 pt-1 pb-1.5">
-            <span className="text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">Downloads</span>
+            <span className="text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">This session</span>
             <span className="flex-1" />
             <span className="max-w-40 truncate font-mono text-[10px] text-ink-3" title={folder}>
               {folder}
