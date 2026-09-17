@@ -36,6 +36,20 @@ describe("tab style", () => {
     expect(items[0]!.className).not.toContain("bg-surface-2");
     expect(items[0]!.className).toContain("h-[calc(var(--row-h)-4px)]");
   });
+
+  it("names a squeezed tab on hover so a clipped title can still be read", () => {
+    useBrowser.setState({
+      tabs: [
+        { ...t("a", "today", 0), title: "A very long documentation page title" },
+        { ...t("d", "today", 1, "discarded"), title: "Sleeping docs" },
+      ],
+      activeTab: "a",
+    });
+    render(createElement(TabStrip));
+    const items = screen.getByRole("tablist", { name: "Tabs" }).querySelectorAll(".tab-item");
+    expect(items[0]!.getAttribute("title")).toBe("A very long documentation page title");
+    expect(items[1]!.getAttribute("title")).toBe("Sleeping docs (sleeping, click to wake)");
+  });
 });
 
 describe("Essentials rail", () => {

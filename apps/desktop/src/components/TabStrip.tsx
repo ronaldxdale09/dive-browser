@@ -33,6 +33,14 @@ export function tabLabel(t: Tab) {
 }
 const label = tabLabel;
 
+/** Hover text when the strip has squeezed the title away. */
+export function tabHoverTitle(t: Tab, detached = false): string {
+  const name = tabLabel(t);
+  if (detached) return `${name} (in its own window)`;
+  if (t.state === "discarded") return `${name} (sleeping, click to wake)`;
+  return name;
+}
+
 /** What the tab menu offers for split view, if anything. */
 export type SplitAction =
   /** The tab is already a pane: take it out. */
@@ -500,7 +508,7 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
       // few words; the others give way, as in every browser's strip.
       className={`tab-item group flex cursor-pointer items-center text-xs transition-colors ${vertical ? "h-7 w-full shrink-0" : `h-[calc(var(--row-h)-4px)] ${pinned ? "w-9 shrink-0 justify-center" : `${active ? "min-w-32" : "min-w-9"} w-56 max-w-56 shrink ${bare ? "justify-center" : ""}`}`} ${sleeping || detached ? "opacity-55 hover:opacity-100" : ""}`}
       data-active={active || undefined}
-      title={detached ? `${label(t)} (in its own window)` : sleeping ? `${label(t)} (sleeping, click to wake)` : pinned ? label(t) : undefined}
+      title={tabHoverTitle(t, detached)}
       data-sleeping={sleeping || undefined}
       data-detached={detached || undefined}
       data-pinned={pinned || undefined}
