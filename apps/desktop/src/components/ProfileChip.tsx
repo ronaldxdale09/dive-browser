@@ -7,6 +7,11 @@ import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 
+/** Hover name for a clipped profile: the person, and the note or count when that is different. */
+export function profileHoverTitle(name: string, detail: string): string {
+  return detail && detail !== name ? `${name} — ${detail}` : name;
+}
+
 /**
  * Who you are browsing as. A profile is a person: its own cookies and
  * logins, and its own workspaces in the rail. The menu switches profiles,
@@ -42,7 +47,7 @@ export function ProfileChip({ variant = "pill", placement = "below" }: { variant
       <button
         type="button"
         aria-label={`Profile: ${current.name}`}
-        title={variant === "avatar" ? `${current.name} — switch profile` : undefined}
+        title={variant === "avatar" ? `${current.name} — switch profile` : current.name}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
@@ -68,12 +73,14 @@ export function ProfileChip({ variant = "pill", placement = "below" }: { variant
           <p className="px-2.5 pt-1.5 pb-1 text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">Profiles</p>
           {profiles.map((p) => {
             const isCurrent = p.id === current.id;
+            const detail = p.note || `${spacesOf(p.id)} ${spacesOf(p.id) === 1 ? "workspace" : "workspaces"} · ${tabsOf(p.id)} ${tabsOf(p.id) === 1 ? "tab" : "tabs"}`;
             return (
               <button
                 key={p.id}
                 type="button"
                 role="menuitemradio"
                 aria-checked={isCurrent}
+                title={profileHoverTitle(p.name, detail)}
                 onClick={() => {
                   setOpen(false);
                   void activate(p.id);
@@ -83,7 +90,7 @@ export function ProfileChip({ variant = "pill", placement = "below" }: { variant
                 <AvatarImage kind="profile" seed={p.avatar} color={p.color} alt="" width={30} height={30} className="size-[30px] shrink-0 rounded-full" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{p.name}</span>
-                  <span className="block truncate text-[10.5px] text-ink-3">{p.note || `${spacesOf(p.id)} ${spacesOf(p.id) === 1 ? "workspace" : "workspaces"} · ${tabsOf(p.id)} ${tabsOf(p.id) === 1 ? "tab" : "tabs"}`}</span>
+                  <span className="block truncate text-[10.5px] text-ink-3">{detail}</span>
                 </span>
                 <span className="grid shrink-0 place-items-center text-ink-3" title="Own cookies and logins">
                   <Icon icon={Shield} size={12} />

@@ -21,6 +21,15 @@ afterEach(() => {
 });
 
 describe("ProfileChip", () => {
+  it("names a clipped profile on hover in the chip and the menu", () => {
+    render(<ProfileChip />);
+    expect(screen.getByRole("button", { name: "Profile: Ronald" }).getAttribute("title")).toBe("Ronald");
+    fireEvent.click(screen.getByRole("button", { name: "Profile: Ronald" }));
+    const items = screen.getAllByRole("menuitemradio");
+    expect(items[0]!.getAttribute("title")).toBe("Ronald — 2 workspaces · 4 tabs");
+    expect(items[1]!.getAttribute("title")).toBe("Work — ronald@company.com");
+  });
+
   it("names the profile you are in and lists the others with their workspaces", () => {
     render(<ProfileChip />);
     fireEvent.click(screen.getByRole("button", { name: "Profile: Ronald" }));
