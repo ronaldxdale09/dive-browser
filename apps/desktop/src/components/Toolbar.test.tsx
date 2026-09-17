@@ -133,6 +133,16 @@ describe("Toolbar", () => {
     expect(document.activeElement).toBe(forward);
   });
 
+  it("names the full resting address on hover when the path is clipped", () => {
+    const url = "https://example.com/docs/a-very-long-path/that-will-clip";
+    useBrowser.setState({ tabs: [{ ...tab, url }] });
+    render(<Toolbar />);
+    const input = screen.getByRole("combobox", { name: "Address" });
+    expect(input.getAttribute("title")).toBe("example.com/docs/a-very-long-path/that-will-clip");
+    act(() => input.focus());
+    expect(input.getAttribute("title")).toBeNull();
+  });
+
   it("shows and selects the complete URL when editing, including scheme and fragment", async () => {
     const url = "https://example.com/docs?q=hello#details";
     useBrowser.setState({ tabs: [{ ...tab, url }] });

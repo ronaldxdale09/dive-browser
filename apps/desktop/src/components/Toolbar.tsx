@@ -155,6 +155,7 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
           <input
             ref={inputRef}
             aria-label="Address"
+            title={!editing && display ? display : undefined}
             value={editing ? value : display}
             onChange={(e) => setValue(e.target.value)}
             onFocus={(e) => {
