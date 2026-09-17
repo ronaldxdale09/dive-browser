@@ -82,6 +82,15 @@ describe("Library dialog", () => {
     }
   });
 
+  it("names a clipped bookmark and history row on hover so a keep can still be read", async () => {
+    render(<Library />);
+    const docs = (await screen.findByText("Example docs")).closest("button");
+    expect(docs?.getAttribute("title")).toBe("Example docs — docs.example.com");
+    fireEvent.click(screen.getByRole("tab", { name: "History" }));
+    const page = (await screen.findByText("A")).closest("button");
+    expect(page?.getAttribute("title")).toBe("A — a.test");
+  });
+
   it("covers the page, lists bookmarks, filters them, and opens one in the current tab", async () => {
     render(<Library />);
     expect(screen.getByRole("dialog", { name: "Library" })).toBeTruthy();

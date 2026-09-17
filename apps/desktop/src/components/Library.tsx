@@ -107,6 +107,20 @@ export function matches(query: string, title: string, url: string): boolean {
   return !q || title.toLowerCase().includes(q) || url.toLowerCase().includes(q);
 }
 
+function host(url: string) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "";
+  }
+}
+
+/** Hover name for a clipped Library row: the page, and its host when that is different. */
+export function libraryRowTitle(name: string, url: string): string {
+  const place = host(url);
+  return place && place !== name ? `${name} — ${place}` : name;
+}
+
 /** Open a row: in the current tab by default, a new one with the platform modifier. */
 function useOpenRow(onOpened: () => void) {
   const navigate = useBrowser((s) => s.navigate);
@@ -128,7 +142,7 @@ function BookmarkRow({
 }) {
   return (
     <div className="group flex items-center gap-1">
-      <button type="button" onClick={(e) => onOpen(e, b.url)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
+      <button type="button" title={libraryRowTitle(titleOf(b), b.url)} onClick={(e) => onOpen(e, b.url)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
         <Favicon src={b.favicon} size={14} fallback={Star} fallbackClassName="text-highlight" />
         <span className="truncate text-ink">{titleOf(b)}</span>
         <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(b.url)}</span>
@@ -309,7 +323,7 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
           <ul className="flex flex-col">
             {g.entries.map((h) => (
               <li key={h.url} className="group flex items-center gap-1">
-                <button type="button" onClick={(e) => open(e, h.url)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
+                <button type="button" title={libraryRowTitle(titleOf(h), h.url)} onClick={(e) => open(e, h.url)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
                   <Favicon src={h.favicon} size={14} fallback={History} />
                   <span className="truncate text-ink">{titleOf(h)}</span>
                   <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(h.url)}</span>
@@ -337,14 +351,6 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
 /** The filter left nothing to show. */
 function NoMatch() {
   return <EmptyState icon={Search} title="Nothing matches" hint="Try a shorter filter" />;
-}
-
-function host(url: string) {
-  try {
-    return new URL(url).host;
-  } catch {
-    return "";
-  }
 }
 
 /** This session's downloads, newest first, with a way to the file. */
