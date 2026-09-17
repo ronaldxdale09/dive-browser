@@ -29,6 +29,13 @@ describe("Settings › Shortcuts chrome rows", () => {
 });
 
 describe("Settings › Shortcuts", () => {
+  it("does not claim every command is in the palette", () => {
+    render(<Shortcuts />);
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/Every command is also in the palette/);
+    expect(text).toMatch(/commands that apply here/);
+  });
+
   it("does not name ⌘K for the command palette on Windows", () => {
     Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
     render(<Shortcuts />);

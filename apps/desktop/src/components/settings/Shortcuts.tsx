@@ -18,7 +18,7 @@ export function Shortcuts() {
   const chrome = chromeChords(cmds);
   const palette = formatChord(chordsByCommand()["palette.open"] ?? "mod+k");
   return (
-    <Group title="Keyboard" description={`Every command is also in the palette (${palette}), which searches tabs, history, bookmarks and local servers.`}>
+    <Group title="Keyboard" description={`The palette (${palette}) searches tabs, history, bookmarks, local servers and commands that apply here.`}>
       {bound.map((c) => (
         <div key={c.id} className="flex items-center gap-4 border-b border-line py-2.5 last:border-b-0">
           <span className="min-w-0 flex-1 truncate text-xs text-ink">{c.title}</span>
