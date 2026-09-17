@@ -22,6 +22,14 @@ afterEach(() => {
 });
 
 describe("RulesPanel", () => {
+  it("does not say workspace rules apply to every tab without naming media", () => {
+    useRules.setState({ byWorkspace: { w1: [newRule()] } });
+    render(<RulesPanel />);
+    const text = screen.getByText(/First enabled match/).textContent ?? "";
+    expect(text).not.toMatch(/every tab/);
+    expect(text).toMatch(/media is not intercepted/i);
+  });
+
   it("a new rule starts off and hands focus to its pattern", async () => {
     expect(newRule().enabled).toBe(false);
     render(

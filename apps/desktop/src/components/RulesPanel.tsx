@@ -67,7 +67,7 @@ export function RulesPanel() {
       ))}
       <p className="px-3 py-2 text-[11px] text-ink-3">
         <Icon icon={Plus} size={11} className="mr-1 inline" />
-        First enabled match wins. Applies to every tab in this workspace, including agent and MCP navigation.
+        First enabled match wins. Applies to this workspace's tabs, including agent and MCP navigation. Media is not intercepted.
       </p>
     </div>
   );
