@@ -1,8 +1,9 @@
 import { CreditCard, MapPin, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Group, Row } from "../SettingsFields";
 import { Icon } from "../Icon";
 import type { Address } from "../../lib/ipc";
+import { useFocusTrap } from "../../lib/useFocusTrap";
 import { BLANK_ADDRESS, describeCard, useWallet } from "../../store/wallet";
 import { credentialStoreName } from "../../lib/commands";
 
@@ -85,6 +86,9 @@ const field = "h-8 w-full rounded-lg border border-line-2 bg-surface-2 px-2.5 te
 function AddressForm({ address, onClose }: { address: Address; onClose: () => void }) {
   const save = useWallet((s) => s.saveAddress);
   const [draft, setDraft] = useState(address);
+  const root = useRef<HTMLDivElement>(null);
+  const first = useRef<HTMLInputElement>(null);
+  useFocusTrap(root, { initialFocus: first, onEscape: onClose });
   const set = (key: keyof Address, value: string) => setDraft((was) => ({ ...was, [key]: value }));
   const submit = async () => {
     if (await save(draft)) onClose();
@@ -97,12 +101,15 @@ function AddressForm({ address, onClose }: { address: Address; onClose: () => vo
   );
   return (
     <div className="overlay-backdrop fixed inset-0 z-50 grid place-items-center" onMouseDown={onClose}>
-      <div onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={address.id ? "Edit address" : "Add address"} className="w-[min(520px,calc(100vw-32px))] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl">
+      <div ref={root} onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={address.id ? "Edit address" : "Add address"} className="w-[min(520px,calc(100vw-32px))] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl">
         <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
           <Icon icon={MapPin} size={14} /> {address.id ? "Edit address" : "Add address"}
         </h2>
         <div className="grid grid-cols-2 gap-2.5">
-          {input("label", "Label", "Home")}
+          <label className="flex flex-col gap-1 text-[11px] text-ink-3">
+            Label
+            <input ref={first} className={field} value={draft.label} placeholder="Home" onChange={(e) => set("label", e.target.value)} />
+          </label>
           {input("name", "Full name")}
           {input("organization", "Company")}
           {input("phone", "Phone")}
@@ -134,13 +141,16 @@ function CardForm({ onClose }: { onClose: () => void }) {
   const [number, setNumber] = useState("");
   const [month, setMonth] = useState("");
   const [year, setYear] = useState("");
+  const root = useRef<HTMLDivElement>(null);
+  const first = useRef<HTMLInputElement>(null);
+  useFocusTrap(root, { initialFocus: first, onEscape: onClose });
   const submit = async () => {
     const ok = await save({ label, cardholder, number, expiry_month: Number(month) || 0, expiry_year: Number(year) || 0 });
     if (ok) onClose();
   };
   return (
     <div className="overlay-backdrop fixed inset-0 z-50 grid place-items-center" onMouseDown={onClose}>
-      <div onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Add card" className="w-[min(460px,calc(100vw-32px))] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl">
+      <div ref={root} onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Add card" className="w-[min(460px,calc(100vw-32px))] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl">
         <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
           <Icon icon={CreditCard} size={14} /> Add card
         </h2>
@@ -148,7 +158,7 @@ function CardForm({ onClose }: { onClose: () => void }) {
         <div className="grid grid-cols-2 gap-2.5">
           <label className="flex flex-col gap-1 text-[11px] text-ink-3">
             Label
-            <input className={field} value={label} placeholder="Personal" onChange={(e) => setLabel(e.target.value)} />
+            <input ref={first} className={field} value={label} placeholder="Personal" onChange={(e) => setLabel(e.target.value)} />
           </label>
           <label className="flex flex-col gap-1 text-[11px] text-ink-3">
             Name on card
