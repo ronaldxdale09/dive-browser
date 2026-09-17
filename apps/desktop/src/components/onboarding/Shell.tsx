@@ -22,6 +22,7 @@ export function stepLabel(step: (typeof STEPS)[number]): string {
  */
 export function Shell({ children }: { children: ReactNode }) {
   const stage = useOnboarding((s) => s.stage);
+  const skipped = useOnboarding((s) => s.skipped);
   const at = STEPS.indexOf(stage as (typeof STEPS)[number]);
   return (
     <div role="dialog" aria-label="Set up Dive" className="fixed inset-0 z-[60] bg-ground text-ink">
@@ -29,11 +30,12 @@ export function Shell({ children }: { children: ReactNode }) {
       <div className="relative z-10 flex h-full flex-col">
         <ol aria-label="Setup steps" className="flex shrink-0 items-center justify-center gap-6 pt-7">
           {STEPS.map((step, i) => {
-            const state = i < at ? "past" : i === at ? "current" : "todo";
+            const state = i === at ? "current" : i < at ? (skipped.includes(step) ? "skipped" : "past") : "todo";
             return (
               <li key={step} aria-current={state === "current" ? "step" : undefined} data-state={state} className="onboarding-step flex items-center gap-2 font-mono text-[10.5px] tracking-[0.16em] uppercase">
                 <span className="onboarding-step-dot grid size-5 place-items-center rounded-full border text-[9px]">{i + 1}</span>
                 {TITLES[step]}
+                {state === "skipped" && <span className="sr-only">skipped</span>}
               </li>
             );
           })}
@@ -51,8 +53,9 @@ export function Shell({ children }: { children: ReactNode }) {
 }
 
 /** Shared footer: back on the left when there is somewhere to go, the primary on the right. */
-export function StepActions({ primary, disabled = false, onPrimary, skip }: { primary: string; disabled?: boolean; onPrimary: () => void; skip?: (() => void) | undefined }) {
+export function StepActions({ primary, disabled = false, onPrimary, skip = false }: { primary: string; disabled?: boolean; onPrimary: () => void; skip?: boolean }) {
   const back = useOnboarding((s) => s.back);
+  const skipStep = useOnboarding((s) => s.skip);
   const stage = useOnboarding((s) => s.stage);
   const first = stage === STEPS[0];
   return (
@@ -64,7 +67,7 @@ export function StepActions({ primary, disabled = false, onPrimary, skip }: { pr
       )}
       <span className="flex-1" />
       {skip && (
-        <button type="button" onClick={skip} className="pressable h-9 rounded-full px-3.5 text-xs text-ink-3 hover:bg-surface-2 hover:text-ink">
+        <button type="button" onClick={skipStep} className="pressable h-9 rounded-full px-3.5 text-xs text-ink-3 hover:bg-surface-2 hover:text-ink">
           Skip
         </button>
       )}

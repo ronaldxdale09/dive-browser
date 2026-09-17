@@ -10,7 +10,7 @@ const platform = Object.getOwnPropertyDescriptor(navigator, "platform");
 
 beforeEach(() => {
   vi.spyOn(ipc, "browserImportSources").mockImplementation(() => new Promise(() => {}));
-  useOnboarding.setState({ stage: "import" });
+  useOnboarding.setState({ stage: "import", skipped: [] });
 });
 
 afterEach(() => {

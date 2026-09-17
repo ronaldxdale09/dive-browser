@@ -38,7 +38,7 @@ export function ImportStep() {
       <div className="mt-5">
         <ImportPanel />
       </div>
-      <StepActions primary="Continue" onPrimary={next} skip={outcome || nothing ? undefined : next} />
+      <StepActions primary="Continue" onPrimary={next} skip={!outcome && !nothing} />
     </div>
   );
 }

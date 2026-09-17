@@ -86,7 +86,7 @@ export function ProfileStep() {
           </div>
         </div>
       </div>
-      <StepActions primary={saving ? "Saving…" : "Continue"} disabled={!profile || saving} onPrimary={() => void submit()} skip={next} />
+      <StepActions primary={saving ? "Saving…" : "Continue"} disabled={!profile || saving} onPrimary={() => void submit()} skip />
     </form>
   );
 }

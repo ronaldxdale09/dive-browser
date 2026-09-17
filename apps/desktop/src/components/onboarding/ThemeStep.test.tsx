@@ -7,7 +7,7 @@ import { ThemeStep } from "./ThemeStep";
 
 beforeEach(() => {
   usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
-  useOnboarding.setState({ stage: "theme" });
+  useOnboarding.setState({ stage: "theme", skipped: [] });
   vi.spyOn(ipc, "prefsSet").mockImplementation(async (p) => p);
 });
 afterEach(() => {

@@ -39,7 +39,7 @@ beforeEach(() => {
   vi.spyOn(ipc, "browserImportSources").mockResolvedValue([]);
   vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
-  useOnboarding.setState({ stage: null });
+  useOnboarding.setState({ stage: null, skipped: [] });
 });
 
 afterEach(() => {
@@ -136,7 +136,7 @@ describe("Onboarding", () => {
 
   it("lets a step be skipped and walked back", async () => {
     usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
-    act(() => useOnboarding.setState({ stage: "profile" }));
+    act(() => useOnboarding.setState({ stage: "profile", skipped: [] }));
     render(<Onboarding />);
     fireEvent.click(screen.getByRole("button", { name: "Skip" }));
     expect(await screen.findByRole("heading", { name: "Make it yours" })).toBeTruthy();
@@ -147,13 +147,16 @@ describe("Onboarding", () => {
   });
 
   it("does not mark a skipped setup step as done", async () => {
-    // Skip writes nothing. A filled "done" dot claims the step ran.
+    // Skip writes nothing. A filled "past" or "done" dot claims the step ran.
     usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
-    act(() => useOnboarding.setState({ stage: "profile" }));
+    act(() => useOnboarding.setState({ stage: "profile", skipped: [] }));
     render(<Onboarding />);
     fireEvent.click(screen.getByRole("button", { name: "Skip" }));
     expect(await screen.findByRole("heading", { name: "Make it yours" })).toBeTruthy();
-    expect(screen.getByText("Profile").closest("li")?.getAttribute("data-state")).toBe("past");
-    expect(screen.getByText("Profile").closest("li")?.getAttribute("data-state")).not.toBe("done");
+    const profile = screen.getByText("Profile").closest("li");
+    expect(profile?.getAttribute("data-state")).toBe("skipped");
+    expect(profile?.getAttribute("data-state")).not.toBe("past");
+    expect(profile?.getAttribute("data-state")).not.toBe("done");
+    expect(profile?.textContent).toMatch(/skipped/i);
   });
 });

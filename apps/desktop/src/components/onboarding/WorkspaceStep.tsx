@@ -99,7 +99,7 @@ export function WorkspaceStep() {
           </div>
         </div>
       </div>
-      <StepActions primary={saving ? "Saving…" : "Continue"} disabled={saving} onPrimary={() => void submit()} skip={next} />
+      <StepActions primary={saving ? "Saving…" : "Continue"} disabled={saving} onPrimary={() => void submit()} skip />
     </form>
   );
 }

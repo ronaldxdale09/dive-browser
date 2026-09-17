@@ -4,7 +4,7 @@ import { STAGES, shouldOnboard, useOnboarding, STEPS } from "./onboarding";
 import { DEFAULT_PREFS, usePrefs } from "./prefs";
 
 afterEach(() => {
-  useOnboarding.setState({ stage: null });
+  useOnboarding.setState({ stage: null, skipped: [] });
   usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: false });
   vi.restoreAllMocks();
 });
@@ -48,6 +48,21 @@ describe("onboarding flow", () => {
     await vi.waitFor(() => expect(usePrefs.getState().prefs.onboarded).toBe(true));
     expect(useOnboarding.getState().stage).toBeNull();
     expect(write).toHaveBeenLastCalledWith(expect.objectContaining({ onboarded: true }));
+  });
+
+  it("records a skipped setup step as skipped, not done, and Continue after Back clears it", () => {
+    useOnboarding.getState().begin();
+    useOnboarding.getState().skipIntro();
+    useOnboarding.getState().next(); // start → profile
+    useOnboarding.getState().skip();
+    expect(useOnboarding.getState().stage).toBe("theme");
+    expect(useOnboarding.getState().skipped).toEqual(["profile"]);
+    useOnboarding.getState().back();
+    expect(useOnboarding.getState().stage).toBe("profile");
+    expect(useOnboarding.getState().skipped).toEqual(["profile"]);
+    useOnboarding.getState().next();
+    expect(useOnboarding.getState().stage).toBe("theme");
+    expect(useOnboarding.getState().skipped).toEqual([]);
   });
 
   it("replays from the intro and forgets that it was done", async () => {
