@@ -56,7 +56,7 @@ export function Developer({ info }: { info: AppInfo | null }) {
       <Group title="Tabs">
         <Row
           label="Open DevTools with new tabs"
-          hint="Every tab opens with the Chromium inspector already attached."
+          hint="Opens the inspector when a tab's view is created, including restore at launch. Tabs already on screen stay as they are."
           control={<Switch label="Open DevTools with new tabs" checked={prefs.devtools_on_open} onChange={(devtools_on_open) => set({ devtools_on_open })} />}
         />
       </Group>

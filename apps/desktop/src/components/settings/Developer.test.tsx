@@ -33,6 +33,12 @@ describe("Developer › MCP setup", () => {
     expect(json.mcpServers.dive.headers.Authorization).toBe("Bearer abc123");
   });
 
+  it("does not say every tab opens with the inspector", () => {
+    render(<Developer info={info} />);
+    expect(document.body.textContent).not.toMatch(/Every tab opens/);
+    expect(document.body.textContent).toMatch(/already on screen stay as they are/);
+  });
+
   it("does not advertise MCP setup in a private window", () => {
     const privateWindow = window as Window & { __DIVE_PRIVATE__?: boolean };
     privateWindow.__DIVE_PRIVATE__ = true;
