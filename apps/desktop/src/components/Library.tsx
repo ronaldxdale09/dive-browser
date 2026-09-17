@@ -529,7 +529,7 @@ function AppRow({ app, onOpen, onRemove }: { app: WebApp; onOpen: () => void; on
   const icon = useWebAppIcon(app.id);
   return (
     <div className="group flex items-center gap-1">
-      <button type="button" onClick={onOpen} className="flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
+      <button type="button" title={libraryRowTitle(app.name, app.start_url)} onClick={onOpen} className="flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
         {icon ? (
           <img src={icon} alt="" width={20} height={20} className="size-5 shrink-0 rounded-md" />
         ) : (

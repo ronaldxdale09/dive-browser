@@ -4,10 +4,12 @@ import { ipc } from "../lib/ipc";
 import { contentCoverDepth, resetContentCover } from "../lib/overlay";
 import { useImportVideo } from "../screen/importVideo";
 import { useBrowser } from "../store/browser";
+import { useWebApps } from "../store/webapps";
 import { screenUrl } from "./internal/InternalPage";
 import { Library, dayLabel, groupByDay, matches, timeLabel } from "./Library";
 
 const initial = useBrowser.getState();
+const initialWebApps = useWebApps.getState();
 // Local-time dates: day boundaries depend on the machine's zone.
 const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h).toISOString();
 const now = new Date(2026, 8, 4, 12);
@@ -33,6 +35,7 @@ afterEach(() => {
   cleanup();
   resetContentCover();
   useBrowser.setState(initial, true);
+  useWebApps.setState(initialWebApps, true);
   useImportVideo.setState({ busy: false });
   vi.restoreAllMocks();
 });
@@ -80,6 +83,31 @@ describe("Library dialog", () => {
     } finally {
       Reflect.deleteProperty(window, "__DIVE_PRIVATE__");
     }
+  });
+
+  it("names a clipped installed app on hover so it can still be read", async () => {
+    vi.spyOn(ipc, "webappsList").mockResolvedValue([
+      {
+        id: "https://mail.example/",
+        name: "Mail by Example",
+        short_name: "Mail",
+        start_url: "https://mail.example/inbox",
+        scope: "https://mail.example/",
+        display: "standalone",
+        theme_color: null,
+        background_color: null,
+        icon_path: "/data/icon.png",
+        manifest_url: "https://mail.example/m.json",
+        created_at: "",
+        last_opened_at: null,
+        bounds: "",
+      },
+    ]);
+    vi.spyOn(ipc, "webappIcon").mockResolvedValue(null);
+    render(<Library />);
+    fireEvent.click(screen.getByRole("tab", { name: "Apps" }));
+    const row = (await screen.findByText("Mail by Example")).closest("button");
+    expect(row?.getAttribute("title")).toBe("Mail by Example — mail.example");
   });
 
   it("names a clipped bookmark and history row on hover so a keep can still be read", async () => {
