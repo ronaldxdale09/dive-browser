@@ -140,6 +140,13 @@ describe("Rail", () => {
     expect(screen.queryByRole("button", { name: /build$/ })).toBeNull();
   });
 
+  it("names a clipped workspace in the context-menu header", () => {
+    render(<Rail />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: /^Client/ }));
+    const name = screen.getByRole("menu", { name: "Client" }).querySelector(".truncate");
+    expect(name?.getAttribute("title")).toBe("Client");
+  });
+
   it("confirms before deleting a workspace and its tabs", () => {
     const remove = vi.fn().mockResolvedValue(undefined);
     useBrowser.setState({ deleteWorkspace: remove });

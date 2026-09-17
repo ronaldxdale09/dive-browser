@@ -418,7 +418,7 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
       >
         <div className="flex items-center gap-2 px-2 pt-1 pb-2">
           <AvatarImage kind="workspace" seed={workspace.icon} color={workspace.color} alt="" width={20} height={20} className="size-5 rounded-md" />
-          <span className="min-w-0 flex-1 truncate text-xs font-medium text-ink">{workspace.name}</span>
+          <span className="min-w-0 flex-1 truncate text-xs font-medium text-ink" title={workspace.name}>{workspace.name}</span>
           <span className="font-mono text-[10px] text-ink-3">{count}</span>
         </div>
         {confirming ? (
