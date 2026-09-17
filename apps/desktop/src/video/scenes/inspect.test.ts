@@ -20,6 +20,12 @@ describe("feature tour inspect scene", () => {
     expect(source).not.toMatch(/applied before the request leaves/);
     expect(source).toMatch(/media is not intercepted/i);
   });
+
+  it("does not say the simulator is a real viewport", () => {
+    expect(source).not.toMatch(/Real viewport/);
+    expect(source).toMatch(/CSS viewport/);
+    expect(source).toMatch(/scaled to fit/);
+  });
 });
 
 

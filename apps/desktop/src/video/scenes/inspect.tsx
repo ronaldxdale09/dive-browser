@@ -216,7 +216,7 @@ export function Mobile({ index }: SceneProps) {
   const width = interpolate(p, [0, 1], [560, 214]);
   const narrow = width < 380;
   return (
-    <Scene index={index} eyebrow="Emulate" title="Mobile simulator" text="Real viewport, pixel ratio and touch, plus throttled networks and media features. Presets for the phones you actually test on.">
+    <Scene index={index} eyebrow="Emulate" title="Mobile simulator" text="The page sees the preset's CSS viewport, pixel ratio and touch, plus throttled networks and media features. The frame is scaled to fit.">
       <Window url="acme.test">
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 28 }}>
           <div style={{ width, height: 300, borderRadius: narrow ? 26 : 10, border: `${narrow ? 6 : 1}px solid ${narrow ? T.surface3 : T.line2}`, background: T.ground, overflow: "hidden", position: "relative", transition: "none" }}>
