@@ -158,7 +158,7 @@ export function AgentActs({ index }: SceneProps) {
   const { fps } = useVideoConfig();
   const allowed = frame >= 104;
   return (
-    <Scene index={index} eyebrow="Delegate" title="An agent that acts" text="Ask in plain words. It inspects the page, fills, clicks and navigates — and asks before anything irreversible." keys="⌘J">
+    <Scene index={index} eyebrow="Delegate" title="An agent that acts" text="Ask in plain words. It inspects the page, fills, clicks and navigates — and asks before costly actions. That is a floor, not a guarantee." keys="⌘J">
       <Window url="app.local/signup">
         <div style={{ position: "absolute", inset: 0, display: "flex" }}>
           <div style={{ flex: 1, padding: "28px 34px" }}>
