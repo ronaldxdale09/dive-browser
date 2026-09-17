@@ -25,6 +25,11 @@ describe("feature tour agent scene", () => {
     expect(source).not.toMatch(/Tabs, cookies and logins kept apart/);
     expect(source).toMatch(/unless/);
   });
+
+  it("does not say any page becomes a QR code", () => {
+    expect(source).not.toMatch(/Any page becomes a QR/);
+    expect(source).toMatch(/http or https/);
+  });
 });
 
 

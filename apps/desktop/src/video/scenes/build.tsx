@@ -259,7 +259,7 @@ export function Localhost({ index }: SceneProps) {
   const { frame } = useScene();
   const qr = ramp(frame, 58, 92);
   return (
-    <Scene index={index} eyebrow="Share" title="Localhost, found and shared" text="Dev servers show up in the palette by themselves. Any page becomes a QR code that opens on your phone over the LAN.">
+    <Scene index={index} eyebrow="Share" title="Localhost, found and shared" text="Dev servers show up in the palette by themselves. An http or https page becomes a QR code that opens on your phone over the LAN.">
       <Window bare>
         <div style={{ position: "absolute", inset: 0, display: "flex" }}>
           <div style={{ flex: 1, padding: 14 }}>
