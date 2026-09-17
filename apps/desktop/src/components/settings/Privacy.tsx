@@ -300,7 +300,7 @@ export function Privacy() {
         <Row
           label="Keep history for"
           htmlFor="pref-history"
-          hint="Older visits are dropped from the address bar and the palette."
+          hint="Older visits are dropped from history, the address bar and the palette."
           control={
             <Select
               id="pref-history"

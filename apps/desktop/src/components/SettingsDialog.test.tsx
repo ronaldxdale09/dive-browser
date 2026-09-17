@@ -148,6 +148,15 @@ describe("SettingsDialog", () => {
     expect(screen.queryByLabelText("Blocked hosts")).toBeNull();
   });
 
+  it("does not say older visits leave only the address bar and palette", () => {
+    render(<SettingsDialog />);
+    fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
+    const hint = screen.getByText(/Older visits are dropped/).textContent ?? "";
+    expect(hint).toMatch(/from history/);
+    expect(hint).toMatch(/address bar/);
+    expect(hint).toMatch(/palette/);
+  });
+
   it("disables YouTube protection while DivePrivacy is off", () => {
     render(<SettingsDialog />);
     fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
