@@ -59,7 +59,7 @@ export function FeaturesStep() {
     <div>
       <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">{stepLabel("features")}</p>
       <h2 ref={heading} tabIndex={-1} className="mt-1 text-lg font-semibold tracking-[-0.02em] outline-none">What's inside</h2>
-      <p className="mt-0.5 text-xs text-ink-3">Everything is a keystroke away, and {displayChord("⌘K")} finds the rest.</p>
+      <p className="mt-0.5 text-xs text-ink-3">Each of these has a keystroke, and {displayChord("⌘K")} finds commands that apply here.</p>
       <ul className="mt-4 divide-y divide-line" aria-label="Features">
         {FEATURES.map((f, i) => (
           <li key={f.title} className="feature-card flex items-center gap-3 py-2" style={{ "--i": i } as React.CSSProperties}>

@@ -35,6 +35,14 @@ describe("FeaturesStep", () => {
     expect(document.body.textContent).toMatch(/Settings › Apps › Default apps/);
   });
 
+  it("does not say everything is a keystroke or that the palette finds the rest", () => {
+    render(<FeaturesStep />);
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/Everything is a keystroke away/);
+    expect(text).not.toMatch(/finds the rest/);
+    expect(text).toMatch(/commands that apply here/);
+  });
+
   it("does not say ads are blocked in the engine before finish writes the pref", () => {
     render(<FeaturesStep />);
     expect(document.body.textContent).not.toMatch(/In the engine/);
@@ -54,6 +62,6 @@ describe("FeaturesStep", () => {
     expect(document.body.textContent).toMatch(/Ctrl\+J/);
     expect(document.body.textContent).toMatch(/Ctrl\+Shift\+D/);
     expect(document.body.textContent).toMatch(/Ctrl\+Shift\+R/);
-    expect(document.body.textContent).toMatch(/Ctrl\+K finds the rest/);
+    expect(document.body.textContent).toMatch(/Ctrl\+K finds commands that apply here/);
   });
 });
