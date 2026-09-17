@@ -162,6 +162,17 @@ describe("Onboarding", () => {
     expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "New tab" }));
   });
 
+  it("wraps the setup rail so a short window does not clip a step", async () => {
+    usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
+    act(() => useOnboarding.setState({ stage: "profile", skipped: [] }));
+    render(<Onboarding />);
+    const rail = await screen.findByRole("list", { name: "Setup steps" });
+    expect(rail.className).toMatch(/flex-wrap/);
+    for (const name of ["Profile", "Theme", "Import", "Workspace", "What's inside"]) {
+      expect(within(rail).getByText(name)).toBeTruthy();
+    }
+  });
+
   it("does not mark a skipped setup step as done", async () => {
     // Skip writes nothing. A filled "past" or "done" dot claims the step ran.
     usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });

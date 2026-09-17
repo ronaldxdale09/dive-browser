@@ -31,7 +31,7 @@ export function Shell({ children }: { children: ReactNode }) {
     <div ref={root} role="dialog" aria-label="Set up Dive" className="fixed inset-0 z-[60] bg-ground text-ink">
       <Backdrop />
       <div className="relative z-10 flex h-full flex-col">
-        <ol aria-label="Setup steps" className="flex shrink-0 items-center justify-center gap-6 pt-7">
+        <ol aria-label="Setup steps" className="flex shrink-0 flex-wrap items-center justify-center gap-x-6 gap-y-2 px-4 pt-7">
           {STEPS.map((step, i) => {
             const state = i === at ? "current" : i < at ? (skipped.includes(step) ? "skipped" : "past") : "todo";
             return (
