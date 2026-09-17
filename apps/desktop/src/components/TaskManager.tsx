@@ -13,6 +13,7 @@ export const SAMPLE_MS = 2000;
 /** Bytes as a browser shows them: whole megabytes, which is the scale that matters here. */
 export function formatMemory(bytes: number | null): string {
   if (bytes === null) return "—";
+  if (bytes === 0) return "0 KB";
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${Math.round(bytes / (1024 * 1024))} MB`;
 }
@@ -94,7 +95,7 @@ export function TaskManager() {
       >
         <div className="flex items-center gap-2 border-b border-line px-4 py-3">
           <h2 className="text-sm font-semibold">Task manager</h2>
-          <span className="text-[11px] text-ink-3">{formatMemory(total)} of JavaScript{holders > 0 ? ` in ${holders} ${holders === 1 ? "tab" : "tabs"}` : ""}</span>
+          <span className="text-[11px] text-ink-3">{holders > 0 ? `${formatMemory(total)} of JavaScript in ${holders} ${holders === 1 ? "tab" : "tabs"}` : "No JavaScript heap reported"}</span>
           <button type="button" aria-label="Close" onClick={() => toggle("tasks", false)} className="ml-auto grid size-6 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink">
             <Icon icon={X} size={12} />
           </button>

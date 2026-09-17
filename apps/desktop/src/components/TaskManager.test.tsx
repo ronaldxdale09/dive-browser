@@ -39,8 +39,9 @@ describe("formatMemory", () => {
   it("reads in the scale a person acts on", () => {
     expect(formatMemory(48 * 1024 * 1024)).toBe("48 MB");
     expect(formatMemory(200 * 1024)).toBe("200 KB");
-    // Never "0 KB" for a renderer that is holding something.
+    // A renderer holding a handful of bytes is not free; a zero sum is.
     expect(formatMemory(12)).toBe("1 KB");
+    expect(formatMemory(0)).toBe("0 KB");
     expect(formatMemory(null)).toBe("—");
   });
 });
@@ -74,6 +75,19 @@ describe("TaskManager", () => {
     expect(dialog.textContent).toContain("asleep");
     // The first sample has no rate to show yet.
     expect(dialog.textContent).toContain("—");
+  });
+
+  it("does not invent a JavaScript heap when no tab reported one", async () => {
+    vi.spyOn(ipc, "tasksList").mockResolvedValue([
+      row({ tab_id: "t1", title: "Asleep A", memory_bytes: null, cpu_seconds: null, nodes: null, sleeping: true }),
+      row({ tab_id: "t2", title: "Asleep B", memory_bytes: null, cpu_seconds: null, nodes: null, sleeping: true }),
+    ]);
+    useBrowser.setState({ open: { ...initial.open, tasks: true } });
+    render(<TaskManager />);
+    const dialog = await screen.findByRole("dialog", { name: "Task manager" });
+    await waitFor(() => expect(screen.getByText("Asleep A")).toBeTruthy());
+    expect(dialog.textContent).not.toMatch(/1 KB/);
+    expect(dialog.textContent).toMatch(/No JavaScript heap reported/);
   });
 
   it("stays shut until it is opened", () => {
