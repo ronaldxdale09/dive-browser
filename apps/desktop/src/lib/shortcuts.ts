@@ -4,7 +4,7 @@ import { events } from "./ipc";
 import { selectAllInChromeField } from "./chromeEditing";
 import { isMac, runCommand, shortcutFor } from "./commands";
 import { contentCoverDepth } from "./overlay";
-import { useBrowser } from "../store/browser";
+import { tabInThisWindow, useBrowser } from "../store/browser";
 
 /**
  * Global key chords, routed through the shared command dispatcher.
@@ -24,8 +24,9 @@ export function useShortcuts() {
       // itself; only when nothing does is the key free to stop a load. Without
       // this the key would both close a dialog and stop the page behind it.
       if (id === "tab.stop" && e.key === "Escape") {
-        const { activeTab, loading } = useBrowser.getState();
-        if (contentCoverDepth() > 0 || !activeTab || !loading[activeTab]) return;
+        const { activeTab, detached, loading } = useBrowser.getState();
+        const here = tabInThisWindow(activeTab, detached);
+        if (contentCoverDepth() > 0 || !here || !loading[here]) return;
       }
       e.preventDefault();
       runCommand(id, "keyboard");
