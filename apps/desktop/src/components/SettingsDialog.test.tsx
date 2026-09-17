@@ -138,7 +138,8 @@ describe("SettingsDialog", () => {
     const youtube = screen.getByRole("switch", { name: "YouTube protection" }) as HTMLButtonElement;
     expect(youtube.disabled).toBe(false);
     expect(youtube.getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByText(/Rules ship inside the signed app and work offline/)).toBeTruthy();
+    expect(screen.getByText(/Rules ship inside the app and work offline/)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/signed app/);
     expect(screen.getByText("2026.09.04.1")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Advanced" })).toBeTruthy();
     expect((screen.getByLabelText("Custom URL rules") as HTMLTextAreaElement).value).toBe("ads.example.test");

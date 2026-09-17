@@ -30,7 +30,7 @@ export function Privacy() {
     <>
       <Group
         title="DivePrivacy"
-        description="Dive's curated ad, tracker, cosmetic, and YouTube protections. Rules ship inside the signed app and work offline."
+        description="Dive's curated ad, tracker, cosmetic, and YouTube protections. Rules ship inside the app and work offline."
       >
         <Row
           label="DivePrivacy protection"
