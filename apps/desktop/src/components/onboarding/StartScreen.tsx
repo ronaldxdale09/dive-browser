@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useSyncExternalStore } from "react";
+import { useFocusTrap } from "../../lib/useFocusTrap";
 import { useOnboarding } from "../../store/onboarding";
 import { Backdrop } from "./Backdrop";
 
@@ -25,13 +26,15 @@ export function orbSize(height: number): number {
  */
 export function StartScreen({ behind = false }: { behind?: boolean }) {
   const next = useOnboarding((s) => s.next);
+  const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
+  useFocusTrap(root, { active: !behind, initialFocus: button });
   const orb = useSyncExternalStore(subscribe, () => orbSize(window.innerHeight), () => 300);
   useEffect(() => {
     if (!behind) button.current?.focus({ preventScroll: true });
   }, [behind]);
   return (
-    <div role="dialog" aria-label="Start Dive" inert={behind || undefined} className="fixed inset-0 z-[60] bg-ground text-ink">
+    <div ref={root} role="dialog" aria-label="Start Dive" inert={behind || undefined} className="fixed inset-0 z-[60] bg-ground text-ink">
       <Backdrop />
       <div className="relative z-10 flex h-full flex-col items-center justify-center overflow-hidden px-6">
         <div className="-mb-3" style={{ width: orb, height: orb }} aria-hidden>

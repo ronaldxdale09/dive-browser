@@ -146,6 +146,22 @@ describe("Onboarding", () => {
     expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
   });
 
+  it("keeps Tab inside the setup dialog instead of the chrome underneath", async () => {
+    usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
+    act(() => useOnboarding.setState({ stage: "profile", skipped: [] }));
+    render(
+      <>
+        <button type="button">New tab</button>
+        <Onboarding />
+      </>,
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Set up Dive" });
+    screen.getByRole("button", { name: "Continue" }).focus();
+    fireEvent.keyDown(dialog, { key: "Tab" });
+    expect(document.activeElement).toBe(screen.getByLabelText("Your name"));
+    expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "New tab" }));
+  });
+
   it("does not mark a skipped setup step as done", async () => {
     // Skip writes nothing. A filled "past" or "done" dot claims the step ran.
     usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });

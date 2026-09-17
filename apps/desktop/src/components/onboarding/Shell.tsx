@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
+import { useFocusTrap } from "../../lib/useFocusTrap";
 import { STEPS, useOnboarding } from "../../store/onboarding";
 import { Backdrop } from "./Backdrop";
 
@@ -23,9 +24,11 @@ export function stepLabel(step: (typeof STEPS)[number]): string {
 export function Shell({ children }: { children: ReactNode }) {
   const stage = useOnboarding((s) => s.stage);
   const skipped = useOnboarding((s) => s.skipped);
+  const root = useRef<HTMLDivElement>(null);
+  useFocusTrap(root);
   const at = STEPS.indexOf(stage as (typeof STEPS)[number]);
   return (
-    <div role="dialog" aria-label="Set up Dive" className="fixed inset-0 z-[60] bg-ground text-ink">
+    <div ref={root} role="dialog" aria-label="Set up Dive" className="fixed inset-0 z-[60] bg-ground text-ink">
       <Backdrop />
       <div className="relative z-10 flex h-full flex-col">
         <ol aria-label="Setup steps" className="flex shrink-0 items-center justify-center gap-6 pt-7">

@@ -1,6 +1,7 @@
 import { Player } from "@remotion/player";
 import type { PlayerRef } from "@remotion/player";
 import { useEffect, useRef, useState } from "react";
+import { useFocusTrap } from "../../lib/useFocusTrap";
 import { useReducedMotion } from "../../lib/useReducedMotion";
 import { useOnboarding } from "../../store/onboarding";
 import { INTRO_DURATION, INTRO_FPS, INTRO_HEIGHT, INTRO_POSTER_FRAME, INTRO_WIDTH, Intro } from "../../video/Intro";
@@ -25,6 +26,8 @@ export function introLeaveDelayMs(reduced: boolean): number {
 export function IntroScene() {
   const skip = useOnboarding((s) => s.skipIntro);
   const reduced = useReducedMotion();
+  const root = useRef<HTMLDivElement>(null);
+  const skipButton = useRef<HTMLButtonElement>(null);
   const ref = useRef<PlayerRef>(null);
   const [leaving, setLeaving] = useState(false);
 
@@ -39,6 +42,7 @@ export function IntroScene() {
       return true;
     });
   };
+  useFocusTrap(root, { initialFocus: skipButton, onEscape: leave });
 
   useEffect(() => {
     const player = ref.current;
@@ -83,6 +87,7 @@ export function IntroScene() {
 
   return (
     <div
+      ref={root}
       role="dialog"
       aria-label="Welcome to Dive"
       className="onboarding-intro fixed inset-0 z-[61] bg-ground"
@@ -104,6 +109,7 @@ export function IntroScene() {
         style={{ width: "100%", height: "100%" }}
       />
       <button
+        ref={skipButton}
         type="button"
         onClick={leave}
         className="pressable absolute top-5 right-6 h-8 rounded-full border border-line-2 bg-surface/70 px-3.5 font-mono text-[11px] tracking-[0.12em] text-ink-2 uppercase backdrop-blur hover:bg-surface-2 hover:text-ink"
