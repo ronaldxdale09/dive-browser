@@ -40,6 +40,12 @@ afterEach(() => {
 });
 
 describe("Rail", () => {
+  it("names a clipped workspace on hover when the rail is expanded", () => {
+    render(<Rail />);
+    const row = screen.getByRole("button", { name: /^Personal — 3 tabs/ });
+    expect(row.getAttribute("title")).toBe("Personal");
+  });
+
   it("names each workspace and shows how many tabs it holds", () => {
     render(<Rail />);
     expect(screen.getByText("Workspaces")).toBeTruthy();

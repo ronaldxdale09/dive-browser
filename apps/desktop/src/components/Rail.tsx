@@ -329,6 +329,7 @@ function WorkspaceRow({
       tabIndex={0}
       aria-pressed={active}
       aria-label={summary}
+      title={expanded ? w.name : undefined}
       onClick={onActivate}
       onKeyDown={(e) => {
         // A button answers Space as well as Enter; Space must not scroll the rail.
@@ -373,8 +374,8 @@ function WorkspaceRow({
       )}
     </div>
   );
-  // Expanded, the row says everything; collapsed, the mark explains itself
-  // on hover the way every other glyph in the chrome does.
+  // Expanded, a clipped name still titles itself; collapsed, the mark
+  // explains itself on hover the way every other glyph in the chrome does.
   if (expanded) return row;
   return (
     <RailTooltip label={`${w.name} · ${count} ${count === 1 ? "tab" : "tabs"}${separate ? " · own cookies" : ""}`} shortcut={index < 9 ? `⌘${index + 1}` : undefined}>
