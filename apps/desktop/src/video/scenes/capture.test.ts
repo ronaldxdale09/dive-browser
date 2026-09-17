@@ -22,4 +22,9 @@ describe("feature tour recording scene", () => {
     expect(source).not.toMatch(/saved and copied to clipboard/);
     expect(source).toMatch(/lands on disk/);
   });
+
+  it("does not say the annotated capture is copied the moment you are done", () => {
+    expect(source).not.toMatch(/Copied the moment you are done/);
+    expect(source).toMatch(/Copy puts/);
+  });
 });

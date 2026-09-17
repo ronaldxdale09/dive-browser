@@ -53,7 +53,7 @@ export function FullPage({ index }: SceneProps) {
   const scroll = interpolate(ramp(frame, 10, 58), [0, 1], [0, -420]);
   const dash = ramp(frame, 70, 92);
   return (
-    <Scene index={index} eyebrow="Capture" title="Full-page capture and annotate" text="The whole document in one image, then arrows, boxes and notes drawn right on it. Copied the moment you are done." keys="⌘⇧S">
+    <Scene index={index} eyebrow="Capture" title="Full-page capture and annotate" text="The whole document in one image, then arrows, boxes and notes drawn right on it. Copy puts the annotated picture on the clipboard." keys="⌘⇧S">
       <Window url="acme.test/pricing">
         <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
           <div style={{ position: "absolute", left: 0, right: 0, top: scroll, height: 760, padding: "26px 40px" }}>
@@ -115,7 +115,7 @@ export function FullPage({ index }: SceneProps) {
           )}
           <Reveal at={116} dx={0} style={{ position: "absolute", left: 16, bottom: 14 }}>
             <Chip tone="ok" style={{ height: 24 }}>
-              ✓ Copied · capture-pricing-full.png
+              Copy · capture-pricing-full.png
             </Chip>
           </Reveal>
         </div>
