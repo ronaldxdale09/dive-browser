@@ -239,10 +239,10 @@ pub fn attach(
         let main = MainFrame::default();
         let mut events = session.subscribe();
         if let Err(error) = session.call0("Page.enable").await {
-            tracing::warn!(%tab_id, %error, "loading page feed setup failed");
+            crate::cdp_feed::setup_failed(tab_id, "the page load feed", &error);
         }
         if let Err(error) = crate::network::enable(&session).await {
-            tracing::warn!(%tab_id, %error, "loading network feed setup failed");
+            crate::cdp_feed::setup_failed(tab_id, "the network feed", &error);
         }
         refresh_main(&session, &main).await;
         let _ = ready_tx.send(());

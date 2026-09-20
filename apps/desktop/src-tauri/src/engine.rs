@@ -1926,7 +1926,11 @@ struct CloseSessionOnDrop {
 impl Drop for CloseSessionOnDrop {
     fn drop(&mut self) {
         if !self.session.is_closed() {
-            tracing::warn!(tab = %self.tab, "cdp worker stopped before its session; closing the session");
+            // Ordinary at shutdown and on a tab close: the worker ends
+            // before the session it was reading. Thirty of these in a log is
+            // what a normal week looks like, so it is not a warning; the
+            // session is closed here either way.
+            tracing::debug!(tab = %self.tab, "cdp worker stopped before its session; closing the session");
             self.session.close();
         }
     }

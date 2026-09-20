@@ -152,6 +152,22 @@ where
 /// Resolves once a feed's `DevTools` domains are enabled.
 pub type Ready = tokio::sync::oneshot::Receiver<()>;
 
+/// Report that a per-tab feed could not be set up.
+///
+/// A tab that is closing takes its CDP session with it while a dozen
+/// subsystems are still attaching to it, and each of them reporting that
+/// separately at warning level buried the one line that mattered: a single
+/// native view timing out produced twelve warnings, none of them the cause.
+/// The tab being gone is expected and goes to debug; anything else is still
+/// worth somebody's attention.
+pub fn setup_failed(tab_id: dive_core::TabId, what: &str, error: &dive_cdp::CdpError) {
+    if error.is_gone() {
+        tracing::debug!(%tab_id, %error, "{what} not set up: the tab was already gone");
+    } else {
+        tracing::warn!(%tab_id, %error, "{what} setup failed");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

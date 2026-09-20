@@ -3482,7 +3482,7 @@ async fn apply_interception_targets(
             continue;
         }
         if let Err(error) = crate::rules::apply(&session, &rules, prefs).await {
-            summary.failed.push((tab_id, error.message));
+            summary.failed.push((tab_id, error.to_string()));
         }
     }
     summary

@@ -122,7 +122,7 @@ pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession)
         Ok::<(), dive_cdp::CdpError>(())
     };
     if let Err(error) = setup.await {
-        tracing::warn!(%tab_id, "saved logins unavailable on this tab: {error}");
+        crate::cdp_feed::setup_failed(tab_id, "saved logins", &error);
         return;
     }
     tauri::async_runtime::spawn(async move {

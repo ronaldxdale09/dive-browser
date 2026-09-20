@@ -228,11 +228,17 @@ export function App() {
       <main className={`col-start-2 grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] bg-line ${oneBar ? "row-start-2" : "row-start-3"}`}>
         <div
           className="relative grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] bg-line"
-          style={{ gridTemplateRows: `${open.find ? "44px " : ""}minmax(0,1fr)${showDock ? ` auto ${shownDockHeight}px` : ""}` }}
+          style={{ gridTemplateRows: `minmax(0,1fr)${showDock ? ` auto ${shownDockHeight}px` : ""}` }}
         >
+          {/* Find hangs over the page rather than taking a row of its own.
+              A row pushed the whole page down by 44px on open and back up on
+              close, which reflows the document you are searching and moves
+              the match out from under the pointer. */}
           {open.find && (
-            <div className="min-h-0 border-b border-line">
-              <FindBar />
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-end p-2">
+              <div className="pointer-events-auto">
+                <FindBar />
+              </div>
             </div>
           )}
           <Content />

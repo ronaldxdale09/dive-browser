@@ -134,7 +134,7 @@ pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
     let mut events = session.subscribe();
     tauri::async_runtime::spawn(async move {
         if let Err(e) = session.call0("Page.enable").await {
-            tracing::warn!(%tab_id, "Page.enable failed: {e}");
+            crate::cdp_feed::setup_failed(tab_id, "the favicon watcher", &e);
             return;
         }
         // The origin the current icon belongs to. A move to another origin

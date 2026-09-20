@@ -131,7 +131,7 @@ pub fn attach(
         let capture_enabled = match enable(&session).await {
             Ok(_) => true,
             Err(error) => {
-                tracing::warn!(%tab_id, %error, "body capture disabled: engine limits were not acknowledged");
+                crate::cdp_feed::setup_failed(tab_id, "response body capture", &error);
                 false
             }
         };

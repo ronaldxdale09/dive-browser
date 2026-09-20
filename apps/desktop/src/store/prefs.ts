@@ -21,7 +21,7 @@ export const DEFAULT_PREFS: Prefs = {
   tell_pages_theme: false,
   startup: "home",
   homepage: "",
-  search_engine: "duckduckgo",
+  search_engine: "google",
   search_template: "",
   default_zoom: 1,
   do_not_track: false,

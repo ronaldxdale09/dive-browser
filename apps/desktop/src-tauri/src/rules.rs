@@ -471,12 +471,15 @@ fn fetch_arguments(rules: &[Rule], prefs: &Prefs) -> Value {
 ///
 /// It is always on now, because authentication rides on it; what changes is
 /// whether it pauses requests. See [`fetch_arguments`].
-pub async fn apply(session: &CdpSession, rules: &[Rule], prefs: &Prefs) -> AppResult<()> {
+pub async fn apply(
+    session: &CdpSession,
+    rules: &[Rule],
+    prefs: &Prefs,
+) -> Result<(), dive_cdp::CdpError> {
     session
         .call("Fetch.enable", fetch_arguments(rules, prefs))
         .await
         .map(|_| ())
-        .map_err(AppError::new)
 }
 
 /// Release every currently paused request and restore the one Fetch owner
@@ -730,7 +733,7 @@ pub fn attach(
             (rules, prefs, document_url)
         };
         if let Err(e) = apply(&session, &initial_rules, &initial_prefs).await {
-            tracing::warn!(%tab_id, "fetch interception failed: {e}");
+            crate::cdp_feed::setup_failed(tab_id, "request interception", &e);
         }
         let mut top_frame = TopFrameContext::new(&initial_document_url);
         let in_flight = Arc::new(tokio::sync::Semaphore::new(MAX_IN_FLIGHT));

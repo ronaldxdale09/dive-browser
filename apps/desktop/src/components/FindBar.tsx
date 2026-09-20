@@ -51,8 +51,10 @@ export function FindBar() {
   // The bar gets its own row above the page: it cannot be drawn over the
   // content area, because that is a native webview painting above the chrome.
   return (
-    <div className="flex h-full items-center justify-end bg-ground px-3">
-      <div className="flex h-9 items-center gap-1 rounded-full border border-line-2 bg-surface px-2 shadow-xl">
+    // Floating: no ground of its own and no full-width strip, so it reads as
+    // a panel over the page instead of another bar bolted under the toolbar.
+    <div data-native-overlay className="flex items-center">
+      <div className="surface-enter flex h-9 items-center gap-1 rounded-full border border-line-2 bg-surface/95 px-2 shadow-2xl backdrop-blur-xl">
         <input
           ref={inputRef}
           aria-label="Find in page"

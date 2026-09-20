@@ -190,10 +190,15 @@ pub async fn attach(registry: &Registry, tab: TabId, nonce: &str, session: &dive
             .await?;
         Ok::<(), dive_cdp::CdpError>(())
     };
-    if let Ok(Ok(())) = tokio::time::timeout(std::time::Duration::from_secs(5), setup).await {
-        registry.ready(tab, nonce);
-    } else {
-        tracing::warn!(%tab, "activity instrumentation unavailable; keeping tab active");
+    match tokio::time::timeout(std::time::Duration::from_secs(5), setup).await {
+        Ok(Ok(())) => registry.ready(tab, nonce),
+        Ok(Err(error)) => {
+            crate::cdp_feed::setup_failed(tab, "activity instrumentation", &error);
+        }
+        // A tab that never answered in five seconds is not a tab that went
+        // away, so this one keeps its warning: it also means the tab is kept
+        // alive for ever, which somebody should know about.
+        Err(_) => tracing::warn!(%tab, "activity instrumentation timed out; keeping tab active"),
     }
 }
 

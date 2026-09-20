@@ -311,7 +311,7 @@ impl Default for Prefs {
             tell_pages_theme: false,
             startup: "home".into(),
             homepage: String::new(),
-            search_engine: "duckduckgo".into(),
+            search_engine: default_search_engine(),
             search_template: String::new(),
             default_zoom: 1.0,
             do_not_track: false,
@@ -360,6 +360,11 @@ impl Default for Prefs {
             onboarded: false,
         }
     }
+}
+
+/// The engine a fresh profile searches with.
+fn default_search_engine() -> String {
+    "google".into()
 }
 
 /// Search engines offered in Settings, as `(key, template)`.
@@ -547,10 +552,19 @@ impl Prefs {
         if self.search_engine == "custom" && self.search_template.contains("{query}") {
             return &self.search_template;
         }
-        ENGINES
-            .iter()
-            .find(|(key, _)| *key == self.search_engine)
-            .map_or(ENGINES[0].1, |(_, template)| *template)
+        // Falling back to whatever sits first in the table would make the
+        // list's order a second, silent definition of the default; they drift
+        // the moment one of them changes. The fallback is the default engine
+        // by name, and the table is free to be in whatever order reads best.
+        let template = |engine: &str| {
+            ENGINES
+                .iter()
+                .find(|(key, _)| *key == engine)
+                .map(|(_, template)| *template)
+        };
+        template(&self.search_engine)
+            .or_else(|| template(&default_search_engine()))
+            .unwrap_or(ENGINES[0].1)
     }
 
     /// Where downloads are written.
@@ -1219,7 +1233,7 @@ mod tests {
     fn defaults_survive_a_partial_blob() {
         let prefs = parse_stored(r#"{"theme":"dark"}"#);
         assert_eq!(prefs.theme, "dark");
-        assert_eq!(prefs.search_engine, "duckduckgo");
+        assert_eq!(prefs.search_engine, "google");
         assert!(prefs.javascript);
     }
 
@@ -1394,7 +1408,7 @@ mod tests {
         assert_eq!(prefs.theme, "system");
         assert_eq!(prefs.accent, Prefs::default().accent);
         assert_eq!(prefs.startup, Prefs::default().startup);
-        assert_eq!(prefs.search_engine, "duckduckgo");
+        assert_eq!(prefs.search_engine, "google");
         assert!((prefs.default_zoom - 3.0).abs() < f64::EPSILON);
         assert_eq!(prefs.history_days, 0);
         assert_eq!(prefs.blocked_patterns, vec!["ads.dev".to_owned()]);
@@ -1408,14 +1422,14 @@ mod tests {
         assert!(
             prefs
                 .search_template()
-                .starts_with("https://duckduckgo.com/")
+                .starts_with("https://www.google.com/")
         );
-        prefs.search_engine = "google".into();
-        assert!(prefs.search_template().contains("google.com/search"));
+        prefs.search_engine = "duckduckgo".into();
+        assert!(prefs.search_template().contains("duckduckgo.com"));
         prefs.search_engine = "custom".into();
         prefs.search_template = "https://s.dev/find".into();
         assert!(
-            prefs.search_template().contains("duckduckgo"),
+            prefs.search_template().contains("google.com"),
             "a custom template without {{query}} is unusable"
         );
         prefs.search_template = "https://s.dev/find?q={query}".into();

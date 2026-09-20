@@ -191,7 +191,7 @@ pub fn watch(app: AppHandle<Runtime>, tab_id: TabId, view_label: String, session
     let mut events = session.subscribe();
     tauri::async_runtime::spawn(async move {
         if let Err(error) = session.call0("Inspector.enable").await {
-            tracing::warn!(%tab_id, "could not enable renderer crash events: {error}");
+            crate::cdp_feed::setup_failed(tab_id, "renderer crash events", &error);
         }
         loop {
             match events.recv().await {

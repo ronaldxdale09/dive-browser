@@ -264,7 +264,9 @@ async fn set_policy(
     let _update = state.prefs.begin_update().await;
     state.rules.set(&state, workspace, rules.clone())?;
     let prefs = state.prefs.set(&state, prefs)?;
-    rules::apply(session, &rules, &prefs).await
+    rules::apply(session, &rules, &prefs)
+        .await
+        .map_err(AppError::new)
 }
 
 async fn verify_phases(
