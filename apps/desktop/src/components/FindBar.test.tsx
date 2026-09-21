@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
+import { contentCoverDepth } from "../lib/overlay";
 import { useBrowser } from "../store/browser";
 import { FindBar } from "./FindBar";
 
@@ -41,5 +42,20 @@ describe("FindBar", () => {
     act(() => useBrowser.setState({ tabs: [{ ...tab, state: "discarded" }], activeTab: "t1" }));
     await waitFor(() => expect(screen.queryByLabelText("Match 1 of 3")).toBeNull());
     expect(screen.queryByText("1/3")).toBeNull();
+  });
+  it("asks the native mask to let it through, and gives that up when it closes", () => {
+    // The page paints above the chrome. Without a cover registered the panel
+    // is drawn behind the page and simply cannot be seen -- which is exactly
+    // what happened when it stopped being a row and became a panel.
+    expect(contentCoverDepth()).toBe(0);
+    const view = render(<FindBar />);
+    expect(contentCoverDepth()).toBe(1);
+    // The panel itself carries the mark, not the strip around it: marking the
+    // strip would cut a hole across the whole top of the page.
+    const marked = view.container.querySelector("[data-native-overlay]");
+    expect(marked).toBeTruthy();
+    expect(marked!.getAttribute("data-native-overlay")).not.toBeNull();
+    view.unmount();
+    expect(contentCoverDepth()).toBe(0);
   });
 });

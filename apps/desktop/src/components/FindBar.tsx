@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
+import { useCoversContent } from "../lib/overlay";
 import { tabInThisWindow, useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
 
@@ -12,6 +13,13 @@ export function FindBar() {
     return id ? s.tabs.find((t) => t.id === id)?.state === "discarded" : false;
   });
   const toggle = useBrowser((s) => s.toggle);
+  // The page is a native view that paints above the chrome, so a panel over
+  // it is invisible until the native mask is told where to let the chrome
+  // through -- and that mask only runs while something holds a cover. This
+  // does not hide the page: with a live overlay registered the tab view
+  // stays shown and the mask simply cuts a hole the shape of the panel, the
+  // way the agent dock floats over a live page.
+  useCoversContent(true);
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(1);
   const [result, setResult] = useState({ total: 0, current: 0 });
