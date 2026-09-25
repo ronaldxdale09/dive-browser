@@ -134,8 +134,8 @@ mod tests {
         for title in ["日本語のページ".repeat(20), "🦀 crab ".repeat(30)] {
             let name = file_name(&title, "https://x.dev");
             assert!(name.len() <= 130, "{} bytes", name.len());
-            assert!(name.ends_with(".mhtml"), "{name}");
-            assert!(title.starts_with(name.trim_end_matches(".mhtml").trim()));
+            let stem = name.strip_suffix(".mhtml").expect("an .mhtml name");
+            assert!(title.starts_with(stem.trim()), "{name}");
         }
     }
 }
