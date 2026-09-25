@@ -90,4 +90,21 @@ describe("ModelPicker", () => {
     expect(screen.queryByRole("dialog", { name: "Model and provider" })).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
+
+  it("closes when the window loses focus, as a click into the page does, and tells the composer", () => {
+    const onOpenChange = vi.fn();
+    render(<ModelPicker onAddProvider={() => {}} onOpenChange={onOpenChange} />);
+    fireEvent.click(screen.getByRole("button", { name: /Claude Opus 5/ }));
+    expect(screen.getByRole("dialog", { name: "Model and provider" })).toBeTruthy();
+    fireEvent.blur(window);
+    expect(screen.queryByRole("dialog", { name: "Model and provider" })).toBeNull();
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("closes on a click outside it", () => {
+    render(<ModelPicker onAddProvider={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Claude Opus 5/ }));
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("dialog", { name: "Model and provider" })).toBeNull();
+  });
 });

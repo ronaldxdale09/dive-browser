@@ -1,8 +1,9 @@
 import { Check, ChevronDown, Loader2, Plus, RefreshCw, Search } from "lucide-react";
-import {useCallback,  useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { compactNumber, shortModel } from "../../lib/agentSteps";
 import type { ModelInfo, Provider } from "../../lib/ipc";
 import { useCoversContent } from "../../lib/overlay";
+import { useDismiss } from "../../lib/useDismiss";
 import { useFocusTrap } from "../../lib/useFocusTrap";
 import { isReady, useAgent } from "../../store/agent";
 import { usePrefs } from "../../store/prefs";
@@ -46,8 +47,10 @@ export function ModelPicker({ onAddProvider, onOpenChange }: { onAddProvider: ()
   const ref = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
 
+  const close = useCallback(() => show(false), [show]);
   useCoversContent(open);
-  useFocusTrap(dialog, { active: open, onEscape: () => show(false) });
+  useFocusTrap(dialog, { active: open, onEscape: close });
+  useDismiss(ref, open, close);
 
   const provider = providers.find((p) => p.id === prefs.agent_provider);
   const listed = models[prefs.agent_provider];
@@ -58,14 +61,6 @@ export function ModelPicker({ onAddProvider, onOpenChange }: { onAddProvider: ()
   useEffect(() => {
     if (open && provider?.lists_models) void loadModels(provider.id);
   }, [open, provider, loadModels]);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) show(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open, show]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

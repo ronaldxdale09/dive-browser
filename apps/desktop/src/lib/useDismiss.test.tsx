@@ -43,4 +43,16 @@ describe("useDismiss", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
+
+  it("closes when the window loses focus, as a click into the page does", () => {
+    render(<Popover />);
+    fireEvent.blur(window);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("ignores a blur on an element inside, which is not the window leaving", () => {
+    render(<Popover />);
+    fireEvent.blur(screen.getByText("Inside"));
+    expect(screen.queryByRole("dialog")).toBeTruthy();
+  });
 });
