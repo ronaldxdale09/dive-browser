@@ -212,7 +212,7 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
         <Action label={copied ? "Copied" : "Copy"} icon={copied ? Check : Copy} disabled={!image || busy !== null} onClick={() => void copy()} />
         <Action label="Export PNG" short="PNG" icon={Download} disabled={!image || busy !== null} onClick={() => void exportAs("png")} />
         <Action label="Export JPEG" short="JPEG" icon={Download} disabled={!image || busy !== null} onClick={() => void exportAs("jpeg")} />
-        <Select label="PDF page size" value={pdfSize} onChange={setPdfSize} options={[{ value: "continuous", label: "Continuous PDF" }, { value: "a4", label: "A4 pages" }, { value: "letter", label: "Letter pages" }]} className="h-8 rounded-l-lg border border-line-2 bg-surface-3 px-2 text-[11px] text-ink outline-none" />
+        <Select label="PDF page size" value={pdfSize} onChange={setPdfSize} options={[{ value: "continuous", label: "Continuous PDF" }, { value: "a4", label: "A4 pages" }, { value: "letter", label: "Letter pages" }]} className="h-8 rounded-l-lg border border-line-2 bg-surface-3 px-2 text-[11px] text-ink outline-none focus-visible:border-highlight/60" />
         <Action label="Export PDF" short="PDF" icon={Download} primary joined disabled={!image || busy !== null} onClick={() => void exportAs("pdf")} />
       </header>
       <div className="flex min-h-0 flex-1">

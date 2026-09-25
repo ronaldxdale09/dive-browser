@@ -249,7 +249,7 @@ export function Timeline() {
         <Tool icon={EyeOff} label="Blur an area" shortcut="B" onClick={() => addAnnotation("blur")} />
         <span className="mx-2 h-5 w-px bg-line-2" />
         <div className="flex items-center">
-          <Select label="Aspect ratio" value={e.aspectRatio} onChange={(value) => update((ed) => ({ ...ed, aspectRatio: value }))} options={ASPECT_RATIOS.map((r) => ({ value: r, label: r }))} className="h-7 rounded-lg bg-transparent px-2 text-xs text-ink-2 outline-none hover:bg-surface-2 hover:text-ink" />
+          <Select label="Aspect ratio" value={e.aspectRatio} onChange={(value) => update((ed) => ({ ...ed, aspectRatio: value }))} options={ASPECT_RATIOS.map((r) => ({ value: r, label: r }))} className="h-7 rounded-lg bg-transparent px-2 text-xs text-ink-2 outline-none hover:bg-surface-2 hover:text-ink focus-visible:ring-1 focus-visible:ring-highlight/60 focus-visible:text-ink" />
         </div>
         <span className="flex-1" />
         <span className="hidden items-center gap-2 text-[10.5px] text-ink-3 md:flex">
