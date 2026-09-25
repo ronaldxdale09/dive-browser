@@ -191,7 +191,9 @@ pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession)
         return;
     }
     tauri::async_runtime::spawn(async move {
-        while let Ok(event) = events.recv().await {
+        while let Some(event) =
+            crate::cdp_feed::next_event(&mut events, tab_id, "audio state").await
+        {
             let Some(audible) = reported_audible(&event, &nonce) else {
                 continue;
             };
@@ -208,8 +210,9 @@ pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession)
             }
         }
         // The session is gone: a page that was playing is not playing now.
+        // A tab already forgotten (closed) is not put back.
         let next = with_tabs(|tabs| {
-            let entry = tabs.entry(tab_id).or_default();
+            let entry = tabs.get_mut(&tab_id)?;
             if !entry.audible {
                 return None;
             }

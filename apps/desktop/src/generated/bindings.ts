@@ -584,8 +584,12 @@ export const commands = {
 	 *  through a page view's rounded corners, or during a resize, is not black.
 	 */
 	windowSetBackground: (hex: string) => typedError<null, AppError>(__TAURI_INVOKE("window_set_background", { hex })),
-	/**  Regions belong to trusted chrome and use CSS logical pixels. */
-	layoutSetOverlayRegions: (regions: OverlayRegion[], active: boolean, modal: boolean) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_overlay_regions", { regions, active, modal })),
+	/**
+	 *  Regions belong to trusted chrome and use CSS logical pixels. `take_focus`
+	 *  is false when every overlay is passive (tooltips, the save-login card), so
+	 *  the page keeps the keyboard under them.
+	 */
+	layoutSetOverlayRegions: (regions: OverlayRegion[], active: boolean, modal: boolean, takeFocus: boolean) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_overlay_regions", { regions, active, modal, takeFocus })),
 	/**
 	 *  Show these tabs side by side at these rectangles; an empty list returns
 	 *  to a single page. Sleeping tabs are woken so every pane has a page.
@@ -1228,16 +1232,19 @@ export type CredentialPrompt = {
 	tab_id: TabId,
 	/**
 	 *  `save` for a new login, `update` when the site's login for this
-	 *  username has a different password, `pick` when several logins fit.
+	 *  username has a different password, `missing` when a login picked in
+	 *  the page has lost its password from the OS store. Choosing among
+	 *  several logins happens in the page, in a list under the field.
 	 */
 	kind: string,
 	/**  `scheme://host[:port]`. */
 	origin: string,
-	/**  The username submitted (save, update). */
+	/**  The username submitted (save, update) or picked (missing). */
 	username: string,
-	/**  Names the person can choose from (pick). */
-	usernames: string[],
-	/**  Handle for answering a save or update; the password stays in the host. */
+	/**
+	 *  Handle for answering a save or update; the password stays in the host.
+	 *  For `missing`, the id of the login to forget.
+	 */
 	token: string,
 };
 

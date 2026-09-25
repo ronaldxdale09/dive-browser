@@ -135,7 +135,13 @@ export function visibleOverlayRegions() {
   const measured = overlayElements()
     // One style read, not two: a `display: none` element measures 0x0 and is
     // dropped by the size filter below, but a hidden one still has a box.
-    .filter((element) => getComputedStyle(element).visibility !== "hidden")
+    // A surface at opacity 0 (a tooltip waiting out its delay, a dialog on
+    // its first fade frame) paints nothing; masking it showed the chrome's
+    // background as a blank box over the page.
+    .filter((element) => {
+      const style = getComputedStyle(element);
+      return style.visibility !== "hidden" && style.opacity !== "0";
+    })
     .map((element) => ({ element, rect: element.getBoundingClientRect() }))
     .filter(({ rect }) => rect.width > 0 && rect.height > 0);
   // A surface wholly inside another adds nothing to the mask; one that
@@ -161,19 +167,39 @@ export function visibleOverlayRegions() {
 /** Modal dialogs and transient choice lists own native input independently
  * of painting geometry. A listbox is not an ARIA modal; its internal marker
  * keeps Windows page HWNDs from receiving keyboard or outside clicks. */
+const MODAL_SELECTOR = '[aria-modal="true"], [data-native-input-owner="true"]';
+
 function hasVisibleModal() {
-  return Array.from(document.querySelectorAll<HTMLElement>('[aria-modal="true"], [data-native-input-owner="true"]')).some((element) => {
+  return Array.from(document.querySelectorAll<HTMLElement>(MODAL_SELECTOR)).some((element) => {
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
     return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
   });
 }
 
-function sendLive(regions: ReturnType<typeof visibleOverlayRegions>, active: boolean, modal = false) {
+/**
+ * Overlays that sit over the page without taking the keyboard from it: a
+ * tooltip under the pointer, or a card that marks itself passive (the
+ * save-login question, which arrives while someone may still be typing into
+ * the page). While every overlay on screen is one of these, the host leaves
+ * native focus with the page.
+ */
+function takesFocus() {
+  const shown = overlayElements().filter((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== "hidden";
+  });
+  // Nothing measurable yet (an overlay still mounting): keep the old rule.
+  if (shown.length === 0) return true;
+  return shown.some((element) => element.getAttribute("role") !== "tooltip" && !element.closest("[data-overlay-passive]"));
+}
+
+function sendLive(regions: ReturnType<typeof visibleOverlayRegions>, active: boolean, modal = false, focus = true) {
   const revision = ++liveRevision;
   liveQueue = liveQueue.catch(() => undefined).then(async () => {
     if (revision !== liveRevision) return;
-    await ipc.setOverlayRegions(regions, active, modal);
+    if (focus) await ipc.setOverlayRegions(regions, active, modal);
+    else await ipc.setOverlayRegions(regions, active, modal, false);
   });
   // A closed native window may reject an already queued frame.
   void liveQueue.catch(() => undefined);
@@ -202,6 +228,8 @@ const MOTION_ATTRIBUTES = ["style", "class", "hidden", "role", "aria-modal", "da
  * frame loop runs between those two events and no longer.
  */
 function beginLive() {
+  // The cache can predate the overlay that just asked to be shown.
+  matched = null;
   let frame = 0;
   let last = "";
   let stopped = false;
@@ -209,8 +237,9 @@ function beginLive() {
   const measure = () => {
     const regions = visibleOverlayRegions();
     const modal = hasVisibleModal();
-    const key = JSON.stringify([window.innerWidth, window.innerHeight, regions, modal]);
-    if (key !== last) { last = key; sendLive(regions, true, modal); }
+    const focus = modal || takesFocus();
+    const key = JSON.stringify([window.innerWidth, window.innerHeight, regions, modal, focus]);
+    if (key !== last) { last = key; sendLive(regions, true, modal, focus); }
   };
   const onFrame = () => {
     frame = 0;
@@ -220,16 +249,43 @@ function beginLive() {
   };
   // At most one measurement per frame, however many events ask for it.
   const schedule = () => { if (!frame && !stopped) frame = requestAnimationFrame(onFrame); };
-  const onMotionStart = () => { motionUntil = performance.now() + MOTION_FOLLOW_MS; schedule(); };
+  // Only motion that can move an overlay: one inside it, or on something
+  // that holds it. A spinner in the tab strip or a count badge re-keying on
+  // every blocked tracker otherwise kept this measuring every frame.
+  const moves = (target: EventTarget | null) =>
+    target instanceof Node && overlayElements().some((overlay) => overlay.contains(target) || target.contains(overlay));
+  const onMotionStart = (event: Event) => {
+    if (!moves(event.target)) return;
+    motionUntil = performance.now() + MOTION_FOLLOW_MS;
+    schedule();
+  };
   // The end event measures once more, at the settled position.
-  const onMotionEnd = () => { motionUntil = 0; schedule(); };
+  const onMotionEnd = (event: Event) => {
+    if (!moves(event.target)) return;
+    motionUntil = 0;
+    schedule();
+  };
 
   const resizer = new ResizeObserver(schedule);
   const observeOverlays = () => {
     resizer.disconnect();
     for (const element of overlayElements()) resizer.observe(element);
   };
-  const mutations = new MutationObserver(() => { observeOverlays(); schedule(); });
+  const mutations = new MutationObserver((records) => {
+    // This can run before the element cache's own observer has dropped it.
+    if (records.some((record) => record.type === "childList")) matched = null;
+    const relevant = records.some((record) => {
+      if (moves(record.target)) return true;
+      // Whether anything is modal, or an overlay at all, is decided by these.
+      if (record.type === "attributes" && ["role", "aria-modal", "data-native-input-owner", "data-native-overlay"].includes(record.attributeName ?? "")) return true;
+      if (record.target instanceof Element && record.target.matches(MODAL_SELECTOR)) return true;
+      return [...record.addedNodes, ...record.removedNodes].some((node) =>
+        node instanceof Element && (node.matches(OVERLAY_SELECTOR) || node.querySelector(OVERLAY_SELECTOR) !== null));
+    });
+    if (!relevant) return;
+    observeOverlays();
+    schedule();
+  });
   mutations.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: MOTION_ATTRIBUTES });
   window.addEventListener("resize", schedule);
   document.addEventListener("scroll", schedule, true);

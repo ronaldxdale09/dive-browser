@@ -57,7 +57,9 @@ pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession)
         return;
     }
     tauri::async_runtime::spawn(async move {
-        while let Ok(event) = events.recv().await {
+        while let Some(event) =
+            crate::cdp_feed::next_event(&mut events, tab_id, "remembered form entries").await
+        {
             let Some(payload) = binding_payload(&event, &nonce) else {
                 continue;
             };

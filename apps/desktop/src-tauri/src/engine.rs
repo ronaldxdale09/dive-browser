@@ -398,6 +398,9 @@ pub struct TabHost {
     /// belongs to the moment the page becomes covered, not to each frame.
     focused_for_cover: std::cell::Cell<bool>,
     live_overlays: HashMap<String, (Vec<OverlayRegion>, bool)>,
+    /// The main chrome's overlays are all passive (a tooltip, the save-login
+    /// card): they sit over the page without taking the keyboard from it.
+    passive_cover: bool,
     /// Corner radius of page views in the main window, in logical pixels,
     /// following the chrome's corner preference. Zero is square.
     corner_radius: f64,
@@ -570,6 +573,7 @@ impl TabHost {
             covered: false,
             focused_for_cover: std::cell::Cell::new(false),
             live_overlays: HashMap::new(),
+            passive_cover: false,
             corner_radius: 0.0,
             panes: Vec::new(),
             popouts: HashMap::new(),
@@ -1064,8 +1068,12 @@ impl TabHost {
         regions: Vec<OverlayRegion>,
         active: bool,
         modal: bool,
+        take_focus: bool,
     ) -> tauri::Result<()> {
         let was_active = self.live_overlays.contains_key(chrome);
+        if chrome == CHROME_LABEL {
+            self.passive_cover = active && !take_focus;
+        }
         if active {
             self.live_overlays
                 .insert(chrome.to_owned(), (regions, modal));
@@ -1090,6 +1098,16 @@ impl TabHost {
             // Animation only changes the mask. Do not re-show every tab and
             // restore Chromium accessibility trees on every animation frame.
             self.update_overlay_mask(chrome, active)?;
+            // A menu or dialog opening while a passive card was already up
+            // still needs the keyboard.
+            if chrome == CHROME_LABEL
+                && active
+                && !self.passive_cover
+                && !self.focused_for_cover.get()
+            {
+                self.focus_chrome();
+                self.focused_for_cover.set(true);
+            }
             #[cfg(all(feature = "cef", target_os = "windows"))]
             if was_active && !active && chrome != CHROME_LABEL {
                 for (id, popout) in &self.popouts {
@@ -1216,11 +1234,15 @@ impl TabHost {
         }
         // Only as the page becomes covered. Refocusing on every region update
         // took the keyboard away from whatever the overlay had given it, once
-        // per frame while a menu animated.
-        if self.covered && !self.focused_for_cover.get() {
+        // per frame while a menu animated. A passive cover leaves the keyboard
+        // with the page: a tooltip under the pointer, or the save-login card
+        // arriving while someone types a one-time code, must not swallow the
+        // next Enter.
+        let wants_focus = self.covered && !self.passive_cover;
+        if wants_focus && !self.focused_for_cover.get() {
             self.focus_chrome();
         }
-        self.focused_for_cover.set(self.covered);
+        self.focused_for_cover.set(wants_focus);
         for chrome in self.live_overlays.keys() {
             self.update_overlay_mask(chrome, true)?;
         }

@@ -597,15 +597,6 @@ export function importPasswordNote(args: { firefox: boolean; browserName: string
   return `${dest} macOS will ask once to let Dive read ${args.browserName}'s password key. Cookies and extensions stay behind.`;
 }
 
-/** Host reveal/fill errors that mean the OS store no longer has the secret. */
-export function isMissingPasswordError(message: string): boolean {
-  return /(?:the keychain|credential manager) no longer/i.test(message);
-}
-
-export function missingPasswordNotice(username: string, windows = isWindows()): string {
-  return `${credentialStoreTitle(windows)} no longer has the password for ${username}.`;
-}
-
 /** Whether a key event happened inside something the user types into. */
 export function isEditable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;

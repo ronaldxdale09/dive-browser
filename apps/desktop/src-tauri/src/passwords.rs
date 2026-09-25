@@ -32,6 +32,12 @@ fn missing_password_error() -> String {
     missing_password_error_for(cfg!(windows))
 }
 
+/// Whether `error` is the OS store saying it no longer has the password, as
+/// opposed to refusing to hand it over.
+pub fn is_missing_password(error: &AppError) -> bool {
+    error.message == missing_password_error()
+}
+
 fn password_read_error(error: impl std::fmt::Display) -> String {
     format!(
         "{} would not hand over this password: {error}",
@@ -117,9 +123,15 @@ pub fn save(
         username,
         Timestamp::now(),
     )?;
-    entry(&row.id)?
-        .set_password(password)
-        .map_err(AppError::new)?;
+    let written = entry(&row.id).and_then(|e| e.set_password(password).map_err(AppError::new));
+    if let Err(error) = written {
+        // A new row with no password behind it would be listed but could
+        // never fill, and every later sign-in would offer to "update" it.
+        if row.id == id {
+            let _ = crate::state::lock(&state.store).remove_credential(&row.id);
+        }
+        return Err(error);
+    }
     Ok(row)
 }
 

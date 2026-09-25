@@ -29,24 +29,32 @@ const MAX_FIELD: usize = 1024;
 pub struct CredentialPrompt {
     pub tab_id: TabId,
     /// `save` for a new login, `update` when the site's login for this
-    /// username has a different password, `pick` when several logins fit.
+    /// username has a different password, `missing` when a login picked in
+    /// the page has lost its password from the OS store. Choosing among
+    /// several logins happens in the page, in a list under the field.
     pub kind: String,
     /// `scheme://host[:port]`.
     pub origin: String,
-    /// The username submitted (save, update).
+    /// The username submitted (save, update) or picked (missing).
     pub username: String,
-    /// Names the person can choose from (pick).
-    pub usernames: Vec<String>,
     /// Handle for answering a save or update; the password stays in the host.
+    /// For `missing`, the id of the login to forget.
     pub token: String,
 }
 
 struct PendingSave {
+    tab: TabId,
     profile: ProfileId,
     url: String,
     username: String,
     password: String,
+    at: std::time::Instant,
 }
+
+/// How long a submitted password waits for an answer. The card goes when its
+/// tab closes, but a prompt nobody answers must not keep a password in memory
+/// until the app quits.
+const PENDING_TTL: std::time::Duration = std::time::Duration::from_mins(10);
 
 static PENDING: Mutex<Option<HashMap<String, PendingSave>>> = Mutex::new(None);
 /// One nonce per tab, so a fill from the chrome can prove itself to the page.
@@ -126,20 +134,34 @@ pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession)
         return;
     }
     tauri::async_runtime::spawn(async move {
-        while let Ok(event) = events.recv().await {
+        while let Some(event) =
+            crate::cdp_feed::next_event(&mut events, tab_id, "saved logins").await
+        {
             let Some(payload) = binding_payload(&event, &nonce) else {
                 continue;
             };
-            if let Err(error) = handle(&app, tab_id, &session, &nonce, payload).await {
+            // The site is whatever document actually called, never the `url`
+            // its payload names: a page that learned the nonce could
+            // otherwise ask for another site's logins by claiming its URL.
+            let Some(origin) = caller_origin(&session, &event).await else {
+                continue;
+            };
+            if let Err(error) = handle(&app, tab_id, &session, &nonce, &origin, payload).await {
                 tracing::debug!(%tab_id, "saved logins request failed: {error}");
             }
         }
         let mut guard = NONCES
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(m) = guard.as_mut() {
+        // A replacement view may already have set up its own nonce.
+        if let Some(m) = guard.as_mut()
+            && m.get(&tab_id) == Some(&nonce)
+        {
             m.remove(&tab_id);
         }
+        drop(guard);
+        // Its submitted logins can no longer be answered from this tab.
+        with_pending(|m| m.retain(|_, p| p.tab != tab_id));
     });
 }
 
@@ -156,6 +178,21 @@ pub fn binding_payload(event: &CdpEvent, nonce: &str) -> Option<Value> {
     (payload["nonce"].as_str() == Some(nonce)).then_some(payload)
 }
 
+/// The origin of the document that called the binding, asked of that very
+/// execution context. `location` is unforgeable, so a page cannot answer for
+/// another site; a context already gone (the page navigated) answers nothing.
+async fn caller_origin(session: &CdpSession, event: &CdpEvent) -> Option<String> {
+    let context = event.params["executionContextId"].as_i64()?;
+    let result = session
+        .call(
+            "Runtime.evaluate",
+            json!({"expression": "location.origin", "contextId": context, "returnByValue": true}),
+        )
+        .await
+        .ok()?;
+    crate::passwords::origin_of(result["result"]["value"].as_str()?).ok()
+}
+
 fn field(payload: &Value, key: &str) -> String {
     payload[key]
         .as_str()
@@ -170,6 +207,7 @@ async fn handle(
     tab_id: TabId,
     session: &CdpSession,
     nonce: &str,
+    origin: &str,
     payload: Value,
 ) -> AppResult<()> {
     let Some(profile) = profile_of_tab(app, tab_id) else {
@@ -178,8 +216,7 @@ async fn handle(
     let state = app.state::<AppState>();
     match payload["kind"].as_str().unwrap_or_default() {
         "query" => {
-            let url = field(&payload, "url");
-            let logins = crate::passwords::for_url(&state, profile, &url).unwrap_or_default();
+            let logins = crate::passwords::for_url(&state, profile, origin).unwrap_or_default();
             let list: Vec<Value> = logins
                 .iter()
                 .map(|c| json!({"id": c.id, "username": c.username}))
@@ -188,41 +225,35 @@ async fn handle(
         }
         "fill" => {
             let id = field(&payload, "id");
-            fill(&state, session, nonce, profile, &id).await?;
+            match fill(&state, session, nonce, profile, &id, Some(origin)).await {
+                // Only forgetting it helps, and the page cannot say so:
+                // ask the chrome to offer that.
+                Err(error) if crate::passwords::is_missing_password(&error) => {
+                    let login = crate::passwords::list(&state, profile)?
+                        .into_iter()
+                        .find(|c| c.id == id);
+                    if let Some(login) = login {
+                        let _ = CredentialPrompt {
+                            tab_id,
+                            kind: "missing".into(),
+                            origin: origin.to_owned(),
+                            username: login.username,
+                            token: login.id,
+                        }
+                        .emit(app);
+                    }
+                }
+                other => other?,
+            }
         }
         "filled" => {
             let id = field(&payload, "id");
             let _ = crate::passwords::touch(&state, &id);
         }
-        "pick" => {
-            let usernames: Vec<String> = payload["usernames"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_str())
-                        .map(|s| s.chars().take(MAX_FIELD).collect())
-                        .take(20)
-                        .collect()
-                })
-                .unwrap_or_default();
-            // Without a site the chrome could not look the logins up again.
-            let Ok(origin) = crate::passwords::origin_of(&field(&payload, "url")) else {
-                return Ok(());
-            };
-            let _ = CredentialPrompt {
-                tab_id,
-                kind: "pick".into(),
-                origin,
-                username: String::new(),
-                usernames,
-                token: String::new(),
-            }
-            .emit(app);
-        }
         // A private window fills what it knows but never offers to keep a
         // login: its store is in memory and the Keychain is not.
         "submitted" if !crate::private_session::is_private() => {
-            submitted(app, tab_id, profile, &payload)?;
+            submitted(app, tab_id, profile, origin, &payload);
         }
         _ => {}
     }
@@ -235,50 +266,61 @@ fn submitted(
     app: &AppHandle<Runtime>,
     tab_id: TabId,
     profile: ProfileId,
+    origin: &str,
     payload: &Value,
-) -> AppResult<()> {
+) {
     let state = app.state::<AppState>();
 
-    let url = field(payload, "url");
-    let username = field(payload, "username");
+    // Saved usernames are trimmed, so an untrimmed one never matched its own
+    // login and asked to save it again on every sign-in.
+    let username = field(payload, "username").trim().to_owned();
     let password = field(payload, "password");
-    if password.is_empty() {
-        return Ok(());
+    // Without a username the save can only fail ("a login needs a
+    // username"), after the password was already let go; a two-step sign-in
+    // shows no username field on its password page.
+    if password.is_empty() || username.is_empty() {
+        return;
     }
-    let origin = crate::passwords::origin_of(&url)?;
+    let url = origin.to_owned();
+    let origin = url.clone();
     if crate::passwords::never_list(&state, profile)
         .unwrap_or_default()
         .contains(&origin)
     {
-        return Ok(());
+        return;
     }
     let known = crate::passwords::for_url(&state, profile, &url).unwrap_or_default();
     let same_user = known.iter().find(|c| c.username == username);
     let kind = match same_user {
-        Some(c) => {
+        Some(c) => match crate::passwords::reveal(&state, profile, &c.id) {
             // Unchanged: nothing to ask, just note the use.
-            if crate::passwords::reveal(&state, profile, &c.id)
-                .ok()
-                .as_deref()
-                == Some(password.as_str())
-            {
+            Ok(saved) if saved == password => {
                 let _ = crate::passwords::touch(&state, &c.id);
-                return Ok(());
+                return;
             }
-            "update"
-        }
+            Ok(_) => "update",
+            // The saved password is gone from the OS store: saving again
+            // puts it back.
+            Err(e) if crate::passwords::is_missing_password(&e) => "update",
+            // A locked or refused Keychain says nothing about whether the
+            // password changed; offering "Update" on every sign-in would
+            // invite overwriting a good password.
+            Err(_) => return,
+        },
         None => "save",
     };
     let token = dive_core::TabId::new().to_string();
     with_pending(|m| {
-        m.retain(|_, p| p.url != url || p.username != username);
+        m.retain(|_, p| (p.url != url || p.username != username) && p.at.elapsed() < PENDING_TTL);
         m.insert(
             token.clone(),
             PendingSave {
+                tab: tab_id,
                 profile,
                 url,
                 username: username.clone(),
                 password,
+                at: std::time::Instant::now(),
             },
         );
     });
@@ -287,11 +329,9 @@ fn submitted(
         kind: kind.into(),
         origin,
         username,
-        usernames: Vec::new(),
         token,
     }
     .emit(app);
-    Ok(())
 }
 
 async fn offer(session: &CdpSession, nonce: &str, list: &[Value]) {
@@ -305,20 +345,30 @@ async fn offer(session: &CdpSession, nonce: &str, list: &[Value]) {
         .await;
 }
 
+/// Put a saved login into the page, but only into a document of the site it
+/// was saved for. `asked_by` is the origin of the document that asked, when
+/// the page asked; a login for any other site is refused outright. The origin
+/// is checked again inside the same evaluation that fills, so a page that
+/// navigated in between never receives it.
 async fn fill(
     state: &AppState,
     session: &CdpSession,
     nonce: &str,
     profile: ProfileId,
     id: &str,
+    asked_by: Option<&str>,
 ) -> AppResult<()> {
     let login = crate::passwords::list(state, profile)?
         .into_iter()
         .find(|c| c.id == id)
         .ok_or_else(|| AppError::new("no such login"))?;
+    if asked_by.is_some_and(|origin| origin != login.origin) {
+        return Err(AppError::new("that login belongs to another site"));
+    }
     let password = crate::passwords::reveal(state, profile, id)?;
     let expression = format!(
-        "window.__diveCredentialsFill && window.__diveCredentialsFill({}, {})",
+        "location.origin === {} && window.__diveCredentialsFill && window.__diveCredentialsFill({}, {})",
+        serde_json::to_string(&login.origin).unwrap_or_default(),
         serde_json::to_string(nonce).unwrap_or_default(),
         json!({"id": login.id, "username": login.username, "password": password})
     );
@@ -338,6 +388,11 @@ pub fn answer(
     let Some(pending) = with_pending(|m| m.remove(token)) else {
         return Err(AppError::new("that prompt has already been answered"));
     };
+    if pending.at.elapsed() >= PENDING_TTL {
+        return Err(AppError::new(
+            "that prompt has expired; sign in again to save the login",
+        ));
+    }
     if !save {
         return Ok(None);
     }
@@ -359,7 +414,8 @@ pub fn never(state: &AppState, token: &str) -> AppResult<String> {
     crate::passwords::never_add(state, pending.profile, &pending.url)
 }
 
-/// Fill a chosen login into `tab`, for the pick prompt.
+/// Fill a saved login into `tab` on the chrome's behalf. The page must be on
+/// the login's own site; the check runs inside the evaluation that fills.
 pub async fn fill_into(app: AppHandle<Runtime>, tab_id: TabId, id: String) -> AppResult<()> {
     let state = app.state::<AppState>();
     let session = crate::state::lock(&state.host)
@@ -370,7 +426,7 @@ pub async fn fill_into(app: AppHandle<Runtime>, tab_id: TabId, id: String) -> Ap
         .ok_or_else(|| AppError::new("saved logins are not set up on that tab"))?;
     let profile =
         profile_of_tab(&app, tab_id).ok_or_else(|| AppError::new("that tab has no profile"))?;
-    fill(&state, &session, &nonce, profile, &id).await
+    fill(&state, &session, &nonce, profile, &id, None).await
 }
 
 #[cfg(test)]
@@ -408,10 +464,12 @@ mod tests {
             m.insert(
                 "t1".into(),
                 PendingSave {
+                    tab: TabId::new(),
                     profile: ProfileId::new(),
                     url: "https://a.test/".into(),
                     username: "u".into(),
                     password: "p".into(),
+                    at: std::time::Instant::now(),
                 },
             );
         });

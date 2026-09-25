@@ -122,6 +122,10 @@
     value: (nonce, forToken, list) => {
       if (nonce !== NONCE || forToken !== token || !Array.isArray(list)) return;
       if (!target || document.activeElement !== target) return;
+      // The saved-login list already hangs under this field; two lists
+      // stacked in one spot is one too many.
+      const owns = window.__diveCredentialsOwns;
+      if (typeof owns === "function" && owns(target)) return hide();
       items = list.filter((v) => typeof v === "string").slice(0, 8);
       selected = -1;
       if (items.length === 0) return hide();

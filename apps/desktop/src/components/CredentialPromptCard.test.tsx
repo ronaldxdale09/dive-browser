@@ -7,7 +7,8 @@ import { useBrowser } from "../store/browser";
 import { useCredentialPrompt } from "../store/credentialPrompt";
 import { CredentialPromptCard } from "./CredentialPromptCard";
 
-const save: CredentialPrompt = { tab_id: "t1", kind: "save", origin: "https://github.com", username: "dale", usernames: [], token: "tok1" };
+const save: CredentialPrompt = { tab_id: "t1", kind: "save", origin: "https://github.com", username: "dale", token: "tok1" };
+const missing: CredentialPrompt = { tab_id: "t1", kind: "missing", origin: "https://github.com", username: "eve", token: "c2" };
 const initialBrowser = useBrowser.getState();
 const platform = Object.getOwnPropertyDescriptor(navigator, "platform");
 
@@ -16,11 +17,6 @@ beforeEach(() => {
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
   // The host saves only on a yes; a "not now" returns nothing.
   vi.spyOn(ipc, "passwordsAnswer").mockImplementation(async (_token, save) => (save ? { id: "c1", profile_id: "p1", origin: "https://github.com", username: "dale", created_at: "", last_used_at: null, uses: 0 } : null));
-  vi.spyOn(ipc, "passwordsForUrl").mockResolvedValue([
-    { id: "c1", profile_id: "p1", origin: "https://github.com", username: "dale", created_at: "", last_used_at: null, uses: 0 },
-    { id: "c2", profile_id: "p1", origin: "https://github.com", username: "eve", created_at: "", last_used_at: null, uses: 0 },
-  ]);
-  vi.spyOn(ipc, "passwordsFill").mockResolvedValue(null);
   vi.spyOn(ipc, "passwordsNever").mockResolvedValue("https://github.com");
   useCredentialPrompt.setState({ byTab: {}, listening: true });
 });
@@ -43,7 +39,9 @@ describe("CredentialPromptCard", () => {
     const dialog = screen.getByRole("dialog", { name: "Save the password for github.com?" });
     expect(dialog.textContent).toContain("dale");
     expect(contentCoverDepth()).toBe(1);
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Save" })));
+    // It never takes the keyboard: the next Enter belongs to the page.
+    expect(document.activeElement).toBe(document.body);
+    expect(dialog.hasAttribute("data-overlay-passive")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(ipc.passwordsAnswer).toHaveBeenCalledWith("tok1", true));
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -78,39 +76,6 @@ describe("CredentialPromptCard", () => {
     await waitFor(() => expect(useBrowser.getState().notice).toBe("Updated the password for github.com"));
   });
 
-  it("fills the chosen login when several are saved", async () => {
-    useCredentialPrompt.setState({ byTab: { t1: { ...save, kind: "pick", username: "", usernames: ["dale", "eve"], token: "" } } });
-    render(<CredentialPromptCard tabId="t1" />);
-    expect(screen.getByRole("dialog", { name: "Sign in to github.com as" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("menuitem", { name: "eve" }));
-    await waitFor(() => expect(ipc.passwordsFill).toHaveBeenCalledWith("t1", "c2"));
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("does not say a missing fill lives only in the Keychain on Windows", async () => {
-    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
-    vi.spyOn(ipc, "passwordsFill").mockRejectedValue(new Error("Credential Manager no longer has this password. Forget the login and save it again."));
-    useCredentialPrompt.setState({ byTab: { t1: { ...save, kind: "pick", username: "", usernames: ["dale", "eve"], token: "" } } });
-    render(<CredentialPromptCard tabId="t1" />);
-    fireEvent.click(screen.getByRole("menuitem", { name: "eve" }));
-    await waitFor(() => expect(useBrowser.getState().notice).toContain("no longer has the password for eve"));
-    expect(useBrowser.getState().notice).not.toMatch(/Keychain/);
-    expect(useBrowser.getState().notice).toMatch(/Credential Manager/);
-  });
-
-  it("offers to forget a login whose Keychain item is gone", async () => {
-    vi.spyOn(ipc, "passwordsFill").mockRejectedValue(new Error("The Keychain no longer has this password. Forget the login and save it again."));
-    const remove = vi.spyOn(ipc, "passwordsDelete").mockResolvedValue(true);
-    useCredentialPrompt.setState({ byTab: { t1: { ...save, kind: "pick", username: "", usernames: ["dale", "eve"], token: "" } } });
-    render(<CredentialPromptCard tabId="t1" />);
-    fireEvent.click(screen.getByRole("menuitem", { name: "eve" }));
-    await waitFor(() => expect(useBrowser.getState().notice).toContain("no longer has the password for eve"));
-    expect(useBrowser.getState().error).toBeNull();
-    useBrowser.getState().noticeAction?.run();
-    await waitFor(() => expect(remove).toHaveBeenCalledWith("c2"));
-    await waitFor(() => expect(useBrowser.getState().notice).toContain("Forgot the login for eve"));
-  });
-
   it("does not say a saved login lives only in the Keychain on Windows", () => {
     Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
     useCredentialPrompt.setState({ byTab: { t1: save } });
@@ -119,17 +84,50 @@ describe("CredentialPromptCard", () => {
     expect(document.body.textContent).toMatch(/Credential Manager/);
   });
 
-  it("walks the saved logins with the arrow keys", () => {
-    useCredentialPrompt.setState({ byTab: { t1: { ...save, kind: "pick", username: "", usernames: ["dale", "eve"], token: "" } } });
+  it("closes on Escape as Not now, so the host lets the password go", async () => {
+    useCredentialPrompt.setState({ byTab: { t1: save } });
     render(<CredentialPromptCard tabId="t1" />);
-    const dale = screen.getByRole("menuitem", { name: "dale" });
-    const eve = screen.getByRole("menuitem", { name: "eve" });
-    expect(document.activeElement).toBe(dale);
-    fireEvent.keyDown(dale, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(eve);
-    fireEvent.keyDown(eve, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(dale);
-    fireEvent.keyDown(dale, { key: "End" });
-    expect(document.activeElement).toBe(eve);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(ipc.passwordsAnswer).toHaveBeenCalledWith("tok1", false));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(useBrowser.getState().error).toBeNull();
+  });
+
+  it("moves below the find bar instead of covering it", () => {
+    useBrowser.setState({ open: { ...useBrowser.getState().open, find: true } });
+    useCredentialPrompt.setState({ byTab: { t1: save } });
+    render(<CredentialPromptCard tabId="t1" />);
+    expect(screen.getByRole("dialog").style.top).toBe("52px");
+  });
+
+  it("lets a closed tab's login go instead of holding it", async () => {
+    vi.spyOn(ipc, "passwordsAnswer").mockResolvedValue(null);
+    useCredentialPrompt.setState({ listening: false });
+    vi.spyOn(await import("../lib/ipc").then((m) => m.events.credentialPrompt), "listen").mockResolvedValue(() => undefined);
+    useBrowser.setState({ tabs: [{ id: "t1", url: "https://github.com/login" } as never] });
+    await useCredentialPrompt.getState().init();
+    useCredentialPrompt.setState({ byTab: { t1: save } });
+    useBrowser.setState({ tabs: [] });
+    await waitFor(() => expect(ipc.passwordsAnswer).toHaveBeenCalledWith("tok1", false));
+    expect(useCredentialPrompt.getState().byTab.t1).toBeUndefined();
+  });
+
+  it("offers to forget a login whose Keychain item is gone", async () => {
+    const remove = vi.spyOn(ipc, "passwordsDelete").mockResolvedValue(true);
+    useCredentialPrompt.setState({ byTab: { t1: missing } });
+    render(<CredentialPromptCard tabId="t1" />);
+    expect(screen.getByRole("dialog", { name: "The Keychain no longer has the password for eve" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Forget login" }));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith("c2"));
+    await waitFor(() => expect(useBrowser.getState().notice).toContain("Forgot the login for eve"));
+    expect(ipc.passwordsAnswer).not.toHaveBeenCalled();
+  });
+
+  it("names Credential Manager for a lost password on Windows", () => {
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Win32" });
+    useCredentialPrompt.setState({ byTab: { t1: missing } });
+    render(<CredentialPromptCard tabId="t1" />);
+    expect(document.body.textContent).not.toMatch(/Keychain/);
+    expect(document.body.textContent).toMatch(/Credential Manager/);
   });
 });

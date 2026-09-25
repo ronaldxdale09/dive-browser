@@ -183,6 +183,28 @@ fn apply_proxy(request_context: &RequestContext, proxy_url: &url::Url) {
     }
 }
 
+/// Turns off Chromium's own form autocomplete and address/card autofill for a
+/// page context. The embedder draws its own suggestion lists; Chromium's popup
+/// is a native widget beside them that duplicates the embedder's choices,
+/// cannot be styled, and does not take clicks reliably while the embedder's
+/// overlays are up. (CEF registers no password-manager preferences.)
+fn disable_builtin_autofill(request_context: &RequestContext) {
+    use cef::ImplValue;
+
+    for name in ["autofill.profile_enabled", "autofill.credit_card_enabled"] {
+        if request_context.can_set_preference(Some(&name.into())) != 1 {
+            continue;
+        }
+        let Some(mut value) = cef::value_create() else {
+            return;
+        };
+        value.set_bool(0);
+        if request_context.set_preference(Some(&name.into()), Some(&mut value), None) != 1 {
+            log::warn!("could not turn off the {name} preference");
+        }
+    }
+}
+
 pub(crate) fn request_context_from_webview_attributes<'a>(
     global_cache_path: &Path,
     webview_attributes: &WebviewAttributes,
@@ -226,6 +248,9 @@ pub(crate) fn request_context_from_webview_attributes<'a>(
             // this continuation signals.
             if let (Some(rc), Some(proxy_url)) = (rc.as_ref(), proxy_url.as_ref()) {
                 apply_proxy(rc, proxy_url);
+            }
+            if let Some(rc) = rc.as_ref() {
+                disable_builtin_autofill(rc);
             }
             on_initialized(rc);
         }

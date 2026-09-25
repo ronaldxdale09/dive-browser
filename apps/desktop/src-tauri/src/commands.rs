@@ -4022,7 +4022,9 @@ pub(crate) fn layout_set_content_covered(
     })
 }
 
-/// Regions belong to trusted chrome and use CSS logical pixels.
+/// Regions belong to trusted chrome and use CSS logical pixels. `take_focus`
+/// is false when every overlay is passive (tooltips, the save-login card), so
+/// the page keeps the keyboard under them.
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn layout_set_overlay_regions(
@@ -4031,6 +4033,7 @@ pub(crate) fn layout_set_overlay_regions(
     regions: Vec<OverlayRegion>,
     active: bool,
     modal: bool,
+    take_focus: bool,
 ) -> AppResult<()> {
     if regions.len() > 64
         || regions.iter().any(|b| {
@@ -4046,7 +4049,7 @@ pub(crate) fn layout_set_overlay_regions(
     }
     on_main(&app, move |_, _, state| {
         if let Some(host) = lock(&state.host).as_mut() {
-            host.set_live_overlay(webview.label(), regions, active, modal)?;
+            host.set_live_overlay(webview.label(), regions, active, modal, take_focus)?;
         }
         Ok(())
     })

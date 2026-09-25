@@ -2,13 +2,12 @@ import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { CredentialPrompt } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
-import { isMissingPasswordError, missingPasswordNotice } from "../lib/commands";
 import { useBrowser } from "./browser";
 
 /**
- * The host's questions about logins: save this one, update it, or pick
- * which to fill. One per tab, newest wins; the password itself never
- * reaches the chrome, only a token to answer with.
+ * The host's questions about logins: save this one, update it, or forget
+ * one whose password the OS store has lost. One per tab, newest wins; the
+ * password itself never reaches the chrome, only a token to answer with.
  */
 interface CredentialPromptStore {
   byTab: Record<string, CredentialPrompt>;
@@ -18,9 +17,17 @@ interface CredentialPromptStore {
   answer: (prompt: CredentialPrompt, save: boolean) => Promise<void>;
   /** Let the login go and stop asking for this site in this profile. */
   never: (prompt: CredentialPrompt) => Promise<void>;
-  /** Fill the login with `username` into the prompt's tab. */
-  pick: (prompt: CredentialPrompt, username: string) => Promise<void>;
+  /** Forget a login whose password the OS store no longer has. */
+  forget: (prompt: CredentialPrompt) => Promise<void>;
   dismiss: (tabId: string) => void;
+}
+
+function originOf(url: string) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
 }
 
 export const useCredentialPrompt = create<CredentialPromptStore>((set, get) => ({
@@ -33,6 +40,22 @@ export const useCredentialPrompt = create<CredentialPromptStore>((set, get) => (
       await events.credentialPrompt.listen((e) => {
         set((s) => ({ byTab: { ...s.byTab, [e.payload.tab_id]: e.payload } }));
       });
+      // A prompt outlives nothing it was about. A closed tab lets its
+      // password go at once, instead of the host holding it until quit; a
+      // "missing" card for a site the tab has since left no longer applies.
+      useBrowser.subscribe((state, previous) => {
+        if (state.tabs === previous.tabs) return;
+        const byId = new Map(state.tabs.map((t) => [t.id, t]));
+        for (const prompt of Object.values(get().byTab)) {
+          const tab = byId.get(prompt.tab_id);
+          if (!tab) {
+            if (prompt.kind === "missing") get().dismiss(prompt.tab_id);
+            else void get().answer(prompt, false);
+          } else if (prompt.kind === "missing" && originOf(tab.url) !== prompt.origin) {
+            get().dismiss(prompt.tab_id);
+          }
+        }
+      });
     } catch {
       // No host (a test, or a chrome without Tauri): nothing to listen to.
       set({ listening: false });
@@ -42,10 +65,13 @@ export const useCredentialPrompt = create<CredentialPromptStore>((set, get) => (
     get().dismiss(prompt.tab_id);
     try {
       const saved = await ipc.passwordsAnswer(prompt.token, save);
+      if (!save) return;
       const site = prompt.origin.replace(/^https?:\/\//, "");
       if (saved) useBrowser.getState().notify(prompt.kind === "update" ? `Updated the password for ${site}` : `Saved the login for ${site}`, 3000);
     } catch (e) {
-      useBrowser.setState({ error: errorMessage(e) });
+      // Letting a login go has nothing to report: a prompt a newer sign-in
+      // already replaced is gone either way.
+      if (save) useBrowser.setState({ error: errorMessage(e) });
     }
   },
   never: async (prompt) => {
@@ -57,29 +83,12 @@ export const useCredentialPrompt = create<CredentialPromptStore>((set, get) => (
       useBrowser.setState({ error: errorMessage(e) });
     }
   },
-  pick: async (prompt, username) => {
+  forget: async (prompt) => {
     get().dismiss(prompt.tab_id);
     try {
-      const logins = await ipc.passwordsForUrl(prompt.origin);
-      const login = logins.find((c) => c.username === username);
-      if (!login) throw new Error(`No saved login for ${username}`);
-      try {
-        await ipc.passwordsFill(prompt.tab_id, login.id);
-      } catch (e) {
-        // A login whose OS-store item is gone can only be forgotten; offer
-        // that right here instead of sending the person to Settings.
-        if (!isMissingPasswordError(errorMessage(e))) throw e;
-        const site = prompt.origin.replace(/^https?:\/\//, "");
-        useBrowser.getState().notify(missingPasswordNotice(username), 8000, {
-          label: "Forget login",
-          run: () => {
-            void ipc
-              .passwordsDelete(login.id)
-              .then(() => useBrowser.getState().notify(`Forgot the login for ${username} on ${site}. Sign in again to save it.`, 4000))
-              .catch((err: unknown) => useBrowser.setState({ error: errorMessage(err) }));
-          },
-        });
-      }
+      await ipc.passwordsDelete(prompt.token);
+      const site = prompt.origin.replace(/^https?:\/\//, "");
+      useBrowser.getState().notify(`Forgot the login for ${prompt.username} on ${site}. Sign in again to save it.`, 4000);
     } catch (e) {
       useBrowser.setState({ error: errorMessage(e) });
     }

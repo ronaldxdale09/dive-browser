@@ -360,7 +360,9 @@
             locator: null,
             enabled: isEnabled(el),
             editable: isEditable(el),
-            value: isEditable(el) ? String(el.value == null ? "" : el.value).slice(0, 120) : null,
+            // Never a password, card number or one-time code: this list goes
+            // to the agent's model and to MCP clients.
+            value: isEditable(el) && !secretField(el) ? String(el.value == null ? "" : el.value).slice(0, 120) : null,
             x: Math.round(rect.left),
             y: Math.round(rect.top),
             width: Math.round(rect.width),

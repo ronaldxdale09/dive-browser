@@ -82,6 +82,12 @@ const isContentEditable = (el) => {
   return attribute === "" || attribute === "true" || attribute === "plaintext-only";
 };
 
+// A field whose value must never leave the page in a snapshot: passwords,
+// card details and one-time codes.
+const secretField = (el) =>
+  !!el && el.tagName === "INPUT"
+  && ((el.type || "").toLowerCase() === "password" || /password|cc-|one-time-code/i.test(el.autocomplete || ""));
+
 const isEditable = (el) => {
   if (!el || el.nodeType !== 1) return false;
   const tag = el.tagName;

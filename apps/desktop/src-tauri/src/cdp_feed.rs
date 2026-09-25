@@ -168,6 +168,26 @@ pub fn setup_failed(tab_id: dive_core::TabId, what: &str, error: &dive_cdp::CdpE
     }
 }
 
+/// The next event on a per-tab feed, riding out a burst it fell behind on.
+/// `while let Ok(..) = recv()` ended the loop on the first `Lagged` -- a
+/// network-heavy page overruns the buffer easily -- and the feature went dead
+/// for that tab until it was reopened. Only a closed session ends it.
+pub async fn next_event(
+    events: &mut dive_cdp::CdpEventReceiver,
+    tab_id: TabId,
+    what: &str,
+) -> Option<std::sync::Arc<CdpEvent>> {
+    loop {
+        match events.recv().await {
+            Ok(event) => return Some(event),
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                tracing::debug!(%tab_id, n, "{what} fell behind and skipped CDP events");
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
