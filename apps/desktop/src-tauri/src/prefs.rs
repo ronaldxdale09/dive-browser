@@ -384,6 +384,8 @@ pub const ENGINES: &[(&str, &str)] = &[
 const MAX_PATTERNS: usize = 200;
 /// Zoom bounds new tabs may open at.
 const ZOOM_RANGE: (f64, f64) = (0.25, 3.0);
+/// Longest history retention window, in days: ten years.
+const MAX_HISTORY_DAYS: i32 = 3650;
 
 impl Prefs {
     /// Fold out-of-range or malformed values back to something usable. Runs
@@ -414,11 +416,7 @@ impl Prefs {
         if !UI_FONTS.contains(&self.ui_font.as_str()) {
             self.ui_font = d.ui_font;
         }
-        self.ui_scale = if self.ui_scale.is_finite() {
-            (self.ui_scale.clamp(UI_SCALE_RANGE.0, UI_SCALE_RANGE.1) * 100.0).round() / 100.0
-        } else {
-            d.ui_scale
-        };
+        self = self.clamp_ranges();
         if !matches!(self.density.as_str(), "compact" | "comfortable" | "relaxed") {
             self.density = d.density;
         }
@@ -448,12 +446,6 @@ impl Prefs {
         self.homepage = self.homepage.trim().to_owned();
         self.search_template = self.search_template.trim().to_owned();
         self.download_dir = self.download_dir.trim().to_owned();
-        self.default_zoom = if self.default_zoom.is_finite() {
-            self.default_zoom.clamp(ZOOM_RANGE.0, ZOOM_RANGE.1)
-        } else {
-            1.0
-        };
-        self.history_days = self.history_days.clamp(0, 3650);
         self.blocked_patterns = self
             .blocked_patterns
             .into_iter()
@@ -467,6 +459,26 @@ impl Prefs {
         if !matches!(self.preferred_editor.as_str(), "vscode" | "cursor" | "zed") {
             self.preferred_editor = d.preferred_editor;
         }
+        self
+    }
+
+    /// Bring every number back inside the range the code that uses it was
+    /// written for. Kept apart from [`Self::clamp`] because it also runs on
+    /// the stored blob: a hand-edited or restored file with a history window
+    /// of two billion days otherwise reaches date arithmetic that panics.
+    fn clamp_ranges(mut self) -> Self {
+        self.ui_scale = if self.ui_scale.is_finite() {
+            (self.ui_scale.clamp(UI_SCALE_RANGE.0, UI_SCALE_RANGE.1) * 100.0).round() / 100.0
+        } else {
+            default_ui_scale()
+        };
+        self.default_zoom = if self.default_zoom.is_finite() {
+            self.default_zoom.clamp(ZOOM_RANGE.0, ZOOM_RANGE.1)
+        } else {
+            1.0
+        };
+        self.history_days = self.history_days.clamp(0, MAX_HISTORY_DAYS);
+        self.agent_max_steps = self.agent_max_steps.clamp(1, 200);
         self
     }
 
@@ -526,7 +538,6 @@ impl Prefs {
         }
         let effort = dive_agent::Effort::parse(&self.agent_reasoning);
         effort.as_str().clone_into(&mut self.agent_reasoning);
-        self.agent_max_steps = self.agent_max_steps.clamp(1, 200);
         if !matches!(self.agent_approvals.as_str(), "every" | "risk" | "never") {
             self.agent_approvals.clone_from(&d.agent_approvals);
         }
@@ -799,7 +810,7 @@ fn fresh_profile_prefs_with(skip_onboarding: bool) -> Prefs {
 /// away. The next [`Registry::set`] would otherwise persist that reset.
 ///
 /// A blob that is not a JSON object at all yields the defaults.
-fn parse_stored(json: &str) -> Prefs {
+pub(crate) fn parse_stored(json: &str) -> Prefs {
     let incoming: Value = match serde_json::from_str(json) {
         Ok(value) => value,
         Err(error) => {
@@ -841,7 +852,9 @@ fn parse_stored(json: &str) -> Prefs {
     }
     prefs.privacy_exceptions = normalize_privacy_exceptions(prefs.privacy_exceptions);
     prefs.external_link_allowed = normalize_external_link_allowed(prefs.external_link_allowed);
-    prefs
+    // Only the numbers: the full clamp would also rewrite text fields a
+    // stored profile has always been allowed to keep as it wrote them.
+    prefs.clamp_ranges()
 }
 
 /// The `DevTools` calls that put `prefs` into force on one tab.
@@ -1166,12 +1179,20 @@ fn summary(done: &[String]) -> String {
 /// Drop visits older than the retention window; no-op when history is kept
 /// forever. Returns how many rows went.
 pub fn prune_history(state: &AppState) -> AppResult<usize> {
-    let days = state.prefs.get(state).history_days;
+    let days = state.prefs.snapshot(state).history_days;
     if days <= 0 {
         return Ok(0);
     }
-    let cutoff = dive_core::Timestamp::now() - time::Duration::days(i64::from(days));
-    Ok(crate::state::lock(&state.store).prune_history(cutoff)?)
+    // Clamped on the way in, and checked here as well: a window reaching
+    // past the calendar's first year panics in a plain subtraction.
+    let days = i64::from(days.min(MAX_HISTORY_DAYS));
+    let Some(cutoff) = dive_core::Timestamp::now()
+        .0
+        .checked_sub(time::Duration::days(days))
+    else {
+        return Ok(0);
+    };
+    Ok(crate::state::lock(&state.store).prune_history(dive_core::Timestamp(cutoff))?)
 }
 
 #[cfg(test)]
@@ -1254,6 +1275,20 @@ mod tests {
         assert_eq!(parse_stored(r#"{"theme":"dark","future":1}"#).theme, "dark");
         assert_eq!(parse_stored("[1,2]"), Prefs::default());
         assert_eq!(parse_stored("not json"), Prefs::default());
+    }
+
+    #[test]
+    fn a_stored_number_out_of_range_is_brought_back_in() {
+        let prefs = parse_stored(
+            r#"{"history_days":2147483647,"default_zoom":1e300,"ui_scale":-4,"agent_max_steps":0}"#,
+        );
+        assert_eq!(prefs.history_days, MAX_HISTORY_DAYS);
+        assert!((prefs.default_zoom - ZOOM_RANGE.1).abs() < f64::EPSILON);
+        assert!((prefs.ui_scale - UI_SCALE_RANGE.0).abs() < f64::EPSILON);
+        assert_eq!(prefs.agent_max_steps, 1);
+        // The window that comes out is one the calendar can subtract.
+        let days = time::Duration::days(i64::from(prefs.history_days));
+        assert!(dive_core::Timestamp::now().0.checked_sub(days).is_some());
     }
 
     #[test]
