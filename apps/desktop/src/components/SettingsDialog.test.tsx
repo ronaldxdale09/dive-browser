@@ -291,10 +291,14 @@ describe("Site permissions", () => {
     render(<SettingsDialog />);
     fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
     await waitFor(() => expect(screen.getByText("https://maps.test")).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: "Forget https://maps.test Location" }));
+    const forget = screen.getByRole("button", { name: "Forget https://maps.test Location" });
+    forget.focus();
+    fireEvent.click(forget);
     expect(ipc.permissionSet).toHaveBeenCalledWith({profile_id:"p1",container_id:"c1"}, "https://maps.test", "geolocation", "ask");
     expect(screen.queryByText("https://maps.test")).toBeNull();
     expect(screen.getByText("https://meet.test")).toBeTruthy();
+    // Focus moves to a surviving row, not the body, so Escape still closes Settings.
+    expect(document.activeElement?.getAttribute("aria-label")).toMatch(/^Forget https:\/\/meet\.test/);
   });
 
   it("shows a failed permission read instead of claiming the list is empty", async () => {

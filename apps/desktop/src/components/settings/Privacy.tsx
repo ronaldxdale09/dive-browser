@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ipc } from "../../lib/ipc";
 import type { Decision, PermissionList, SitePermission } from "../../lib/ipc";
 import { errorMessage } from "../../lib/errors";
@@ -355,6 +355,16 @@ function ScopedSitePermissions() {
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const [saving, setSaving] = useState<Record<string, true>>({});
+  const rows = useRef<HTMLDivElement>(null);
+  // Which row keyboard focus should land on once a forgotten row is gone.
+  const refocus = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const at = refocus.current;
+    if (at === null || !rows.current) return;
+    refocus.current = null;
+    const forget = rows.current.querySelectorAll<HTMLButtonElement>("[data-forget-permission]");
+    (forget[Math.min(at, forget.length - 1)] ?? rows.current).focus();
+  }, [list]);
   useEffect(() => {
     let alive = true;
     ipc
@@ -372,6 +382,13 @@ function ScopedSitePermissions() {
     // Escape then no longer closed Settings -- so a change made meanwhile is
     // ignored here instead.
     if (saving[key]) return;
+    // "Ask" removes the row, and focus in it would fall to the body, where
+    // Escape no longer closes Settings. Hand it to the next row instead.
+    if (decision === "ask" && rows.current?.contains(document.activeElement)) {
+      const forget = Array.from(rows.current.querySelectorAll("[data-forget-permission]"));
+      const row = document.activeElement?.closest("[data-permission-row]");
+      refocus.current = Math.max(0, forget.findIndex((b) => row?.contains(b)));
+    }
     setList((l) => (l ?? []).flatMap((x) => (x.origin === p.origin && x.kind === p.kind ? (decision === "ask" ? [] : [{ ...x, decision }]) : [x])));
     setError(null);
     setSaving((s) => ({ ...s, [key]: true }));
@@ -408,18 +425,21 @@ function ScopedSitePermissions() {
         </div>
       )}
       {list !== null && !error && groups.length === 0 && <p className="py-3 text-xs text-ink-3">No site has asked for anything yet.</p>}
+      <div ref={rows} tabIndex={-1} className="outline-none">
       {groups.map((g) => (
         <div key={g.origin} className="border-b border-line py-3 last:border-b-0">
           <p className="mb-1.5 truncate font-mono text-xs text-ink">{g.origin}</p>
           <div className="flex flex-col gap-1.5">
             {g.kinds.map((p) => (
-              <div key={p.kind} className="flex items-center gap-3">
+              <div key={p.kind} data-permission-row className="flex items-center gap-3">
                 <span className="min-w-0 flex-1 text-[11px] text-ink-2">{PERMISSION_KINDS[p.kind] ?? p.kind}</span>
                 <Select label={`${g.origin} ${PERMISSION_KINDS[p.kind] ?? p.kind}`} value={p.decision} onChange={(d) => decide(p, d)} options={DECISIONS} />
                 <button
                   type="button"
                   disabled={Boolean(saving[`${p.origin}\n${p.kind}`])}
+                  data-forget-permission
                   aria-label={`Forget ${g.origin} ${PERMISSION_KINDS[p.kind] ?? p.kind}`}
+                  title="Forget"
                   onClick={() => decide(p, "ask")}
                   className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-ink"
                 >
@@ -430,6 +450,7 @@ function ScopedSitePermissions() {
           </div>
         </div>
       ))}
+      </div>
     </Group>
   );
 }
