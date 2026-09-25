@@ -1,8 +1,9 @@
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { NavigationHistory } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { useCoversContent } from "../lib/overlay";
+import { useDismiss } from "../lib/useDismiss";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { useTabHistory } from "../lib/useTabHistory";
 import { useBrowser } from "../store/browser";
@@ -28,14 +29,10 @@ function HistoryButton({ direction, tabId, history, disabled, navigate }: {
   const panel = useRef<HTMLDivElement>(null);
   const label = direction === "back" ? "Back" : "Forward";
   const visible = open && !disabled && history !== null;
+  const close = useCallback(() => setOpen(false), []);
   useCoversContent(visible);
-  useFocusTrap(panel, { active: visible, menu: true, onEscape: () => setOpen(false) });
-  useEffect(() => {
-    if (!visible) return;
-    const outside = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); };
-    window.addEventListener("mousedown", outside);
-    return () => window.removeEventListener("mousedown", outside);
-  }, [visible]);
+  useFocusTrap(panel, { active: visible, menu: true, onEscape: close });
+  useDismiss(root, visible, close);
   const entries = history ? direction === "back" ? history.entries.slice(0, history.current_index).reverse() : history.entries.slice(history.current_index + 1) : [];
   const show = () => {
     if (disabled) return;
@@ -51,17 +48,21 @@ function HistoryButton({ direction, tabId, history, disabled, navigate }: {
       onKeyDown={(event) => {
         if (event.key === "ArrowDown" || (event.shiftKey && event.key === "F10")) { event.preventDefault(); show(); }
       }} />
-    {visible && <div ref={panel} role="menu" aria-label={`${label} history`} className="surface-enter absolute left-0 top-full z-50 mt-1 max-h-80 w-72 overflow-y-auto rounded-xl border border-line-2 bg-surface p-1 shadow-2xl">
+    {visible && <div ref={panel} role="menu" aria-label={`${label} history`} className="surface-enter absolute left-0 top-full z-50 mt-1 max-h-80 w-72 overflow-y-auto rounded-xl border border-line-2 bg-surface p-1 text-xs shadow-2xl">
       {entries.map((entry) => <button type="button" role="menuitem" key={entry.id} title={entry.url}
-        className="block w-full rounded-lg px-3 py-2 text-left text-ink-2 hover:bg-surface-2 focus:bg-surface-2 focus:text-ink focus:outline-none"
+        // The pointer and the keyboard share one cursor: hovering a row moves
+        // focus to it, so the first item's focus and the hovered row are never
+        // two highlighted rows at once.
+        onMouseEnter={(event) => event.currentTarget.focus({ preventScroll: true })}
+        className="block w-full rounded-lg px-2.5 py-1 text-left text-ink-2 outline-none hover:bg-surface-2 hover:text-ink focus-visible:bg-surface-2 focus-visible:text-ink"
         onClick={() => {
           setOpen(false);
           if (tabId && history) void ipc.tabHistoryNavigate(tabId, history.generation, entry.id).catch((error: unknown) => {
             useBrowser.setState({ error: errorMessage(error) });
           });
         }}>
-        <span className="block truncate text-[12px]">{entry.title.trim() || entry.url}</span>
-        <span className="block truncate text-[10px] text-ink-3">{entry.url}</span>
+        <span className="block truncate leading-4">{entry.title.trim() || entry.url}</span>
+        <span className="block truncate text-[10.5px] leading-4 text-ink-3">{entry.url}</span>
       </button>)}
     </div>}
   </div>;
