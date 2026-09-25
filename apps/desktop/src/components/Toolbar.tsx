@@ -248,7 +248,7 @@ export function BrowserActions() {
   const toggle = useBrowser((s) => s.toggle);
   return (
     <div className="relative flex shrink-0 items-center gap-1">
-      <IconButton icon={Menu} label="Menu" active={open.menu} onClick={() => toggle("menu")} tooltipAlign="end" />
+      <IconButton icon={Menu} label="Menu" active={open.menu} hasPopup="dialog" expanded={open.menu} onClick={() => toggle("menu")} tooltipAlign="end" />
       {open.menu && <MainMenu />}
     </div>
   );
@@ -273,7 +273,7 @@ function ToolbarMore({ children }: { children: React.ReactNode }) {
   }, [open]);
   return (
     <div ref={root} className="relative shrink-0">
-      <IconButton icon={MoreHorizontal} label="More page actions" active={open} onClick={() => setOpen((value) => !value)} tooltipAlign="end" />
+      <IconButton icon={MoreHorizontal} label="More page actions" active={open} hasPopup="dialog" expanded={open} onClick={() => setOpen((value) => !value)} tooltipAlign="end" />
       {open && (
         <div ref={panel} role="dialog" aria-label="Page actions" aria-modal="true" className="surface-enter absolute top-full right-0 z-50 mt-1 flex items-center gap-0.5 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl">
           {children}
@@ -352,5 +352,5 @@ function RecorderIndicator() {
   const recordingTab = useRecorder((s) => s.recordingTab);
   const here = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   if (!recordingTab || recordingTab !== here) return null;
-  return <IconButton icon={ScrollText} label="Stop recording steps" active onClick={() => runCommand("recorder.toggle")} />;
+  return <IconButton icon={ScrollText} label="Stop recording steps" active toggle onClick={() => runCommand("recorder.toggle")} />;
 }

@@ -149,11 +149,11 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
       <div className="flex shrink-0 flex-col items-center gap-1 border-l border-line py-2" style={{ width: TOOLS_WIDTH }}>
         <IconButton icon={Smartphone} label="Choose device" onClick={() => openPicker(true)} tooltipSide="left" />
         <IconButton icon={RotateCw} label="Rotate" shortcut="R" disabled={sel.deviceId === "custom"} onClick={() => void toggleLandscape(tabId)} tooltipSide="left" />
-        <IconButton icon={MonitorSmartphone} label={`Around the page: ${uiLabel}`} disabled={isLaptop} onClick={() => void setUi(tabId, nextUi)} tooltipSide="left" active={sel.ui !== "browser" && !isLaptop} />
+        <IconButton icon={MonitorSmartphone} label={`Around the page: ${uiLabel}`} disabled={isLaptop} onClick={() => void setUi(tabId, nextUi)} tooltipSide="left" active={sel.ui !== "browser" && !isLaptop} toggle />
         <Tool label={`Zoom ${zoomLabel}`} onClick={() => setZoom(tabId, nextZoom)}>
           <ZoomIn size={15} strokeWidth={1.75} aria-hidden />
         </Tool>
-        <IconButton icon={Maximize2} label="Fit to window" active={sel.zoom === "fit"} onClick={() => setZoom(tabId, "fit")} tooltipSide="left" />
+        <IconButton icon={Maximize2} label="Fit to window" active={sel.zoom === "fit"} toggle onClick={() => setZoom(tabId, "fit")} tooltipSide="left" />
         <IconButton icon={Camera} label="Screenshot with device frame" onClick={() => void snapshot()} tooltipSide="left" />
         <span className="flex-1" />
         <IconButton icon={X} label="Leave the simulator" onClick={() => void setDevice(tabId, null)} tooltipSide="left" />

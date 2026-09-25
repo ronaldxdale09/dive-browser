@@ -3,6 +3,13 @@ import type { ReactElement, ReactNode } from "react";
 import { displayChord } from "../lib/commands";
 import { useCoversContent } from "../lib/overlay";
 
+/**
+ * How much room a tip above its trigger needs: its own 11px line, padding
+ * and border, and the 4px gap. A trigger nearer the top of the window than
+ * this would have its tip cut off by the window's edge.
+ */
+const ROOM_ABOVE = 28;
+
 interface TriggerProps {
   "aria-describedby"?: string;
   title?: string | undefined;
@@ -36,23 +43,37 @@ export function Tooltip({
   // the churn the alternative buys.
   const [hovered, setHovered] = useState(false);
   useCoversContent(hovered);
+  // A tip that would open above a control in the title-bar row has nowhere
+  // to go: the chrome is clipped at the window's edge, so it was cut off or
+  // missing. Such a tip opens below instead. Measured as the tip is about to
+  // show (pointer or focus arriving), so it is right in whichever row the
+  // control sits in -- the one-bar layout moves the toolbar into the top row.
+  const [flipped, setFlipped] = useState(false);
+  const place = (target: HTMLElement) => {
+    if (side === "top") setFlipped(target.getBoundingClientRect().top < ROOM_ABOVE);
+  };
+  const shownSide = side === "top" && flipped ? "bottom" : side;
   const trigger = children as ReactElement<TriggerProps>;
   const describedBy = [trigger.props["aria-describedby"], id].filter(Boolean).join(" ");
   const horizontal = align === "start" ? "left-0" : align === "end" ? "right-0" : "left-1/2 -translate-x-1/2";
   const position =
-    side === "bottom"
+    shownSide === "bottom"
       ? `top-full mt-1 ${horizontal}`
-      : side === "left"
+      : shownSide === "left"
         ? "top-1/2 right-full mr-1 -translate-y-1/2"
-        : side === "right"
+        : shownSide === "right"
           ? "top-1/2 left-full ml-1 -translate-y-1/2"
           : `bottom-full mb-1 ${horizontal}`;
 
   return (
     <span
       className="group/tooltip relative inline-flex shrink-0"
-      onMouseEnter={() => setHovered(true)}
+      onMouseEnter={(e) => {
+        place(e.currentTarget);
+        setHovered(true);
+      }}
       onMouseLeave={() => setHovered(false)}
+      onFocus={(e) => place(e.currentTarget)}
     >
       {cloneElement(trigger, { "aria-describedby": describedBy, title: undefined })}
       <span
@@ -62,10 +83,13 @@ export function Tooltip({
         // invisible still counts as scrollable overflow, and a tooltip near the
         // edge of a scrolling panel gave the panel a scrollbar. It fades in
         // from its starting style after the usual delay.
-        className={`pointer-events-none absolute z-50 hidden w-max max-w-56 items-center gap-2 rounded-md border border-line-2 bg-surface-2 px-2 py-1 text-[11px] leading-none whitespace-nowrap text-ink shadow-lg transition-opacity delay-500 duration-100 starting:opacity-0 group-hover/tooltip:flex group-focus-within/tooltip:flex group-focus-within/tooltip:delay-0 ${position}`}
+        // A long label wraps, balanced so the last line is not a lone word,
+        // instead of running out of its box: a cap with no wrapping let
+        // "Connect an agent: drive Dive from…" spill past the border.
+        className={`pointer-events-none absolute z-50 hidden w-max max-w-64 items-center gap-2 rounded-md border border-line-2 bg-surface-2 px-2 py-1 text-[11px] leading-tight text-ink shadow-lg transition-opacity delay-500 duration-100 starting:opacity-0 group-hover/tooltip:flex group-focus-within/tooltip:flex group-focus-within/tooltip:delay-0 ${position}`}
       >
-        {label}
-        {shortcut && <kbd className="font-mono text-[9px] text-ink-3">{displayChord(shortcut)}</kbd>}
+        <span className="min-w-0 text-balance">{label}</span>
+        {shortcut && <kbd className="shrink-0 font-mono text-[9px] whitespace-nowrap text-ink-3">{displayChord(shortcut)}</kbd>}
       </span>
     </span>
   );

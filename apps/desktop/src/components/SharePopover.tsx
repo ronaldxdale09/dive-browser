@@ -58,7 +58,7 @@ export function SharePopover() {
 
   return (
     <div ref={ref} className="relative">
-      <Tooltip label="Share to another device">
+      <Tooltip label="Share to another device" side="bottom">
         <button
           type="button"
           aria-label="Share to another device"

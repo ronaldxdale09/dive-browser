@@ -243,7 +243,8 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
           ))}
         </div>
       </SortableContext>
-      {!vertical && <IconButton icon={Plus} label="New tab" onClick={() => toggle("palette", true)} />}
+      {/* The strip is the window's top row, so its tip opens downward. */}
+      {!vertical && <IconButton icon={Plus} label="New tab" tooltipSide="bottom" onClick={() => toggle("palette", true)} />}
       {hidden > 0 && (
         <button
           type="button"

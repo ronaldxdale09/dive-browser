@@ -115,7 +115,7 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
           <span className="truncate text-xs text-ink" data-tauri-drag-region="true">{title}</span>
         </div>
         <div ref={menuRoot} className="relative">
-          <IconButton icon={EllipsisVertical} label="App menu" active={menu} onClick={() => setMenu((v) => !v)} tooltipAlign="end" />
+          <IconButton icon={EllipsisVertical} label="App menu" active={menu} hasPopup="menu" expanded={menu} onClick={() => setMenu((v) => !v)} tooltipAlign="end" />
           {menu && (
             <div role="menu" aria-label="App menu" className="surface-enter absolute top-full right-0 z-50 mt-1 w-56 rounded-xl border border-line-2 bg-surface p-1 text-xs shadow-2xl">
               <MenuItem icon={Copy} label="Copy URL" onClick={() => { void navigator.clipboard.writeText(url); closeMenu(); }} />

@@ -13,6 +13,7 @@ export function IconButton({
   label,
   onClick,
   active = false,
+  toggle = false,
   disabled = false,
   size = 15,
   shortcut,
@@ -28,7 +29,14 @@ export function IconButton({
   icon: LucideIcon;
   label: string;
   onClick?: () => void;
+  /** Drawn as on: an open popover's button, a running recorder. */
   active?: boolean;
+  /**
+   * The button switches something on and off, so `active` is announced as
+   * pressed. Most icon buttons are actions or open a popover; announcing
+   * those as toggles ("Menu, toggle button, not pressed") misdescribes them.
+   */
+  toggle?: boolean;
   disabled?: boolean;
   size?: number;
   shortcut?: string;
@@ -38,7 +46,7 @@ export function IconButton({
   iconClassName?: string | undefined;
   onContextMenu?: MouseEventHandler<HTMLButtonElement>;
   onKeyDown?: KeyboardEventHandler<HTMLButtonElement>;
-  hasPopup?: "menu";
+  hasPopup?: "menu" | "dialog";
   expanded?: boolean;
   description?: string;
 }) {
@@ -47,7 +55,8 @@ export function IconButton({
       <button
         type="button"
         aria-label={label}
-        aria-pressed={active}
+        aria-pressed={toggle ? active : undefined}
+        data-active={active || undefined}
         disabled={disabled}
         onClick={onClick}
         onContextMenu={onContextMenu}
@@ -55,7 +64,7 @@ export function IconButton({
         aria-haspopup={hasPopup}
         aria-expanded={expanded}
         aria-description={description}
-        className="pressable grid size-7 place-items-center rounded-full text-ink-2 transition-[color,background-color,transform] duration-150 hover:bg-surface-3 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink"
+        className="pressable grid size-7 place-items-center rounded-full text-ink-2 transition-[color,background-color,transform] duration-150 hover:bg-surface-3 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent data-active:bg-surface-3 data-active:text-ink"
       >
         <Icon icon={icon} size={size} {...(iconClassName ? { className: iconClassName } : {})} />
       </button>
