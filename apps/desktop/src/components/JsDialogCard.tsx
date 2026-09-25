@@ -20,7 +20,7 @@ function heading(d: JsDialogAsked) {
  * A page's `alert`, `confirm`, `prompt` or leave-page question, shown as a
  * card over the page instead of a native modal. The page's script is paused
  * until it is answered; nothing else in Dive is. Enter accepts, Escape
- * cancels (or, for an alert, closes it).
+ * cancels (or, for an alert, closes it). Placed by `PagePrompts`.
  */
 export function JsDialogCard({ tabId }: { tabId: string | null }) {
   const dialog = useJsDialog((s) => (tabId ? s.byTab[tabId]?.[0] : undefined));
@@ -50,8 +50,11 @@ export function JsDialogCard({ tabId }: { tabId: string | null }) {
       role="alertdialog"
       aria-label={heading(dialog)}
       aria-describedby="js-dialog-message"
-      className="surface-enter absolute top-2 left-1/2 z-40 w-[380px] max-w-[calc(100%-16px)] -translate-x-1/2 rounded-2xl border border-line-2 bg-surface p-3 text-xs shadow-2xl"
+      className="surface-enter w-[380px] max-w-full rounded-2xl border border-line-2 bg-surface p-3 text-xs shadow-2xl"
       onKeyDown={(e) => {
+        // A focused button answers Enter itself: Enter on Stay or Cancel
+        // means Stay or Cancel, never the opposite.
+        if (e.target instanceof HTMLButtonElement) return;
         if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
           accept();

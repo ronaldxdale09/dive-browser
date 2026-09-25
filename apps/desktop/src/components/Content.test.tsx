@@ -5,7 +5,7 @@ import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { contentCoverDepth, resetContentCover, useCoversContent } from "../lib/overlay";
 import { tabInThisWindow, useBrowser } from "../store/browser";
-import { Content, describePermission } from "./Content";
+import { Content, NavErrorPanel, describePermission } from "./Content";
 
 // The welcome screen, the device simulator and its picker have tests of
 // their own and lean on browser APIs jsdom lacks.
@@ -215,6 +215,15 @@ describe("Content permission dialog", () => {
     expect(contentCoverDepth()).toBe(0);
   });
 
+  it("dims only the content area, so tabs and the toolbar stay usable while it waits", () => {
+    useBrowser.setState({ permissionRequests: { t1: [camera] } });
+    const { container } = render(<Content />);
+    const scrim = screen.getByRole("dialog").parentElement!;
+    expect(scrim.className).toContain("absolute");
+    expect(scrim.className).not.toContain("fixed");
+    expect(container.firstElementChild!.contains(scrim)).toBe(true);
+  });
+
   it("resumes the original request with a page-only choice without reloading", async () => {
     useBrowser.setState({ permissionRequests: { t1: [camera] } });
     render(<Content />);
@@ -262,4 +271,20 @@ it("leaves a detached tab's pending dialog to its owning window", () => {
   render(<Content />);
   expect(screen.queryByRole("alertdialog")).toBeNull();
   expect(contentCoverDepth()).toBe(0);
+});
+
+describe("NavErrorPanel's way past https-only", () => {
+  it("disables Continue while the host decides and says so when it refuses", async () => {
+    vi.spyOn(ipc, "httpsOnlyUpgraded").mockResolvedValue("plain.test");
+    let refuse: (e: Error) => void = () => undefined;
+    vi.spyOn(ipc, "httpsOnlyAllow").mockImplementation(() => new Promise((_, reject) => { refuse = reject; }));
+    render(<NavErrorPanel url="https://plain.test/" error="net::ERR_CONNECTION_REFUSED" />);
+    const button = await screen.findByRole("button", { name: /Continue without encryption/ });
+    fireEvent.click(button);
+    expect(ipc.httpsOnlyAllow).toHaveBeenCalledWith("t1", "https://plain.test/");
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => refuse(new Error("could not save the exception")));
+    expect(screen.getByText("could not save the exception")).toBeTruthy();
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+  });
 });

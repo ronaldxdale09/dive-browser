@@ -14,7 +14,7 @@ import { Icon } from "./Icon";
  * over http is the password itself on the wire, readable by anything in
  * between, which is worth knowing before typing rather than after.
  */
-export function HttpAuthCard({ tabId }: { tabId: string | null }) {
+export function HttpAuthCard({ tabId, takesFocus = true }: { tabId: string | null; /** Off while another card above it holds the keyboard. */ takesFocus?: boolean }) {
   const asked = useHttpAuth((s) => (tabId ? s.byTab[tabId]?.[0] : undefined));
   const recover = useHttpAuth((s) => s.recover);
   const answer = useHttpAuth((s) => s.answer);
@@ -29,7 +29,7 @@ export function HttpAuthCard({ tabId }: { tabId: string | null }) {
   }, [recover, tabId]);
   useCoversContent(open);
   useFocusTrap(panel, {
-    active: open,
+    active: open && takesFocus,
     initialFocus: userField,
     onEscape: () => asked && void answer(asked, null, ""),
   });
@@ -46,11 +46,15 @@ export function HttpAuthCard({ tabId }: { tabId: string | null }) {
       ref={panel}
       role="alertdialog"
       aria-label={`Sign in to ${asked.host}`}
-      className="surface-enter absolute top-2 left-1/2 z-40 w-[380px] max-w-[calc(100%-16px)] -translate-x-1/2 rounded-2xl border border-line-2 bg-surface p-3 text-xs shadow-2xl"
+      className="surface-enter w-[380px] max-w-full rounded-2xl border border-line-2 bg-surface p-3 text-xs shadow-2xl"
       onKeyDown={(e) => {
+        // A focused button answers Enter itself, so Enter on Cancel cancels.
+        // From a field it signs in, but only once there is a name to send:
+        // an empty username is a half-filled form, not an answer.
+        if (e.target instanceof HTMLButtonElement) return;
         if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
-          signIn();
+          if (mine.user) signIn();
         }
       }}
     >
@@ -88,7 +92,7 @@ export function HttpAuthCard({ tabId }: { tabId: string | null }) {
           placeholder="Username"
           value={mine.user}
           onChange={(e) => setDraft({ ...mine, user: e.target.value })}
-          className="h-8 rounded-lg border border-line bg-surface-2 px-2.5 text-xs text-ink outline-none focus:border-line-3"
+          className="h-8 rounded-lg border border-line bg-surface-2 px-2.5 text-xs text-ink outline-none focus:border-highlight/60"
         />
         <input
           id="http-auth-password"
@@ -98,7 +102,7 @@ export function HttpAuthCard({ tabId }: { tabId: string | null }) {
           placeholder="Password"
           value={mine.password}
           onChange={(e) => setDraft({ ...mine, password: e.target.value })}
-          className="h-8 rounded-lg border border-line bg-surface-2 px-2.5 text-xs text-ink outline-none focus:border-line-3"
+          className="h-8 rounded-lg border border-line bg-surface-2 px-2.5 text-xs text-ink outline-none focus:border-highlight/60"
         />
       </div>
 

@@ -20,8 +20,7 @@ import { usePicker } from "../store/simulator";
 import { DropZones, SplitView } from "./SplitView";
 import { CredentialPromptCard } from "./CredentialPromptCard";
 import { ExternalLinkDialog } from "./ExternalLinkDialog";
-import { HttpAuthCard } from "./HttpAuthCard";
-import { JsDialogCard } from "./JsDialogCard";
+import { PagePrompts } from "./PagePrompts";
 import { useTabDrag } from "./TabDnd";
 import { InternalPage, isInternalUrl } from "./internal/InternalPage";
 import { errorMessage } from "../lib/errors";
@@ -29,6 +28,11 @@ import { errorMessage } from "../lib/errors";
 const DevicePicker = lazy(() => import("./simulator/DevicePicker").then(({ DevicePicker }) => ({ default: DevicePicker })));
 const DeviceStage = lazy(() => import("./simulator/DeviceStage").then(({ DeviceStage }) => ({ default: DeviceStage })));
 const Welcome = lazy(() => import("./Welcome").then(({ Welcome }) => ({ default: Welcome })));
+
+/** The floating find bar's bottom edge, measured from the top of the content area. */
+const FIND_BAR_HEIGHT = 44;
+/** Height of the crash notice row at the top of the content area. */
+const CRASH_ROW_HEIGHT = 36;
 
 /**
  * The content area. The real page is a native child webview positioned over
@@ -54,6 +58,10 @@ export function Content() {
   const crash = useBrowser((s) => (activeTab ? s.crashedTabs[activeTab] : undefined));
   const navError = useBrowser((s) => (activeTab ? s.navError[activeTab] : undefined));
   const asked = useBrowser((s) => (activeTab ? s.permissionRequests[activeTab]?.[0] : undefined));
+  const findOpen = useBrowser((s) => s.open.find);
+  // The page's questions start below whatever already floats at the top of
+  // the page: the find bar (8px inset + 36px tall) or the crash notice row.
+  const promptTop = 8 + Math.max(findOpen ? FIND_BAR_HEIGHT : 0, activeTab && crash ? CRASH_ROW_HEIGHT : 0);
   useStartupDevice(activeTab);
 
   // A closed or torn-off tab leaves its split, so the split does not wait on
@@ -77,8 +85,7 @@ export function Content() {
       {activeTab && <PermissionDialog key={`${activeTab}-${asked?.request_id ?? "none"}`} tabId={activeTab} request={asked} />}
       <CredentialPromptCard tabId={activeTab} />
       <ExternalLinkDialog />
-      <JsDialogCard tabId={activeTab && !detached.includes(activeTab) ? activeTab : null} />
-      <HttpAuthCard tabId={activeTab && !detached.includes(activeTab) ? activeTab : null} />
+      <PagePrompts tabId={activeTab && !detached.includes(activeTab) ? activeTab : null} top={promptTop} />
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <div className="relative grid min-h-0 min-w-0 flex-1">
           {internal ? (
@@ -148,6 +155,10 @@ export function describePermission(kind: string): string {
  * safe answer; Allow is the primary action. There is no Escape: the page is
  * waiting on a decision, and a dismissal would have to be recorded as one.
  * Keyed on the tab, so an answer given on one tab never lingers on another.
+ *
+ * The scrim covers the content area only, not the window: the question is
+ * about this page, and the tabs, rail and toolbar stay usable so the person
+ * can look at another tab, or close this one, before deciding.
  */
 function PermissionDialog({ tabId, request }: { tabId: string; request: PermissionRequest | undefined }) {
   const decide = useBrowser((s) => s.decidePermission);
@@ -169,13 +180,13 @@ function PermissionDialog({ tabId, request }: { tabId: string; request: Permissi
   };
   const wants = request.kinds.map(describePermission).join(" and ");
   return (
-    <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-[1px]">
+    <div className="absolute inset-0 z-50 bg-black/30 backdrop-blur-[1px]">
       <div
         ref={panel}
         role="dialog"
         aria-modal="true"
         aria-labelledby="permission-title"
-        className="surface-enter mx-auto mt-16 w-[460px] max-w-[calc(100vw-32px)] rounded-2xl border border-line-2 bg-surface p-4 text-xs shadow-2xl"
+        className="surface-enter mx-auto mt-12 w-[460px] max-w-[calc(100%-32px)] rounded-2xl border border-line-2 bg-surface p-4 text-xs shadow-2xl"
       >
         <div className="flex items-start gap-3">
           <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-2">
@@ -244,6 +255,21 @@ export function NavErrorPanel({ url, error, onRetry }: { url: string; error: str
       setUpgraded(null);
     };
   }, [activeTab, url, error]);
+  // Allowing plain http is a write on the host; while it runs the button
+  // cannot be pressed twice, and a refusal is said here rather than lost.
+  const [allowing, setAllowing] = useState(false);
+  const [allowError, setAllowError] = useState<string | null>(null);
+  const allowHttp = async (tab: string) => {
+    setAllowing(true);
+    setAllowError(null);
+    try {
+      await ipc.httpsOnlyAllow(tab, url);
+    } catch (e) {
+      setAllowError(errorMessage(e));
+    } finally {
+      setAllowing(false);
+    }
+  };
   const offline = /ERR_INTERNET_DISCONNECTED/.test(error);
   // A host that does not exist is often a typo for one that does.
   const term = /ERR_NAME_NOT_RESOLVED/.test(error) ? searchTermFor(url) : "";
@@ -272,14 +298,16 @@ export function NavErrorPanel({ url, error, onRetry }: { url: string; error: str
           {upgraded && activeTab && (
             <button
               type="button"
-              onClick={() => void ipc.httpsOnlyAllow(activeTab, url)}
+              disabled={allowing}
+              onClick={() => void allowHttp(activeTab)}
               title={`Load ${upgraded} over http from now on. Anything on the network between you and it can read and change the page.`}
-              className="flex h-8 items-center gap-1.5 rounded-lg border border-warn/50 px-3 text-sm text-ink hover:bg-warn/10"
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-warn/50 px-3 text-sm text-ink hover:bg-warn/10 disabled:opacity-50"
             >
               <Icon icon={ShieldOff} size={13} /> Continue without encryption
             </button>
           )}
         </div>
+        {allowError && <p role="alert" className="text-xs text-danger">{allowError}</p>}
         {upgraded && (
           <p className="text-xs text-ink-3">
             Dive asked for this page over https because Secure connections is on. {upgraded} did not answer over

@@ -1,4 +1,4 @@
-import { JsDialogCard } from "./JsDialogCard";
+import { PagePrompts } from "./PagePrompts";
 import { windowDrag } from "../lib/windowDrag";
 import { isPrivateWindow } from "../lib/privateMode";
 import { PrivateBadge, PrivateWelcome } from "./PrivateMode";
@@ -265,7 +265,7 @@ export function Popout({ tabId }: { tabId: string }) {
         </div>}
       </div>
       <div ref={body} className="relative min-h-0 flex-1 bg-surface">
-        <JsDialogCard tabId={tabId} />
+        <PagePrompts tabId={tabId} auth={false} />
         {privateStart && <PrivateWelcome onBrowse={() => { inputRef.current?.focus(); inputRef.current?.select(); }} />}
         {navError && <NavErrorPanel url={navError.url} error={navError.error} onRetry={() => run(ipc.tabReload(tabId))} />}
       </div>

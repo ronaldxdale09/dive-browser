@@ -172,7 +172,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
       )}
 
       {/* The composer: one card, a paragraph wide, over the page. */}
-      <div data-native-overlay className="rounded-[20px] border border-line-2 bg-surface/95 px-4 pt-3.5 pb-2.5 shadow-2xl backdrop-blur-xl transition-[border-color] focus-within:border-line-3">
+      <div data-native-overlay className="rounded-[20px] border border-line-2 bg-surface/95 px-4 pt-3.5 pb-2.5 shadow-2xl backdrop-blur-xl transition-[border-color] focus-within:border-highlight/60">
         <textarea
           ref={textRef}
           value={draft}

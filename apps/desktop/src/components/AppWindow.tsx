@@ -1,7 +1,6 @@
 import { useCoversContent } from "../lib/overlay";
 import { windowDrag } from "../lib/windowDrag";
-import { HttpAuthCard } from "./HttpAuthCard";
-import { JsDialogCard } from "./JsDialogCard";
+import { PagePrompts } from "./PagePrompts";
 import { ArrowLeft, ArrowRight, Copy, EllipsisVertical, PanelsTopLeft, RotateCw, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { events, ipc } from "../lib/ipc";
@@ -145,8 +144,7 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
         )}
       </div>
       <div ref={body} className="relative min-h-0 flex-1 bg-surface">
-        <JsDialogCard tabId={tabId} />
-        <HttpAuthCard tabId={tabId} />
+        <PagePrompts tabId={tabId} />
         {navError && <NavErrorPanel url={navError.url} error={navError.error} onRetry={() => run(ipc.tabReload(tabId))} />}
       </div>
     </div>
