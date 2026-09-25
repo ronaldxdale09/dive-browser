@@ -47,3 +47,30 @@ it("does not let an old component cleanup close a replacement editor session", a
   view.unmount();
   expect(useEditor.getState().project?.media.source).toBe("owner.mp4");
 });
+
+it("leaves keys pressed in a dropdown to the dropdown, not the editor", async () => {
+  render(<DiveScreen src="shortcuts.mp4" tabId="editor" />);
+  await screen.findByTestId("preview");
+  const trigger = document.createElement("button");
+  trigger.setAttribute("role", "combobox");
+  const list = document.createElement("div");
+  list.setAttribute("role", "listbox");
+  const option = document.createElement("div");
+  option.setAttribute("role", "option");
+  list.append(option);
+  document.body.append(trigger, list);
+  try {
+    const zooms = () => useEditor.getState().project?.editor.zooms.length ?? 0;
+    const before = zooms();
+    fireEvent.keyDown(trigger, { key: " " });
+    fireEvent.keyDown(trigger, { key: "z" });
+    fireEvent.keyDown(option, { key: "z" });
+    expect(useEditor.getState().playing).toBe(false);
+    expect(zooms()).toBe(before);
+    act(() => { fireEvent.keyDown(document.body, { key: "z" }); });
+    expect(zooms()).toBe(before + 1);
+  } finally {
+    trigger.remove();
+    list.remove();
+  }
+});

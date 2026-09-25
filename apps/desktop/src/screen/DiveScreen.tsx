@@ -140,13 +140,25 @@ function Tool({ icon, label, shortcut, disabled, onClick }: { icon: LucideIcon; 
   );
 }
 
+/**
+ * Whether a key belongs to the control it was pressed in rather than to the
+ * editor: text fields, and dropdowns -- a native one, or our Select's
+ * combobox trigger and its list. Focus stays on the trigger after a pick, so
+ * without the combobox check Space opened the list again instead of playing,
+ * and with the list open Delete and the arrows still edited the timeline.
+ */
+function keyBelongsToControl(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable) return true;
+  return target.closest('[role="combobox"], [role="listbox"]') !== null;
+}
+
 /** Keyboard: Space plays, Z/T/S/A/B add, Delete removes, ⌘Z undoes, arrows step. */
 function useShortcuts(active: boolean) {
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      if (keyBelongsToControl(e.target)) return;
       const s = useEditor.getState();
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "z") {
