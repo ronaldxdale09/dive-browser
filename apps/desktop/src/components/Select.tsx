@@ -99,13 +99,28 @@ export function Select<T extends string>({ value, onChange, options, label, id, 
         return;
       }
       const margin = 8, gap = 4;
+      // The list is at least 160px wide, so under a short trigger it would
+      // hang past whatever panel holds the trigger (a Settings row ends at
+      // the dialog's edge). Keep it inside that panel where it can.
+      const panel = trigger.current?.closest('[role="dialog"], [role="alertdialog"]')?.getBoundingClientRect();
+      const lo = panel ? panel.left + margin : margin;
+      const hi = Math.min(window.innerWidth, panel ? panel.right : window.innerWidth) - margin;
       const width = Math.min(Math.max(rect.width, 160), Math.max(0, window.innerWidth - margin * 2));
+      // Past the panel's right edge, line the list's right edge up with the
+      // trigger's instead of its left: a right-aligned control opens leftward.
+      const start = rect.left + width > hi ? rect.right - width : rect.left;
+      const left = Math.max(margin, Math.min(Math.max(start, lo), window.innerWidth - width - margin));
       const below = window.innerHeight - rect.bottom - gap - margin;
       const above = rect.top - gap - margin;
-      const upwards = below < Math.min(280, list.current?.scrollHeight || 280) && above > below;
+      // The full height includes the list's border. Comparing against the
+      // scroll height alone left a list 2px short of fitting, so it opened
+      // downward and scrolled over its last option instead of flipping up.
+      const frame = list.current ? list.current.offsetHeight - list.current.clientHeight : 0;
+      const natural = list.current?.scrollHeight ? list.current.scrollHeight + frame : 280;
+      const upwards = below < Math.min(280, natural) && above > below;
       const maxHeight = Math.max(0, Math.min(280, upwards ? above : below));
-      const height = Math.min(list.current?.scrollHeight || 280, maxHeight);
-      const next = { left: Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin)), top: Math.max(margin, upwards ? rect.top - gap - height : rect.bottom + gap), width, maxHeight };
+      const height = Math.min(natural, maxHeight);
+      const next = { left, top: Math.max(margin, upwards ? rect.top - gap - height : rect.bottom + gap), width, maxHeight };
       setPosition((previous) => Object.keys(next).every((key) => previous[key as keyof typeof next] === next[key as keyof typeof next]) ? previous : next);
     };
     const onScroll = (event: Event) => {

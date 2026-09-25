@@ -123,6 +123,21 @@ it("repositions on resizing without a stationary animation loop", async () => {
   expect(frame).not.toHaveBeenCalled();
 });
 
+it("opens a short right-aligned trigger leftward so the list stays inside its dialog", () => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const role = this.getAttribute("role");
+    if (role === "combobox") return { x: 900, y: 100, left: 900, top: 100, right: 980, bottom: 132, width: 80, height: 32 } as DOMRect;
+    if (role === "dialog") return { x: 200, y: 50, left: 200, top: 50, right: 1000, bottom: 700, width: 800, height: 650 } as DOMRect;
+    return { x: 0, y: 0, left: 0, top: 0, right: 200, bottom: 100, width: 200, height: 100 } as DOMRect;
+  });
+  render(<div role="dialog"><Select value="a" label="Fruit" options={options} onChange={() => undefined} /></div>);
+  fireEvent.click(trigger());
+  const list = screen.getByRole("listbox");
+  expect(list.style.width).toBe("160px");
+  // Right edges line up: 980 - 160.
+  expect(list.style.left).toBe("820px");
+});
+
 it("does not reopen after a disabled or empty control becomes available again", () => {
   const props = { value: "b", label: "Fruit", options, onChange: vi.fn() };
   const view = render(<Select {...props} />);
