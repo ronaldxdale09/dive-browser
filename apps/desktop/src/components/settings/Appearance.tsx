@@ -376,7 +376,9 @@ function HexInput({ id, label, value, onCommit }: { id: string; label: string; v
       onBlur={(e) => commit(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
-        if (e.key === "Escape") {
+        // An edit is taken back without closing Settings; see TextInput.
+        if (e.key === "Escape" && e.currentTarget.value !== value.toUpperCase()) {
+          e.stopPropagation();
           e.currentTarget.value = value.toUpperCase();
           e.currentTarget.blur();
         }

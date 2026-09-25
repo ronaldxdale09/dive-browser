@@ -260,6 +260,29 @@ describe("SettingsDialog", () => {
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     await waitFor(() => expect(useBrowser.getState().open.settings).toBe(false));
   });
+
+  it("takes back an edit on Escape without closing Settings", async () => {
+    useBrowser.setState({ open: { ...useBrowser.getState().open, settings: true } });
+    render(<SettingsDialog />);
+    const home = screen.getByLabelText("Home page") as HTMLInputElement;
+    home.focus();
+    fireEvent.change(home, { target: { value: "https://half-typed" } });
+    fireEvent.keyDown(home, { key: "Escape" });
+    expect(home.value).toBe(DEFAULT_PREFS.homepage);
+    // Closing fades first, so give a close the time it would take.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(useBrowser.getState().open.settings).toBe(true);
+  });
+
+  it("moves focus with the selection when the arrow keys change section", () => {
+    render(<SettingsDialog />);
+    const general = screen.getByRole("tab", { name: "General" });
+    general.focus();
+    fireEvent.keyDown(general, { key: "ArrowDown" });
+    const next = screen.getByRole("tab", { selected: true });
+    expect(next).not.toBe(general);
+    expect(document.activeElement).toBe(next);
+  });
 });
 
 describe("Site permissions", () => {

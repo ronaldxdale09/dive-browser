@@ -101,7 +101,12 @@ export function SettingsDialog() {
     const sections = visibleSections();
     const at = sections.findIndex((s) => s.id === section);
     const next = sections[(at + (e.key === "ArrowDown" ? 1 : sections.length - 1)) % sections.length];
-    if (next) setSection(next.id);
+    if (!next) return;
+    setSection(next.id);
+    // Focus goes with the selection, as in any tab list: the roving tabindex
+    // moves to the new section, and focus left on the old one would sit on a
+    // tab that Tab can no longer reach.
+    e.currentTarget.querySelector<HTMLElement>(`#settings-tab-${next.id}`)?.focus();
   };
 
   return (

@@ -135,7 +135,11 @@ export function TextInput({
       onBlur={(e) => e.target.value !== value && onCommit(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
-        if (e.key === "Escape") {
+        // Escape with an edit in the field takes the edit back and stops
+        // there; it used to go on and close the whole of Settings with it.
+        // In a field that was not changed, it closes Settings as usual.
+        if (e.key === "Escape" && e.currentTarget.value !== value) {
+          e.stopPropagation();
           e.currentTarget.value = value;
           e.currentTarget.blur();
         }
