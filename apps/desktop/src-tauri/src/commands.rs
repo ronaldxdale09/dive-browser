@@ -2390,8 +2390,11 @@ pub(crate) fn tab_zoom(state: State<'_, AppState>, id: TabId, factor: f64) -> Ap
         .and_then(|t| dive_core::origin_of(&t.url));
     if let Some(origin) = origin {
         let key = format!("{}{origin}", crate::engine::SITE_ZOOM_PREFIX);
+        // Before the store guard: a cold preferences cache reads the store,
+        // and that second lock on this thread would never return.
+        let default_zoom = state.prefs.snapshot(&state).default_zoom;
         let store = lock(&state.store);
-        if (factor - state.prefs.get(&state).default_zoom).abs() < f64::EPSILON {
+        if (factor - default_zoom).abs() < f64::EPSILON {
             store.remove_setting(&key)?;
         } else {
             store.set_setting(&key, &factor.to_string())?;

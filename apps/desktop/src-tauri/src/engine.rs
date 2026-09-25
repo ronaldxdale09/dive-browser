@@ -740,6 +740,9 @@ impl TabHost {
         {
             let nav_app = app.clone();
             let nav_nonce = activity_nonce.clone();
+            // Counts this view's address changes, so a deferred zoom that
+            // lands after a newer navigation's knows to stand aside.
+            let zoom_epoch = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
             builder = builder.on_address_change(move |_, url| {
                 nav_app
                     .state::<AppState>()
@@ -753,11 +756,22 @@ impl TabHost {
                 let url = url.to_string();
                 // Deferred a loop turn: zoom talks to the engine, and the
                 // store write emits to the chrome; neither belongs inside
-                // the callback that reported the navigation.
+                // the callback that reported the navigation. This callback
+                // already runs on the main thread, where `run_on_main_thread`
+                // calls straight through, so the hop is made from a task,
+                // as the navigation handlers above do. Tasks may land out
+                // of order; only the newest address's zoom is applied.
+                let epoch = zoom_epoch.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                let zoom_epoch = zoom_epoch.clone();
                 let zoom_app = nav_app.clone();
                 let zoom_url = url.clone();
-                let _ = nav_app.run_on_main_thread(move || {
-                    apply_site_zoom(&zoom_app, tab_id, &zoom_url);
+                tauri::async_runtime::spawn(async move {
+                    let app = zoom_app.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        if zoom_epoch.load(std::sync::atomic::Ordering::Relaxed) == epoch {
+                            apply_site_zoom(&zoom_app, tab_id, &zoom_url);
+                        }
+                    });
                 });
                 let app = nav_app.clone();
                 let nonce = nav_nonce.clone();
@@ -1995,6 +2009,10 @@ fn apply_site_zoom(app: &AppHandle<Runtime>, tab_id: TabId, url: &str) {
     let Some(origin) = dive_core::origin_of(url) else {
         return;
     };
+    // Read before the store is taken: on a cold cache the preferences load
+    // from the store, and asking for them under its guard locked the same
+    // mutex twice on one thread.
+    let default_zoom = state.prefs.snapshot(&state).default_zoom;
     let factor = {
         let Ok(store) = state.store.try_lock() else {
             return;
@@ -2004,7 +2022,7 @@ fn apply_site_zoom(app: &AppHandle<Runtime>, tab_id: TabId, url: &str) {
             .ok()
             .flatten()
             .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or_else(|| state.prefs.get(&state).default_zoom)
+            .unwrap_or(default_zoom)
     };
     if let Ok(host) = state.host.try_lock()
         && let Some(host) = host.as_ref()
