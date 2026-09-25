@@ -92,7 +92,7 @@ export function ModelPicker({ onAddProvider, onOpenChange }: { onAddProvider: ()
         <Icon icon={ChevronDown} size={11} className="shrink-0 text-ink-3" />
       </button>
       {open && (
-        <div ref={dialog} role="dialog" aria-label="Model and provider" className="surface-enter absolute bottom-full left-0 z-20 mb-2 w-[min(320px,calc(100vw-24px))] rounded-xl border border-line-2 bg-surface p-1 text-xs shadow-2xl">
+        <div ref={dialog} role="dialog" aria-label="Model and provider" className="surface-enter absolute bottom-full left-0 z-20 mb-2 w-[min(320px,calc(100vw-24px))] rounded-xl border border-line-2 bg-surface p-1 text-xs shadow-2xl" style={{ transformOrigin: "bottom left" }}>
           <div className="mb-1.5 flex flex-wrap items-center gap-1 px-1 pt-1">
             {usable.map((p) => (
               <button

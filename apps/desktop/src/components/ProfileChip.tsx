@@ -69,7 +69,7 @@ export function ProfileChip({ variant = "pill", placement = "below" }: { variant
         {variant !== "avatar" && <Icon icon={placement === "above" ? ChevronUp : ChevronDown} size={12} className="shrink-0 text-ink-3" />}
       </button>
       {open && (
-        <div ref={menu} role="menu" aria-label="Profiles" className={`surface-enter absolute left-0 z-50 w-[300px] rounded-xl border border-line-2 bg-surface p-1 text-xs shadow-2xl ${placement === "above" ? "bottom-full mb-1" : "top-9"}`}>
+        <div ref={menu} role="menu" aria-label="Profiles" className={`surface-enter absolute left-0 z-50 w-[300px] rounded-xl border border-line-2 bg-surface p-1 text-xs shadow-2xl ${placement === "above" ? "bottom-full mb-1" : "top-9"}`} style={{ transformOrigin: placement === "above" ? "bottom left" : "top left" }}>
           <p className="px-2 pt-1.5 pb-1 text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">Profiles</p>
           {profiles.map((p) => {
             const isCurrent = p.id === current.id;
