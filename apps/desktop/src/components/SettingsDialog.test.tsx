@@ -321,7 +321,7 @@ describe("Site permissions", () => {
     expect(screen.getByRole("alert").textContent).toContain("permission write failed");
   });
 
-  it("disables a permission decision while its write is pending", async () => {
+  it("keeps a permission decision focused while its write is pending, and ignores a second change", async () => {
     let finish!: () => void;
     vi.mocked(ipc.permissionSet).mockImplementation(() => new Promise<null>((resolve) => {
       finish = () => resolve(null);
@@ -331,12 +331,21 @@ describe("Site permissions", () => {
     await waitFor(() => expect(screen.getByText("https://maps.test")).toBeTruthy());
 
     const select = screen.getByLabelText("https://maps.test Location") as HTMLButtonElement;
+    select.focus();
     fireEvent.click(select);
     fireEvent.click(screen.getByRole("option", { name: "Allow" }));
-    expect(select.disabled).toBe(true);
+    // Disabling it here dropped focus to the body, where Escape no longer
+    // reached Settings.
+    expect(select.disabled).toBe(false);
+    expect(document.activeElement).toBe(select);
+
+    fireEvent.click(select);
+    fireEvent.click(screen.getByRole("option", { name: "Block" }));
+    expect(ipc.permissionSet).toHaveBeenCalledTimes(1);
+    expect(select.textContent).toContain("Allow");
 
     finish();
-    await waitFor(() => expect(select.disabled).toBe(false));
+    await waitFor(() => expect(select.textContent).toContain("Allow"));
   });
 });
 

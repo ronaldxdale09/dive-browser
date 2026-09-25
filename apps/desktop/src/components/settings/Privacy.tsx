@@ -367,6 +367,11 @@ function ScopedSitePermissions() {
   }, [reload]);
   const decide = (p: SitePermission, decision: Decision) => {
     const key = `${p.origin}\n${p.kind}`;
+    // One write per row at a time. The row's controls stay enabled while it
+    // saves -- disabling the focused dropdown dropped focus to the body, and
+    // Escape then no longer closed Settings -- so a change made meanwhile is
+    // ignored here instead.
+    if (saving[key]) return;
     setList((l) => (l ?? []).flatMap((x) => (x.origin === p.origin && x.kind === p.kind ? (decision === "ask" ? [] : [{ ...x, decision }]) : [x])));
     setError(null);
     setSaving((s) => ({ ...s, [key]: true }));
@@ -410,7 +415,7 @@ function ScopedSitePermissions() {
             {g.kinds.map((p) => (
               <div key={p.kind} className="flex items-center gap-3">
                 <span className="min-w-0 flex-1 text-[11px] text-ink-2">{PERMISSION_KINDS[p.kind] ?? p.kind}</span>
-                <Select disabled={Boolean(saving[`${p.origin}\n${p.kind}`])} label={`${g.origin} ${PERMISSION_KINDS[p.kind] ?? p.kind}`} value={p.decision} onChange={(d) => decide(p, d)} options={DECISIONS} />
+                <Select label={`${g.origin} ${PERMISSION_KINDS[p.kind] ?? p.kind}`} value={p.decision} onChange={(d) => decide(p, d)} options={DECISIONS} />
                 <button
                   type="button"
                   disabled={Boolean(saving[`${p.origin}\n${p.kind}`])}
