@@ -1760,17 +1760,24 @@ pub(crate) async fn browser_import_run(
     })
     .await
     .map_err(AppError::new)??;
-    let (added_bookmarks, added_history, added_forms, profile) = {
-        let store = lock(&state.store);
-        let profile = active_profile(&store, *lock(&state.active_workspace))?;
-        (
-            store.import_bookmarks(&harvest.bookmarks)?,
-            store.import_history(&harvest.history)?,
-            store.import_form_entries(profile.id, &harvest.forms)?,
-            profile,
-        )
-    };
-    let known = crate::passwords::list(&state, profile.id)?;
+    // Merged a chunk at a time: another browser's history can be a hundred
+    // thousand rows, and the store is not ours alone for that long.
+    let profile = crate::backup::scoped_profile(&lock(&state.store))?;
+    let added_bookmarks = crate::backup::merge_in_chunks(
+        &state.store,
+        profile,
+        &harvest.bookmarks,
+        |store, chunk| Ok(store.import_bookmarks(chunk)?),
+    )?;
+    let added_history =
+        crate::backup::merge_in_chunks(&state.store, profile, &harvest.history, |store, chunk| {
+            Ok(store.import_history(chunk)?)
+        })?;
+    let added_forms =
+        crate::backup::merge_in_chunks(&state.store, profile, &harvest.forms, |store, chunk| {
+            Ok(store.import_form_entries(profile, chunk)?)
+        })?;
+    let known = crate::passwords::list(&state, profile)?;
     let mut added_passwords = 0u32;
     for login in &harvest.passwords {
         if known
@@ -1781,7 +1788,7 @@ pub(crate) async fn browser_import_run(
         }
         if crate::passwords::save(
             &state,
-            profile.id,
+            profile,
             &login.origin,
             &login.username,
             &login.password,
@@ -2659,13 +2666,22 @@ pub(crate) async fn backup_restore(
         .await
         .map_err(|error| AppError::new(format!("could not read {}: {error}", path.display())))?;
     let backup = crate::backup::parse(&text)?;
-    let summary = {
+    let mut summary = {
         use tauri::Manager as _;
         let state = app.state::<AppState>();
-        let store = lock(&state.store);
-        let profile = active_profile(&store, *lock(&state.active_workspace))?;
-        crate::backup::restore(&store, profile.id, &backup, take_preferences)?
+        let profile = crate::backup::scoped_profile(&lock(&state.store))?;
+        crate::backup::restore(&state.store, profile, &backup)?
     };
+    // Through the same path as a change in Settings. Written straight into
+    // the store, the restored preferences sat behind the registry's cached
+    // copy: the running browser never saw them, and the next change in
+    // Settings wrote the old ones back over the restore.
+    if take_preferences && let Some(preferences) = &backup.preferences {
+        use tauri::Manager as _;
+        let restored = crate::prefs::parse_stored(preferences);
+        prefs_set(app.state::<AppState>(), restored).await?;
+        summary.preferences = true;
+    }
     // Restored workspaces and their tabs have to reach the chrome, which
     // draws from events rather than re-reading the store.
     if summary.workspaces > 0 {

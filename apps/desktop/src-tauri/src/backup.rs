@@ -11,6 +11,8 @@
 //! file on disk is exactly where they should not be; Settings › Passwords
 //! exports them separately, on purpose, with the warning that deserves.
 
+use std::sync::Mutex;
+
 use dive_core::{ProfileId, Store, Tab, TabState, Timestamp, Workspace};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -25,6 +27,12 @@ pub const VERSION: u32 = 1;
 const HISTORY_LIMIT: usize = 100_000;
 /// Refuse a file bigger than this rather than trying to parse it.
 pub const MAX_BYTES: usize = 128 * 1024 * 1024;
+/// Rows merged per hold of the store lock. A backup or another browser's
+/// history can be a hundred thousand rows, and the store is the lock every
+/// tab switch, title change and favicon on the main thread also takes; one
+/// hold for the lot froze the browser for seconds. A few hundred rows is a
+/// few milliseconds.
+const MERGE_CHUNK: usize = 500;
 
 /// One saved page.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -176,50 +184,124 @@ pub fn parse(text: &str) -> AppResult<Backup> {
     Ok(backup)
 }
 
-/// Merge a backup into the active profile and say what it added.
+/// The profile the store files history and bookmarks under right now: the
+/// owner of the active workspace it has recorded, else the first profile.
+/// Read from the store, not from `AppState::active_workspace`, because the
+/// store's own writes pick their profile by the same rule.
+pub(crate) fn scoped_profile(store: &Store) -> AppResult<ProfileId> {
+    let active = store
+        .setting(crate::state::ACTIVE_WORKSPACE)?
+        .and_then(|id| id.parse().ok());
+    Ok(crate::commands::active_profile(store, active)?.id)
+}
+
+/// Write `items` for `profile` a chunk at a time, letting go of the store
+/// between chunks so the rest of the browser keeps moving; returns what
+/// `write` reported added.
+///
+/// Letting go means the person can switch profile halfway through, and the
+/// store files bookmarks and history under whichever profile is active when
+/// the row is written. Each chunk checks first and the merge stops rather
+/// than spill into another profile. Every merge here skips what is already
+/// present, so running it again finishes the job without doubling anything.
+pub(crate) fn merge_in_chunks<T>(
+    store: &Mutex<Store>,
+    profile: ProfileId,
+    items: &[T],
+    mut write: impl FnMut(&Store, &[T]) -> AppResult<usize>,
+) -> AppResult<usize> {
+    let mut added = 0;
+    for chunk in items.chunks(MERGE_CHUNK) {
+        let store = lock(store);
+        if scoped_profile(&store)? != profile {
+            return Err(AppError::new(
+                "the profile changed partway through; run it again to bring in the rest",
+            ));
+        }
+        added += write(&store, chunk)?;
+    }
+    Ok(added)
+}
+
+fn count(n: usize) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
+}
+
+/// Merge a backup into `profile` and say what it added. Preferences are the
+/// caller's to apply, through the preferences registry, so the running
+/// browser and its cached copy see them too.
 ///
 /// Merging, never replacing: nothing already here is removed, and an address
 /// that is already bookmarked or already open is left alone, so restoring the
 /// same file twice is the same as restoring it once.
 pub fn restore(
-    store: &Store,
+    store: &Mutex<Store>,
     profile: ProfileId,
     backup: &Backup,
-    take_preferences: bool,
 ) -> AppResult<RestoreSummary> {
     let mut summary = RestoreSummary::default();
     let now = Timestamp::now();
 
-    let existing: std::collections::HashSet<String> = store
+    let existing: std::collections::HashSet<String> = lock(store)
         .all_bookmarks()?
         .into_iter()
         .map(|bookmark| bookmark.url)
         .collect();
-    for bookmark in &backup.bookmarks {
-        if !is_keepable(&bookmark.url) || existing.contains(&bookmark.url) {
-            continue;
-        }
-        let at = Timestamp::parse(&bookmark.created_at).unwrap_or(now);
-        store.add_bookmark(&bookmark.url, &bookmark.title, at)?;
-        summary.bookmarks += 1;
-    }
+    let bookmarks: Vec<&BackupBookmark> = backup
+        .bookmarks
+        .iter()
+        .filter(|bookmark| is_keepable(&bookmark.url) && !existing.contains(&bookmark.url))
+        .collect();
+    summary.bookmarks = count(merge_in_chunks(
+        store,
+        profile,
+        &bookmarks,
+        |store, chunk| {
+            for bookmark in chunk {
+                let at = Timestamp::parse(&bookmark.created_at).unwrap_or(now);
+                store.add_bookmark(&bookmark.url, &bookmark.title, at)?;
+            }
+            Ok(chunk.len())
+        },
+    )?);
 
-    for visit in &backup.history {
-        if !is_keepable(&visit.url) {
-            continue;
-        }
-        let at = Timestamp::parse(&visit.last_visited_at).unwrap_or(now);
-        store.record_visit(&visit.url, &visit.title, at)?;
-        summary.history += 1;
-    }
+    let history: Vec<&BackupVisit> = backup
+        .history
+        .iter()
+        .filter(|visit| is_keepable(&visit.url))
+        .collect();
+    summary.history = count(merge_in_chunks(
+        store,
+        profile,
+        &history,
+        |store, chunk| {
+            for visit in chunk {
+                let at = Timestamp::parse(&visit.last_visited_at).unwrap_or(now);
+                store.record_visit(&visit.url, &visit.title, at)?;
+            }
+            Ok(chunk.len())
+        },
+    )?);
 
-    for entry in &backup.form_entries {
-        if crate::browser_import::keep_form_entry(&entry.field, &entry.value) {
-            store.record_form_entry(profile, &entry.field, &entry.value, now)?;
-            summary.form_entries += 1;
-        }
-    }
+    let entries: Vec<&BackupFormEntry> = backup
+        .form_entries
+        .iter()
+        .filter(|entry| crate::browser_import::keep_form_entry(&entry.field, &entry.value))
+        .collect();
+    summary.form_entries = count(merge_in_chunks(
+        store,
+        profile,
+        &entries,
+        |store, chunk| {
+            for entry in chunk {
+                store.record_form_entry(profile, &entry.field, &entry.value, now)?;
+            }
+            Ok(chunk.len())
+        },
+    )?);
 
+    // A handful of workspaces and their tabs: one hold is short enough.
+    let store = lock(store);
     let known: std::collections::HashSet<String> = store
         .workspaces()?
         .into_iter()
@@ -260,10 +342,6 @@ pub fn restore(
         }
     }
 
-    if take_preferences && let Some(preferences) = &backup.preferences {
-        store.set_setting(crate::prefs::KEY, preferences)?;
-        summary.preferences = true;
-    }
     Ok(summary)
 }
 
@@ -281,6 +359,46 @@ mod tests {
         assert!(!is_keepable("dive://settings"));
         assert!(!is_keepable(""));
         assert!(!is_keepable("not a url"));
+    }
+
+    #[test]
+    fn a_merge_lets_go_between_chunks_and_stops_if_the_profile_changes() {
+        let store = Store::in_memory().unwrap();
+        let first = store.ensure_default_profile().unwrap();
+        let home = Workspace::new("Home", first.container_id, first.id, 0);
+        store.upsert_workspace(&home).unwrap();
+        store
+            .set_setting(crate::state::ACTIVE_WORKSPACE, &home.id.to_string())
+            .unwrap();
+        let container = dive_core::Container::new("Other");
+        store.upsert_container(&container).unwrap();
+        let other = dive_core::Profile::new("Other", container.id, 1);
+        store.upsert_profile(&other).unwrap();
+        let away = Workspace::new("Away", container.id, other.id, 0);
+        store.upsert_workspace(&away).unwrap();
+        assert_eq!(scoped_profile(&store).unwrap(), first.id);
+        let store = Mutex::new(store);
+        let rows = vec![0u8; MERGE_CHUNK * 3];
+
+        // Everything arrives, one chunk per hold of the lock.
+        let mut holds = 0;
+        let added = merge_in_chunks(&store, first.id, &rows, |_, chunk| {
+            holds += 1;
+            Ok(chunk.len())
+        })
+        .unwrap();
+        assert_eq!((added, holds), (rows.len(), 3));
+
+        // The person switches profile after the first chunk: the rest is not
+        // written into the profile they switched to.
+        let mut holds = 0;
+        let switched = merge_in_chunks(&store, first.id, &rows, |store, chunk| {
+            holds += 1;
+            store.set_setting(crate::state::ACTIVE_WORKSPACE, &away.id.to_string())?;
+            Ok(chunk.len())
+        });
+        assert!(switched.is_err());
+        assert_eq!(holds, 1);
     }
 
     #[test]
