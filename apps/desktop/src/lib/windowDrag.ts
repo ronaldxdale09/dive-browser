@@ -34,6 +34,19 @@ const KEEPS_ITS_PRESS = [
   "[role='textbox']",
   "[role='combobox']",
   "[role='menuitem']",
+  "[role='menuitemradio']",
+  "[role='menuitemcheckbox']",
+  "[role='option']",
+  // Popovers that hang out of the bar (address suggestions, the protection,
+  // share and downloads panels): a press on their text or padding is a pick
+  // or a miss, never a window drag. Dragging swallowed the mouseup, so the
+  // suggestion under the pointer was never chosen.
+  "[role='listbox']",
+  "[role='menu']",
+  "[role='dialog']",
+  "[role='alertdialog']",
+  "[data-native-overlay]",
+  "label",
   "[data-no-drag]",
   '[data-tauri-drag-region="false"]',
 ].join(",");

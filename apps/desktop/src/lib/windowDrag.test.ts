@@ -28,6 +28,10 @@ describe("pressMovesWindow", () => {
       "<div role='button'>x</div>",
       "<div data-no-drag><span>x</span></div>",
       "<div data-tauri-drag-region='false'><span>tab</span></div>",
+      // A suggestion row or popover padding hanging out of the bar.
+      "<ul role='listbox'><li role='option'><span>example.com</span></li></ul>",
+      "<div role='dialog'><p><span>Protection</span></p></div>",
+      "<div role='menu'><hr /><span>sep</span></div>",
     ]) {
       const host = element(html);
       const target = host.querySelector("span") ?? host;

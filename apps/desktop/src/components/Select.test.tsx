@@ -111,7 +111,7 @@ it("repositions on resizing without a stationary animation loop", async () => {
   render(<Select value="a" label="Fruit" options={options} onChange={() => undefined} />);
   fireEvent.click(trigger());
   const list = screen.getByRole("listbox");
-  expect(Number.parseFloat(list.style.left) + Number.parseFloat(list.style.width)).toBeLessThanOrEqual(window.innerWidth - 8);
+  expect(Number.parseFloat(list.style.left) + Number.parseFloat(list.style.minWidth)).toBeLessThanOrEqual(window.innerWidth - 8);
   expect(Number.parseFloat(list.style.top)).toBeLessThan(708);
   bottom = 100;
   fireEvent.resize(window);
@@ -133,7 +133,7 @@ it("opens a short right-aligned trigger leftward so the list stays inside its di
   render(<div role="dialog"><Select value="a" label="Fruit" options={options} onChange={() => undefined} /></div>);
   fireEvent.click(trigger());
   const list = screen.getByRole("listbox");
-  expect(list.style.width).toBe("160px");
+  expect(list.style.minWidth).toBe("160px");
   // Right edges line up: 980 - 160.
   expect(list.style.left).toBe("820px");
 });

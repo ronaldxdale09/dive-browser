@@ -23,7 +23,7 @@ export function Select<T extends string>({ value, onChange, options, label, id, 
   const list = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [highlight, setHighlight] = useState<T>(value);
-  const [position, setPosition] = useState({ left: 8, top: 8, width: 160, maxHeight: 280 });
+  const [position, setPosition] = useState({ left: 8, top: 8, minWidth: 160, maxWidth: 360, maxHeight: 280 });
   const search = useRef({ text: "", time: 0 });
   const dismissal = useRef<{ pointerId: number } | null>(null);
   const open = expanded && !disabled && options.length > 0;
@@ -105,7 +105,12 @@ export function Select<T extends string>({ value, onChange, options, label, id, 
       const panel = trigger.current?.closest('[role="dialog"], [role="alertdialog"]')?.getBoundingClientRect();
       const lo = panel ? panel.left + margin : margin;
       const hi = Math.min(window.innerWidth, panel ? panel.right : window.innerWidth) - margin;
-      const width = Math.min(Math.max(rect.width, 160), Math.max(0, window.innerWidth - margin * 2));
+      // At least as wide as its trigger, and as wide as its longest option up
+      // to a cap, so an option never wraps where the trigger showed it on
+      // one line.
+      const maxWidth = Math.max(0, Math.min(360, window.innerWidth - margin * 2));
+      const minWidth = Math.min(Math.max(rect.width, 160), maxWidth);
+      const width = Math.min(maxWidth, Math.max(minWidth, list.current?.offsetWidth ?? 0));
       // Past the panel's right edge, line the list's right edge up with the
       // trigger's instead of its left: a right-aligned control opens leftward.
       const start = rect.left + width > hi ? rect.right - width : rect.left;
@@ -120,7 +125,7 @@ export function Select<T extends string>({ value, onChange, options, label, id, 
       const upwards = below < Math.min(280, natural) && above > below;
       const maxHeight = Math.max(0, Math.min(280, upwards ? above : below));
       const height = Math.min(natural, maxHeight);
-      const next = { left, top: Math.max(margin, upwards ? rect.top - gap - height : rect.bottom + gap), width, maxHeight };
+      const next = { left, top: Math.max(margin, upwards ? rect.top - gap - height : rect.bottom + gap), minWidth, maxWidth, maxHeight };
       setPosition((previous) => Object.keys(next).every((key) => previous[key as keyof typeof next] === next[key as keyof typeof next]) ? previous : next);
     };
     const onScroll = (event: Event) => {
@@ -141,9 +146,11 @@ export function Select<T extends string>({ value, onChange, options, label, id, 
     return () => { observer.disconnect(); window.removeEventListener("resize", place); document.removeEventListener("scroll", onScroll, true); };
   }, [open, options]);
 
+  // Again once the list has its real height: the first pass runs at the
+  // provisional 280px and could leave the chosen option below the fold.
   useLayoutEffect(() => {
     if (open) document.getElementById(`${listId}-${active}`)?.scrollIntoView?.({ block: "nearest" });
-  }, [open, active, listId]);
+  }, [open, active, listId, position.maxHeight]);
 
   const show = () => {
     if (disabled || options.length === 0) return;
@@ -189,15 +196,25 @@ export function Select<T extends string>({ value, onChange, options, label, id, 
     <button ref={trigger} id={id} type="button" role="combobox" aria-label={label} aria-expanded={open} aria-haspopup="listbox" aria-controls={open ? listId : undefined} aria-activedescendant={open ? `${listId}-${active}` : undefined} disabled={disabled || options.length === 0}
       onClick={() => open ? setExpanded(false) : show()} onKeyDownCapture={onKey} onBlur={() => setExpanded(false)}
       className={`inline-flex min-w-0 items-center justify-between gap-2 text-left ${className ?? "h-8 rounded-lg border border-line bg-surface-2 py-0 pr-2 pl-2.5 text-xs text-ink outline-none hover:border-line-2 focus:border-highlight/60 disabled:opacity-40"}`}>
-      <span className="truncate">{selected?.label ?? (options.length ? "Choose…" : "No options")}</span><Icon icon={ChevronDown} size={13} className="shrink-0 text-ink-3" />
+      {/* Every label sits in the same grid cell, only the chosen one visible,
+          so the trigger is as wide as its longest option and does not jump
+          when the choice changes. */}
+      <span className="grid min-w-0 [grid-template-areas:'label'] *:[grid-area:label]" title={selected?.label}>
+        {options.map((option) => <span key={option.value} aria-hidden={option.value !== value} className={`truncate ${option.value === value ? "" : "invisible"}`}>{option.label}</span>)}
+        {!selected && <span className="truncate">{options.length ? "Choose…" : "No options"}</span>}
+      </span>
+      <Icon icon={ChevronDown} size={13} className={`shrink-0 text-ink-3 transition-transform ${open ? "rotate-180" : ""}`} />
     </button>
     {open && createPortal(<div ref={list} id={listId} role="listbox" aria-label={label} data-native-input-owner="true"
-      className="fixed z-[1000] overflow-y-auto overscroll-contain rounded-xl border border-line-2 bg-surface p-1 text-xs text-ink shadow-2xl"
+      className="fixed z-[1000] w-max overflow-y-auto overscroll-contain rounded-xl border border-line-2 bg-surface p-1 text-xs text-ink shadow-2xl"
       style={{ ...position, borderRadius: 12 }} onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
       {options.map((option, index) => <div key={option.value} id={`${listId}-${index}`} role="option" aria-selected={option.value === value}
         className={`flex cursor-default items-center gap-2 rounded-lg px-2 py-2 ${index === active ? "bg-surface-3 text-ink" : "text-ink-2"}`}
         onPointerMove={() => setHighlight(option.value)} onClick={() => commit(option.value)}>
-        <span className="min-w-0 flex-1 break-words">{option.label}</span>{option.value === value && <Icon icon={Check} size={13} className="shrink-0 text-highlight" />}
+        <span className="min-w-0 flex-1 truncate" title={option.label}>{option.label}</span>
+        {/* The check's slot is kept on every row, so rows line up and the
+            chosen one is no narrower than the rest. */}
+        <Icon icon={Check} size={13} className={`shrink-0 text-highlight ${option.value === value ? "" : "invisible"}`} />
       </div>)}
     </div>, document.body)}
   </>;
