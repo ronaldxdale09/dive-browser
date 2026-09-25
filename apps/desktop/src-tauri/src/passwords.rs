@@ -147,7 +147,19 @@ pub fn reveal(state: &AppState, profile: ProfileId, id: &str) -> AppResult<Strin
 /// Forget a login and its password.
 pub fn delete(state: &AppState, profile: ProfileId, id: &str) -> AppResult<bool> {
     owned(state, profile, id)?;
-    let _ = entry(id).and_then(|e| e.delete_credential().map_err(AppError::new));
+    // The secret goes first, and the row only once it has. Removing the row
+    // after a refused delete left the password in the OS store with nothing
+    // in Dive that could ever name it again. An item already gone is what
+    // forgetting wanted anyway.
+    match entry(id)?.delete_credential() {
+        Ok(()) | Err(keyring_core::Error::NoEntry) => {}
+        Err(error) => {
+            return Err(AppError::new(format!(
+                "{} would not forget this password: {error}",
+                credential_store_name()
+            )));
+        }
+    }
     Ok(crate::state::lock(&state.store).remove_credential(id)?)
 }
 
