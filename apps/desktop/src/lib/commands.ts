@@ -104,6 +104,9 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
     const { activeTab, detached, toggle } = useBrowser.getState();
     if (!tabInThisWindow(activeTab, detached)) return;
     toggle("find", true);
+    // Already open, the bar does not remount, so it is asked to take the
+    // keyboard back and select its query: ⌘F again means "find something else".
+    window.dispatchEvent(new CustomEvent(FOCUS_FIND));
   },
   "library.open": () => useBrowser.getState().toggle("library", true),
   "bookmarks.open": () => useBrowser.getState().openLibrary("bookmarks"),
@@ -177,6 +180,8 @@ function jumpToWorkspace(index: number) {
 
 /** Asks the toolbar to select its address field; the Toolbar listens for it. */
 export const FOCUS_ADDRESS = "dive:focus-address";
+/** Asks an open find bar to focus and select its query; the FindBar listens for it. */
+export const FOCUS_FIND = "dive:focus-find";
 /** Open the star's popover on the active page's bookmark (the notice's Edit action). */
 export const EDIT_BOOKMARK = "dive:edit-bookmark";
 /** Opens the share popover (QR code and LAN address) for the current page. */

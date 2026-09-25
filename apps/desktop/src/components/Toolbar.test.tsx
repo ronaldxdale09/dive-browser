@@ -248,7 +248,16 @@ describe("Toolbar", () => {
     expect(input.value).toBe(tab.url);
   });
 
+  it("has no More button while nothing would be in its tray", () => {
+    render(<Toolbar compact />);
+    expect(screen.queryByRole("button", { name: "More page actions" })).toBeNull();
+    act(() => useBrowser.setState({ zoom: { [tab.id]: 1.25 } }));
+    expect(screen.getByRole("button", { name: "More page actions" })).toBeTruthy();
+  });
+
   it("covers native content for the compact tray and restores trigger focus on Escape", async () => {
+    // The tray only exists while something is in it: a zoomed page is.
+    useBrowser.setState({ zoom: { [tab.id]: 1.25 } });
     render(<Toolbar compact />);
     const trigger = screen.getByRole("button", { name: "More page actions" });
     act(() => trigger.focus());
@@ -263,6 +272,7 @@ describe("Toolbar", () => {
   });
 
   it("closes a nested Share popover without closing the compact actions tray", () => {
+    useBrowser.setState({ zoom: { [tab.id]: 1.25 } });
     render(<Toolbar compact />);
     fireEvent.click(screen.getByRole("button", { name: "More page actions" }));
     fireEvent.click(screen.getByRole("button", { name: "Share to another device" }));
@@ -283,6 +293,20 @@ describe("Toolbar", () => {
     act(() => useBrowser.setState({ tabs: [{ ...tab, url: "https://example.com/final" }] }));
     expect(input.value).toBe("example.com/final");
     expect(document.activeElement).not.toBe(input);
+  });
+
+  it("calls only plain http not secure, not Dive's own pages or local files", () => {
+    for (const [url, name, kind] of [
+      ["http://example.com/", "Not secure: this page uses plain http", "none"],
+      ["dive://settings", "A page of Dive's own", "internal"],
+      ["file:///Users/me/notes.html", "A file on this computer", "file"],
+      ["about:blank", "Search or enter an address", "none"],
+    ] as const) {
+      useBrowser.setState({ tabs: [{ ...tab, url }] });
+      const { unmount } = render(<Toolbar />);
+      expect(screen.getByRole("img", { name }).getAttribute("data-security")).toBe(kind);
+      unmount();
+    }
   });
 
   it("reads the site first: host in ink, path dimmed, and a glyph that says what the connection is", async () => {

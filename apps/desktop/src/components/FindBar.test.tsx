@@ -4,6 +4,7 @@ import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { contentCoverDepth } from "../lib/overlay";
 import { useBrowser } from "../store/browser";
+import { UI_COMMANDS } from "../lib/commands";
 import { FindBar } from "./FindBar";
 
 const tab = { id: "t1", workspace_id: "w1", url: "https://a.test/", title: "A", favicon: null, tier: "today", position: 0, state: "active", last_active_at: "" } as unknown as Tab;
@@ -22,6 +23,17 @@ afterEach(() => {
 });
 
 describe("FindBar", () => {
+  it("takes the keyboard back and selects the query when ⌘F is pressed while it is open", () => {
+    render(<FindBar />);
+    const field = screen.getByLabelText("Find in page") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "hello" } });
+    field.blur();
+    expect(document.activeElement).not.toBe(field);
+    UI_COMMANDS["find.open"]!();
+    expect(document.activeElement).toBe(field);
+    expect([field.selectionStart, field.selectionEnd]).toEqual([0, 5]);
+  });
+
   it("does not keep a detached tab's match count as this window's", async () => {
     render(<FindBar />);
     fireEvent.change(screen.getByLabelText("Find in page"), { target: { value: "hello" } });

@@ -88,4 +88,25 @@ describe("SharePopover", () => {
     expect((copy as HTMLButtonElement).disabled).toBe(false);
     expect(writeText).toHaveBeenCalledWith("http://192.168.1.2:3000/docs");
   });
+
+  it("never shows the last page's code for this one", async () => {
+    render(<SharePopover />);
+    fireEvent.click(screen.getByRole("button", { name: "Share to another device" }));
+    await screen.findByText("http://192.168.1.2:3000/docs");
+
+    // A navigation while open: the old code goes at once, the new one is asked for.
+    let resolve!: (v: { lan_url: string; qr_svg: string }) => void;
+    vi.mocked(ipc.shareUrl).mockReturnValue(new Promise((r) => (resolve = r)));
+    act(() => useBrowser.setState({ tabs: [{ ...tab, url: "http://localhost:3000/blog" }] }));
+    expect(screen.queryByText("http://192.168.1.2:3000/docs")).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("Finding this computer's address");
+    expect(ipc.shareUrl).toHaveBeenLastCalledWith("http://localhost:3000/blog");
+    await act(async () => resolve({ lan_url: "http://192.168.1.2:3000/blog", qr_svg: "<svg></svg>" }));
+    expect(screen.getByText("http://192.168.1.2:3000/blog")).toBeTruthy();
+
+    // A title change is not a new address and does not ask again.
+    const asked = vi.mocked(ipc.shareUrl).mock.calls.length;
+    act(() => useBrowser.setState({ tabs: [{ ...tab, url: "http://localhost:3000/blog", title: "Blog" }] }));
+    expect(vi.mocked(ipc.shareUrl).mock.calls.length).toBe(asked);
+  });
 });

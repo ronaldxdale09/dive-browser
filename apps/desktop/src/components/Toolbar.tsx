@@ -1,6 +1,7 @@
 import { isPrivateWindow } from "../lib/privateMode";
 import { prettyUrl, splitAddress } from "../lib/prettyUrl";
-import { Captions, Globe, House, ScrollText, Lock, MoreHorizontal, RotateCw, Search, TriangleAlert, X, Menu } from "lucide-react";
+import { Captions, FileText, Globe, House, Info, ScrollText, Lock, MoreHorizontal, RotateCw, Search, TriangleAlert, X, Menu } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FOCUS_ADDRESS } from "../lib/commands";
@@ -25,6 +26,18 @@ import { useRecorder } from "../store/recorder";
 import { runCommand } from "../lib/commands";
 import { usePrefs } from "../store/prefs";
 import { NavigationButtons } from "./NavigationButtons";
+import { ADDRESS_SECURITY_MEANING, addressSecurity } from "../lib/addressSecurity";
+import type { AddressSecurity } from "../lib/addressSecurity";
+
+const SECURITY_GLYPHS: Record<AddressSecurity, LucideIcon> = {
+  none: Search,
+  failed: TriangleAlert,
+  secure: Lock,
+  plain: Globe,
+  internal: Info,
+  file: FileText,
+  local: Info,
+};
 
 const NO_TABS: Tab[] = [];
 
@@ -58,11 +71,7 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
   if (draft.tabId !== activeTab) setDraft({ tabId: activeTab, value: url });
   const value = editing ? draft.value : url;
   const setValue = (value: string) => setDraft({ tabId: activeTab, value });
-  // A load that failed is not secure whatever its scheme says; the bar
-  // shows a warning instead of a lock so a certificate error is not
-  // dressed up as a safe page.
   const failed = Boolean(failedUrl);
-  const secure = url.startsWith("https://") && !failed;
   const display = prettyUrl(url);
   const inputRef = useRef<HTMLInputElement>(null);
   // Suggestions live only while the draft says something other than the
@@ -132,11 +141,13 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
         >
           {/* The glyph says what kind of thing the bar holds: a search when
               it is empty, a lock for https, a globe for plain http, a warning
-              for a page that did not load. Each explains itself on hover. */}
+              for a page that did not load, and for Dive's own pages and local
+              files what they are rather than a false "not secure". Each
+              explains itself on hover. */}
           {(() => {
-            const kind = !current ? "none" : failed ? "failed" : secure ? "secure" : "plain";
-            const glyph = kind === "failed" ? TriangleAlert : kind === "secure" ? Lock : kind === "plain" ? Globe : Search;
-            const meaning = kind === "failed" ? "This page could not be loaded" : kind === "secure" ? "Secure connection" : kind === "plain" ? "Not secure: this page uses plain http" : "Search or enter an address";
+            const kind = addressSecurity(url, { failed, hasTab: Boolean(current) });
+            const glyph = SECURITY_GLYPHS[kind];
+            const meaning = ADDRESS_SECURITY_MEANING[kind];
             return (
               <Tooltip label={meaning} side="bottom" align="start">
                 <span role="img" aria-label={meaning} data-security={kind === "plain" ? "none" : kind} className="grid shrink-0 place-items-center">
@@ -254,9 +265,16 @@ export function BrowserActions() {
   );
 }
 
-/** Secondary page actions collapse into a small tray before the omnibox does. */
+/**
+ * Secondary page actions collapse into a small tray before the omnibox does.
+ * Every one of them shows only while it has something to say, so with none
+ * of them showing there is no tray: a More button that opens onto an empty
+ * box reads as broken.
+ */
 function ToolbarMore({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
+  const [wanted, setOpen] = useState(false);
+  const any = useAnyPageStatus();
+  const open = wanted && any;
   const root = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   useCoversContent(open);
@@ -271,9 +289,10 @@ function ToolbarMore({ children }: { children: React.ReactNode }) {
       window.removeEventListener("mousedown", close);
     };
   }, [open]);
+  if (!any) return null;
   return (
     <div ref={root} className="relative shrink-0">
-      <IconButton icon={MoreHorizontal} label="More page actions" active={open} hasPopup="dialog" expanded={open} onClick={() => setOpen((value) => !value)} tooltipAlign="end" />
+      <IconButton icon={MoreHorizontal} label="More page actions" active={open} hasPopup="dialog" expanded={open} onClick={() => setOpen(!open)} tooltipAlign="end" />
       {open && (
         <div ref={panel} role="dialog" aria-label="Page actions" aria-modal="true" className="surface-enter absolute top-full right-0 z-50 mt-1 flex items-center gap-0.5 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl">
           {children}
@@ -299,17 +318,38 @@ function LoadingLine() {
 
 /** Hostname plus path, scheme dropped, for the resting omnibox. */
 
+type BrowserSnapshot = ReturnType<typeof useBrowser.getState>;
+
+/** The active tab is awake and zoomed away from the default. */
+function zoomBadgeShown(s: BrowserSnapshot) {
+  const id = tabInThisWindow(s.activeTab, s.detached);
+  if (!id || s.tabs.find((t) => t.id === id)?.state === "discarded") return false;
+  return Math.abs((s.zoom[id] ?? s.defaultZoom) - s.defaultZoom) >= 0.001;
+}
+
+/**
+ * Whether any of the indicators beside the address has something to show.
+ * Each indicator decides for itself with the same rules; this is how the
+ * compact tray knows it would be empty.
+ */
+function useAnyPageStatus() {
+  const zoomed = useBrowser(zoomBadgeShown);
+  const subtitles = useSubtitles((s) => s.active || s.starting);
+  const downloads = useDownloads((s) => s.items.length > 0);
+  const recordingTab = useRecorder((s) => s.recordingTab);
+  const here = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
+  return zoomed || subtitles || downloads || (recordingTab !== null && recordingTab === here);
+}
+
 /** Shows the active tab's zoom when it is not the default; click resets. */
 function ZoomBadge() {
-  const active = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
-  const sleeping = useBrowser((s) => {
+  const shown = useBrowser(zoomBadgeShown);
+  const zoom = useBrowser((s) => {
     const id = tabInThisWindow(s.activeTab, s.detached);
-    return id ? s.tabs.find((t) => t.id === id)?.state === "discarded" : false;
+    return id ? (s.zoom[id] ?? s.defaultZoom) : s.defaultZoom;
   });
-  const zoom = useBrowser((s) => (active ? (s.zoom[active] ?? s.defaultZoom) : s.defaultZoom));
-  const defaultZoom = useBrowser((s) => s.defaultZoom);
   const zoomStep = useBrowser((s) => s.zoomStep);
-  if (sleeping || Math.abs(zoom - defaultZoom) < 0.001) return null;
+  if (!shown) return null;
   return (
     <Tooltip label="Reset zoom" shortcut="⌘0">
       <button

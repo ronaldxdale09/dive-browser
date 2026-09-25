@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { FOCUS_FIND } from "../lib/commands";
 import { ipc } from "../lib/ipc";
 import { useCoversContent } from "../lib/overlay";
 import { tabInThisWindow, useBrowser } from "../store/browser";
@@ -27,6 +28,14 @@ export function FindBar() {
 
   useEffect(() => {
     inputRef.current?.focus();
+    // ⌘F with the bar already open: back to the field, query selected so
+    // typing replaces it, as in every browser.
+    const refocus = () => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    };
+    window.addEventListener(FOCUS_FIND, refocus);
+    return () => window.removeEventListener(FOCUS_FIND, refocus);
   }, []);
 
   const idle = !activeTab || sleeping;

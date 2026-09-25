@@ -18,8 +18,15 @@ export function SharePopover() {
     return id ? s.tabs.find((t) => t.id === id) : undefined;
   });
   const [open, setOpen] = useState(false);
-  const [info, setInfo] = useState<ShareInfo | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // The code is kept with the address it was made for, so a QR for the last
+  // page is never shown for this one while the new one is being made.
+  const [shared, setShared] = useState<{ url: string; info: ShareInfo } | null>(null);
+  const url = current?.url;
+  const info = shared && shared.url === url ? shared.info : null;
+  // A failure, too, belongs to the address it was about.
+  const [failure, setFailure] = useState<{ url: string | undefined; message: string } | null>(null);
+  const error = failure && failure.url === url ? failure.message : null;
+  const setError = (message: string | null) => setFailure(message === null ? null : { url, message });
   const [copied, setCopied] = useState(false);
   const [copying, setCopying] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -30,19 +37,24 @@ export function SharePopover() {
   // The page's right-click menu asks for the QR code through the host.
   useEffect(() => {
     const show = () => {
-      if (current) setOpen(true);
+      if (!current) return;
+      setShared(null);
+      setFailure(null);
+      setOpen(true);
     };
     window.addEventListener(OPEN_SHARE, show);
     return () => window.removeEventListener(OPEN_SHARE, show);
   }, [current]);
 
+  // Keyed on the address, not the tab object: a title or favicon change must
+  // not ask again, and a navigation while open must.
   useEffect(() => {
-    if (!open || !current) return;
+    if (!open || url === undefined) return;
     let alive = true;
     ipc
-      .shareUrl(current.url)
-      .then((i) => alive && (setInfo(i), setError(null)))
-      .catch((e: unknown) => alive && setError(errorMessage(e)));
+      .shareUrl(url)
+      .then((i) => alive && (setShared({ url, info: i }), setFailure(null)))
+      .catch((e: unknown) => alive && setFailure({ url, message: errorMessage(e) }));
     const onDown = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     };
@@ -54,7 +66,7 @@ export function SharePopover() {
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
     };
-  }, [open, current]);
+  }, [open, url]);
 
   return (
     <div ref={ref} className="relative">
@@ -64,7 +76,15 @@ export function SharePopover() {
           aria-label="Share to another device"
           aria-expanded={open}
           disabled={!current}
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            // Each opening makes a fresh code: the LAN address can change
+            // between openings (another network, a new DHCP lease).
+            if (!open) {
+              setShared(null);
+              setFailure(null);
+            }
+            setOpen(!open);
+          }}
           className="grid size-7 place-items-center rounded-full text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-35"
         >
           <Icon icon={Share} />
@@ -87,6 +107,7 @@ export function SharePopover() {
                 <button
                   type="button"
                   aria-label={copied ? "Copied" : "Copy link"}
+                  title={copied ? "Copied" : "Copy link"}
                   disabled={copying}
                   onClick={() => {
                     setError(null);
