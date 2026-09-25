@@ -69,8 +69,8 @@ export function ProfileChip({ variant = "pill", placement = "below" }: { variant
         {variant !== "avatar" && <Icon icon={placement === "above" ? ChevronUp : ChevronDown} size={12} className="shrink-0 text-ink-3" />}
       </button>
       {open && (
-        <div ref={menu} role="menu" aria-label="Profiles" className={`absolute left-0 z-50 w-[300px] rounded-2xl border border-line-2 bg-surface p-1.5 shadow-2xl ${placement === "above" ? "bottom-full mb-1" : "top-9"}`}>
-          <p className="px-2.5 pt-1.5 pb-1 text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">Profiles</p>
+        <div ref={menu} role="menu" aria-label="Profiles" className={`surface-enter absolute left-0 z-50 w-[300px] rounded-xl border border-line-2 bg-surface p-1 text-xs shadow-2xl ${placement === "above" ? "bottom-full mb-1" : "top-9"}`}>
+          <p className="px-2 pt-1.5 pb-1 text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">Profiles</p>
           {profiles.map((p) => {
             const isCurrent = p.id === current.id;
             const detail = p.note || `${spacesOf(p.id)} ${spacesOf(p.id) === 1 ? "workspace" : "workspaces"} · ${tabsOf(p.id)} ${tabsOf(p.id) === 1 ? "tab" : "tabs"}`;
@@ -85,12 +85,12 @@ export function ProfileChip({ variant = "pill", placement = "below" }: { variant
                   setOpen(false);
                   void activate(p.id);
                 }}
-                className={`flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left text-xs transition-colors hover:bg-surface-2 ${isCurrent ? "bg-surface-2 text-ink" : "text-ink-2"}`}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1 text-left transition-colors hover:bg-surface-2 ${isCurrent ? "bg-surface-2 text-ink" : "text-ink-2"}`}
               >
-                <AvatarImage kind="profile" seed={p.avatar} color={p.color} alt="" width={30} height={30} className="size-[30px] shrink-0 rounded-full" />
+                <AvatarImage kind="profile" seed={p.avatar} color={p.color} alt="" width={28} height={28} className="size-7 shrink-0 rounded-full" />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{p.name}</span>
-                  <span className="block truncate text-[10.5px] text-ink-3">{detail}</span>
+                  <span className="block truncate leading-4 font-medium">{p.name}</span>
+                  <span className="block truncate text-[10.5px] leading-4 text-ink-3">{detail}</span>
                 </span>
                 <span className="grid shrink-0 place-items-center text-ink-3" title="Own cookies and logins">
                   <Icon icon={Shield} size={12} />
@@ -103,7 +103,7 @@ export function ProfileChip({ variant = "pill", placement = "below" }: { variant
               </button>
             );
           })}
-          <div className="my-1.5 h-px bg-line" />
+          <div className="my-1 h-px bg-line" />
           <button
             type="button"
             role="menuitem"
@@ -111,9 +111,9 @@ export function ProfileChip({ variant = "pill", placement = "below" }: { variant
               setOpen(false);
               setEditing({ id: current.id });
             }}
-            className="flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink"
+            className="flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-left text-ink-2 hover:bg-surface-2 hover:text-ink"
           >
-            <span className="grid size-[30px] shrink-0 place-items-center rounded-full bg-surface-2 text-ink-3">
+            <span className="grid size-7 shrink-0 place-items-center rounded-full bg-surface-2 text-ink-3">
               <Icon icon={Pencil} size={13} />
             </span>
             Edit {current.name}…
@@ -125,14 +125,14 @@ export function ProfileChip({ variant = "pill", placement = "below" }: { variant
               setOpen(false);
               setEditing({ id: null });
             }}
-            className="flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink"
+            className="flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-left text-ink-2 hover:bg-surface-2 hover:text-ink"
           >
-            <span className="grid size-[30px] shrink-0 place-items-center rounded-full border border-dashed border-line-2 text-ink-3">
+            <span className="grid size-7 shrink-0 place-items-center rounded-full border border-dashed border-line-2 text-ink-3">
               <Icon icon={Plus} size={13} />
             </span>
             New profile…
           </button>
-          <p className="px-2.5 pt-2 pb-1.5 text-[10.5px] leading-snug text-ink-3">Each profile keeps its own cookies, logins, history, bookmarks and workspaces, like a separate person using Dive.</p>
+          <p className="px-2 pt-1.5 pb-1.5 text-[10.5px] leading-snug text-ink-3">Each profile keeps its own cookies, logins, history, bookmarks and workspaces, like a separate person using Dive.</p>
         </div>
       )}
     </div>

@@ -88,7 +88,7 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
         )}
       </FeatureButton>
       {open && (
-        <div ref={panel} role="dialog" aria-label="Downloads this session" className="absolute right-0 z-50 mt-1 w-80 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl">
+        <div ref={panel} role="dialog" aria-label="Downloads this session" className="surface-enter absolute right-0 z-50 mt-1 w-80 rounded-xl border border-line-2 bg-surface p-1 text-xs shadow-2xl">
           <div className="flex items-center px-2 pt-1 pb-1.5">
             <span className="text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">This session</span>
             <span className="flex-1" />
@@ -114,7 +114,7 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
               ))}
             </ul>
           )}
-          <div className="mt-1 flex items-center gap-1 border-t border-line pt-1.5">
+          <div className="mt-1 flex items-center gap-1 border-t border-line pt-1">
             <button type="button" onClick={() => reveal(null)} className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink">
               <Icon icon={FolderOpen} size={12} /> Open folder
             </button>

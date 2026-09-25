@@ -159,8 +159,8 @@ function Actions({ tabId }: { tabId: string }) {
         </button>
       </Tooltip>
       {menu && (
-        <div ref={panel} role="menu" aria-label="Translate this page" className="surface-enter absolute top-full right-0 z-50 mt-1.5 max-h-[60vh] w-56 overflow-y-auto rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl">
-          <p className="px-2.5 py-1.5 text-[11px] text-ink-3">Translated on this machine; the page is not sent anywhere.</p>
+        <div ref={panel} role="menu" aria-label="Translate this page" className="surface-enter absolute top-full right-0 z-50 mt-1.5 max-h-[60vh] w-56 overflow-y-auto rounded-xl border border-line-2 bg-surface p-1 text-xs shadow-2xl">
+          <p className="px-2.5 py-1.5 text-[10.5px] leading-snug text-ink-3">Translated on this machine; the page is not sent anywhere.</p>
           {translated && (
             <button type="button" role="menuitem" onClick={() => void showOriginal()} className="mb-1 w-full rounded-lg px-2.5 py-1.5 text-left text-ink hover:bg-surface-2">
               Show original
@@ -210,7 +210,7 @@ function WalletButton({ tabId, className }: { tabId: string; className: string }
         </button>
       </Tooltip>
       {open && (
-        <div ref={panel} role="menu" aria-label="Saved addresses and cards" className="surface-enter absolute top-full right-0 z-50 mt-1.5 w-64 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl">
+        <div ref={panel} role="menu" aria-label="Saved addresses and cards" className="surface-enter absolute top-full right-0 z-50 mt-1.5 w-64 rounded-xl border border-line-2 bg-surface p-1 text-xs shadow-2xl">
           {addresses.map((address) => (
             <button
               key={address.id}

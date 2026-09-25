@@ -109,7 +109,7 @@ export function AddressSuggestions({
       role="listbox"
       aria-label="Address suggestions"
       onMouseDown={(event) => event.preventDefault()}
-      className="surface-enter absolute inset-x-0 top-full z-50 mt-1 rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl"
+      className="surface-enter absolute inset-x-0 top-full z-50 mt-1 rounded-xl border border-line-2 bg-surface p-1 text-xs shadow-2xl"
     >
       {rows.map((row, index) => (
         <li
@@ -120,7 +120,7 @@ export function AddressSuggestions({
           onMouseEnter={() => onHighlight(index)}
           onClick={() => onPick(row)}
           title={suggestionHoverTitle(row)}
-          className={`flex cursor-default items-center gap-2 rounded-lg px-3 py-2 ${index === highlight ? "bg-surface-2 text-ink" : "text-ink"}`}
+          className={`flex h-8 cursor-default items-center gap-2 rounded-lg px-2.5 ${index === highlight ? "bg-surface-2 text-ink" : "text-ink"}`}
         >
           {rowGlyph(row)}
           {row.kind === "open" || row.kind === "search" || row.kind === "suggest" ? (

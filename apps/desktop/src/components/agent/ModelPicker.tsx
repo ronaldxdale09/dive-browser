@@ -92,8 +92,8 @@ export function ModelPicker({ onAddProvider, onOpenChange }: { onAddProvider: ()
         <Icon icon={ChevronDown} size={11} className="shrink-0 text-ink-3" />
       </button>
       {open && (
-        <div ref={dialog} role="dialog" aria-label="Model and provider" className="absolute bottom-full left-0 z-20 mb-2 w-[min(320px,calc(100vw-24px))] rounded-xl border border-line-2 bg-surface p-2 shadow-2xl">
-          <div className="mb-2 flex flex-wrap items-center gap-1">
+        <div ref={dialog} role="dialog" aria-label="Model and provider" className="surface-enter absolute bottom-full left-0 z-20 mb-2 w-[min(320px,calc(100vw-24px))] rounded-xl border border-line-2 bg-surface p-1 text-xs shadow-2xl">
+          <div className="mb-1.5 flex flex-wrap items-center gap-1 px-1 pt-1">
             {usable.map((p) => (
               <button
                 key={p.id}
@@ -112,7 +112,7 @@ export function ModelPicker({ onAddProvider, onOpenChange }: { onAddProvider: ()
           </div>
 
           {provider?.lists_models && (
-            <div className="mb-1.5 flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2 focus-within:border-line-2">
+            <div className="mx-1 mb-1 flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2 focus-within:border-line-2">
               <Icon icon={Search} size={12} className="shrink-0 text-ink-3" />
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${list.length === 1 ? "1 model" : list.length ? `${list.length} models` : "models"}`} aria-label="Search models" className="h-7 min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-ink-3" />
               <button type="button" aria-label="Refresh models" disabled={loading !== null} onClick={() => provider && void loadModels(provider.id, true)} className="grid size-5 place-items-center rounded-full text-ink-3 hover:text-ink disabled:opacity-40">
@@ -138,10 +138,10 @@ export function ModelPicker({ onAddProvider, onOpenChange }: { onAddProvider: ()
             onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
             aria-label="Model id"
             spellCheck={false}
-            className="mt-1.5 h-7 w-full rounded-lg border border-line bg-surface-2 px-2 font-mono text-[11px] text-ink outline-none focus:border-highlight/60"
+            className="mx-1 mt-1 block h-7 w-[calc(100%-0.5rem)] rounded-lg border border-line bg-surface-2 px-2 font-mono text-[11px] text-ink outline-none focus:border-highlight/60"
           />
 
-          <div className="mt-2 flex items-center gap-2 border-t border-line pt-2">
+          <div className="mt-1.5 flex items-center gap-2 border-t border-line px-1 pt-1.5 pb-0.5">
             <span className="text-[11px] text-ink-3">Thinking</span>
             <div role="radiogroup" aria-label="Reasoning effort" className="ml-auto inline-flex rounded-lg border border-line bg-surface-2 p-0.5">
               {EFFORTS.map((o) => (
@@ -160,10 +160,10 @@ export function ModelPicker({ onAddProvider, onOpenChange }: { onAddProvider: ()
 function ModelRow({ model, selected, onPick }: { model: ModelInfo; selected: boolean; onPick: () => void }) {
   const detail = modelDetail(model);
   return (
-    <button type="button" onClick={onPick} aria-pressed={selected} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-surface-2 aria-pressed:bg-surface-3">
+    <button type="button" onClick={onPick} aria-pressed={selected} className="flex min-h-8 w-full items-center gap-2 rounded-lg px-2 py-1 text-left hover:bg-surface-2 aria-pressed:bg-surface-2">
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-xs text-ink">{model.name}</span>
-        {detail && <span className="block truncate font-mono text-[10px] text-ink-3">{detail}</span>}
+        <span className="block truncate leading-4 text-ink">{model.name}</span>
+        {detail && <span className="block truncate font-mono text-[10px] leading-4 text-ink-3">{detail}</span>}
       </span>
       {selected && <Icon icon={Check} size={12} className="shrink-0 text-highlight" />}
     </button>
