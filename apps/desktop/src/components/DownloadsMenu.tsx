@@ -218,7 +218,7 @@ function Row({ item, onReveal, onOpen, onCancel, onResume }: { item: Item; onRev
           type="button"
           onClick={onResume}
           aria-label={`Resume ${item.name}`}
-          className="flex h-6 shrink-0 items-center gap-1 rounded-full border border-line px-2 text-[10.5px] text-ink-2 hover:bg-surface-3 hover:text-ink"
+          className="flex h-6 shrink-0 items-center gap-1 rounded-full border border-line px-2 text-10.5 text-ink-2 hover:bg-surface-3 hover:text-ink"
         >
           <Icon icon={RotateCw} size={10} /> Resume
         </button>

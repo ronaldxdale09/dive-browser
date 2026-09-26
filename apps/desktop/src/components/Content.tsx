@@ -461,7 +461,7 @@ export function CertErrorPanel({ asked }: { asked: CertErrorAsked }) {
         <p className="max-w-full truncate font-mono text-xs text-ink-3" title={asked.url}>
           {asked.url}
         </p>
-        <p className="font-mono text-[11px] text-ink-3">{asked.error}</p>
+        <p className="font-mono text-11 text-ink-3">{asked.error}</p>
         <div className="mt-1 flex flex-wrap items-center gap-3">
           <button ref={back} type="button" onClick={() => void goBack()} className="flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-sm text-accent-ink hover:opacity-90">
             Back to safety
