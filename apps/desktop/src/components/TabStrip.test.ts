@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { countOutOfView, essentialTabs, revealScrollLeft, revealScrollTop, orderTabs, roveTab, splitAction, tabLabel, TabStrip } from "./TabStrip";
+import { countOutOfView, essentialTabs, revealScrollLeft, revealScrollTop, orderTabs, roveTab, splitAction, tabAccessibleName, tabLabel, TabStrip } from "./TabStrip";
 import type { Tab } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { ipc } from "../lib/ipc";
@@ -132,7 +132,7 @@ describe("TabStrip controls", () => {
 
     const tab = screen.getByRole("tab");
     expect(tab.dataset.sleeping).toBe("true");
-    expect(screen.getByLabelText("Sleeping")).toBeTruthy();
+    expect(tab.getAttribute("aria-label")).toBe("x, sleeping");
     fireEvent.click(tab);
     expect(activateTab).toHaveBeenCalledWith("d");
   });
@@ -207,7 +207,7 @@ describe("TabStrip controls", () => {
     expect(closeTab).toHaveBeenCalledTimes(4);
 
     // Middle click on pinned tab does NOT close it
-    const pinnedTab = screen.getByRole("tab", { name: "Pinned" });
+    const pinnedTab = screen.getByRole("tab", { name: "Pinned, pinned" });
     fireEvent(pinnedTab.parentElement!, new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 }));
     expect(closeTab).toHaveBeenCalledTimes(4);
 
@@ -217,7 +217,8 @@ describe("TabStrip controls", () => {
   it("swaps the favicon for a spinner while the tab loads", () => {
     useBrowser.setState({ tabs: [t("a", "today", 0)], activeTab: "a", loading: { a: true } });
     render(createElement(TabStrip));
-    const spinner = screen.getByRole("img", { name: "Loading" });
+    expect(screen.getByRole("tab", { name: /, loading$/ })).toBeTruthy();
+    const spinner = screen.getByRole("tab").querySelector<HTMLElement>("[class*=animate-spin]")!;
     expect(spinner.className).toContain("animate-spin");
     expect(spinner.className).toContain("motion-reduce:animate-none");
     expect(spinner.querySelector("svg")).toBeTruthy();
@@ -343,5 +344,25 @@ describe("tabLabel", () => {
     expect(tabLabel({ ...t("a", "today", 0), title: "about:blank", url: "http://nonexistent.invalid/" })).toBe("nonexistent.invalid");
     expect(tabLabel({ ...t("a", "today", 0), title: "about:blank", url: "about:blank" })).toBe("about:blank");
     expect(tabLabel({ ...t("a", "today", 0), title: "Docs", url: "https://x" })).toBe("Docs");
+  });
+});
+
+describe("tabAccessibleName", () => {
+  it("says everything the tab's marks show, after its title", () => {
+    expect(tabAccessibleName("Docs", {})).toBe("Docs");
+    expect(tabAccessibleName("Docs", { pinned: true, loading: true, audio: "playing", inSplit: true })).toBe("Docs, pinned, loading, playing audio, in split view");
+    expect(tabAccessibleName("Docs", { audio: "muted", sleeping: true, detached: true })).toBe("Docs, muted, sleeping, in its own window");
+    // An agent at work outranks loading, as the mark does.
+    expect(tabAccessibleName("Docs", { driven: true, loading: true })).toBe("Docs, an agent is working in it");
+  });
+
+  it("points the active tab at the page it shows", () => {
+    useBrowser.setState({ tabs: [{ ...t("a", "today", 0), title: "Docs" }, { ...t("b", "today", 1), title: "Mail" }], activeTab: "a", detached: [] });
+    render(createElement(TabStrip));
+    expect(screen.getByRole("tab", { name: "Docs" }).getAttribute("aria-controls")).toBe("dive-page");
+    expect(screen.getByRole("tab", { name: "Mail" }).getAttribute("aria-controls")).toBeNull();
+    // dnd-kit's own wording is not on the tab.
+    expect(screen.getByRole("tab", { name: "Docs" }).getAttribute("aria-roledescription")).toBeNull();
+    expect(screen.getByRole("tab", { name: "Docs" }).getAttribute("aria-describedby")).toBeNull();
   });
 });

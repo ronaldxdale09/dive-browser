@@ -1,11 +1,11 @@
 import { windowDrag } from "./lib/windowDrag";
 import { isPrivateWindow } from "./lib/privateMode";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Rail, RAIL_WIDTH, RailToggle } from "./components/Rail";
 import { Wordmark } from "./components/Wordmark";
 import { BuildBadge } from "./components/BuildBadge";
-import { TabStrip } from "./components/TabStrip";
+import { PAGE_ID, TabStrip } from "./components/TabStrip";
 import { TabDnd } from "./components/TabDnd";
 import { ProfileDialog } from "./components/ProfileDialog";
 import { FeatureBar } from "./components/FeatureBar";
@@ -118,6 +118,20 @@ export function App() {
     };
   }, [loadPrefs]);
   useShortcuts();
+  // The page area is named by the tab it shows, the other half of the active
+  // tab's aria-controls. Set on the element rather than rendered: following
+  // the active tab from here re-rendered the whole chrome on every switch.
+  const page = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const name = (id: string | null) => {
+      if (id) page.current?.setAttribute("aria-labelledby", `dive-tab-${id}`);
+      else page.current?.removeAttribute("aria-labelledby");
+    };
+    name(useBrowser.getState().activeTab);
+    return useBrowser.subscribe((s, prev) => {
+      if (s.activeTab !== prev.activeTab) name(s.activeTab);
+    });
+  }, []);
 
   const effectiveRailExpanded = railExpanded && !responsive.collapseRail;
   const railWidth = effectiveRailExpanded ? RAIL_WIDTH.expanded : RAIL_WIDTH.collapsed;
@@ -153,12 +167,12 @@ export function App() {
           elsewhere or while maximized. */}
       <WindowResizeEdges top={oneBar ? 44 : 84} />
       {!oneBar && (
-        <header className={`col-span-2 row-start-1 flex items-center gap-2 ${captionGutter}`} data-tauri-drag-region="true" {...windowDrag()}>
+        <header aria-label="Title bar" className={`col-span-2 row-start-1 flex items-center gap-2 ${captionGutter}`} data-tauri-drag-region="true" {...windowDrag()}>
           {isPrivateWindow() && <span className="px-2 font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
           <BuildBadge align="start" />
-          <div className="h-full min-w-0 flex-1">
+          <nav aria-label="Tabs" className="h-full min-w-0 flex-1">
             <TabStrip />
-          </div>
+          </nav>
           <FeatureBar compact={responsive.collapseRail} />
           <WindowControls />
         </header>
@@ -197,7 +211,7 @@ export function App() {
         />
       </div>
       {oneBar ? (
-        <header className="col-start-2 row-start-1 flex min-w-0 items-center" data-tauri-drag-region="true" {...windowDrag()}>
+        <header aria-label="Title bar" className="col-start-2 row-start-1 flex min-w-0 items-center" data-tauri-drag-region="true" {...windowDrag()}>
           {/* The build badge lives at the foot of an open rail; with the rail
               collapsed there is no room for it there, so it leads this row. */}
           {!effectiveRailExpanded && <span className="pl-2"><BuildBadge align="start" /></span>}
@@ -220,7 +234,7 @@ export function App() {
           <Toolbar compact={responsive.compactToolbar} />
         </nav>
       )}
-      <main className={`col-start-2 grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] bg-line ${oneBar ? "row-start-2" : "row-start-3"}`}>
+      <main ref={page} id={PAGE_ID} className={`col-start-2 grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] bg-line ${oneBar ? "row-start-2" : "row-start-3"}`}>
         <DockedPage showDock={showDock} onCloseDock={() => toggle("dock", false)}>
           {/* Find hangs over the page rather than taking a row of its own.
               A row pushed the whole page down by 44px on open and back up on

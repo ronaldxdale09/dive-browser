@@ -35,7 +35,7 @@ it("re-renders only the tab whose title, load state or sound changed", () => {
   act(() => useBrowser.setState({ tabs: [{ ...a, title: "Alpha, renamed" }, b] }));
   expect(screen.getByRole("tab", { name: "Alpha, renamed" })).toBeTruthy();
   act(() => useBrowser.setState({ loading: { a: true } }));
-  expect(screen.getAllByRole("img", { name: "Loading" })).toHaveLength(1);
+  expect(screen.getByRole("tab", { name: "Alpha, renamed, loading" })).toBeTruthy();
   act(() => useTabAudio.setState({ byTab: { a: { tab_id: "a", audible: true, muted: false } } }));
 
   expect(renders.get("b.png") ?? 0).toBe(0);

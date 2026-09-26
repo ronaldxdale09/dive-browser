@@ -65,6 +65,33 @@ describe("Rail", () => {
     expect(activate).toHaveBeenCalledTimes(2);
   });
 
+  it("marks the current workspace, and is one Tab stop the arrows walk", () => {
+    const activate = vi.fn().mockResolvedValue(undefined);
+    useBrowser.setState({ activateWorkspace: activate });
+    render(<Rail />);
+    expect(screen.getByRole("navigation", { name: "Sidebar" })).toBeTruthy();
+    const current = screen.getByRole("button", { name: /^Personal/ });
+    const other = screen.getByRole("button", { name: /^Client/ });
+    expect(current.getAttribute("aria-current")).toBe("true");
+    expect(current.getAttribute("aria-pressed")).toBeNull();
+    expect(current.getAttribute("aria-keyshortcuts")).toMatch(/^(Meta|Control)\+1$/);
+    expect([current.tabIndex, other.tabIndex]).toEqual([0, -1]);
+    current.focus();
+    fireEvent.keyDown(current, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(other);
+    expect(activate).not.toHaveBeenCalled();
+    fireEvent.keyDown(other, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(current);
+  });
+
+  it("asks about a delete as an alert dialog described by its question", () => {
+    render(<Rail />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: /^Client/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete workspace" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Client" });
+    expect(document.getElementById(dialog.getAttribute("aria-describedby") ?? "")?.textContent).toMatch(/Delete Client and close its 1 tab\?/);
+  });
+
   it("switches workspace on click", () => {
     const activate = vi.fn().mockResolvedValue(undefined);
     useBrowser.setState({ activateWorkspace: activate });
@@ -223,7 +250,7 @@ describe("Rail", () => {
       ],
     });
     render(<Rail />);
-    const list = screen.getByRole("region", { name: "Tabs" });
+    const list = screen.getByRole("navigation", { name: "Tabs" });
     const names = Array.from(list.querySelectorAll('[role="tab"]')).map((b) => b.getAttribute("aria-label"));
     expect(names).toEqual(["Mail, essential", "Beta", "Alpha"]);
     expect(screen.getByRole("tablist", { name: "Tabs" }).getAttribute("aria-orientation")).toBe("vertical");

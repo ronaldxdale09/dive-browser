@@ -16,6 +16,7 @@ import { chordsByCommand, formatChord } from "../lib/commands";
 import { clampFloatingPosition, useClampToViewport } from "../lib/floating";
 import { essentialTabs, orderTabs } from "../lib/tabOrder";
 import { copyText } from "../lib/clipboard";
+import { quietDragAttributes } from "../lib/dragA11y";
 
 export { essentialTabs, orderTabs };
 
@@ -41,6 +42,40 @@ export function tabHoverTitle(t: Tab, detached = false): string {
   if (t.state === "discarded") return `${name} (sleeping, click to wake)`;
   return name;
 }
+
+/** What a tab is doing, for its accessible name. */
+export interface TabNameState {
+  pinned?: boolean | undefined;
+  loading?: boolean | undefined;
+  /** An agent is driving it; said instead of loading, as the mark shows. */
+  driven?: boolean | undefined;
+  audio?: "playing" | "muted" | null | undefined;
+  inSplit?: boolean | undefined;
+  sleeping?: boolean | undefined;
+  detached?: boolean | undefined;
+}
+
+/**
+ * The name a screen reader gives a tab: its title, then everything its marks
+ * show -- pinned, loading, playing or muted, in split view, asleep, in its own
+ * window. The tab's own label used to replace its children's, so those marks
+ * each had a name nobody heard; the name is built from the same state instead.
+ */
+export function tabAccessibleName(title: string, state: TabNameState): string {
+  const parts = [title];
+  if (state.pinned) parts.push("pinned");
+  if (state.driven) parts.push("an agent is working in it");
+  else if (state.loading) parts.push("loading");
+  if (state.audio === "muted") parts.push("muted");
+  else if (state.audio === "playing") parts.push("playing audio");
+  if (state.inSplit) parts.push("in split view");
+  if (state.sleeping) parts.push("sleeping");
+  if (state.detached) parts.push("in its own window");
+  return parts.join(", ");
+}
+
+/** The page the active tab controls: the chrome's main element, labelled by that tab. */
+export const PAGE_ID = "dive-page";
 
 /** What the tab menu offers for split view, if anything. */
 export type SplitAction =
@@ -490,6 +525,8 @@ function TabSpeaker({ tab, pinned }: { tab: Tab; pinned: boolean }) {
   if (!state?.audible && !state?.muted) return null;
   const muted = state.muted;
   const action = `${muted ? "Unmute" : "Mute"} ${label(tab)}`;
+  // The icon stays small, but the target is 24px: a pseudo-element extends
+  // it, and a 4px gap keeps it clear of the close button's own.
   return (
     <button
       type="button"
@@ -503,7 +540,7 @@ function TabSpeaker({ tab, pinned }: { tab: Tab; pinned: boolean }) {
         e.stopPropagation();
         void toggle(tab.id);
       }}
-      className={`grid size-5 shrink-0 place-items-center rounded-full hover:bg-surface-3 hover:text-ink ${muted ? "text-ink-3" : "text-ink-2"} ${pinned ? "absolute right-0 bottom-0 size-4 bg-surface-2" : "mr-0.5"}`}
+      className={`grid size-5 shrink-0 place-items-center rounded-full before:absolute hover:bg-surface-3 hover:text-ink ${muted ? "text-ink-3" : "text-ink-2"} ${pinned ? "absolute right-0 bottom-0 size-4 bg-surface-2 before:-inset-1" : "relative mr-1 before:-inset-0.5"}`}
     >
       <Icon icon={muted ? VolumeX : Volume2} size={pinned ? 9 : 11} />
     </button>
@@ -521,6 +558,7 @@ const SortableTab = memo(function SortableTab({ tab: t, active, detached, inSpli
   const bare = narrow.title && !active;
   const driven = useIsDriven(t.id);
   const loading = useBrowser((s) => s.loading[t.id] === true);
+  const audio = useTabAudio((s) => (s.byTab[t.id]?.muted ? "muted" : s.byTab[t.id]?.audible ? "playing" : null));
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id });
   const onFocus = () => focusTab(t.id);
   const onActivate = () => activateTab(t.id);
@@ -558,16 +596,19 @@ const SortableTab = memo(function SortableTab({ tab: t, active, detached, inSpli
     >
       <button
         type="button"
-        {...attributes}
+        {...quietDragAttributes(attributes)}
         {...listeners}
         data-tab-drag-handle
         data-tab-id={t.id}
         data-tauri-drag-region="false"
         role="tab"
         id={`dive-tab-${t.id}`}
-        aria-label={driven ? `${label(t)}, an agent is working in it` : detached ? `${label(t)}, in its own window` : sleeping ? `${label(t)}, sleeping` : label(t)}
+        aria-label={tabAccessibleName(label(t), { pinned: t.tier === "pinned", loading, driven, audio, inSplit: inSplit && !detached, sleeping, detached })}
         aria-keyshortcuts={!pinned ? "Delete, Backspace" : undefined}
         aria-selected={active}
+        // The active tab is the one the page belongs to; a tab in its own
+        // window shows there, not in this window's page.
+        aria-controls={active && !detached ? PAGE_ID : undefined}
         tabIndex={inTabOrder ? 0 : -1}
         // Tauri installs a document-level mousedown listener for native
         // window movement. Keep the tab gesture inside React so dnd-kit owns
@@ -616,7 +657,7 @@ const SortableTab = memo(function SortableTab({ tab: t, active, detached, inSpli
           {driven ? (
             <DrivingMark size={pinned ? 16 : 14} />
           ) : loading ? (
-            <span className="grid place-items-center text-ink-2 motion-safe:animate-spin motion-reduce:animate-none" aria-label="Loading" role="img">
+            <span className="grid place-items-center text-ink-2 motion-safe:animate-spin motion-reduce:animate-none" aria-hidden>
               <Icon icon={Loader2} size={pinned ? 16 : 14} />
             </span>
           ) : (
@@ -630,22 +671,22 @@ const SortableTab = memo(function SortableTab({ tab: t, active, detached, inSpli
         </span>
         {!pinned && !bare && <span className="truncate">{label(t)}</span>}
         {vertical && t.tier === "pinned" && (
-          <span className="grid shrink-0 place-items-center text-ink-3" aria-label="Pinned">
+          <span className="grid shrink-0 place-items-center text-ink-3" aria-hidden>
             <Icon icon={Pin} size={10} />
           </span>
         )}
         {sleeping && !pinned && (
-          <span className="grid shrink-0 place-items-center text-ink-3" aria-label="Sleeping">
+          <span className="grid shrink-0 place-items-center text-ink-3" aria-hidden>
             <Icon icon={Moon} size={11} />
           </span>
         )}
         {detached && !pinned && (
-          <span className="grid shrink-0 place-items-center text-ink-3" aria-label="In its own window">
+          <span className="grid shrink-0 place-items-center text-ink-3" aria-hidden>
             <Icon icon={AppWindow} size={11} />
           </span>
         )}
         {inSplit && !detached && !pinned && !bare && (
-          <span className="grid shrink-0 place-items-center text-highlight" aria-label="In split view">
+          <span className="grid shrink-0 place-items-center text-highlight" aria-hidden>
             <Icon icon={Columns2} size={11} />
           </span>
         )}
@@ -663,7 +704,7 @@ const SortableTab = memo(function SortableTab({ tab: t, active, detached, inSpli
             e.stopPropagation();
             onClose();
           }}
-          className={`mr-1 grid size-5 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100 ${active ? "opacity-100" : ""}`}
+          className={`relative mr-1 grid size-5 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 before:absolute before:-inset-0.5 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100 ${active ? "opacity-100" : ""}`}
         >
           <Icon icon={X} size={12} />
         </button>
@@ -711,7 +752,9 @@ function EssentialTab({
         onMenu(e.clientX, e.clientY);
       }}
       title={`${label(t)} (essential, in every workspace)`}
-      aria-label={`${label(t)}, essential`}
+      id={`dive-tab-${t.id}`}
+      aria-label={`${tabAccessibleName(label(t), { loading })}, essential`}
+      aria-controls={active ? PAGE_ID : undefined}
       data-essential
       data-tauri-drag-region="false"
       onMouseDown={(e) => e.stopPropagation()}
@@ -719,7 +762,7 @@ function EssentialTab({
       className={vertical ? "tab-item flex h-7 w-full shrink-0 cursor-pointer items-center gap-2 px-2 text-xs transition-colors" : "tab-item grid h-[calc(var(--row-h)-4px)] w-8 shrink-0 cursor-pointer place-items-center text-xs transition-colors"}
     >
       {loading ? (
-        <span className="grid place-items-center text-ink-2 motion-safe:animate-spin motion-reduce:animate-none" aria-label="Loading" role="img">
+        <span className="grid place-items-center text-ink-2 motion-safe:animate-spin motion-reduce:animate-none" aria-hidden>
           <Icon icon={Loader2} size={vertical ? 14 : 16} />
         </span>
       ) : (

@@ -30,7 +30,8 @@ const PANES: ChromePane[] = [
     // The tab in the Tab order is the active one (or the one last focused).
     stops: ['[role="tablist"][aria-label="Tabs"] [role="tab"][tabindex="0"]', '[role="tablist"][aria-label="Essentials"] [role="tab"][tabindex="0"]', '[role="tablist"][aria-label="Tabs"] [role="tab"]'],
   },
-  { id: "rail", region: 'nav[aria-label="Workspaces"]', stops: ['nav[aria-label="Workspaces"] [aria-pressed="true"]', null] },
+  // The active workspace's row is the rail's Tab stop and says it is current.
+  { id: "rail", region: 'nav[aria-label="Sidebar"]', stops: ['nav[aria-label="Sidebar"] [data-workspace-row][aria-current="true"]', null] },
   { id: "toolbar", region: 'nav[aria-label="Browser controls"]', stops: ['nav[aria-label="Browser controls"] input[aria-label="Address"]', null] },
   { id: "features", region: '[data-pane="features"]', stops: [null] },
   { id: "dock", region: 'section[aria-label="Developer dock"]', stops: ['[role="tablist"][aria-label="Dock panels"] [role="tab"][tabindex="0"]', null] },

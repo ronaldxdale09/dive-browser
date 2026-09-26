@@ -6,7 +6,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { ArrowDown, ArrowDownToLine, ArrowRight, ArrowUp, Globe, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Settings2, Shield, SquarePlus, Trash2, X } from "lucide-react";
 import { BuildBadge } from "./BuildBadge";
 import { useUpdates } from "../store/updates";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { useBrowser } from "../store/browser";
 import type { Workspace } from "../lib/ipc";
@@ -19,8 +19,9 @@ import { useFocusTrap } from "../lib/useFocusTrap";
 import { QuickLinks } from "./QuickLinks";
 import { ProfileChip } from "./ProfileChip";
 import { TabStrip, opensMenu } from "./TabStrip";
-import { displayChord, runCommand } from "../lib/commands";
+import { displayChord, isMac, runCommand } from "../lib/commands";
 import { announce } from "../lib/announce";
+import { NO_DRAG_INSTRUCTIONS, dragAnnouncements, quietDragAttributes } from "../lib/dragA11y";
 import { clampFloatingPosition, useClampToViewport } from "../lib/floating";
 
 /** Rail width in each mode; App.tsx sizes the grid column from these. */
@@ -59,6 +60,11 @@ export function Rail({ forceCollapsed = false, toggle = true }: { forceCollapsed
   const expanded = preferredExpanded && !forceCollapsed;
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  // A reorder is announced by workspace name, not by the ids dnd-kit knows.
+  const accessibility = {
+    announcements: dragAnnouncements((id) => workspaces.find((w) => w.id === String(id))?.name ?? "a workspace"),
+    screenReaderInstructions: NO_DRAG_INSTRUCTIONS,
+  };
 
   const onDragEnd = (e: DragEndEvent) => {
     const { active: dragged, over } = e;
@@ -68,7 +74,7 @@ export function Rail({ forceCollapsed = false, toggle = true }: { forceCollapsed
   };
 
   return (
-    <nav aria-label="Workspaces" className={`flex h-full flex-col gap-1 px-2 pt-1 pb-2 ${expanded ? "" : "items-center"}`}>
+    <nav aria-label="Sidebar" className={`flex h-full flex-col gap-1 px-2 pt-1 pb-2 ${expanded ? "" : "items-center"}`}>
       {/* The collapse control keeps one home, the top of the rail, whichever
           state the rail is in, so the hand goes to the same place both ways. */}
       {!forceCollapsed && toggle && (
@@ -85,8 +91,8 @@ export function Rail({ forceCollapsed = false, toggle = true }: { forceCollapsed
       {/* Scrolls rather than clips: past about a dozen workspaces the rail runs
           out of height, and a mark sliced in half is worse than one that has to
           be scrolled to. Settings stays pinned below it either way. */}
-      <div className={`scroll-hidden flex min-h-0 flex-col overflow-x-hidden overflow-y-auto ${expanded ? "max-h-[45%] shrink-0 gap-1" : "flex-1 items-center gap-2"}`}>
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <div role="group" aria-label="Workspaces" className={`scroll-hidden flex min-h-0 flex-col overflow-x-hidden overflow-y-auto ${expanded ? "max-h-[45%] shrink-0 gap-1" : "flex-1 items-center gap-2"}`}>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd} accessibility={accessibility}>
           <SortableContext items={workspaces.map((w) => w.id)} strategy={verticalListSortingStrategy}>
             {workspaces.map((w, i) => (
               <WorkspaceRow
@@ -94,6 +100,7 @@ export function Rail({ forceCollapsed = false, toggle = true }: { forceCollapsed
                 workspace={w}
                 index={i}
                 active={w.id === active}
+                inTabOrder={w.id === active || (!workspaces.some((x) => x.id === active) && i === 0)}
                 expanded={expanded}
                 separate={workspaces.filter((other) => other.container_id === w.container_id).length === 1}
                 onActivate={() => void activate(w.id)}
@@ -182,7 +189,7 @@ function DefaultBrowserButton({ expanded }: { expanded: boolean }) {
         aria-label="Not now"
         title="Not now (asks again in two weeks)"
         onClick={decline}
-        className="absolute -top-1.5 -right-1.5 grid size-5 place-items-center rounded-full border border-line-2 bg-surface text-ink-3 opacity-0 shadow transition-opacity group-hover:opacity-100 hover:text-ink focus-visible:opacity-100"
+        className="absolute -top-1.5 -right-1.5 grid size-5 place-items-center rounded-full border border-line-2 bg-surface text-ink-3 opacity-0 shadow transition-opacity before:absolute before:-inset-[3px] group-hover:opacity-100 hover:text-ink focus-visible:opacity-100"
       >
         <Icon icon={X} size={10} />
       </button>
@@ -199,7 +206,7 @@ function DefaultBrowserButton({ expanded }: { expanded: boolean }) {
 function TabList() {
   const count = useBrowser((s) => s.tabs.length);
   return (
-    <section aria-label="Tabs" className="flex min-h-0 flex-1 flex-col">
+    <nav aria-label="Tabs" className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-6 shrink-0 items-center gap-1 pr-0.5 pl-2">
         <span className="text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">Tabs</span>
         {count > 0 && <span className="font-mono text-[10px] text-ink-3 tabular-nums">{count}</span>}
@@ -207,7 +214,7 @@ function TabList() {
         <RailButton icon={Plus} label="New tab" onClick={() => runCommand("tab.new")} />
       </div>
       <TabStrip orientation="vertical" />
-    </section>
+    </nav>
   );
 }
 
@@ -302,6 +309,7 @@ function WorkspaceRow({
   active,
   expanded,
   separate,
+  inTabOrder,
   onActivate,
   onMenu,
 }: {
@@ -310,6 +318,8 @@ function WorkspaceRow({
   active: boolean;
   expanded: boolean;
   separate: boolean;
+  /** The one row in the Tab order: the active workspace; the arrows reach the rest. */
+  inTabOrder: boolean;
   onActivate: () => void;
   onMenu: (x: number, y: number) => void;
 }) {
@@ -324,11 +334,13 @@ function WorkspaceRow({
     <div
       ref={setNodeRef}
       style={style}
-      {...attributes}
+      {...quietDragAttributes(attributes)}
+      data-workspace-row
       {...listeners}
       role="button"
-      tabIndex={0}
-      aria-pressed={active}
+      tabIndex={inTabOrder ? 0 : -1}
+      aria-current={active ? "true" : undefined}
+      aria-keyshortcuts={index < 9 ? `${isMac() ? "Meta" : "Control"}+${index + 1}` : undefined}
       aria-label={summary}
       title={expanded ? w.name : undefined}
       onClick={onActivate}
@@ -337,6 +349,17 @@ function WorkspaceRow({
           e.preventDefault();
           const r = e.currentTarget.getBoundingClientRect();
           onMenu(r.left, r.bottom);
+          return;
+        }
+        // The rows are one Tab stop; Up and Down (Home, End) walk them without
+        // switching, so reaching Settings is not a Tab per workspace.
+        if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") {
+          const rows = Array.from(e.currentTarget.closest("[role='group']")?.querySelectorAll<HTMLElement>("[data-workspace-row]") ?? []);
+          const at = rows.indexOf(e.currentTarget);
+          const next = e.key === "Home" ? rows[0] : e.key === "End" ? rows[rows.length - 1] : rows[(at + (e.key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length];
+          if (!next) return;
+          e.preventDefault();
+          next.focus();
           return;
         }
         // A button answers Space as well as Enter; Space must not scroll the rail.
@@ -407,6 +430,7 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
   const reorder = useBrowser((s) => s.reorderWorkspaces);
   const activeProfile = useBrowser((s) => s.activeProfile);
   const [confirming, setConfirming] = useState(false);
+  const question = useId();
   const workspace = workspaces.find((w) => w.id === id);
   // The rail's own order: this profile's workspaces, as the drag reorders them.
   const shown = workspaces.filter((w) => !activeProfile || w.profile_id === activeProfile).map((w) => w.id);
@@ -433,7 +457,10 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
       <div className="fixed inset-0 z-40" onMouseDown={onClose} />
       <div
         ref={root}
-        role="menu"
+        // Asking to delete, it is no longer a menu of items but a question
+        // with two answers, and says so; the question is its description.
+        role={confirming ? "alertdialog" : "menu"}
+        aria-describedby={confirming ? question : undefined}
         aria-label={workspace.name}
         style={{ left: position.x, top: position.y }}
         className="surface-enter fixed z-50 w-56 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl"
@@ -445,7 +472,7 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
         </div>
         {confirming ? (
           <div className="px-2 pb-1">
-            <p className="text-[11px] leading-relaxed text-ink-2">
+            <p id={question} className="text-[11px] leading-relaxed text-ink-2">
               {count === 0 ? `Delete ${workspace.name}? It has no open tabs.` : `Delete ${workspace.name} and close its ${count} ${count === 1 ? "tab" : "tabs"}?`}
             </p>
             <div className="mt-2 flex gap-2">

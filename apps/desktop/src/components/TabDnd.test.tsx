@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { planDrop, paneId, zoneId } from "./TabDnd";
+import { dragPlaceName, planDrop, paneId, zoneId } from "./TabDnd";
+import type { Tab } from "../lib/ipc";
 
 const viewport = { width: 1200, height: 800 };
 const stripBottom = 44;
@@ -35,5 +36,16 @@ describe("planDrop", () => {
     expect(planDrop({ dragged: "a", fromPane: false, over: null, ordered, pointer: { x: 600, y: 30 }, viewport, stripBottom })).toEqual({ kind: "none" });
     expect(planDrop({ dragged: "a", fromPane: false, over: "a", ordered, pointer: { x: 60, y: 20 }, viewport, stripBottom })).toEqual({ kind: "none" });
     expect(planDrop({ dragged: paneId("b"), fromPane: true, over: null, ordered, pointer: { x: 600, y: 300 }, viewport, stripBottom })).toEqual({ kind: "none" });
+  });
+});
+
+describe("dragPlaceName", () => {
+  it("names tabs, panes and drop zones as the person sees them", () => {
+    const tabs = [{ id: "a", title: "Docs", url: "https://docs.test/" }, { id: "b", title: "", url: "https://mail.test/" }] as Tab[];
+    expect(dragPlaceName("a", tabs)).toBe("Docs");
+    expect(dragPlaceName(paneId("b"), tabs)).toBe("mail.test");
+    expect(dragPlaceName(zoneId(1, "a:r"), tabs)).toBe("the right side of Docs");
+    expect(dragPlaceName(zoneId(0, "a:l"), tabs)).toBe("the left side of Docs");
+    expect(dragPlaceName("gone", tabs)).toBe("a tab");
   });
 });

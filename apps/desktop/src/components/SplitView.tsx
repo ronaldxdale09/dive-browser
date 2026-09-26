@@ -161,14 +161,29 @@ export function nudgedSizes(sizes: number[], i: number, direction: 1 | -1): numb
 type Divider = { label: string; share: number; pair: number };
 
 function PaneAndDivider({ tab, active, last, divider, onActivate, onClose, onResize, onNudge, register }: { tab: Tab; active: boolean; last: boolean; divider: Divider; onActivate: () => void; onClose: () => void; onResize: (e: React.PointerEvent<HTMLDivElement>) => void; onNudge: (direction: 1 | -1) => void; register: (el: HTMLDivElement | null) => void }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: paneId(tab.id) });
+  const { listeners, setNodeRef, isDragging } = useDraggable({ id: paneId(tab.id) });
   const preview = useContentPreview(tab.id);
   return (
     <>
       <section aria-label={tabLabel(tab)} aria-current={active ? "true" : undefined} className={`flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border ${active ? "border-line-2" : "border-line"} ${isDragging ? "opacity-50" : ""}`}>
-        <header ref={setNodeRef} {...attributes} {...listeners} onClick={onActivate} className={`flex h-7 shrink-0 cursor-grab items-center gap-2 px-2 text-[11px] ${active ? "bg-surface-2 text-ink shadow-[inset_0_2px_0_var(--color-highlight)]" : "bg-surface text-ink-2"}`}>
+        {/* The header is only a drag handle for the pointer; dnd-kit's
+            attributes made it a button that did nothing from the keyboard.
+            Focusing the pane is the title's own button instead. */}
+        <header ref={setNodeRef} {...listeners} onClick={onActivate} className={`flex h-7 shrink-0 cursor-grab items-center gap-2 px-2 text-[11px] ${active ? "bg-surface-2 text-ink shadow-[inset_0_2px_0_var(--color-highlight)]" : "bg-surface text-ink-2"}`}>
           <Favicon src={tab.favicon} size={12} />
-          <span className="min-w-0 flex-1 truncate" title={tabLabel(tab)}>{tabLabel(tab)}</span>
+          <button
+            type="button"
+            aria-label={`Focus pane ${tabLabel(tab)}`}
+            aria-pressed={active}
+            title={tabLabel(tab)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onActivate();
+            }}
+            className="min-w-0 flex-1 cursor-grab truncate rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-highlight"
+          >
+            {tabLabel(tab)}
+          </button>
           <button
             type="button"
             aria-label={`Close pane ${tabLabel(tab)}`}
@@ -178,7 +193,9 @@ function PaneAndDivider({ tab, active, last, divider, onActivate, onClose, onRes
               e.stopPropagation();
               onClose();
             }}
-            className="grid size-5 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-ink"
+            // 24px to the pointer, without growing the 28px header: the
+            // pseudo-element carries the extra 2px on each side.
+            className="relative grid size-5 shrink-0 place-items-center rounded-full text-ink-3 before:absolute before:-inset-0.5 hover:bg-surface-3 hover:text-ink"
           >
             <Icon icon={X} size={11} />
           </button>

@@ -19,6 +19,8 @@ import { useLayout, visibleSplit } from "../store/layout";
 import { useCoversContent } from "../lib/overlay";
 import { Favicon } from "./Favicon";
 import { orderTabs, tabLabel } from "./TabStrip";
+import type { Tab } from "../lib/ipc";
+import { NO_DRAG_INSTRUCTIONS, dragAnnouncements } from "../lib/dragA11y";
 
 /**
  * One drag context for everything a tab can be dragged onto: another slot in
@@ -136,6 +138,29 @@ function stripEdges(): { stripBottom: number; stripRight?: number } {
   return vertical ? { stripBottom: bottom + STRIP_SLACK, stripRight: right + STRIP_SLACK } : { stripBottom: bottom + STRIP_SLACK };
 }
 
+/**
+ * What a drag id is called out loud: a tab or a pane by its tab's title, a
+ * drop zone by the side of the pane it opens on.
+ */
+export function dragPlaceName(id: UniqueIdentifier, tabs: readonly Tab[]): string {
+  const s = String(id);
+  const titleOf = (tab: string) => {
+    const t = tabs.find((x) => x.id === tab);
+    return t ? tabLabel(t) : "a tab";
+  };
+  if (s.startsWith(ZONE)) {
+    // zone:<index>:<tab>:<l|r>
+    const [, , tab = "", side = ""] = s.split(":");
+    return `the ${side === "l" ? "left" : "right"} side of ${titleOf(tab)}`;
+  }
+  return titleOf(tabOf(s));
+}
+
+const accessibility = {
+  announcements: dragAnnouncements((id) => dragPlaceName(id, useBrowser.getState().tabs)),
+  screenReaderInstructions: NO_DRAG_INSTRUCTIONS,
+};
+
 function pointerAt(e: DragEndEvent): { x: number; y: number } | null {
   const start = e.activatorEvent as PointerEvent | MouseEvent | null;
   if (!start || typeof start.clientX !== "number") return null;
@@ -169,7 +194,7 @@ export function TabDnd({ children }: { children: ReactNode }) {
   };
 
   return (
-    <DndContext sensors={sensors} collisionDetection={collision} autoScroll={false} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => useTabDrag.setState({ dragging: null })}>
+    <DndContext sensors={sensors} collisionDetection={collision} autoScroll={false} accessibility={accessibility} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => useTabDrag.setState({ dragging: null })}>
       {children}
       <DragOverlay dropAnimation={null}>
         {ghost && (

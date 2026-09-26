@@ -10,12 +10,12 @@ const tab: Tab = { id: "t1", workspace_id: "w", tier: "today", url: "https://x",
 /** The chrome's regions as the components draw them, in the one-row layout. */
 function chrome() {
   document.body.innerHTML = `
-    <nav aria-label="Workspaces">
-      <div role="button" tabindex="0" aria-pressed="false">Work</div>
-      <div role="button" tabindex="0" aria-pressed="true">Home</div>
-      <section aria-label="Tabs"><div role="tablist" aria-label="Tabs">
+    <nav aria-label="Sidebar"><div role="group" aria-label="Workspaces">
+      <div role="button" tabindex="-1" data-workspace-row>Work</div>
+      <div role="button" tabindex="0" data-workspace-row aria-current="true">Home</div></div>
+      <nav aria-label="Tabs"><div role="tablist" aria-label="Tabs">
         <button role="tab" tabindex="-1">A</button><button role="tab" tabindex="0">B</button>
-      </div></section>
+      </div></nav>
     </nav>
     <nav aria-label="Browser controls"><button>Back</button><input aria-label="Address"></nav>
     <div data-pane="features"><button>Agent</button><button>Apps</button></div>
