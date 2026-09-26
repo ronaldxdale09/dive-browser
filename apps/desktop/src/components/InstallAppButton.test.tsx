@@ -66,6 +66,10 @@ describe("InstallAppButton", () => {
     expect(dialog.textContent).toContain("Mail by Example");
     expect(dialog.textContent).toContain("mail.example");
     expect(dialog.textContent).toContain("Your inbox");
+    // The app and what installing does are read with the title.
+    const described = dialog.getAttribute("aria-describedby")!.split(" ").map((id) => document.getElementById(id)?.textContent).join(" ");
+    expect(described).toContain("Mail by Example");
+    expect(described).toContain("mail.example");
   });
 
   it("names Spotlight on macOS instead of the Start Menu", async () => {

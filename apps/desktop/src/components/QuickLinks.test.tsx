@@ -41,6 +41,11 @@ describe("QuickLinks", () => {
     fireEvent.submit(screen.getByRole("form", { name: "New quick link" }));
     expect(screen.getByRole("alert").textContent).toContain("http or https");
     expect(usePrefs.getState().update).not.toHaveBeenCalled();
+    // The reason is the address field's: marked, described by it, focused.
+    const address = screen.getByRole("textbox", { name: "Address" });
+    expect(address.getAttribute("aria-invalid")).toBe("true");
+    expect(address.getAttribute("aria-describedby")).toBe(screen.getByRole("alert").id);
+    expect(document.activeElement).toBe(address);
   });
 });
 

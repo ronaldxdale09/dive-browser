@@ -33,6 +33,10 @@ describe("ExternalLinkDialog", () => {
     expect(dialog.textContent).toContain("claude.ai wants to open this application");
     // Where the link goes, without the codes in the rest of it.
     expect(dialog.textContent).toContain("claude://login");
+    // The question is the dialog's description, read when focus lands on Open.
+    const described = dialog.getAttribute("aria-describedby")!.split(" ").map((id) => document.getElementById(id)?.textContent).join(" ");
+    expect(described).toContain("claude.ai wants to open this application");
+    expect(described).toContain("claude://login");
     expect(contentCoverDepth()).toBe(1);
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Open Claude" })));
     fireEvent.click(screen.getByRole("button", { name: "Open Claude" }));

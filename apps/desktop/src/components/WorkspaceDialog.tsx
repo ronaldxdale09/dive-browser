@@ -1,6 +1,7 @@
 import { AvatarImage } from "./AvatarImage";
 import { Shield, Trash2 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { aboutTheName } from "../lib/errors";
 import { useBrowser } from "../store/browser";
 import { AVATAR_SEEDS, seedFromName } from "../lib/workspaceAvatar";
 import { colorName } from "../lib/profileAvatar";
@@ -35,6 +36,7 @@ export function WorkspaceDialog() {
   useCoversContent(Boolean(editing));
   const root = useRef<HTMLDivElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
+  const failureId = useId();
   useFocusTrap(root, { active: Boolean(editing), initialFocus: nameField });
   const { close, className } = useFadeClose(() => setEditing(null));
   if (!editing) return null;
@@ -54,7 +56,11 @@ export function WorkspaceDialog() {
     setFailure(null);
     if (await action()) return;
     setSaving(false);
-    setFailure(useBrowser.getState().error ?? "That did not work. Try again.");
+    const reason = useBrowser.getState().error ?? "That did not work. Try again.";
+    setFailure(reason);
+    // A refused name sends the keyboard back to the name, which then reads
+    // out why as its description.
+    if (aboutTheName(reason)) nameField.current?.focus();
   };
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,6 +78,7 @@ export function WorkspaceDialog() {
         role="dialog"
         aria-modal="true"
         aria-label={existing ? "Edit workspace" : "New workspace"}
+        aria-describedby={failure ? failureId : undefined}
         onKeyDown={(e) => e.key === "Escape" && close()}
         aria-busy={saving}
         className="m-auto w-[380px] max-w-full shrink-0 rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
@@ -93,6 +100,8 @@ export function WorkspaceDialog() {
             ref={nameField}
             value={name}
             onChange={(e) => setName(e.target.value)}
+            aria-invalid={failure && aboutTheName(failure) ? true : undefined}
+            aria-describedby={failure && aboutTheName(failure) ? failureId : undefined}
             maxLength={40}
             placeholder="Client, Side project, Research…"
             className="mt-1 h-9 w-full rounded-lg border border-line bg-surface-2 px-3 text-sm text-ink outline-none placeholder:text-ink-3 focus:border-highlight/60"
@@ -193,7 +202,7 @@ export function WorkspaceDialog() {
           </div>
         )}
         {failure && (
-          <p role="alert" className="mt-3 text-[11px] text-danger">
+          <p id={failureId} role="alert" className="mt-3 text-[11px] text-danger">
             {failure}
           </p>
         )}

@@ -1,6 +1,7 @@
 import { AvatarImage } from "./AvatarImage";
 import { Shield, Trash2 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { aboutTheName } from "../lib/errors";
 import { colorName, PROFILE_COLORS, PROFILE_SEEDS, seedFromProfileName } from "../lib/profileAvatar";
 import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
@@ -37,6 +38,7 @@ function ProfileForm({ id }: { id: string | null }) {
   useCoversContent(true);
   const root = useRef<HTMLDivElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
+  const failureId = useId();
   useFocusTrap(root, { initialFocus: nameField });
   const { close, className } = useFadeClose(() => setEditing(null));
   const avatar = seed || seedFromProfileName(name);
@@ -52,7 +54,11 @@ function ProfileForm({ id }: { id: string | null }) {
     setFailure(null);
     if (await action()) return;
     setSaving(false);
-    setFailure(useBrowser.getState().error ?? "That did not work. Try again.");
+    const reason = useBrowser.getState().error ?? "That did not work. Try again.";
+    setFailure(reason);
+    // A refused name sends the keyboard back to the name, which then reads
+    // out why as its description.
+    if (aboutTheName(reason)) nameField.current?.focus();
   };
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,6 +77,7 @@ function ProfileForm({ id }: { id: string | null }) {
         role="dialog"
         aria-modal="true"
         aria-label={existing ? "Edit profile" : "New profile"}
+        aria-describedby={failure ? failureId : undefined}
         onKeyDown={(e) => e.key === "Escape" && close()}
         aria-busy={saving}
         className="m-auto w-[420px] max-w-full shrink-0 rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
@@ -85,7 +92,7 @@ function ProfileForm({ id }: { id: string | null }) {
 
         <label className="mt-4 block text-[11px] text-ink-2">
           Name
-          <input ref={nameField} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ronald" maxLength={40} required className="mt-1 h-9 w-full rounded-lg border border-line bg-surface-2 px-3 text-xs text-ink outline-none focus:border-highlight/60" />
+          <input ref={nameField} value={name} onChange={(e) => setName(e.target.value)} aria-invalid={failure && aboutTheName(failure) ? true : undefined} aria-describedby={failure && aboutTheName(failure) ? failureId : undefined} placeholder="Ronald" maxLength={40} required className="mt-1 h-9 w-full rounded-lg border border-line bg-surface-2 px-3 text-xs text-ink outline-none focus:border-highlight/60" />
         </label>
         <label className="mt-3 block text-[11px] text-ink-2">
           Shown under the name <span className="text-ink-3">(optional)</span>
@@ -136,7 +143,7 @@ function ProfileForm({ id }: { id: string | null }) {
           </button>
         </div>
         {failure && (
-          <p role="alert" className="mt-3 text-[11px] text-danger">
+          <p id={failureId} role="alert" className="mt-3 text-[11px] text-danger">
             {failure}
           </p>
         )}

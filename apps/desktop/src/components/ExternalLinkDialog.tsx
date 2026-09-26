@@ -1,5 +1,5 @@
 import { ExternalLink } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import type { ExternalLinkAsked } from "../lib/ipc";
@@ -35,6 +35,8 @@ function Prompt({ asked }: { asked: ExternalLinkAsked }) {
   const [always, setAlways] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
+  const body = useId();
+  const target = useId();
   useCoversContent(true);
   useFocusTrap(root, { active: true, initialFocus: primary, onEscape: () => cancel(asked) });
   const name = asked.app ?? `the ${asked.scheme} app`;
@@ -47,6 +49,9 @@ function Prompt({ asked }: { asked: ExternalLinkAsked }) {
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        // Who is asking and where it goes is the question itself: a screen
+        // reader landing on Open hears it, not only the title.
+        aria-describedby={`${body} ${target}`}
         className="mx-auto mt-28 w-[420px] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
       >
         <div className="flex items-center gap-2.5">
@@ -55,12 +60,12 @@ function Prompt({ asked }: { asked: ExternalLinkAsked }) {
           </span>
           <h2 className="min-w-0 text-sm font-semibold">{title}</h2>
         </div>
-        <p className="mt-3 text-xs text-ink-2">
+        <p id={body} className="mt-3 text-xs text-ink-2">
           {site} wants to open {asked.app ? "this application" : `a ${asked.scheme}: link`}.
         </p>
         {/* Where it goes, as far as it is safe to say: the scheme and host.
             The rest of the address can carry codes meant for the app. */}
-        <p className="mt-1 truncate font-mono text-[11px] text-ink-3" title={asked.target}>
+        <p id={target} className="mt-1 truncate font-mono text-[11px] text-ink-3" title={asked.target}>
           {asked.target}
         </p>
         {asked.origin && (

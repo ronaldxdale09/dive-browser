@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useId, useLayoutEffect, useRef } from "react";
 import { Icon } from "./Icon";
 import { AppWindow } from "lucide-react";
 import { useCoversContent } from "../lib/overlay";
@@ -26,6 +26,9 @@ export function InstallAppDialog({ tabId, probe, onClose }: { tabId: string; pro
   useCoversContent(true);
   const root = useRef<HTMLDivElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
+  const app = useId();
+  const launcher = useId();
+  const failure = useId();
   const { close, className } = useFadeClose(onClose);
   // A failure belongs to the attempt that made it: opening the dialog again,
   // for this page or another, starts clean.
@@ -41,6 +44,9 @@ export function InstallAppDialog({ tabId, probe, onClose }: { tabId: string; pro
         role="dialog"
         aria-modal="true"
         aria-labelledby="install-app-title"
+        // What is being installed and what installing does, read with the
+        // title; a failure joins them so a second try says why the first did not work.
+        aria-describedby={[app, launcher, error ? failure : null].filter(Boolean).join(" ")}
         onMouseDown={(e) => e.stopPropagation()}
         className="w-[420px] max-w-[92vw] overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
       >
@@ -52,14 +58,14 @@ export function InstallAppDialog({ tabId, probe, onClose }: { tabId: string; pro
             ) : (
               <span className="grid size-12 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-3"><Icon icon={AppWindow} size={22} /></span>
             )}
-            <div className="min-w-0">
+            <div id={app} className="min-w-0">
               <p className="truncate text-[13px] font-medium text-ink">{name}</p>
               <p className="truncate text-xs text-ink-3">{origin}</p>
             </div>
           </div>
           {probe.description && <p className="mt-3 line-clamp-2 text-xs text-ink-2">{probe.description}</p>}
-          <p className="mt-3 text-xs text-ink-3">{installAppLauncherCopy()}</p>
-          {error && <p role="alert" className="mt-3 text-xs text-danger">{error}</p>}
+          <p id={launcher} className="mt-3 text-xs text-ink-3">{installAppLauncherCopy()}</p>
+          {error && <p id={failure} role="alert" className="mt-3 text-xs text-danger">{error}</p>}
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-line bg-surface-2/60 px-4 py-3">
           <button type="button" onClick={close} className="rounded-full border border-line-2 px-4 py-1.5 text-xs text-ink hover:bg-surface-3">Cancel</button>

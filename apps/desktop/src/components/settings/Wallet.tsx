@@ -1,5 +1,5 @@
 import { CreditCard, MapPin, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Button, Group, Row } from "../SettingsFields";
 import { Icon } from "../Icon";
@@ -130,7 +130,7 @@ const field = "h-8 w-full rounded-lg border border-line-2 bg-surface-2 px-2.5 te
  * go to the page behind the modal, where the backdrop hid it and the form
  * simply stayed open.
  */
-function WalletDialog({ title, icon, onClose, onSubmit, error, busy, initialFocus, children }: { title: string; icon: typeof MapPin; onClose: () => void; onSubmit: () => void; error: string | null; busy: boolean; initialFocus: React.RefObject<HTMLInputElement | null>; children: ReactNode }) {
+function WalletDialog({ title, icon, onClose, onSubmit, error, errorId, busy, initialFocus, children }: { title: string; icon: typeof MapPin; onClose: () => void; onSubmit: () => void; error: string | null; /** The refusal's id, which the field it is about names as its description. */ errorId: string; busy: boolean; initialFocus: React.RefObject<HTMLInputElement | null>; children: ReactNode }) {
   const root = useRef<HTMLFormElement>(null);
   useFocusTrap(root, { initialFocus, onEscape: onClose });
   return (
@@ -145,6 +145,9 @@ function WalletDialog({ title, icon, onClose, onSubmit, error, busy, initialFocu
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        // A refusal describes the whole form too: not every one is about a
+        // single field, and one read with the dialog is not missed.
+        aria-describedby={error ? errorId : undefined}
         className="w-[min(520px,calc(100vw-32px))] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
       >
         <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
@@ -152,7 +155,7 @@ function WalletDialog({ title, icon, onClose, onSubmit, error, busy, initialFocu
         </h2>
         {children}
         {error && (
-          <p role="alert" className="mt-3 rounded-lg bg-surface-2 px-3 py-2 text-[11px] text-warn">
+          <p id={errorId} role="alert" className="mt-3 rounded-lg bg-surface-2 px-3 py-2 text-[11px] text-warn">
             {error}
           </p>
         )}
@@ -167,19 +170,42 @@ function WalletDialog({ title, icon, onClose, onSubmit, error, busy, initialFocu
   );
 }
 
+/**
+ * The field a refused card is about, from the host's reason. The host words
+ * each refusal for one field, and a reason tied to its field is read when
+ * that field is reached, not only once as the alert goes by.
+ */
+export function cardErrorField(error: string): "number" | "month" | "year" | null {
+  if (/card number/i.test(error)) return "number";
+  if (/valid month|has passed/i.test(error)) return "month";
+  if (/valid year/i.test(error)) return "year";
+  return null;
+}
+
+/** What a field shows when the refusal is about it: invalid, and described by the reason. */
+function invalidProps(invalid: boolean, errorId: string) {
+  return invalid ? { "aria-invalid": true as const, "aria-describedby": errorId } : {};
+}
+
 function AddressForm({ address, onClose }: { address: Address; onClose: () => void }) {
   const save = useWallet((s) => s.saveAddress);
   const [draft, setDraft] = useState(address);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const first = useRef<HTMLInputElement>(null);
+  const errorId = useId();
   const set = (key: keyof Address, value: string) => setDraft((was) => ({ ...was, [key]: value }));
+  // The one refusal an address has is a missing name or label; it is the
+  // label field's, where the keyboard goes to fix it.
+  const labelInvalid = error !== null && /name or a label/i.test(error);
   const submit = async () => {
     setBusy(true);
     const failed = await save(draft);
     setBusy(false);
-    if (failed) setError(failed);
-    else onClose();
+    if (failed) {
+      setError(failed);
+      if (/name or a label/i.test(failed)) first.current?.focus();
+    } else onClose();
   };
   const input = (key: keyof Address, label: string, placeholder = "") => (
     <label className="flex flex-col gap-1 text-[11px] text-ink-3">
@@ -188,11 +214,11 @@ function AddressForm({ address, onClose }: { address: Address; onClose: () => vo
     </label>
   );
   return (
-    <WalletDialog title={address.id ? "Edit address" : "Add address"} icon={MapPin} onClose={onClose} onSubmit={() => void submit()} error={error} busy={busy} initialFocus={first}>
+    <WalletDialog title={address.id ? "Edit address" : "Add address"} icon={MapPin} onClose={onClose} onSubmit={() => void submit()} error={error} errorId={errorId} busy={busy} initialFocus={first}>
       <div className="grid grid-cols-2 gap-2.5">
         <label className="flex flex-col gap-1 text-[11px] text-ink-3">
           Label
-          <input ref={first} className={field} value={draft.label} placeholder="Home" onChange={(e) => set("label", e.target.value)} />
+          <input ref={first} className={field} value={draft.label} placeholder="Home" onChange={(e) => set("label", e.target.value)} {...invalidProps(labelInvalid, errorId)} />
         </label>
         {input("name", "Full name")}
         {input("organization", "Company")}
@@ -221,16 +247,25 @@ function CardForm({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const first = useRef<HTMLInputElement>(null);
+  const numberField = useRef<HTMLInputElement>(null);
+  const monthField = useRef<HTMLInputElement>(null);
+  const yearField = useRef<HTMLInputElement>(null);
+  const errorId = useId();
+  const invalid = error ? cardErrorField(error) : null;
   const submit = async () => {
     setBusy(true);
     // A two-digit year ("30") goes as typed; the host reads it as 2030.
     const failed = await save({ label, cardholder, number, expiry_month: Number(month) || 0, expiry_year: Number(year) || 0 });
     setBusy(false);
-    if (failed) setError(failed);
-    else onClose();
+    if (failed) {
+      setError(failed);
+      // Straight to the field to fix, which then reads out why.
+      const at = cardErrorField(failed);
+      (at === "number" ? numberField : at === "month" ? monthField : at === "year" ? yearField : null)?.current?.focus();
+    } else onClose();
   };
   return (
-    <WalletDialog title="Add card" icon={CreditCard} onClose={onClose} onSubmit={() => void submit()} error={error} busy={busy} initialFocus={first}>
+    <WalletDialog title="Add card" icon={CreditCard} onClose={onClose} onSubmit={() => void submit()} error={error} errorId={errorId} busy={busy} initialFocus={first}>
       <p className="-mt-2 mb-3 text-[11px] text-ink-3">The number goes straight to {credentialStoreName()}; Dive's database keeps only the last four digits. The security code is never saved.</p>
       <div className="grid grid-cols-2 gap-2.5">
         <label className="flex flex-col gap-1 text-[11px] text-ink-3">
@@ -243,15 +278,15 @@ function CardForm({ onClose }: { onClose: () => void }) {
         </label>
         <label className="col-span-2 flex flex-col gap-1 text-[11px] text-ink-3">
           Card number
-          <input className={`${field} font-mono`} value={number} inputMode="numeric" autoComplete="off" onChange={(e) => setNumber(e.target.value)} />
+          <input ref={numberField} className={`${field} font-mono`} value={number} inputMode="numeric" autoComplete="off" onChange={(e) => setNumber(e.target.value)} {...invalidProps(invalid === "number", errorId)} />
         </label>
         <label className="flex flex-col gap-1 text-[11px] text-ink-3">
           Expiry month
-          <input className={field} value={month} inputMode="numeric" placeholder="09" onChange={(e) => setMonth(e.target.value)} />
+          <input ref={monthField} className={field} value={month} inputMode="numeric" placeholder="09" onChange={(e) => setMonth(e.target.value)} {...invalidProps(invalid === "month", errorId)} />
         </label>
         <label className="flex flex-col gap-1 text-[11px] text-ink-3">
           Expiry year
-          <input className={field} value={year} inputMode="numeric" placeholder="30 or 2030" onChange={(e) => setYear(e.target.value)} />
+          <input ref={yearField} className={field} value={year} inputMode="numeric" placeholder="30 or 2030" onChange={(e) => setYear(e.target.value)} {...invalidProps(invalid === "year", errorId)} />
         </label>
       </div>
     </WalletDialog>

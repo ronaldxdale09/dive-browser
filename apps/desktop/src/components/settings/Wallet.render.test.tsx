@@ -3,7 +3,7 @@ import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Card } from "../../lib/ipc";
 import { useWallet } from "../../store/wallet";
-import { Wallet } from "./Wallet";
+import { Wallet, cardErrorField } from "./Wallet";
 
 const initial = useWallet.getState();
 const card: Card = { id: "c1", profile_id: "p1", label: "", cardholder: "Dale", last4: "4242", brand: "visa", expiry_month: 9, expiry_year: 2030, created_at: "", last_used_at: null, uses: 0 };
@@ -72,6 +72,20 @@ describe("Settings › Wallet", () => {
     await waitFor(() => expect(saveCard).toHaveBeenCalledWith(expect.objectContaining({ expiry_month: 13, expiry_year: 30 })));
     expect((await screen.findByRole("alert")).textContent).toContain("not a valid month");
     expect(dialog.contains(screen.getByRole("alert"))).toBe(true);
+    // The reason belongs to the month: marked, described by it, and focused.
+    const monthField = screen.getByLabelText("Expiry month");
+    expect(monthField.getAttribute("aria-invalid")).toBe("true");
+    expect(monthField.getAttribute("aria-describedby")).toBe(screen.getByRole("alert").id);
+    expect(document.activeElement).toBe(monthField);
+    expect(screen.getByLabelText("Expiry year").getAttribute("aria-invalid")).toBeNull();
+    expect(dialog.getAttribute("aria-describedby")).toBe(screen.getByRole("alert").id);
+  });
+
+  it("ties each refusal to the card field it is about", () => {
+    expect(cardErrorField("that does not look like a card number")).toBe("number");
+    expect(cardErrorField("that expiry date (01/2020) has passed")).toBe("month");
+    expect(cardErrorField("99 is not a valid year; use two or four digits, like 30 or 2030")).toBe("year");
+    expect(cardErrorField("the keychain refused")).toBeNull();
   });
 
   it("lets Escape dismiss Add card without closing Settings", () => {

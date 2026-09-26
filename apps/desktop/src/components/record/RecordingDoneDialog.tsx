@@ -1,6 +1,6 @@
 import { Check, Copy, ExternalLink, FolderOpen, Trash2, Video, Wand2 } from "lucide-react";
 import { screenUrl } from "../internal/InternalPage";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { ipc } from "../../lib/ipc";
 import { showInFileManagerLabel } from "../../lib/commands";
 import { captureMediaUrl } from "../../lib/mediaUrl";
@@ -35,6 +35,8 @@ export function RecordingDoneDialog() {
   const { close, className } = useFadeClose(dismiss);
   const [confirming, setConfirming] = useState(false);
   const [copied, setCopied] = useState(false);
+  const fileId = useId();
+  const statsId = useId();
   const previewSource = open ? { path: result.preview ?? result.path, format: result.preview ? "webm" : result.format } : null;
   const [preview, previewFailed] = usePreview(previewSource);
 
@@ -49,6 +51,9 @@ export function RecordingDoneDialog() {
         role="dialog"
         aria-modal="true"
         aria-label="Recording saved"
+        // Which file, how long and how big: what someone deciding to keep or
+        // share it needs, read with the title rather than found by browsing.
+        aria-describedby={`${fileId} ${statsId}`}
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.key === "Escape" && close()}
         className="mx-auto mt-12 flex w-[720px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
@@ -59,11 +64,11 @@ export function RecordingDoneDialog() {
           </span>
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-semibold">Recording saved</h2>
-            <p className="truncate font-mono text-[11px] text-ink-3" title={result.path}>
+            <p id={fileId} className="truncate font-mono text-[11px] text-ink-3" title={result.path}>
               {name}
             </p>
           </div>
-          <dl className="flex shrink-0 gap-4 text-right">
+          <dl id={statsId} className="flex shrink-0 gap-4 text-right">
             <Stat label="Length" value={recordingClock(result.duration_secs ?? 0)} />
             <Stat label="Size" value={recordingBytes(result.bytes ?? 0)} />
             <Stat label="Picture" value={`${result.width}×${result.height}`} />

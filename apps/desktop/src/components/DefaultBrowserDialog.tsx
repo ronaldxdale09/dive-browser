@@ -1,5 +1,5 @@
 import { Check, Globe } from "lucide-react";
-import { useRef } from "react";
+import { useId, useRef } from "react";
 import { useBrowser } from "../store/browser";
 import { useDefaultBrowser } from "../store/defaultBrowser";
 import { browserForBundle, useBrowserImport } from "../store/browserImport";
@@ -83,6 +83,7 @@ export function DefaultBrowserDialog() {
   useCoversContent(open);
   const root = useRef<HTMLDivElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
+  const bodyId = useId();
   useFocusTrap(root, { active: open, initialFocus: primary });
   const { close, className } = useFadeClose(() => {
     reset();
@@ -121,6 +122,9 @@ export function DefaultBrowserDialog() {
 
   let body: React.ReactNode;
   let actions: React.ReactNode;
+  // The offer to import sits under the body but is not part of what the
+  // dialog says: it is read as the control it is, not as the description.
+  let offerImport = false;
   const secondary = "h-8 rounded-full px-3 text-xs text-ink-2 hover:bg-surface-2";
   const primaryClass = "h-8 rounded-full bg-accent px-4 text-xs font-medium text-accent-ink disabled:opacity-40";
 
@@ -132,12 +136,8 @@ export function DefaultBrowserDialog() {
       </button>
     );
   } else if (done) {
-    body = (
-      <>
-        <p className="text-xs text-ink-2">Links from other apps will open in Dive from now on.</p>
-        {importRow}
-      </>
-    );
+    body = <p className="text-xs text-ink-2">Links from other apps will open in Dive from now on.</p>;
+    offerImport = true;
     actions = (
       <button ref={primary} type="button" onClick={close} className={primaryClass}>
         Done
@@ -191,9 +191,9 @@ export function DefaultBrowserDialog() {
       <>
         <p className="text-xs text-ink-2">{defaultBrowserAskCopy()}</p>
         {current && <p className="mt-1.5 text-[11px] text-ink-3">Currently: {current}</p>}
-        {importRow}
       </>
     );
+    offerImport = true;
     actions = (
       <>
         <button type="button" onClick={notNow} className={secondary}>
@@ -213,6 +213,7 @@ export function DefaultBrowserDialog() {
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        aria-describedby={bodyId}
         onKeyDown={(e) => e.key === "Escape" && close()}
         className="mx-auto mt-28 w-[380px] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
       >
@@ -227,7 +228,10 @@ export function DefaultBrowserDialog() {
           </span>
           <h2 className="min-w-0 text-sm font-semibold">{title}</h2>
         </div>
-        <div className="mt-3">{body}</div>
+        <div className="mt-3">
+          <div id={bodyId}>{body}</div>
+          {offerImport && importRow}
+        </div>
         <div className="mt-5 flex items-center gap-2">
           <span className="flex-1" />
           {actions}

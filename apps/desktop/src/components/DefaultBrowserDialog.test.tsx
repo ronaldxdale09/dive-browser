@@ -34,8 +34,12 @@ describe("DefaultBrowserDialog", () => {
   it("offers to make Dive the default and names the current browser", () => {
     openWith(notDefault);
     render(<DefaultBrowserDialog />);
-    expect(screen.getByRole("dialog", { name: "Make Dive your default browser" })).toBeTruthy();
+    const dialog = screen.getByRole("dialog", { name: "Make Dive your default browser" });
     expect(screen.getByText(/macOS will ask you to confirm/)).toBeTruthy();
+    // Described by what it asks, not by the import offer under it.
+    const description = document.getElementById(dialog.getAttribute("aria-describedby")!)!.textContent;
+    expect(description).toMatch(/macOS will ask you to confirm/);
+    expect(description).not.toContain("Import");
     expect(screen.getByText("Currently: Safari")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Make default" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Not now" })).toBeTruthy();

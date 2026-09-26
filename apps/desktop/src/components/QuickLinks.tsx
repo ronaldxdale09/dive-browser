@@ -1,5 +1,5 @@
 import { Plus, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useBrowser } from "../store/browser";
 import { usePrefs } from "../store/prefs";
@@ -133,12 +133,16 @@ function AddLink({ onAdd, onCancel }: { onAdd: (link: QuickLink) => void; onCanc
   const [url, setUrl] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const errorId = useId();
   useFocusTrap(form, { initialFocus: first, onEscape: onCancel });
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const parsed = parseQuickLink(url, name);
     if ("error" in parsed) {
       setError(parsed.error);
+      // Every refusal is about the address: back to it, where the reason is
+      // read as its description.
+      first.current?.focus();
       return;
     }
     onAdd(parsed);
@@ -148,6 +152,8 @@ function AddLink({ onAdd, onCancel }: { onAdd: (link: QuickLink) => void; onCanc
       <input
         ref={first}
         aria-label="Address"
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? errorId : undefined}
         placeholder="https://linear.app"
         value={url}
         onChange={(e) => {
@@ -164,7 +170,7 @@ function AddLink({ onAdd, onCancel }: { onAdd: (link: QuickLink) => void; onCanc
         className="h-7 rounded-md bg-surface-2 px-2 text-[11px] text-ink outline-none placeholder:text-ink-3 focus:ring-1 focus:ring-accent"
       />
       {error && (
-        <p role="alert" className="px-0.5 text-[10.5px] text-warn">
+        <p id={errorId} role="alert" className="px-0.5 text-[10.5px] text-warn">
           {error}
         </p>
       )}

@@ -58,7 +58,12 @@ describe("WorkspaceDialog", () => {
     expect(create).toHaveBeenCalledTimes(1);
     refuse();
     expect((await screen.findByRole("alert")).textContent).toBe("workspace name is taken");
-    expect((screen.getByPlaceholderText(/Client, Side project/) as HTMLInputElement).value).toBe("Client");
+    const name = screen.getByPlaceholderText(/Client, Side project/) as HTMLInputElement;
+    expect(name.value).toBe("Client");
+    // The refusal is the name's: marked, described by it, and focused.
+    expect(name.getAttribute("aria-invalid")).toBe("true");
+    expect(name.getAttribute("aria-describedby")).toBe(screen.getByRole("alert").id);
+    expect(document.activeElement).toBe(name);
     expect(useBrowser.getState().editing).toEqual({ id: null });
   });
 });
