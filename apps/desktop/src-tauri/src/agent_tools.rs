@@ -342,6 +342,13 @@ pub async fn run<B: Browser>(
     scope: &crate::agent::Scope,
     call: &ToolUse,
 ) -> ToolResult {
+    // The tab this call works on stays awake for the rest of the run -- one
+    // it may use, that is: a clean run reaching elsewhere is refused below.
+    if let Ok(tab) = resolve_tab(tab_argument(&call.input), default_tab)
+        && scope.admits(tab).is_ok()
+    {
+        scope.touch(tab);
+    }
     let outcome = execute(browser, default_tab, scope, call).await;
     match outcome {
         Ok(content) => ToolResult {

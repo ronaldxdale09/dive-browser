@@ -830,6 +830,16 @@ pub struct FaviconEntry {
     pub updated_at: Timestamp,
 }
 
+/// Which tabs a discard may take.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscardScope {
+    /// `Today` tabs, the only ones the regular idle sweep touches.
+    Today,
+    /// Any tier: the system is about to start killing processes, and a
+    /// pinned tab asleep is better than the whole browser taken down.
+    AnyTier,
+}
+
 /// Persistent store backed by SQLite.
 pub struct Store {
     conn: Connection,
@@ -2884,12 +2894,26 @@ impl Store {
         now: Timestamp,
         max_idle: time::Duration,
     ) -> Result<Vec<Tab>> {
+        self.discard_candidates(now, max_idle, DiscardScope::Today)
+    }
+
+    /// Live tabs unfocused longer than `max_idle`, oldest first: `Today`
+    /// tabs only, or every tier when the system is short of memory.
+    pub fn discard_candidates(
+        &self,
+        now: Timestamp,
+        max_idle: time::Duration,
+        scope: DiscardScope,
+    ) -> Result<Vec<Tab>> {
         let cutoff = (now - max_idle).to_rfc3339();
         let mut stmt = self.conn.prepare(&format!(
-            "{TAB_SELECT} WHERE tier = 'today' AND state != 'discarded' AND last_active_at < ?1
+            "{TAB_SELECT} WHERE (tier = 'today' OR ?2) AND state != 'discarded' AND last_active_at < ?1
              ORDER BY last_active_at"
         ))?;
-        let rows = stmt.query_map([&cutoff], tab_from_row)?;
+        let rows = stmt.query_map(
+            params![&cutoff, scope == DiscardScope::AnyTier],
+            tab_from_row,
+        )?;
         let mut tabs: Vec<Tab> = readable_rows(rows, "tabs")?;
         for tab in &mut tabs {
             self.fill_favicon(tab);
@@ -2922,7 +2946,19 @@ impl Store {
         scroll: (i32, i32),
         close: impl FnOnce() -> Result<()>,
     ) -> Result<bool> {
-        self.transition_candidate(candidate, cutoff, scroll, false, close)
+        self.prepare_discard_in(DiscardScope::Today, candidate, cutoff, scroll, close)
+    }
+
+    /// [`Store::prepare_discard`] for a candidate from `scope`.
+    pub fn prepare_discard_in(
+        &self,
+        scope: DiscardScope,
+        candidate: &Tab,
+        cutoff: Timestamp,
+        scroll: (i32, i32),
+        close: impl FnOnce() -> Result<()>,
+    ) -> Result<bool> {
+        self.transition_candidate(scope, candidate, cutoff, scroll, false, close)
             .map(|tab| tab.is_some())
     }
 
@@ -2934,11 +2970,24 @@ impl Store {
         scroll: (i32, i32),
         close: impl FnOnce() -> Result<()>,
     ) -> Result<Option<Tab>> {
-        self.transition_candidate(candidate, cutoff, scroll, true, close)
+        self.discard_candidate_in(DiscardScope::Today, candidate, cutoff, scroll, close)
+    }
+
+    /// [`Store::discard_candidate`] for a candidate from `scope`.
+    pub fn discard_candidate_in(
+        &self,
+        scope: DiscardScope,
+        candidate: &Tab,
+        cutoff: Timestamp,
+        scroll: (i32, i32),
+        close: impl FnOnce() -> Result<()>,
+    ) -> Result<Option<Tab>> {
+        self.transition_candidate(scope, candidate, cutoff, scroll, true, close)
     }
 
     fn transition_candidate(
         &self,
+        scope: DiscardScope,
         candidate: &Tab,
         cutoff: Timestamp,
         scroll: (i32, i32),
@@ -2948,7 +2997,7 @@ impl Store {
         let transaction = self.conn.unchecked_transaction()?;
         let changed = transaction.execute(
             "UPDATE tabs SET state = CASE WHEN ?7 THEN 'discarded' ELSE state END
-             WHERE id = ?1 AND tier = 'today' AND state = ?2 AND state != 'discarded'
+             WHERE id = ?1 AND (tier = 'today' OR ?8) AND tier = ?9 AND state = ?2 AND state != 'discarded'
              AND url = ?3 AND workspace_id IS ?4 AND last_active_at = ?5 AND last_active_at < ?6",
             params![
                 candidate.id.to_string(),
@@ -2957,7 +3006,11 @@ impl Store {
                 candidate.workspace_id.map(|id| id.to_string()),
                 candidate.last_active_at.to_rfc3339(),
                 cutoff.to_rfc3339(),
-                discard
+                discard,
+                scope == DiscardScope::AnyTier,
+                // The tier it had when it was chosen: one pinned or made an
+                // essential meanwhile is someone's decision to keep it.
+                candidate.tier.as_str()
             ],
         )?;
         if changed == 0 {
@@ -4849,6 +4902,60 @@ mod tests {
         );
         store.remove_tab(tab.id).unwrap();
         assert_eq!(store.scroll(tab.id, "https://a/long").unwrap(), None);
+    }
+
+    #[test]
+    fn only_memory_pressure_reaches_past_today_tabs() {
+        let (store, workspace) = seeded();
+        let now = Timestamp::now();
+        let mut today = Tab::new(workspace.id, "https://example.com/today", 0);
+        today.last_active_at = now - time::Duration::minutes(10);
+        let mut pinned = Tab::new(workspace.id, "https://example.com/pinned", 1);
+        pinned.tier = TabTier::Pinned;
+        pinned.last_active_at = now - time::Duration::minutes(10);
+        store.upsert_tab(&today).unwrap();
+        store.upsert_tab(&pinned).unwrap();
+        let ids = |scope| {
+            store
+                .discard_candidates(now, time::Duration::minutes(5), scope)
+                .unwrap()
+                .into_iter()
+                .map(|tab| tab.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(DiscardScope::Today), vec![today.id]);
+        assert_eq!(ids(DiscardScope::AnyTier).len(), 2);
+        // The regular sweep cannot finalize a pinned tab even if handed one.
+        assert!(
+            store
+                .discard_candidate(&pinned, now, (0, 0), || Ok(()))
+                .unwrap()
+                .is_none()
+        );
+        let discarded = store
+            .discard_candidate_in(DiscardScope::AnyTier, &pinned, now, (0, 0), || Ok(()))
+            .unwrap()
+            .expect("pressure may discard a pinned tab");
+        assert_eq!(discarded.state, TabState::Discarded);
+        assert_eq!(discarded.tier, TabTier::Pinned, "it stays pinned, asleep");
+    }
+
+    #[test]
+    fn pressure_never_discards_a_tab_whose_tier_changed_since_it_was_chosen() {
+        let (store, workspace) = seeded();
+        let now = Timestamp::now();
+        let mut candidate = Tab::new(workspace.id, "https://example.com/a", 0);
+        candidate.last_active_at = now - time::Duration::minutes(10);
+        store.upsert_tab(&candidate).unwrap();
+        let mut pinned = candidate.clone();
+        pinned.tier = TabTier::Pinned;
+        store.upsert_tab(&pinned).unwrap();
+        assert!(
+            store
+                .discard_candidate_in(DiscardScope::AnyTier, &candidate, now, (0, 0), || Ok(()))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

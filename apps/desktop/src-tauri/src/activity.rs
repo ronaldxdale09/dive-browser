@@ -230,9 +230,29 @@ impl PageActivity {
 }
 /// Timeout, navigation, missing scripts, and malformed results are unknown.
 pub async fn probe(session: &dive_cdp::CdpSession) -> Option<PageActivity> {
-    let reply = tokio::time::timeout(std::time::Duration::from_millis(400), session.call("Runtime.evaluate",
-        serde_json::json!({"expression":"window.__diveActivitySnapshot?.()", "returnByValue":true}))).await.ok()?.ok()?;
-    serde_json::from_value(reply.get("result")?.get("value")?.clone()).ok()
+    probe_answer(session).await.ok().flatten()
+}
+
+/// The page's report, `Ok(None)` when it answered with nothing usable
+/// (navigating, no script), and `Err` when it did not answer in time at all
+/// -- the one sign of a renderer that is hung rather than merely busy.
+pub async fn probe_answer(session: &dive_cdp::CdpSession) -> Result<Option<PageActivity>, ()> {
+    let reply = tokio::time::timeout(
+        std::time::Duration::from_millis(400),
+        session.call(
+            "Runtime.evaluate",
+            serde_json::json!({"expression":"window.__diveActivitySnapshot?.()", "returnByValue":true}),
+        ),
+    )
+    .await
+    .map_err(|_| ())?;
+    let Ok(reply) = reply else {
+        return Ok(None);
+    };
+    Ok(reply
+        .get("result")
+        .and_then(|result| result.get("value"))
+        .and_then(|value| serde_json::from_value(value.clone()).ok()))
 }
 
 /// Profile-scoped exceptions are read from current store state at commit time.

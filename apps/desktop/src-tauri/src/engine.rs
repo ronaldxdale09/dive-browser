@@ -1520,6 +1520,12 @@ impl TabHost {
         }
     }
 
+    /// How many tabs have a live page view, each a renderer the machine is
+    /// paying for.
+    pub fn live_views(&self) -> usize {
+        self.views.len()
+    }
+
     /// Every tab a user can currently see, in any window. The idle sweep
     /// must not put one of these to sleep.
     pub fn showing(&self) -> Vec<TabId> {

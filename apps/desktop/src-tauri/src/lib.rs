@@ -56,6 +56,7 @@ mod loading;
 mod locator;
 mod main_window;
 mod mcp;
+mod memory_pressure;
 mod memory_probe;
 mod menu;
 mod meta;

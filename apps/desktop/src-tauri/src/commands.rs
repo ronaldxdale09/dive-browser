@@ -1662,6 +1662,7 @@ pub(crate) fn forget_tab_state(app: &AppHandle<Runtime>, state: &AppState, id: T
     state.http_auth.forget_tab(id);
     crate::cert_error::forget_tab(app, id);
     crate::https_only::forget(id);
+    crate::housekeeping::forget_unanswered(id);
 }
 
 /// Setting key remembering the last workspace of a profile.
@@ -1985,6 +1986,38 @@ pub fn open_tab(
     open_tab_with(main, app, state, workspace_id, url, true)
 }
 
+/// Recent background opens, to tell a burst from the odd link opened behind.
+struct Burst {
+    opens: std::sync::Mutex<std::collections::VecDeque<std::time::Instant>>,
+}
+
+impl Burst {
+    /// Background opens inside [`Burst::WINDOW`] that still load at once.
+    const LIMIT: usize = 5;
+    const WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+
+    const fn new() -> Self {
+        Self {
+            opens: std::sync::Mutex::new(std::collections::VecDeque::new()),
+        }
+    }
+
+    /// Count an open at `now`; true when it is past the first few of a burst.
+    fn burst(&self, now: std::time::Instant) -> bool {
+        let mut opens = lock(&self.opens);
+        while opens
+            .front()
+            .is_some_and(|at| now.saturating_duration_since(*at) >= Self::WINDOW)
+        {
+            opens.pop_front();
+        }
+        opens.push_back(now);
+        opens.len() > Self::LIMIT
+    }
+}
+
+static BACKGROUND_OPENS: Burst = Burst::new();
+
 /// Open a tab, bringing it forward only when `activate` is set: a link
 /// opened with a middle click loads behind the page it came from.
 pub fn open_tab_with(
@@ -2008,12 +2041,23 @@ pub fn open_tab_with(
         if url.scheme() == crate::engine::INTERNAL_SCHEME {
             tab.title = internal_title(&url);
         }
+        // One of a burst of links opened behind the page (a row of results
+        // middle-clicked in turn) starts asleep: each would otherwise start a
+        // renderer and load at once, for pages nobody is looking at yet. It
+        // loads when it is first shown, like any sleeping tab.
+        if !activate
+            && url.scheme() != crate::engine::INTERNAL_SCHEME
+            && BACKGROUND_OPENS.burst(std::time::Instant::now())
+        {
+            tab.state = dive_core::TabState::Discarded;
+        }
         store.upsert_tab(&tab)?;
         (tab, container)
     };
     let opened = {
         let mut host = lock(&state.host);
         match host.as_mut() {
+            Some(_) if tab.state == dive_core::TabState::Discarded => Ok(()),
             Some(host) => match host.open(main, app, &tab, &container) {
                 Ok(()) if !activate => Ok(()),
                 Ok(()) => host.activate(main, tab.id).map_err(|error| {
@@ -5270,6 +5314,21 @@ pub fn normalize_url_with(input: &str, template: &str) -> AppResult<url::Url> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_a_burst_of_background_links_opens_asleep() {
+        let burst = super::Burst::new();
+        let start = std::time::Instant::now();
+        for n in 0..5 {
+            assert!(
+                !burst.burst(start + std::time::Duration::from_millis(n * 100)),
+                "the first few load at once"
+            );
+        }
+        assert!(burst.burst(start + std::time::Duration::from_secs(1)));
+        // Once the burst is over, a link opened behind loads again.
+        assert!(!burst.burst(start + std::time::Duration::from_secs(30)));
+    }
+
     #[test]
     fn capture_names_read_as_host_kind_and_local_time() {
         let at = dive_core::Timestamp::parse("2026-09-07T18:19:30Z").unwrap();

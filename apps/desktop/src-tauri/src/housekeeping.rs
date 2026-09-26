@@ -20,6 +20,76 @@ const WAKE_LOAD: Duration = Duration::from_secs(20);
 /// How long a scroll restore waits for a fresh view's devtools session.
 const SESSION_WAIT_STEP: Duration = Duration::from_millis(100);
 const SESSION_WAIT_TRIES: u32 = 50;
+/// How long a `Today` tab may sit unfocused once the system says memory is
+/// getting short: minutes rather than the usual hour.
+pub const WARN_IDLE: time::Duration = time::Duration::minutes(5);
+/// Live page views kept at most. Each is a renderer, and past a few dozen
+/// the machine is paging for tabs nobody is looking at; the oldest hidden
+/// `Today` tabs beyond this are put to sleep whatever their idle time.
+pub const LIVE_CAP: usize = 30;
+/// Sweeps in a row a hidden page may fail to answer the activity question
+/// before it is put to sleep without an answer. A renderer that hangs never
+/// says it is idle, and used to be kept alive, hung, for good.
+pub const UNANSWERED_BEFORE_FORCE: u32 = 3;
+
+/// How hard a sweep reaches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reach {
+    /// The regular sweep: `Today` tabs idle past [`max_idle`].
+    Idle,
+    /// The system warned that memory is short: `Today` tabs idle past
+    /// [`WARN_IDLE`].
+    Warn,
+    /// The system is about to kill processes: every hidden tab that nothing
+    /// protects, of any tier, however recently it was used.
+    Critical,
+    /// More live views than [`LIVE_CAP`]: the oldest hidden `Today` tabs,
+    /// however recently they were used, until the count is back under it.
+    OverCap,
+}
+
+impl Reach {
+    /// How long a candidate must have sat unfocused.
+    pub fn idle(self) -> time::Duration {
+        match self {
+            Self::Idle => max_idle(),
+            Self::Warn => WARN_IDLE,
+            Self::Critical | Self::OverCap => time::Duration::ZERO,
+        }
+    }
+
+    /// Which tiers it may take.
+    pub fn scope(self) -> dive_core::DiscardScope {
+        if self == Self::Critical {
+            dive_core::DiscardScope::AnyTier
+        } else {
+            dive_core::DiscardScope::Today
+        }
+    }
+}
+
+/// Hidden tabs whose page has not answered the activity question, and how
+/// many sweeps in a row it has not.
+fn unanswered() -> &'static std::sync::Mutex<std::collections::HashMap<TabId, u32>> {
+    static UNANSWERED: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<TabId, u32>>,
+    > = std::sync::OnceLock::new();
+    UNANSWERED.get_or_init(Default::default)
+}
+
+/// Count one more unanswered question for `tab`; true once it has gone
+/// unanswered often enough to be put to sleep anyway.
+fn note_unanswered(tab: TabId) -> bool {
+    let mut misses = lock(unanswered());
+    let count = misses.entry(tab).or_default();
+    *count += 1;
+    *count >= UNANSWERED_BEFORE_FORCE
+}
+
+/// `tab` answered, or is gone: start its count over.
+pub fn forget_unanswered(tab: TabId) {
+    lock(unanswered()).remove(&tab);
+}
 
 /// How long a `Today` tab may sit unfocused before it is discarded.
 /// `DIVE_MAX_IDLE_SECS` overrides it so a harness can force a sweep.
@@ -42,6 +112,8 @@ const PRUNE_EVERY_SWEEPS: u32 = 60;
 
 /// Start the periodic sweep.
 pub fn start(app: AppHandle<Runtime>) {
+    // The system's own word that memory is short sweeps at once, and harder.
+    crate::memory_pressure::watch(app.clone());
     // Once per launch: frames a crashed recording left behind.
     tauri::async_runtime::spawn_blocking(crate::screencast::sweep_stale_work_dirs);
     tauri::async_runtime::spawn(async move {
@@ -99,7 +171,7 @@ pub enum Keep {
     LocalDevServer,
     /// A screen recording or step recording is running on it.
     Recording,
-    /// An agent run is in flight and may be driving it.
+    /// An agent run in flight has worked on it, and may again.
     AgentBusy,
     /// Something on the page is playing sound.
     Audible,
@@ -113,7 +185,7 @@ pub struct Signals {
     pub showing: Option<TabId>,
     /// Whether a recording targets the tab.
     pub recording: bool,
-    /// Whether any agent run is in flight.
+    /// Whether an agent run in flight has worked on this tab.
     pub agent_busy: bool,
     /// Whether the page reports playing media.
     pub audible: bool,
@@ -156,12 +228,35 @@ pub fn keep_reason(tab: &Tab, s: Signals) -> Option<Keep> {
 /// host -> store lock order on the main thread; native destruction is awaited
 /// without either lock. A fresh renderer/activation invalidates finalization.
 pub async fn sweep(app: &AppHandle<Runtime>) -> dive_core::Result<usize> {
-    let candidates =
-        lock(&app.state::<AppState>().store).idle_tab_candidates(Timestamp::now(), max_idle())?;
+    let mut count = sweep_with(app, Reach::Idle, usize::MAX).await?;
+    // Idle time alone lets a burst of fresh tabs pile up views without end.
+    let live = lock(&app.state::<AppState>().host)
+        .as_ref()
+        .map_or(0, crate::engine::TabHost::live_views);
+    if live > LIVE_CAP {
+        count += sweep_with(app, Reach::OverCap, live - LIVE_CAP).await?;
+    }
+    Ok(count)
+}
+
+/// Discard up to `limit` tabs within `reach`, oldest first.
+pub async fn sweep_with(
+    app: &AppHandle<Runtime>,
+    reach: Reach,
+    limit: usize,
+) -> dive_core::Result<usize> {
+    let candidates = lock(&app.state::<AppState>().store).discard_candidates(
+        Timestamp::now(),
+        reach.idle(),
+        reach.scope(),
+    )?;
     let mut count = 0;
     for tab in candidates {
+        if count >= limit {
+            break;
+        }
         #[cfg(feature = "cef")]
-        if discard_one(app, tab).await? {
+        if discard_one(app, tab, reach).await? {
             count += 1;
         }
         #[cfg(not(feature = "cef"))]
@@ -174,7 +269,9 @@ fn protected(state: &AppState, host: &crate::engine::TabHost, tab: &Tab) -> bool
     let signals = Signals {
         showing: host.showing().contains(&tab.id).then_some(tab.id),
         recording: state.screencast.is_recording(tab.id) || state.buffers.is_recording(tab.id),
-        agent_busy: !lock(&state.agent_runs).is_empty(),
+        agent_busy: lock(&state.agent_runs)
+            .values()
+            .any(|run| run.scope.touches(tab.id)),
         // The page's own report, which the tab strip's speaker also comes from;
         // the renderer snapshot and native audio are checked separately.
         audible: crate::tab_audio::is_audible(tab.id),
@@ -211,7 +308,7 @@ async fn on_main<T: Send + 'static>(
 }
 
 #[cfg(feature = "cef")]
-async fn discard_one(app: &AppHandle<Runtime>, tab: Tab) -> dive_core::Result<bool> {
+async fn discard_one(app: &AppHandle<Runtime>, tab: Tab, reach: Reach) -> dive_core::Result<bool> {
     use cef::ImplBrowser;
     let state = app.state::<AppState>();
     let Some((session, ticket, view)) = ({
@@ -233,10 +330,7 @@ async fn discard_one(app: &AppHandle<Runtime>, tab: Tab) -> dive_core::Result<bo
     }) else {
         return Ok(false);
     };
-    let Some(page) = crate::activity::probe(&session)
-        .await
-        .filter(|page| page.idle_for(&tab.url))
-    else {
+    let Some(scroll) = idle_scroll(&state, &session, &tab).await else {
         return Ok(false);
     };
     let observed = std::time::Instant::now();
@@ -257,7 +351,6 @@ async fn discard_one(app: &AppHandle<Runtime>, tab: Tab) -> dive_core::Result<bo
     let close_native = native.clone();
     let close_tab = tab.clone();
     let close_ticket = ticket.clone();
-    let scroll = (page.scroll[0], page.scroll[1]);
     let started = tokio::time::timeout(
         PAGE_QUESTION,
         on_main(app, move |state| {
@@ -266,6 +359,7 @@ async fn discard_one(app: &AppHandle<Runtime>, tab: Tab) -> dive_core::Result<bo
             }
             request_discard(
                 state,
+                reach,
                 &close_tab,
                 &close_ticket,
                 scroll,
@@ -312,9 +406,45 @@ async fn discard_one(app: &AppHandle<Runtime>, tab: Tab) -> dive_core::Result<bo
         return Ok(false);
     }
     on_main(app, move |state| {
-        finish_discard(state, &tab, &ticket, scroll, &view)
+        finish_discard(state, reach, &tab, &ticket, scroll, &view)
     })
     .await
+}
+
+/// Where an idle page is scrolled, or `None` when it is not idle (or cannot
+/// say yet). A hidden page that does not answer at all is hung: it is asked
+/// again next sweep, and put to sleep once it has stayed silent long
+/// enough, where it used to be kept alive forever. Its last known scroll is
+/// what it wakes to.
+#[cfg(feature = "cef")]
+async fn idle_scroll(
+    state: &AppState,
+    session: &dive_cdp::CdpSession,
+    tab: &Tab,
+) -> Option<(i32, i32)> {
+    match crate::activity::probe_answer(session).await {
+        Ok(Some(page)) if page.idle_for(&tab.url) => {
+            forget_unanswered(tab.id);
+            Some((page.scroll[0], page.scroll[1]))
+        }
+        Ok(_) => {
+            forget_unanswered(tab.id);
+            None
+        }
+        Err(()) => {
+            if !note_unanswered(tab.id) {
+                return None;
+            }
+            tracing::warn!(id = %tab.id, "hidden page stopped answering; putting it to sleep");
+            Some(
+                lock(&state.store)
+                    .scroll(tab.id, &tab.url)
+                    .ok()
+                    .flatten()
+                    .unwrap_or((0, 0)),
+            )
+        }
+    }
 }
 
 /// The wait before asking again whether a discarded browser has closed:
@@ -328,6 +458,7 @@ fn next_receipt_pause(pause: Duration) -> Duration {
 #[cfg(feature = "cef")]
 fn finish_discard(
     state: &AppState,
+    reach: Reach,
     tab: &Tab,
     ticket: &crate::activity::Ticket,
     scroll: (i32, i32),
@@ -345,14 +476,20 @@ fn finish_discard(
         return Ok(false);
     }
     let store = lock(&state.store);
-    let discarded =
-        store.discard_candidate(tab, Timestamp::now() - max_idle(), scroll, || Ok(()))?;
+    let discarded = store.discard_candidate_in(
+        reach.scope(),
+        tab,
+        Timestamp::now() - reach.idle(),
+        scroll,
+        || Ok(()),
+    )?;
     drop(store);
     if let Some(tab) = discarded {
         state.activity.drop_tab(tab.id);
         state.buffers.drop_tab(tab.id);
         state.inspector.drop_tab(tab.id);
         state.crashes.drop_tab(tab.id);
+        forget_unanswered(tab.id);
         state.bus.publish(CoreEvent::TabUpserted(tab));
         Ok(true)
     } else {
@@ -364,6 +501,7 @@ fn finish_discard(
 #[cfg(feature = "cef")]
 fn request_discard(
     state: &AppState,
+    reach: Reach,
     tab: &Tab,
     ticket: &crate::activity::Ticket,
     scroll: (i32, i32),
@@ -392,7 +530,8 @@ fn request_discard(
         return Ok(false);
     }
     let mut native_requested = false;
-    let prepared = store.prepare_discard(tab, Timestamp::now() - max_idle(), scroll, || {
+    let cutoff = Timestamp::now() - reach.idle();
+    let prepared = store.prepare_discard_in(reach.scope(), tab, cutoff, scroll, || {
         if observed.elapsed() > PAGE_QUESTION || !state.activity.begin_close(tab.id, ticket) {
             return Err(dive_core::CoreError::Invalid(
                 "activity changed before native discard".into(),
@@ -550,6 +689,25 @@ async fn scroll_until_it_holds(session: &dive_cdp::CdpSession, x: i32, y: i32) -
 mod tests {
     use super::*;
     use dive_core::WorkspaceId;
+
+    #[test]
+    fn a_silent_hidden_page_is_put_to_sleep_only_after_staying_silent() {
+        let tab = TabId::new();
+        for _ in 1..UNANSWERED_BEFORE_FORCE {
+            assert!(!note_unanswered(tab));
+        }
+        assert!(note_unanswered(tab));
+        // One answer is enough to start the count over.
+        forget_unanswered(tab);
+        assert!(!note_unanswered(tab));
+        forget_unanswered(tab);
+    }
+
+    #[test]
+    fn the_regular_sweep_keeps_its_hour() {
+        assert_eq!(Reach::Idle.idle(), max_idle());
+        assert_eq!(Reach::OverCap.idle(), time::Duration::ZERO);
+    }
 
     fn tab(url: &str) -> Tab {
         Tab::new(WorkspaceId::new(), url, 0)

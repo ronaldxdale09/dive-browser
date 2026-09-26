@@ -227,6 +227,10 @@ pub struct Scope {
     context: Mutex<Option<String>>,
     /// Tabs this run opened, oldest first.
     opened: Mutex<Vec<TabId>>,
+    /// Tabs a tool of this run has acted on or read. Only these are kept
+    /// awake for the run: protecting every tab while any run was going kept
+    /// a hundred idle tabs alive for an agent working in one.
+    touched: Mutex<std::collections::HashSet<TabId>>,
 }
 
 impl Scope {
@@ -260,6 +264,16 @@ impl Scope {
             "this run is in a clean session and may only use the tabs it opened with tab_open"
                 .into(),
         )
+    }
+
+    /// Note that a tool of this run is working on `tab`.
+    pub fn touch(&self, tab: TabId) {
+        lock(&self.touched).insert(tab);
+    }
+
+    /// Whether this run has worked on `tab`, or opened it.
+    pub fn touches(&self, tab: TabId) -> bool {
+        lock(&self.touched).contains(&tab) || lock(&self.opened).contains(&tab)
     }
 
     /// Whether there is room for another tab.
@@ -807,6 +821,10 @@ pub(crate) async fn agent_send(
     } else {
         tab_id
     };
+    // The tab the run starts on is the one it works in; it stays awake.
+    if let Some(tab) = tab_id {
+        run.scope.touch(tab);
+    }
     let claimed = tab_id.filter(|tab| {
         dive_mcp::lease::shared()
             .claim(
@@ -1925,6 +1943,20 @@ mod tests {
         let refused = scope.reserve().unwrap_err();
         assert!(refused.contains("tab_navigate"), "{refused}");
         assert_eq!(scope.opened().len(), MAX_OPENED_TABS);
+    }
+
+    #[test]
+    fn a_run_keeps_awake_only_the_tabs_it_worked_on_or_opened() {
+        let scope = Scope::default();
+        let (worked, opened, other) = (TabId::new(), TabId::new(), TabId::new());
+        scope.touch(worked);
+        scope.record(opened);
+        assert!(scope.touches(worked));
+        assert!(scope.touches(opened));
+        assert!(
+            !scope.touches(other),
+            "an idle tab elsewhere may still sleep"
+        );
     }
 
     #[test]
