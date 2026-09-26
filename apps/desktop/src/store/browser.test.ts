@@ -421,12 +421,16 @@ describe("optimistic switching", () => {
     expect(snapshot).not.toHaveBeenCalled();
   });
 
-  it("optimistically updates tab URL on navigate and rolls back if the engine refuses", async () => {
-    vi.spyOn(ipc, "tabNavigate").mockRejectedValue(new Error("invalid protocol"));
+  it("leaves the tab's URL to the engine on navigate and reports a refusal", async () => {
+    const nav = vi.spyOn(ipc, "tabNavigate").mockRejectedValueOnce(new Error("invalid protocol"));
     useBrowser.setState({ activeTab: "a", detached: [], tabs: [tab("a", "https://prev.test")] });
-    await useBrowser.getState().navigate("bad://protocol");
+    await expect(useBrowser.getState().navigate("bad://protocol")).resolves.toBe(false);
     expect(useBrowser.getState().tabs.find((t) => t.id === "a")?.url).toBe("https://prev.test");
     expect(useBrowser.getState().error).toBe("invalid protocol");
+    // Accepted is not committed: typed text never stands in for the address.
+    nav.mockResolvedValueOnce(null);
+    await expect(useBrowser.getState().navigate("typed words")).resolves.toBe(true);
+    expect(useBrowser.getState().tabs.find((t) => t.id === "a")?.url).toBe("https://prev.test");
   });
 
   it("optimistically reorders tabs and rolls back if the engine refuses", async () => {

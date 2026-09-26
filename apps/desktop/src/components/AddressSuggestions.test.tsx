@@ -28,6 +28,9 @@ beforeEach(() => {
   vi.spyOn(events.tabHistoryChanged, "listen").mockResolvedValue(() => {});
   vi.spyOn(ipc, "tabNavigate").mockResolvedValue(null);
   vi.spyOn(ipc, "tabActivate").mockResolvedValue(null);
+  vi.spyOn(ipc, "tabFocus").mockResolvedValue(null);
+  vi.spyOn(ipc, "historyRemove").mockResolvedValue(true);
+  vi.spyOn(ipc, "searchSuggest").mockResolvedValue([]);
   vi.spyOn(ipc, "bookmarksSearch").mockResolvedValue([{ url: "https://doc.rust-lang.org/book/", title: "The Rust Book", created_at: "2026-09-06T00:00:00Z", favicon: null }]);
   vi.spyOn(ipc, "historySearch").mockResolvedValue([
     { url: "https://rust-lang.org/learn", title: "Learn Rust", last_visited_at: "2026-09-06T00:00:00Z", visits: 3, favicon: null },
@@ -118,6 +121,9 @@ describe("address bar suggestions", () => {
     expect(screen.getByRole("listbox")).toBeTruthy();
     fireEvent.keyDown(input, { key: "Escape" });
     expect(screen.queryByRole("listbox")).toBeNull();
+    expect(input.value).toBe(tab.url);
+    expect(document.activeElement).toBe(input);
+    fireEvent.keyDown(input, { key: "Escape" });
     expect(input.value).toBe("example.com/docs");
     expect(document.activeElement).not.toBe(input);
   });
@@ -175,5 +181,107 @@ describe("address bar suggestions", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("never offers to switch to the tab being typed over", async () => {
+    render(<Toolbar />);
+    const input = address();
+    act(() => input.focus());
+    fireEvent.input(input, { target: { value: "docs" }, inputType: "insertText" });
+    await waitFor(() => expect(ipc.historySearch).toHaveBeenCalled());
+    expect(screen.queryByText("Switch to tab")).toBeNull();
+  });
+
+  it("opens the row the arrows reached even when history arrives and would reorder the list", async () => {
+    let answer: (found: Awaited<ReturnType<typeof ipc.historySearch>>) => void = () => {};
+    vi.mocked(ipc.historySearch).mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    vi.mocked(ipc.bookmarksSearch).mockResolvedValue([]);
+    render(<Toolbar />);
+    const input = address();
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "crates" } });
+    expect(screen.getAllByRole("option").map((row) => row.textContent)).toEqual(["Searchcrates"]);
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    // A site the letters begin arrives late; it would lead the list.
+    await act(async () => answer([{ url: "https://crates.io/", title: "crates.io", last_visited_at: "2026-09-06T00:00:00Z", visits: 9, favicon: null }]));
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    fireEvent.submit(input.closest("form")!);
+    await waitFor(() => expect(ipc.tabNavigate).toHaveBeenCalledWith(tab.id, "crates"));
+  });
+
+  it("keeps the highlight on the row pointed at while the list is rebuilt", async () => {
+    vi.mocked(ipc.bookmarksSearch).mockResolvedValue([]);
+    vi.mocked(ipc.historySearch).mockResolvedValue([{ url: "https://learn.example/", title: "Learning", last_visited_at: "2026-09-06T00:00:00Z", visits: 2, favicon: null }]);
+    render(<Toolbar />);
+    const input = address();
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "learn" } });
+    const before = screen.getAllByRole("option").findIndex((row) => row.textContent?.includes("Learn Rust"));
+    fireEvent.mouseEnter(screen.getByRole("option", { name: /Learn Rust/ }));
+    // History answers with a site the letters begin, which takes the lead
+    // and pushes the tab's row down.
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(3));
+    expect(screen.getAllByRole("option").findIndex((row) => row.textContent?.includes("Learn Rust"))).toBe(before + 1);
+    expect(screen.getByRole("option", { name: /Learn Rust/ }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.submit(input.closest("form")!);
+    await waitFor(() => expect(ipc.tabActivate).toHaveBeenCalledWith(other.id));
+  });
+
+  it("forgets a visited page with Shift+Delete", async () => {
+    render(<Toolbar />);
+    const input = address();
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "crates" } });
+    const row = await screen.findByRole("option", { name: /crates\.io/ });
+    fireEvent.mouseEnter(row);
+    fireEvent.keyDown(input, { key: "Delete", shiftKey: true });
+    expect(ipc.historyRemove).toHaveBeenCalledWith("https://crates.io/search?q=rust");
+    expect(screen.queryByRole("option", { name: /crates\.io/ })).toBeNull();
+    // A row that is not history is left alone.
+    fireEvent.keyDown(input, { key: "Delete", shiftKey: true });
+    expect(ipc.historyRemove).toHaveBeenCalledTimes(1);
+  });
+
+  it("completes a site in place, selected after the caret, and Backspace takes the completion away", async () => {
+    render(<Toolbar />);
+    const input = address();
+    act(() => input.focus());
+    fireEvent.input(input, { target: { value: "rust" }, inputType: "insertText" });
+    expect(input.value).toBe("rust-lang.org/learn");
+    expect([input.selectionStart, input.selectionEnd]).toEqual([4, "rust-lang.org/learn".length]);
+    expect(screen.getAllByRole("option")[0]!.getAttribute("aria-selected")).toBe("true");
+    // Backspace removes the selected completion, and deleting never completes.
+    fireEvent.input(input, { target: { value: "rust" }, inputType: "deleteContentBackward" });
+    expect(input.value).toBe("rust");
+    fireEvent.input(input, { target: { value: "rus" }, inputType: "deleteContentBackward" });
+    expect(input.value).toBe("rus");
+    // Typing on completes again, and Enter goes where the completion says.
+    fireEvent.input(input, { target: { value: "rust" }, inputType: "insertText" });
+    expect(input.value).toBe("rust-lang.org/learn");
+    fireEvent.submit(input.closest("form")!);
+    await waitFor(() => expect(ipc.tabActivate).toHaveBeenCalledWith(other.id));
+  });
+
+  it("accepts the completion as typed text when the caret moves past it", () => {
+    render(<Toolbar />);
+    const input = address();
+    act(() => input.focus());
+    fireEvent.input(input, { target: { value: "rust" }, inputType: "insertText" });
+    fireEvent.keyDown(input, { key: "End" });
+    expect(input.value).toBe("rust-lang.org/learn");
+    fireEvent.input(input, { target: { value: "rust-lang.org/lear" }, inputType: "deleteContentBackward" });
+    expect(input.value).toBe("rust-lang.org/lear");
+  });
+
+  it("tells a screen reader how many suggestions there are once typing pauses", async () => {
+    render(<Toolbar />);
+    const input = address();
+    const status = screen.getByRole("status");
+    expect(status.textContent).toBe("");
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "rust" } });
+    await waitFor(() => expect(status.textContent).toBe("4 suggestions"));
+    fireEvent.change(input, { target: { value: "" } });
+    await waitFor(() => expect(status.textContent).toBe(""));
   });
 });

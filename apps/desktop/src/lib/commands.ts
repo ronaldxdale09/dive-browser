@@ -46,12 +46,13 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   },
   "tab.reload": () => useBrowser.getState().reload(),
   "tab.reloadHard": () => useBrowser.getState().reload(true),
-  "tab.home": () => {
+  "tab.home": async () => {
     // A configured home page is where Home goes; without one, the welcome screen.
     const homepage = usePrefs.getState().prefs.homepage.trim();
     const { activeTab, navigate, openTab, showHome } = useBrowser.getState();
     if (!homepage) return showHome();
-    return activeTab ? navigate(homepage) : openTab(homepage);
+    if (activeTab) await navigate(homepage);
+    else await openTab(homepage);
   },
   "tab.devtools": () => useBrowser.getState().devtools(),
   "report.compose": () => useBrowser.getState().bugReport(),

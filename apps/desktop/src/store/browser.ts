@@ -86,7 +86,11 @@ interface BrowserState {
   /** A tab opened just to fetch a file has nothing to show once the download starts; close it. */
   closeIfOnlyDownload: (id: string, url: string) => Promise<void>;
   activateTab: (id: string) => Promise<void>;
-  navigate: (url: string) => Promise<void>;
+  /**
+   * Load what was typed in the active tab, resolving to whether the engine
+   * took it. The tab's URL changes only when the engine commits the load.
+   */
+  navigate: (url: string) => Promise<boolean>;
   /** Show the welcome screen; every tab stays open and comes back when clicked. */
   showHome: () => Promise<void>;
   back: () => Promise<void>;
@@ -745,23 +749,23 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   },
   navigate: async (url) => {
     const id = tabInThisWindow(get().activeTab, get().detached);
-    if (!id) return get().openTab(url);
-    const prevTab = get().tabs.find((candidate) => candidate.id === id);
-    const prevUrl = prevTab?.url;
-    // Optimistic: show the destination immediately in the active tab;
-    // if navigation rejects, roll back to the previous URL.
-    set((s) => ({
-      navError: without(s.navError, id),
-      tabs: s.tabs.map((t) => (t.id === id ? { ...t, url } : t)),
-    }));
+    if (!id) {
+      await get().openTab(url);
+      return true;
+    }
+    // The tab keeps the address it has until the engine commits a new one.
+    // Writing the raw text in here at once left it standing whenever the
+    // load never committed -- a download, another app's link, a stop -- as
+    // the engine does not republish an address that did not change. The
+    // address bar shows what was typed meanwhile, and only there.
+    set((s) => ({ navError: without(s.navError, id) }));
     try {
       await ipc.tabNavigate(id, url);
       set({ error: null });
+      return true;
     } catch (e) {
-      set((s) => ({
-        tabs: s.tabs.map((t) => (t.id === id ? { ...t, url: prevUrl ?? t.url } : t)),
-        error: errorMessage(e),
-      }));
+      set({ error: errorMessage(e) });
+      return false;
     }
   },
   back: async () => {

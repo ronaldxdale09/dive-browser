@@ -73,6 +73,7 @@ beforeEach(() => {
   vi.spyOn(ipc, "tabHistoryNavigate").mockResolvedValue(null);
   vi.spyOn(ipc, "tabReload").mockResolvedValue(null);
   vi.spyOn(ipc, "tabStop").mockResolvedValue(null);
+  vi.spyOn(ipc, "tabFocus").mockResolvedValue(null);
   vi.spyOn(ipc, "tabOpen").mockResolvedValue(tab);
   vi.spyOn(ipc, "tabCapture").mockResolvedValue("/tmp/capture.png");
   vi.spyOn(ipc, "tabScreencastStart").mockResolvedValue(null);
@@ -233,9 +234,17 @@ describe("Toolbar", () => {
     fireEvent.change(input, { target: { value: "my unfinished search" } });
     act(() => useBrowser.setState({ tabs: [{ ...tab, url: "https://example.com/redirected" }] }));
     expect(input.value).toBe("my unfinished search");
+    // The first Escape takes back the typing and keeps the field...
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input.value).toBe("https://example.com/redirected");
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, input.value.length]);
+    expect(ipc.tabFocus).not.toHaveBeenCalled();
+    // ...the second gives the keyboard back to the page.
     fireEvent.keyDown(input, { key: "Escape" });
     expect(input.value).toBe("example.com/redirected");
     expect(document.activeElement).not.toBe(input);
+    expect(ipc.tabFocus).toHaveBeenCalledWith(tab.id);
     expect(ipc.tabStop).not.toHaveBeenCalled();
   });
 
@@ -246,6 +255,126 @@ describe("Toolbar", () => {
     fireEvent.change(input, { target: { value: "old draft" } });
     act(() => useBrowser.setState({ tabs: [tab, { ...tab, id: "second" }], activeTab: "second" }));
     expect(input.value).toBe(tab.url);
+  });
+
+  it("keeps a draft while the app is left for a moment, and drops it when focus moves within the chrome", () => {
+    render(<Toolbar />);
+    const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "half typed" } });
+    // Another app, or the page, takes the keyboard: the window loses focus.
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    act(() => input.blur());
+    expect(input.value).toBe("half typed");
+    hasFocus.mockReturnValue(true);
+    act(() => input.focus());
+    expect(input.value).toBe("half typed");
+    // Tabbing on to a button in the chrome ends the edit.
+    act(() => input.blur());
+    expect(input.value).toBe("example.com/docs");
+  });
+
+  it("drops a draft left behind when a new page arrives in the tab", () => {
+    render(<Toolbar />);
+    const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "half typed" } });
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    act(() => input.blur());
+    act(() => useBrowser.setState({ tabs: [{ ...tab, url: "https://example.com/clicked" }] }));
+    expect(input.value).toBe("example.com/clicked");
+  });
+
+  it("shows what was submitted until the load commits, and puts the address back when it never does", async () => {
+    vi.spyOn(ipc, "tabNavigate").mockResolvedValue(null);
+    render(<Toolbar />);
+    const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "files.example.com/big.zip" } });
+    fireEvent.submit(input.closest("form")!);
+    await waitFor(() => expect(ipc.tabNavigate).toHaveBeenCalledWith(tab.id, "files.example.com/big.zip"));
+    // The tab keeps its address; only the bar shows the pending text.
+    expect(useBrowser.getState().tabs[0]?.url).toBe(tab.url);
+    expect(input.value).toBe("files.example.com/big.zip");
+    // It turned out to be a download: the load started and stopped in place.
+    act(() => useBrowser.getState().applyLoad({ tab_id: tab.id, phase: "started", url: null, error: null }));
+    expect(input.value).toBe("files.example.com/big.zip");
+    act(() => useBrowser.getState().applyLoad({ tab_id: tab.id, phase: "stopped", url: tab.url, error: null }));
+    expect(input.value).toBe("example.com/docs");
+  });
+
+  it("puts the address back when the engine refuses what was submitted, or the load never starts", async () => {
+    vi.useFakeTimers();
+    try {
+      const nav = vi.spyOn(ipc, "tabNavigate").mockRejectedValueOnce(new Error("engine not ready"));
+      render(<Toolbar />);
+      const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
+      act(() => input.focus());
+      fireEvent.change(input, { target: { value: "refused.example.com" } });
+      fireEvent.submit(input.closest("form")!);
+      await act(async () => {});
+      expect(input.value).toBe("example.com/docs");
+
+      nav.mockResolvedValueOnce(null);
+      act(() => input.focus());
+      fireEvent.change(input, { target: { value: "never.example.com" } });
+      fireEvent.submit(input.closest("form")!);
+      await act(async () => {});
+      expect(input.value).toBe("never.example.com");
+      act(() => void vi.advanceTimersByTime(2000));
+      expect(input.value).toBe("example.com/docs");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not hold another app's link in the bar, since no page will load", async () => {
+    vi.spyOn(ipc, "tabNavigate").mockResolvedValue(null);
+    render(<Toolbar />);
+    const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "mailto:someone@example.com" } });
+    fireEvent.submit(input.closest("form")!);
+    await waitFor(() => expect(ipc.tabNavigate).toHaveBeenCalledWith(tab.id, "mailto:someone@example.com"));
+    expect(input.value).toBe("example.com/docs");
+  });
+
+  it("searches with Option-Enter, whatever the words look like", async () => {
+    vi.spyOn(ipc, "tabNavigate").mockResolvedValue(null);
+    render(<Toolbar />);
+    const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "example.org" } });
+    fireEvent.keyDown(input, { key: "Enter", altKey: true });
+    await waitFor(() => expect(ipc.tabNavigate).toHaveBeenCalledWith(tab.id, "?example.org"));
+    expect(input.value).toBe("example.org");
+  });
+
+  it("leaves keys alone while an input method is composing", () => {
+    render(<Toolbar />);
+    const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "にほん" } });
+    fireEvent.keyDown(input, { key: "Escape", keyCode: 229 });
+    fireEvent.keyDown(input, { key: "Enter", altKey: true, isComposing: true });
+    expect(input.value).toBe("にほん");
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("keeps the whole address selected after the click that focuses it", () => {
+    render(<Toolbar />);
+    const input = screen.getByRole("combobox", { name: "Address" }) as HTMLInputElement;
+    fireEvent.mouseDown(input);
+    act(() => input.focus());
+    // The click's own mouseup lands a caret, as a browser would.
+    input.setSelectionRange(3, 3);
+    expect(fireEvent.mouseUp(input)).toBe(false);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, tab.url.length]);
+    // Once focused, a click places the caret like any text field.
+    fireEvent.mouseDown(input);
+    input.setSelectionRange(3, 3);
+    expect(fireEvent.mouseUp(input)).toBe(true);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([3, 3]);
   });
 
   it("has no More button while nothing would be in its tray", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Bookmark, HistoryEntry, Tab } from "./ipc";
-import { SUGGESTION_LIMIT, buildSuggestions, hostOf, looksLikeUrl, placeOf, stepHighlight } from "./omnibox";
+import { SUGGESTION_LIMIT, buildSuggestions, hostOf, inlineCompletion, looksLikeUrl, opensInAnotherApp, placeOf, stepHighlight } from "./omnibox";
 import vectors from "../../src-tauri/src/omnibox/vectors.json";
 
 const tab = (id: string, url: string, title: string): Tab => ({
@@ -113,6 +113,57 @@ describe("buildSuggestions", () => {
     const many = { tabs: [], bookmarks: [], history: Array.from({ length: 20 }, (_, i) => visit(`https://h.test/${i}`, `page ${i}`)) };
     expect(buildSuggestions("page", many)).toHaveLength(8);
     expect(buildSuggestions("page", many, 3)).toHaveLength(3);
+  });
+});
+
+describe("forced searches, the current tab and other apps", () => {
+  const sources = {
+    tabs: [tab("here", "https://example.com/", "Example"), tab("there", "https://example.org/", "Example org")],
+    bookmarks: [bookmark("https://example.net/", "Example net")],
+    history: [],
+  };
+
+  it("never offers the tab being typed over", () => {
+    const rows = buildSuggestions("example", { ...sources, activeTab: "here" });
+    expect(rows.filter((r) => r.kind === "tab").map((r) => r.kind === "tab" && r.tabId)).toEqual(["there"]);
+  });
+
+  it("offers only the search for a leading ?, named without the mark", () => {
+    const rows = buildSuggestions("?example.com", { ...sources, suggestions: ["example com login"] });
+    expect(rows.map((r) => `${r.kind}:${r.title}`)).toEqual(["search:example.com", "suggest:example com login"]);
+    expect(rows[0]!.url).toBe("?example.com");
+    expect(buildSuggestions("?  ", sources)).toEqual([]);
+  });
+
+  it("knows another app's link from an address", () => {
+    expect(opensInAnotherApp("mailto:a@example.com")).toBe(true);
+    expect(opensInAnotherApp(" vscode://file/x ")).toBe(true);
+    expect(opensInAnotherApp("https://example.com")).toBe(false);
+    expect(opensInAnotherApp("localhost:3000")).toBe(false);
+    expect(opensInAnotherApp("note: milk")).toBe(false);
+  });
+});
+
+describe("inlineCompletion", () => {
+  const rows = buildSuggestions("git", {
+    tabs: [],
+    bookmarks: [],
+    history: [visit("https://www.github.com/", "GitHub"), visit("https://gitlab.com/explore?x=1", "GitLab")],
+  });
+
+  it("completes the first site whose address begins with the letters, keeping them as typed", () => {
+    expect(inlineCompletion("Git", rows)).toEqual({ index: rows.findIndex((r) => r.url === "https://www.github.com/"), text: "Github.com" });
+    expect(inlineCompletion("gitl", rows)?.text).toBe("gitlab.com/explore?x=1");
+    expect(inlineCompletion("www.gith", rows)?.text).toBe("www.github.com");
+    expect(inlineCompletion("https://gitl", rows)?.text).toBe("https://gitlab.com/explore?x=1");
+  });
+
+  it("does not complete a search, a finished address or something no site begins with", () => {
+    expect(inlineCompletion("git hub", rows)).toBeNull();
+    expect(inlineCompletion("?git", rows)).toBeNull();
+    expect(inlineCompletion("github.com", rows)).toBeNull();
+    expect(inlineCompletion("hub", rows)).toBeNull();
+    expect(inlineCompletion("", rows)).toBeNull();
   });
 });
 

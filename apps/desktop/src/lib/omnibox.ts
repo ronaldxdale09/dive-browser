@@ -46,23 +46,32 @@ export function looksLikeUrl(input: string): boolean {
   if (!text || text.startsWith("?")) return false;
   if (text.startsWith("/") || text === "~" || text.startsWith("~/")) return true;
   if (/^[a-z]:[\\/]/i.test(text) && typeof navigator !== "undefined" && /Windows/.test(navigator.userAgent)) return true;
-  return withScheme(text) || bareHost(text);
+  return withScheme(text) !== null || bareHost(text);
+}
+
+/**
+ * Whether what was typed is another app's link (`mailto:`, `vscode:`): Enter
+ * asks to hand it over, and no page loads in the tab.
+ */
+export function opensInAnotherApp(input: string): boolean {
+  return withScheme(input.trim()) === "app";
 }
 
 /** An address typed with a scheme the engine loads, or another app's link. */
-function withScheme(text: string): boolean {
+function withScheme(text: string): "address" | "app" | null {
   let url: URL;
   try {
     url = new URL(text);
   } catch {
-    return false;
+    return null;
   }
   const scheme = url.protocol.slice(0, -1);
-  if (ADDRESS_SCHEMES.has(scheme)) return true;
+  if (ADDRESS_SCHEMES.has(scheme)) return "address";
   const rest = text.slice(text.indexOf(":") + 1);
   // "localhost:3000" parses as a scheme and a path; it is a host and a port.
   const portLike = /^\d+(?:[/?#]|$)/.test(rest);
-  return scheme.length > 1 && !portLike && rest !== "" && !rest.startsWith(":") && !/\s/.test(text) && !ENGINE_SCHEMES.has(scheme);
+  const app = scheme.length > 1 && !portLike && rest !== "" && !rest.startsWith(":") && !/\s/.test(text) && !ENGINE_SCHEMES.has(scheme);
+  return app ? "app" : null;
 }
 
 /** A host typed without a scheme: an IP, this machine, a name with a port, or a name ending in a known domain. */
@@ -164,28 +173,47 @@ function matches(query: string, ...fields: (string | null | undefined)[]) {
 }
 
 /**
+ * The words a query searches for: what was typed, less the leading "?" that
+ * forces a search.
+ */
+export function searchWords(query: string): string {
+  const trimmed = query.trim();
+  return trimmed.startsWith("?") ? trimmed.slice(1).trim() : trimmed;
+}
+
+/** A row's identity, which survives the list being rebuilt around it. */
+export function suggestionKey(row: Suggestion): string {
+  return `${row.kind}|${row.url}`;
+}
+
+/**
  * The rows under the address bar for `query`, in the order they are offered:
  * the literal open-or-search row, then open tabs, bookmarks and history. A URL
  * appears once, wherever it is first seen -- a page that is open is offered as
- * a tab rather than again from history.
+ * a tab rather than again from history. The tab being typed over is never
+ * offered: switching to the tab you are on does nothing.
  */
 export function buildSuggestions(
   query: string,
-  { tabs, bookmarks, history, suggestions = [] }: { tabs: readonly Tab[]; bookmarks: readonly Bookmark[]; history: readonly HistoryEntry[]; suggestions?: readonly string[] },
+  { tabs, bookmarks, history, suggestions = [], activeTab = null }: { tabs: readonly Tab[]; bookmarks: readonly Bookmark[]; history: readonly HistoryEntry[]; suggestions?: readonly string[]; activeTab?: string | null },
   limit = SUGGESTION_LIMIT,
 ): Suggestion[] {
   const trimmed = query.trim();
-  if (!trimmed) return [];
-  const needle = trimmed.toLowerCase();
-  const rows: Suggestion[] = [{ kind: looksLikeUrl(trimmed) ? "open" : "search", url: trimmed, title: trimmed, favicon: null }];
+  // "?words" is a search whatever the words look like: the row says so, and
+  // nothing Dive knows about is offered in its place.
+  const forced = trimmed.startsWith("?");
+  const words = searchWords(trimmed);
+  if (!words) return [];
+  const needle = words.toLowerCase();
+  const rows: Suggestion[] = [{ kind: looksLikeUrl(trimmed) ? "open" : "search", url: trimmed, title: words, favicon: null }];
   const seen = new Set<string>();
   const add = (row: Suggestion) => {
-    if (rows.length >= limit || seen.has(row.url)) return;
+    if (forced || rows.length >= limit || seen.has(row.url)) return;
     seen.add(row.url);
     rows.push(row);
   };
   for (const tab of tabs) {
-    if (matches(needle, tab.title, tab.url)) add({ kind: "tab", url: tab.url, title: titleOf(tab), favicon: tab.favicon, tabId: tab.id });
+    if (tab.id !== activeTab && matches(needle, tab.title, tab.url)) add({ kind: "tab", url: tab.url, title: titleOf(tab), favicon: tab.favicon, tabId: tab.id });
   }
   for (const bookmark of bookmarks) {
     if (matches(needle, bookmark.title, bookmark.url)) add({ kind: "bookmark", url: bookmark.url, title: titleOf(bookmark), favicon: bookmark.favicon });
@@ -212,6 +240,39 @@ export function buildSuggestions(
     if (site > 0) rows.unshift(...rows.splice(site, 1));
   }
   return rows.slice(0, limit);
+}
+
+/**
+ * The address to complete what was typed with, in place, as every browser
+ * does: the first site row whose address -- without its scheme or a "www."
+ * the person did not type -- begins with the typed text. `text` keeps the
+ * letters as typed and adds the rest of the address; `index` is the row.
+ */
+export function inlineCompletion(typed: string, rows: readonly Suggestion[]): { index: number; text: string } | null {
+  if (!typed || /\s/.test(typed) || typed.startsWith("?")) return null;
+  const needle = typed.toLowerCase();
+  for (const [index, row] of rows.entries()) {
+    if (row.kind !== "tab" && row.kind !== "bookmark" && row.kind !== "history") continue;
+    const address = completable(row.url, needle);
+    if (address && address.length > typed.length && address.toLowerCase().startsWith(needle)) return { index, text: typed + address.slice(typed.length) };
+  }
+  return null;
+}
+
+/** `url` as someone typing `needle` would write it out. */
+function completable(url: string, needle: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  // A bare trailing slash is nobody's to type.
+  let text = parsed.pathname === "/" && !parsed.search && !parsed.hash ? url.replace(/\/$/, "") : url;
+  if (needle.startsWith(parsed.protocol)) return text;
+  text = text.slice(parsed.protocol.length + 2);
+  return !needle.startsWith("www.") && text.startsWith("www.") ? text.slice(4) : text;
 }
 
 /** Next highlight after an arrow key, wrapping at both ends. */

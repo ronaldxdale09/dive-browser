@@ -11,7 +11,9 @@ import { SharePopover } from "./SharePopover";
 import { BookmarkButton } from "./BookmarkButton";
 import { PageActions } from "./PageActions";
 import { AddressSuggestions, optionId, useAddressSuggestions } from "./AddressSuggestions";
+import { opensInAnotherApp, searchWords } from "../lib/omnibox";
 import type { Suggestion } from "../lib/omnibox";
+import { ipc } from "../lib/ipc";
 import type { Tab } from "../lib/ipc";
 import { DownloadsMenu } from "./DownloadsMenu";
 import { useDownloads } from "../store/downloads";
@@ -42,6 +44,29 @@ const SECURITY_GLYPHS: Record<AddressSecurity, LucideIcon> = {
 
 const NO_TABS: Tab[] = [];
 
+/** How long a submitted address waits for its load to begin before the bar stops showing it. */
+const PENDING_START_MS = 2000;
+
+/**
+ * Text being typed over a tab. `base` is the address it was started on, so a
+ * new page arriving while the field is not focused ends it; `initial` is what
+ * the field held on focus; `complete` says the last edit was typing at the
+ * end, the only time an address is completed in place.
+ */
+type Draft = { tabId: string | null; value: string; base: string; initial: string; complete: boolean };
+
+/** Text submitted over a tab whose load has not committed; `started` once the load began. */
+type Pending = { tabId: string; text: string; base: string; started: boolean };
+
+function freshDraft(tabId: string | null, value: string, base = value): Draft {
+  return { tabId, value, base, initial: value, complete: false };
+}
+
+/** A key press that belongs to an input method composing text, not to the bar. */
+function composing(event: React.KeyboardEvent) {
+  return event.nativeEvent.isComposing || event.keyCode === 229;
+}
+
 /** Navigation row: nav icons, the omnibox pill and, as glyphs, the actions that act on the page. */
 export function Toolbar({ compact = false, trailing = true }: { compact?: boolean; singleAuxPanel?: boolean; /** Render the browser's own controls (downloads, privacy, menu) at the end; off when the bar places them after the feature cluster. */ trailing?: boolean }) {
   const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
@@ -65,33 +90,79 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
   // browser does, so it can be corrected in place; the store still holds the
   // last committed URL for everything else.
   const url = failedUrl || current?.url || "";
-  // A redirect must not overwrite text the person is editing. A tab switch
-  // does reset the draft, even when both tabs happen to have the same URL.
-  const [draft, setDraft] = useState({ tabId: activeTab, value: url });
-  const [editing, setEditing] = useState(false);
-  if (draft.tabId !== activeTab) setDraft({ tabId: activeTab, value: url });
-  const value = editing ? draft.value : url;
-  const setValue = (value: string) => setDraft({ tabId: activeTab, value });
+  // What is being typed. A redirect must not overwrite it, and neither must
+  // leaving the app for a moment: the field losing focus to another window,
+  // or to the page, keeps the draft until a new page arrives in that tab. A
+  // tab switch does reset it, even when both tabs have the same URL.
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [focused, setFocused] = useState(false);
+  if (draft && draft.tabId !== activeTab) setDraft(focused ? freshDraft(activeTab, url) : null);
+  const editing = draft !== null && draft.tabId === activeTab && (focused || draft.base === url);
+  const typed = editing ? draft.value : "";
+  // What was submitted, shown at rest until its page commits. The tab's own
+  // URL is only ever the engine's, so a load that never commits -- a
+  // download, a stop, a refusal -- puts the bar back by itself.
+  // It is measured against the committed address, not a failed one the bar
+  // may be showing: submitting clears that failure at once.
+  const committed = current?.url ?? "";
+  const [pending, setPending] = useState<Pending | null>(null);
+  const pendingText = !editing && pending && pending.tabId === activeTab && pending.base === committed && !failedUrl ? pending.text : null;
   const failed = Boolean(failedUrl);
   const display = prettyUrl(url);
   const inputRef = useRef<HTMLInputElement>(null);
-  // Suggestions live only while the draft says something other than the
-  // address already shown -- focusing the bar selects the URL, and that alone
-  // is not a question. The list is a listbox the input drives, so the input
-  // never loses focus to it.
+  // Suggestions live only while the draft says something other than what the
+  // field held when it was focused -- focusing the bar selects the URL, and
+  // that alone is not a question. The list is a listbox the input drives, so
+  // the input never loses focus to it.
   const listId = useId();
   // Open tabs are offered only while typing, so only then is the list followed.
   const tabs = useBrowser((s) => (editing ? s.tabs : NO_TABS));
-  const { rows, highlight, setHighlight, move } = useAddressSuggestions(draft.value, editing && draft.value.trim() !== url, tabs);
+  const asking = editing && focused && typed.trim() !== url && typed !== draft.initial;
+  const { rows, highlight, setHighlight, move, remove, completion } = useAddressSuggestions(typed, asking, tabs, { activeTab, autocomplete: draft?.complete === true });
+  const shown = editing ? (completion ?? typed) : (pendingText ?? display);
+  const resting = !editing && !pendingText && Boolean(current && display);
   const finishEditing = () => {
-    setEditing(false);
+    setDraft(null);
     inputRef.current?.blur();
   };
-  const pick = (row: Suggestion) => {
+  // Load `target` in this tab, showing `text` in the bar until it commits.
+  const go = (target: string, text = target) => {
     finishEditing();
-    if (row.kind === "tab") void activateTab(row.tabId);
-    else void navigate(row.url);
+    const tabId = activeTab;
+    const entry = tabId && !opensInAnotherApp(target) ? { tabId, text, base: committed, started: false } : null;
+    setPending(entry);
+    void navigate(target).then((accepted) => {
+      if (!accepted) setPending((now) => (now === entry ? null : now));
+    });
   };
+  const pick = (row: Suggestion) => {
+    if (row.kind === "tab") {
+      finishEditing();
+      void activateTab(row.tabId);
+    } else if (row.kind === "suggest") {
+      // The engine's phrases are searches, whatever they look like.
+      go(`?${row.url}`, row.url);
+    } else go(row.url);
+  };
+  // The page's own load says when the submitted text has had its turn: once
+  // a load has started and stopped without a new address, or when none has
+  // started at all within a moment, the bar shows the tab's address again.
+  if (pending && (pending.tabId !== activeTab || pending.base !== committed || failedUrl || (pending.started && !loading))) setPending(null);
+  else if (pending && loading && !pending.started) setPending({ ...pending, started: true });
+  useEffect(() => {
+    if (!pending || pending.started) return;
+    const timer = setTimeout(() => setPending((now) => (now === pending ? null : now)), PENDING_START_MS);
+    return () => clearTimeout(timer);
+  }, [pending]);
+  // Completion is drawn selected after the caret, so the next letter typed
+  // replaces it and Backspace takes it away.
+  useLayoutEffect(() => {
+    const input = inputRef.current;
+    if (completion && input && document.activeElement === input) input.setSelectionRange(typed.length, completion.length);
+  }, [completion, typed]);
+  // A click that focuses the field selects all of it; this remembers that
+  // the press began outside so the mouseup that ends it can keep that.
+  const selectOnMouseUp = useRef(false);
   // Cmd+L, from the menu or the palette.
   useEffect(() => {
     const focus = () => {
@@ -130,14 +201,13 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
           className="flex min-w-0 flex-1 items-center gap-2"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!value.trim()) return;
+            if (!typed.trim()) return;
             const row = rows[highlight];
             if (row) {
               pick(row);
               return;
             }
-            void navigate(value);
-            finishEditing();
+            go(typed);
           }}
         >
           {/* The glyph says what kind of thing the bar holds: a search when
@@ -164,7 +234,7 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
           {/* At rest the host is set in ink and the path in a quieter tone, so a
               glance reads the site; the input underneath keeps the whole text
               for selection, copying and assistive tech. */}
-          {!editing && current && display && (
+          {resting && (
             <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center overflow-hidden text-[13px] whitespace-nowrap">
               <span className="text-ink">{splitAddress(url).host}</span>
               <span className="truncate text-ink-3">{splitAddress(url).rest}</span>
@@ -173,21 +243,75 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
           <input
             ref={inputRef}
             aria-label="Address"
-            title={!editing && display ? display : undefined}
-            value={editing ? value : display}
-            onChange={(e) => setValue(e.target.value)}
-            onFocus={(e) => {
-              setEditing(true);
-              setValue(url);
-              e.currentTarget.select();
+            title={resting ? display : undefined}
+            value={shown}
+            onChange={(event) => {
+              const input = event.currentTarget;
+              const native = event.nativeEvent as InputEvent;
+              // Completing in place follows typing at the end, and nothing
+              // else: not a deletion, which would put back what was just
+              // removed, and not a composition still being chosen.
+              const complete = !native.inputType?.startsWith("delete") && !native.isComposing && input.selectionEnd === input.value.length;
+              setDraft({ ...(editing ? draft : freshDraft(activeTab, url)), value: input.value, complete });
             }}
-            onBlur={() => setEditing(false)}
+            onFocus={() => {
+              setFocused(true);
+              // Coming back to a draft left a moment ago keeps it, caret and all.
+              if (!editing) setDraft(freshDraft(activeTab, pendingText ?? url, url));
+            }}
+            onBlur={() => {
+              setFocused(false);
+              // Focus moving within the chrome ends the edit. The window
+              // losing it -- to another app, or to the page -- does not.
+              if (document.hasFocus() || !draft || draft.value === draft.initial) setDraft(null);
+            }}
+            onMouseDown={(event) => {
+              selectOnMouseUp.current = document.activeElement !== event.currentTarget;
+            }}
+            onMouseUp={(event) => {
+              if (!selectOnMouseUp.current) return;
+              selectOnMouseUp.current = false;
+              // The press that focused the field selected all of it; the
+              // mouseup that ends the click would collapse that to a caret.
+              // A press that dragged out a range of its own keeps it.
+              const input = event.currentTarget;
+              if (input.selectionStart === input.selectionEnd) {
+                event.preventDefault();
+                input.select();
+              }
+            }}
             onKeyDown={(event) => {
+              if (composing(event)) return;
               if (event.key === "Escape") {
                 event.preventDefault();
                 event.stopPropagation();
-                setValue(url);
-                event.currentTarget.blur();
+                // The first Escape takes back what was typed and keeps the
+                // field; the next hands the keyboard back to the page.
+                if (editing && (draft.value !== url || completion)) {
+                  const input = event.currentTarget;
+                  flushSync(() => setDraft(freshDraft(activeTab, url)));
+                  input.select();
+                  return;
+                }
+                finishEditing();
+                if (activeTab) void ipc.tabFocus(activeTab).catch(() => undefined);
+                return;
+              }
+              if (event.key === "Enter" && event.altKey) {
+                // Option-Enter searches for the words, whatever they look like.
+                event.preventDefault();
+                const words = searchWords(typed);
+                if (words) go(`?${words}`, words);
+                return;
+              }
+              if (completion && !event.shiftKey && (event.key === "ArrowRight" || event.key === "End")) {
+                // Moving past the completion accepts it as typed text.
+                setDraft({ ...draft!, value: completion, complete: false });
+                return;
+              }
+              if (event.key === "Delete" && event.shiftKey) {
+                const row = rows[highlight];
+                if (row && remove(row)) event.preventDefault();
                 return;
               }
               if ((event.key === "ArrowDown" || event.key === "ArrowUp") && rows.length > 0) {
@@ -201,10 +325,10 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
             role="combobox"
             aria-haspopup="listbox"
             aria-expanded={rows.length > 0}
-            aria-autocomplete="list"
+            aria-autocomplete="both"
             aria-controls={rows.length > 0 ? listId : undefined}
             aria-activedescendant={rows.length > 0 ? optionId(listId, highlight) : undefined}
-            className={`min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-ink-3 ${!editing && current && display ? "text-transparent" : "text-ink"}`}
+            className={`min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-ink-3 ${resting ? "text-transparent" : "text-ink"}`}
           />
           </span>
           <AddressSuggestions id={listId} rows={rows} highlight={highlight} onHighlight={setHighlight} onPick={pick} />
