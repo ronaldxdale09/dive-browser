@@ -405,4 +405,29 @@ describe("Library recordings import", () => {
     expect(del).toHaveBeenCalledWith("/captures/clip.mov");
     await waitFor(() => expect(screen.queryByText("clip.mov")).toBeNull());
   });
+
+  it("keeps focus in the list when a row is removed: the next row's Remove, else the filter", async () => {
+    render(<Library />);
+    fireEvent.click(screen.getByRole("tab", { name: "History" }));
+    const removeA = await screen.findByRole("button", { name: "Remove A from history" });
+    removeA.focus();
+    fireEvent.click(removeA);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Remove B from history" })));
+    fireEvent.click(document.activeElement!);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Filter history")));
+  });
+
+  it("puts focus on Keep when a recording asks to be deleted, and back on Delete after Keep", async () => {
+    vi.spyOn(ipc, "recordingsList").mockResolvedValue([
+      { path: "/captures/clip.mov", name: "clip.mov", format: "mov", bytes: 10, modified_ms: 1, editable: true, has_project: false },
+    ]);
+    render(<Library />);
+    fireEvent.click(screen.getByRole("tab", { name: "Recordings" }));
+    const ask = await screen.findByRole("button", { name: "Delete clip.mov" });
+    ask.focus();
+    fireEvent.click(ask);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Keep" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Delete clip.mov" }));
+  });
 });

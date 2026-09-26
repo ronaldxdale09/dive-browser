@@ -185,3 +185,60 @@ describe("useFocusTrap", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("useFocusTrap backstop", () => {
+  function Removable() {
+    const root = useRef<HTMLDivElement>(null);
+    const [rows, setRows] = useState(["a", "b"]);
+    useFocusTrap(root);
+    return (
+      <div ref={root} role="dialog" aria-modal="true" aria-label="Rows">
+        <input aria-label="filter" />
+        {rows.map((r) => (
+          <button key={r} type="button" onClick={() => setRows((list) => list.filter((x) => x !== r))}>
+            remove {r}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  it("brings focus back inside when the focused control is removed", async () => {
+    render(<Removable />);
+    const b = screen.getByText("remove b");
+    b.focus();
+    fireEvent.click(b);
+    expect(screen.queryByText("remove b")).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(document.activeElement).toBe(screen.getByLabelText("filter"));
+  });
+
+  it("pulls focus back from the chrome behind a modal, but not from a portaled list", async () => {
+    const behind = document.createElement("button");
+    const list = document.createElement("div");
+    list.setAttribute("role", "listbox");
+    const option = document.createElement("button");
+    list.appendChild(option);
+    document.body.append(behind, list);
+    render(<Removable />);
+    const filter = screen.getByLabelText("filter");
+    expect(document.activeElement).toBe(filter);
+    behind.focus();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(document.activeElement).toBe(filter);
+    option.focus();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(document.activeElement).toBe(option);
+    behind.remove();
+    list.remove();
+  });
+
+  it("lets focus leave a menu, which is how it is dismissed", () => {
+    const behind = document.createElement("button");
+    document.body.append(behind);
+    render(<Menu />);
+    behind.focus();
+    expect(document.activeElement).toBe(behind);
+    behind.remove();
+  });
+});

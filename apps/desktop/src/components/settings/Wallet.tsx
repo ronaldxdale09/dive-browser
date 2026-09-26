@@ -5,6 +5,7 @@ import { Button, Group, Row } from "../SettingsFields";
 import { Icon } from "../Icon";
 import type { Address } from "../../lib/ipc";
 import { useFocusTrap } from "../../lib/useFocusTrap";
+import { focusAfterRemoval, rowIndexOf } from "../../lib/focusAfterRemoval";
 import { BLANK_ADDRESS, describeCard, useWallet } from "../../store/wallet";
 import { credentialStoreName } from "../../lib/commands";
 
@@ -29,6 +30,19 @@ export function Wallet() {
   // The row asking "Delete …?" -- one at a time, and nothing is deleted on
   // the first click, which used to throw a saved card away on a stray one.
   const [confirming, setConfirming] = useState<string | null>(null);
+  // The row whose question was answered without deleting it (Keep, or a
+  // delete that failed): its Delete button comes back and takes focus, so
+  // focus does not fall out of Settings with the buttons that held it.
+  const returnTo = useRef<string | null>(null);
+  const settle = (id: string) => {
+    returnTo.current = id;
+    setConfirming(null);
+  };
+  const takeFocus = (id: string) => {
+    if (returnTo.current !== id) return false;
+    returnTo.current = null;
+    return true;
+  };
   useEffect(() => {
     if (!loaded) void load();
   }, [loaded, load]);
@@ -50,11 +64,11 @@ export function Wallet() {
               hint={[address.name, address.street.split("\n").join(", "), address.city, address.region, address.postal_code, address.country].filter(Boolean).join(" · ")}
               control={
                 confirming === address.id ? (
-                  <ConfirmDelete question="Delete this address?" label={`Delete ${name} for good`} onKeep={() => setConfirming(null)} onDelete={() => void deleteAddress(address.id).finally(() => setConfirming(null))} />
+                  <ConfirmDelete question="Delete this address?" label={`Delete ${name} for good`} onKeep={() => settle(address.id)} onDelete={() => void deleteAddress(address.id).finally(() => settle(address.id))} />
                 ) : (
                   <div className="flex items-center gap-1.5">
                     <Button onClick={() => setEditing(address)}>Edit…</Button>
-                    <DeleteButton label={`Delete ${name}`} onClick={() => setConfirming(address.id)} />
+                    <DeleteButton label={`Delete ${name}`} onClick={() => setConfirming(address.id)} takeFocus={() => takeFocus(address.id)} />
                   </div>
                 )
               }
@@ -78,9 +92,9 @@ export function Wallet() {
               hint={`${card.cardholder} · ${describeCard(card)} · the number is kept in ${credentialStoreName()}, not in Dive's database`}
               control={
                 confirming === card.id ? (
-                  <ConfirmDelete question="Delete this card?" label={`Delete ${name} for good`} onKeep={() => setConfirming(null)} onDelete={() => void deleteCard(card.id).finally(() => setConfirming(null))} />
+                  <ConfirmDelete question="Delete this card?" label={`Delete ${name} for good`} onKeep={() => settle(card.id)} onDelete={() => void deleteCard(card.id).finally(() => settle(card.id))} />
                 ) : (
-                  <DeleteButton label={`Delete ${name}`} onClick={() => setConfirming(card.id)} />
+                  <DeleteButton label={`Delete ${name}`} onClick={() => setConfirming(card.id)} takeFocus={() => takeFocus(card.id)} />
                 )
               }
             />
@@ -99,9 +113,9 @@ export function Wallet() {
   );
 }
 
-function DeleteButton({ label, onClick }: { label: string; onClick: () => void }) {
+function DeleteButton({ label, onClick, takeFocus }: { label: string; onClick: () => void; takeFocus: () => boolean }) {
   return (
-    <button type="button" aria-label={label} onClick={onClick} className="grid size-7 place-items-center rounded-lg text-ink-3 hover:bg-surface-2 hover:text-warn">
+    <button type="button" ref={(el) => void (el && takeFocus() && el.focus())} aria-label={label} onClick={onClick} className="grid size-7 place-items-center rounded-lg text-ink-3 hover:bg-surface-2 hover:text-warn">
       <Icon icon={Trash2} size={13} />
     </button>
   );
@@ -112,10 +126,23 @@ function ConfirmDelete({ question, label, onKeep, onDelete }: { question: string
   return (
     <div className="flex items-center gap-1.5">
       <span className="shrink-0 text-[11px] text-ink-2">{question}</span>
-      <button type="button" onClick={onKeep} className="h-7 shrink-0 rounded-full px-2.5 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
+      {/* The safe answer takes focus: the Delete that asked is gone, and a
+          second Enter should not throw the row away. */}
+      <button type="button" autoFocus onClick={onKeep} className="h-7 shrink-0 rounded-full px-2.5 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
         Keep
       </button>
-      <button type="button" aria-label={label} onClick={onDelete} className="h-7 shrink-0 rounded-full bg-danger px-2.5 text-[11px] font-medium text-danger-ink hover:brightness-110">
+      <button
+        type="button"
+        aria-label={label}
+        onClick={(e) => {
+          // Once the row is gone, focus goes to the row below it (or the
+          // group's Add row) rather than to the page behind Settings.
+          const row = e.currentTarget.closest<HTMLElement>("[data-settings-row]");
+          const list = row?.parentElement ?? null;
+          focusAfterRemoval(list, rowIndexOf(list, row));
+          onDelete();
+        }}
+        className="h-7 shrink-0 rounded-full bg-danger px-2.5 text-[11px] font-medium text-danger-ink hover:brightness-110">
         Delete
       </button>
     </div>

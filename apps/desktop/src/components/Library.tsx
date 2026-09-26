@@ -4,7 +4,7 @@ import { useWebAppIcon } from "../lib/useWebAppIcon";
 import { WEBAPPS_CHANGED, useWebApps } from "../store/webapps";
 import type { WebApp } from "../lib/ipc";
 import { displayChord, BOOKMARKS_CHANGED, fileManagerName } from "../lib/commands";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ipc } from "../lib/ipc";
 import type { Bookmark, DownloadRecord, HistoryEntry, RecordingInfo } from "../lib/ipc";
@@ -15,6 +15,7 @@ import { screenUrl } from "./internal/InternalPage";
 import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
+import { focusAfterRemovalOf } from "../lib/focusAfterRemoval";
 import { useBrowser } from "../store/browser";
 import { isPrivateWindow } from "../lib/privateMode";
 import { IMPORT_BUSY, useImportVideo } from "../screen/importVideo";
@@ -94,6 +95,7 @@ export function Library() {
             <Icon icon={Search} size={13} className="shrink-0 text-ink-3" />
             <input
               ref={input}
+              data-library-filter
               aria-label={`Filter ${tab}`}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -234,6 +236,14 @@ function LoadMore({ onMore, loading }: { onMore: () => void; loading: boolean })
   );
 }
 
+/**
+ * Where focus goes once a list's last row is removed: the Library's filter,
+ * which names the list it filters.
+ */
+function libraryFilter(): HTMLElement | null {
+  return document.querySelector<HTMLElement>("[data-library-filter]");
+}
+
 function BookmarkRow({
   item: b,
   onOpen,
@@ -267,7 +277,10 @@ function BookmarkRow({
         type="button"
         aria-label={`Remove bookmark ${titleOf(b)}`}
         title="Remove bookmark"
-        onClick={() => onRemove(b)}
+        onClick={(e) => {
+          focusAfterRemovalOf(e.currentTarget, libraryFilter);
+          onRemove(b);
+        }}
         className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100"
       >
         <Icon icon={Trash2} size={13} />
@@ -405,7 +418,7 @@ function Bookmarks({ query, onOpened, scrollRef }: { query: string; onOpened: ()
     return (
       <>
         {header}
-        <ul className="flex flex-col">
+        <ul data-row-list className="flex flex-col">
           {shown.map((b) => (
             <li key={b.url}>
               <BookmarkRow item={b} onOpen={open} onRemove={remove} onRename={rename} />
@@ -418,7 +431,7 @@ function Bookmarks({ query, onOpened, scrollRef }: { query: string; onOpened: ()
   }
 
   const virtualList = (
-    <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
+    <div data-row-list style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
       {virtualItems.map((virtualRow) => {
         const b = shown[virtualRow.index];
         if (!b) return null;
@@ -523,12 +536,13 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
       </div>
       {items === null && loadError && <LoadFailed what="history" error={loadError} onRetry={retry} />}
       {items !== null && groups.length === 0 && (!filtered ? <EmptyState icon={History} title="No history yet" hint="Pages you visit show up here" /> : <NoMatch />)}
+      <div data-row-list>
       {groups.map((g) => (
         <section key={g.day} aria-label={g.day} className="mb-2">
           <h4 className="px-2.5 py-1.5 text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">{g.day}</h4>
           <ul className="flex flex-col">
             {g.entries.map((h) => (
-              <li key={h.url} className="group flex items-center gap-1">
+              <li key={h.url} data-row className="group flex items-center gap-1">
                 <button type="button" title={libraryRowTitle(titleOf(h), h.url)} onClick={(e) => open(e, h.url)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
                   <Favicon src={h.favicon} size={14} fallback={History} />
                   <span className="truncate text-ink">{titleOf(h)}</span>
@@ -541,7 +555,10 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
                   type="button"
                   aria-label={`Remove ${titleOf(h)} from history`}
                   title="Remove from history"
-                  onClick={() => void remove(h.url)}
+                  onClick={(e) => {
+                    focusAfterRemovalOf(e.currentTarget, libraryFilter);
+                    void remove(h.url);
+                  }}
                   className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100"
                 >
                   <Icon icon={Trash2} size={13} />
@@ -551,6 +568,7 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
           </ul>
         </section>
       ))}
+      </div>
       {more && <LoadMore onMore={loadMore} loading={loading} />}
     </>
   );
@@ -709,7 +727,7 @@ function DownloadsList({ query, onOpened }: { query: string; onOpened: () => voi
   return (
     <>
       {header}
-      <ul className="flex flex-col">
+      <ul data-row-list className="flex flex-col">
         {shown.map((d) => {
           const gone = d.status === "finished" && missing.has(d.path);
           const saved = d.status === "finished" && Boolean(d.path) && !gone;
@@ -739,7 +757,13 @@ function DownloadsList({ query, onOpened }: { query: string; onOpened: () => voi
                 </button>
               )}
               {!running && d.recordId && (
-                <button type="button" aria-label={`Remove ${d.name} from the list`} title="Remove from list (the file stays)" onClick={() => forget(d)} className={quiet}>
+                <button type="button" aria-label={`Remove ${d.name} from the list`} title="Remove from list (the file stays)"
+                  onClick={(e) => {
+                    focusAfterRemovalOf(e.currentTarget, libraryFilter);
+                    forget(d);
+                  }}
+                  className={quiet}
+                >
                   <Icon icon={Trash2} size={13} />
                 </button>
               )}
@@ -756,6 +780,9 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
   const [items, setItems] = useState<RecordingInfo[] | null>(null);
   // The row whose Delete was pressed once; the file only goes on the second press.
   const [confirming, setConfirming] = useState<string | null>(null);
+  // The row whose Keep was pressed: its Delete button comes back and takes
+  // focus again, rather than focus falling to the page behind the dialog.
+  const returnTo = useRef<string | null>(null);
   const openTab = useBrowser((s) => s.openTab);
   const importing = useImportVideo((s) => s.busy);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -820,7 +847,7 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
   return (
     <>
     {header}
-    <ul className="flex flex-col">
+    <ul data-row-list className="flex flex-col">
       {shown.map((r) => (
         <li key={r.path} className="group flex items-center gap-1">
           <button type="button" title={r.name} onClick={() => openRecording(r.path)} className="flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
@@ -833,18 +860,38 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
               </span>
             </span>
           </button>
+          {/* Keyed, so the question is new buttons rather than the row's own
+              relabelled: reused, the focused Delete turned into "Delete for
+              good" under the key that had just been pressed. */}
           {confirming === r.path ? (
-            <>
+            <Fragment key="confirm">
               <span className="shrink-0 text-[11px] text-ink-2">Delete this recording?</span>
-              <button type="button" onClick={() => setConfirming(null)} className="h-7 shrink-0 rounded-full px-2.5 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
+              {/* The safe answer takes focus: the Delete button that asked is
+                  gone, and a second Enter should not cost the file. */}
+              <button
+                type="button"
+                autoFocus
+                onClick={() => {
+                  returnTo.current = r.path;
+                  setConfirming(null);
+                }}
+                className="h-7 shrink-0 rounded-full px-2.5 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink"
+              >
                 Keep
               </button>
-              <button type="button" aria-label={`Delete ${r.name} for good`} onClick={() => remove(r.path)} className="h-7 shrink-0 rounded-full bg-danger px-2.5 text-[11px] font-medium text-danger-ink hover:brightness-110">
+              <button
+                type="button"
+                aria-label={`Delete ${r.name} for good`}
+                onClick={(e) => {
+                  focusAfterRemovalOf(e.currentTarget, libraryFilter);
+                  remove(r.path);
+                }}
+                className="h-7 shrink-0 rounded-full bg-danger px-2.5 text-[11px] font-medium text-danger-ink hover:brightness-110">
                 Delete
               </button>
-            </>
+            </Fragment>
           ) : (
-            <>
+            <Fragment key="actions">
               {r.editable && (
                 <button
                   type="button"
@@ -862,10 +909,21 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
               <button type="button" aria-label={`Show ${r.name} in ${fileManagerName()}`} title={`Show in ${fileManagerName()}`} onClick={() => reveal(r.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100">
                 <Icon icon={FolderOpen} size={13} />
               </button>
-              <button type="button" aria-label={`Delete ${r.name}`} title="Delete recording" onClick={() => setConfirming(r.path)} className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100">
+              <button
+                type="button"
+                ref={(el) => {
+                  if (el && returnTo.current === r.path) {
+                    returnTo.current = null;
+                    el.focus();
+                  }
+                }}
+                aria-label={`Delete ${r.name}`}
+                title="Delete recording"
+                onClick={() => setConfirming(r.path)}
+                className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100">
                 <Icon icon={Trash2} size={13} />
               </button>
-            </>
+            </Fragment>
           )}
         </li>
       ))}
@@ -896,7 +954,7 @@ function Apps({ query, onOpened }: { query: string; onOpened: () => void }) {
     );
   }
   return (
-    <div className="flex flex-col gap-0.5">
+    <div data-row-list className="flex flex-col gap-0.5">
       {shown.map((app) => (
         <AppRow key={app.id} app={app} onOpen={() => { onOpened(); void open(app.id); }} onRemove={() => void uninstall(app.id)} />
       ))}
@@ -921,7 +979,10 @@ function AppRow({ app, onOpen, onRemove }: { app: WebApp; onOpen: () => void; on
         type="button"
         aria-label={`Uninstall ${app.name}`}
         title="Uninstall"
-        onClick={onRemove}
+        onClick={(e) => {
+          focusAfterRemovalOf(e.currentTarget, libraryFilter);
+          onRemove();
+        }}
         className="grid size-7 shrink-0 place-items-center rounded-full text-ink-3 opacity-0 hover:bg-surface-3 hover:text-danger focus:opacity-100 group-hover:opacity-100"
       >
         <Icon icon={Trash2} size={13} />

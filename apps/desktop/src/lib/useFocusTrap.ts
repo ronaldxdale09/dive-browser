@@ -15,6 +15,24 @@ const FOCUSABLE = [
 // Nested dialogs own their keys. An outer trap must not close the whole tray
 // or move focus a second time after a child popover handles the same event.
 const activeTraps = new WeakSet<HTMLElement>();
+// Armed traps, innermost last. Only the innermost one catches stray focus, so
+// a dialog over a dialog does not have both pulling at the same key press.
+const trapStack: HTMLElement[] = [];
+
+/**
+ * Places focus may go while a modal trap is armed without being pulled back:
+ * a portaled choice list (Select), another modal or trap stacked above this
+ * one, and announcements such as toasts, which offer their own actions.
+ */
+const MAY_LEAVE = "[data-native-input-owner],[role='listbox'],[aria-modal='true'],[role='alertdialog'],[role='status'],[role='alert'],[data-focus-trap-exempt]";
+
+/** Whether focus arriving at `target` from inside `root` is legitimate rather than stray. */
+export function mayLeaveTrap(root: HTMLElement, target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return true;
+  if (root.contains(target)) return true;
+  if (target.closest(MAY_LEAVE)) return true;
+  return trapStack.some((trap) => trap !== root && trap.contains(target));
+}
 
 const MENU_ITEM = "[role='menuitem'],[role='menuitemradio'],[role='menuitemcheckbox']";
 
@@ -89,6 +107,68 @@ export function useFocusTrap<T extends HTMLElement>(ref: RefObject<T | null>, { 
       target.focus({ preventScroll: true });
     }
 
+    trapStack.push(root);
+    const innermost = () => trapStack[trapStack.length - 1] === root;
+    const modal = () => root.matches("[aria-modal='true']") || root.querySelector("[aria-modal='true']") !== null;
+    // Where stray focus is brought back to: the control the trap opened on,
+    // else the first one, else the container itself.
+    const home = (): HTMLElement => {
+      const wanted = initialFocus?.current;
+      if (wanted && wanted.isConnected && root.contains(wanted) && !(wanted as HTMLButtonElement).disabled) return wanted;
+      const first = focusables(root)[0];
+      if (first) return first;
+      if (!root.hasAttribute("tabindex")) root.setAttribute("tabindex", "-1");
+      return root;
+    };
+    // The last control inside that had focus, or null once focus has left on
+    // purpose. Only focus that was ours is ever brought back.
+    let last: HTMLElement | null = document.activeElement instanceof HTMLElement && root.contains(document.activeElement) ? document.activeElement : null;
+    // A backstop for focus that goes astray while the trap is armed. Removing
+    // the focused control -- a row's Remove, a confirm step that swaps its
+    // buttons -- drops focus to the body without any event, so the trap
+    // watches its own subtree. The check waits a turn: a swap that focuses its
+    // replacement (autoFocus, an effect, focusAfterRemoval) has done so by
+    // then and is left alone.
+    let pending: ReturnType<typeof setTimeout> | undefined;
+    let pulling: ReturnType<typeof setTimeout> | undefined;
+    let disposed = false;
+    const rescue = () => {
+      clearTimeout(pending);
+      pending = setTimeout(() => {
+        if (disposed || !root.isConnected || !innermost() || last === null) return;
+        const now = document.activeElement;
+        if (now !== null && now !== document.body && now.isConnected) return;
+        home().focus({ preventScroll: true });
+      }, 0);
+    };
+    const observer = typeof MutationObserver === "undefined" ? null : new MutationObserver(rescue);
+    observer?.observe(root, { childList: true, subtree: true });
+    // In a modal, focus that lands on the chrome behind the scrim (a script
+    // focusing the address bar, say) is brought back too. A menu or popover
+    // lets it go: leaving one is how it is dismissed.
+    const onFocusIn = (e: FocusEvent) => {
+      if (e.target instanceof HTMLElement && root.contains(e.target)) {
+        last = e.target;
+        return;
+      }
+      if (!innermost()) return;
+      if (!modal()) {
+        last = null;
+        return;
+      }
+      if (mayLeaveTrap(root, e.target)) return;
+      const stray = e.target;
+      // Decided a turn later: a dialog that closes by focusing its trigger
+      // first and unmounting after has gone by then, and keeps that focus.
+      clearTimeout(pulling);
+      pulling = setTimeout(() => {
+        if (disposed || !root.isConnected || !innermost() || document.activeElement !== stray) return;
+        const back = last?.isConnected && root.contains(last) ? last : home();
+        back.focus({ preventScroll: true });
+      }, 0);
+    };
+    document.addEventListener("focusin", onFocusIn);
+
     const onKey = (e: KeyboardEvent) => {
       for (let node = e.target instanceof HTMLElement ? e.target : null; node && node !== root; node = node.parentElement) {
         if (activeTraps.has(node)) return;
@@ -131,6 +211,13 @@ export function useFocusTrap<T extends HTMLElement>(ref: RefObject<T | null>, { 
     return () => {
       activeTraps.delete(root);
       root.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocusIn);
+      observer?.disconnect();
+      disposed = true;
+      clearTimeout(pending);
+      clearTimeout(pulling);
+      const at = trapStack.lastIndexOf(root);
+      if (at !== -1) trapStack.splice(at, 1);
       // Give focus back only if it is still ours to give: if the user has
       // already clicked somewhere else, that click wins.
       const now = document.activeElement;

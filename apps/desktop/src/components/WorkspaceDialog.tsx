@@ -37,6 +37,9 @@ export function WorkspaceDialog() {
   const root = useRef<HTMLDivElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
   const failureId = useId();
+  // Set by the confirmation's Cancel, so the Delete button that comes back
+  // takes focus again instead of focus falling out of the dialog.
+  const backToDelete = useRef(false);
   useFocusTrap(root, { active: Boolean(editing), initialFocus: nameField });
   const { close, className } = useFadeClose(() => setEditing(null));
   if (!editing) return null;
@@ -162,13 +165,23 @@ export function WorkspaceDialog() {
           </label>
         )}
         {confirming ? (
-          <div className="mt-5 rounded-lg border border-line bg-surface-2 p-3">
+          <div key="confirm" className="mt-5 rounded-lg border border-line bg-surface-2 p-3">
             <p className="text-xs text-ink-2">
               Delete {existing?.name} and close its {count} {count === 1 ? "tab" : "tabs"}? Its history and cookies stay on disk.
             </p>
             <div className="mt-3 flex gap-2">
               <span className="flex-1" />
-              <button type="button" onClick={() => setConfirming(false)} className="h-8 rounded-full px-3 text-xs text-ink-2 hover:bg-surface-3">
+              {/* The safe answer takes focus when the question appears: the
+                  Delete that asked it is gone, and Enter should not delete. */}
+              <button
+                type="button"
+                autoFocus
+                onClick={() => {
+                  backToDelete.current = true;
+                  setConfirming(false);
+                }}
+                className="h-8 rounded-full px-3 text-xs text-ink-2 hover:bg-surface-3"
+              >
                 Cancel
               </button>
               <button
@@ -182,10 +195,16 @@ export function WorkspaceDialog() {
             </div>
           </div>
         ) : (
-          <div className="mt-5 flex items-center gap-2">
+          <div key="actions" className="mt-5 flex items-center gap-2">
             {existing && workspaces.length > 1 && (
               <button
                 type="button"
+                ref={(el) => {
+                  if (el && backToDelete.current) {
+                    backToDelete.current = false;
+                    el.focus();
+                  }
+                }}
                 onClick={() => setConfirming(true)}
                 className="flex h-8 items-center gap-1.5 rounded-full px-3 text-xs text-danger hover:bg-surface-2"
               >
