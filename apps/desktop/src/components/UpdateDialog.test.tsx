@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UpdateDialog } from "./UpdateDialog";
 import { useBrowser } from "../store/browser";
 import { useUpdates } from "../store/updates";
+import { ipc } from "../lib/ipc";
 
 beforeEach(() => {
   useUpdates.setState({
@@ -73,6 +74,41 @@ describe("UpdateDialog", () => {
 
     useUpdates.getState().dismiss();
     expect(useUpdates.getState().dismissed).toBe(true);
+  });
+
+  it("leaves the keyboard where it was, and closes on Escape only from inside", () => {
+    const field = document.createElement("input");
+    document.body.appendChild(field);
+    field.focus();
+    useUpdates.setState({ status: "available", update: { version: "0.1.1", notes: null }, dismissed: false });
+    render(<UpdateDialog />);
+    // Someone typing when the notice arrives keeps typing into their field.
+    expect(document.activeElement).toBe(field);
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    vi.useFakeTimers();
+    fireEvent.keyDown(screen.getByRole("button", { name: /later/i }), { key: "Escape" });
+    vi.advanceTimersByTime(200);
+    vi.useRealTimers();
+    expect(useUpdates.getState().dismissed).toBe(true);
+    field.remove();
+  });
+
+  it("cannot be waved away mid-install, and comes back to say why an install failed", async () => {
+    vi.spyOn(ipc, "updateInstall").mockRejectedValue(new Error("signature did not verify"));
+    useUpdates.setState({ status: "available", update: { version: "0.1.1", notes: null }, dismissed: true, installing: true });
+    useUpdates.getState().dismiss();
+    expect(useUpdates.getState().dismissed).toBe(true);
+    useUpdates.setState({ dismissed: false });
+    render(<UpdateDialog />);
+    expect((screen.getByRole("button", { name: "Dismiss update" }) as HTMLButtonElement).disabled).toBe(true);
+    useUpdates.getState().dismiss();
+    expect(useUpdates.getState().dismissed).toBe(false);
+    // Started from Settings with the card waved away: the failure brings it back.
+    useUpdates.setState({ installing: false, dismissed: true });
+    await useUpdates.getState().install();
+    expect(useUpdates.getState().dismissed).toBe(false);
+    expect((await screen.findByRole("alert")).textContent).toContain("signature did not verify");
   });
 
   it("triggers install when clicking Install and restart", async () => {
