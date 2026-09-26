@@ -14,11 +14,33 @@
   const tracks = new Set();
   const remembered = new WeakMap();
   let notified = false;
+  // Document changes only matter between a snapshot and the first change
+  // after it, so the observer watches only then. Left on, it had the engine
+  // record every attribute change anywhere in the page, for the life of
+  // every tab, to be ignored by a callback that had already signalled.
+  const roots = new Set();
+  const changes = new window.MutationObserver(() => signal());
+  const watchOptions = { childList: true, subtree: true, attributes: true };
+  let watching = false;
+  const watch = () => {
+    if (watching) return;
+    watching = true;
+    for (const ref of roots) {
+      const root = ref.deref();
+      if (root) changes.observe(root, watchOptions);
+      else roots.delete(ref);
+    }
+  };
+  const unwatch = () => {
+    if (!watching) return;
+    watching = false;
+    changes.disconnect();
+  };
   const signal = () => {
     // One receipt invalidates the host's previous evidence. Further changes
     // need no IPC until a new snapshot arms another discard decision.
     if (notified) return;
-    try { window.__diveActivityChanged(JSON.stringify({ nonce })); notified = true; }
+    try { window.__diveActivityChanged(JSON.stringify({ nonce })); notified = true; unwatch(); }
     catch (_) { known = false; }
   };
   const remember = (set, value, events) => {
@@ -131,7 +153,10 @@
       root.addEventListener(event, signal, true);
     for (const event of ["input", "change"])
       root.addEventListener(event, () => { dirty = true; signal(); }, true);
-    new window.MutationObserver(signal).observe(root, { childList: true, subtree: true, attributes: true });
+    // Held weakly: a shadow root belongs to its host element, and must be
+    // free to go with it.
+    roots.add(new WeakRef(root));
+    if (watching) changes.observe(root, watchOptions);
   }
   observe(document);
   function snapshot() {
@@ -139,6 +164,7 @@
     // any subsequent event invalidates this evidence immediately, with no
     // debounce window in which the host could discard a newly active page.
     notified = false;
+    watch();
     const reasons = new Set();
     let covered = known && installed.every(([object, name, value]) => object[name] === value);
     if (active(media, (value) => !value.paused && !value.ended)) reasons.add("media");

@@ -69,6 +69,9 @@
     value: (nonce, list) => {
       if (nonce !== NONCE || !Array.isArray(list)) return;
       candidates = list.slice(0, 20);
+      // Only a lone login is ever filled unasked, so only then do fields
+      // that appear later need watching for.
+      if (candidates.length !== 1) observer.disconnect();
       maybeFillIdle();
       offerPending();
     },
@@ -326,18 +329,36 @@
     },
     true,
   );
-  const observer = new MutationObserver(() => {
-    if (passwordFields().length) {
-      ask();
-      maybeFillIdle();
+  // Only what was added is looked at. Scanning the whole document -- and
+  // measuring every password field, which forces a layout -- for every batch
+  // of changes cost a busy page on every frame once it had a login form.
+  const adds = (records, selector) =>
+    records.some((record) =>
+      [...record.addedNodes].some(
+        (node) => node.nodeType === 1 && (node.matches(selector) || node.querySelector(selector) !== null),
+      ),
+    );
+  const observer = new MutationObserver((records) => {
+    if (!asked) {
+      if (adds(records, 'input[type="password"]')) ask();
+      return;
     }
+    // Still waiting for the host's answer, which fills a lone login itself.
+    if (candidates === null) return;
+    // New fields can only matter for filling a lone login; with none saved,
+    // or several to choose from on focus, there is nothing left to watch for.
+    if (candidates.length !== 1) {
+      observer.disconnect();
+      return;
+    }
+    if (adds(records, "input")) maybeFillIdle();
   });
   const start = () => {
     observer.observe(document.documentElement, { childList: true, subtree: true });
-    if (passwordFields().length) {
-      ask();
-      maybeFillIdle();
-    }
+    // A field that is there but not yet shown (a sign-in dialog waiting to
+    // open) is asked about now: the observer no longer rescans the page for
+    // it on every change, and asking fills nothing on its own.
+    if (document.querySelector('input[type="password"]')) ask();
   };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
   else start();

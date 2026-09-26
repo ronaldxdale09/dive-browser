@@ -191,6 +191,42 @@ describe("discard activity guard", () => {
     expect(snapshot().reasons).toContain("unsaved_form");
   });
 
+  it("watches the document only between a snapshot and the first change after it", async () => {
+    const frame = document.createElement("iframe");
+    document.body.append(frame);
+    const page = frame.contentWindow as Page;
+    const host = page as unknown as { MutationObserver: typeof MutationObserver };
+    const Native = host.MutationObserver;
+    let watched = 0;
+    host.MutationObserver = class extends Native {
+      observe(target: Node, options?: MutationObserverInit) {
+        watched += 1;
+        super.observe(target, options);
+      }
+      disconnect() {
+        watched = 0;
+        super.disconnect();
+      }
+    };
+    const { snapshot, signals } = install(page);
+    expect(watched).toBe(0);
+    snapshot();
+    expect(watched).toBe(1);
+    // A shadow root that arrives while armed is watched at once.
+    const shadowHost = page.document.createElement("div");
+    page.document.body.append(shadowHost);
+    const before = signals.length;
+    shadowHost.attachShadow({ mode: "open" });
+    expect(signals.length).toBe(before + 1);
+    expect(watched).toBe(0);
+    snapshot();
+    expect(watched).toBe(2);
+    page.document.body.setAttribute("data-tick", "1");
+    await Promise.resolve();
+    expect(signals.length).toBe(before + 2);
+    expect(watched).toBe(0);
+  });
+
   it("protects unload handlers and closed shadow content", () => {
     const { page, snapshot } = install();
     page.onbeforeunload = () => "unsaved";
