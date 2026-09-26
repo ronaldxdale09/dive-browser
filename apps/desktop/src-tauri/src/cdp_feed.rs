@@ -75,39 +75,33 @@ fn emit_navigation_reset(
     }
 }
 
-/// Enable `domains` on `session`, then map every event with `map`; each hit
-/// is recorded through `record` and emitted to the chrome. `navigated` runs
-/// when the main frame commits a new document, before the chrome is told.
+/// Map every event matching `methods` with `map`; each hit is recorded
+/// through `record` and emitted to the chrome. `navigated` runs when the main
+/// frame commits a new document, before the chrome is told, so `methods`
+/// always takes in `Page.frameNavigated` as well.
 ///
-/// The returned receiver resolves once every domain has been enabled (or has
-/// failed to), so callers can hold the first navigation until the feed is
-/// listening.
+/// The feed enables nothing itself: [`enable_domains`] does that once for
+/// the whole tab. It subscribes before returning, so a caller that enables
+/// the domains afterwards cannot lose an event to the task not having
+/// started yet.
 #[allow(clippy::too_many_arguments)] // Each hook is one feed-specific step; a struct of them would only rename the list.
 pub fn attach<T, M, R, N>(
     app: AppHandle<Runtime>,
     tab_id: TabId,
     session: CdpSession,
-    domains: &'static [&'static str],
+    methods: &'static [&'static str],
     batch_event: &'static str,
     map: M,
     record: R,
     navigated: N,
-) -> Ready
-where
+) where
     T: serde::Serialize + Clone + Send + 'static,
     M: Fn(TabId, &CdpEvent) -> Option<T> + Send + 'static,
     R: Fn(&AppState, &T) + Send + 'static,
     N: Fn(&AppState, TabId) + Send + 'static,
 {
-    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let mut events = session.subscribe_to(methods);
     tauri::async_runtime::spawn(async move {
-        let mut events = session.subscribe();
-        for method in domains {
-            if let Err(e) = session.call0(method).await {
-                tracing::warn!(%tab_id, "{method} failed: {e}");
-            }
-        }
-        let _ = ready_tx.send(());
         let mut batch = IpcBatch::default();
         loop {
             let incoming = if let Some(deadline) = batch.deadline() {
@@ -151,11 +145,49 @@ where
             }
         }
     });
-    ready_rx
 }
 
-/// Resolves once a feed's `DevTools` domains are enabled.
+/// Resolves once a feed is set up far enough for the first navigation.
 pub type Ready = tokio::sync::oneshot::Receiver<()>;
+
+/// Enable, once for the whole tab, every `DevTools` domain its feeds and page
+/// scripts listen on. Each of them used to enable its own, one after the
+/// other: `Runtime` three times, `Page` five and `Network` twice, each a
+/// round trip through the main thread standing between a new tab and its
+/// first navigation. Here they go out together and are awaited together.
+///
+/// `feeds` is false when the `DevTools` feeds are switched off, and then only
+/// the domains the page scripts need are enabled. Returns whether the
+/// network domain acknowledged its buffer limits, which response capture
+/// depends on.
+pub async fn enable_domains(tab_id: TabId, session: &CdpSession, feeds: bool) -> bool {
+    let report = |what: &str, result: &Result<serde_json::Value, dive_cdp::CdpError>| {
+        if let Err(error) = result {
+            setup_failed(tab_id, what, error);
+        }
+    };
+    if feeds {
+        let (runtime, page, log, network) = tokio::join!(
+            session.call0("Runtime.enable"),
+            session.call0("Page.enable"),
+            session.call0("Log.enable"),
+            crate::network::enable(session),
+        );
+        report("the Runtime domain", &runtime);
+        report("the Page domain", &page);
+        report("the Log domain", &log);
+        report("response body capture", &network);
+        network.is_ok()
+    } else {
+        let (runtime, page) = tokio::join!(
+            session.call0("Runtime.enable"),
+            session.call0("Page.enable"),
+        );
+        report("the Runtime domain", &runtime);
+        report("the Page domain", &page);
+        false
+    }
+}
 
 /// Report that a per-tab feed could not be set up.
 ///
@@ -217,5 +249,66 @@ mod tests {
         batch.push(2);
         assert_eq!(batch.deadline(), Some(deadline));
         assert!(deadline <= tokio::time::Instant::now() + IPC_BATCH_WINDOW);
+    }
+
+    /// Records what the session sent, so a test can answer it.
+    #[derive(Clone, Default)]
+    struct Outbox(std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>);
+    impl dive_cdp::Transport for Outbox {
+        fn send(&self, message: &str) -> Result<(), dive_cdp::CdpError> {
+            self.0
+                .lock()
+                .unwrap()
+                .push(serde_json::from_str(message).unwrap());
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn every_domain_is_enabled_once_and_all_at_the_same_time() {
+        let outbox = Outbox::default();
+        let session = CdpSession::new(outbox.clone());
+        let setup = tokio::spawn({
+            let session = session.clone();
+            async move { enable_domains(TabId::new(), &session, true).await }
+        });
+        tokio::task::yield_now().await;
+        let sent = outbox.0.lock().unwrap().clone();
+        let methods: Vec<_> = sent.iter().map(|m| m["method"].as_str().unwrap()).collect();
+        assert_eq!(
+            methods,
+            [
+                "Runtime.enable",
+                "Page.enable",
+                "Log.enable",
+                "Network.enable"
+            ],
+            "all four are out before any of them is answered"
+        );
+        assert!(sent[3]["params"]["maxTotalBufferSize"].is_number());
+        for message in &sent {
+            session
+                .handle_incoming(
+                    &serde_json::json!({"id": message["id"], "result": {}}).to_string(),
+                )
+                .unwrap();
+        }
+        assert!(setup.await.unwrap(), "the network limits were acknowledged");
+    }
+
+    #[tokio::test]
+    async fn without_feeds_only_the_page_script_domains_are_enabled() {
+        let outbox = Outbox::default();
+        let session = CdpSession::new(outbox.clone());
+        let setup = tokio::spawn({
+            let session = session.clone();
+            async move { enable_domains(TabId::new(), &session, false).await }
+        });
+        tokio::task::yield_now().await;
+        let sent = outbox.0.lock().unwrap().clone();
+        let methods: Vec<_> = sent.iter().map(|m| m["method"].as_str().unwrap()).collect();
+        assert_eq!(methods, ["Runtime.enable", "Page.enable"]);
+        session.close();
+        assert!(!setup.await.unwrap());
     }
 }

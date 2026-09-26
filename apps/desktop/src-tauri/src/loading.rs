@@ -235,15 +235,20 @@ pub fn attach(
     session: CdpSession,
 ) -> crate::cdp_feed::Ready {
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    // `Page` and `Network` are enabled by the tab's setup, once. The frame
+    // tree answers without them, so the main frame's identity is asked for
+    // at once and is known before the first navigation either way.
+    let mut events = session.subscribe_to(&[
+        "Page.frameNavigated",
+        "Page.navigatedWithinDocument",
+        "Page.frameStartedLoading",
+        "Page.frameStoppedLoading",
+        "Network.requestWillBeSent",
+        "Network.loadingFinished",
+        "Network.loadingFailed",
+    ]);
     tauri::async_runtime::spawn(async move {
         let main = MainFrame::default();
-        let mut events = session.subscribe();
-        if let Err(error) = session.call0("Page.enable").await {
-            crate::cdp_feed::setup_failed(tab_id, "the page load feed", &error);
-        }
-        if let Err(error) = crate::network::enable(&session).await {
-            crate::cdp_feed::setup_failed(tab_id, "the network feed", &error);
-        }
         refresh_main(&session, &main).await;
         let _ = ready_tx.send(());
         loop {

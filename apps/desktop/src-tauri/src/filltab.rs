@@ -12,45 +12,31 @@ use crate::state::AppState;
 
 /// Install the control in every document of the tab, when the preference
 /// allows it. Idempotent in the page: the script checks its own marker.
-/// The returned receiver resolves once the new-document script is
-/// registered, so the caller can hold the first navigation until then.
-pub fn attach(
-    app: AppHandle<Runtime>,
-    tab_id: TabId,
-    session: CdpSession,
-) -> crate::cdp_feed::Ready {
-    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-    tauri::async_runtime::spawn(async move {
-        let enabled = {
-            let state = app.state::<AppState>();
-            state.prefs.get(&state).video_fill_tab
-        };
-        if !enabled {
-            let _ = ready_tx.send(());
-            return;
-        }
-        let script = crate::pagescript::build("fill-tab.js", &[]);
-        let _ = session.call0("Page.enable").await;
-        if let Err(e) = session
-            .call(
-                "Page.addScriptToEvaluateOnNewDocument",
-                json!({"source": script, "runImmediately": true}),
-            )
-            .await
-        {
-            tracing::debug!(%tab_id, "fill-tab install failed: {e}");
-        }
-        let _ = ready_tx.send(());
-        // The current document, if the tab already has one.
-        match session
-            .call("Runtime.evaluate", json!({"expression": script}))
-            .await
-        {
-            Ok(_) => tracing::debug!(%tab_id, "fill-tab control installed"),
-            Err(e) => tracing::debug!(%tab_id, "fill-tab evaluate failed: {e}"),
-        }
-    });
-    ready_rx
+/// Resolves once the new-document script is registered, so the caller can
+/// hold the first navigation until then.
+///
+/// Registration is all it takes. The tab's view is new and still on its
+/// blank document, which the first navigation replaces, so evaluating the
+/// script there as well only cost a round trip.
+pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
+    let enabled = {
+        let state = app.state::<AppState>();
+        state.prefs.get(&state).video_fill_tab
+    };
+    if !enabled {
+        return;
+    }
+    let script = crate::pagescript::build("fill-tab.js", &[]);
+    match session
+        .call(
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({"source": script}),
+        )
+        .await
+    {
+        Ok(_) => tracing::debug!(%tab_id, "fill-tab control installed"),
+        Err(e) => tracing::debug!(%tab_id, "fill-tab install failed: {e}"),
+    }
 }
 
 /// Toggle the filled state of the tab's most likely video. Returns what the

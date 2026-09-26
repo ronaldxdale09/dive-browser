@@ -117,24 +117,30 @@ pub(crate) async fn enable(session: &CdpSession) -> Result<Value, dive_cdp::CdpE
 }
 
 /// Forward metadata independently of the bounded response capture worker.
+///
+/// The domain is enabled by the tab's setup ([`crate::cdp_feed::enable_domains`]);
+/// `limits` says whether that call acknowledged the buffer limits, which body
+/// capture relies on. The subscription is taken before this returns, so no
+/// event can slip past between the domain being enabled and the task
+/// starting.
 #[allow(clippy::too_many_lines)] // one actor owns ordered metadata batching and bounded body capture
 pub fn attach(
     app: AppHandle<Runtime>,
     tab_id: TabId,
     session: CdpSession,
     nonce: String,
-) -> crate::cdp_feed::Ready {
+    limits: tokio::sync::oneshot::Receiver<bool>,
+) {
     use tauri::Manager;
-    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let mut events = session.subscribe_to(&[
+        "Network.",
+        "Page.frameStartedLoading",
+        "Page.frameNavigated",
+    ]);
     tauri::async_runtime::spawn(async move {
-        let mut events = session.subscribe();
-        let capture_enabled = match enable(&session).await {
-            Ok(_) => true,
-            Err(error) => {
-                crate::cdp_feed::setup_failed(tab_id, "response body capture", &error);
-                false
-            }
-        };
+        // Events queue on the subscription meanwhile; none of them is a
+        // network event until the domain is on.
+        let capture_enabled = limits.await.unwrap_or(false);
         let (queue, receiver) = tokio::sync::mpsc::channel(BODY_QUEUE_CAP);
         let body_app = app.clone();
         let body_session = session.clone();
@@ -150,7 +156,6 @@ pub fn attach(
         ));
         let mut tracker = BodyTracker::default();
         let mut batch = crate::cdp_feed::IpcBatch::default();
-        let _ = ready_tx.send(());
         loop {
             let incoming = if let Some(deadline) = batch.deadline() {
                 tokio::select! {
@@ -249,7 +254,6 @@ pub fn attach(
         // Dropping a pending CDP call and its permit releases their resources.
         worker.abort();
     });
-    ready_rx
 }
 
 fn record_capture(

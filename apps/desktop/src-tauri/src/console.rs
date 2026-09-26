@@ -53,17 +53,19 @@ pub struct ConsoleEntry {
     pub column: Option<u32>,
 }
 
-/// Enable the domains and forward every entry to the chrome.
-pub fn attach(
-    app: AppHandle<Runtime>,
-    tab_id: TabId,
-    session: CdpSession,
-) -> crate::cdp_feed::Ready {
+/// Forward every entry to the chrome. The `Runtime` and `Log` domains are
+/// enabled by the tab's setup, once, with everything else it listens on.
+pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
     crate::cdp_feed::attach(
         app,
         tab_id,
         session,
-        &["Runtime.enable", "Log.enable"],
+        &[
+            "Runtime.consoleAPICalled",
+            "Runtime.exceptionThrown",
+            "Log.entryAdded",
+            "Page.frameNavigated",
+        ],
         "console-entry-batch",
         map_event,
         |state, entry| {
@@ -75,7 +77,7 @@ pub fn attach(
             state.buffers.push_console(entry.clone());
         },
         |state, tab_id| state.buffers.mark_console(tab_id),
-    )
+    );
 }
 
 /// The arguments of one `console.*` call as a line of text. A leading string

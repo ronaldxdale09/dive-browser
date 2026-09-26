@@ -188,7 +188,7 @@ pub fn on_native_terminate(webview: &tauri::Webview<Runtime>) {
 
 /// Watch a tab's session for renderer crashes and reload within budget.
 pub fn watch(app: AppHandle<Runtime>, tab_id: TabId, view_label: String, session: CdpSession) {
-    let mut events = session.subscribe();
+    let mut events = session.subscribe_to(&["Inspector.targetCrashed"]);
     tauri::async_runtime::spawn(async move {
         if let Err(error) = session.call0("Inspector.enable").await {
             crate::cdp_feed::setup_failed(tab_id, "renderer crash events", &error);

@@ -202,12 +202,14 @@ pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
     // Subscribed before the task is spawned: the caller navigates as soon as
     // the other feeds are ready, and a subscription taken inside the task
     // could miss the first load entirely.
-    let mut events = session.subscribe();
+    // Only the page's own navigations and loads wake it; `Page` is enabled by
+    // the tab's setup, once, with everything else the tab listens on.
+    let mut events = session.subscribe_to(&[
+        "Page.frameNavigated",
+        "Page.navigatedWithinDocument",
+        "Page.loadEventFired",
+    ]);
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = session.call0("Page.enable").await {
-            crate::cdp_feed::setup_failed(tab_id, "the favicon watcher", &e);
-            return;
-        }
         // The origin the current icon belongs to. A move to another origin
         // invalidates it immediately, so no tab ever wears a stranger's mark.
         let mut origin: Option<String> = None;

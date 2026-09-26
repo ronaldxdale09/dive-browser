@@ -815,88 +815,95 @@ impl TabHost {
             // `DIVE_DISABLE_FEEDS=1` leaves the DevTools session idle, to
             // tell an engine fault apart from one our own traffic provokes.
             let feeds = std::env::var_os("DIVE_DISABLE_FEEDS").is_none();
-            let (console_ready, network_ready, interception_ready, fill_ready, loading_ready) =
-                if feeds {
-                    let c = crate::console::attach(app.clone(), tab_id, session.clone());
-                    let n = crate::network::attach(
-                        app.clone(),
-                        tab_id,
-                        session.clone(),
-                        activity_nonce.clone(),
-                    );
-                    crate::favicon::attach(app.clone(), tab_id, session.clone());
-                    let loading = crate::loading::attach(app.clone(), tab_id, session.clone());
-                    let f = crate::filltab::attach(app.clone(), tab_id, session.clone());
-                    let r = crate::rules::attach(
-                        app.clone(),
-                        tab_id,
-                        tab.workspace_id,
-                        session.clone(),
-                    );
-                    crate::inspect::watch(app.clone(), tab_id, &session);
-                    crate::crash::watch(
-                        app.clone(),
-                        tab_id,
-                        view.label().to_owned(),
-                        session.clone(),
-                    );
-                    (c, n, r, f, loading)
-                } else {
-                    let (ct, cr) = tokio::sync::oneshot::channel();
-                    let (nt, nr) = tokio::sync::oneshot::channel();
-                    let (rt, rr) = tokio::sync::oneshot::channel();
-                    let (ft, fr) = tokio::sync::oneshot::channel();
-                    let (lt, lr) = tokio::sync::oneshot::channel();
-                    let _ = (
-                        ct.send(()),
-                        nt.send(()),
-                        rt.send(()),
-                        ft.send(()),
-                        lt.send(()),
-                    );
-                    (cr, nr, rr, fr, lr)
-                };
+            // Every feed subscribes before this returns and enables nothing
+            // itself; the domains are enabled once, below, for all of them.
+            let (limits_tx, limits_rx) = tokio::sync::oneshot::channel();
+            let (interception_ready, loading_ready) = if feeds {
+                crate::console::attach(app.clone(), tab_id, session.clone());
+                crate::network::attach(
+                    app.clone(),
+                    tab_id,
+                    session.clone(),
+                    activity_nonce.clone(),
+                    limits_rx,
+                );
+                crate::favicon::attach(app.clone(), tab_id, session.clone());
+                let loading = crate::loading::attach(app.clone(), tab_id, session.clone());
+                let r =
+                    crate::rules::attach(app.clone(), tab_id, tab.workspace_id, session.clone());
+                crate::inspect::watch(app.clone(), tab_id, &session);
+                crate::crash::watch(
+                    app.clone(),
+                    tab_id,
+                    view.label().to_owned(),
+                    session.clone(),
+                );
+                (r, loading)
+            } else {
+                let (rt, rr) = tokio::sync::oneshot::channel();
+                let (lt, lr) = tokio::sync::oneshot::channel();
+                let _ = (rt.send(()), lt.send(()));
+                (rr, lr)
+            };
             let session_for_prefs = session.clone();
             self.cdp.insert(tab_id, session);
             let nav = view.clone();
             let prefs_app = app.clone();
             tauri::async_runtime::spawn(async move {
-                let _ = console_ready.await;
-                let _ = network_ready.await;
-                let _ = interception_ready.await;
-                let _ = fill_ready.await;
-                let _ = loading_ready.await;
+                // One prelude per session: each domain enabled once, all of
+                // them together. This used to be some two dozen round trips
+                // made one after another, each through the main thread,
+                // before a new tab could start loading.
+                let limits =
+                    crate::cdp_feed::enable_domains(tab_id, &session_for_prefs, feeds).await;
+                let _ = limits_tx.send(limits);
                 // Privacy preferences have to be in force before the document
                 // request goes out, or the first load escapes them.
                 let (prefs, chrome_scheme) = {
                     let state = prefs_app.state::<AppState>();
                     (state.prefs.get(&state), state.prefs.chrome_scheme())
                 };
-                crate::privacy::attach_page(prefs_app.clone(), tab_id, session_for_prefs.clone())
-                    .await;
-                tracing::debug!(%tab_id, "privacy page setup complete before navigation");
-                crate::permissions::attach_page(
-                    prefs_app.clone(),
-                    tab_id,
-                    session_for_prefs.clone(),
-                    nav.clone(),
-                    permission_workspace,
-                    permission_container,
-                )
-                .await;
-                tracing::debug!(%tab_id, "permission page setup complete before navigation");
-                crate::activity::attach(&activity, tab_id, &activity_nonce, &session_for_prefs)
-                    .await;
-                crate::credential_fill::attach(
-                    prefs_app.clone(),
-                    tab_id,
-                    session_for_prefs.clone(),
-                )
-                .await;
-                crate::form_fill::attach(prefs_app.clone(), tab_id, session_for_prefs.clone())
-                    .await;
-                crate::tab_audio::attach(prefs_app.clone(), tab_id, session_for_prefs.clone())
-                    .await;
+                // Everything the first document needs registered, sent
+                // together. Each part issues its first call when first polled
+                // and `join!` polls them in this order, so the page scripts
+                // still register -- and so run at document start -- in the
+                // order they always did.
+                let s = &session_for_prefs;
+                tokio::join!(
+                    async {
+                        let _ = interception_ready.await;
+                    },
+                    async {
+                        let _ = loading_ready.await;
+                    },
+                    async {
+                        if feeds {
+                            crate::filltab::attach(prefs_app.clone(), tab_id, s.clone()).await;
+                        }
+                    },
+                    async {
+                        crate::privacy::attach_page(prefs_app.clone(), tab_id, s.clone()).await;
+                        tracing::debug!(%tab_id, "privacy page setup complete before navigation");
+                    },
+                    async {
+                        crate::permissions::attach_page(
+                            prefs_app.clone(),
+                            tab_id,
+                            s.clone(),
+                            nav.clone(),
+                            permission_workspace,
+                            permission_container,
+                        )
+                        .await;
+                        tracing::debug!(%tab_id, "permission page setup complete before navigation");
+                    },
+                    crate::activity::attach(&activity, tab_id, &activity_nonce, s),
+                    crate::credential_fill::attach(prefs_app.clone(), tab_id, s.clone()),
+                    crate::form_fill::attach(prefs_app.clone(), tab_id, s.clone()),
+                    crate::tab_audio::attach(prefs_app.clone(), tab_id, s.clone()),
+                    crate::prefs::apply(s, &prefs, chrome_scheme.as_deref()),
+                );
+                tracing::debug!(%tab_id, "page setup complete before navigation");
                 // A tab that was muted before it was discarded wakes up muted:
                 // the view is new, and native mute belongs to the view.
                 if crate::tab_audio::is_muted(tab_id) {
@@ -911,8 +918,6 @@ impl TabHost {
                         }
                     });
                 }
-                crate::prefs::apply(&session_for_prefs, &prefs, chrome_scheme.as_deref()).await;
-                tracing::debug!(%tab_id, "browser preferences complete before navigation");
                 if session_for_prefs.is_closed()
                     || !activity.session_current(tab_id, &activity_nonce)
                 {

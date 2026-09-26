@@ -151,24 +151,39 @@ struct PageEvent {
 pub async fn attach_page(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
     let binding = page_binding(tab_id);
     let source = YOUTUBE_SCRIPT.replace("__DIVE_PRIVACY_BINDING__", &binding);
-    let mut events = session.subscribe();
+    let mut events = session.subscribe_to(&[
+        "Runtime.bindingCalled",
+        "Runtime.executionContext",
+        "Page.frameNavigated",
+        "Page.frameStartedLoading",
+        "Network.requestWillBeSent",
+        "Fetch.requestPaused",
+    ]);
 
-    for (method, params) in [
-        ("Runtime.enable", json!({})),
-        ("Runtime.addBinding", json!({"name": binding})),
-        ("Page.enable", json!({})),
-        (
+    // The domains are on already: the tab's setup enables them once. Both
+    // registrations go out together, the binding first.
+    let (bound, registered) = tokio::join!(
+        session.call("Runtime.addBinding", json!({"name": binding})),
+        session.call(
             "Page.addScriptToEvaluateOnNewDocument",
             json!({"source": &source}),
         ),
+    );
+    for (method, result) in [
+        ("Runtime.addBinding", bound),
+        ("Page.addScriptToEvaluateOnNewDocument", registered),
     ] {
-        if let Err(error) = session.call(method, params).await {
+        if let Err(error) = result {
             tracing::debug!(%tab_id, %method, "DivePrivacy page setup failed open: {error}");
         }
     }
     // Join the same transaction boundary as `prefs_set`: otherwise a tab
     // attaching with an older snapshot could register its policy after a
     // newer persisted update had already finished applying.
+    //
+    // Only documents to come are configured. The view is new and still on
+    // its blank document, which the first navigation replaces; bootstrapping
+    // and configuring that one as well was two round trips for nothing.
     {
         let state = app.state::<crate::state::AppState>();
         let _update = state.prefs.begin_update().await;
@@ -179,13 +194,6 @@ pub async fn attach_page(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSes
                 tracing::debug!(%tab_id, "DivePrivacy document policy registration failed open: {error}");
             }
         }
-        if let Err(error) = session
-            .call("Runtime.evaluate", json!({"expression": &source}))
-            .await
-        {
-            tracing::debug!(%tab_id, "DivePrivacy current-page bootstrap failed open: {error}");
-        }
-        apply_page(&session, &prefs).await;
     }
 
     tauri::async_runtime::spawn(async move {

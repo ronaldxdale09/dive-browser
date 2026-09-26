@@ -178,20 +178,20 @@ pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession)
             ("__BINDING__", BINDING.to_owned()),
         ],
     );
-    let mut events = session.subscribe();
+    let mut events = session.subscribe_to(&["Runtime.bindingCalled"]);
+    // Registered for every document to come, before the first navigation.
+    // The view is still on its blank document, so there is no page to
+    // evaluate the script in now. Both calls go out together.
     let setup = async {
-        session
-            .call("Runtime.addBinding", json!({"name": BINDING}))
-            .await?;
-        session
-            .call(
+        let (binding, script) = tokio::join!(
+            session.call("Runtime.addBinding", json!({"name": BINDING})),
+            session.call(
                 "Page.addScriptToEvaluateOnNewDocument",
                 json!({"source": source}),
-            )
-            .await?;
-        let _ = session
-            .call("Runtime.evaluate", json!({"expression": source}))
-            .await;
+            ),
+        );
+        binding?;
+        script?;
         Ok::<(), dive_cdp::CdpError>(())
     };
     if let Err(error) = setup.await {
