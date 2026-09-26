@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseBlocks, parseInline } from "./markdown";
+import { parseBlocks, parseInline, tableCells } from "./markdown";
 
 describe("parseBlocks", () => {
   it("separates fenced code from prose and keeps its language", () => {
@@ -49,5 +49,22 @@ describe("parseInline", () => {
   });
   it("only links http(s) URLs", () => {
     expect(parseInline("[x](javascript:alert(1))")).toEqual([{ kind: "text", text: "[x](javascript:alert(1))" }]);
+  });
+});
+
+describe("tables", () => {
+  it("reads a GitHub table and pads short rows to the header", () => {
+    const blocks = parseBlocks("Results:\n\n| Metric | Value |\n| --- | :---: |\n| LCP | 1.2 s |\n| CLS |\n\nAfter.");
+    expect(blocks).toEqual([
+      { kind: "paragraph", text: "Results:" },
+      { kind: "table", header: ["Metric", "Value"], rows: [["LCP", "1.2 s"], ["CLS", ""]] },
+      { kind: "paragraph", text: "After." },
+    ]);
+  });
+  it("leaves a line with a pipe in it as prose when no rule follows", () => {
+    expect(parseBlocks("a | b\nnot a rule")).toEqual([{ kind: "paragraph", text: "a | b\nnot a rule" }]);
+  });
+  it("keeps an escaped pipe inside its cell", () => {
+    expect(tableCells("| a \\| b | c |")).toEqual(["a | b", "c"]);
   });
 });
