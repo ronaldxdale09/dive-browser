@@ -194,3 +194,16 @@ describe("capture internal page", () => {
     expect(documentText).toContain("/Count 3");
   });
 });
+
+describe("an unknown dive:// page", () => {
+  it("is named as a Dive page, not the capture editor, and offers a way out", async () => {
+    const closeTab = vi.fn().mockResolvedValue(undefined);
+    useBrowser.setState({ closeTab });
+    render(<InternalPage tab={{ ...capture, id: "odd", url: "dive://nowhere" }} />);
+    expect(await screen.findByText("There is no built-in page called “nowhere”.")).toBeTruthy();
+    expect(screen.queryByText(/Capture editor/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Go home" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close tab" }));
+    expect(closeTab).toHaveBeenCalledWith("odd");
+  });
+});

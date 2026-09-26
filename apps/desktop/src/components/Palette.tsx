@@ -209,7 +209,7 @@ export function Palette() {
               <Command.Item value={`open ${query}`} title={query} onSelect={() => void go(query)} className="flex items-center gap-2 rounded-lg px-3 py-2">
                 <Icon icon={looksLikeUrl ? ArrowUpRight : Search} size={14} className="text-ink-3" />
                 <span className="text-ink-2">{looksLikeUrl ? "Open" : "Search"}</span>
-                <span className="truncate font-mono text-ink">{query}</span>
+                <span className="truncate font-mono text-ink" title={query}>{query}</span>
               </Command.Item>
             </Command.Group>
           )}
@@ -221,7 +221,7 @@ export function Palette() {
                   <Icon icon={Server} size={14} className="shrink-0 text-highlight" />
                   <span className="font-mono">localhost:{d.port}</span>
                   <span className="text-ink-2">{d.framework}</span>
-                  {d.title && <span className="ml-auto truncate pl-3 text-[11px] text-ink-3">{d.title}</span>}
+                  {d.title && <span className="ml-auto truncate pl-3 text-[11px] text-ink-3" title={d.title}>{d.title}</span>}
                 </Command.Item>
               ))}
             </Command.Group>
