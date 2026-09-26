@@ -1,6 +1,6 @@
 import { Check, Copy, Share } from "lucide-react";
 import { OPEN_SHARE } from "../lib/commands";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
 import type { ShareInfo } from "../lib/ipc";
 import { tabInThisWindow, useBrowser } from "../store/browser";
@@ -10,6 +10,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { errorMessage } from "../lib/errors";
 import { copyText } from "../lib/clipboard";
+import { useDismiss } from "../lib/useDismiss";
 
 /** Share button: the current URL rewritten to this machine's LAN address, as a QR code. */
 export function SharePopover() {
@@ -33,6 +34,10 @@ export function SharePopover() {
   const panel = useRef<HTMLDivElement>(null);
   useCoversContent(open);
   useFocusTrap(panel, { active: open });
+  // A click on the page never reaches the chrome as a mousedown, only as the
+  // window losing focus; useDismiss closes on that too.
+  const dismiss = useCallback(() => setOpen(false), []);
+  useDismiss(ref, open, dismiss);
 
   // The page's right-click menu asks for the QR code through the host.
   useEffect(() => {
@@ -55,16 +60,8 @@ export function SharePopover() {
       .shareUrl(url)
       .then((i) => alive && (setShared({ url, info: i }), setFailure(null)))
       .catch((e: unknown) => alive && setFailure({ url, message: errorMessage(e) }));
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
     return () => {
       alive = false;
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
     };
   }, [open, url]);
 

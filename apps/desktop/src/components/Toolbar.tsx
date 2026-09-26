@@ -2,7 +2,7 @@ import { isPrivateWindow } from "../lib/privateMode";
 import { prettyUrl, splitAddress } from "../lib/prettyUrl";
 import { Captions, FileText, Globe, House, Info, ScrollText, Lock, MoreHorizontal, RotateCw, Search, TriangleAlert, X, Menu } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FOCUS_ADDRESS } from "../lib/commands";
 import { tabInThisWindow, useBrowser } from "../store/browser";
@@ -21,6 +21,7 @@ import { MainMenu } from "./MainMenu";
 import { Tooltip } from "./Tooltip";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
+import { useDismiss } from "../lib/useDismiss";
 import { useSubtitles } from "../store/subtitles";
 import { useRecorder } from "../store/recorder";
 import { runCommand } from "../lib/commands";
@@ -279,16 +280,10 @@ function ToolbarMore({ children }: { children: React.ReactNode }) {
   const panel = useRef<HTMLDivElement>(null);
   useCoversContent(open);
   useFocusTrap(panel, { active: open, onEscape: () => setOpen(false) });
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
-    };
-    window.addEventListener("mousedown", close);
-    return () => {
-      window.removeEventListener("mousedown", close);
-    };
-  }, [open]);
+  // Closes on a press outside, Escape, focus elsewhere, and a click on the
+  // page (seen only as the window losing focus).
+  const dismiss = useCallback(() => setOpen(false), []);
+  useDismiss(root, open, dismiss);
   if (!any) return null;
   return (
     <div ref={root} className="relative shrink-0">

@@ -271,15 +271,19 @@ describe("Toolbar", () => {
     await waitFor(() => expect(ipc.setContentCovered).toHaveBeenLastCalledWith(false));
   });
 
-  it("closes a nested Share popover without closing the compact actions tray", () => {
+  it("puts the compact tray and Share away when the page is clicked", () => {
     useBrowser.setState({ zoom: { [tab.id]: 1.25 } });
     render(<Toolbar compact />);
     fireEvent.click(screen.getByRole("button", { name: "More page actions" }));
-    fireEvent.click(screen.getByRole("button", { name: "Share to another device" }));
-    const share = screen.getByRole("dialog", { name: "Share" });
-    fireEvent.keyDown(share, { key: "Escape" });
-    expect(screen.queryByRole("dialog", { name: "Share" })).toBeNull();
     expect(screen.getByRole("dialog", { name: "Page actions" })).toBeTruthy();
+    // A click on the native page reaches the chrome only as the window blurring.
+    act(() => void window.dispatchEvent(new Event("blur")));
+    expect(screen.queryByRole("dialog", { name: "Page actions" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Share to another device" }));
+    expect(screen.getByRole("dialog", { name: "Share" })).toBeTruthy();
+    act(() => void window.dispatchEvent(new Event("blur")));
+    expect(screen.queryByRole("dialog", { name: "Share" })).toBeNull();
   });
 
   it("finishes editing after Enter so the final navigation URL replaces the submitted text", async () => {
