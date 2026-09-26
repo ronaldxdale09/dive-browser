@@ -914,6 +914,7 @@ pub fn emit_state_changed(app: &AppHandle<Runtime>, event: CoreEvent) -> tauri::
 
 /// Register commands that only touch core state. Engine-backed actions are
 /// exposed as dedicated IPC commands; the registry lists them for the palette.
+#[allow(clippy::too_many_lines)] // The built-in command table; one list to read.
 pub fn register_builtin(registry: &dive_core::CommandRegistry) {
     let builtin = [
         ("tab.new", "New tab", Some("mod+t"), CommandScope::Workspace),
@@ -921,7 +922,7 @@ pub fn register_builtin(registry: &dive_core::CommandRegistry) {
         ("tab.reload", "Reload", Some("mod+r"), CommandScope::Tab),
         (
             "tab.reloadHard",
-            "Reload ignoring cache",
+            "Hard reload",
             Some("mod+shift+r"),
             CommandScope::Tab,
         ),
@@ -2199,7 +2200,8 @@ pub(crate) fn tab_reload(
 
 /// Reload `id` without the HTTP cache, as ⌘⇧R does in every browser: a
 /// stale stylesheet or script is fetched again instead of served from disk.
-/// A tab with no DevTools session (still being created) gets a plain reload.
+/// A tab with no debugging session yet (still being created) gets a plain
+/// reload.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn tab_reload_hard(

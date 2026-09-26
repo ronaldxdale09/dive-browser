@@ -308,7 +308,7 @@ export const COMMAND_TITLES: Record<string, string> = {
   "tab.reopen": "Reopen closed tab",
   "tab.detach": "Move tab to its own window",
   "tab.reload": "Reload",
-  "tab.reloadHard": "Reload ignoring cache",
+  "tab.reloadHard": "Hard reload",
   "tab.home": "Home",
   "tab.stop": "Stop loading",
   "tab.print": "Print…",

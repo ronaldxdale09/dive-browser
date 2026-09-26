@@ -246,6 +246,7 @@ fn history_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
 // Only the native menu bar uses this, and only macOS has one: Windows
 // draws its controls in the chrome instead.
 #[cfg(not(target_os = "windows"))]
+#[allow(clippy::too_many_lines)] // The whole menu bar in reading order, as the user sees it.
 pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
     // "About" opens Dive's own About section rather than the stock panel,
     // so the version, engine and update check are all in one place.
@@ -280,7 +281,7 @@ pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
         .item(&item(
             app,
             "tab.reloadHard",
-            "Reload Ignoring Cache",
+            "Hard Reload",
             "CmdOrCtrl+Shift+R",
         )?)
         .separator()

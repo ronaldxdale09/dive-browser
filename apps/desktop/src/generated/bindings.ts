@@ -209,7 +209,8 @@ export const commands = {
 	/**
 	 *  Reload `id` without the HTTP cache, as ⌘⇧R does in every browser: a
 	 *  stale stylesheet or script is fetched again instead of served from disk.
-	 *  A tab with no DevTools session (still being created) gets a plain reload.
+	 *  A tab with no debugging session yet (still being created) gets a plain
+	 *  reload.
 	 */
 	tabReloadHard: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_reload_hard", { id })),
 	/**  Set a tab's zoom factor (clamped to the step range). */
