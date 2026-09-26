@@ -5,6 +5,7 @@ import { useAgent } from "../../store/agent";
 import { tabInThisWindow, useBrowser } from "../../store/browser";
 import { usePrefs } from "../../store/prefs";
 import { Thread } from "./Thread";
+import { FOCUS_AGENT } from "../../lib/commands";
 
 const PROVIDERS: ProviderInfo[] = [
   {
@@ -72,6 +73,17 @@ afterEach(() => {
 });
 
 describe("Thread", () => {
+  it("names the composer and says which page goes with each message", () => {
+    render(<Thread onAddProvider={() => {}} />);
+    const box = screen.getByRole("textbox", { name: "Message the agent" });
+    const chip = screen.getByRole("button", { name: "Send this page with messages: Example docs" });
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
+    // Focus elsewhere; ⌘J or F6 asks for the composer back.
+    box.blur();
+    act(() => void window.dispatchEvent(new CustomEvent(FOCUS_AGENT)));
+    expect(document.activeElement).toBe(box);
+  });
+
   it("does not ask about a detached tab as this page", () => {
     useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [tab.id] });
     expect(useBrowser.getState().detached).toEqual([tab.id]);

@@ -160,6 +160,26 @@ const PRESENT: Record<string, string> = {
   Compared: "Compare",
 };
 
+/** Where a step stands, as the step list draws it. */
+export type StepStatus = "awaiting" | "failed" | "running" | "ok";
+
+/**
+ * A step's state in words. The row shows it as a colour and a glyph (a
+ * spinner, a tick, a cross, a shield), none of which reaches a screen reader.
+ */
+export function stepStatusText(status: StepStatus): string {
+  switch (status) {
+    case "awaiting":
+      return "waiting for your approval";
+    case "failed":
+      return "failed";
+    case "running":
+      return "running";
+    case "ok":
+      return "done";
+  }
+}
+
 /**
  * A step that has not happened yet, worded so: "Click the link", not
  * "Clicked the link", while it waits for approval or is still running.

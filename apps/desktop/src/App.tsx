@@ -33,6 +33,7 @@ import { bootSubtitles } from "./store/subtitles";
 import { useRecording } from "./store/recording";
 import { useRecorder } from "./store/recorder";
 import { WindowControls } from "./components/WindowControls";
+import { AgentAnnouncer } from "./components/agent/AgentAnnouncer";
 import { WindowResizeEdges } from "./components/WindowResizeEdges";
 import { isWindows } from "./lib/commands";
 import { listenForAgentPresence } from "./store/agentPresence";
@@ -269,6 +270,7 @@ export function App() {
         {recordingPhase === "done" && <RecordingDoneDialog />}
       </Suspense>
       <LiveRegions />
+      {!isPrivateWindow() && <AgentAnnouncer />}
       <BrowserToasts />
       <UpdateDialog />
       <TaskManager />

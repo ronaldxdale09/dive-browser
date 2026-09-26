@@ -1,6 +1,7 @@
 import { Check, ChevronRight, Loader2, ShieldAlert, X } from "lucide-react";
-import { useState } from "react";
-import { describeStep, pendingLabel } from "../../lib/agentSteps";
+import { useId, useState } from "react";
+import { describeStep, pendingLabel, stepStatusText } from "../../lib/agentSteps";
+import type { StepStatus } from "../../lib/agentSteps";
 import type { Step } from "../../store/agent";
 import { useAgent } from "../../store/agent";
 import { Icon } from "../Icon";
@@ -73,8 +74,9 @@ function StepRow({ step }: { step: Step }) {
   const approve = useAgent((s) => s.approve);
   const setSessionAutoApprove = useAgent((s) => s.setSessionAutoApprove);
   const { label: done, icon } = describeStep(step);
+  const question = useId();
   const running = step.summary === undefined && !step.error && !step.awaiting;
-  const status = step.awaiting ? "awaiting" : step.error ? "failed" : running ? "running" : "ok";
+  const status: StepStatus = step.awaiting ? "awaiting" : step.error ? "failed" : running ? "running" : "ok";
   // Only a step that ran is in the past; a denied or failed one never happened.
   const label = status === "ok" ? done : pendingLabel(done);
   const tone = status === "failed" ? "text-danger" : status === "awaiting" ? "text-highlight" : step.action ? "text-ink" : "text-ink-2";
@@ -84,8 +86,11 @@ function StepRow({ step }: { step: Step }) {
         <span className={`grid size-5 shrink-0 place-items-center rounded-md ${step.action ? "bg-surface-3" : ""} ${tone}`}>
           <Icon icon={icon} size={12} />
         </span>
-        <span className={`min-w-0 flex-1 truncate text-[11px] ${tone}`}>{label}</span>
-        <span className="shrink-0 text-ink-3">
+        <span className={`min-w-0 flex-1 truncate text-[11px] ${tone}`}>
+          {label}
+          <span className="sr-only">, {stepStatusText(status)}</span>
+        </span>
+        <span className="shrink-0 text-ink-3" aria-hidden>
           {status === "running" && <Icon icon={Loader2} size={11} className="animate-spin motion-reduce:animate-none" />}
           {status === "ok" && <Icon icon={Check} size={11} className="text-ink-3" />}
           {status === "failed" && <Icon icon={X} size={11} className="text-danger" />}
@@ -95,10 +100,12 @@ function StepRow({ step }: { step: Step }) {
       </button>
       {step.awaiting && (
         <div className="px-1.5 pt-0.5 pb-1.5">
-          <p className="mb-1.5 text-[11px] text-ink-2">
+          <p id={question} className="mb-1.5 text-[11px] text-ink-2">
             {step.caution ? `${step.caution[0]?.toUpperCase()}${step.caution.slice(1)}. Allow it?` : "This changes the page. Allow it?"}
           </p>
-          <div className="flex flex-wrap items-center gap-1.5">
+          {/* The buttons are named by the question they answer, so tabbing
+              to Allow says what is being allowed. */}
+          <div role="group" aria-labelledby={question} className="flex flex-wrap items-center gap-1.5">
             <button type="button" onClick={() => void approve(step.id, true)} className="h-6 rounded-full bg-accent px-3 text-[11px] font-medium text-accent-ink">
               Allow
             </button>

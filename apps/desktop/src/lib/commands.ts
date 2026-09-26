@@ -223,6 +223,8 @@ export const EDIT_BOOKMARK = "dive:edit-bookmark";
 export const OPEN_SHARE = "dive:open-share";
 /** A bookmark was added, renamed or removed somewhere; anything showing bookmark state re-reads it. */
 export const BOOKMARKS_CHANGED = "dive:bookmarks-changed";
+/** Asks an open agent to put the keyboard in its composer; the Thread listens for it. */
+export const FOCUS_AGENT = "dive:focus-agent";
 
 /**
  * The tabs the keyboard walks, in the order they are drawn: the essentials

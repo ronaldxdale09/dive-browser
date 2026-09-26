@@ -1,6 +1,7 @@
 import { ArrowUp, Brain, ChevronDown, ChevronRight, ChevronUp, EyeOff, FlaskConical, Globe, RotateCcw, ShieldAlert, ShieldOff, Square } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { compactNumber, formatCost } from "../../lib/agentSteps";
+import { FOCUS_AGENT } from "../../lib/commands";
 import { replayableSteps, toPlaywrightSpec } from "../../lib/playwright";
 import { Markdown } from "../../lib/markdown";
 import type { Message } from "../../store/agent";
@@ -114,6 +115,13 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
   useEffect(() => {
     textRef.current?.focus();
   }, []);
+  // ⌘J again, or F6, while the keyboard is on the page or elsewhere in the
+  // chrome brings it back here rather than closing the agent.
+  useEffect(() => {
+    const focus = () => textRef.current?.focus();
+    window.addEventListener(FOCUS_AGENT, focus);
+    return () => window.removeEventListener(FOCUS_AGENT, focus);
+  }, []);
 
   const submit = (text = draft) => {
     if (!text.trim() || busy) return;
@@ -204,6 +212,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
             }
           }}
           rows={Math.min(8, Math.max(2, draft.split("\n").length))}
+          aria-label="Message the agent"
           placeholder={activeTab ? "Ask about this page, or say what to do…" : "Open a tab, then ask…"}
           className="max-h-[38vh] w-full resize-none bg-transparent text-[13px] leading-6 text-ink outline-none placeholder:text-ink-3"
         />
@@ -234,6 +243,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
               type="button"
               onClick={() => void update({ agent_include_page: !includePage })}
               aria-pressed={includePage}
+              aria-label={`Send this page with messages: ${current.title || current.url}`}
               title={includePage ? "The page goes with each message. Click to send only what you type." : "The page is not sent. Click to include its text, address and console."}
               className={`flex h-7 min-w-0 max-w-[40%] items-center gap-1.5 rounded-full px-2.5 text-[11px] transition-[color,background-color,opacity] ${
                 includePage ? "bg-surface-2 text-ink-2 hover:text-ink" : "text-ink-3 line-through decoration-ink-3/50 hover:text-ink-2"
