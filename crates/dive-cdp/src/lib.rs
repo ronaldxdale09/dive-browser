@@ -10,6 +10,7 @@ pub mod error;
 pub mod page;
 pub mod queue;
 mod session;
+mod worlds;
 
 pub use error::CdpError;
 pub use session::{CdpEvent, CdpEventReceiver, CdpSession, Transport};
