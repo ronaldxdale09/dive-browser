@@ -1602,7 +1602,7 @@ dependencies = [
 
 [[package]]
 name = "dive-agent"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "eventsource-stream",
  "futures-util",
@@ -1616,7 +1616,7 @@ dependencies = [
 
 [[package]]
 name = "dive-cdp"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -1628,7 +1628,7 @@ dependencies = [
 
 [[package]]
 name = "dive-core"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "rusqlite",
  "serde",
@@ -1644,7 +1644,7 @@ dependencies = [
 
 [[package]]
 name = "dive-desktop"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "adblock",
  "aes",
@@ -1710,7 +1710,7 @@ dependencies = [
 
 [[package]]
 name = "dive-integration"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "async-trait",
  "dive-cdp",
@@ -1726,7 +1726,7 @@ dependencies = [
 
 [[package]]
 name = "dive-mcp"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "async-trait",
  "axum",
