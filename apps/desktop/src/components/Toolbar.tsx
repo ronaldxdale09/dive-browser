@@ -473,7 +473,9 @@ function ZoomBadge() {
     <Tooltip label="Reset zoom" shortcut="⌘0">
       <button
         type="button"
-        aria-label="Reset zoom"
+        // The level is the button's whole face; a name of "Reset zoom" alone
+        // hid it from anyone not looking.
+        aria-label={`Zoom ${Math.round(zoom * 100)}%, reset`}
         onClick={() => void zoomStep(0)}
         className="mr-1 h-6 rounded-full border border-line px-2 font-mono text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink"
       >

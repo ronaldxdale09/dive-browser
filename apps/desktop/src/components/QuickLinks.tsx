@@ -95,7 +95,9 @@ export function QuickLinks() {
                 aria-label={`Remove ${link.name} from quick links`}
                 title="Remove"
                 onClick={() => remove(link.url)}
-                className="absolute -top-0.5 -right-0.5 grid size-4 place-items-center rounded-full bg-surface-3 text-ink-3 opacity-0 transition-opacity group-hover/link:opacity-100 hover:text-ink focus-visible:opacity-100"
+                // A 16px mark with a 24px target: the pseudo-element takes the
+                // pointer for 4px around it.
+                className="absolute -top-0.5 -right-0.5 grid size-4 place-items-center rounded-full bg-surface-3 text-ink-3 opacity-0 transition-opacity before:absolute before:-inset-1 group-hover/link:opacity-100 hover:text-ink focus-visible:opacity-100"
               >
                 <Icon icon={X} size={9} />
               </button>

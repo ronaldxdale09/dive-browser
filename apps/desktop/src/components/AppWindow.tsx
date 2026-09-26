@@ -164,7 +164,7 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
         {error && (
           <div role="alert" className="flex items-start gap-2 border-b border-line bg-surface px-3 py-2 text-xs text-danger">
             <p className="min-w-0 flex-1 break-words">{error}</p>
-            <button type="button" aria-label="Dismiss error" onClick={() => useBrowser.setState({ error: null })} className="grid size-5 shrink-0 place-items-center rounded hover:bg-surface-2"><Icon icon={X} size={13} /></button>
+            <button type="button" aria-label="Dismiss error" onClick={() => useBrowser.setState({ error: null })} className="relative grid size-5 shrink-0 place-items-center rounded before:absolute before:-inset-0.5 hover:bg-surface-2"><Icon icon={X} size={13} /></button>
           </div>
         )}
       </div>

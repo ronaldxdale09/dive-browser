@@ -97,7 +97,7 @@ export function AppsDialog() {
               className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
             />
             {query && (
-              <button type="button" aria-label="Clear" onClick={() => setQuery("")} className="grid size-5 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-ink">
+              <button type="button" aria-label="Clear" onClick={() => setQuery("")} className="relative grid size-5 place-items-center rounded-full text-ink-3 before:absolute before:-inset-0.5 hover:bg-surface-3 hover:text-ink">
                 <Icon icon={X} size={11} />
               </button>
             )}

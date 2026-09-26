@@ -180,7 +180,7 @@ describe("Toolbar", () => {
   it("shows the zoom badge for a tab opened at the default zoom, and hides it at that default", () => {
     useBrowser.setState({ defaultZoom: 1.25 });
     render(<Toolbar />);
-    expect(screen.queryByRole("button", { name: "Reset zoom" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Zoom \d+%, reset|Reset zoom)$/ })).toBeNull();
     useBrowser.setState({ defaultZoom: 1 });
   });
 
@@ -188,11 +188,11 @@ describe("Toolbar", () => {
     const other = { ...tab, id: "tab-2", url: "https://other.test/" };
     useBrowser.setState({ tabs: [tab, other], activeTab: tab.id, zoom: { [other.id]: 2 }, defaultZoom: 1 });
     render(<Toolbar />);
-    expect(screen.queryByRole("button", { name: "Reset zoom" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Zoom \d+%, reset|Reset zoom)$/ })).toBeNull();
     act(() => useBrowser.getState().applyZoom(tab.id, 1.5));
-    expect(screen.getByRole("button", { name: "Reset zoom" }).textContent).toBe("150%");
+    expect(screen.getByRole("button", { name: "Zoom 150%, reset" }).textContent).toBe("150%");
     act(() => useBrowser.setState({ activeTab: other.id }));
-    expect(screen.getByRole("button", { name: "Reset zoom" }).textContent).toBe("200%");
+    expect(screen.getByRole("button", { name: /^(Zoom \d+%, reset|Reset zoom)$/ }).textContent).toBe("200%");
   });
 
   it("does not show a detached tab's address as this window's", () => {
@@ -205,15 +205,15 @@ describe("Toolbar", () => {
   it("does not show a detached tab's zoom as this window's", () => {
     useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [tab.id], zoom: { [tab.id]: 1.5 }, defaultZoom: 1 });
     render(<Toolbar />);
-    expect(screen.queryByRole("button", { name: "Reset zoom" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Zoom \d+%, reset|Reset zoom)$/ })).toBeNull();
   });
 
   it("does not keep the last zoom percent when this tab is sleeping", () => {
     useBrowser.setState({ tabs: [tab], activeTab: tab.id, zoom: { [tab.id]: 1.5 }, defaultZoom: 1 });
     render(<Toolbar />);
-    expect(screen.getByRole("button", { name: "Reset zoom" }).textContent).toBe("150%");
+    expect(screen.getByRole("button", { name: /^(Zoom \d+%, reset|Reset zoom)$/ }).textContent).toBe("150%");
     act(() => useBrowser.setState({ tabs: [{ ...tab, state: "discarded" }], activeTab: tab.id }));
-    expect(screen.queryByRole("button", { name: "Reset zoom" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Zoom \d+%, reset|Reset zoom)$/ })).toBeNull();
   });
 
   it("shows the address that failed to load, not the last one that worked", () => {

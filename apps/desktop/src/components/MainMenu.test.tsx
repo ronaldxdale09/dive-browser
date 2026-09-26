@@ -67,8 +67,8 @@ describe("MainMenu", () => {
     useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [tab.id], zoom: { [tab.id]: 1.5 }, defaultZoom: 1 });
     expect(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached)).toBeNull();
     render(<MainMenu />);
-    expect(screen.getByRole("button", { name: "Reset zoom" }).textContent).toBe("100%");
-    expect((screen.getByRole("button", { name: "Reset zoom" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: /^(Zoom \d+%, reset|Reset zoom)$/ }).textContent).toBe("100%");
+    expect((screen.getByRole("button", { name: /^(Zoom \d+%, reset|Reset zoom)$/ }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Zoom in" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Zoom out" }) as HTMLButtonElement).disabled).toBe(true);
   });

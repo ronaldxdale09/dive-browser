@@ -222,7 +222,7 @@ function ZoomRow() {
       <button type="button" aria-label="Zoom out" title={`Zoom out (${displayChord("⌘−")})`} disabled={!active || sleeping} onClick={() => void zoomStep(-1)} className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
         <Icon icon={Minus} size={14} />
       </button>
-      <button type="button" aria-label="Reset zoom" title={`Reset zoom (${displayChord("⌘0")})`} disabled={!active || sleeping} onClick={() => void zoomStep(0)} className="w-12 rounded-md py-1 text-center font-mono text-[12px] tabular-nums hover:bg-surface-2 disabled:opacity-40">
+      <button type="button" aria-label={sleeping ? "Reset zoom" : `Zoom ${Math.round(zoom * 100)}%, reset`} title={`Reset zoom (${displayChord("⌘0")})`} disabled={!active || sleeping} onClick={() => void zoomStep(0)} className="w-12 rounded-md py-1 text-center font-mono text-[12px] tabular-nums hover:bg-surface-2 disabled:opacity-40">
         {sleeping ? "—" : `${Math.round(zoom * 100)}%`}
       </button>
       <button type="button" aria-label="Zoom in" title={`Zoom in (${displayChord("⌘=")})`} disabled={!active || sleeping} onClick={() => void zoomStep(1)} className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">

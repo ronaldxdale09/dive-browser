@@ -121,7 +121,7 @@ export function ModelPicker({ onAddProvider, onOpenChange }: { onAddProvider: ()
             <div className="mx-1 mb-1 flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2 focus-within:border-line-2">
               <Icon icon={Search} size={12} className="shrink-0 text-ink-3" />
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${list.length === 1 ? "1 model" : list.length ? `${list.length} models` : "models"}`} aria-label="Search models" className="h-7 min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-ink-3" />
-              <button type="button" aria-label="Refresh models" disabled={loading !== null} onClick={() => provider && void loadModels(provider.id, true)} className="grid size-5 place-items-center rounded-full text-ink-3 hover:text-ink disabled:opacity-40">
+              <button type="button" aria-label="Refresh models" disabled={loading !== null} onClick={() => provider && void loadModels(provider.id, true)} className="relative grid size-5 place-items-center rounded-full text-ink-3 before:absolute before:-inset-0.5 hover:text-ink disabled:opacity-40">
                 <Icon icon={loading ? Loader2 : RefreshCw} size={11} className={loading ? "animate-spin motion-reduce:animate-none" : ""} />
               </button>
             </div>
