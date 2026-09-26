@@ -13,7 +13,7 @@ use dioxus_debug_cell::RefCell;
 use html5ever::{LocalName, interface::QualName, namespace_url, ns};
 use http::{
     HeaderMap, HeaderName, HeaderValue,
-    header::{CONTENT_SECURITY_POLICY, CONTENT_TYPE, ORIGIN},
+    header::{ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_SECURITY_POLICY, CONTENT_TYPE, ORIGIN},
 };
 use kuchiki::NodeRef;
 use tauri_runtime::{
@@ -37,6 +37,16 @@ use crate::{
 mod partial_response;
 
 type HttpResponse = Arc<RefCell<Option<http::Response<Cursor<Vec<u8>>>>>>;
+
+/// The protocol Tauri serves local files through.
+const ASSET_SCHEME: &str = "asset";
+
+/// Whether a webview is one of the embedder's page views -- a browser tab,
+/// showing whatever site the person opened -- rather than one of its own
+/// documents. The embedder labels those `tab-…`.
+fn is_page_view(label: &str) -> bool {
+    label.starts_with("tab-")
+}
 pub(crate) type SchemeRegistry = Arc<
     Mutex<
         std::collections::HashMap<
@@ -421,6 +431,13 @@ wrap_resource_handler! {
         let Ok(value) = value.to_str() else {
           continue;
         };
+        // `null` is the origin of every sandboxed frame and `data:` page, so
+        // allowing it allows all of them. Tauri answers with the webview's
+        // own origin, which is `null` for a view that started on a blank
+        // page; that grant is dropped rather than passed on.
+        if name == ACCESS_CONTROL_ALLOW_ORIGIN && value.trim().eq_ignore_ascii_case("null") {
+          continue;
+        }
 
         response.set_header_by_name(Some(&name.as_str().into()), Some(&value.into()), 0);
 
@@ -463,6 +480,7 @@ wrap_scheme_handler_factory! {
       _scheme_name: Option<&CefString>,
       _request: Option<&mut Request>,
     ) -> Option<ResourceHandler> {
+      let unattributed = browser.is_none();
       let (webview_label, handler, initialization_scripts) = match browser {
         Some(browser) => {
           let id = browser.identifier();
@@ -499,6 +517,29 @@ wrap_scheme_handler_factory! {
           (webview_label, handler, Arc::new(Vec::new()))
         }
       };
+
+      // A page view shows the web, and the asset protocol serves files off the
+      // person's disk to the application's own documents. Every webview gets
+      // every protocol the application registered, so without this any site
+      // open in a tab could read those files with `fetch`. Answered with one
+      // empty 404 whatever the path, so a page cannot tell a file that exists
+      // from one that does not, or one outside the scope from either. A request
+      // no browser made -- a service worker's -- is not the application's own
+      // document asking either.
+      if self.scheme == ASSET_SCHEME && (unattributed || is_page_view(&webview_label)) {
+        let not_found: Box<UriSchemeProtocolHandler> = Box::new(|_, _, respond| {
+          let mut response = http::Response::new(Cow::Borrowed(&[][..]));
+          *response.status_mut() = http::StatusCode::NOT_FOUND;
+          respond(response);
+        });
+        return Some(WebResourceHandler::new(
+          webview_label,
+          Arc::new(not_found),
+          Arc::new(Vec::new()),
+          None,
+          Arc::new(RefCell::new(None)),
+        ));
+      }
 
       // Capture the initiating main frame's origin so `process_request` can
       // repair a racy `Origin: null` header. Restricted to the main frame: it
@@ -597,4 +638,19 @@ fn get_request_headers(request: &mut Request) -> HeaderMap {
     }
 
     headers
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_embedder_s_tabs_are_page_views() {
+        assert!(is_page_view("tab-01a08307-7720-7843-a80f-583734dbeecd-0"));
+        assert!(!is_page_view("chrome"));
+        assert!(!is_page_view(
+            "chrome-pop-3-01a08307-7720-7843-a80f-583734dbeecd"
+        ));
+        assert!(!is_page_view("mytab-1"));
+    }
 }
