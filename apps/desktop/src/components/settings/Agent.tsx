@@ -122,7 +122,7 @@ export function Agent() {
       <Group title="Behaviour">
         <Row
           label="Ask before acting"
-          hint="Costly ones is the default: the agent gets on with ordinary clicking and typing, and stops for anything that spends money, destroys something, hands over a secret or happens on a page about money. Every action asks about all of it, which is thorough but wearing. Never asks about nothing — a page can steer the model, so leave that for work you are watching."
+          hint="Costly ones is the default: the agent gets on with ordinary clicking and typing, and stops for anything that spends money, destroys something, hands over a secret or happens on a page about money. Every action asks about all of it, which is thorough but wearing. Never asks about the rest only — a page can steer the model, so leave that for work you are watching. Whatever you choose, sending a file, reading a site's cookies or a server's reply, and then taking what was read to another site always ask."
           control={<Segmented label="Ask before acting" value={prefs.agent_approvals} onChange={(agent_approvals) => set({ agent_approvals })} options={APPROVALS} />}
         />
         <Row

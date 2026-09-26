@@ -1664,6 +1664,7 @@ dependencies = [
  "dive-core",
  "dive-mcp",
  "futures-util",
+ "getrandom 0.3.4",
  "gif",
  "hmac",
  "image",

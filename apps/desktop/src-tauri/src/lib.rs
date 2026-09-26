@@ -59,6 +59,7 @@ mod menu;
 mod meta;
 mod navigation;
 mod netconfig;
+mod netfetch;
 mod network;
 #[cfg(feature = "cef")]
 mod network_probe;
@@ -91,6 +92,7 @@ mod save_page;
 mod screen;
 mod screencast;
 mod search_suggest;
+mod site;
 mod site_zoom;
 mod snapshot;
 mod sourcemaps;

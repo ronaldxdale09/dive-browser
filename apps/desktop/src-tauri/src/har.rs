@@ -83,8 +83,20 @@ fn entry(r: &RequestSummary) -> Value {
     })
 }
 
+/// Headers that carry a credential: whoever has them is signed in as the
+/// person. A HAR is made to be attached to a bug report, and is written to
+/// the captures folder, so these are left out the way Chrome's sanitized
+/// export leaves them out.
+const CREDENTIAL_HEADERS: &[&str] = &[
+    "cookie",
+    "set-cookie",
+    "authorization",
+    "proxy-authorization",
+];
+
 fn headers(map: &std::collections::BTreeMap<String, String>) -> Vec<Value> {
     map.iter()
+        .filter(|(k, _)| !CREDENTIAL_HEADERS.iter().any(|c| k.eq_ignore_ascii_case(c)))
         .map(|(k, v)| json!({"name": k, "value": v}))
         .collect()
 }
@@ -154,6 +166,25 @@ mod tests {
             content["comment"],
             "Response exceeds the 64 KiB capture limit"
         );
+    }
+
+    #[test]
+    fn credentials_never_reach_the_file() {
+        let mut r = req();
+        r.headers.insert("Cookie".into(), "sid=secret".into());
+        r.headers
+            .insert("authorization".into(), "Bearer secret".into());
+        r.headers
+            .insert("Proxy-Authorization".into(), "Basic secret".into());
+        r.response_headers
+            .insert("Set-Cookie".into(), "sid=secret; HttpOnly".into());
+        let har = from_requests("https://api.dev/", "", &[r]);
+        let text = serde_json::to_string(&har).unwrap();
+        assert!(!text.contains("secret"), "{text}");
+        // The rest of the headers are still there to debug with.
+        let e = &har["log"]["entries"][0];
+        assert_eq!(e["request"]["headers"][0]["name"], "Accept");
+        assert_eq!(e["response"]["headers"][0]["name"], "content-type");
     }
 
     #[test]

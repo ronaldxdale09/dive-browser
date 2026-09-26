@@ -51,6 +51,31 @@ pub struct ExtensionList {
 struct Registry {
     version: u8,
     items: Vec<ExtensionInfo>,
+    /// SHA-256 of each extension's manifest.json as it was when the person
+    /// loaded it, by id. An unpacked extension is a folder anything can
+    /// write to; a manifest that changed afterwards may ask for permissions
+    /// the person never saw, and this is how Dive notices.
+    #[serde(default)]
+    manifests: std::collections::BTreeMap<String, String>,
+}
+
+/// The warning shown on an extension whose manifest is not the one that was
+/// loaded.
+const MANIFEST_CHANGED: &str = "Its manifest.json has changed since you loaded it, and may ask for permissions you have not seen. Check the folder, then load it again to accept the change.";
+
+/// SHA-256 of the manifest in `directory`, as hex.
+fn manifest_digest(directory: &Path) -> Option<String> {
+    let bytes = fs::read(directory.join("manifest.json")).ok()?;
+    Some(format!("{:x}", Sha256::digest(bytes)))
+}
+
+/// Whether the manifest of `item` differs from the one recorded when it was
+/// loaded. An extension loaded before digests were kept has nothing to
+/// compare with and is taken as it is.
+fn manifest_changed(registry: &Registry, item: &ExtensionInfo) -> bool {
+    registry.manifests.get(&item.id).is_some_and(|recorded| {
+        manifest_digest(Path::new(&item.path)).is_none_or(|now| &now != recorded)
+    })
 }
 
 fn registry_path() -> PathBuf {
@@ -61,7 +86,7 @@ fn read_registry(path: &Path) -> AppResult<Registry> {
     if !path.exists() {
         return Ok(Registry {
             version: REGISTRY_VERSION,
-            items: Vec::new(),
+            ..Registry::default()
         });
     }
     let bytes = fs::read(path).map_err(AppError::new)?;
@@ -262,6 +287,14 @@ fn validate(directory: &Path) -> AppResult<ExtensionInfo> {
     }
 
     let canonical = root.to_string_lossy().into_owned();
+    // Chromium takes every unpacked extension in one switch, separated by
+    // commas, so a comma in a folder's path splits it into two paths -- the
+    // second of which could be a folder the person never chose.
+    if canonical.contains(',') {
+        return Err(AppError::new(
+            "The folder's path has a comma in it, which Chromium reads as two folders. Rename or move the folder, then load it again.",
+        ));
+    }
     let digest = Sha256::digest(canonical.as_bytes());
     Ok(ExtensionInfo {
         id: format!("{digest:x}")[..32].to_owned(),
@@ -292,6 +325,11 @@ pub fn startup_paths() -> Vec<String> {
     let Ok(registry) = read_registry(&registry_path()) else {
         return Vec::new();
     };
+    for item in registry.items.iter().filter(|item| item.enabled) {
+        if manifest_changed(&registry, item) {
+            tracing::warn!(extension = %item.name, "extension manifest changed since it was loaded");
+        }
+    }
     enabled_paths_from(&registry)
         .into_iter()
         .filter(|path| validate(Path::new(path)).is_ok())
@@ -304,7 +342,18 @@ pub fn mark_started(paths: &[String]) {
 }
 
 fn list_at(path: &Path) -> AppResult<ExtensionList> {
-    let registry = read_registry(path)?;
+    let mut registry = read_registry(path)?;
+    let changed: Vec<String> = registry
+        .items
+        .iter()
+        .filter(|item| manifest_changed(&registry, item))
+        .map(|item| item.id.clone())
+        .collect();
+    for item in &mut registry.items {
+        if changed.contains(&item.id) {
+            item.warnings.push(MANIFEST_CHANGED.to_owned());
+        }
+    }
     let enabled = enabled_paths_from(&registry);
     let started = STARTED_PATHS
         .get()
@@ -348,6 +397,10 @@ pub fn extension_import(path: String) -> AppResult<ExtensionList> {
     {
         item.enabled = existing.enabled;
     }
+    // Loading it again is how the person accepts the manifest as it is now.
+    if let Some(digest) = manifest_digest(Path::new(&item.path)) {
+        registry.manifests.insert(item.id.clone(), digest);
+    }
     registry.items.retain(|existing| existing.id != item.id);
     registry.items.push(item);
     registry.items.sort_by_key(|item| item.name.to_lowercase());
@@ -382,6 +435,7 @@ pub fn extension_remove(id: String) -> AppResult<ExtensionList> {
     if registry.items.len() == before {
         return Err(AppError::new("extension not found"));
     }
+    registry.manifests.remove(&id);
     write_registry(&registry_path(), &registry)?;
     list_at(&registry_path())
 }
@@ -465,11 +519,66 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_with_a_comma_in_its_path_is_refused() {
+        let parent = temp_dir("comma");
+        let root = parent.join("a,--load-extension=elsewhere");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("manifest.json"),
+            r#"{"manifest_version":3,"name":"Comma","version":"1"}"#,
+        )
+        .unwrap();
+        let error = validate(&root).expect_err("comma").to_string();
+        assert!(error.contains("comma"), "{error}");
+        fs::remove_dir_all(parent).unwrap();
+    }
+
+    #[test]
+    fn a_manifest_that_changed_after_loading_is_flagged_until_loaded_again() {
+        let root = fixture(r#"{"manifest_version":3,"name":"Fixture","version":"1"}"#);
+        let dir = temp_dir("digest");
+        let path = dir.join("extensions.json");
+        let item = validate(&root).unwrap();
+        let mut registry = Registry {
+            version: REGISTRY_VERSION,
+            items: vec![item.clone()],
+            manifests: std::collections::BTreeMap::new(),
+        };
+        // Loaded before digests were kept: nothing to compare with.
+        assert!(!manifest_changed(&registry, &item));
+        registry
+            .manifests
+            .insert(item.id.clone(), manifest_digest(&root).unwrap());
+        write_registry(&path, &registry).unwrap();
+        assert!(list_at(&path).unwrap().items[0].warnings.is_empty());
+
+        fs::write(
+            root.join("manifest.json"),
+            r#"{"manifest_version":3,"name":"Fixture","version":"1","host_permissions":["<all_urls>"]}"#,
+        )
+        .unwrap();
+        let listed = list_at(&path).unwrap();
+        assert!(
+            listed.items[0]
+                .warnings
+                .iter()
+                .any(|w| w == MANIFEST_CHANGED),
+            "{:?}",
+            listed.items[0].warnings
+        );
+        // The warning is worked out when listed, never written back.
+        assert!(read_registry(&path).unwrap().items[0].warnings.is_empty());
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn registry_round_trip_is_atomic_and_paths_are_deterministic() {
         let root = temp_dir("registry");
         let path = root.join("extensions.json");
         let registry = Registry {
             version: REGISTRY_VERSION,
+            manifests: std::collections::BTreeMap::new(),
             items: vec![
                 ExtensionInfo {
                     id: "b".into(),

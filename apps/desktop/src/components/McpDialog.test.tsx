@@ -28,7 +28,8 @@ afterEach(() => {
 describe("McpDialog", () => {
   it("keeps the token out of the DOM but copies the complete skill and MCP setup", async () => {
     ready();
-    const write = vi.spyOn(ipc, "clipboardWriteText").mockResolvedValue(null);
+    const plain = vi.spyOn(ipc, "clipboardWriteText").mockResolvedValue(null);
+    const write = vi.spyOn(ipc, "clipboardWriteSecret").mockResolvedValue(null);
     const { container } = render(<McpDialog onClose={() => {}} />);
 
     const button = await screen.findByRole("button", { name: "Copy setup" });
@@ -51,13 +52,18 @@ describe("McpDialog", () => {
     expect(payload).toContain("dive_capabilities");
     expect(payload).toContain("tabs_list");
     expect(container.innerHTML).not.toContain("secret-token");
+    // The token only ever goes through the secret clipboard, which clears.
+    expect(plain).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toContain("30 seconds");
   });
 
-  it("keeps a pending copy disabled and offers a visible retry after both clipboard methods fail", async () => {
+  it("keeps a pending copy disabled and offers a visible retry when the secret clipboard fails", async () => {
     ready();
     let rejectWrite!: (reason: Error) => void;
-    const write = vi.spyOn(ipc, "clipboardWriteText").mockImplementationOnce(() => new Promise<null>((_, reject) => { rejectWrite = reject; }));
-    const fallback = vi.fn().mockRejectedValue(new Error("clipboard unavailable"));
+    const write = vi.spyOn(ipc, "clipboardWriteSecret").mockImplementationOnce(() => new Promise<null>((_, reject) => { rejectWrite = reject; }));
+    // The page clipboard is never a fallback for a secret: it can neither
+    // hide it from history nor clear it again.
+    const fallback = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { clipboard: { writeText: fallback } });
     render(<McpDialog onClose={() => {}} />);
 
@@ -72,6 +78,7 @@ describe("McpDialog", () => {
     fireEvent.click(retry);
     await screen.findByRole("button", { name: "Copied" });
     expect(write).toHaveBeenCalledTimes(2);
+    expect(fallback).not.toHaveBeenCalled();
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -105,12 +112,14 @@ describe("McpDialog", () => {
     expect(screen.getByRole("dialog").textContent).not.toMatch(/OpenCode can read/);
   });
 
-  it("does not offer setup when the server is off in a private window", async () => {
+  it("does not offer setup when the server is not running, and says why it might not be", async () => {
     vi.spyOn(ipc, "appInfo").mockResolvedValue({ ...info, mcp_url: "" });
     vi.spyOn(ipc, "mcpToken").mockResolvedValue("");
     render(<McpDialog onClose={() => {}} />);
 
-    await waitFor(() => expect(document.body.textContent).toContain("MCP server is off"));
+    await waitFor(() => expect(document.body.textContent).toContain("MCP server is not running"));
+    expect(document.body.textContent).toContain("private");
+    expect(document.body.textContent).toContain("DIVE_MCP_PORT");
     expect(screen.queryByRole("button", { name: "Copy setup" })).toBeNull();
     expect(document.body.textContent).not.toContain("Loading");
   });

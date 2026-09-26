@@ -397,6 +397,115 @@ impl AppBrowser {
     }
 }
 
+/// How long the host spends finding out what a step is aimed at before it
+/// gives up and judges the step without knowing.
+const DESCRIBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+impl AppBrowser {
+    /// The element at viewport point (`x`, `y`), as `role "name"`, for
+    /// judging a click that named no element.
+    ///
+    /// Asked of the engine's hit test and accessibility tree rather than of
+    /// a script in the page, so the page cannot answer on the element's
+    /// behalf. `None` when there is no answer in time.
+    pub async fn describe_point(&self, tab: TabId, x: f64, y: f64) -> Option<String> {
+        let found = async {
+            let session = self.session_for(tab).await.ok()?;
+            #[allow(clippy::cast_possible_truncation)]
+            let (x, y) = (x.round() as i64, y.round() as i64);
+            let hit = session
+                .call(
+                    "DOM.getNodeForLocation",
+                    json!({"x": x, "y": y, "includeUserAgentShadowDOM": false, "ignorePointerEventsNone": true}),
+                )
+                .await
+                .ok()?;
+            let backend = hit["backendNodeId"].as_i64()?;
+            describe_node(&session, backend).await
+        };
+        tokio::time::timeout(DESCRIBE_TIMEOUT, found)
+            .await
+            .ok()
+            .flatten()
+    }
+
+    /// The element that has focus, as `role "name"`: where a key press or
+    /// typed text with no target lands.
+    pub async fn describe_focused(&self, tab: TabId) -> Option<String> {
+        let found = async {
+            let session = self.session_for(tab).await.ok()?;
+            let focused = session
+                .call(
+                    "Runtime.evaluate",
+                    json!({"expression": "document.activeElement", "returnByValue": false}),
+                )
+                .await
+                .ok()?;
+            let object = focused["result"]["objectId"].as_str()?.to_owned();
+            let node = session
+                .call("DOM.describeNode", json!({"objectId": object}))
+                .await
+                .ok();
+            let _ = session
+                .call("Runtime.releaseObject", json!({"objectId": object}))
+                .await;
+            let backend = node?["node"]["backendNodeId"].as_i64()?;
+            describe_node(&session, backend).await
+        };
+        tokio::time::timeout(DESCRIBE_TIMEOUT, found)
+            .await
+            .ok()
+            .flatten()
+    }
+}
+
+/// The accessible description of a DOM node and what it sits inside.
+async fn describe_node(session: &CdpSession, backend: i64) -> Option<String> {
+    let tree = session
+        .call(
+            "Accessibility.getPartialAXTree",
+            json!({"backendNodeId": backend, "fetchRelatives": true}),
+        )
+        .await
+        .ok()?;
+    describe_from_ax(&tree, backend)
+}
+
+/// What a person would call the node `backend`: the nearest control it is
+/// part of (a span inside a button is the button), or failing that the
+/// nearest thing with a name.
+fn describe_from_ax(tree: &Value, backend: i64) -> Option<String> {
+    let nodes = tree["nodes"].as_array()?;
+    let by_id: std::collections::HashMap<&str, &Value> = nodes
+        .iter()
+        .filter_map(|n| n["nodeId"].as_str().map(|id| (id, n)))
+        .collect();
+    let mut node = nodes
+        .iter()
+        .find(|n| n["backendDOMNodeId"].as_i64() == Some(backend))?;
+    let mut named: Option<String> = None;
+    for _ in 0..12 {
+        let role = node["role"]["value"].as_str().unwrap_or_default();
+        let name = node["name"]["value"].as_str().unwrap_or_default().trim();
+        let label = if name.is_empty() {
+            role.to_owned()
+        } else {
+            format!("{role} {name:?}")
+        };
+        if crate::ax::INTERACTIVE.contains(&role) {
+            return Some(label);
+        }
+        if named.is_none() && !name.is_empty() && !node["ignored"].as_bool().unwrap_or(false) {
+            named = Some(label);
+        }
+        let Some(parent) = node["parentId"].as_str().and_then(|id| by_id.get(id)) else {
+            break;
+        };
+        node = parent;
+    }
+    named
+}
+
 impl From<locator::Failure> for BrowserError {
     fn from(f: locator::Failure) -> Self {
         match f {
@@ -922,13 +1031,19 @@ fn paper_size(named: Option<&str>) -> Result<(f64, f64), BrowserError> {
 /// A name, never a path: the file goes to the download folder, and a caller
 /// that could pass `../` or an absolute path would be choosing where on the
 /// disk a remote tool call writes.
+///
+/// Separators are not the only way out on Windows. `C:evil.pdf` is relative
+/// to the current directory of drive C, `name:stream` writes an alternate
+/// data stream, and `CON` or `NUL` is a device rather than a file. So the
+/// name is held to what is a plain file name on every system the browser
+/// runs on, rather than to what happens to be safe on this one.
 fn pdf_filename(given: Option<&str>) -> Result<String, BrowserError> {
     let Some(given) = given.map(str::trim).filter(|n| !n.is_empty()) else {
         return Ok("page.pdf".to_owned());
     };
-    if given.contains('/') || given.contains('\\') || given.starts_with('.') {
+    if !plain_file_name(given) {
         return Err(BrowserError::BadRequest(
-            "filename is a name, not a path; the file goes to the download folder".into(),
+            "filename is a plain name, not a path: no folders, drive letters, colons or reserved names; the file goes to the download folder".into(),
         ));
     }
     Ok(
@@ -941,6 +1056,98 @@ fn pdf_filename(given: Option<&str>) -> Result<String, BrowserError> {
             format!("{given}.pdf")
         },
     )
+}
+
+/// Whether `name` is a file name on macOS, Windows and Linux alike, and
+/// nothing more.
+fn plain_file_name(name: &str) -> bool {
+    const FORBIDDEN: &[char] = &['/', '\\', ':', '<', '>', '"', '|', '?', '*'];
+    const RESERVED: &[&str] = &[
+        "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
+        "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+    ];
+    if name.len() > 200
+        || name.starts_with('.')
+        || name.ends_with('.')
+        || name.ends_with(' ')
+        || name
+            .chars()
+            .any(|c| c.is_control() || FORBIDDEN.contains(&c))
+    {
+        return false;
+    }
+    // Windows reserves the device names with any extension: `nul.pdf` is NUL.
+    let stem = name.split('.').next().unwrap_or(name).trim_end();
+    if RESERVED.iter().any(|r| stem.eq_ignore_ascii_case(r)) {
+        return false;
+    }
+    std::path::Path::new(name).file_name() == Some(std::ffi::OsStr::new(name))
+}
+
+/// Folders a file may be attached to a page from.
+///
+/// A remote client, or a model a page is steering, names the file, so "any
+/// absolute path" meant any file the person can read: an SSH key, a
+/// keychain export, the browser's own profile. The folders people keep
+/// documents to share in are the ones a file input is for; anything else
+/// has to be moved there first, or named in `DIVE_UPLOAD_DIRS` (a path list,
+/// separated the way `PATH` is on this system).
+fn upload_roots(download_dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut roots = vec![download_dir.to_path_buf()];
+    if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+        let home = std::path::PathBuf::from(home);
+        roots.extend(["Downloads", "Desktop", "Documents"].map(|d| home.join(d)));
+    }
+    if let Some(extra) = std::env::var_os("DIVE_UPLOAD_DIRS") {
+        roots.extend(std::env::split_paths(&extra).filter(|p| p.is_absolute()));
+    }
+    roots
+        .into_iter()
+        .filter_map(|root| root.canonicalize().ok())
+        .collect()
+}
+
+/// The file at `path`, if it may be attached: an absolute path to a regular
+/// file inside one of `roots`, reached without a hidden folder on the way.
+///
+/// Resolved before it is judged, so a link in Documents that points at
+/// `~/.ssh/id_ed25519` is judged by where it leads. The resolved path is what
+/// is attached, so the file checked is the file sent.
+fn upload_path(
+    path: &str,
+    roots: &[std::path::PathBuf],
+) -> Result<std::path::PathBuf, BrowserError> {
+    let given = std::path::Path::new(path);
+    if !given.is_absolute() {
+        return Err(BrowserError::BadRequest(format!(
+            "{path} is not an absolute path"
+        )));
+    }
+    let real = given
+        .canonicalize()
+        .map_err(|_| BrowserError::BadRequest(format!("no file at {path}")))?;
+    if !real.is_file() {
+        return Err(BrowserError::BadRequest(format!("no file at {path}")));
+    }
+    let inside = roots.iter().find_map(|root| real.strip_prefix(root).ok());
+    let Some(inside) = inside else {
+        return Err(BrowserError::NotAllowed {
+            operation: "page_upload".into(),
+            reason: format!(
+                "{path} is outside the folders files may be attached from (Downloads, Desktop, Documents, the download folder, and any in DIVE_UPLOAD_DIRS); move it into one of them first"
+            ),
+        });
+    };
+    let hidden = inside
+        .components()
+        .any(|c| c.as_os_str().to_string_lossy().starts_with('.'));
+    if hidden {
+        return Err(BrowserError::NotAllowed {
+            operation: "page_upload".into(),
+            reason: format!("{path} is in a hidden folder or is a hidden file"),
+        });
+    }
+    Ok(real)
 }
 
 /// Run one check and say whether it held, and what was there if it did not.
@@ -1248,9 +1455,186 @@ pub(crate) fn check_web_url(url: &url::Url) -> Result<(), BrowserError> {
     }
 }
 
+/// Refuse a tab outside the profile in front.
+///
+/// Every profile has its own cookies and logins, and the tools only list the
+/// tabs of the one in front; a tab id from another profile is a way into a
+/// session the person did not put in front of the client. Essentials belong
+/// to no workspace and are shown in every one, so they pass. Answered as
+/// "not found" rather than "not yours", so the refusal does not confirm that
+/// the tab exists.
+pub(crate) fn tab_in_active_profile(
+    store: &dive_core::Store,
+    active: Option<dive_core::WorkspaceId>,
+    tab: TabId,
+) -> Result<(), BrowserError> {
+    let not_found = || BrowserError::TabNotFound(tab.to_string());
+    let row = store.tab(tab).map_err(|_| not_found())?;
+    let Some(workspace) = row.workspace_id else {
+        return Ok(());
+    };
+    let owner = store
+        .workspace(workspace)
+        .map_err(|_| not_found())?
+        .profile_id;
+    let profile = crate::commands::active_profile(store, active).map_err(|e| other(e.message))?;
+    if owner == profile.id {
+        Ok(())
+    } else {
+        Err(not_found())
+    }
+}
+
+/// The same refusal for a context id: a workspace of another profile.
+fn workspace_in_active_profile(
+    store: &dive_core::Store,
+    active: Option<dive_core::WorkspaceId>,
+    workspace: dive_core::WorkspaceId,
+) -> Result<(), BrowserError> {
+    let not_found = || other("no context with that id");
+    let owner = store
+        .workspace(workspace)
+        .map_err(|_| not_found())?
+        .profile_id;
+    let profile = crate::commands::active_profile(store, active).map_err(|e| other(e.message))?;
+    if owner == profile.id {
+        Ok(())
+    } else {
+        Err(not_found())
+    }
+}
+
+/// How long an answer to "may this client read the cookies of this site"
+/// stands. Long enough that a test reading them between steps is not a
+/// dialog per step, short enough that a yes this morning is not a yes all day.
+const COOKIE_ANSWER_TTL: std::time::Duration = std::time::Duration::from_mins(10);
+/// How long a question waits for the person before it counts as a no.
+const CONFIRM_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(2);
+
+/// Sites whose cookies the person agreed a client may read, and when.
+fn cookie_answers()
+-> &'static std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>> {
+    static ANSWERS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
+    > = std::sync::OnceLock::new();
+    ANSWERS.get_or_init(Default::default)
+}
+
+/// One question on screen at a time: two clients asking at once would
+/// otherwise stack dialogs the person cannot tell apart.
+fn confirm_queue() -> &'static tokio::sync::Mutex<()> {
+    static QUEUE: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    QUEUE.get_or_init(Default::default)
+}
+
+/// The question put to the person for `step` on the page at `url`.
+fn confirm_text(step: &dive_mcp::Sensitive, url: &str) -> (String, String) {
+    let site = url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "this page".to_owned());
+    match step {
+        dive_mcp::Sensitive::Upload { paths, .. } => {
+            let listed: Vec<&str> = paths.iter().take(5).map(String::as_str).collect();
+            let more = paths.len().saturating_sub(listed.len());
+            let mut files = listed.join("\n");
+            if more > 0 {
+                use std::fmt::Write as _;
+                let _ = write!(files, "\nand {more} more");
+            }
+            let count = paths.len();
+            let noun = plural(count, "file");
+            (
+                "Send files to a page?".to_owned(),
+                format!(
+                    "An agent connected over MCP wants to attach {count} {noun} from your computer to {site}:\n\n{files}\n\nThe page can send them anywhere once they are attached."
+                ),
+            )
+        }
+        dive_mcp::Sensitive::ReadCookies { .. } => (
+            "Hand over a site's cookies?".to_owned(),
+            format!(
+                "An agent connected over MCP wants to read the cookies {site} keeps, including the ones that keep you signed in. Whoever has them can act as you on {site}.\n\nAllow it for the next 10 minutes?"
+            ),
+        ),
+    }
+}
+
 #[allow(clippy::too_many_lines)] // Browser adapter methods stay together so the MCP surface is auditable.
 #[async_trait]
 impl Browser for AppBrowser {
+    async fn check_tab(&self, tab: TabId) -> Result<(), BrowserError> {
+        let state = self.state();
+        let store = lock(&state.store);
+        let active = *lock(&state.active_workspace);
+        tab_in_active_profile(&store, active, tab)
+    }
+
+    async fn confirm(&self, step: dive_mcp::Sensitive) -> Result<(), BrowserError> {
+        // For a machine that runs a trusted client unattended -- CI, a test
+        // rig -- the person can say yes ahead of time when starting Dive.
+        if std::env::var_os("DIVE_MCP_SKIP_CONFIRM").is_some() {
+            return Ok(());
+        }
+        let tab = match &step {
+            dive_mcp::Sensitive::Upload { tab, .. } | dive_mcp::Sensitive::ReadCookies { tab } => {
+                *tab
+            }
+        };
+        let url = {
+            let state = self.state();
+            let store = lock(&state.store);
+            store.tab(tab).map(|t| t.url).unwrap_or_default()
+        };
+        let origin = url::Url::parse(&url)
+            .map_or_else(|_| url.clone(), |u| u.origin().ascii_serialization());
+        let cookies = matches!(step, dive_mcp::Sensitive::ReadCookies { .. });
+        let answered_yes = |answers: &std::collections::HashMap<String, std::time::Instant>| {
+            answers
+                .get(&origin)
+                .is_some_and(|at| at.elapsed() < COOKIE_ANSWER_TTL)
+        };
+        if cookies && answered_yes(&lock(cookie_answers())) {
+            return Ok(());
+        }
+        let _turn = confirm_queue().lock().await;
+        // Someone else's question may have been this one.
+        if cookies && answered_yes(&lock(cookie_answers())) {
+            return Ok(());
+        }
+        let (title, description) = confirm_text(&step, &url);
+        let asked = rfd::AsyncMessageDialog::new()
+            .set_title(&title)
+            .set_description(&description)
+            .set_level(rfd::MessageLevel::Warning)
+            .set_buttons(rfd::MessageButtons::OkCancelCustom(
+                "Allow".into(),
+                "Deny".into(),
+            ))
+            .show();
+        let allowed = match tokio::time::timeout(CONFIRM_TIMEOUT, asked).await {
+            Ok(rfd::MessageDialogResult::Ok) => true,
+            Ok(rfd::MessageDialogResult::Custom(label)) => label == "Allow",
+            Ok(_) | Err(_) => false,
+        };
+        if !allowed {
+            return Err(BrowserError::NotAllowed {
+                operation: if cookies {
+                    "reading cookies"
+                } else {
+                    "page_upload"
+                }
+                .into(),
+                reason: "the person using Dive did not allow it; do not retry, ask them instead"
+                    .into(),
+            });
+        }
+        if cookies {
+            lock(cookie_answers()).insert(origin, std::time::Instant::now());
+        }
+        Ok(())
+    }
+
     async fn tabs(&self) -> Result<Vec<TabInfo>, BrowserError> {
         let state = self.state();
         let active = lock(&state.host)
@@ -1294,11 +1678,12 @@ impl Browser for AppBrowser {
                     Some(id) => {
                         // Checked against the store rather than trusted: a
                         // context that has been closed would otherwise open a
-                        // tab nobody can reach.
-                        lock(&state.store)
-                            .workspace(id)
-                            .map_err(|_| other("no context with that id"))?
-                            .id
+                        // tab nobody can reach, and one of another profile
+                        // would open it inside that profile's session.
+                        let store = lock(&state.store);
+                        let active = *lock(&state.active_workspace);
+                        workspace_in_active_profile(&store, active, id)?;
+                        id
                     }
                     None => (*lock(&state.active_workspace))
                         .ok_or_else(|| other("no active workspace"))?,
@@ -1395,6 +1780,8 @@ impl Browser for AppBrowser {
             // nothing to show and nowhere to put a new tab.
             let remaining = {
                 let store = lock(&state.store);
+                let active = *lock(&state.active_workspace);
+                workspace_in_active_profile(&store, active, id)?;
                 let workspace = store
                     .workspace(id)
                     .map_err(|_| other("no context with that id"))?;
@@ -2459,17 +2846,15 @@ impl Browser for AppBrowser {
         }
         // Checked here rather than left to Chromium, which accepts a missing
         // path in silence and leaves the input empty.
-        for path in &params.paths {
-            let p = std::path::Path::new(path);
-            if !p.is_absolute() {
-                return Err(BrowserError::BadRequest(format!(
-                    "{path} is not an absolute path"
-                )));
-            }
-            if !p.is_file() {
-                return Err(BrowserError::BadRequest(format!("no file at {path}")));
-            }
-        }
+        let roots = {
+            let state = self.state();
+            upload_roots(&state.prefs.get(&state).download_dir())
+        };
+        let files: Vec<String> = params
+            .paths
+            .iter()
+            .map(|path| upload_path(path, &roots).map(|p| p.to_string_lossy().into_owned()))
+            .collect::<Result<_, _>>()?;
         let session = self.action_session_for(tab).await?;
         self.tracked(tab, "page_upload", Some(locator.clone()), async {
             locator::hold(&session, &locator).await?;
@@ -2496,11 +2881,11 @@ impl Browser for AppBrowser {
             session
                 .call(
                     "DOM.setFileInputFiles",
-                    json!({"files": params.paths, "objectId": object_id}),
+                    json!({"files": files, "objectId": object_id}),
                 )
                 .await
                 .map_err(|e| other(e.to_string()))?;
-            Ok(json!({"attached_to": locator, "files": params.paths}))
+            Ok(json!({"attached_to": locator, "files": files}))
         })
         .await
     }
@@ -3167,43 +3552,77 @@ pub fn token_path() -> std::path::PathBuf {
 
 /// Read the token, creating a fresh random one on first run.
 fn load_or_create_token() -> std::io::Result<String> {
-    let path = token_path();
-    if let Ok(existing) = std::fs::read_to_string(&path) {
+    load_or_create_token_at(&token_path())
+}
+
+/// Shortest token that is kept as it is. Every token this build writes is 64
+/// hex characters; shorter is a file somebody else wrote.
+const TOKEN_MIN_LEN: usize = 32;
+
+/// A fresh token: 32 bytes from the operating system's random source, as hex.
+///
+/// Not a uuid. A v7 uuid starts with the time it was made, so part of a token
+/// built from two of them was guessable by anyone who knew roughly when Dive
+/// was first started.
+fn new_token() -> std::io::Result<String> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(|e| std::io::Error::other(e.to_string()))?;
+    Ok(bytes.iter().fold(String::with_capacity(64), |mut out, b| {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{b:02x}");
+        out
+    }))
+}
+
+/// The token at `path`, or a new one written there.
+///
+/// Only a regular file is read: a link at the token's path would have the
+/// server hand out whatever file it points at as the secret. Anything else
+/// there is removed and the token written from scratch.
+fn load_or_create_token_at(path: &std::path::Path) -> std::io::Result<String> {
+    if let Ok(metadata) = std::fs::symlink_metadata(path)
+        && metadata.file_type().is_file()
+        && let Ok(existing) = std::fs::read_to_string(path)
+    {
         let t = existing.trim();
-        if t.len() >= 32 {
+        if t.len() >= TOKEN_MIN_LEN && t.chars().all(|c| c.is_ascii_alphanumeric()) {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt as _;
-
-                let metadata = std::fs::symlink_metadata(&path)?;
-                if !metadata.file_type().is_file() {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "MCP token path is not a regular file",
-                    ));
-                }
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+                std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
             }
             return Ok(t.to_owned());
         }
     }
-    let token = dive_core::TabId::new().to_string().replace('-', "")
-        + &dive_core::TabId::new().to_string().replace('-', "");
+    let token = new_token()?;
+    write_token(path, &token)?;
+    Ok(token)
+}
+
+/// Write the token to a file that did not exist a moment ago.
+///
+/// Opening the old path for writing would follow a link planted there and
+/// truncate its target, and would keep whatever permissions the old file
+/// had. Removing it first and then creating exclusively means the file
+/// written is a new one, readable by nobody but the person, and that a link
+/// raced in between makes the write fail rather than land elsewhere.
+fn write_token(path: &std::path::Path, token: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::io::Write as _;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&path)?;
-        f.write_all(token.as_bytes())?;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
     }
-    #[cfg(not(unix))]
-    std::fs::write(&path, &token)?;
-    Ok(token)
+    let mut file = options.open(path)?;
+    file.write_all(token.as_bytes())?;
+    file.sync_all()
 }
 
 #[cfg(test)]
@@ -3349,6 +3768,170 @@ mod tool_session_tests {
                 "{hostile} should be refused"
             );
         }
+    }
+
+    #[test]
+    fn a_pdf_filename_cannot_reach_a_drive_a_stream_or_a_device() {
+        for hostile in [
+            "C:evil.pdf",
+            "report.pdf:hidden",
+            "CON",
+            "nul.pdf",
+            "Lpt1.txt",
+            "a|b",
+            "trailing.",
+            "tab\tname",
+            "<x>",
+        ] {
+            assert!(
+                pdf_filename(Some(hostile)).is_err(),
+                "{hostile} should be refused"
+            );
+        }
+        assert!(pdf_filename(Some(&"x".repeat(300))).is_err());
+        assert_eq!(
+            pdf_filename(Some("Invoice 2026-09 (final)")).unwrap(),
+            "Invoice 2026-09 (final).pdf"
+        );
+        assert_eq!(
+            pdf_filename(Some("console.log")).unwrap(),
+            "console.log.pdf"
+        );
+    }
+
+    #[test]
+    fn uploads_come_only_from_the_folders_people_share_from() {
+        let root = tempfile::tempdir().unwrap();
+        let shared = root.path().join("Documents");
+        let secret = root.path().join(".ssh");
+        std::fs::create_dir_all(shared.join(".private")).unwrap();
+        std::fs::create_dir_all(&secret).unwrap();
+        std::fs::write(shared.join("cv.pdf"), b"cv").unwrap();
+        std::fs::write(shared.join(".private/notes.txt"), b"n").unwrap();
+        std::fs::write(secret.join("id_ed25519"), b"key").unwrap();
+        let roots = vec![shared.canonicalize().unwrap()];
+        let ok = upload_path(shared.join("cv.pdf").to_str().unwrap(), &roots).unwrap();
+        assert!(ok.ends_with("cv.pdf"));
+        let refused = |path: &std::path::Path| {
+            upload_path(path.to_str().unwrap(), &roots).expect_err(&path.display().to_string())
+        };
+        assert!(matches!(
+            refused(&secret.join("id_ed25519")),
+            BrowserError::NotAllowed { .. }
+        ));
+        assert!(matches!(
+            refused(&shared.join(".private/notes.txt")),
+            BrowserError::NotAllowed { .. }
+        ));
+        assert!(matches!(
+            refused(&shared.join("missing.pdf")),
+            BrowserError::BadRequest(_)
+        ));
+        assert!(upload_path("Documents/cv.pdf", &roots).is_err());
+        // A link in a shared folder is judged by where it leads.
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(secret.join("id_ed25519"), shared.join("key.pdf")).unwrap();
+            assert!(matches!(
+                refused(&shared.join("key.pdf")),
+                BrowserError::NotAllowed { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn a_point_is_described_by_the_control_it_is_part_of() {
+        let tree = json!({"nodes": [
+            {"nodeId": "1", "role": {"value": "RootWebArea"}, "name": {"value": "Account"}},
+            {"nodeId": "2", "parentId": "1", "backendDOMNodeId": 20, "role": {"value": "button"}, "name": {"value": "Delete account"}},
+            {"nodeId": "3", "parentId": "2", "backendDOMNodeId": 30, "role": {"value": "generic"}, "name": {"value": ""}, "ignored": true},
+            {"nodeId": "4", "parentId": "1", "backendDOMNodeId": 40, "role": {"value": "paragraph"}, "name": {"value": ""}},
+        ]});
+        // A span inside the button is the button.
+        assert_eq!(
+            describe_from_ax(&tree, 30).as_deref(),
+            Some("button \"Delete account\"")
+        );
+        assert_eq!(
+            describe_from_ax(&tree, 20).as_deref(),
+            Some("button \"Delete account\"")
+        );
+        // Outside any control, the nearest named thing.
+        assert_eq!(
+            describe_from_ax(&tree, 40).as_deref(),
+            Some("RootWebArea \"Account\"")
+        );
+        assert_eq!(describe_from_ax(&tree, 99), None);
+    }
+
+    #[test]
+    fn a_new_token_is_sixty_four_random_hex_characters() {
+        let a = new_token().unwrap();
+        let b = new_token().unwrap();
+        assert_eq!(a.len(), 64);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn the_token_file_is_kept_when_sound_and_replaced_when_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mcp-token");
+        let first = load_or_create_token_at(&path).unwrap();
+        assert_eq!(load_or_create_token_at(&path).unwrap(), first);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        std::fs::write(&path, "short").unwrap();
+        let replaced = load_or_create_token_at(&path).unwrap();
+        assert_ne!(replaced, "short");
+        assert_eq!(replaced.len(), 64);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_at_the_token_path_is_replaced_rather_than_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let victim = dir.path().join("victim");
+        std::fs::write(&victim, "precious contents, not a token at all!!!!!!").unwrap();
+        let path = dir.path().join("mcp-token");
+        std::os::unix::fs::symlink(&victim, &path).unwrap();
+        let token = load_or_create_token_at(&path).unwrap();
+        assert_eq!(token.len(), 64);
+        assert_eq!(
+            std::fs::read_to_string(&victim).unwrap(),
+            "precious contents, not a token at all!!!!!!"
+        );
+        assert!(
+            std::fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_file()
+        );
+    }
+
+    #[test]
+    fn the_question_names_the_site_and_the_files() {
+        let tab = TabId::new();
+        let (title, body) = confirm_text(
+            &dive_mcp::Sensitive::Upload {
+                tab,
+                paths: vec!["/Users/me/Documents/cv.pdf".into()],
+            },
+            "https://jobs.example/apply",
+        );
+        assert!(title.contains("files"), "{title}");
+        assert!(body.contains("jobs.example"), "{body}");
+        assert!(body.contains("/Users/me/Documents/cv.pdf"), "{body}");
+        let (_, body) = confirm_text(
+            &dive_mcp::Sensitive::ReadCookies { tab },
+            "https://mail.example/inbox",
+        );
+        assert!(body.contains("mail.example"), "{body}");
+        assert!(body.contains("signed in"), "{body}");
     }
 
     #[test]

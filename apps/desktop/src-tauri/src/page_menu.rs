@@ -93,15 +93,30 @@ fn carry_out(
         return Err(AppError::new("page menu action off the main thread"));
     };
     match command.action {
-        ContextMenuAction::OpenLinkInNewTab => {
-            open_beside(&main, app, &state, tab_id, &command.link_url, true)
-        }
-        ContextMenuAction::OpenLinkInBackgroundTab => {
-            open_beside(&main, app, &state, tab_id, &command.link_url, false)
-        }
-        ContextMenuAction::OpenImageInNewTab => {
-            open_beside(&main, app, &state, tab_id, &command.source_url, true)
-        }
+        ContextMenuAction::OpenLinkInNewTab => open_beside(
+            &main,
+            app,
+            &state,
+            tab_id,
+            web_link(&command.link_url)?,
+            true,
+        ),
+        ContextMenuAction::OpenLinkInBackgroundTab => open_beside(
+            &main,
+            app,
+            &state,
+            tab_id,
+            web_link(&command.link_url)?,
+            false,
+        ),
+        ContextMenuAction::OpenImageInNewTab => open_beside(
+            &main,
+            app,
+            &state,
+            tab_id,
+            web_link(&command.source_url)?,
+            true,
+        ),
         ContextMenuAction::CopyLink => copy(&command.link_url, "Copied the link"),
         ContextMenuAction::CopyImageAddress => {
             copy(&command.source_url, "Copied the image address")
@@ -128,6 +143,27 @@ fn carry_out(
             Ok(())
         }),
     }
+}
+
+/// A link or image address from the page, if a new tab may be opened on it.
+///
+/// The page wrote the address, and a tab opened from the menu is opened by
+/// Dive: a `file:` link would read the disk, a `dive:` link would open a
+/// built-in page and `javascript:` would run in whatever the new tab became.
+/// The rules are the ones a page asking for a new window gets.
+fn web_link(address: &str) -> AppResult<&str> {
+    if address.is_empty() {
+        return Err(AppError::new("that item has no address"));
+    }
+    let parsed =
+        url::Url::parse(address).map_err(|_| AppError::new("that item's address is not a link"))?;
+    if !crate::engine::is_web_link(&parsed) {
+        return Err(AppError::new(format!(
+            "Dive opens web links in a new tab, not {}: addresses",
+            parsed.scheme()
+        )));
+    }
+    Ok(address)
 }
 
 /// A new tab in the workspace the page's tab lives in.
@@ -227,5 +263,23 @@ mod tests {
         .unwrap();
         assert_eq!(url, "https://duckduckgo.com/?q=rust+context+menu");
         assert!(super::search_url("https://duckduckgo.com/?q={query}", "   ").is_err());
+    }
+
+    #[test]
+    fn a_link_opens_in_a_new_tab_only_when_it_is_on_the_web() {
+        assert!(super::web_link("https://a.test/x").is_ok());
+        assert!(super::web_link("http://localhost:3000/").is_ok());
+        assert!(super::web_link("about:blank").is_ok());
+        for refused in [
+            "",
+            "file:///etc/passwd",
+            "dive://settings",
+            "javascript:alert(document.cookie)",
+            "data:text/html,<script>1</script>",
+            "blob:https://a.test/9f",
+            "not a link",
+        ] {
+            assert!(super::web_link(refused).is_err(), "{refused}");
+        }
     }
 }

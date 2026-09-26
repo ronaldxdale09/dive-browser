@@ -86,10 +86,32 @@ use crate::{
 struct Fake {
     tabs: Mutex<Vec<TabInfo>>,
     navigated: Mutex<Vec<(TabId, String)>>,
+    /// Tabs `check_tab` refuses, as if they belonged to another profile.
+    foreign: Mutex<Vec<TabId>>,
+    /// What the person was asked, in order.
+    asked: Mutex<Vec<Sensitive>>,
+    /// Whether the person says no.
+    refuse: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait]
 impl Browser for Fake {
+    async fn check_tab(&self, tab: TabId) -> Result<(), BrowserError> {
+        if self.foreign.lock().unwrap().contains(&tab) {
+            return Err(BrowserError::TabNotFound(tab.to_string()));
+        }
+        Ok(())
+    }
+    async fn confirm(&self, step: Sensitive) -> Result<(), BrowserError> {
+        self.asked.lock().unwrap().push(step);
+        if self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(BrowserError::NotAllowed {
+                operation: "that".into(),
+                reason: "the person said no".into(),
+            });
+        }
+        Ok(())
+    }
     async fn tabs(&self) -> Result<Vec<TabInfo>, BrowserError> {
         Ok(self.tabs.lock().unwrap().clone())
     }
@@ -766,7 +788,7 @@ async fn evaluate_is_gated_and_bad_ids_rejected() {
         }))
         .await
         .unwrap_err();
-    assert!(err.message.contains("disabled"));
+    assert!(err.message.contains("DIVE_MCP_ALLOW_EVAL"));
 
     let open = DiveServer::new(
         Arc::new(Fake::default()),
@@ -862,6 +884,20 @@ async fn token_and_origin_are_enforced() {
         .unwrap(),
         403
     );
+    // A sandboxed frame says `null` and a dev server says localhost; both are
+    // web pages, and both hold the token only if it leaked to them.
+    for origin in ["null", "http://localhost:3000", "http://127.0.0.1:7391"] {
+        assert_eq!(
+            status_of(
+                &url,
+                &[("authorization", "Bearer s3cret"), ("origin", origin)]
+            )
+            .await
+            .unwrap(),
+            403,
+            "{origin}"
+        );
+    }
     assert_eq!(
         status_of(&url, &[("authorization", "Bearer s3cret")])
             .await
@@ -909,4 +945,94 @@ async fn page_dialog_defaults_to_accepting_and_passes_prompt_text() {
             && props.get("text").is_some()
             && props.get("tab_id").is_some()
     );
+}
+
+#[tokio::test]
+async fn a_tab_the_browser_disowns_cannot_be_driven_by_id() {
+    let fake = Arc::new(Fake::default());
+    let server = DiveServer::new(Arc::clone(&fake), Config::default());
+    let foreign = TabId::new();
+    fake.foreign.lock().unwrap().push(foreign);
+    let err = server
+        .page_text(Parameters(TabRef {
+            tab_id: Some(foreign.to_string()),
+        }))
+        .await
+        .unwrap_err();
+    assert!(err.message.contains("tab not found"), "{}", err.message);
+    let err = server
+        .tab_navigate(Parameters(NavigateParams {
+            tab_id: Some(foreign.to_string()),
+            url: "https://a.dev/".into(),
+        }))
+        .await
+        .unwrap_err();
+    assert!(err.message.contains("tab not found"), "{}", err.message);
+    assert!(fake.navigated.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn uploads_and_cookie_reads_ask_the_person_first() {
+    let fake = Arc::new(Fake::default());
+    let server = DiveServer::new(Arc::clone(&fake), Config::default());
+    server
+        .tab_open(Parameters(OpenParams {
+            context_id: None,
+            url: "https://a.dev".into(),
+        }))
+        .await
+        .unwrap();
+    server
+        .page_upload(Parameters(crate::params::UploadParams {
+            tab_id: None,
+            locator: Some("css=input[type=file]".into()),
+            paths: vec!["/Users/me/Documents/cv.pdf".into()],
+        }))
+        .await
+        .unwrap();
+    server
+        .page_storage(Parameters(crate::params::StorageGetParams {
+            tab_id: None,
+            include: None,
+        }))
+        .await
+        .unwrap();
+    // Storage without cookies holds nothing the page could not read itself.
+    server
+        .page_storage(Parameters(crate::params::StorageGetParams {
+            tab_id: None,
+            include: Some(vec![crate::params::StorageKind::Local]),
+        }))
+        .await
+        .unwrap();
+    let asked = fake.asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 2, "{asked:?}");
+    assert!(
+        matches!(&asked[0], Sensitive::Upload { paths, .. } if paths == &["/Users/me/Documents/cv.pdf"])
+    );
+    assert!(matches!(asked[1], Sensitive::ReadCookies { .. }));
+
+    fake.refuse.store(true, std::sync::atomic::Ordering::SeqCst);
+    let err = server
+        .page_storage(Parameters(crate::params::StorageGetParams {
+            tab_id: None,
+            include: Some(vec![crate::params::StorageKind::Cookies]),
+        }))
+        .await
+        .unwrap_err();
+    assert!(err.message.contains("said no"), "{}", err.message);
+}
+
+#[test]
+fn the_evaluate_description_names_the_switch_that_turns_it_on() {
+    let entry = tool_catalog()
+        .into_iter()
+        .find(|e| e.name == "page_evaluate")
+        .unwrap();
+    assert!(
+        entry.description.contains("DIVE_MCP_ALLOW_EVAL"),
+        "{}",
+        entry.description
+    );
+    assert!(!entry.description.contains("enabled it in Dive"));
 }

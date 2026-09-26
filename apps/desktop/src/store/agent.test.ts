@@ -47,7 +47,7 @@ describe("applyDelta", () => {
 
 describe("tool steps", () => {
   it("records calls and their results on the assistant message", () => {
-    let m = applyDelta(base, { type: "tool_call", data: { id: "tu1", name: "page_click", input: '{"ref":"e1"}', action: true, locator: null, caution: null } });
+    let m = applyDelta(base, { type: "tool_call", data: { id: "tu1", name: "page_click", input: '{"ref":"e1"}', action: true, locator: null, caution: null, always: false } });
     m = applyDelta(m, { type: "tool_done", data: { id: "tu1", summary: "clicked", error: false } });
     expect(m[1]?.steps).toHaveLength(1);
     expect(m[1]?.steps?.[0]).toMatchObject({ id: "tu1", name: "page_click", action: true, summary: "clicked", error: false });
@@ -56,22 +56,30 @@ describe("tool steps", () => {
 
 describe("approval", () => {
   it("marks a step as awaiting and clears it when done", () => {
-    let m = applyDelta(base, { type: "tool_call", data: { id: "tu2", name: "tab_navigate", input: "{}", action: true, locator: null, caution: null } });
-    m = applyDelta(m, { type: "needs_approval", data: { id: "tu2", name: "tab_navigate", input: "{}", action: true, locator: null, caution: null } });
+    let m = applyDelta(base, { type: "tool_call", data: { id: "tu2", name: "tab_navigate", input: "{}", action: true, locator: null, caution: null, always: false } });
+    m = applyDelta(m, { type: "needs_approval", data: { id: "tu2", name: "tab_navigate", input: "{}", action: true, locator: null, caution: null, always: false } });
     expect(m[1]?.steps?.[0]?.awaiting).toBe(true);
     m = applyDelta(m, { type: "tool_done", data: { id: "tu2", summary: "denied", error: true } });
     expect(m[1]?.steps?.[0]).toMatchObject({ awaiting: false, error: true });
   });
+  it("asks with the reason the host settled on, not the one the row streamed in with", () => {
+    let m = applyDelta(base, { type: "tool_call", data: { id: "tu4", name: "page_mouse", input: "{}", action: true, locator: null, caution: null, always: false } });
+    m = applyDelta(m, { type: "needs_approval", data: { id: "tu4", name: "page_mouse", input: "{}", action: true, locator: 'button "Delete account"', caution: "“delete” reads as something that cannot be undone", always: false } });
+    expect(m[1]?.steps?.[0]).toMatchObject({ awaiting: true, locator: 'button "Delete account"', caution: "“delete” reads as something that cannot be undone" });
+    m = applyDelta(m, { type: "tool_call", data: { id: "tu5", name: "tab_navigate", input: "{}", action: true, locator: null, caution: null, always: false } });
+    m = applyDelta(m, { type: "needs_approval", data: { id: "tu5", name: "tab_navigate", input: "{}", action: true, locator: null, caution: "this run has read private data from mail.example", always: true } });
+    expect(m[1]?.steps?.[1]).toMatchObject({ awaiting: true, always: true });
+  });
   it("clears a dangling approval when the reply ends or fails", () => {
-    let m = applyDelta(base, { type: "tool_call", data: { id: "tu3", name: "page_type", input: "{}", action: true, locator: null, caution: null } });
-    m = applyDelta(m, { type: "needs_approval", data: { id: "tu3", name: "page_type", input: "{}", action: true, locator: null, caution: null } });
+    let m = applyDelta(base, { type: "tool_call", data: { id: "tu3", name: "page_type", input: "{}", action: true, locator: null, caution: null, always: false } });
+    m = applyDelta(m, { type: "needs_approval", data: { id: "tu3", name: "page_type", input: "{}", action: true, locator: null, caution: null, always: false } });
     expect(applyDelta(m, { type: "done", data: "stopped" })[1]?.steps?.[0]?.awaiting).toBe(false);
     expect(applyDelta(m, { type: "error", data: { message: "gone", kind: "other" } })[1]?.steps?.[0]?.awaiting).toBe(false);
   });
   it("stops a step that never ran from spinning once the reply is over", () => {
-    let m = applyDelta(base, { type: "tool_call", data: { id: "a", name: "page_text", input: "{}", action: false, locator: null, caution: null } });
+    let m = applyDelta(base, { type: "tool_call", data: { id: "a", name: "page_text", input: "{}", action: false, locator: null, caution: null, always: false } });
     m = applyDelta(m, { type: "tool_done", data: { id: "a", summary: "ok", error: false } });
-    m = applyDelta(m, { type: "tool_call", data: { id: "b", name: "page_click", input: "{}", action: true, locator: null, caution: null } });
+    m = applyDelta(m, { type: "tool_call", data: { id: "b", name: "page_click", input: "{}", action: true, locator: null, caution: null, always: false } });
     for (const end of [{ type: "done", data: "stopped" }, { type: "error", data: { message: "limit", kind: "other" } }] as ChatDeltaOut[]) {
       const steps = applyDelta(m, end)[1]?.steps;
       expect(steps?.[0]).toMatchObject({ summary: "ok", error: false });
@@ -115,7 +123,7 @@ describe("turnsFor", () => {
 
 describe("coalesceDeltas", () => {
   it("joins adjacent text and reasoning pieces but keeps a tool call between them", () => {
-    const call: ChatDeltaOut = { type: "tool_call", data: { id: "t", name: "page_click", input: "{}", action: true, locator: null, caution: null } };
+    const call: ChatDeltaOut = { type: "tool_call", data: { id: "t", name: "page_click", input: "{}", action: true, locator: null, caution: null, always: false } };
     expect(coalesceDeltas([
       { type: "reasoning", data: "Fi" }, { type: "reasoning", data: "rst" },
       { type: "text", data: "a" }, { type: "text", data: "b" }, call, { type: "text", data: "c" },
@@ -157,7 +165,7 @@ describe("streaming", () => {
 
     // A tool call is shown at once, with the text that was waiting before it.
     emit({ type: "text", data: "ld" });
-    emit({ type: "tool_call", data: { id: "t1", name: "page_click", input: "{}", action: true, locator: null, caution: null } });
+    emit({ type: "tool_call", data: { id: "t1", name: "page_click", input: "{}", action: true, locator: null, caution: null, always: false } });
     expect(useAgent.getState().messages.at(-1)).toMatchObject({ content: "Hello, world", steps: [{ id: "t1" }] });
 
     // Text still in the buffer when the stream ends is not dropped.

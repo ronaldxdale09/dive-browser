@@ -93,7 +93,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ),
         spec(
             "page_upload",
-            "Attach files to an <input type=\"file\">, as the picker would. paths are absolute paths on this machine. A picker opened by a click cannot be driven, so go through the input.".into(),
+            "Attach files to an <input type=\"file\">, as the picker would. paths are absolute paths to files in Downloads, Desktop or Documents; the person is asked first. A picker opened by a click cannot be driven, so go through the input.".into(),
             obj(json!({"tab_id": tab, "locator": locator, "paths": {"type": "array", "items": {"type": "string"}}}), &["paths"]),
         ),
         spec(
@@ -143,7 +143,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ),
         spec(
             "page_storage",
-            "Everything this site keeps on this machine in one call: cookies, localStorage and sessionStorage. What it returns is what page_storage_set takes, so a signed-in session can be read once and restored later without logging in again.".into(),
+            "Everything this site keeps on this machine in one call: cookies, localStorage and sessionStorage. What it returns is what page_storage_set takes, so a signed-in session can be read once and restored later without logging in again. The person is asked first, every time.".into(),
             obj(json!({"tab_id": tab, "include": {"type": "array", "items": {"type": "string", "enum": ["cookies", "local", "session"]}}}), &[]),
         ),
         spec(
@@ -329,6 +329,12 @@ fn resolve_tab(argument: Option<&str>, current: Option<TabId>) -> Result<TabId, 
     }
 }
 
+/// The tab a call acts on, the way [`execute`] will read it: the one it
+/// names, or the run's current tab.
+pub(crate) fn call_tab(current: Option<TabId>, input: &Value) -> Option<TabId> {
+    resolve_tab(tab_argument(input), current).ok()
+}
+
 /// Run one tool call against the browser.
 pub async fn run<B: Browser>(
     browser: &B,
@@ -397,7 +403,16 @@ async fn execute<B: Browser>(
     call: &ToolUse,
 ) -> Result<Value, String> {
     let input = &call.input;
-    let tab = || resolve_tab(tab_argument(input), default_tab);
+    // Every tab a call reaches is checked twice: against the profile in
+    // front, since a tab id is only a uuid and could name a tab of another
+    // profile's session, and against the run, since a clean run may only use
+    // the tabs it opened.
+    let tab = async || -> Result<TabId, String> {
+        let tab = resolve_tab(tab_argument(input), default_tab)?;
+        scope.admits(tab)?;
+        browser.check_tab(tab).await.map_err(err)?;
+        Ok(tab)
+    };
     let text = |v: Value| {
         Ok(Value::String(
             serde_json::to_string_pretty(&v).unwrap_or_default(),
@@ -421,28 +436,48 @@ async fn execute<B: Browser>(
             .unwrap_or_default()
     };
     match call.name.as_str() {
-        "tabs_list" => text(
-            serde_json::to_value(browser.tabs().await.map_err(err)?).map_err(|e| e.to_string())?,
-        ),
-        "page_inspect" => text(browser.page_inspect(tab()?).await.map_err(err)?),
+        "tabs_list" => {
+            let mut tabs = browser.tabs().await.map_err(err)?;
+            // A clean run's tabs are its own; the person's are not listed to
+            // it, so their addresses and titles do not reach the model either.
+            if scope.context().is_some() {
+                let opened: Vec<String> = scope.opened().iter().map(ToString::to_string).collect();
+                tabs.retain(|t| opened.contains(&t.id));
+                for id in opened {
+                    if !tabs.iter().any(|t| t.id == id) {
+                        tabs.push(dive_mcp::TabInfo {
+                            id,
+                            url: String::new(),
+                            title: String::new(),
+                            active: false,
+                        });
+                    }
+                }
+            }
+            text(serde_json::to_value(tabs).map_err(|e| e.to_string())?)
+        }
+        "page_inspect" => text(browser.page_inspect(tab().await?).await.map_err(err)?),
         "page_text" => browser
-            .page_text(tab()?)
+            .page_text(tab().await?)
             .await
             .map(Value::String)
             .map_err(err),
         "page_markdown" => browser
-            .page_markdown(tab()?)
+            .page_markdown(tab().await?)
             .await
             .map(Value::String)
             .map_err(err),
         "page_state" => browser
-            .page_state(tab()?)
+            .page_state(tab().await?)
             .await
             .map(Value::String)
             .map_err(err),
         "page_screenshot" => {
             let full_page = input["full_page"].as_bool().unwrap_or(false);
-            let png = browser.screenshot(tab()?, full_page).await.map_err(err)?;
+            let png = browser
+                .screenshot(tab().await?, full_page)
+                .await
+                .map_err(err)?;
             if png.len() > MAX_AGENT_SCREENSHOT_BYTES {
                 return Err(format!(
                     "screenshot is over the {MAX_AGENT_SCREENSHOT_BYTES} byte agent limit; resize the page and try again"
@@ -454,14 +489,14 @@ async fn execute<B: Browser>(
         }
         "page_click" => text(
             browser
-                .page_click(tab()?, target_of(input))
+                .page_click(tab().await?, target_of(input))
                 .await
                 .map_err(err)?,
         ),
         "page_type" => text(
             browser
                 .page_type(
-                    tab()?,
+                    tab().await?,
                     target_of(input),
                     s("text")?,
                     input["clear"].as_bool().unwrap_or(true),
@@ -471,14 +506,19 @@ async fn execute<B: Browser>(
                 .map_err(err)?,
         ),
         "page_press" => browser
-            .page_press(tab()?, target_of(input), s("key")?, strings("modifiers"))
+            .page_press(
+                tab().await?,
+                target_of(input),
+                s("key")?,
+                strings("modifiers"),
+            )
             .await
             .map(|()| Value::String("pressed".into()))
             .map_err(err),
         "page_scroll" => text(
             browser
                 .page_scroll(
-                    tab()?,
+                    tab().await?,
                     target_of(input),
                     input["delta_x"].as_f64().unwrap_or(0.0),
                     input["delta_y"].as_f64().unwrap_or(0.0),
@@ -489,7 +529,7 @@ async fn execute<B: Browser>(
         "page_wait_for" => text(
             browser
                 .page_wait_for(
-                    tab()?,
+                    tab().await?,
                     WaitForParams {
                         tab_id: None,
                         locator: input["locator"].as_str().map(str::to_owned),
@@ -504,14 +544,14 @@ async fn execute<B: Browser>(
         ),
         "page_hover" => text(
             browser
-                .page_hover(tab()?, target_of(input))
+                .page_hover(tab().await?, target_of(input))
                 .await
                 .map_err(err)?,
         ),
         "page_fill_form" => text(
             browser
                 .page_fill_form(
-                    tab()?,
+                    tab().await?,
                     serde_json::from_value(json!({
                         "fields": input["fields"].clone(),
                         "submit": input["submit"].clone(),
@@ -524,7 +564,7 @@ async fn execute<B: Browser>(
         "page_upload" => text(
             browser
                 .page_upload(
-                    tab()?,
+                    tab().await?,
                     dive_mcp::UploadParams {
                         tab_id: None,
                         locator: input["locator"].as_str().map(str::to_owned),
@@ -544,7 +584,7 @@ async fn execute<B: Browser>(
         "page_drag" => text(
             browser
                 .page_drag(
-                    tab()?,
+                    tab().await?,
                     dive_mcp::DragParams {
                         tab_id: None,
                         from: input["from"].as_str().map(str::to_owned),
@@ -579,7 +619,7 @@ async fn execute<B: Browser>(
         "page_pdf" => text(
             browser
                 .page_pdf(
-                    tab()?,
+                    tab().await?,
                     serde_json::from_value(json!({
                         "filename": input["filename"].clone(),
                         "landscape": input["landscape"].clone(),
@@ -607,7 +647,7 @@ async fn execute<B: Browser>(
         "page_expect" => text(
             browser
                 .page_expect(
-                    tab()?,
+                    tab().await?,
                     serde_json::from_value(json!({
                         "checks": input["checks"].clone(),
                         "timeout_ms": input["timeout_ms"].clone(),
@@ -622,7 +662,7 @@ async fn execute<B: Browser>(
         "page_keys" => text(
             browser
                 .page_keys(
-                    tab()?,
+                    tab().await?,
                     serde_json::from_value(json!({
                         "locator": input["locator"].clone(),
                         "steps": input["steps"].clone(),
@@ -635,7 +675,7 @@ async fn execute<B: Browser>(
         "page_mouse" => text(
             browser
                 .page_mouse(
-                    tab()?,
+                    tab().await?,
                     serde_json::from_value(json!({"steps": input["steps"].clone()}))
                         .map_err(|e| format!("steps must be a list of {{action, x, y}}: {e}"))?,
                 )
@@ -645,7 +685,7 @@ async fn execute<B: Browser>(
         "page_storage" => text(
             browser
                 .page_storage_get(
-                    tab()?,
+                    tab().await?,
                     serde_json::from_value(json!({"include": input["include"].clone()})).map_err(
                         |e| format!("include must be a list of cookies/local/session: {e}"),
                     )?,
@@ -656,7 +696,7 @@ async fn execute<B: Browser>(
         "page_storage_set" => text(
             browser
                 .page_storage_set(
-                    tab()?,
+                    tab().await?,
                     serde_json::from_value(json!({
                         "cookies": input["cookies"].clone(),
                         "local": input["local"].clone(),
@@ -674,7 +714,7 @@ async fn execute<B: Browser>(
         "page_storage_clear" => text(
             browser
                 .page_storage_clear(
-                    tab()?,
+                    tab().await?,
                     serde_json::from_value(json!({"clear": input["clear"].clone()})).map_err(
                         |e| format!("clear must be a list of cookies/local/session: {e}"),
                     )?,
@@ -685,7 +725,7 @@ async fn execute<B: Browser>(
         "page_select" => text(
             browser
                 .page_select(
-                    tab()?,
+                    tab().await?,
                     SelectParams {
                         tab_id: None,
                         target: target_of(input),
@@ -696,11 +736,16 @@ async fn execute<B: Browser>(
                 .await
                 .map_err(err)?,
         ),
-        "tab_history" => text(browser.history(tab()?, s("action")?).await.map_err(err)?),
+        "tab_history" => text(
+            browser
+                .history(tab().await?, s("action")?)
+                .await
+                .map_err(err)?,
+        ),
         "page_dialog" => text(
             browser
                 .page_dialog(
-                    tab()?,
+                    tab().await?,
                     DialogParams {
                         tab_id: None,
                         accept: input["accept"].as_bool(),
@@ -712,14 +757,14 @@ async fn execute<B: Browser>(
         ),
         "page_locate" => text(
             browser
-                .page_locate(tab()?, s("locator")?)
+                .page_locate(tab().await?, s("locator")?)
                 .await
                 .map_err(err)?,
         ),
         "page_resize" => text(
             browser
                 .page_resize(
-                    tab()?,
+                    tab().await?,
                     ResizeParams {
                         tab_id: None,
                         preset: input["preset"].as_str().map(str::to_owned),
@@ -737,7 +782,7 @@ async fn execute<B: Browser>(
         "page_appearance" => text(
             browser
                 .page_appearance(
-                    tab()?,
+                    tab().await?,
                     AppearanceParams {
                         tab_id: None,
                         color_scheme: input["color_scheme"].as_str().map(str::to_owned),
@@ -751,13 +796,13 @@ async fn execute<B: Browser>(
         ),
         "page_throttle" => text(
             browser
-                .page_throttle(tab()?, s("profile")?)
+                .page_throttle(tab().await?, s("profile")?)
                 .await
                 .map_err(err)?,
         ),
         "page_component" => text(
             browser
-                .page_component(tab()?, target_of(input))
+                .page_component(tab().await?, target_of(input))
                 .await
                 .map_err(err)?,
         ),
@@ -786,22 +831,22 @@ async fn execute<B: Browser>(
             }))
         }
         "tab_close" => browser
-            .close(tab()?)
+            .close(tab().await?)
             .await
             .map(|()| Value::String("closed".into()))
             .map_err(err),
         "tab_activate" => browser
-            .activate(tab()?)
+            .activate(tab().await?)
             .await
             .map(|()| Value::String("activated".into()))
             .map_err(err),
         "tab_navigate" => browser
-            .navigate(tab()?, web_url(s("url")?)?)
+            .navigate(tab().await?, web_url(s("url")?)?)
             .await
             .map(|()| Value::String("navigating".into()))
             .map_err(err),
         "page_report" => browser
-            .page_report(tab()?)
+            .page_report(tab().await?)
             .await
             .map(Value::String)
             .map_err(err),
@@ -812,21 +857,26 @@ async fn execute<B: Browser>(
             .map(|()| Value::String("rules applied".into()))
             .map_err(err),
         "page_snapshot" => browser
-            .page_snapshot(tab()?)
+            .page_snapshot(tab().await?)
             .await
             .map(Value::String)
             .map_err(err),
         "page_diff" => Ok(Value::String(
-            browser.page_diff(tab()?).await.map_err(err)?["summary"]
+            browser.page_diff(tab().await?).await.map_err(err)?["summary"]
                 .as_str()
                 .unwrap_or_default()
                 .to_owned(),
         )),
-        "console_tail" => text(browser.console_tail(tab()?, limit()).await.map_err(err)?),
-        "network_list" => text(browser.requests(tab()?, limit()).await.map_err(err)?),
+        "console_tail" => text(
+            browser
+                .console_tail(tab().await?, limit())
+                .await
+                .map_err(err)?,
+        ),
+        "network_list" => text(browser.requests(tab().await?, limit()).await.map_err(err)?),
         "network_body" => text(
             browser
-                .request_body(tab()?, s("request_id")?)
+                .request_body(tab().await?, s("request_id")?)
                 .await
                 .map_err(err)?,
         ),

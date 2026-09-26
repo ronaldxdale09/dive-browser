@@ -26,6 +26,29 @@ pub struct TabInfo {
     pub active: bool,
 }
 
+/// A step a remote client may take only once the person has agreed to it.
+///
+/// Each of these hands something to whoever is on the other end of the
+/// connection that the person would not hand over without being asked: a
+/// file off their disk, or the cookies that keep them signed in. The token
+/// says the client is one the person set up; it does not say the person
+/// wants this particular thing to leave.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Sensitive {
+    /// Attach these files, by absolute path, to a file input in the tab.
+    Upload {
+        /// The tab the files would go to.
+        tab: TabId,
+        /// The files, as the client named them.
+        paths: Vec<String>,
+    },
+    /// Read the tab's cookies, including the ones scripts cannot see.
+    ReadCookies {
+        /// The tab whose cookies would be read.
+        tab: TabId,
+    },
+}
+
 /// The engine surface the MCP tools need.
 #[async_trait]
 pub trait Browser: Send + Sync + 'static {
@@ -44,6 +67,25 @@ pub trait Browser: Send + Sync + 'static {
     ) -> Result<TabInfo, BrowserError> {
         let _ = context;
         self.open_tab(url).await
+    }
+    /// Refuse a tab id the caller has no business reaching.
+    ///
+    /// Tab ids are handed out by `tabs_list`, but they are only uuids: a
+    /// client that learned one another way -- from an old session, from
+    /// another profile -- must not be able to drive that tab with it.
+    /// Defaulted to allowing everything, for implementations with one set of
+    /// tabs.
+    async fn check_tab(&self, tab: TabId) -> Result<(), BrowserError> {
+        let _ = tab;
+        Ok(())
+    }
+    /// Ask the person before a remote client takes a [`Sensitive`] step.
+    ///
+    /// Defaulted to allowing it, for implementations with nobody to ask; the
+    /// real browser puts the question on screen.
+    async fn confirm(&self, step: Sensitive) -> Result<(), BrowserError> {
+        let _ = step;
+        Ok(())
     }
     /// Navigate an existing tab.
     async fn navigate(&self, tab: TabId, url: String) -> Result<(), BrowserError>;

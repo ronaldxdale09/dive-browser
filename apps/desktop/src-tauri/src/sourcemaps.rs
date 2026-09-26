@@ -20,27 +20,9 @@ pub struct Original {
 }
 
 /// Fetches scripts and their maps, caching parsed maps per script URL.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Resolver {
-    http: reqwest::Client,
     cache: Arc<Mutex<HashMap<String, Option<Arc<sourcemap::SourceMap>>>>>,
-}
-
-impl Default for Resolver {
-    fn default() -> Self {
-        let http = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(3))
-            .timeout(std::time::Duration::from_secs(10))
-            // A same-origin asset is allowed to point only at a same-origin
-            // map. Not following redirects keeps that guarantee enforceable.
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .unwrap_or_default();
-        Self {
-            http,
-            cache: Arc::default(),
-        }
-    }
 }
 
 impl Resolver {
@@ -112,7 +94,7 @@ impl Resolver {
         if !matches!(script_url.scheme(), "http" | "https") {
             return None;
         }
-        let script = String::from_utf8(fetch_capped(&self.http, url).await?).ok()?;
+        let script = String::from_utf8(fetch_capped(&script_url).await?).ok()?;
         let map_ref = map_url(&script)?;
         let bytes = if let Some(data) = map_ref.strip_prefix("data:") {
             let (_, payload) = data.split_once(',')?;
@@ -127,7 +109,7 @@ impl Resolver {
             (bytes.len() <= MAX_BYTES).then_some(bytes)?
         } else {
             let absolute = map_target(&script_url, &map_ref)?;
-            fetch_capped(&self.http, absolute.as_str()).await?
+            fetch_capped(&absolute).await?
         };
         sourcemap::SourceMap::from_slice(&bytes).ok()
     }
@@ -145,28 +127,35 @@ fn map_target(script: &url::Url, reference: &str) -> Option<url::Url> {
 }
 
 /// GET `url`, giving up past [`MAX_BYTES`].
-async fn fetch_capped(http: &reqwest::Client, url: &str) -> Option<Vec<u8>> {
-    use futures_util::StreamExt as _;
-    let response = http.get(url).send().await.ok()?;
-    if !response.status().is_success() {
-        return None;
-    }
-    if response
-        .content_length()
-        .is_some_and(|n| n > MAX_BYTES as u64)
+///
+/// The page named the script, so the fetch is a page's choice made from
+/// outside the sandbox (see [`crate::netfetch`]). A script served from a
+/// name that is plainly this machine or the LAN -- a dev server, which is
+/// what source maps are mostly for -- may be fetched there; a public name
+/// that resolves to a local address may not. Redirects are not followed: a
+/// same-origin asset is allowed to point only at a same-origin map, and a
+/// redirect would undo that.
+async fn fetch_capped(url: &url::Url) -> Option<Vec<u8>> {
+    let reach = if crate::netfetch::names_local_host(url) {
+        crate::netfetch::Reach::AlsoLocal
+    } else {
+        crate::netfetch::Reach::Public
+    };
+    match crate::netfetch::get(
+        url.as_str(),
+        reach,
+        MAX_BYTES,
+        std::time::Duration::from_secs(10),
+        false,
+    )
+    .await
     {
-        return None;
-    }
-    let mut out = Vec::new();
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.ok()?;
-        if out.len() + chunk.len() > MAX_BYTES {
-            return None;
+        Ok(bytes) => Some(bytes),
+        Err(error) => {
+            tracing::debug!(%url, %error, "source map fetch refused or failed");
+            None
         }
-        out.extend_from_slice(&chunk);
     }
-    Some(out)
 }
 
 /// Whether two URLs share scheme, host and port.

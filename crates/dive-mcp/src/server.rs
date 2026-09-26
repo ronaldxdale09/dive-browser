@@ -14,7 +14,7 @@ use rmcp::model::{
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use serde::Serialize;
 
-use crate::browser::Browser;
+use crate::browser::{Browser, Sensitive};
 use crate::error::BrowserError;
 use crate::params::{
     AppearanceParams, BatchParams, BodyParams, ClaimParams, ClickParams, ComponentParams,
@@ -64,12 +64,14 @@ impl<B: Browser> DiveServer<B> {
     async fn resolve(&self, tab_id: Option<String>) -> Result<TabId, ErrorData> {
         // A blank id is how some clients say "the current tab".
         if let Some(id) = tab_id.filter(|id| !id.trim().is_empty()) {
-            return id.parse().map_err(|_| {
+            let tab: TabId = id.parse().map_err(|_| {
                 ErrorData::invalid_params(
                     format!("bad tab id {id}: pass an id from tabs_list, or leave tab_id out for the active tab"),
                     None,
                 )
-            });
+            })?;
+            self.browser.check_tab(tab).await?;
+            return Ok(tab);
         }
         let tabs = self.browser.tabs().await?;
         let Some(tab) = tabs.iter().find(|t| t.active).or_else(|| tabs.first()) else {
@@ -465,7 +467,7 @@ impl<B: Browser> DiveServer<B> {
     /// Attach files.
     #[tool(
         name = "page_upload",
-        description = "Attach files to an <input type=\"file\">, as choosing them in the picker would, firing the change event the page listens for. paths are absolute paths on this machine; an empty list clears the input. A file picker opened by a click cannot be driven, so upload through the input itself.",
+        description = "Attach files to an <input type=\"file\">, as choosing them in the picker would, firing the change event the page listens for. paths are absolute paths to files in Downloads, Desktop, Documents or the download folder, and the person is asked in Dive before they are attached; an empty list clears the input. A file picker opened by a click cannot be driven, so upload through the input itself.",
         annotations(
             title = "Page upload",
             read_only_hint = false,
@@ -477,6 +479,12 @@ impl<B: Browser> DiveServer<B> {
         Parameters(p): Parameters<UploadParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let tab = self.resolve(p.tab_id.clone()).await?;
+        self.browser
+            .confirm(Sensitive::Upload {
+                tab,
+                paths: p.paths.clone(),
+            })
+            .await?;
         json_result(&self.browser.page_upload(tab, p).await?)
     }
 
@@ -497,7 +505,7 @@ impl<B: Browser> DiveServer<B> {
     /// Read stored state.
     #[tool(
         name = "page_storage",
-        description = "Everything this site keeps on this machine, in one call: its cookies, its localStorage and its sessionStorage. Pass include to narrow it. The shape it returns is the shape page_storage_set takes, so a signed-in session can be read once here and restored later or in another tab without going through the login again.",
+        description = "Everything this site keeps on this machine, in one call: its cookies, its localStorage and its sessionStorage. Reading cookies asks the person in Dive first. Pass include to narrow it. The shape it returns is the shape page_storage_set takes, so a signed-in session can be read once here and restored later or in another tab without going through the login again.",
         annotations(
             title = "Page storage",
             read_only_hint = true,
@@ -509,6 +517,14 @@ impl<B: Browser> DiveServer<B> {
         Parameters(p): Parameters<StorageGetParams>,
     ) -> Result<CallToolResult, ErrorData> {
         let tab = self.resolve(p.tab_id.clone()).await?;
+        // Leaving include out means everything, cookies with it.
+        let cookies = p
+            .include
+            .as_ref()
+            .is_none_or(|kinds| kinds.contains(&crate::params::StorageKind::Cookies));
+        if cookies {
+            self.browser.confirm(Sensitive::ReadCookies { tab }).await?;
+        }
         json_result(&self.browser.page_storage_get(tab, p).await?)
     }
 
@@ -939,7 +955,7 @@ impl<B: Browser> DiveServer<B> {
     /// Evaluate JS (gated).
     #[tool(
         name = "page_evaluate",
-        description = "Evaluate a JavaScript expression in the page and return its JSON result. Disabled unless the user enabled it in Dive.",
+        description = "Evaluate a JavaScript expression in the page and return its JSON result. Off unless Dive was started with the DIVE_MCP_ALLOW_EVAL environment variable set; there is no setting for it.",
         annotations(
             title = "Page evaluate",
             read_only_hint = false,
@@ -952,7 +968,7 @@ impl<B: Browser> DiveServer<B> {
     ) -> Result<CallToolResult, ErrorData> {
         if !self.config.allow_evaluate {
             return Err(ErrorData::invalid_request(
-                "page_evaluate is disabled in Dive settings",
+                "page_evaluate is off: Dive has to be started with DIVE_MCP_ALLOW_EVAL set to allow it",
                 None,
             ));
         }

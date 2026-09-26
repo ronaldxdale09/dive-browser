@@ -757,6 +757,30 @@ impl TabHost {
             if is_popup_window(&url, features.size().is_some()) {
                 return tauri::webview::NewWindowResponse::Allow;
             }
+            // Another app's link -- `mailto:` in a new window is common -- is
+            // put to the person exactly as it is when the page follows it in
+            // place, rather than as a tab that could only fail to load it.
+            if crate::external_link::is_external(&url) {
+                let app = popup_app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let origin = current_page_host(&app, tab_id);
+                    let on_main = app.clone();
+                    let _ = on_main.run_on_main_thread(move || {
+                        crate::external_link::intercept(&app, tab_id, &url, &origin);
+                    });
+                });
+                return tauri::webview::NewWindowResponse::Deny;
+            }
+            // The page chose this address, and a new tab is opened by Dive
+            // on its behalf: a `file:` page, a Dive page or `javascript:` is
+            // somewhere a page could not have navigated itself.
+            if !is_web_link(&url) {
+                tracing::debug!(
+                    scheme = url.scheme(),
+                    "refused a new window outside the web"
+                );
+                return tauri::webview::NewWindowResponse::Deny;
+            }
             let app = popup_app.clone();
             tauri::async_runtime::spawn(async move {
                 let schedule = app.clone();
@@ -2802,7 +2826,15 @@ fn current_page_host(app: &AppHandle<Runtime>, tab_id: TabId) -> String {
 /// never became the sign-in page. Anything else (a file, a Dive URL, a custom
 /// scheme) is opened the way Dive opens links.
 fn is_popup_window(url: &url::Url, sized: bool) -> bool {
-    sized && (matches!(url.scheme(), "http" | "https") || url.as_str() == BLANK_URL)
+    sized && is_web_link(url)
+}
+
+/// Whether a page may have Dive open `url` in a new window or tab for it:
+/// the web, and the blank page sign-in flows start from. Anything else -- a
+/// file, a Dive page, `javascript:`, another app's scheme -- is not a link a
+/// page gets to open by asking.
+pub(crate) fn is_web_link(url: &url::Url) -> bool {
+    matches!(url.scheme(), "http" | "https") || url.as_str() == BLANK_URL
 }
 
 /// Chrome links open tracked page tabs, never unmanaged popups inheriting
@@ -3172,10 +3204,31 @@ mod tests {
         assert!(!plain("https://example.com/article"));
         // An empty window the opener navigates itself is the Google flow.
         assert!(sized(BLANK_URL));
-        // Anything else becomes a tab.
+        // Anything else is not a popup.
         assert!(!sized("file:///etc/hosts"));
         assert!(!sized("dive://settings"));
         assert!(!plain(BLANK_URL));
+    }
+
+    #[test]
+    fn a_page_may_ask_for_a_new_tab_only_on_the_web() {
+        let link = |raw: &str| is_web_link(&url::Url::parse(raw).unwrap());
+        assert!(link("https://example.com/article"));
+        assert!(link("http://localhost:3000/"));
+        assert!(link(BLANK_URL));
+        for refused in [
+            "file:///etc/hosts",
+            "dive://settings",
+            "javascript:alert(1)",
+            "data:text/html,<b>x</b>",
+            "blob:https://example.com/0f0e",
+            "about:srcdoc",
+            "chrome://settings",
+            "view-source:https://example.com/",
+            "mailto:a@b.c",
+        ] {
+            assert!(!link(refused), "{refused}");
+        }
     }
 
     #[test]

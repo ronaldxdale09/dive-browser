@@ -14,7 +14,7 @@ const SKIP: &[&str] = &[
     "StaticText",
 ];
 /// Roles worth a ref because an agent may act on them.
-const INTERACTIVE: &[&str] = &[
+pub(crate) const INTERACTIVE: &[&str] = &[
     "button",
     "link",
     "textbox",

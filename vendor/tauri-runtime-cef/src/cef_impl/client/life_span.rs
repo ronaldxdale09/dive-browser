@@ -45,7 +45,7 @@ wrap_life_span_handler! {
       target_url: Option<&CefString>,
       _target_frame_name: Option<&CefString>,
       _target_disposition: WindowOpenDisposition,
-      _user_gesture: std::os::raw::c_int,
+      user_gesture: std::os::raw::c_int,
       popup_features: Option<&PopupFeatures>,
       _window_info: Option<&mut WindowInfo>,
       _client: Option<&mut Option<Client>>,
@@ -53,6 +53,19 @@ wrap_life_span_handler! {
       _extra_info: Option<&mut Option<DictionaryValue>>,
       _no_javascript_access: Option<&mut i32>,
     ) -> std::os::raw::c_int {
+      // A page opens a window only in answer to the person -- a click, a key
+      // press -- as Chrome's popup blocker has it. Without that, any page
+      // could open windows and tabs on a timer, or the moment it loads, and
+      // stack them in front of the one the person is reading. A link opened
+      // in a new tab from a click carries the gesture and is unaffected.
+      if user_gesture == 0 {
+        log::debug!(
+          target: "dive_popup",
+          "blocked a window opened without a user gesture: {}",
+          target_url.map(|url| url.to_string()).unwrap_or_default()
+        );
+        return 1;
+      }
       let Some(handler) = &self.new_window_handler else {
         return 0;
       };
