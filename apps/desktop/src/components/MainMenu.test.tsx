@@ -27,6 +27,24 @@ afterEach(() => {
 });
 
 describe("MainMenu", () => {
+  it("lists recently closed tabs, newest first, and reopens the one chosen", () => {
+    const reopen = vi.fn().mockResolvedValue(undefined);
+    useBrowser.setState({
+      reopenClosedTab: reopen,
+      closedTabs: [
+        { url: "https://old.test/", title: "Old", workspace_id: "w", index: 0 },
+        { url: "https://new.test/", title: "New", workspace_id: "w", index: 1 },
+      ],
+    });
+    render(<MainMenu />);
+    const group = screen.getByRole("group", { name: "Recently closed" });
+    const rows = Array.from(group.querySelectorAll('[role="menuitem"]')).map((row) => row.textContent);
+    expect(rows).toEqual(["New", "Old"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Old" }));
+    expect(reopen).toHaveBeenCalledWith(0);
+    useBrowser.setState({ closedTabs: [] });
+  });
+
   it("drops what a private window cannot do and leads with the way out", () => {
     Object.defineProperty(window, "__DIVE_PRIVATE__", { value: true, configurable: true });
     try {

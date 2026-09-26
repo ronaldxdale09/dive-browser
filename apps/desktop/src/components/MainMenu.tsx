@@ -74,6 +74,9 @@ interface Group {
 /* Bookmarks and history stay in normal windows: a private window keeps neither. */
 const PRIVATE_HIDDEN = ["agent", "workspace.new", "subtitles", "bookmarks", "history"];
 
+/** How many recently closed tabs the menu lists. */
+const RECENTLY_CLOSED_SHOWN = 5;
+
 export function MainMenu() {
   useCoversContent(true);
   const toggle = useBrowser((s) => s.toggle);
@@ -151,7 +154,12 @@ export function MainMenu() {
         <div role="menu" className="scroll-hidden min-h-0 flex-1 overflow-y-auto pb-2">
           {flat.length === 0 && <p className="px-4 py-6 text-center text-xs text-ink-3">Nothing matches “{query}”.</p>}
           {filtered.map((g, gi) => (
-            <div key={g.id} className={gi > 0 ? "mt-1 border-t border-line pt-1" : ""}>
+            <div key={g.id} role={g.id === "recently-closed" ? "group" : undefined} aria-labelledby={g.id === "recently-closed" ? "menu-recently-closed" : undefined} className={gi > 0 ? "mt-1 border-t border-line pt-1" : ""}>
+              {g.id === "recently-closed" && (
+                <p id="menu-recently-closed" className="px-4 pt-1.5 pb-0.5 text-[10.5px] font-medium tracking-[0.06em] text-ink-3 uppercase">
+                  Recently closed
+                </p>
+              )}
               {g.id === "zoom" ? (
                 <ZoomRow />
               ) : (
@@ -246,7 +254,8 @@ function useMenu(close: () => void): Group[] {
   const active = useBrowser((s) => s.activeTab);
   const here = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const open = useBrowser((s) => s.open);
-  const closedTabs = useBrowser((s) => s.closedTabs.length);
+  const closed = useBrowser((s) => s.closedTabs);
+  const closedTabs = closed.length;
   const detached = useBrowser((s) => s.detached);
   const [latest, setLatest] = useState<string | null>(null);
   useEffect(() => {
@@ -279,6 +288,26 @@ function useMenu(close: () => void): Group[] {
         },
       ],
     },
+    // The last few tabs closed, newest first, so one further back than ⇧⌘T
+    // reaches is still a click away.
+    ...(closedTabs > 0
+      ? [
+          {
+            id: "recently-closed",
+            items: closed
+              .map((entry, at) => ({ entry, at }))
+              .slice(-RECENTLY_CLOSED_SHOWN)
+              .reverse()
+              .map(({ entry, at }) => ({
+                id: `closed.${at}`,
+                label: entry.title || entry.url,
+                icon: Undo2,
+                keywords: `recently closed reopen ${entry.url}`,
+                run: done(() => b().reopenClosedTab(at)),
+              })),
+          },
+        ]
+      : []),
     {
       id: "apps",
       items: [

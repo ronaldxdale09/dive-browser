@@ -751,7 +751,8 @@ export const commands = {
 	clipboardWriteSecret: (text: string) => typedError<null, AppError>(__TAURI_INVOKE("clipboard_write_secret", { text })),
 	/**
 	 *  Where a tab's page is scrolled, for remembering a tab about to close.
-	 *  `None` when the page cannot say in time.
+	 *  A page that cannot say in time -- or a sleeping tab, which has no page
+	 *  to ask -- answers with where it was last kept; `None` when neither knows.
 	 */
 	tabScrollPosition: (id: TabId) => typedError<[number, number] | null, AppError>(__TAURI_INVOKE("tab_scroll_position", { id })),
 	/**

@@ -377,17 +377,24 @@ pub(crate) fn prefs_get(state: State<'_, AppState>) -> crate::prefs::Prefs {
 }
 
 /// Where a tab's page is scrolled, for remembering a tab about to close.
-/// `None` when the page cannot say in time.
+/// A page that cannot say in time -- or a sleeping tab, which has no page
+/// to ask -- answers with where it was last kept; `None` when neither knows.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn tab_scroll_position(
     state: State<'_, AppState>,
     id: TabId,
 ) -> AppResult<Option<(i32, i32)>> {
-    let Ok(session) = cdp_for(&state, id) else {
+    if let Ok(session) = cdp_for(&state, id)
+        && let Some(live) = crate::housekeeping::page_scroll(&session).await
+    {
+        return Ok(Some(live));
+    }
+    let store = lock(&state.store);
+    let Ok(tab) = store.tab(id) else {
         return Ok(None);
     };
-    Ok(crate::housekeeping::page_scroll(&session).await)
+    Ok(store.scroll(id, &tab.url)?)
 }
 
 /// Scroll a freshly opened tab to where its closed predecessor was, once its

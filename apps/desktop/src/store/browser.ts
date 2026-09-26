@@ -9,6 +9,9 @@ import { useLayout } from "./layout";
 import type { DownloadNotice, CoreEvent, Decision, Duration, NavigationHistory, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
 import { fileNameOr, fileUrl, opensInTab} from "../lib/paths";
+import { isPrivateWindow } from "../lib/privateMode";
+import { orderTabs } from "../lib/tabOrder";
+import { uiStorage } from "../lib/uiStorage";
 
 export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser" | "subtitles" | "tasks" | "import" | "apps";
 /** The sections of the library dialog. */
@@ -42,9 +45,10 @@ interface BrowserState {
   activeTab: string | null;
   /** Tabs living in their own window rather than the main one. */
   detached: string[];
-  /** Tabs closed this session, oldest first; ⌘⇧T brings the last one back. */
+  /** Tabs closed recently, oldest first, kept across restarts; ⌘⇧T brings the last one back. */
   closedTabs: ClosedTab[];
-  reopenClosedTab: () => Promise<void>;
+  /** Reopen the closed tab at `at` in `closedTabs`, the most recent when omitted. */
+  reopenClosedTab: (at?: number) => Promise<void>;
   /** Close every unpinned tab in the workspace but `keep`, with an Undo that brings them back. */
   closeOtherTabs: (keep: string) => Promise<void>;
   detachTab: (id: string, at: { x: number; y: number } | null) => Promise<void>;
@@ -150,7 +154,15 @@ interface BrowserState {
 
 export type NavError = { url: string; error: string };
 export type NoticeAction = { label: string; run: () => void };
-export type ClosedTab = { url: string; title: string; workspace_id: string | null; index: number; scroll?: [number, number] };
+export type ClosedTab = {
+  url: string;
+  title: string;
+  workspace_id: string | null;
+  index: number;
+  scroll?: [number, number];
+  /** Pinned or essential; a plain tab leaves it out. */
+  tier?: TabTier;
+};
 /** Most closed tabs remembered for reopening. */
 export const CLOSED_TABS_LIMIT = 25;
 /** Scroll offsets of tabs the chrome is closing, keyed by tab id, until their tab_closed arrives. */
@@ -262,30 +274,67 @@ export function sameSiteTab(tabs: readonly Tab[], url: string): Tab | undefined 
   });
 }
 
+/**
+ * A workspace's strip in the order it is drawn: pinned first, then by
+ * position. The store's array keeps the order tabs arrived in, which a drag
+ * never changes -- only their positions -- so it cannot stand in for the strip.
+ */
+function stripOf(tabs: readonly Tab[], workspaceId: string | null): Tab[] {
+  return orderTabs([...tabs]).filter((t) => t.workspace_id === workspaceId);
+}
+
 /** Where `id` sits in its workspace's strip, for putting a reopened tab back. */
 export function stripIndex(tabs: readonly Tab[], id: string): number {
   const tab = tabs.find((t) => t.id === id);
   if (!tab) return -1;
-  return tabs.filter((t) => t.workspace_id === tab.workspace_id).findIndex((t) => t.id === id);
+  return stripOf(tabs, tab.workspace_id).findIndex((t) => t.id === id);
 }
 
 /** The order of a workspace's strip with `id` moved to `index`, for the engine to apply. */
 export function orderWithAt(tabs: readonly Tab[], workspaceId: string, id: string, index: number): string[] {
-  const ids = tabs.filter((t) => t.workspace_id === workspaceId && t.id !== id).map((t) => t.id);
+  const ids = stripOf(tabs, workspaceId).filter((t) => t.id !== id).map((t) => t.id);
   const at = Math.max(0, Math.min(index, ids.length));
   ids.splice(at, 0, id);
   return ids;
 }
 
 /** The closed-tab stack after `tab` went, or unchanged when there was nothing worth reopening. */
-export function rememberClosed(stack: ClosedTab[], tab: Pick<Tab, "url" | "title" | "workspace_id"> | undefined, index = -1, scroll?: [number, number]): ClosedTab[] {
+export function rememberClosed(stack: ClosedTab[], tab: Pick<Tab, "url" | "title" | "workspace_id"> & { tier?: TabTier } | undefined, index = -1, scroll?: [number, number]): ClosedTab[] {
   if (!tab || !tab.url || tab.url === "about:blank") return stack;
   const entry: ClosedTab = { url: tab.url, title: tab.title, workspace_id: tab.workspace_id, index };
   if (scroll && (scroll[0] !== 0 || scroll[1] !== 0)) entry.scroll = scroll;
+  if (tab.tier && tab.tier !== "today") entry.tier = tab.tier;
   const next = [...stack, entry];
   return next.length > CLOSED_TABS_LIMIT ? next.slice(next.length - CLOSED_TABS_LIMIT) : next;
 }
 export type CrashState = { attempt: number; recovering: boolean };
+
+/** Where the closed-tab stack is kept between runs (the profile store, through `uiStorage`). */
+const CLOSED_TABS_KEY = "closed-tabs";
+
+/**
+ * Only the main window of a normal session keeps the stack: every window's
+ * chrome hears the same closes, and a private session keeps nothing.
+ */
+function keepsClosedTabs(): boolean {
+  if (isPrivateWindow() || typeof window === "undefined") return false;
+  const query = new URLSearchParams(window.location.search);
+  return !query.get("popout") && !query.get("app");
+}
+
+/** The stack as it was last saved, dropping anything that does not read as one. */
+export function parseClosedTabs(raw: string | null): ClosedTab[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((entry): entry is ClosedTab => typeof entry === "object" && entry !== null && typeof (entry as ClosedTab).url === "string" && typeof (entry as ClosedTab).title === "string" && typeof (entry as ClosedTab).index === "number")
+      .slice(-CLOSED_TABS_LIMIT);
+  } catch {
+    return [];
+  }
+}
 
 const NAVIGATION_DIALOGS = new Set<UiPanel>(["palette", "settings", "library", "shortcuts"]);
 
@@ -443,6 +492,8 @@ let unlistenDownloadProgress: (() => void) | null = null;
 let unlistenZoom: (() => void) | null = null;
 /** The boot in flight, so a remount that boots again waits for it instead of subscribing twice. */
 let booting: Promise<void> | null = null;
+/** The saved closed-tab stack was read and is being written back; once per chrome. */
+let closedTabsKept = false;
 /** The one toast timer: a newer notice cancels the older one's clearing. */
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 /** Zoom commands on their way to the engine, one per tab, and the level to send next. */
@@ -597,19 +648,23 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   activeTab: null,
   detached: [],
   closedTabs: [],
-  reopenClosedTab: async () => {
-    const last = get().closedTabs.at(-1);
+  reopenClosedTab: async (at) => {
+    const stack = get().closedTabs;
+    const position = at ?? stack.length - 1;
+    const last = stack[position];
     if (!last) {
       get().notify("No closed tab to reopen.");
       return;
     }
-    set((s) => ({ closedTabs: s.closedTabs.slice(0, -1) }));
+    set((s) => ({ closedTabs: s.closedTabs.filter((entry) => entry !== last) }));
     if (last.workspace_id && last.workspace_id !== get().activeWorkspace && get().workspaces.some((w) => w.id === last.workspace_id)) {
       await get().activateWorkspace(last.workspace_id);
     }
     const ws = get().activeWorkspace;
     if (!ws) return;
     const opened = await run(set, () => ipc.tabOpen(ws, last.url));
+    // Pinned or essential again, as it was.
+    if (opened?.id && last.tier) await ipc.tabSetTier(opened.id, last.tier).catch(() => undefined);
     // Scrolled to where it was, once the page is back.
     if (opened?.id && last.scroll) await ipc.tabRestoreScroll(opened.id, last.scroll[0], last.scroll[1]).catch(() => undefined);
     // Back where it was, not at the end of the strip.
@@ -732,6 +787,14 @@ export const useBrowser = create<BrowserState>((set, get) => ({
             get().applyZoom(e.payload.tab_id, e.payload.factor);
           }), (off) => { unlistenZoom = off; }),
         ]);
+        // The tabs closed in the last session can still come back.
+        if (keepsClosedTabs() && !closedTabsKept) {
+          closedTabsKept = true;
+          set((s) => ({ closedTabs: [...parseClosedTabs(uiStorage.getItem(CLOSED_TABS_KEY)), ...s.closedTabs].slice(-CLOSED_TABS_LIMIT) }));
+          useBrowser.subscribe((s, prev) => {
+            if (s.closedTabs !== prev.closedTabs) uiStorage.setItem(CLOSED_TABS_KEY, JSON.stringify(s.closedTabs));
+          });
+        }
         const [, , , candidate] = await Promise.all([listenConsole(), listenNetwork(), listenPrivacy(), snapshotCandidate(), usePrivacy.getState().loadInfo()]);
         if (candidate.isCurrent()) {
           set(replaySnapshot(candidate.snapshot, candidate.events));

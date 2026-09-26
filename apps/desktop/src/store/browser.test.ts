@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@tauri-apps/api/event";
-import { CLOSED_TABS_LIMIT, countsChanged, onTabClosed, orderWithAt, reduceCrash, sameSiteTab, togglePanel, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, tabInThisWindow, useBrowser, withoutRequest, isClosing, nextCloseTarget, pageAnsweredClose, pagePromptedOnClose } from "./browser";
+import { CLOSED_TABS_LIMIT, countsChanged, onTabClosed, orderWithAt, reduceCrash, sameSiteTab, togglePanel, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, tabInThisWindow, useBrowser, withoutRequest, isClosing, nextCloseTarget, pageAnsweredClose, pagePromptedOnClose, parseClosedTabs } from "./browser";
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
 import type { PermissionAsked, PermissionDismissed, Snapshot, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
@@ -689,6 +689,47 @@ describe("reopening closed tabs", () => {
     expect(open).toHaveBeenCalledWith("w1", "https://b.test/");
     expect(reorder).toHaveBeenCalledWith("w1", ["a", "b2", "c"]);
     expect(orderWithAt([t("a", "https://a.test/"), t("b", "https://b.test/")], "w1", "b", 99)).toEqual(["a", "b"]);
+  });
+
+  it("puts a reopened tab back among the tabs as they were dragged, not as they arrived", async () => {
+    const open = vi.spyOn(ipc, "tabOpen").mockResolvedValue({ id: "b2" } as never);
+    const reorder = vi.spyOn(ipc, "tabReorder").mockResolvedValue(null as never);
+    const at = (tab: Tab, position: number) => ({ ...tab, position }) as Tab;
+    // Arrived a, b, c; dragged into c, b, a.
+    useBrowser.setState({
+      tabs: [at(t("a", "https://a.test/"), 2), at(t("b", "https://b.test/"), 1), at(t("c", "https://c.test/"), 0)],
+      activeTab: "a",
+      activeWorkspace: "w1",
+      workspaces: [{ id: "w1" }] as unknown as Workspace[],
+    });
+    useBrowser.getState().applyEvent({ type: "tab_closed", data: "b" });
+    expect(useBrowser.getState().closedTabs[0]?.index).toBe(1);
+    useBrowser.setState({ tabs: [at(t("a", "https://a.test/"), 2), at(t("c", "https://c.test/"), 0), at(t("b2", "https://b.test/"), 3)] });
+    await useBrowser.getState().reopenClosedTab();
+    expect(open).toHaveBeenCalledWith("w1", "https://b.test/");
+    expect(reorder).toHaveBeenCalledWith("w1", ["c", "b2", "a"]);
+  });
+
+  it("brings a pinned tab back pinned, and any entry of the stack on request", async () => {
+    vi.spyOn(ipc, "tabOpen").mockResolvedValue({ id: "n" } as never);
+    vi.spyOn(ipc, "tabReorder").mockResolvedValue(null as never);
+    const tier = vi.spyOn(ipc, "tabSetTier").mockResolvedValue(null as never);
+    const pinned = { ...t("p", "https://p.test/"), tier: "pinned" } as Tab;
+    useBrowser.setState({ tabs: [t("a", "https://a.test/"), pinned], activeTab: "a", activeWorkspace: "w1", workspaces: [{ id: "w1" }] as unknown as Workspace[] });
+    useBrowser.getState().applyEvent({ type: "tab_closed", data: "p" });
+    useBrowser.getState().applyEvent({ type: "tab_closed", data: "a" });
+    expect(useBrowser.getState().closedTabs.map((c) => c.tier)).toEqual(["pinned", undefined]);
+    await useBrowser.getState().reopenClosedTab(0);
+    expect(tier).toHaveBeenCalledWith("n", "pinned");
+    expect(useBrowser.getState().closedTabs.map((c) => c.url)).toEqual(["https://a.test/"]);
+  });
+
+  it("reads a saved stack back and ignores anything that is not one", () => {
+    expect(parseClosedTabs(null)).toEqual([]);
+    expect(parseClosedTabs("not json")).toEqual([]);
+    expect(parseClosedTabs('{"url":"x"}')).toEqual([]);
+    const saved = [{ url: "https://a.test/", title: "A", workspace_id: "w1", index: 2, tier: "pinned" }, { url: 3 }];
+    expect(parseClosedTabs(JSON.stringify(saved))).toEqual([saved[0]]);
   });
 
   it("lets a split go of a pane the engine closed or moved, never of one merely out of view", () => {
