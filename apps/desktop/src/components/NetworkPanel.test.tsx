@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
@@ -96,9 +96,13 @@ describe("NetworkPanel", () => {
   it("opens a row from the keyboard", () => {
     useNetwork.setState({ byTab: { "tab-1": rows(3) } });
     render(<NetworkPanel />);
+    expect(screen.getByRole("grid", { name: "Requests" }).getAttribute("aria-rowcount")).toBe("4");
+    // One row is in the Tab order, not all of them.
+    expect(screen.getByText("item-0").closest("tr")!.getAttribute("tabindex")).toBe("0");
     const tr = screen.getByText("item-1").closest("tr")!;
+    expect(tr.getAttribute("tabindex")).toBe("-1");
+    act(() => tr.focus());
     expect(tr.getAttribute("tabindex")).toBe("0");
-    tr.focus();
     fireEvent.keyDown(tr, { key: "Enter" });
     expect(tr.getAttribute("aria-selected")).toBe("true");
   });

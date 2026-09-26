@@ -406,6 +406,21 @@ describe("Library recordings import", () => {
     await waitFor(() => expect(screen.queryByText("clip.mov")).toBeNull());
   });
 
+  it("moves between sections with the arrow keys, one Tab stop for all of them", () => {
+    render(<Library />);
+    const bookmarks = screen.getByRole("tab", { name: "Bookmarks" });
+    expect(bookmarks.tabIndex).toBe(0);
+    expect(screen.getByRole("tab", { name: "History" }).tabIndex).toBe(-1);
+    fireEvent.keyDown(bookmarks, { key: "ArrowRight" });
+    const history = screen.getByRole("tab", { name: "History" });
+    expect(history.getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(history);
+    fireEvent.keyDown(history, { key: "End" });
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Apps" }));
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Bookmarks" }));
+  });
+
   it("keeps focus in the list when a row is removed: the next row's Remove, else the filter", async () => {
     render(<Library />);
     fireEvent.click(screen.getByRole("tab", { name: "History" }));

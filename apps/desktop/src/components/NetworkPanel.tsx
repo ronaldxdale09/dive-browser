@@ -87,43 +87,56 @@ const NetworkRow = memo(function NetworkRow({
   row: r,
   index,
   selected,
+  inTabOrder,
   onSelect,
   onStep,
+  onFocusRow,
   measure,
 }: {
   row: RequestRow;
   index: number;
   selected: boolean;
+  /** The one row Tab reaches; the arrow keys reach the rest. */
+  inTabOrder: boolean;
   onSelect: (id: string) => void;
   onStep: (from: number, by: number) => void;
+  onFocusRow: (index: number) => void;
   measure: (node: HTMLTableRowElement | null) => void;
 }) {
   return (
     <tr
       ref={measure}
       data-index={index}
-      tabIndex={0}
+      // Header row first, so the first request is row 2.
+      aria-rowindex={index + 2}
+      tabIndex={inTabOrder ? 0 : -1}
+      onFocus={() => onFocusRow(index)}
       onClick={() => onSelect(r.id)}
       onKeyDown={(e) => {
-        // Rows are reachable with Tab; Enter or Space opens the detail like a
-        // click, and the arrow keys walk the list the way DevTools' does.
+        // The table is one Tab stop, so a page with a thousand requests does
+        // not put a thousand stops between the filter and the detail. Enter
+        // or Space opens the detail like a click, and the arrow keys (Home
+        // and End too) walk the list the way DevTools' does.
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onSelect(r.id);
         } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
           e.preventDefault();
           onStep(index, e.key === "ArrowDown" ? 1 : -1);
+        } else if (e.key === "Home" || e.key === "End") {
+          e.preventDefault();
+          onStep(index, e.key === "Home" ? -Infinity : Infinity);
         }
       }}
       aria-selected={selected}
       className="cursor-default border-b border-line/60 outline-none hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-accent/60 focus-visible:ring-inset aria-selected:bg-surface-3"
     >
-      <td className="max-w-[360px] truncate px-3 text-ink" title={r.url}>{name(r.url)}</td>
-      <td className="px-2 text-ink-2">{r.method}</td>
-      <td className={`px-2 ${statusClass(r)}`} title={r.error ?? undefined}>{outcomeLabel(r)}{r.mocked ? " (mock)" : r.fromCache ? " (cache)" : ""}</td>
-      <td className="px-2 text-ink-2">{r.resourceType.toLowerCase()}</td>
-      <td className="px-2 text-right text-ink-2 tabular-nums">{size(r.size)}</td>
-      <td className="px-3 text-right text-ink-2 tabular-nums">{r.durationMs === null ? "" : `${r.durationMs} ms`}</td>
+      <td role="gridcell" className="max-w-[360px] truncate px-3 text-ink" title={r.url}>{name(r.url)}</td>
+      <td role="gridcell" className="px-2 text-ink-2">{r.method}</td>
+      <td role="gridcell" className={`px-2 ${statusClass(r)}`} title={r.error ?? undefined}>{outcomeLabel(r)}{r.mocked ? " (mock)" : r.fromCache ? " (cache)" : ""}</td>
+      <td role="gridcell" className="px-2 text-ink-2">{r.resourceType.toLowerCase()}</td>
+      <td role="gridcell" className="px-2 text-right text-ink-2 tabular-nums">{size(r.size)}</td>
+      <td role="gridcell" className="px-3 text-right text-ink-2 tabular-nums">{r.durationMs === null ? "" : `${r.durationMs} ms`}</td>
     </tr>
   );
 });
@@ -177,6 +190,10 @@ export function NetworkPanel() {
   const detail = selected ? byId.get(selected) : undefined;
   const frames = useNetwork(selectFrames(activeTab, selected));
   const select = useCallback((id: string) => setSelected((cur) => (cur === id ? null : id)), []);
+  // The row in the Tab order: the last one focused, kept inside the list as
+  // it shrinks under a filter or a clear.
+  const [cursor, setCursor] = useState(0);
+  const stop = Math.min(cursor, Math.max(0, shown.length - 1));
   // The rows a key press moves through, read at the moment of the press: a
   // handler rebuilt for every flush would re-render every row with it.
   const shownRef = useRef<RequestRow[]>([]);
@@ -207,10 +224,12 @@ export function NetworkPanel() {
   // focused once it exists.
   const step = useCallback(
     (from: number, by: number) => {
-      const to = from + by;
+      const last = shownRef.current.length - 1;
+      const to = Math.max(0, Math.min(last, from + by));
       const next = shownRef.current[to];
-      if (!next) return;
+      if (!next || to === from) return;
       setSelected(next.id);
+      setCursor(to);
       virtualizer.scrollToIndex(to, { align: "auto" });
       requestAnimationFrame(() => scrollRef.current?.querySelector<HTMLElement>(`tr[data-index="${to}"]`)?.focus());
     },
@@ -248,27 +267,29 @@ export function NetworkPanel() {
         </label>
       </div>
       <div ref={scrollRef} data-testid="network-scroll" className="min-h-16 flex-1 overflow-auto font-mono text-[11.5px] leading-5">
-        <table className="w-full border-collapse">
+        {/* A grid: one Tab stop, rows that say which is selected, and a row
+            count that stays true though only the rows in view are mounted. */}
+        <table role="grid" aria-label="Requests" aria-rowcount={shown.length + 1} className="w-full border-collapse">
           <thead className="sticky top-0 bg-surface text-left text-[10px] tracking-wider text-ink-3 uppercase">
-            <tr>
-              <th className="px-3 font-medium">Name</th>
-              <th className="px-2 font-medium">Method</th>
-              <th className="px-2 font-medium">Status</th>
-              <th className="px-2 font-medium">Type</th>
-              <th className="px-2 text-right font-medium">Size</th>
-              <th className="px-3 text-right font-medium">Time</th>
+            <tr aria-rowindex={1}>
+              <th role="columnheader" className="px-3 font-medium">Name</th>
+              <th role="columnheader" className="px-2 font-medium">Method</th>
+              <th role="columnheader" className="px-2 font-medium">Status</th>
+              <th role="columnheader" className="px-2 font-medium">Type</th>
+              <th role="columnheader" className="px-2 text-right font-medium">Size</th>
+              <th role="columnheader" className="px-3 text-right font-medium">Time</th>
             </tr>
           </thead>
           <tbody>
             {shown.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-2 text-ink-3">{activeTab ? (filter.trim() ? "No requests match." : "No requests yet.") : "Open a tab to see its traffic."}</td>
+                <td role="gridcell" colSpan={6} className="px-3 py-2 text-ink-3">{activeTab ? (filter.trim() ? "No requests match." : "No requests yet.") : "Open a tab to see its traffic."}</td>
               </tr>
             )}
             {above > 0 && <tr aria-hidden style={{ height: above }} />}
             {items.map((v) => {
               const r = shown[v.index]!;
-              return <NetworkRow key={r.id} row={r} index={v.index} selected={r.id === selected} onSelect={select} onStep={step} measure={virtualizer.measureElement} />;
+              return <NetworkRow key={r.id} row={r} index={v.index} selected={r.id === selected} inTabOrder={v.index === stop} onSelect={select} onStep={step} onFocusRow={setCursor} measure={virtualizer.measureElement} />;
             })}
             {below > 0 && <tr aria-hidden style={{ height: below }} />}
           </tbody>

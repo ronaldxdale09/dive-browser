@@ -16,6 +16,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { focusAfterRemovalOf } from "../lib/focusAfterRemoval";
+import { radioStep } from "../lib/useRovingRadio";
 import { useBrowser } from "../store/browser";
 import { isPrivateWindow } from "../lib/privateMode";
 import { IMPORT_BUSY, useImportVideo } from "../screen/importVideo";
@@ -74,13 +75,29 @@ export function Library() {
         className="flex h-[min(620px,88vh)] w-[720px] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
       >
         <header className="flex h-12 shrink-0 items-center gap-1 border-b border-line px-3">
-          <div role="tablist" aria-label="Library sections" className="flex items-center gap-0.5">
+          <div
+            role="tablist"
+            aria-label="Library sections"
+            className="flex items-center gap-0.5"
+            // One Tab stop for the sections, and the arrows (Home, End) move
+            // between them and show each as they go, as the dock's tabs do.
+            onKeyDown={(e) => {
+              if (e.key === "ArrowUp" || e.key === "ArrowDown") return;
+              const at = tabs.findIndex((t) => t.id === tab);
+              const next = radioStep(tabs.length, at, e.key);
+              if (next === null) return;
+              e.preventDefault();
+              setTab(tabs[next]!.id);
+              e.currentTarget.querySelector<HTMLElement>(`#library-tab-${tabs[next]!.id}`)?.focus();
+            }}
+          >
             {tabs.map(({ id, label, icon }) => (
               <button
                 key={id}
                 type="button"
                 role="tab"
                 id={`library-tab-${id}`}
+                tabIndex={tab === id ? 0 : -1}
                 aria-selected={tab === id}
                 aria-controls={`library-panel-${id}`}
                 onClick={() => setTab(id)}
