@@ -1,5 +1,6 @@
 import { AppWindow, MonitorDown } from "lucide-react";
 import { useEffect, useState } from "react";
+import { isPrivateWindow } from "../lib/privateMode";
 import { tabInThisWindow, useBrowser } from "../store/browser";
 import { WEBAPPS_CHANGED, useWebApps } from "../store/webapps";
 import { FeatureButton } from "./FeatureBar";
@@ -10,8 +11,15 @@ import { InstallAppDialog } from "./InstallAppDialog";
  * install rules, "Open in <app>" once it is installed, nothing otherwise.
  * The page is probed once per URL after it finishes loading, so the button
  * appears with the page rather than flickering while it loads.
+ *
+ * A private window offers neither: installing leaves a launcher on disk for
+ * a session that is meant to leave nothing, and the host refuses it there.
  */
 export function InstallAppButton() {
+  return isPrivateWindow() ? null : <InstallOffer />;
+}
+
+function InstallOffer() {
   const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const url = useBrowser((s) => {
     const id = tabInThisWindow(s.activeTab, s.detached);

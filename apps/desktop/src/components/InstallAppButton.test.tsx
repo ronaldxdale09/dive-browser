@@ -26,6 +26,18 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("InstallAppButton", () => {
+  it("offers nothing in a private window", () => {
+    (window as Window & { __DIVE_PRIVATE__?: boolean }).__DIVE_PRIVATE__ = true;
+    try {
+      useWebApps.setState({ probes: { [tab.id]: { url: tab.url, probe: installable } } });
+      render(<InstallAppButton />);
+      expect(screen.queryByRole("button", { name: "Install Mail" })).toBeNull();
+      expect(ipc.webappProbe).not.toHaveBeenCalled();
+    } finally {
+      delete (window as Window & { __DIVE_PRIVATE__?: boolean }).__DIVE_PRIVATE__;
+    }
+  });
+
   it("does not offer a detached tab's install as this window's", () => {
     useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [tab.id], loading: {} });
     useWebApps.setState({ probes: { [tab.id]: { url: tab.url, probe: installable } } });

@@ -70,6 +70,8 @@ pub fn cleanup() {
 
 /// Startup extension loading and all credential-bearing/background services are
 /// disabled as well as these UI commands. The policy is enforced before dispatch.
+/// Installing a web app writes a launcher to disk that outlives the session
+/// and opens a window with no private context behind it, so it is refused.
 pub fn allows_command(command: &str) -> bool {
     ![
         "agent_",
@@ -88,6 +90,7 @@ pub fn allows_command(command: &str) -> bool {
                 | "bookmark_rename"
                 | "default_browser_set"
                 | "workspace_create"
+                | "webapp_install"
         )
 }
 
@@ -303,6 +306,7 @@ mod tests {
             "bookmark_toggle",
             "default_browser_set",
             "update_install",
+            "webapp_install",
         ] {
             assert!(!allows_command(command), "{command}");
         }
