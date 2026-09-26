@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ipc } from "../lib/ipc";
 import type { A11yReport } from "../lib/ipc";
 import { tabInThisWindow, useBrowser } from "../store/browser";
+import { usePanelRead } from "../store/dockPanels";
 import { Icon } from "./Icon";
 import { errorMessage } from "../lib/errors";
 import { InternalPageNote, isInternalPage } from "./InternalPageNote";
@@ -25,29 +26,20 @@ export function A11yPanel() {
   const sleeping = tab?.state === "discarded";
   const openTab = useBrowser((s) => s.openTab);
   const [missing, setMissing] = useState<string | null>(null);
-  // One report per tab and URL: switching tabs never shows another page's
-  // findings, navigating this tab drops the last page's count, and
-  // switching back to the same URL keeps what was already gathered.
-  const [reports, setReports] = useState<Record<string, { url: string; report: A11yReport }>>({});
-  const report = activeTab && url && reports[activeTab]?.url === url ? reports[activeTab].report : null;
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [revealError, setRevealError] = useState<string | null>(null);
+  // One report per tab and URL, kept outside the panel: switching tabs never
+  // shows another page's findings, navigating this tab drops the last page's
+  // count, and switching to another dock panel and back keeps the audit.
+  const { data: report, busy, error: auditError, run: audit } = usePanelRead<A11yReport>("a11y", activeTab, url ?? "");
+  const error = auditError ?? revealError;
 
   const run = async () => {
-    if (!activeTab) return;
-    const audited = useBrowser.getState().tabs.find((t) => t.id === activeTab)?.url ?? url ?? "";
-    setBusy(true);
-    setError(null);
     setMissing(null);
-    try {
+    setRevealError(null);
+    await audit(async (tab) => {
       const { default: axeSource } = await import("axe-core/axe.min.js?raw");
-      const next = await ipc.tabA11y(activeTab, axeSource);
-      setReports((all) => ({ ...all, [activeTab]: { url: audited, report: next } }));
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
+      return ipc.tabA11y(tab, axeSource);
+    });
   };
 
   // Scroll the page to the offending element and flash it. A selector that
@@ -57,7 +49,7 @@ export function A11yPanel() {
     try {
       setMissing((await ipc.tabA11yReveal(activeTab, selector)) ? null : selector);
     } catch (e) {
-      setError(errorMessage(e));
+      setRevealError(errorMessage(e));
     }
   };
 

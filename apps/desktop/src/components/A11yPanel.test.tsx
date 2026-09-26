@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
+import { useDockPanels } from "../store/dockPanels";
 import { A11yPanel } from "./A11yPanel";
 
 vi.mock("axe-core/axe.min.js?raw", () => ({ default: "/* axe */" }));
@@ -16,11 +17,37 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  useDockPanels.setState({ slots: {} });
   useBrowser.setState(initial, true);
   vi.restoreAllMocks();
 });
 
 describe("A11yPanel", () => {
+  it("keeps an audit across a trip to another panel, and keeps one tab's run to that tab", async () => {
+    const other = { ...tab, id: "t2", url: "https://b.test/" } as Tab;
+    useBrowser.setState({ tabs: [tab, other], activeTab: "t1" });
+    let finish!: () => void;
+    vi.spyOn(ipc, "tabA11y").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ violations: [], passes: 3, incomplete: 0 });
+        }),
+    );
+    const first = render(<A11yPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Run audit" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Running…" })).toBeTruthy());
+    // Another tab is not the one being audited.
+    act(() => useBrowser.setState({ activeTab: "t2" }));
+    expect(screen.getByRole("button", { name: "Run audit" })).toBeTruthy();
+    act(() => useBrowser.setState({ activeTab: "t1" }));
+    await act(async () => finish());
+    expect((await screen.findByRole("status")).textContent).toContain("3 passed");
+    // The dock mounts only the panel on show; coming back finds the audit.
+    first.unmount();
+    render(<A11yPanel />);
+    expect(screen.getByRole("status").textContent).toContain("3 passed");
+  });
+
   it("announces the result of a run, counts one violation in the singular, and lists it", async () => {
     vi.spyOn(ipc, "tabA11y").mockResolvedValue({
       violations: [{ id: "image-alt", impact: "critical", help: "Images must have alternative text", help_url: "https://x/image-alt", targets: ["img"], notes: [""], count: 1 }],

@@ -1,8 +1,9 @@
 import { Check, Copy, Pipette, RefreshCw } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ipc } from "../lib/ipc";
 import type { ColorFormats, Palette, PaletteEntry } from "../lib/ipc";
 import { tabInThisWindow, useBrowser } from "../store/browser";
+import { useDockPanels, usePanelRead } from "../store/dockPanels";
 import { copyText } from "../lib/clipboard";
 import { errorMessage } from "../lib/errors";
 import { Icon } from "./Icon";
@@ -42,43 +43,33 @@ export function ColorPanel() {
     const id = tabInThisWindow(s.activeTab, s.detached);
     return id ? (s.tabs.find((t) => t.id === id)?.url ?? "") : "";
   });
-  // Keyed by the URL it was read from, so navigating away drops the palette
-  // without an effect that clears state on every render pass.
-  const [palettes, setPalettes] = useState<Record<string, Palette>>({});
-  const [picked, setPicked] = useState<ColorFormats | null>(null);
-  const [recent, setRecent] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // The palette belongs to the tab and the page it was read from, kept
+  // outside the panel so a trip to another dock panel does not lose it. The
+  // picked colours came from anywhere on screen, so they are not per tab.
+  const { data: palette, busy, error: scanError, run } = usePanelRead<Palette>("palette", activeTab, url);
+  const picked = useDockPanels((s) => s.picked);
+  const recent = useDockPanels((s) => s.recent);
+  const setPicked = useDockPanels((s) => s.setPicked);
+  const [pickError, setPickError] = useState<string | null>(null);
+  const error = pickError ?? scanError;
 
-  const scan = useCallback(async () => {
-    if (!activeTab) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const found = await ipc.tabPalette(activeTab);
-      setPalettes((p) => ({ ...p, [url]: found }));
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  }, [activeTab, url]);
+  const scan = () => {
+    setPickError(null);
+    return run(ipc.tabPalette);
+  };
 
   const pick = useCallback(async () => {
     if (!activeTab) return;
-    setError(null);
+    setPickError(null);
     try {
       const colour = await ipc.tabEyedropper(activeTab);
       // A dismissed eyedropper is an outcome, not a failure: say nothing.
       if (!colour) return;
       setPicked(colour);
-      setRecent((r) => [colour.hex, ...r.filter((h) => h !== colour.hex)].slice(0, 12));
     } catch (e) {
-      setError(errorMessage(e));
+      setPickError(errorMessage(e));
     }
-  }, [activeTab]);
-
-  const palette = palettes[url] ?? null;
+  }, [activeTab, setPicked]);
 
   if (isInternalPage(url)) return <InternalPageNote what="Colours" />;
 
@@ -115,15 +106,7 @@ export function ColorPanel() {
             <h3 className="mb-1 text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">Recent</h3>
             <div className="flex flex-wrap gap-1">
               {recent.map((hex) => (
-                <Tooltip key={hex} label={hex} side="top">
-                  <button
-                    type="button"
-                    aria-label={hex}
-                    onClick={() => void copyText(hex)}
-                    className="size-6 rounded-md ring-1 ring-line-2"
-                    style={{ background: hex }}
-                  />
-                </Tooltip>
+                <RecentSwatch key={hex} hex={hex} />
               ))}
             </div>
           </section>
@@ -183,45 +166,68 @@ function Picked({ colour }: { colour: ColorFormats }) {
   );
 }
 
+/**
+ * Copy `value` and say how it went: "copied", or that it could not be. The
+ * copies used to fail without a word, which read exactly like success.
+ */
+function useCopy(value: string) {
+  const [outcome, setOutcome] = useState<"copied" | "failed" | null>(null);
+  useEffect(() => {
+    if (!outcome) return;
+    const timer = setTimeout(() => setOutcome(null), 1200);
+    return () => clearTimeout(timer);
+  }, [outcome]);
+  const copy = () => {
+    copyText(value).then(
+      () => setOutcome("copied"),
+      () => setOutcome("failed"),
+    );
+  };
+  return { outcome, copy };
+}
+
+function RecentSwatch({ hex }: { hex: string }) {
+  const { outcome, copy } = useCopy(hex);
+  const label = outcome === "copied" ? `${hex} copied` : outcome === "failed" ? `Could not copy ${hex}` : hex;
+  return (
+    <Tooltip label={label} side="top">
+      <button type="button" aria-label={outcome ? label : `Copy ${hex}`} onClick={copy} className="grid size-6 place-items-center rounded-md ring-1 ring-line-2" style={{ background: hex }}>
+        {outcome === "copied" && <Icon icon={Check} size={11} className="text-white mix-blend-difference" />}
+      </button>
+    </Tooltip>
+  );
+}
+
 function CopyRow({ value }: { value: string }) {
-  const [done, setDone] = useState(false);
+  const { outcome, copy } = useCopy(value);
   return (
     <button
       type="button"
-      aria-label={`Copy ${value}`}
-      onClick={() => {
-        void copyText(value).then(() => {
-          setDone(true);
-          setTimeout(() => setDone(false), 1200);
-        });
-      }}
+      aria-label={outcome === "failed" ? `Could not copy ${value}` : `Copy ${value}`}
+      onClick={copy}
       className="group flex items-center gap-1.5 rounded px-1 py-0.5 text-left font-mono text-[11px] text-ink hover:bg-surface-3"
     >
       <span className="truncate">{value}</span>
-      <Icon icon={done ? Check : Copy} size={10} className={done ? "text-highlight" : "text-ink-3 opacity-0 group-hover:opacity-100"} />
+      <Icon icon={outcome === "copied" ? Check : Copy} size={10} className={outcome === "copied" ? "text-highlight" : outcome === "failed" ? "text-danger" : "text-ink-3 opacity-0 group-hover:opacity-100"} />
+      {outcome === "failed" && <span className="font-sans text-[10px] text-danger">not copied</span>}
     </button>
   );
 }
 
 function Swatch({ entry }: { entry: PaletteEntry }) {
-  const [done, setDone] = useState(false);
+  const { outcome, copy } = useCopy(entry.hex);
   return (
     <button
       type="button"
       aria-label={`Copy ${entry.hex}`}
-      onClick={() => {
-        void copyText(entry.hex).then(() => {
-          setDone(true);
-          setTimeout(() => setDone(false), 1200);
-        });
-      }}
+      onClick={copy}
       className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-surface-2"
     >
       <span className="size-5 shrink-0 rounded-md ring-1 ring-line-2" style={{ background: entry.hex, opacity: entry.alpha ?? 1 }} />
       <span className="font-mono text-[11px] text-ink">{entry.hex}</span>
       <span className="rounded bg-surface-2 px-1 text-[10px] text-ink-3">{entry.role}</span>
       <span className="ml-auto shrink-0 truncate pl-2 text-[10px] text-ink-3">
-        {done ? "copied" : `${entry.count}×${entry.sample ? ` · ${entry.sample}` : ""}`}
+        {outcome === "copied" ? "copied" : outcome === "failed" ? "could not copy" : `${entry.count}×${entry.sample ? ` · ${entry.sample}` : ""}`}
       </span>
     </button>
   );
