@@ -63,12 +63,12 @@ export function WorkspaceStep() {
       <div className="flex items-center gap-4">
         <AvatarImage kind="workspace" seed={icon} color={color} alt="" width={56} height={56} className="size-14 shrink-0 rounded-2xl" />
         <div className="min-w-0">
-          <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">{stepLabel("workspace")}</p>
+          <p className="font-mono text-10.5 tracking-[0.18em] text-highlight uppercase">{stepLabel("workspace")}</p>
           <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em]">Your first workspace</h2>
           <p className="mt-0.5 text-xs text-ink-3">A workspace is a set of tabs for one thing you do. Switch between them with {displayChord("⌘1")} to {displayChord("⌘9")}.</p>
         </div>
       </div>
-      <label className="mt-6 block text-[11px] text-ink-2">
+      <label className="mt-6 block text-11 text-ink-2">
         Name
         <input
           ref={field}
@@ -81,14 +81,14 @@ export function WorkspaceStep() {
       </label>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {IDEAS.map((idea) => (
-          <button key={idea} type="button" onClick={() => setName(idea)} className="pressable h-7 rounded-full border border-line px-2.5 text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink">
+          <button key={idea} type="button" onClick={() => setName(idea)} className="pressable h-7 rounded-full border border-line px-2.5 text-11 text-ink-2 hover:bg-surface-2 hover:text-ink">
             {idea}
           </button>
         ))}
       </div>
       <div className="mt-5 grid grid-cols-[1fr_auto] items-start gap-6">
         <div>
-          <p className="text-[11px] text-ink-2">Mark</p>
+          <p className="text-11 text-ink-2">Mark</p>
           <div role="radiogroup" aria-label="Mark" className="mt-1.5 grid grid-cols-8 gap-2">
             {seeds.map((s) => (
               <button key={s} type="button" role="radio" aria-checked={s === icon} aria-label={s.replace(/-/g, " ")} onClick={() => setSeed(s)} className="grid aspect-square place-items-center rounded-lg ring-offset-2 ring-offset-surface aria-checked:ring-2 aria-checked:ring-highlight">
@@ -98,7 +98,7 @@ export function WorkspaceStep() {
           </div>
         </div>
         <div>
-          <p className="text-[11px] text-ink-2">Colour</p>
+          <p className="text-11 text-ink-2">Colour</p>
           <div role="radiogroup" aria-label="Colour" className="mt-1.5 grid grid-cols-4 gap-2">
             {SWATCHES.map((c) => (
               <button key={c} type="button" role="radio" aria-checked={c === color} aria-label={colorName(c)} title={colorName(c)} onClick={() => setColor(c)} className="size-6 rounded-full ring-offset-2 ring-offset-surface aria-checked:ring-2 aria-checked:ring-highlight" style={{ background: c }} />

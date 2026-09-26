@@ -85,7 +85,7 @@ export function Rail({ forceCollapsed = false, toggle = true }: { forceCollapsed
       {expanded && !isPrivateWindow() && <QuickLinks />}
       {expanded && (
         <div className="flex h-6 items-center gap-1 pr-0.5 pl-2">
-          <span className="text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">Workspaces</span>
+          <span className="text-11 font-medium tracking-[0.08em] text-ink-3 uppercase">Workspaces</span>
         </div>
       )}
       {/* Scrolls rather than clips: past about a dozen workspaces the rail runs
@@ -175,8 +175,8 @@ function DefaultBrowserButton({ expanded }: { expanded: boolean }) {
           <Icon icon={Globe} size={14} />
         </span>
         <span className="flex min-w-0 flex-1 flex-col leading-tight">
-          <span className="truncate text-[12px] font-medium">Set as default</span>
-          <span className="truncate text-[10.5px] text-ink-3">Open links in Dive</span>
+          <span className="truncate text-12 font-medium">Set as default</span>
+          <span className="truncate text-10.5 text-ink-3">Open links in Dive</span>
         </span>
         <span className="grid size-5 shrink-0 place-items-center rounded-full text-ink-3 transition-colors group-hover:bg-accent group-hover:text-accent-ink" aria-hidden>
           <Icon icon={ArrowRight} size={11} />
@@ -208,8 +208,8 @@ function TabList() {
   return (
     <nav aria-label="Tabs" className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-6 shrink-0 items-center gap-1 pr-0.5 pl-2">
-        <span className="text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">Tabs</span>
-        {count > 0 && <span className="font-mono text-[10px] text-ink-3 tabular-nums">{count}</span>}
+        <span className="text-11 font-medium tracking-[0.08em] text-ink-3 uppercase">Tabs</span>
+        {count > 0 && <span className="font-mono text-10 text-ink-3 tabular-nums">{count}</span>}
         <span className="flex-1" />
         <RailButton icon={Plus} label="New tab" onClick={() => runCommand("tab.new")} />
       </div>
@@ -391,14 +391,14 @@ function WorkspaceRow({
           workspace, not while glancing at the list: it shows for the active row
           and under the pointer, and the tooltip spells it out. */}
       {expanded && separate && <Icon icon={Shield} size={11} className={`shrink-0 text-ink-3 transition-opacity ${active ? "" : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"}`} />}
-      {expanded && count > 0 && <span className="shrink-0 font-mono text-[10px] text-ink-3 tabular-nums">{count}</span>}
+      {expanded && count > 0 && <span className="shrink-0 font-mono text-10 text-ink-3 tabular-nums">{count}</span>}
       {/* Inset from the window edge: the row is centred in the rail, so
           `-left-2` put this at x=0, where it read as a sliced-off sliver
           rather than a marker. */}
       {active && <span className={`absolute h-5 w-[3px] rounded-full bg-highlight ${expanded ? "-left-1" : "-left-1.5"}`} aria-hidden />}
       {/* Collapsed, the count has nowhere to sit but the mark itself. */}
       {!expanded && count > 0 && (
-        <span className="absolute -right-0.5 -bottom-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full bg-surface-3 px-1 font-mono text-[9px] text-ink-2 tabular-nums">
+        <span className="absolute -right-0.5 -bottom-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full bg-surface-3 px-1 font-mono text-9 text-ink-2 tabular-nums">
           {count}
         </span>
       )}
@@ -468,17 +468,17 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
         <div className="flex items-center gap-2 px-2 pt-1 pb-2">
           <AvatarImage kind="workspace" seed={workspace.icon} color={workspace.color} alt="" width={20} height={20} className="size-5 rounded-md" />
           <span className="min-w-0 flex-1 truncate text-xs font-medium text-ink" title={workspace.name}>{workspace.name}</span>
-          <span className="font-mono text-[10px] text-ink-3">{count}</span>
+          <span className="font-mono text-10 text-ink-3">{count}</span>
         </div>
         {confirming ? (
           <div className="px-2 pb-1">
-            <p id={question} className="text-[11px] leading-relaxed text-ink-2">
+            <p id={question} className="text-11 leading-relaxed text-ink-2">
               {count === 0 ? `Delete ${workspace.name}? It has no open tabs.` : `Delete ${workspace.name} and close its ${count} ${count === 1 ? "tab" : "tabs"}?`}
             </p>
             <div className="mt-2 flex gap-2">
               {/* The confirm replaces the item that had focus, which would
                   leave focus on nothing; it starts on the safe answer. */}
-              <button type="button" autoFocus onClick={onClose} className="h-7 flex-1 rounded-full border border-line text-[11px] text-ink-2 hover:bg-surface-2">
+              <button type="button" autoFocus onClick={onClose} className="h-7 flex-1 rounded-full border border-line text-11 text-ink-2 hover:bg-surface-2">
                 Cancel
               </button>
               <button
@@ -487,7 +487,7 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
                   void remove(id);
                   onClose();
                 }}
-                className="h-7 flex-1 rounded-full bg-danger text-[11px] font-medium text-danger-ink"
+                className="h-7 flex-1 rounded-full bg-danger text-11 font-medium text-danger-ink"
               >
                 Delete
               </button>

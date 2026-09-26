@@ -102,7 +102,7 @@ function McpAction({ compact }: { compact: boolean }) {
           className={
             compact
               ? `pressable dive-shimmer relative ml-0.5 grid size-7 place-items-center rounded-full transition-[color,background-color,transform] ${open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-3 hover:text-ink"}`
-              : `pressable dive-shimmer relative ml-0.5 flex h-7 items-center gap-1.5 overflow-hidden rounded-lg px-2.5 text-[11.5px] font-medium transition-[color,background-color,transform] ${
+              : `pressable dive-shimmer relative ml-0.5 flex h-7 items-center gap-1.5 overflow-hidden rounded-lg px-2.5 text-11.5 font-medium transition-[color,background-color,transform] ${
                   open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
                 }`
           }
@@ -138,7 +138,7 @@ function UpdatePill({ compact }: { compact: boolean }) {
         type="button"
         aria-label="Update available"
         onClick={() => openSettings("about")}
-        className="mr-1 flex h-6 shrink-0 items-center gap-1 rounded-full border border-highlight/40 bg-highlight/15 px-2 text-[10.5px] font-medium text-highlight hover:bg-highlight/25"
+        className="mr-1 flex h-6 shrink-0 items-center gap-1 rounded-full border border-highlight/40 bg-highlight/15 px-2 text-10.5 font-medium text-highlight hover:bg-highlight/25"
       >
         <Icon icon={ArrowDownToLine} size={11} />
         {!compact && "Update available"}
@@ -191,7 +191,7 @@ export function FeatureButton({
         className={
           iconOnly
             ? `pressable relative grid size-7 place-items-center rounded-full transition-[color,background-color,transform] duration-150 hover:bg-surface-3 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink aria-expanded:bg-surface-3 aria-expanded:text-ink ${color}`
-            : `pressable flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11.5px] transition-[color,background-color,transform] duration-150 hover:bg-surface-2 hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink aria-expanded:bg-surface-3 aria-expanded:text-ink ${color}`
+            : `pressable flex h-7 items-center gap-1.5 rounded-lg px-2 text-11.5 transition-[color,background-color,transform] duration-150 hover:bg-surface-2 hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink aria-expanded:bg-surface-3 aria-expanded:text-ink ${color}`
         }
       >
         <Icon icon={icon} size={iconOnly ? 15 : 13} />
@@ -260,7 +260,7 @@ function RecordingHud({ compact }: { compact: boolean }) {
 
   if (phase === "starting") {
     return (
-      <div className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 px-2.5 text-[11.5px] text-ink-2">
+      <div className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 px-2.5 text-11.5 text-ink-2">
         <Icon icon={Loader2} size={13} className="motion-safe:animate-spin" />
         {!compact && "Preparing…"}
       </div>
@@ -269,7 +269,7 @@ function RecordingHud({ compact }: { compact: boolean }) {
 
   if (phase === "countdown") {
     return (
-      <div className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 pr-1 pl-2.5 text-[11.5px] text-ink">
+      <div className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 pr-1 pl-2.5 text-11.5 text-ink">
         <span className="size-2 rounded-full bg-danger" aria-hidden />
         {compact ? countdown : `Recording in ${countdown}…`}
         <IconButton icon={X} label="Cancel recording" size={13} onClick={() => void cancel()} />
@@ -279,7 +279,7 @@ function RecordingHud({ compact }: { compact: boolean }) {
   if (phase === "finishing") {
     const percent = progress === null ? null : `${Math.round(progress * 100)}%`;
     return (
-      <div className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 pr-1 pl-2.5 text-[11.5px] text-ink-2">
+      <div className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 pr-1 pl-2.5 text-11.5 text-ink-2">
         <Icon icon={Loader2} size={13} className="motion-safe:animate-spin" />
         {compact ? percent : `Saving…${percent ? ` ${percent}` : ""}`}
         <IconButton icon={X} label="Stop saving" size={13} onClick={() => void stopSaving()} />
@@ -290,7 +290,7 @@ function RecordingHud({ compact }: { compact: boolean }) {
   // with the way out beside it; an icon's label alone reached nobody.
   if (phase === "failed") {
     return (
-      <div className="flex h-7 items-center gap-1.5 rounded-lg bg-danger/15 pr-1 pl-2.5 text-[11.5px] text-ink">
+      <div className="flex h-7 items-center gap-1.5 rounded-lg bg-danger/15 pr-1 pl-2.5 text-11.5 text-ink">
         <Icon icon={AlertTriangle} size={13} className="shrink-0 text-danger" />
         <span className="max-w-72 truncate" title={error ?? undefined}>
           {compact ? "Not saved" : `Not saved: ${error ?? "the recording could not be saved"}`}
@@ -303,7 +303,7 @@ function RecordingHud({ compact }: { compact: boolean }) {
     );
   }
   return (
-    <div role="group" aria-label={paused ? "Recording paused" : "Recording"} className={`flex h-7 items-center gap-1 rounded-lg pr-1 pl-2.5 text-[11.5px] ${paused ? "bg-surface-2 text-ink-2" : "bg-danger/15 text-ink"}`}>
+    <div role="group" aria-label={paused ? "Recording paused" : "Recording"} className={`flex h-7 items-center gap-1 rounded-lg pr-1 pl-2.5 text-11.5 ${paused ? "bg-surface-2 text-ink-2" : "bg-danger/15 text-ink"}`}>
       <span className={`size-2 rounded-full ${paused ? "bg-ink-3" : "bg-danger motion-safe:animate-pulse"}`} aria-hidden />
       <span role="timer" aria-label={`${recordingClock(elapsed)} recorded`} className="min-w-8 font-mono tabular-nums" aria-live="off">
         {recordingClock(elapsed)}
@@ -368,7 +368,7 @@ function AgentAction({ compact }: { compact: boolean }) {
         className={
           compact
             ? `pressable relative ml-0.5 grid size-7 place-items-center rounded-full transition-[color,background-color,transform] ${open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-3 hover:text-ink"}`
-            : `pressable relative ml-0.5 flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] font-medium transition-[color,background-color,transform] ${
+            : `pressable relative ml-0.5 flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-11.5 font-medium transition-[color,background-color,transform] ${
                 open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
               }`
         }

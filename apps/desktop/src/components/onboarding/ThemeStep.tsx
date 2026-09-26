@@ -54,7 +54,7 @@ export function ThemeStep() {
           </span>
         </span>
         <div className="min-w-0">
-          <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">{stepLabel("theme")}</p>
+          <p className="font-mono text-10.5 tracking-[0.18em] text-highlight uppercase">{stepLabel("theme")}</p>
           <h2 ref={heading} tabIndex={-1} className="mt-1 text-lg font-semibold tracking-[-0.02em] outline-none">Make it yours</h2>
           <p className="mt-0.5 text-xs text-ink-3">A template is three colours — ground, ink and highlight; the rest of the chrome is mixed from them.</p>
         </div>
@@ -67,7 +67,7 @@ export function ThemeStep() {
         <TemplateTile preset={custom} seeds={customSeeds} scheme={scheme} selected={selected === CUSTOM_PRESET_ID} onSelect={() => choose(CUSTOM_PRESET_ID)} />
       </div>
 
-      <p className="mt-3 text-[11px] text-ink-3">Mode, accent, font and density live in Settings › Appearance.</p>
+      <p className="mt-3 text-11 text-ink-3">Mode, accent, font and density live in Settings › Appearance.</p>
       <StepActions primary="Continue" disabled={saving} onPrimary={next} />
     </form>
   );
@@ -94,7 +94,7 @@ function TemplateTile({ preset, seeds, scheme, selected, onSelect }: { preset: P
         <Swatch colour={dots.ink} />
         <Swatch colour={dots.highlight} />
       </span>
-      <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-ink">{preset.name}</span>
+      <span className="min-w-0 flex-1 truncate text-11 font-medium text-ink">{preset.name}</span>
       {selected && <Icon icon={Check} size={12} className="shrink-0 text-highlight" />}
     </button>
   );

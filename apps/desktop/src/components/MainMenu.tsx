@@ -156,7 +156,7 @@ export function MainMenu() {
           {filtered.map((g, gi) => (
             <div key={g.id} role={g.id === "recently-closed" ? "group" : undefined} aria-labelledby={g.id === "recently-closed" ? "menu-recently-closed" : undefined} className={gi > 0 ? "mt-1 border-t border-line pt-1" : ""}>
               {g.id === "recently-closed" && (
-                <p id="menu-recently-closed" className="px-4 pt-1.5 pb-0.5 text-[10.5px] font-medium tracking-[0.06em] text-ink-3 uppercase">
+                <p id="menu-recently-closed" className="px-4 pt-1.5 pb-0.5 text-10.5 font-medium tracking-[0.06em] text-ink-3 uppercase">
                   Recently closed
                 </p>
               )}
@@ -176,11 +176,11 @@ export function MainMenu() {
                       aria-description={item.hint}
                       onMouseEnter={() => setCursor(i)}
                       onClick={() => void item.run()}
-                      className={`flex h-9 w-full items-center gap-3 px-4 text-left text-[13px] text-ink transition-colors disabled:opacity-40 ${cursor === i ? "bg-surface-2" : ""}`}
+                      className={`flex h-9 w-full items-center gap-3 px-4 text-left text-13 text-ink transition-colors disabled:opacity-40 ${cursor === i ? "bg-surface-2" : ""}`}
                     >
                       <span className="grid size-5 shrink-0 place-items-center text-ink-2">{item.glyph ?? (item.icon && <Icon icon={item.icon} size={15} />)}</span>
                       <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                      {item.hint ? <span className="shrink-0 text-[11px] text-ink-3">{item.hint}</span> : item.shortcut && <kbd className="font-mono text-[11px] text-ink-3">{displayChord(item.shortcut)}</kbd>}
+                      {item.hint ? <span className="shrink-0 text-11 text-ink-3">{item.hint}</span> : item.shortcut && <kbd className="font-mono text-11 text-ink-3">{displayChord(item.shortcut)}</kbd>}
                       {item.more && <Icon icon={ChevronRight} size={13} className="text-ink-3" />}
                     </button>
                   );
@@ -214,7 +214,7 @@ function ZoomRow() {
       .catch(() => undefined);
   }, []);
   return (
-    <div className="flex h-10 items-center gap-3 px-4 text-[13px] text-ink">
+    <div className="flex h-10 items-center gap-3 px-4 text-13 text-ink">
       <span className="grid size-5 place-items-center text-ink-2">
         <Icon icon={Search} size={15} />
       </span>
@@ -222,7 +222,7 @@ function ZoomRow() {
       <button type="button" aria-label="Zoom out" title={`Zoom out (${displayChord("⌘−")})`} disabled={!active || sleeping} onClick={() => void zoomStep(-1)} className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
         <Icon icon={Minus} size={14} />
       </button>
-      <button type="button" aria-label={sleeping ? "Reset zoom" : `Zoom ${Math.round(zoom * 100)}%, reset`} title={`Reset zoom (${displayChord("⌘0")})`} disabled={!active || sleeping} onClick={() => void zoomStep(0)} className="w-12 rounded-md py-1 text-center font-mono text-[12px] tabular-nums hover:bg-surface-2 disabled:opacity-40">
+      <button type="button" aria-label={sleeping ? "Reset zoom" : `Zoom ${Math.round(zoom * 100)}%, reset`} title={`Reset zoom (${displayChord("⌘0")})`} disabled={!active || sleeping} onClick={() => void zoomStep(0)} className="w-12 rounded-md py-1 text-center font-mono text-12 tabular-nums hover:bg-surface-2 disabled:opacity-40">
         {sleeping ? "—" : `${Math.round(zoom * 100)}%`}
       </button>
       <button type="button" aria-label="Zoom in" title={`Zoom in (${displayChord("⌘=")})`} disabled={!active || sleeping} onClick={() => void zoomStep(1)} className="grid size-7 place-items-center rounded-md text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">

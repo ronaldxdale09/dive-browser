@@ -71,7 +71,7 @@ export function RecordDialog() {
           </span>
           <div className="min-w-0">
             <h2 className="text-sm font-semibold">New recording</h2>
-            <p className="text-[11px] text-ink-3">Record what happens in a tab and get a file you can share.</p>
+            <p className="text-11 text-ink-3">Record what happens in a tab and get a file you can share.</p>
           </div>
         </header>
 
@@ -95,7 +95,7 @@ export function RecordDialog() {
                     <Favicon src={t.favicon} size={14} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">{tabLabel(t)}</span>
-                      <span className="block truncate text-[10.5px] text-ink-3">{host(t.url)}</span>
+                      <span className="block truncate text-10.5 text-ink-3">{host(t.url)}</span>
                     </span>
                     {picked && <Icon icon={Check} size={13} className="shrink-0 text-highlight" />}
                   </button>
@@ -154,7 +154,7 @@ export function RecordDialog() {
                   options={[{ value: "", label: "Off" }, ...mics.map((m) => ({ value: m.id, label: m.name }))]}
                   className="h-8 w-full rounded-lg border border-line bg-surface-2 pr-2 pl-8 text-xs text-ink outline-none focus:border-highlight/60 disabled:opacity-50" />
               </div>
-              <p className="mt-1 text-[10.5px] text-ink-3">
+              <p className="mt-1 text-10.5 text-ink-3">
                 {!canVideo ? "Install ffmpeg for video and voice." : live.format === "gif" ? "A GIF has no sound." : mics.length === 0 ? "No microphone found." : "Your voice, in sync with the page."}
               </p>
             </Field>
@@ -167,14 +167,14 @@ export function RecordDialog() {
         </div>
 
         <footer className="flex items-center gap-3 border-t border-line px-5 py-3">
-          <p className="min-w-0 flex-1 text-[11px] text-ink-3">{error ? <span className="text-danger">{error}</span> : describeLimits(live, caps)}</p>
+          <p className="min-w-0 flex-1 text-11 text-ink-3">{error ? <span className="text-danger">{error}</span> : describeLimits(live, caps)}</p>
           <button type="button" disabled={starting} onClick={close} className="h-8 rounded-lg px-3 text-xs text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
             Cancel
           </button>
           <button ref={primary} type="submit" disabled={!chosen || starting} className="flex h-8 min-w-32 items-center justify-center gap-1.5 rounded-lg bg-danger px-3.5 text-xs font-medium text-danger-ink hover:brightness-110 disabled:opacity-60">
             {starting ? <Icon icon={Loader2} size={13} className="motion-safe:animate-spin" /> : <span className="size-2 rounded-full bg-white" aria-hidden />}
             {starting ? "Preparing…" : "Start recording"}
-            {!starting && <kbd className="ml-1 font-mono text-[10px] opacity-70">⏎</kbd>}
+            {!starting && <kbd className="ml-1 font-mono text-10 opacity-70">⏎</kbd>}
           </button>
         </footer>
       </form>
@@ -191,7 +191,7 @@ function host(url: string) {
 }
 
 function Label({ children }: { children: ReactNode }) {
-  return <span className="text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">{children}</span>;
+  return <span className="text-10 font-medium tracking-[0.08em] text-ink-3 uppercase">{children}</span>;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {

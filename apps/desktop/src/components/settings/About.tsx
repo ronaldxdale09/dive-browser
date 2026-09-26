@@ -24,26 +24,26 @@ export function About({ info }: { info: AppInfo | null }) {
       <div className="mb-4 flex items-center gap-3.5 rounded-2xl border border-line bg-surface-2/50 px-4 py-3.5">
         <img src={logo} alt="" width={44} height={44} className="size-11 shrink-0" />
         <div className="min-w-0">
-          <p className="text-[13px] font-semibold text-ink">Dive</p>
-          <p className="text-[11px] text-ink-3" data-testid="about-summary">
+          <p className="text-13 font-semibold text-ink">Dive</p>
+          <p className="text-11 text-ink-3" data-testid="about-summary">
             Version {info?.version ?? "…"} · {engineLabel()}
           </p>
-          <p className="text-[10.5px] text-ink-3">The browser built for developers. MIT licensed; Chromium under its own terms.</p>
+          <p className="text-10.5 text-ink-3">The browser built for developers. MIT licensed; Chromium under its own terms.</p>
         </div>
       </div>
       <Group title="This build">
-        <Row label="Engine" hint="Chromium through CEF. Containers isolate cookies and cache, not processes." control={<span className="font-mono text-[11px] text-ink-2 select-text">{engineLabel()}</span>} />
+        <Row label="Engine" hint="Chromium through CEF. Containers isolate cookies and cache, not processes." control={<span className="font-mono text-11 text-ink-2 select-text">{engineLabel()}</span>} />
         <Row
           stacked
           label="Data folder"
           hint="Profiles, history, bookmarks, captures and preferences."
-          control={<code className="block font-mono text-[11px] break-all text-ink-2 select-text">{info?.data_dir ?? "…"}</code>}
+          control={<code className="block font-mono text-11 break-all text-ink-2 select-text">{info?.data_dir ?? "…"}</code>}
         />
         <Row
           stacked
           label="MCP endpoint"
           hint={serveMcp ? "Coding agents on this computer connect here; the Developer section has the full command." : isPrivateWindow() ? "Private windows do not serve MCP." : "Disabled in this build."}
-          control={serveMcp && info ? <CopyBlock text={info.mcp_url} label="Copy MCP URL" /> : <code className="block font-mono text-[11px] text-ink-2">disabled</code>}
+          control={serveMcp && info ? <CopyBlock text={info.mcp_url} label="Copy MCP URL" /> : <code className="block font-mono text-11 text-ink-2">disabled</code>}
         />
       </Group>
       <Updates channel={info?.build.channel ?? null} updater={info?.updater ?? true} />
@@ -143,12 +143,12 @@ function Updates({ channel, updater }: { channel: string | null; updater: boolea
         }
       />
       {status === "none" && !silent && (
-        <p role="status" className="flex items-center gap-1.5 py-2.5 text-[11px] text-ink-2">
+        <p role="status" className="flex items-center gap-1.5 py-2.5 text-11 text-ink-2">
           <Icon icon={CheckIcon} size={12} className="text-highlight" /> You're up to date
         </p>
       )}
       {status === "available" && (
-        <p role="status" className="flex items-center gap-1.5 py-2.5 text-[11px] text-ink-2">
+        <p role="status" className="flex items-center gap-1.5 py-2.5 text-11 text-ink-2">
           <Icon icon={ArrowDownToLine} size={12} className="text-highlight" /> Update available: {update?.version}
         </p>
       )}

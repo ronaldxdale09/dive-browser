@@ -152,7 +152,7 @@ const Inlines = memo(function Inlines({ text, onLink }: { text: string; onLink?:
         switch (piece.kind) {
           case "code":
             return (
-              <code key={i} className="rounded-[5px] bg-surface-3 px-1 py-px font-mono text-[11px] [overflow-wrap:anywhere] text-ink">
+              <code key={i} className="rounded-[5px] bg-surface-3 px-1 py-px font-mono text-11 [overflow-wrap:anywhere] text-ink">
                 {piece.text}
               </code>
             );
@@ -196,8 +196,8 @@ function CodeBlock({ lang, text }: { lang: string; text: string }) {
   const label = copied === "yes" ? "Copied" : copied === "failed" ? "Could not copy" : "Copy code";
   return (
     <div className="group/code relative">
-      <pre className="overflow-x-auto rounded-lg border border-line bg-ground p-2.5 font-mono text-[11px] leading-relaxed text-ink select-text">
-        {lang && <span className="mb-1.5 block text-[10px] tracking-wider text-ink-3 uppercase">{lang}</span>}
+      <pre className="overflow-x-auto rounded-lg border border-line bg-ground p-2.5 font-mono text-11 leading-relaxed text-ink select-text">
+        {lang && <span className="mb-1.5 block text-10 tracking-wider text-ink-3 uppercase">{lang}</span>}
         <code>{text}</code>
       </pre>
       <button
@@ -224,7 +224,7 @@ function CodeBlock({ lang, text }: { lang: string; text: string }) {
 function Table({ header, rows, onLink }: { header: string[]; rows: string[][]; onLink?: ((href: string) => void) | undefined }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-line">
-      <table className="w-full border-collapse text-left text-[11px]">
+      <table className="w-full border-collapse text-left text-11">
         <thead className="bg-surface-2 text-ink">
           <tr>
             {header.map((cell, c) => (
@@ -261,7 +261,7 @@ export function Markdown({ text, onLink }: { text: string; onLink?: ((href: stri
             return <CodeBlock key={i} lang={b.lang} text={b.text} />;
           case "heading":
             return (
-              <div key={i} className={`font-semibold text-ink ${b.level <= 2 ? "text-[13px]" : "text-xs"}`}>
+              <div key={i} className={`font-semibold text-ink ${b.level <= 2 ? "text-13" : "text-xs"}`}>
                 <Inlines text={b.text} onLink={onLink} />
               </div>
             );

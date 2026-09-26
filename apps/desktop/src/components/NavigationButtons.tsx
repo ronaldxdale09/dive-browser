@@ -73,7 +73,7 @@ function HistoryButton({ direction, tabId, loadHistory, disabled, navigate }: {
           });
         }}>
         <span className="block truncate leading-4">{entry.title.trim() || entry.url}</span>
-        <span className="block truncate text-[10.5px] leading-4 text-ink-3">{entry.url}</span>
+        <span className="block truncate text-10.5 leading-4 text-ink-3">{entry.url}</span>
       </button>)}
     </div>}
   </div>;

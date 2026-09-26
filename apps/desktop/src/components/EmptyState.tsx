@@ -25,10 +25,10 @@ export function EmptyState({
       <span className={`grid place-items-center rounded-xl bg-surface-2 text-ink-3 ${compact ? "size-8" : "size-10"}`}>
         <Icon icon={icon} size={compact ? 15 : 18} />
       </span>
-      <p className={`font-medium text-ink ${compact ? "text-[11px]" : "text-xs"}`}>{title}</p>
-      {hint && <p className={`max-w-[320px] text-ink-3 ${compact ? "text-[10.5px]" : "text-[11px]"}`}>{hint}</p>}
+      <p className={`font-medium text-ink ${compact ? "text-11" : "text-xs"}`}>{title}</p>
+      {hint && <p className={`max-w-[320px] text-ink-3 ${compact ? "text-10.5" : "text-11"}`}>{hint}</p>}
       {action && (
-        <button type="button" onClick={action.onClick} className="mt-1 h-7 rounded-full border border-line px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
+        <button type="button" onClick={action.onClick} className="mt-1 h-7 rounded-full border border-line px-3 text-11 text-ink-2 hover:bg-surface-3 hover:text-ink">
           {action.label}
         </button>
       )}

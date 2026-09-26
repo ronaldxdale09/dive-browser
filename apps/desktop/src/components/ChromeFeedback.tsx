@@ -153,7 +153,7 @@ function Toast({
             action.run();
             onDismiss();
           }}
-          className="pressable h-6 shrink-0 rounded-full border border-line-2 px-2.5 text-[11px] font-medium text-ink hover:bg-surface-3"
+          className="pressable h-6 shrink-0 rounded-full border border-line-2 px-2.5 text-11 font-medium text-ink hover:bg-surface-3"
         >
           {action.label}
         </button>

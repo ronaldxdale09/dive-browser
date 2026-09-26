@@ -232,7 +232,7 @@ export function DeviceFrame({ device, landscape, mode, layout, dark, url, secure
           </div>
         </div>
       </div>
-      {caption && <figcaption className="font-mono text-[10px] text-ink-3">{caption}</figcaption>}
+      {caption && <figcaption className="font-mono text-10 text-ink-3">{caption}</figcaption>}
     </figure>
   );
 }

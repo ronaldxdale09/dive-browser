@@ -279,11 +279,11 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
     <main aria-label="Capture editor" className="flex h-full min-h-0 flex-col bg-ground text-ink">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line-2 bg-surface-2 px-4">
         <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-highlight-soft text-highlight"><Icon icon={ImageDown} size={16} /></span>
-        <div className="mr-2 min-w-0 flex-1"><h1 className="truncate text-sm font-semibold">{title}</h1><p className="truncate text-[11px] text-ink-3">{sourceUrl || "Full-page capture"}</p></div>
+        <div className="mr-2 min-w-0 flex-1"><h1 className="truncate text-sm font-semibold">{title}</h1><p className="truncate text-11 text-ink-3">{sourceUrl || "Full-page capture"}</p></div>
         <Action label={copied ? "Copied" : "Copy"} icon={copied ? Check : Copy} disabled={!image || busy !== null} onClick={() => void copy()} />
         <Action label="Export PNG" short="PNG" icon={Download} disabled={!image || busy !== null} onClick={() => void exportAs("png")} />
         <Action label="Export JPEG" short="JPEG" icon={Download} disabled={!image || busy !== null} onClick={() => void exportAs("jpeg")} />
-        <Select label="PDF page size" value={pdfSize} onChange={setPdfSize} options={[{ value: "continuous", label: "Continuous PDF" }, { value: "a4", label: "A4 pages" }, { value: "letter", label: "Letter pages" }]} className="h-8 rounded-l-lg border border-line-2 bg-surface-3 px-2 text-[11px] text-ink outline-none focus-visible:border-highlight/60" />
+        <Select label="PDF page size" value={pdfSize} onChange={setPdfSize} options={[{ value: "continuous", label: "Continuous PDF" }, { value: "a4", label: "A4 pages" }, { value: "letter", label: "Letter pages" }]} className="h-8 rounded-l-lg border border-line-2 bg-surface-3 px-2 text-11 text-ink outline-none focus-visible:border-highlight/60" />
         <Action label="Export PDF" short="PDF" icon={Download} primary joined disabled={!image || busy !== null} onClick={() => void exportAs("pdf")} />
       </header>
       <div className="flex min-h-0 flex-1">
@@ -311,13 +311,13 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
           </div>}
         </section>
         <aside aria-label="Tool settings" className="flex w-52 shrink-0 flex-col border-l border-line bg-surface p-4">
-          <h2 className="text-xs font-semibold">{TOOLS.find((item) => item.id === tool)?.label}</h2><p className="mt-1 text-[11px] leading-relaxed text-ink-3">{toolHint(tool)}</p>
-          {tool !== "crop" && tool !== "blur" && <><label className="mt-5 text-[10px] font-medium tracking-wider text-ink-3 uppercase">Color</label><div className="mt-2 flex flex-wrap gap-2">{COLORS.map((choice) => <button key={choice} type="button" aria-label={`Color ${COLOR_NAMES[choice] ?? choice}`} title={COLOR_NAMES[choice] ?? choice} aria-pressed={color === choice} onClick={() => setColor(choice)} className="size-6 rounded-full border border-line-2 aria-pressed:ring-2 aria-pressed:ring-highlight" style={{ background: choice }} />)}</div><label htmlFor="capture-stroke" className="mt-5 flex justify-between text-[10px] font-medium tracking-wider text-ink-3 uppercase"><span>Stroke</span><span>{width}px</span></label><input id="capture-stroke" aria-label="Stroke width" type="range" min="2" max="20" value={width} onChange={(event) => setWidth(Number(event.target.value))} className="mt-2 accent-[var(--color-highlight)]" /></>}
+          <h2 className="text-xs font-semibold">{TOOLS.find((item) => item.id === tool)?.label}</h2><p className="mt-1 text-11 leading-relaxed text-ink-3">{toolHint(tool)}</p>
+          {tool !== "crop" && tool !== "blur" && <><label className="mt-5 text-10 font-medium tracking-wider text-ink-3 uppercase">Color</label><div className="mt-2 flex flex-wrap gap-2">{COLORS.map((choice) => <button key={choice} type="button" aria-label={`Color ${COLOR_NAMES[choice] ?? choice}`} title={COLOR_NAMES[choice] ?? choice} aria-pressed={color === choice} onClick={() => setColor(choice)} className="size-6 rounded-full border border-line-2 aria-pressed:ring-2 aria-pressed:ring-highlight" style={{ background: choice }} />)}</div><label htmlFor="capture-stroke" className="mt-5 flex justify-between text-10 font-medium tracking-wider text-ink-3 uppercase"><span>Stroke</span><span>{width}px</span></label><input id="capture-stroke" aria-label="Stroke width" type="range" min="2" max="20" value={width} onChange={(event) => setWidth(Number(event.target.value))} className="mt-2 accent-[var(--color-highlight)]" /></>}
           {image && (tool === "crop" || tool === "blur") && <RegionFields key={tool} kind={tool} image={{ width: image.naturalWidth, height: image.naturalHeight }} initial={tool === "crop" ? cropRegion : null} onApply={(region) => addRegion(tool, region)} />}
-          <div className="mt-auto space-y-2 border-t border-line pt-4 text-[11px] text-ink-3">{image && <p>{image.naturalWidth.toLocaleString()} × {image.naturalHeight.toLocaleString()} px</p>}{cropRegion && <p className="text-highlight">Crop: {Math.round(cropRegion.width)} × {Math.round(cropRegion.height)} px</p>}<button type="button" disabled={!src} onClick={() => src && void ipc.downloadsReveal(src)} className="flex items-center gap-1.5 text-ink-2 hover:text-ink disabled:opacity-40"><Icon icon={FolderOpen} size={13} /> {originalInFileManagerLabel()}</button></div>
+          <div className="mt-auto space-y-2 border-t border-line pt-4 text-11 text-ink-3">{image && <p>{image.naturalWidth.toLocaleString()} × {image.naturalHeight.toLocaleString()} px</p>}{cropRegion && <p className="text-highlight">Crop: {Math.round(cropRegion.width)} × {Math.round(cropRegion.height)} px</p>}<button type="button" disabled={!src} onClick={() => src && void ipc.downloadsReveal(src)} className="flex items-center gap-1.5 text-ink-2 hover:text-ink disabled:opacity-40"><Icon icon={FolderOpen} size={13} /> {originalInFileManagerLabel()}</button></div>
         </aside>
       </div>
-      <footer className="flex h-10 shrink-0 items-center gap-2 border-t border-line bg-surface px-4 text-[11px] text-ink-3"><span>{operations.length} edit{operations.length === 1 ? "" : "s"}</span><span className="flex-1 text-center">Everything stays on this computer</span><button type="button" aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(0.1, value - 0.1))} className="grid size-7 place-items-center rounded-full hover:bg-surface-2"><Icon icon={Minus} size={13} /></button><button type="button" aria-label={zoomMode === "fit" ? "Fitted to width; click for actual size" : "Fit to width"} aria-pressed={zoomMode === "fit"} onClick={() => setZoomMode(zoomMode === "fit" ? 1 : "fit")} className="min-w-12 rounded px-1.5 py-1 text-center hover:bg-surface-2 aria-pressed:text-ink">{zoomMode === "fit" ? `Fit · ${Math.round(zoom * 100)}%` : `${Math.round(zoom * 100)}%`}</button><button type="button" aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(2, value + 0.1))} className="grid size-7 place-items-center rounded-full hover:bg-surface-2"><Icon icon={Plus} size={13} /></button></footer>
+      <footer className="flex h-10 shrink-0 items-center gap-2 border-t border-line bg-surface px-4 text-11 text-ink-3"><span>{operations.length} edit{operations.length === 1 ? "" : "s"}</span><span className="flex-1 text-center">Everything stays on this computer</span><button type="button" aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(0.1, value - 0.1))} className="grid size-7 place-items-center rounded-full hover:bg-surface-2"><Icon icon={Minus} size={13} /></button><button type="button" aria-label={zoomMode === "fit" ? "Fitted to width; click for actual size" : "Fit to width"} aria-pressed={zoomMode === "fit"} onClick={() => setZoomMode(zoomMode === "fit" ? 1 : "fit")} className="min-w-12 rounded px-1.5 py-1 text-center hover:bg-surface-2 aria-pressed:text-ink">{zoomMode === "fit" ? `Fit · ${Math.round(zoom * 100)}%` : `${Math.round(zoom * 100)}%`}</button><button type="button" aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(2, value + 0.1))} className="grid size-7 place-items-center rounded-full hover:bg-surface-2"><Icon icon={Plus} size={13} /></button></footer>
     </main>
   );
 }
@@ -354,9 +354,9 @@ function RegionFields({ kind, image, initial, onApply }: { kind: "crop" | "blur"
   const [values, setValues] = useState({ x: Math.round(start.x), y: Math.round(start.y), width: Math.round(start.width), height: Math.round(start.height) });
   const [refused, setRefused] = useState(false);
   const field = (key: keyof typeof values, label: string) => (
-    <label className="flex flex-col gap-1 text-[10px] font-medium tracking-wider text-ink-3 uppercase">
+    <label className="flex flex-col gap-1 text-10 font-medium tracking-wider text-ink-3 uppercase">
       {label}
-      <input type="number" min={0} step={1} value={values[key]} onChange={(event) => setValues((current) => ({ ...current, [key]: Number(event.target.value) }))} className="h-7 rounded-md border border-line bg-surface-2 px-2 font-mono text-[11px] tracking-normal text-ink normal-case outline-none focus:border-highlight/60" />
+      <input type="number" min={0} step={1} value={values[key]} onChange={(event) => setValues((current) => ({ ...current, [key]: Number(event.target.value) }))} className="h-7 rounded-md border border-line bg-surface-2 px-2 font-mono text-11 tracking-normal text-ink normal-case outline-none focus:border-highlight/60" />
     </label>
   );
   return (
@@ -374,10 +374,10 @@ function RegionFields({ kind, image, initial, onApply }: { kind: "crop" | "blur"
         {field("width", "Width")}
         {field("height", "Height")}
       </div>
-      <button type="submit" className="mt-2 h-7 w-full rounded-lg border border-line-2 bg-surface-3 text-[11px] text-ink hover:brightness-125">
+      <button type="submit" className="mt-2 h-7 w-full rounded-lg border border-line-2 bg-surface-3 text-11 text-ink hover:brightness-125">
         {kind === "crop" ? "Apply crop" : "Blur this area"}
       </button>
-      {refused && <p role="alert" className="mt-2 text-[11px] text-warn">That area is too small or lies outside the capture.</p>}
+      {refused && <p role="alert" className="mt-2 text-11 text-warn">That area is too small or lies outside the capture.</p>}
     </form>
   );
 }

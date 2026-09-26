@@ -84,7 +84,7 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
 
       {/* Model */}
       <div>
-        <h3 className="text-[11px] font-medium tracking-wide text-ink-3 uppercase">Model</h3>
+        <h3 className="text-11 font-medium tracking-wide text-ink-3 uppercase">Model</h3>
         <div className="mt-1.5 space-y-1.5">
           {models.map((m) => {
             const progress = downloading[m.id];
@@ -103,12 +103,12 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
                     {selected && <span className="size-1.5 rounded-full bg-accent-ink" />}
                   </button>
                   <button type="button" onClick={() => setModel(m.id)} className="min-w-0 flex-1 text-left">
-                    <p className="truncate text-[13px] text-ink">{m.label}</p>
-                    <p className="line-clamp-2 text-[11px] text-ink-3">{m.detail}</p>
+                    <p className="truncate text-13 text-ink">{m.label}</p>
+                    <p className="line-clamp-2 text-11 text-ink-3">{m.detail}</p>
                   </button>
                   {m.downloaded ? (
                     <span className="flex shrink-0 items-center gap-1">
-                      <button type="button" disabled={Boolean(progress)} onClick={() => void download(m.id)} title="Verify or repair this model" className="inline-flex items-center gap-1 text-[11px] text-ink-2">
+                      <button type="button" disabled={Boolean(progress)} onClick={() => void download(m.id)} title="Verify or repair this model" className="inline-flex items-center gap-1 text-11 text-ink-2">
                         <Icon icon={Check} size={12} className="text-highlight" />
                         {progress ? "Verifying…" : "Downloaded"}
                       </button>
@@ -125,7 +125,7 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
                     </span>
                   ) : progress ? (
                     <span className="flex shrink-0 items-center gap-1.5">
-                      <span className="text-[11px] text-ink-3" role="status">
+                      <span className="text-11 text-ink-3" role="status">
                         {progress.total ? `${mb(progress.received)} / ${mb(progress.total)}` : `${mb(progress.received)}…`}
                       </span>
                       <button
@@ -142,7 +142,7 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
                     <button
                       type="button"
                       onClick={() => void download(m.id)}
-                      className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-line-2 px-2.5 text-[11px] text-ink-2 hover:bg-surface-2"
+                      className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-line-2 px-2.5 text-11 text-ink-2 hover:bg-surface-2"
                     >
                       <Icon icon={Download} size={12} />
                       Download ({modelSize(m.size_mb)})
@@ -174,7 +174,7 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
 
       {/* Language */}
       <div className="flex items-center justify-between">
-        <label htmlFor="subtitle-language" className="text-[13px] text-ink">
+        <label htmlFor="subtitle-language" className="text-13 text-ink">
           Language
         </label>
         <Select id="subtitle-language" label="Subtitle language" value={language} onChange={setLanguage} options={LANGUAGES} />
@@ -183,14 +183,14 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
       {/* Translate */}
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[13px] text-ink">Translate to English</p>
-          <p className="text-[11px] text-ink-3">Translation to other languages is coming later.</p>
+          <p className="text-13 text-ink">Translate to English</p>
+          <p className="text-11 text-ink-3">Translation to other languages is coming later.</p>
         </div>
         <Switch label="Translate to English" checked={translate} onChange={setTranslate} />
       </div>
 
-      {!activeTab && <p className="text-[11px] text-ink-3">Open a tab with a playing video to turn subtitles on. You can still download models here.</p>}
-      {activeTab && !chosen?.downloaded && <p className="text-[11px] text-ink-3">Download the selected model to start.</p>}
+      {!activeTab && <p className="text-11 text-ink-3">Open a tab with a playing video to turn subtitles on. You can still download models here.</p>}
+      {activeTab && !chosen?.downloaded && <p className="text-11 text-ink-3">Download the selected model to start.</p>}
 
       {error && (
         <p className="text-xs text-danger" role="alert">
@@ -199,7 +199,7 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
       )}
 
       {(active || starting) && (
-        <p className="truncate rounded-lg bg-surface-2 px-2.5 py-1.5 text-[11px] text-ink-2" role="status" aria-live="polite">
+        <p className="truncate rounded-lg bg-surface-2 px-2.5 py-1.5 text-11 text-ink-2" role="status" aria-live="polite">
           {lastCue ? lastCue : "Listening…"}
         </p>
       )}

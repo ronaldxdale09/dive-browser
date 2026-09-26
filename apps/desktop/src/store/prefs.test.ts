@@ -278,7 +278,7 @@ describe("applyAppearance", () => {
     expect(root.style.getPropertyValue("--color-ground")).toBe("#231a14");
     expect(root.style.getPropertyValue("--color-surface")).toContain("color-mix(in oklab");
     expect(root.style.getPropertyValue("--radius-lg")).toBe("3px");
-    expect(root.style.getPropertyValue("--row-h")).toBe("40px");
+    expect(root.style.getPropertyValue("--row-h")).toBe("2.5rem");
     expect(root.style.getPropertyValue("--font-sans")).toContain("Georgia");
 
     applyAppearance(DEFAULT_PREFS);
@@ -300,7 +300,7 @@ describe("applyAppearance", () => {
     applyAppearance({ ...DEFAULT_PREFS, ui_scale: 1.2 });
     expect(root.style.fontSize).toBe("19.2px");
     applyAppearance({ ...DEFAULT_PREFS, ui_scale: 3 });
-    expect(root.style.fontSize).toBe("20.8px");
+    expect(root.style.fontSize).toBe("32px");
     applyAppearance(DEFAULT_PREFS);
     expect(root.style.fontSize).toBe("");
   });

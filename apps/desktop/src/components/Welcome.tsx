@@ -50,11 +50,11 @@ export function Welcome() {
         {/* The small globe follows effective motion (System/Reduce/Full).
             Only the large character field above requires an explicit Full opt-in. */}
         {background === "orbs" ? <OrbBurst pointer={{ drag: 0 }} width={190} height={190} className="-mb-4" pauseWhenBlurred maxFps={WELCOME_ORB_FPS} idleAfterMs={WELCOME_ORB_IDLE_MS} /> : <div className="h-10" aria-hidden />}
-        <p className="text-[10px] font-medium tracking-[0.18em] text-highlight uppercase">Dive</p>
+        <p className="text-10 font-medium tracking-[0.18em] text-highlight uppercase">Dive</p>
         <h1 className="mt-2 max-w-full text-center text-[clamp(26px,4vw,34px)] leading-tight font-semibold tracking-[-0.025em] text-balance">
           The browser built for developers
         </h1>
-        <p className="mt-2 max-w-[520px] text-center text-[13px] leading-relaxed text-ink-2 text-balance">
+        <p className="mt-2 max-w-[520px] text-center text-13 leading-relaxed text-ink-2 text-balance">
           Chromium, a workspace per project, a developer toolkit that lives next to the page, and an agent that can work in your tabs.
         </p>
         <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
@@ -69,7 +69,7 @@ export function Welcome() {
         <ActiveDevServers />
 
         <OptionalFeatureTour />
-        <p className="mt-4 text-[11px] text-ink-3">
+        <p className="mt-4 text-11 text-ink-3">
           Press <Kbd dim>⌘K</Kbd> anywhere to search tabs, history, bookmarks, local servers and commands that apply here.
         </p>
       </div>
@@ -135,7 +135,7 @@ function OptionalFeatureTour() {
 }
 function Kbd({ children, dim = false }: { children: string; dim?: boolean }) {
   children = displayChord(children);
-  return <kbd className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${dim ? "bg-surface-3 text-ink-3" : "bg-ground/15"}`}>{children}</kbd>;
+  return <kbd className={`rounded px-1.5 py-0.5 font-mono text-10 ${dim ? "bg-surface-3 text-ink-3" : "bg-ground/15"}`}>{children}</kbd>;
 }
 
 function ActiveDevServers() {
@@ -178,7 +178,7 @@ function ActiveDevServers() {
     <div className="mt-6 w-full max-w-[560px] rounded-2xl border border-line bg-surface-2/60 p-3 shadow-sm">
       <div className="flex items-center gap-2 px-1 pb-2">
         <span className="size-2 animate-pulse rounded-full bg-good motion-reduce:animate-none" aria-hidden />
-        <span className="text-[11px] font-semibold tracking-wider text-ink uppercase">
+        <span className="text-11 font-semibold tracking-wider text-ink uppercase">
           Detected Dev Server{servers.length > 1 ? "s" : ""}
         </span>
       </div>
@@ -189,7 +189,7 @@ function ActiveDevServers() {
             className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-surface px-3 py-2 transition-colors hover:border-line-2"
           >
             <div className="flex min-w-0 items-center gap-2.5">
-              <span className="rounded-md bg-highlight-soft px-1.5 py-0.5 font-mono text-[11px] font-semibold text-highlight">
+              <span className="rounded-md bg-highlight-soft px-1.5 py-0.5 font-mono text-11 font-semibold text-highlight">
                 :{s.port}
               </span>
               <span className="text-xs font-medium text-ink">{s.framework || "Web Server"}</span>
@@ -206,7 +206,7 @@ function ActiveDevServers() {
           </div>
         ))}
         {servers.length > INITIAL_SERVER_COUNT && (
-          <button type="button" onClick={() => setExpanded((value) => !value)} className="pressable mt-0.5 h-7 rounded-lg text-[11px] text-ink-3 hover:bg-surface hover:text-ink">
+          <button type="button" onClick={() => setExpanded((value) => !value)} className="pressable mt-0.5 h-7 rounded-lg text-11 text-ink-3 hover:bg-surface hover:text-ink">
             {expanded ? "Show fewer" : `Show ${servers.length - INITIAL_SERVER_COUNT} more`}
           </button>
         )}

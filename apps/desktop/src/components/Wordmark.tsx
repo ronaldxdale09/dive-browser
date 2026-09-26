@@ -12,7 +12,7 @@ export function Wordmark() {
   return (
     <span className="flex min-w-0 items-center gap-1.5" data-tauri-drag-region="true">
       <img src={logo} alt="" width={16} height={16} draggable={false} className="size-4 shrink-0 rounded-[4px]" data-tauri-drag-region="true" />
-      <span className="truncate text-[13px] font-semibold tracking-tight text-ink" data-tauri-drag-region="true">Dive</span>
+      <span className="truncate text-13 font-semibold tracking-tight text-ink" data-tauri-drag-region="true">Dive</span>
       {isPrivateWindow() && <PrivateBadge />}
     </span>
   );

@@ -236,9 +236,9 @@ export function Stage() {
         <button type="button" aria-label={playing ? "Pause" : "Play"} title="Space" onClick={() => setPlaying(!playing)} className="grid size-9 shrink-0 place-items-center rounded-full bg-ink text-ground transition hover:brightness-90">
           <Icon icon={playing ? Pause : Play} size={15} className="fill-current" />
         </button>
-        <span ref={currentTimeLabel} className="w-10 font-mono text-[11px] tabular-nums text-ink-2">{recordingClock(outNow / 1000)}</span>
+        <span ref={currentTimeLabel} className="w-10 font-mono text-11 tabular-nums text-ink-2">{recordingClock(outNow / 1000)}</span>
         <input ref={positionControl} type="range" aria-label="Position" min={0} max={Math.max(1, duration)} step={1} defaultValue={Math.min(duration, outNow)} onChange={(e) => seek(sourceTime(segments, Number(e.target.value)) ?? 0)} className="h-1 flex-1 accent-ink" />
-        <span className="w-10 text-right font-mono text-[11px] tabular-nums text-ink-3">{recordingClock(duration / 1000)}</span>
+        <span className="w-10 text-right font-mono text-11 tabular-nums text-ink-3">{recordingClock(duration / 1000)}</span>
         <button type="button" aria-label={fill ? "Fit preview" : "Fill preview"} onClick={() => setFill(!fill)} className="grid size-7 place-items-center rounded-full text-ink-2 hover:bg-surface-2 hover:text-ink">
           <Icon icon={fill ? Minimize2 : Maximize2} size={14} />
         </button>

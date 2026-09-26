@@ -246,7 +246,7 @@ function LoadMore({ onMore, loading }: { onMore: () => void; loading: boolean })
   }, [onMore]);
   return (
     <div ref={ref} className="flex justify-center py-2">
-      <button type="button" onClick={onMore} disabled={loading} className="h-7 rounded-full border border-line px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-60">
+      <button type="button" onClick={onMore} disabled={loading} className="h-7 rounded-full border border-line px-3 text-11 text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-60">
         {loading ? "Loading…" : "Show more"}
       </button>
     </div>
@@ -279,7 +279,7 @@ function BookmarkRow({
       <button type="button" title={libraryRowTitle(titleOf(b), b.url)} onClick={(e) => onOpen(e, b.url)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
         <Favicon src={b.favicon} size={14} fallback={Star} fallbackClassName="text-highlight" />
         <span className="truncate text-ink">{titleOf(b)}</span>
-        <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(b.url)}</span>
+        <span className="ml-auto truncate pl-3 font-mono text-11 text-ink-3">{host(b.url)}</span>
       </button>
       <button
         type="button"
@@ -424,7 +424,7 @@ function Bookmarks({ query, onOpened, scrollRef }: { query: string; onOpened: ()
 
   if (items === null && loadError) return <LoadFailed what="bookmarks" error={loadError} onRetry={retry} />;
   if (items === null) return <p className="p-3 text-xs text-ink-3">Loading…</p>;
-  const header = <p className="px-2.5 pt-1 pb-2 text-[11px] text-ink-3" role="status">{countLabel(items.length, "bookmark", "bookmarks", { more, capped, filtered })}</p>;
+  const header = <p className="px-2.5 pt-1 pb-2 text-11 text-ink-3" role="status">{countLabel(items.length, "bookmark", "bookmarks", { more, capped, filtered })}</p>;
   if (shown.length === 0) return !filtered ? <EmptyState icon={Star} title="No bookmarks yet" hint={`Press ${displayChord("⌘D")} on a page to keep it here`} /> : <NoMatch />;
 
   const virtualItems = virtualizer.getVirtualItems();
@@ -539,14 +539,14 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
   return (
     <>
       <div className="flex items-center justify-between px-2.5 pt-1 pb-2">
-        <span className="text-[11px] text-ink-3" role="status">{items === null ? (loadError ? "" : "Loading…") : countLabel(items.length, "page", "pages", { more, capped, filtered })}</span>
+        <span className="text-11 text-ink-3" role="status">{items === null ? (loadError ? "" : "Loading…") : countLabel(items.length, "page", "pages", { more, capped, filtered })}</span>
         <button
           type="button"
           onClick={() => {
             onOpened();
             openSettings("privacy", "clear-browsing-data");
           }}
-          className="h-7 rounded-full border border-line px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink"
+          className="h-7 rounded-full border border-line px-3 text-11 text-ink-2 hover:bg-surface-3 hover:text-ink"
         >
           Clear browsing data…
         </button>
@@ -556,15 +556,15 @@ function HistoryList({ query, onOpened }: { query: string; onOpened: () => void 
       <div data-row-list>
       {groups.map((g) => (
         <section key={g.day} aria-label={g.day} className="mb-2">
-          <h4 className="px-2.5 py-1.5 text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">{g.day}</h4>
+          <h4 className="px-2.5 py-1.5 text-11 font-medium tracking-[0.08em] text-ink-3 uppercase">{g.day}</h4>
           <ul className="flex flex-col">
             {g.entries.map((h) => (
               <li key={h.url} data-row className="group flex items-center gap-1">
                 <button type="button" title={libraryRowTitle(titleOf(h), h.url)} onClick={(e) => open(e, h.url)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs hover:bg-surface-2">
                   <Favicon src={h.favicon} size={14} fallback={History} />
                   <span className="truncate text-ink">{titleOf(h)}</span>
-                  <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(h.url)}</span>
-                  <span className="w-16 shrink-0 text-right font-mono text-[10.5px] text-ink-3 tabular-nums" aria-label={`at ${timeLabel(h.last_visited_at)}`}>
+                  <span className="ml-auto truncate pl-3 font-mono text-11 text-ink-3">{host(h.url)}</span>
+                  <span className="w-16 shrink-0 text-right font-mono text-10.5 text-ink-3 tabular-nums" aria-label={`at ${timeLabel(h.last_visited_at)}`}>
                     {timeLabel(h.last_visited_at)}
                   </span>
                 </button>
@@ -731,9 +731,9 @@ function DownloadsList({ query, onOpened }: { query: string; onOpened: () => voi
   };
   const header = (
     <div className="flex items-center justify-between gap-2 px-2.5 pt-1 pb-2">
-      <span className="text-[11px] text-ink-3">{`${items.length} ${items.length === 1 ? "download" : "downloads"}`}</span>
+      <span className="text-11 text-ink-3">{`${items.length} ${items.length === 1 ? "download" : "downloads"}`}</span>
       {items.some((d) => d.status !== "started") && (
-        <button type="button" onClick={clearAll} className="h-7 rounded-full border border-line px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
+        <button type="button" onClick={clearAll} className="h-7 rounded-full border border-line px-3 text-11 text-ink-2 hover:bg-surface-3 hover:text-ink">
           Clear list
         </button>
       )}
@@ -756,7 +756,7 @@ function DownloadsList({ query, onOpened }: { query: string; onOpened: () => voi
               <button type="button" title={d.name} disabled={!saved} onClick={() => void openFile(d.path)} className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-left text-xs enabled:hover:bg-surface-2">
                 <Icon icon={Download} size={14} className="shrink-0 text-ink-3" />
                 <span className={`truncate ${gone ? "text-ink-3 line-through" : "text-ink"}`}>{d.name}</span>
-                <span className={`ml-auto shrink-0 pl-3 text-[11px] ${d.status === "failed" ? "text-danger" : "text-ink-3"}`}>{label}</span>
+                <span className={`ml-auto shrink-0 pl-3 text-11 ${d.status === "failed" ? "text-danger" : "text-ink-3"}`}>{label}</span>
               </button>
               {running && d.id !== undefined && (
                 <button type="button" aria-label={`Cancel ${d.name}`} title="Cancel" onClick={() => void ipc.downloadsCancel(d.id as number).catch(fail)} className={quiet}>
@@ -839,10 +839,10 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
   const shown = (items ?? []).filter((r) => matches(query, r.name, r.format));
   const header = (
     <div className="flex items-center justify-between gap-2 px-2.5 pt-1 pb-2">
-      <span className="min-w-0 truncate text-[11px] text-ink-3">
+      <span className="min-w-0 truncate text-11 text-ink-3">
         {importing ? IMPORT_BUSY : items === null ? (loadError ? "" : "Loading…") : `${items.length} ${items.length === 1 ? "recording" : "recordings"}`}
       </span>
-      <OpenVideoButton onOpened={onOpened} className="flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-line px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-60" />
+      <OpenVideoButton onOpened={onOpened} className="flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-line px-3 text-11 text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-60" />
     </div>
   );
   if (items === null) {
@@ -871,7 +871,7 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
             <Icon icon={Clapperboard} size={14} className="shrink-0 text-ink-3" />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-ink">{r.name}</span>
-              <span className="block truncate font-mono text-[10.5px] text-ink-3">
+              <span className="block truncate font-mono text-10.5 text-ink-3">
                 {r.format.toUpperCase()} · {recordingBytes(r.bytes ?? 0)} · {new Date(r.modified_ms ?? 0).toLocaleString()}
                 {r.has_project ? " · edited" : ""}
               </span>
@@ -882,7 +882,7 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
               good" under the key that had just been pressed. */}
           {confirming === r.path ? (
             <Fragment key="confirm">
-              <span className="shrink-0 text-[11px] text-ink-2">Delete this recording?</span>
+              <span className="shrink-0 text-11 text-ink-2">Delete this recording?</span>
               {/* The safe answer takes focus: the Delete button that asked is
                   gone, and a second Enter should not cost the file. */}
               <button
@@ -892,7 +892,7 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
                   returnTo.current = r.path;
                   setConfirming(null);
                 }}
-                className="h-7 shrink-0 rounded-full px-2.5 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink"
+                className="h-7 shrink-0 rounded-full px-2.5 text-11 text-ink-2 hover:bg-surface-3 hover:text-ink"
               >
                 Keep
               </button>
@@ -903,7 +903,7 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
                   focusAfterRemovalOf(e.currentTarget, libraryFilter);
                   remove(r.path);
                 }}
-                className="h-7 shrink-0 rounded-full bg-danger px-2.5 text-[11px] font-medium text-danger-ink hover:brightness-110">
+                className="h-7 shrink-0 rounded-full bg-danger px-2.5 text-11 font-medium text-danger-ink hover:brightness-110">
                 Delete
               </button>
             </Fragment>
@@ -990,7 +990,7 @@ function AppRow({ app, onOpen, onRemove }: { app: WebApp; onOpen: () => void; on
           <Icon icon={AppWindow} size={16} className="shrink-0 text-ink-3" />
         )}
         <span className="truncate text-ink">{app.name}</span>
-        <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(app.start_url)}</span>
+        <span className="ml-auto truncate pl-3 font-mono text-11 text-ink-3">{host(app.start_url)}</span>
       </button>
       <button
         type="button"

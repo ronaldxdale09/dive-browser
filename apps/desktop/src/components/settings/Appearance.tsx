@@ -7,7 +7,7 @@ import { Button, Group, Row, Segmented, Select, Switch } from "../SettingsFields
 import { DEFAULT_APPEARANCE, DEFAULT_PREFS, previewAppearance, systemTheme, usePrefs } from "../../store/prefs";
 import { colorName } from "../../lib/profileAvatar";
 import type { Prefs } from "../../store/prefs";
-import { CUSTOM_PRESET_ID, PRESETS, contrastRatio, exportTheme, findPreset, importTheme, isHex, presetSeeds, resolveScheme } from "../../lib/theme";
+import { CUSTOM_PRESET_ID, PRESETS, UI_SCALE_MAX, UI_SCALE_MIN, contrastRatio, exportTheme, findPreset, importTheme, isHex, presetSeeds, resolveScheme } from "../../lib/theme";
 import type { Preset, Scheme, Seeds } from "../../lib/theme";
 import { copyText } from "../../lib/clipboard";
 import { rovingRadio } from "../../lib/useRovingRadio";
@@ -237,13 +237,13 @@ function Preview({ scheme, note }: { scheme: "dark" | "light"; note?: string | u
           <span className="ml-1 size-2.5 rounded-full bg-line-2" aria-hidden />
           <span className="size-2.5 rounded-full bg-line-2" aria-hidden />
           <span className="mr-1 size-2.5 rounded-full bg-line-2" aria-hidden />
-          <span className="tab-item flex h-[calc(var(--row-h)-10px)] w-20 items-center gap-1.5 px-2 text-[10px]" data-active>
+          <span className="tab-item flex h-[calc(var(--row-h)-10px)] w-20 items-center gap-1.5 px-2 text-10" data-active>
             <span className="size-2 rounded-full bg-highlight" aria-hidden /> Dive
           </span>
-          <span className="tab-item flex h-[calc(var(--row-h)-10px)] w-20 items-center gap-1.5 px-2 text-[10px]">
+          <span className="tab-item flex h-[calc(var(--row-h)-10px)] w-20 items-center gap-1.5 px-2 text-10">
             <span className="size-2 rounded-full bg-ink-3" aria-hidden /> Docs
           </span>
-          <span className="tab-item flex h-[calc(var(--row-h)-10px)] w-20 items-center gap-1.5 px-2 text-[10px]">
+          <span className="tab-item flex h-[calc(var(--row-h)-10px)] w-20 items-center gap-1.5 px-2 text-10">
             <span className="size-2 rounded-full bg-ink-3" aria-hidden /> Local
           </span>
         </div>
@@ -260,18 +260,18 @@ function Preview({ scheme, note }: { scheme: "dark" | "light"; note?: string | u
             <div className="flex h-[calc(var(--row-h)-2px)] items-center gap-[var(--ui-gap)] px-2">
               <span className="size-3 rounded-sm bg-surface-3" aria-hidden />
               <span className="size-3 rounded-sm bg-surface-3" aria-hidden />
-              <span className="flex h-[calc(var(--row-h)-12px)] flex-1 items-center rounded-lg border border-line bg-surface px-2 text-[10px] text-ink-3">dive.local/settings</span>
+              <span className="flex h-[calc(var(--row-h)-12px)] flex-1 items-center rounded-lg border border-line bg-surface px-2 text-10 text-ink-3">dive.local/settings</span>
             </div>
             <div className="border-t border-line bg-surface px-4 py-3">
               <p className="text-xs font-medium text-ink">Every surface, from three colours.</p>
-              <p className="mt-0.5 text-[11px] text-ink-2">Ground, ink and highlight; the rest is mixed.</p>
-              <span className="mt-2 inline-block rounded-full bg-highlight px-2.5 py-1 text-[10px] font-medium text-highlight-ink">Open a tab</span>
-              <span className="ml-2 inline-block rounded-full border border-line-2 px-2.5 py-1 text-[10px] text-ink-2">Agent</span>
+              <p className="mt-0.5 text-11 text-ink-2">Ground, ink and highlight; the rest is mixed.</p>
+              <span className="mt-2 inline-block rounded-full bg-highlight px-2.5 py-1 text-10 font-medium text-highlight-ink">Open a tab</span>
+              <span className="ml-2 inline-block rounded-full border border-line-2 px-2.5 py-1 text-10 text-ink-2">Agent</span>
             </div>
           </div>
         </div>
       </div>
-      {note && <p className="mt-1.5 text-[11px] text-ink-3">{note}</p>}
+      {note && <p className="mt-1.5 text-11 text-ink-3">{note}</p>}
     </section>
   );
 }
@@ -295,9 +295,9 @@ function TemplateCard({ preset, seeds, scheme, selected, onSelect, radio }: { pr
           <Dot colour={dots.highlight} />
         </span>
         <span className="text-xs font-medium text-ink">{preset.name}</span>
-        {preset.scheme !== "auto" && <span className="ml-auto text-[10px] text-ink-3">{preset.scheme}</span>}
+        {preset.scheme !== "auto" && <span className="ml-auto text-10 text-ink-3">{preset.scheme}</span>}
       </span>
-      <span className="text-[11px] leading-snug text-ink-3">{preset.description}</span>
+      <span className="text-11 leading-snug text-ink-3">{preset.description}</span>
     </button>
   );
 }
@@ -348,7 +348,7 @@ function CustomColours({ prefs, set }: { prefs: Prefs; set: (patch: Partial<Pref
 function ColourField({ label, value, onChange, onPreview }: { label: string; value: string; onChange: (hex: string) => void; onPreview: (hex: string) => void }) {
   const id = useId();
   return (
-    <label htmlFor={id} className="flex flex-col gap-1 text-[11px] text-ink-3">
+    <label htmlFor={id} className="flex flex-col gap-1 text-11 text-ink-3">
       {label}
       <span className="flex items-center gap-1.5">
         <ColourWell label={`${label} colour`} value={value} onPreview={onPreview} onChange={onChange} />
@@ -459,10 +459,10 @@ function HexInput({ id, label, value, onCommit }: { id: string; label: string; v
             setDraft(value.toUpperCase());
           }
         }}
-        className={`h-7 w-[84px] rounded-md border bg-surface-2 px-2 font-mono text-[11px] text-ink outline-none select-text hover:border-line-2 focus:border-highlight/60 ${invalid ? "border-warn" : "border-line"}`}
+        className={`h-7 w-[84px] rounded-md border bg-surface-2 px-2 font-mono text-11 text-ink outline-none select-text hover:border-line-2 focus:border-highlight/60 ${invalid ? "border-warn" : "border-line"}`}
       />
       {invalid && (
-        <span id={problem} className="text-[10px] text-warn">
+        <span id={problem} className="text-10 text-warn">
           Use #RRGGBB
         </span>
       )}
@@ -490,8 +490,8 @@ function ScaleRow({ value, onChange }: { value: number; onChange: (v: number) =>
             ref={ref}
             id={id}
             type="range"
-            min={80}
-            max={130}
+            min={UI_SCALE_MIN * 100}
+            max={UI_SCALE_MAX * 100}
             step={5}
             value={percent}
             aria-label="Interface size"
@@ -505,7 +505,7 @@ function ScaleRow({ value, onChange }: { value: number; onChange: (v: number) =>
             // the pointer as it changed the size it is measured in.
             className="w-[144px] accent-highlight"
           />
-          <span className="w-[40px] text-right font-mono text-[11px] text-ink-2" data-testid="scale-value">{percent}%</span>
+          <span className="w-[40px] text-right font-mono text-11 text-ink-2" data-testid="scale-value">{percent}%</span>
           <Button onClick={() => onChange(1)} disabled={value === 1}>Reset</Button>
         </div>
       }

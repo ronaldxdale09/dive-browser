@@ -152,9 +152,9 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
         <WindowControls />
       </header>
       {outside && app && (
-        <div role="status" className="flex items-center gap-2 border-b border-line bg-surface-2 px-3 text-[11px] text-ink-2">
+        <div role="status" className="flex items-center gap-2 border-b border-line bg-surface-2 px-3 text-11 text-ink-2">
           <span className="truncate">Now on <span className="text-ink">{originOf(url)}</span>, outside {app.short_name || app.name}.</span>
-          <button type="button" onClick={() => run(ipc.tabAttach(tabId))} className="ml-auto shrink-0 rounded-full border border-line-2 px-2.5 py-0.5 text-[11px] text-ink hover:bg-surface-3">
+          <button type="button" onClick={() => run(ipc.tabAttach(tabId))} className="ml-auto shrink-0 rounded-full border border-line-2 px-2.5 py-0.5 text-11 text-ink hover:bg-surface-3">
             Open in Dive
           </button>
         </div>

@@ -70,7 +70,7 @@ export function Splash() {
           <OrbBurst width={260} height={260} pointer={{ drag: 0 }} />
         </Suspense>
         <p className="-mt-2 text-base font-semibold tracking-tight">Dive</p>
-        <p className="mt-1 font-mono text-[11px] tracking-[0.14em] text-ink-3 uppercase">
+        <p className="mt-1 font-mono text-11 tracking-[0.14em] text-ink-3 uppercase">
           Starting engine
         </p>
       </div>}

@@ -167,7 +167,7 @@ describe("Appearance", () => {
     expect(prefs()).toMatchObject({ ui_font: "mono", density: "compact", corner_radius: "sharp", tab_style: "flat", motion: "reduce" });
     expect(document.documentElement.dataset.tabStyle).toBe("flat");
     expect(document.documentElement.dataset.motion).toBe("reduce");
-    expect(document.documentElement.style.getPropertyValue("--row-h")).toBe("30px");
+    expect(document.documentElement.style.getPropertyValue("--row-h")).toBe("1.875rem");
   });
 
   it("copies the theme as JSON and pastes one back, reporting a bad paste", async () => {

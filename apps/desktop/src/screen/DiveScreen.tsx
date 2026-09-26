@@ -103,18 +103,18 @@ function TopBar({ onExport }: { onExport: () => void }) {
   const name = source?.split("/").pop() ?? "";
   return (
     <div className="flex h-12 shrink-0 items-center gap-1 px-4">
-      <span className="mr-3 text-[13px] font-semibold tracking-tight">DiveScreen</span>
+      <span className="mr-3 text-13 font-semibold tracking-tight">DiveScreen</span>
       <Bar icon={Video} label="Return to recorder" onClick={() => openSetup()} />
       <Bar icon={FolderOpen} label={showInFileManagerLabel()} onClick={() => source && void ipc.downloadsReveal(source).catch(() => undefined)} />
       <OpenVideoButton />
       <Bar icon={Save} label={dirty ? "Save Project" : "Saved"} onClick={() => void save()} />
       <span className="flex-1" />
-      <span className="mr-3 truncate font-mono text-[11px] text-ink-3" title={source ?? ""}>
+      <span className="mr-3 truncate font-mono text-11 text-ink-3" title={source ?? ""}>
         {name}
       </span>
       <Tool icon={Undo2} label="Undo" shortcut="⌘Z" disabled={past === 0} onClick={undo} />
       <Tool icon={Redo2} label="Redo" shortcut="⇧⌘Z" disabled={future === 0} onClick={redo} />
-      <button type="button" onClick={onExport} className="ml-2 flex h-8 items-center gap-1.5 rounded-lg bg-emerald-500 px-3.5 text-[12px] font-medium text-black hover:brightness-110">
+      <button type="button" onClick={onExport} className="ml-2 flex h-8 items-center gap-1.5 rounded-lg bg-emerald-500 px-3.5 text-12 font-medium text-black hover:brightness-110">
         <Icon icon={Download} size={13} /> Export
       </button>
     </div>
@@ -123,7 +123,7 @@ function TopBar({ onExport }: { onExport: () => void }) {
 
 function Bar({ icon, label, onClick }: { icon: LucideIcon; label: string; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] text-ink-2 hover:bg-surface-2 hover:text-ink">
+    <button type="button" onClick={onClick} className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-12 text-ink-2 hover:bg-surface-2 hover:text-ink">
       <Icon icon={icon} size={14} />
       {label}
     </button>

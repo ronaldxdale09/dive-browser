@@ -66,8 +66,8 @@ export function JsDialogCard({ tabId }: { tabId: string | null }) {
           <Icon icon={MessageSquareWarning} size={15} />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="text-[13px] font-semibold text-ink">{heading(dialog)}</h2>
-          <p id="js-dialog-message" className="mt-0.5 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[12px] text-ink-2">
+          <h2 className="text-13 font-semibold text-ink">{heading(dialog)}</h2>
+          <p id="js-dialog-message" className="mt-0.5 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-12 text-ink-2">
             {message}
           </p>
         </div>
@@ -79,7 +79,7 @@ export function JsDialogCard({ tabId }: { tabId: string | null }) {
           aria-label="Your answer"
           value={text}
           onChange={(e) => setDraft({ id: dialog.dialog_id, text: e.target.value })}
-          className="mt-2.5 h-8 w-full rounded-lg border border-line-2 bg-surface-2 px-2.5 text-[12px] text-ink outline-none focus:border-accent"
+          className="mt-2.5 h-8 w-full rounded-lg border border-line-2 bg-surface-2 px-2.5 text-12 text-ink outline-none focus:border-accent"
         />
       )}
       <div className="mt-3 flex items-center justify-end gap-2">

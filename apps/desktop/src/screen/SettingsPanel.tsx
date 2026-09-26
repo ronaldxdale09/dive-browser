@@ -70,7 +70,7 @@ export function SettingsPanel({ onExport }: { onExport: () => void }) {
               <Icon icon={ArrowLeft} size={14} />
             </button>
           )}
-          <h2 className="text-[15px] font-semibold">{title}</h2>
+          <h2 className="text-15 font-semibold">{title}</h2>
           <span className="flex-1" />
           <span className="text-ink-3" title="Drag items on the timeline; press Z, T, A, S or B to add">
             <Icon icon={HelpCircle} size={15} />
@@ -93,7 +93,7 @@ function Card({ children, className = "" }: { children: ReactNode; className?: s
 
 function Switch({ label, checked, onChange, hint }: { label: string; checked: boolean; onChange: (v: boolean) => void; hint?: string }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 py-1 text-[13px] text-ink">
+    <label className="flex cursor-pointer items-center gap-2 py-1 text-13 text-ink">
       <span className="flex-1">
         {label}
         {hint && <span className="ml-1 text-ink-3" title={hint}>ⓘ</span>}
@@ -110,9 +110,9 @@ function Slider({ label, value, min, max, step, onChange, format }: { label: str
   return (
     <Card>
       <label className="flex flex-col gap-2">
-        <span className="flex text-[13px] text-ink">
+        <span className="flex text-13 text-ink">
           {label}
-          <span className="ml-auto font-mono text-[11px] text-ink-3">{format ? format(value) : value}</span>
+          <span className="ml-auto font-mono text-11 text-ink-3">{format ? format(value) : value}</span>
         </span>
         <input type="range" min={min} max={max} step={step} value={value} onPointerDown={checkpoint} onChange={(ev) => onChange(Number(ev.target.value))} className="h-1 accent-emerald-400" />
       </label>
@@ -124,7 +124,7 @@ function Choice<T extends string | number>({ value, options, onChange, cols = 3 
   return (
     <div role="radiogroup" className="grid gap-1 rounded-lg bg-surface-2 p-1" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
       {options.map((o) => (
-        <button key={String(o.value)} type="button" role="radio" aria-checked={o.value === value} onClick={() => onChange(o.value)} className={`h-7 rounded-md text-[11px] transition-colors ${o.value === value ? "bg-surface text-ink shadow-sm ring-1 ring-line-2" : "text-ink-2 hover:text-ink"}`}>
+        <button key={String(o.value)} type="button" role="radio" aria-checked={o.value === value} onClick={() => onChange(o.value)} className={`h-7 rounded-md text-11 transition-colors ${o.value === value ? "bg-surface text-ink shadow-sm ring-1 ring-line-2" : "text-ink-2 hover:text-ink"}`}>
           {o.label}
         </button>
       ))}
@@ -133,7 +133,7 @@ function Choice<T extends string | number>({ value, options, onChange, cols = 3 
 }
 
 function Label({ children }: { children: ReactNode }) {
-  return <span className="text-[13px] text-ink">{children}</span>;
+  return <span className="text-13 text-ink">{children}</span>;
 }
 
 /** Seconds as a field shows them: tenths, without trailing noise. */
@@ -167,7 +167,7 @@ function TimesFields({ target, startMs, endMs }: { target: Exclude<Selection, nu
         <TimeField label="End (seconds)" value={endMs} refused={refused} onCommit={(text) => commit("end", text)} />
       </div>
       {refused && (
-        <p id="screen-times-refused" role="alert" className="mt-2 text-[11px] text-warn">
+        <p id="screen-times-refused" role="alert" className="mt-2 text-11 text-warn">
           Those times run past the recording, are under a tenth of a second long, or overlap another item in the lane.
         </p>
       )}
@@ -298,7 +298,7 @@ function LayoutSettings({ project }: { project: Project }) {
         </div>
       </Card>
       <Card>
-        <span className="flex items-center gap-1.5 text-[13px] text-ink">
+        <span className="flex items-center gap-1.5 text-13 text-ink">
           <Icon icon={Crop} size={13} /> Crop
         </span>
         <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2">
@@ -454,7 +454,7 @@ function NoteSettings({ note }: { note: AnnotationRegion }) {
             <textarea value={note.text ?? ""} onChange={(ev) => patch({ text: ev.target.value }, false)} onBlur={() => useEditor.getState().checkpoint()} rows={3} className="mt-2 w-full rounded-lg border border-line bg-surface p-2 text-xs text-ink outline-none focus:border-highlight/60" />
             <div className="mt-2 flex gap-1">
               {(["bold", "italic", "underline"] as const).map((k) => (
-                <button key={k} type="button" aria-pressed={note.style[k]} onClick={() => style({ [k]: !note.style[k] })} className="h-7 flex-1 rounded-md bg-surface text-[11px] text-ink-2 aria-pressed:bg-surface-3 aria-pressed:text-ink">
+                <button key={k} type="button" aria-pressed={note.style[k]} onClick={() => style({ [k]: !note.style[k] })} className="h-7 flex-1 rounded-md bg-surface text-11 text-ink-2 aria-pressed:bg-surface-3 aria-pressed:text-ink">
                   {k[0]!.toUpperCase()}
                 </button>
               ))}

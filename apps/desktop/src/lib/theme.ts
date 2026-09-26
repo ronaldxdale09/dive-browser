@@ -251,10 +251,21 @@ export function contentCornerRadius(pref: string): number {
   return pref === "sharp" ? 0 : pref === "soft" ? 4 : 6;
 }
 
+/**
+ * The Interface size preference's range, matching the host's clamp
+ * (UI_SCALE_RANGE in prefs.rs). Up to twice the size: 130% was the ceiling
+ * while text was sized in px and did not grow with it, and for low vision
+ * that was never enough.
+ */
+export const UI_SCALE_MIN = 0.8;
+export const UI_SCALE_MAX = 2;
+
+// Rows in rem, like the type in them: a row sized in px kept its height as
+// the Interface size grew its text, and the text overflowed it.
 export const DENSITY = {
-  compact: { row: "30px", gap: "2px" },
-  comfortable: { row: "36px", gap: "4px" },
-  relaxed: { row: "40px", gap: "6px" },
+  compact: { row: "1.875rem", gap: "0.125rem" },
+  comfortable: { row: "2.25rem", gap: "0.25rem" },
+  relaxed: { row: "2.5rem", gap: "0.375rem" },
 } as const;
 
 const PALETTE_VARS: Record<keyof Palette, string> = {
@@ -357,7 +368,7 @@ export function importTheme(json: string): Partial<Appearance> {
       if (!isHex(value)) throw new Error(`Not a theme: ${key} must be a hex colour like #7fd8c8.`);
       out[key as "accent"] = value;
     } else if (key === "ui_scale") {
-      if (typeof value !== "number" || !Number.isFinite(value) || value < 0.8 || value > 1.3) throw new Error("Not a theme: ui_scale must be a number from 0.8 to 1.3.");
+      if (typeof value !== "number" || !Number.isFinite(value) || value < UI_SCALE_MIN || value > UI_SCALE_MAX) throw new Error(`Not a theme: ui_scale must be a number from ${UI_SCALE_MIN} to ${UI_SCALE_MAX}.`);
       out.ui_scale = value;
     } else {
       const allowed = ENUMS[key]!;

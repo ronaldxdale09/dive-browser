@@ -301,7 +301,7 @@ export function Timeline() {
           <Select label="Aspect ratio" value={e.aspectRatio} onChange={(value) => update((ed) => ({ ...ed, aspectRatio: value }))} options={ASPECT_RATIOS.map((r) => ({ value: r, label: r }))} className="h-7 rounded-lg bg-transparent px-2 text-xs text-ink-2 outline-none hover:bg-surface-2 hover:text-ink focus-visible:ring-1 focus-visible:ring-highlight/60 focus-visible:text-ink" />
         </div>
         <span className="flex-1" />
-        <span className="hidden items-center gap-2 text-[10.5px] text-ink-3 md:flex">
+        <span className="hidden items-center gap-2 text-10.5 text-ink-3 md:flex">
           <kbd className="rounded border border-line-2 bg-surface-2 px-1.5 py-0.5 font-mono">Scroll</kbd> Pan
           <kbd className="ml-2 rounded border border-line-2 bg-surface-2 px-1.5 py-0.5 font-mono">⌘ + Scroll</kbd> Zoom
           <span className="ml-2">Drag on a lane to draw</span>
@@ -321,7 +321,7 @@ export function Timeline() {
             <span key={`m${t}`} aria-hidden className="absolute bottom-0 h-1.5 border-l border-line-2" style={{ left: toX(t) }} />
           ))}
           {major.map((t) => (
-            <span key={t} className="absolute top-1 -translate-x-1/2 font-mono text-[10px] text-ink-3" style={{ left: toX(t) }}>
+            <span key={t} className="absolute top-1 -translate-x-1/2 font-mono text-10 text-ink-3" style={{ left: toX(t) }}>
               {stamp(t)}
             </span>
           ))}
@@ -351,7 +351,7 @@ export function Timeline() {
                   onFocus={() => !picked && select({ kind: lane.kind, id: it.id })}
                   onKeyDown={itemKey(lane.kind, it)}
                   onPointerDown={dragItem(lane.kind, it.id, "move")}
-                  className={`absolute top-1.5 flex h-7 cursor-grab items-center outline-none focus-visible:ring-2 focus-visible:ring-highlight justify-center gap-1.5 overflow-hidden rounded-lg border px-3 text-[11px] whitespace-nowrap ${lane.pill} ${lane.text} ${picked ? `ring-2 ${lane.ring}` : ""}`}
+                  className={`absolute top-1.5 flex h-7 cursor-grab items-center outline-none focus-visible:ring-2 focus-visible:ring-highlight justify-center gap-1.5 overflow-hidden rounded-lg border px-3 text-11 whitespace-nowrap ${lane.pill} ${lane.text} ${picked ? `ring-2 ${lane.ring}` : ""}`}
                   style={{ left: Math.max(PAD, x), width: Math.min(w, width - PAD - Math.max(PAD, x)) }}
                 >
                   <span aria-hidden onPointerDown={dragItem(lane.kind, it.id, "start")} className="absolute inset-y-0 left-0 w-2.5 cursor-ew-resize" />

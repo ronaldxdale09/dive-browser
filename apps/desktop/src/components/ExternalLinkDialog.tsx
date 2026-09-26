@@ -65,11 +65,11 @@ function Prompt({ asked }: { asked: ExternalLinkAsked }) {
         </p>
         {/* Where it goes, as far as it is safe to say: the scheme and host.
             The rest of the address can carry codes meant for the app. */}
-        <p id={target} className="mt-1 truncate font-mono text-[11px] text-ink-3" title={asked.target}>
+        <p id={target} className="mt-1 truncate font-mono text-11 text-ink-3" title={asked.target}>
           {asked.target}
         </p>
         {asked.origin && (
-          <label className="mt-3 flex items-start gap-2 text-[11px] text-ink-2">
+          <label className="mt-3 flex items-start gap-2 text-11 text-ink-2">
             <input type="checkbox" checked={always} onChange={(e) => setAlways(e.target.checked)} className="mt-0.5 size-3.5 accent-accent" />
             <span>
               Always allow {asked.origin} to open {asked.scheme}: links in {name}

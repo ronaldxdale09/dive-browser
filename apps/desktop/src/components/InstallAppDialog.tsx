@@ -51,7 +51,7 @@ export function InstallAppDialog({ tabId, probe, onClose }: { tabId: string; pro
         className="w-[420px] max-w-[92vw] overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
       >
         <div className="px-5 pt-5 pb-4">
-          <h2 id="install-app-title" className="text-[15px] font-medium text-ink">Install app</h2>
+          <h2 id="install-app-title" className="text-15 font-medium text-ink">Install app</h2>
           <div className="mt-4 flex items-center gap-3.5">
             {probe.icon_url ? (
               <img src={probe.icon_url} alt="" width={48} height={48} className="size-12 shrink-0 rounded-xl bg-surface-2 object-contain" />
@@ -59,7 +59,7 @@ export function InstallAppDialog({ tabId, probe, onClose }: { tabId: string; pro
               <span className="grid size-12 shrink-0 place-items-center rounded-xl bg-surface-2 text-ink-3"><Icon icon={AppWindow} size={22} /></span>
             )}
             <div id={app} className="min-w-0">
-              <p className="truncate text-[13px] font-medium text-ink">{name}</p>
+              <p className="truncate text-13 font-medium text-ink">{name}</p>
               <p className="truncate text-xs text-ink-3">{origin}</p>
             </div>
           </div>

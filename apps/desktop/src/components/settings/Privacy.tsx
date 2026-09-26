@@ -95,14 +95,14 @@ export function Privacy() {
           hint="Protection is paused only for these exact hosts. Developer request rules still apply."
           control={
             prefs.privacy_exceptions.length === 0 ? (
-              <p className="text-[11px] text-ink-3">No site exceptions.</p>
+              <p className="text-11 text-ink-3">No site exceptions.</p>
             ) : (
               <div role="list" aria-label="Sites with paused DivePrivacy protection" className="flex flex-wrap gap-2">
                 {prefs.privacy_exceptions.map((host) => (
                   <span
                     key={host}
                     role="listitem"
-                    className="inline-flex h-7 items-center gap-1.5 rounded-full border border-line bg-surface-2 pl-2.5 pr-1 font-mono text-[10.5px] text-ink-2"
+                    className="inline-flex h-7 items-center gap-1.5 rounded-full border border-line bg-surface-2 pl-2.5 pr-1 font-mono text-10.5 text-ink-2"
                   >
                     {host}
                     <button
@@ -122,7 +122,7 @@ export function Privacy() {
         <Row
           label="Bundled ruleset"
           hint="This version is packaged with Dive and changes only when the app is updated."
-          control={<span className="font-mono text-[11px] text-ink-2">{privacyInfo?.version ?? "…"}</span>}
+          control={<span className="font-mono text-11 text-ink-2">{privacyInfo?.version ?? "…"}</span>}
         />
       </Group>
 
@@ -180,7 +180,7 @@ export function Privacy() {
                     key={host}
                     type="button"
                     onClick={() => set({ https_only_allowed: prefs.https_only_allowed.filter((h) => h !== host) })}
-                    className="flex h-7 items-center gap-1.5 rounded-full border border-line px-2.5 font-mono text-[11px] text-ink-2 hover:border-line-2 hover:text-ink"
+                    className="flex h-7 items-center gap-1.5 rounded-full border border-line px-2.5 font-mono text-11 text-ink-2 hover:border-line-2 hover:text-ink"
                     title={`Ask for ${host} over https again`}
                   >
                     {host}
@@ -491,7 +491,7 @@ function ScopedSitePermissions() {
           <div className="flex flex-col gap-1.5">
             {g.kinds.map((p) => (
               <div key={p.kind} data-permission-row className="flex items-center gap-3">
-                <span className="min-w-0 flex-1 text-[11px] text-ink-2">{PERMISSION_KINDS[p.kind] ?? p.kind}</span>
+                <span className="min-w-0 flex-1 text-11 text-ink-2">{PERMISSION_KINDS[p.kind] ?? p.kind}</span>
                 <Select label={`${g.origin} ${PERMISSION_KINDS[p.kind] ?? p.kind}`} value={p.decision} onChange={(d) => decide(p, d)} options={DECISIONS} />
                 <button
                   type="button"
@@ -651,7 +651,7 @@ function ClearData() {
         <Check label="Cached files" checked={what.cache} onChange={(cache) => pick({ cache })} />
         <Check label="Site data (local storage, IndexedDB) — sites open now at once, the rest when Dive restarts" checked={what.site_data} onChange={(site_data) => pick({ site_data })} />
         <Check label="Form entries in this profile" checked={what.forms} onChange={(forms) => pick({ forms })} />
-        <p className="text-[10.5px] text-ink-3">
+        <p className="text-10.5 text-ink-3">
           The time range applies to history, downloads and form entries. Cookies, cached files and site data have no dates Chromium can clear by, so they are always cleared in full. Saved passwords are not touched here; manage them under Passwords &amp; forms.
         </p>
         {confirming ? (
@@ -673,7 +673,7 @@ function ClearData() {
             </Button>
             {result && (
               <>
-                <span role="status" className="text-[11px] text-ink-2">
+                <span role="status" className="text-11 text-ink-2">
                   {result.summary}
                 </span>
                 {result.restart_needed && <Button onClick={() => void ipc.appRestart()}>Restart now</Button>}
@@ -682,14 +682,14 @@ function ClearData() {
           </div>
         )}
         {result && result.failures.length > 0 && (
-          <ul role="alert" className="flex flex-col gap-0.5 text-[11px] text-danger">
+          <ul role="alert" className="flex flex-col gap-0.5 text-11 text-danger">
             {result.failures.map((failure) => (
               <li key={failure}>Not cleared — {failure}</li>
             ))}
           </ul>
         )}
         {error && (
-          <p role="alert" className="text-[11px] text-danger">
+          <p role="alert" className="text-11 text-danger">
             {error}
           </p>
         )}

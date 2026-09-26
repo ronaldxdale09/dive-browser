@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { ipc } from "../lib/ipc";
 import type { Prefs as WirePrefs } from "../lib/ipc";
 import { useBrowser } from "./browser";
-import { APPEARANCE_KEYS, THEME_VARS, accentInk, contentCornerRadius, resolveScheme, themeCss } from "../lib/theme";
+import { APPEARANCE_KEYS, THEME_VARS, UI_SCALE_MAX, UI_SCALE_MIN, accentInk, contentCornerRadius, resolveScheme, themeCss } from "../lib/theme";
 import { errorMessage } from "../lib/errors";
 import { isPrivateWindow } from "../lib/privateMode";
 
@@ -263,7 +263,7 @@ export function applyAppearance(prefs: Prefs, { preview = false }: { preview?: b
     return;
   }
   for (const [name, value] of themeCss(prefs, scheme)) root.style.setProperty(name, value);
-  const scale = Math.min(1.3, Math.max(0.8, prefs.ui_scale || 1));
+  const scale = Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, prefs.ui_scale || 1));
   if (scale === 1) root.style.removeProperty("font-size");
   else root.style.fontSize = `${16 * scale}px`;
   if (!preview) syncWindowBackground();

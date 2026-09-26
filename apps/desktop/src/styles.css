@@ -38,8 +38,26 @@
   /* Density: the height of a rail row and the gap between chrome controls.
      Tabs and the omnibox are 4px shorter than a row. The theme engine
      (lib/theme.ts) overrides these per the density preference. */
-  --row-h: 36px;
-  --ui-gap: 4px;
+  --row-h: 2.25rem;
+  --ui-gap: 0.25rem;
+  /* The chrome's small type, as `text-11` and so on. Each is named for its
+     size at the default Interface size and set in rem, so the preference,
+     which sets the root font size, enlarges text along with everything else;
+     sizes in px stayed put however far it was turned up. No line height of
+     their own: like the arbitrary sizes they replace, they keep the one
+     inherited. */
+  --text-9: 0.5625rem;
+  --text-9\.5: 0.59375rem;
+  --text-10: 0.625rem;
+  --text-10\.5: 0.65625rem;
+  --text-11: 0.6875rem;
+  --text-11\.5: 0.71875rem;
+  --text-12: 0.75rem;
+  --text-12\.5: 0.78125rem;
+  --text-13: 0.8125rem;
+  --text-13\.5: 0.84375rem;
+  --text-14: 0.875rem;
+  --text-15: 0.9375rem;
 }
 
 /* Light palette. The theme preference resolves to `data-theme` on the root,
@@ -110,7 +128,7 @@ body {
   background: var(--color-ground);
   color: var(--color-ink);
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: 0.8125rem;
   user-select: none;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
@@ -198,7 +216,7 @@ button:not(:disabled):active,
 
 /* cmdk */
 [cmdk-item][data-selected="true"] { background: var(--color-surface-3); }
-[cmdk-group-heading] { padding: 8px 12px 4px; font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
+[cmdk-group-heading] { padding: 8px 12px 4px; font-size: 0.6875rem; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--color-ink-3); }
 
 /* Welcome screen ground; the animated character field is rendered separately. */
 .welcome {

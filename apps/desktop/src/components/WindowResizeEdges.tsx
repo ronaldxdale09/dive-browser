@@ -22,7 +22,7 @@ import {
  * bottom, width from either side. Nothing renders off Windows or while
  * maximized, where the OS handles resizing.
  */
-export function WindowResizeEdges({ top = 44 }: { top?: number } = {}) {
+export function WindowResizeEdges({ top = 44 }: { /** Where the title row ends: px, or a length that follows the Interface size. */ top?: number | string } = {}) {
   const maximized = useWindowMaximized();
   if (!isWindows() || maximized) return null;
 

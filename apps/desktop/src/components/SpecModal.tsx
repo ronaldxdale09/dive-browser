@@ -77,7 +77,7 @@ export function SpecModal({
           </span>
           <div className="min-w-0">
             <h2 className="truncate text-xs font-semibold text-ink">{title}</h2>
-            <p className="truncate text-[11px] text-ink-3">{subtitle}</p>
+            <p className="truncate text-11 text-ink-3">{subtitle}</p>
           </div>
           <span className="flex-1" />
           <button
@@ -102,10 +102,10 @@ export function SpecModal({
 
         <div className="flex min-h-0 flex-1 flex-col bg-ground p-4">
           <div className="flex items-center justify-between pb-2">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-ink-3">Generated Code</span>
+            <span className="text-11 font-medium uppercase tracking-wider text-ink-3">Generated Code</span>
             {footer}
           </div>
-          <pre className="min-h-0 flex-1 select-text overflow-auto rounded-xl border border-line bg-surface-2 p-3.5 font-mono text-[11.5px] leading-relaxed text-ink">
+          <pre className="min-h-0 flex-1 select-text overflow-auto rounded-xl border border-line bg-surface-2 p-3.5 font-mono text-11.5 leading-relaxed text-ink">
             <code>{spec}</code>
           </pre>
         </div>

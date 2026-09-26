@@ -94,7 +94,7 @@ export function AppsDialog() {
                   grid.current?.querySelector<HTMLButtonElement>("[data-app]:not(:disabled)")?.focus();
                 }
               }}
-              className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
+              className="min-w-0 flex-1 bg-transparent text-13 text-ink outline-none placeholder:text-ink-3"
             />
             {query && (
               <button type="button" aria-label="Clear" onClick={() => setQuery("")} className="relative grid size-5 place-items-center rounded-full text-ink-3 before:absolute before:-inset-0.5 hover:bg-surface-3 hover:text-ink">
@@ -111,7 +111,7 @@ export function AppsDialog() {
             <div className="flex flex-col gap-6">
               {shelves.map((shelf) => (
                 <section key={shelf.id} aria-label={shelf.name}>
-                  <h3 className="mb-2 px-1 text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">{shelf.name}</h3>
+                  <h3 className="mb-2 px-1 text-11 font-medium tracking-[0.08em] text-ink-3 uppercase">{shelf.name}</h3>
                   <div data-shelf className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
                     {shelf.apps.map((app) => (
                       <AppCard key={app.id} app={app} disabled={Boolean(app.needsTab && !activeTab)} onLaunch={launch} />
@@ -141,10 +141,10 @@ function AppCard({ app, disabled, onLaunch }: { app: AppEntry; disabled: boolean
       <BuiltinAppIcon app={app.id} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex items-center gap-2">
-          <span className="truncate text-[12.5px] font-medium text-ink">{app.name}</span>
-          {chord && <kbd className="ml-auto shrink-0 font-mono text-[9.5px] text-ink-3">{chord}</kbd>}
+          <span className="truncate text-12.5 font-medium text-ink">{app.name}</span>
+          {chord && <kbd className="ml-auto shrink-0 font-mono text-9.5 text-ink-3">{chord}</kbd>}
         </span>
-        <span className="line-clamp-2 text-[11px] leading-snug text-ink-3">{app.blurb}</span>
+        <span className="line-clamp-2 text-11 leading-snug text-ink-3">{app.blurb}</span>
       </span>
     </button>
   );

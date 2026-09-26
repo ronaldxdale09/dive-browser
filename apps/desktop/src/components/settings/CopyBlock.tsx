@@ -13,7 +13,7 @@ export function CopyBlock({ text, label = "Copy command", display, displayTitle 
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex items-start gap-2 rounded-lg border border-line bg-surface-2 p-2">
-      <code title={displayTitle} className="min-w-0 flex-1 font-mono text-[11px] break-all text-ink select-text">
+      <code title={displayTitle} className="min-w-0 flex-1 font-mono text-11 break-all text-ink select-text">
         {display ?? (text || "…")}
       </code>
       {copied && (

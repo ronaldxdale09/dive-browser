@@ -147,7 +147,7 @@ export function DevicePicker() {
               {sel?.deviceId === "custom" && <Icon icon={Check} size={13} className="text-highlight" />}
             </form>
             {customProblem && (
-              <p role="alert" className="pt-2 text-[11px] text-danger">
+              <p role="alert" className="pt-2 text-11 text-danger">
                 {customProblem}
               </p>
             )}
@@ -163,7 +163,7 @@ export function DevicePicker() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="pt-3">
-      <h3 className="pb-2 text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">{title}</h3>
+      <h3 className="pb-2 text-10 font-medium tracking-[0.08em] text-ink-3 uppercase">{title}</h3>
       {children}
     </section>
   );
@@ -197,8 +197,8 @@ function DeviceCard({ device, selected, onClick }: { device: DevicePreset; selec
         <span className="rounded-[3px] border border-ink-3 bg-surface-3" style={{ width: tall ? 14 : 24, height: tall ? 24 : 14 }} />
       </span>
       <span className="min-w-0">
-        <span className="block truncate text-[11px] leading-tight text-ink">{device.name}</span>
-        <span className="mt-1 block font-mono text-[9.5px] text-ink-3">
+        <span className="block truncate text-11 leading-tight text-ink">{device.name}</span>
+        <span className="mt-1 block font-mono text-9.5 text-ink-3">
           {device.width}×{device.height} @{device.dpr}x
         </span>
       </span>
@@ -260,7 +260,7 @@ function Environment({ tab }: { tab: string }) {
         </div>
       </Section>
       <Section title="Place and time">
-        <p className="pb-2 text-[11px] text-ink-3">Where the page thinks it is: geolocation, time zone and locale together.</p>
+        <p className="pb-2 text-11 text-ink-3">Where the page thinks it is: geolocation, time zone and locale together.</p>
         <div className="flex flex-wrap gap-1.5">
           <Chip selected={!env.place} onClick={() => void setEnvironment(tab, { place: null, timezone: null, locale: null })}>
             <Icon icon={Globe} size={12} /> This machine

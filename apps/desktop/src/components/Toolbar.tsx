@@ -235,7 +235,7 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
               glance reads the site; the input underneath keeps the whole text
               for selection, copying and assistive tech. */}
           {resting && (
-            <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center overflow-hidden text-[13px] whitespace-nowrap">
+            <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center overflow-hidden text-13 whitespace-nowrap">
               <span className="text-ink">{splitAddress(url).host}</span>
               <span className="truncate text-ink-3">{splitAddress(url).rest}</span>
             </span>
@@ -328,7 +328,7 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
             aria-autocomplete="both"
             aria-controls={rows.length > 0 ? listId : undefined}
             aria-activedescendant={rows.length > 0 ? optionId(listId, highlight) : undefined}
-            className={`min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-ink-3 ${resting ? "text-transparent" : "text-ink"}`}
+            className={`min-w-0 flex-1 bg-transparent text-13 outline-none placeholder:text-ink-3 ${resting ? "text-transparent" : "text-ink"}`}
           />
           </span>
           <AddressSuggestions id={listId} rows={rows} highlight={highlight} onHighlight={setHighlight} onPick={pick} />
@@ -477,7 +477,7 @@ function ZoomBadge() {
         // hid it from anyone not looking.
         aria-label={`Zoom ${Math.round(zoom * 100)}%, reset`}
         onClick={() => void zoomStep(0)}
-        className="mr-1 h-6 rounded-full border border-line px-2 font-mono text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink"
+        className="mr-1 h-6 rounded-full border border-line px-2 font-mono text-11 text-ink-2 hover:bg-surface-2 hover:text-ink"
       >
         {Math.round(zoom * 100)}%
       </button>

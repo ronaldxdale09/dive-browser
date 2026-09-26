@@ -138,7 +138,7 @@ export function BookmarkButton() {
       </Tooltip>
       {open && current && (
         <div ref={panel} role="dialog" aria-label={editing ? "Edit bookmark" : "Bookmark added"} className="surface-enter absolute right-0 z-50 mt-1 w-72 rounded-xl border border-line-2 bg-surface p-3 text-xs shadow-2xl">
-          <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">
+          <div className="mb-2 flex items-center gap-1.5 text-10 font-medium tracking-[0.08em] text-ink-3 uppercase">
             <Icon icon={Star} size={11} fill="currentColor" className="text-highlight" />
             {editing ? "Edit bookmark" : "Bookmark added"}
           </div>
@@ -155,17 +155,17 @@ export function BookmarkButton() {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               spellCheck={false}
-              className="h-7 w-full rounded-lg border border-line bg-surface-2 px-2 text-[12px] text-ink outline-none focus:border-highlight/60"
+              className="h-7 w-full rounded-lg border border-line bg-surface-2 px-2 text-12 text-ink outline-none focus:border-highlight/60"
             />
-            <div className="mt-1 truncate px-0.5 font-mono text-[11px] text-ink-3" title={current.url}>
+            <div className="mt-1 truncate px-0.5 font-mono text-11 text-ink-3" title={current.url}>
               {hostOf(current.url) || current.url}
             </div>
             <div className="mt-3 flex items-center gap-1">
-              <button type="button" onClick={remove} className="h-7 rounded-lg px-2 text-[11px] text-ink-2 hover:bg-surface-2 hover:text-danger">
+              <button type="button" onClick={remove} className="h-7 rounded-lg px-2 text-11 text-ink-2 hover:bg-surface-2 hover:text-danger">
                 Remove
               </button>
               <span className="flex-1" />
-              <button type="submit" className="h-7 rounded-lg bg-highlight px-3 text-[11px] font-medium text-highlight-ink hover:opacity-90">
+              <button type="submit" className="h-7 rounded-lg bg-highlight px-3 text-11 font-medium text-highlight-ink hover:opacity-90">
                 Done
               </button>
             </div>

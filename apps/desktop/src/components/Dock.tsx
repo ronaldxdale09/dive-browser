@@ -235,13 +235,13 @@ function ConsolePanel() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-3 px-2 pb-1 text-[11px] text-ink-3">
+      <div className="flex items-center gap-3 px-2 pb-1 text-11 text-ink-3">
         <input
           aria-label="Filter console"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Filter"
-          className="h-6 w-56 rounded-md border border-line bg-surface-2 px-2 text-[11px] outline-none placeholder:text-ink-3 focus:border-highlight/60"
+          className="h-6 w-56 rounded-md border border-line bg-surface-2 px-2 text-11 outline-none placeholder:text-ink-3 focus:border-highlight/60"
         />
         <label className="ml-auto flex items-center gap-1.5 select-none">
           <input type="checkbox" checked={preserve} onChange={(e) => setPreserve(e.target.checked)} className="accent-highlight" />
@@ -255,7 +255,7 @@ function ConsolePanel() {
           const el = e.currentTarget;
           atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK;
         }}
-        className="min-h-0 flex-1 select-text overflow-auto font-mono text-[11.5px] leading-5"
+        className="min-h-0 flex-1 select-text overflow-auto font-mono text-11.5 leading-5"
       >
         {shown.length === 0 && (
           <div className="px-3 py-2 text-ink-3">{!activeTab ? "Open a tab to see its console." : entries.length > 0 ? "Nothing matches the filter." : "No console output yet."}</div>
@@ -330,9 +330,9 @@ const Row = memo(function Row({
         {cleared ? "" : entry.source}
       </span>
       {/* Colour alone must not carry the level: a warning and an error say so. */}
-      {(entry.level === "warn" || entry.level === "error") && <span className="shrink-0 self-start rounded bg-current/10 px-1 text-[10px] uppercase">{entry.level}</span>}
+      {(entry.level === "warn" || entry.level === "error") && <span className="shrink-0 self-start rounded bg-current/10 px-1 text-10 uppercase">{entry.level}</span>}
       {entry.repeats > 1 && (
-        <span className="shrink-0 self-start rounded-full bg-surface-3 px-1.5 text-[10px] text-ink-2" title={`${entry.repeats} identical lines in a row`} aria-label={`${entry.repeats} times`}>
+        <span className="shrink-0 self-start rounded-full bg-surface-3 px-1.5 text-10 text-ink-2" title={`${entry.repeats} identical lines in a row`} aria-label={`${entry.repeats} times`}>
           ×{entry.repeats}
         </span>
       )}

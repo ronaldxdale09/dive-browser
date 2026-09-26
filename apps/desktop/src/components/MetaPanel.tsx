@@ -88,11 +88,11 @@ export function MetaPanel() {
     <div className="flex min-h-0 flex-1 gap-4 overflow-auto px-3 py-2 select-text">
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex items-center">
-          <span className="text-[10px] tracking-wider text-ink-3 uppercase">Head</span>
+          <span className="text-10 tracking-wider text-ink-3 uppercase">Head</span>
           <span className="flex-1" />
           <IconButton icon={RefreshCw} label="Re-read metadata" size={12} onClick={refresh} tooltipAlign="end" />
         </div>
-        <div className="font-mono text-[11.5px] leading-5">
+        <div className="font-mono text-11.5 leading-5">
           {rows.map(([k, v]) => (
             <div key={k} className="flex gap-3 border-b border-line/60 py-0.5">
               <span className="w-32 shrink-0 text-ink-3">{k}</span>
@@ -103,21 +103,21 @@ export function MetaPanel() {
       </div>
       <div className="flex w-80 shrink-0 flex-col gap-3">
         <div>
-          <div className="mb-1 text-[10px] tracking-wider text-ink-3 uppercase">Search result</div>
+          <div className="mb-1 text-10 tracking-wider text-ink-3 uppercase">Search result</div>
           <div className="rounded-lg border border-line bg-surface-2 p-3">
-            <div className="truncate text-[11px] text-ink-3">{host}</div>
+            <div className="truncate text-11 text-ink-3">{host}</div>
             <div className="truncate text-sm text-link">{meta.title || "(no title)"}</div>
             <div className="line-clamp-2 text-xs text-ink-2">{meta.description ?? "No description. Search engines will pick text from the page."}</div>
           </div>
         </div>
         <div>
-          <div className="mb-1 text-[10px] tracking-wider text-ink-3 uppercase">Social card</div>
+          <div className="mb-1 text-10 tracking-wider text-ink-3 uppercase">Social card</div>
           <div className="overflow-hidden rounded-lg border border-line bg-surface-2">
             <CardImage src={ogImage} />
             <div className="p-2.5">
-              <div className="truncate text-[11px] text-ink-3">{host}</div>
+              <div className="truncate text-11 text-ink-3">{host}</div>
               <div className="truncate text-xs font-medium text-ink">{ogTitle || "(no title)"}</div>
-              <div className="line-clamp-2 text-[11px] text-ink-2">{ogDesc}</div>
+              <div className="line-clamp-2 text-11 text-ink-2">{ogDesc}</div>
             </div>
           </div>
         </div>

@@ -191,8 +191,8 @@ export function AddressSuggestions({
           ) : (
             <>
               <span className="truncate">{row.title || row.url}</span>
-              {row.kind === "tab" && <span className="shrink-0 rounded-full border border-line px-1.5 text-[10px] leading-4 text-ink-3">Switch to tab</span>}
-              <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{placeOf(row.url)}</span>
+              {row.kind === "tab" && <span className="shrink-0 rounded-full border border-line px-1.5 text-10 leading-4 text-ink-3">Switch to tab</span>}
+              <span className="ml-auto truncate pl-3 font-mono text-11 text-ink-3">{placeOf(row.url)}</span>
             </>
           )}
         </li>

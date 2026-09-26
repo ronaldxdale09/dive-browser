@@ -30,7 +30,7 @@ export function Shortcuts() {
       {bound.map((c) => (
         <div key={c.id} className="flex items-center gap-4 border-b border-line py-2.5 last:border-b-0">
           <span className="min-w-0 flex-1 truncate text-xs text-ink">{c.title}</span>
-          <kbd className="rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-2">{chord(c.keybinding ?? "")}</kbd>
+          <kbd className="rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-10 text-ink-2">{chord(c.keybinding ?? "")}</kbd>
         </div>
       ))}
       {cmds === null && failure && (
@@ -48,7 +48,7 @@ export function Shortcuts() {
       {chrome.map((c) => (
         <div key={c.title} className="flex items-center gap-4 border-b border-line py-2.5 last:border-b-0">
           <span className="min-w-0 flex-1 truncate text-xs text-ink">{c.title}</span>
-          <kbd className="rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-2">{c.keys}</kbd>
+          <kbd className="rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-10 text-ink-2">{c.keys}</kbd>
         </div>
       ))}
     </Group>

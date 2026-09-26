@@ -293,7 +293,7 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
           data-tauri-drag-region="false"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={() => openPalette("tabs")}
-          className="pressable h-6 shrink-0 rounded-full bg-surface-2 px-2 font-mono text-[10.5px] text-ink-2 tabular-nums hover:bg-surface-3 hover:text-ink"
+          className="pressable h-6 shrink-0 rounded-full bg-surface-2 px-2 font-mono text-10.5 text-ink-2 tabular-nums hover:bg-surface-3 hover:text-ink"
         >
           +{hidden}
         </button>
@@ -986,7 +986,7 @@ function TabMenu({ x, y, tier, detached, muted, split, canCloseRight, moveTarget
 function MenuChord({ chord }: { chord: string | undefined }) {
   if (!chord) return null;
   return (
-    <kbd aria-hidden="true" className="ml-auto pl-3 font-mono text-[11px] text-ink-3">
+    <kbd aria-hidden="true" className="ml-auto pl-3 font-mono text-11 text-ink-3">
       {formatChord(chord)}
     </kbd>
   );

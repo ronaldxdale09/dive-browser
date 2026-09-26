@@ -92,14 +92,14 @@ export function Shortcuts() {
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-x-8 gap-y-4 overflow-y-auto px-5 py-4 sm:grid-cols-2">
           {areas.map((area) => (
             <section key={area.title} aria-label={area.title}>
-              <h3 className="mb-1.5 text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">{area.title}</h3>
+              <h3 className="mb-1.5 text-11 font-medium tracking-[0.08em] text-ink-3 uppercase">{area.title}</h3>
               <dl>
                 {area.rows.map((r) => (
                   <div key={r.id} className="flex items-center gap-4 border-b border-line py-2 last:border-b-0">
                     <dt className="min-w-0 flex-1 truncate text-xs text-ink">{r.title}</dt>
                     <dd className="flex shrink-0 items-center gap-1">
                       {r.chords.map((c) => (
-                        <kbd key={c} className="rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-2">
+                        <kbd key={c} className="rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-10 text-ink-2">
                           {c.includes(" … ") ? c.split(" … ").map((part) => formatChord(part, mac)).join(" … ") : formatChord(c, mac)}
                         </kbd>
                       ))}
@@ -110,7 +110,7 @@ export function Shortcuts() {
             </section>
           ))}
         </div>
-        <footer className="shrink-0 border-t border-line px-5 py-2.5 text-[11px] text-ink-3">Every command is also in the palette ({formatChord("mod+k", mac)}).</footer>
+        <footer className="shrink-0 border-t border-line px-5 py-2.5 text-11 text-ink-3">Every command is also in the palette ({formatChord("mod+k", mac)}).</footer>
       </div>
     </div>
   );

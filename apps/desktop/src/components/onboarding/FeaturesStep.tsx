@@ -58,7 +58,7 @@ export function FeaturesStep() {
 
   return (
     <div>
-      <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">{stepLabel("features")}</p>
+      <p className="font-mono text-10.5 tracking-[0.18em] text-highlight uppercase">{stepLabel("features")}</p>
       <h2 ref={heading} tabIndex={-1} className="mt-1 text-lg font-semibold tracking-[-0.02em] outline-none">What's inside</h2>
       <p className="mt-0.5 text-xs text-ink-3">Each of these has a keystroke, and {displayChord("⌘K")} finds commands that apply here.</p>
       <ul className="mt-4 divide-y divide-line" aria-label="Features">
@@ -71,11 +71,11 @@ export function FeaturesStep() {
               <span className="font-medium text-ink">{f.title}</span>
               <span className="text-ink-3"> · {f.text}</span>
             </span>
-            <kbd className="shrink-0 rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-3">{displayChord(f.keys)}</kbd>
+            <kbd className="shrink-0 rounded bg-surface-3 px-1.5 py-0.5 font-mono text-10 text-ink-3">{displayChord(f.keys)}</kbd>
           </li>
         ))}
       </ul>
-      <p className="mt-3 font-mono text-[10px] tracking-[0.16em] text-ink-3 uppercase">Set up now</p>
+      <p className="mt-3 font-mono text-10 tracking-[0.16em] text-ink-3 uppercase">Set up now</p>
       <div className="mt-1 divide-y divide-line">
         <div className="flex items-center gap-3 py-2">
           <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-highlight-soft text-highlight">
@@ -96,13 +96,13 @@ export function FeaturesStep() {
             <span className="text-ink-3">{isDefault ? " · Links already open here." : defaultBrowserOnboardingHint(phase === "waiting" && !timedOut)}</span>
           </span>
           {!isDefault && (
-            <button type="button" disabled={!canAsk} onClick={() => void makeDefault()} className="pressable h-7 shrink-0 rounded-full border border-line-2 px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40">
+            <button type="button" disabled={!canAsk} onClick={() => void makeDefault()} className="pressable h-7 shrink-0 rounded-full border border-line-2 px-3 text-11 text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40">
               {phase === "asking" ? "Asking…" : "Set as default"}
             </button>
           )}
         </div>
       </div>
-      <button type="button" onClick={() => setTour((t) => !t)} aria-expanded={tour} className="mt-3 text-[11px] text-ink-3 underline-offset-2 hover:text-ink hover:underline">
+      <button type="button" onClick={() => setTour((t) => !t)} aria-expanded={tour} className="mt-3 text-11 text-ink-3 underline-offset-2 hover:text-ink hover:underline">
         {tour ? "Hide the tour" : "Watch the one-minute tour"}
       </button>
       {tour && (

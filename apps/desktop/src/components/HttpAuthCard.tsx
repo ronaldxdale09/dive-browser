@@ -63,7 +63,7 @@ export function HttpAuthCard({ tabId, takesFocus = true }: { tabId: string | nul
           <Icon icon={asked.is_proxy ? ShieldAlert : KeyRound} size={14} />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="text-[13px] font-semibold text-ink">
+          <h2 className="text-13 font-semibold text-ink">
             {asked.is_proxy ? "The proxy wants you to sign in" : `Sign in to ${asked.host}`}
           </h2>
           <p className="mt-0.5 text-ink-2">
@@ -77,7 +77,7 @@ export function HttpAuthCard({ tabId, takesFocus = true }: { tabId: string | nul
       </div>
 
       {plain && (
-        <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-warn/10 px-2 py-1.5 text-[11px] text-ink-2">
+        <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-warn/10 px-2 py-1.5 text-11 text-ink-2">
           <Icon icon={ShieldAlert} size={12} className="mt-px shrink-0 text-warn" />
           This connection is not encrypted, so the password is readable by anything on the way to {asked.host}.
         </p>
@@ -110,7 +110,7 @@ export function HttpAuthCard({ tabId, takesFocus = true }: { tabId: string | nul
         <button
           type="button"
           onClick={cancel}
-          className="h-7 rounded-lg border border-line px-3 text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink"
+          className="h-7 rounded-lg border border-line px-3 text-11 text-ink-2 hover:bg-surface-2 hover:text-ink"
         >
           Cancel
         </button>
@@ -118,7 +118,7 @@ export function HttpAuthCard({ tabId, takesFocus = true }: { tabId: string | nul
           type="button"
           onClick={signIn}
           disabled={!mine.user}
-          className="h-7 rounded-lg bg-accent px-3 text-[11px] font-medium text-accent-ink disabled:opacity-45"
+          className="h-7 rounded-lg bg-accent px-3 text-11 font-medium text-accent-ink disabled:opacity-45"
         >
           Sign in
         </button>

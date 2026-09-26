@@ -55,12 +55,12 @@ export function ProfileStep() {
       <div className="flex items-center gap-4">
         <AvatarImage kind="profile" seed={avatar} color={color} alt="" width={56} height={56} className="size-14 shrink-0 rounded-full" />
         <div className="min-w-0">
-          <p className="font-mono text-[10.5px] tracking-[0.18em] text-highlight uppercase">{stepLabel("profile")}</p>
+          <p className="font-mono text-10.5 tracking-[0.18em] text-highlight uppercase">{stepLabel("profile")}</p>
           <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em]">Who's diving?</h2>
           <p className="mt-0.5 text-xs text-ink-3">A profile keeps its own cookies, logins, history, bookmarks and workspaces. Add more later for work and clients.</p>
         </div>
       </div>
-      <label className="mt-6 block text-[11px] text-ink-2">
+      <label className="mt-6 block text-11 text-ink-2">
         Your name
         <input
           ref={field}
@@ -73,7 +73,7 @@ export function ProfileStep() {
       </label>
       <div className="mt-5 grid grid-cols-[1fr_auto] items-start gap-6">
         <div>
-          <p className="text-[11px] text-ink-2">Face</p>
+          <p className="text-11 text-ink-2">Face</p>
           <div role="radiogroup" aria-label="Face" className="mt-1.5 grid grid-cols-8 gap-2">
             {seeds.map((s) => (
               <button key={s} type="button" role="radio" aria-checked={avatar === s} aria-label={s === seedFromProfileName(name) ? "Face from the name" : `Face ${s}`} title={s === seedFromProfileName(name) ? "Face from the name" : s} onClick={() => setSeed(s)} className={`aspect-square rounded-full ring-offset-2 ring-offset-surface ${avatar === s ? "ring-2 ring-highlight" : "opacity-75 hover:opacity-100"}`}>
@@ -83,7 +83,7 @@ export function ProfileStep() {
           </div>
         </div>
         <div>
-          <p className="text-[11px] text-ink-2">Colour</p>
+          <p className="text-11 text-ink-2">Colour</p>
           <div role="radiogroup" aria-label="Colour" className="mt-1.5 grid grid-cols-4 gap-2">
             {PROFILE_COLORS.map((c) => (
               <button key={c} type="button" role="radio" aria-checked={color === c} aria-label={colorName(c)} title={colorName(c)} onClick={() => setColor(c)} className={`size-6 rounded-full ring-offset-2 ring-offset-surface ${color === c ? "ring-2 ring-highlight" : ""}`} style={{ background: c }} />

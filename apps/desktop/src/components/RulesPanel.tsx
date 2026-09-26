@@ -6,7 +6,7 @@ import { useBrowser } from "../store/browser";
 import { DEFAULT_ACTIONS, listenRules, newRule, ruleProblem, selectRules, selectRulesStatus, useRules } from "../store/rules";
 import { Icon, IconButton } from "./Icon";
 
-const FIELD = "h-6 rounded border border-line bg-surface-2 px-1.5 font-mono text-[11px] text-ink outline-none focus:border-highlight/60";
+const FIELD = "h-6 rounded border border-line bg-surface-2 px-1.5 font-mono text-11 text-ink outline-none focus:border-highlight/60";
 
 /** How long typing pauses before a rule is saved. */
 export const SAVE_AFTER_MS = 400;
@@ -67,7 +67,7 @@ export function RulesPanel() {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-xs text-ink-3">
         <p>This workspace&rsquo;s rules could not be read.</p>
-        <button type="button" onClick={() => void load(workspace, true)} className="pressable rounded-full border border-line-2 px-2 py-0.5 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
+        <button type="button" onClick={() => void load(workspace, true)} className="pressable rounded-full border border-line-2 px-2 py-0.5 text-11 text-ink-2 hover:bg-surface-3 hover:text-ink">
           Try again
         </button>
       </div>
@@ -78,7 +78,7 @@ export function RulesPanel() {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-1 p-6 text-center text-xs text-ink-3">
         <p>No rules. Block requests, answer them with a canned body, or add a header, per URL pattern.</p>
-        <p className="font-mono text-[11px]">https://*/api/* · *.png · https://api.dev/users/*</p>
+        <p className="font-mono text-11">https://*/api/* · *.png · https://api.dev/users/*</p>
       </div>
     );
   }
@@ -87,7 +87,7 @@ export function RulesPanel() {
       {rules.map((r) => (
         <RuleRow key={r.id} rule={r} onSave={update} onRemove={() => remove(r.id)} />
       ))}
-      <p className="px-3 py-2 text-[11px] text-ink-3">
+      <p className="px-3 py-2 text-11 text-ink-3">
         <Icon icon={Plus} size={11} className="mr-1 inline" />
         First enabled match wins. Applies to this workspace's tabs, including agent and MCP navigation. Media is not intercepted.
       </p>
@@ -196,7 +196,7 @@ function RuleRow({ rule, onSave, onRemove }: { rule: Rule; onSave: (rule: Rule) 
         onChange={(action) => change({ action })}
       />
       {problem && (
-        <p role="alert" className="pl-6 text-[11px] text-danger">
+        <p role="alert" className="pl-6 text-11 text-danger">
           {problem}
         </p>
       )}
@@ -207,7 +207,7 @@ function RuleRow({ rule, onSave, onRemove }: { rule: Rule; onSave: (rule: Rule) 
 function ActionFields({ action, statusText, onStatusText, onChange }: { action: RuleAction; statusText: string; onStatusText: (text: string) => void; onChange: (a: RuleAction) => void }) {
   switch (action.kind) {
     case "block":
-      return <p className="pl-6 text-[11px] text-ink-3">Fails with net::ERR_BLOCKED_BY_CLIENT.</p>;
+      return <p className="pl-6 text-11 text-ink-3">Fails with net::ERR_BLOCKED_BY_CLIENT.</p>;
     case "mock":
       return (
         <div className="flex flex-col gap-1 pl-6">

@@ -60,7 +60,7 @@ export function QuickLinks() {
   return (
     <div role="group" aria-label="Quick links" className="shrink-0 pb-1">
       <div className="flex h-6 items-center gap-1 pr-0.5 pl-2">
-        <span className="text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">Quick links</span>
+        <span className="text-11 font-medium tracking-[0.08em] text-ink-3 uppercase">Quick links</span>
         <span className="flex-1" />
         {links.length < MAX_QUICK_LINKS && (
           <button
@@ -88,7 +88,7 @@ export function QuickLinks() {
                 className="pressable flex h-11 w-full flex-col items-center justify-center gap-1 rounded-lg text-ink-3 transition-[color,background-color,transform] hover:bg-surface-2 hover:text-ink focus-visible:bg-surface-2 focus-visible:text-ink"
               >
                 <LinkMark url={link.url} favicon={iconFor(link.url)} />
-                <span className="max-w-full truncate px-1 text-[10px] leading-none">{link.name}</span>
+                <span className="max-w-full truncate px-1 text-10 leading-none">{link.name}</span>
               </button>
               <button
                 type="button"
@@ -162,25 +162,25 @@ function AddLink({ onAdd, onCancel }: { onAdd: (link: QuickLink) => void; onCanc
           setUrl(e.target.value);
           setError(null);
         }}
-        className="h-7 rounded-md bg-surface-2 px-2 text-[11px] text-ink outline-none placeholder:text-ink-3 focus:ring-1 focus:ring-accent"
+        className="h-7 rounded-md bg-surface-2 px-2 text-11 text-ink outline-none placeholder:text-ink-3 focus:ring-1 focus:ring-accent"
       />
       <input
         aria-label="Name"
         placeholder="Name (optional)"
         value={name}
         onChange={(e) => setName(e.target.value)}
-        className="h-7 rounded-md bg-surface-2 px-2 text-[11px] text-ink outline-none placeholder:text-ink-3 focus:ring-1 focus:ring-accent"
+        className="h-7 rounded-md bg-surface-2 px-2 text-11 text-ink outline-none placeholder:text-ink-3 focus:ring-1 focus:ring-accent"
       />
       {error && (
-        <p id={errorId} role="alert" className="px-0.5 text-[10.5px] text-warn">
+        <p id={errorId} role="alert" className="px-0.5 text-10.5 text-warn">
           {error}
         </p>
       )}
       <div className="flex justify-end gap-1">
-        <button type="button" onClick={onCancel} className="h-6 rounded-md px-2 text-[11px] text-ink-3 hover:bg-surface-2 hover:text-ink">
+        <button type="button" onClick={onCancel} className="h-6 rounded-md px-2 text-11 text-ink-3 hover:bg-surface-2 hover:text-ink">
           Cancel
         </button>
-        <button type="submit" className="h-6 rounded-md bg-accent px-2 text-[11px] font-medium text-accent-ink hover:opacity-90">
+        <button type="submit" className="h-6 rounded-md bg-accent px-2 text-11 font-medium text-accent-ink hover:opacity-90">
           Add
         </button>
       </div>

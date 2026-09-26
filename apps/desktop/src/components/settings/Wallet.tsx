@@ -125,10 +125,10 @@ function DeleteButton({ label, onClick, takeFocus }: { label: string; onClick: (
 function ConfirmDelete({ question, label, onKeep, onDelete }: { question: string; label: string; onKeep: () => void; onDelete: () => void }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="shrink-0 text-[11px] text-ink-2">{question}</span>
+      <span className="shrink-0 text-11 text-ink-2">{question}</span>
       {/* The safe answer takes focus: the Delete that asked is gone, and a
           second Enter should not throw the row away. */}
-      <button type="button" autoFocus onClick={onKeep} className="h-7 shrink-0 rounded-full px-2.5 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
+      <button type="button" autoFocus onClick={onKeep} className="h-7 shrink-0 rounded-full px-2.5 text-11 text-ink-2 hover:bg-surface-3 hover:text-ink">
         Keep
       </button>
       <button
@@ -142,7 +142,7 @@ function ConfirmDelete({ question, label, onKeep, onDelete }: { question: string
           focusAfterRemoval(list, rowIndexOf(list, row));
           onDelete();
         }}
-        className="h-7 shrink-0 rounded-full bg-danger px-2.5 text-[11px] font-medium text-danger-ink hover:brightness-110">
+        className="h-7 shrink-0 rounded-full bg-danger px-2.5 text-11 font-medium text-danger-ink hover:brightness-110">
         Delete
       </button>
     </div>
@@ -182,7 +182,7 @@ function WalletDialog({ title, icon, onClose, onSubmit, error, errorId, busy, in
         </h2>
         {children}
         {error && (
-          <p id={errorId} role="alert" className="mt-3 rounded-lg bg-surface-2 px-3 py-2 text-[11px] text-warn">
+          <p id={errorId} role="alert" className="mt-3 rounded-lg bg-surface-2 px-3 py-2 text-11 text-warn">
             {error}
           </p>
         )}
@@ -235,7 +235,7 @@ function AddressForm({ address, onClose }: { address: Address; onClose: () => vo
     } else onClose();
   };
   const input = (key: keyof Address, label: string, placeholder = "") => (
-    <label className="flex flex-col gap-1 text-[11px] text-ink-3">
+    <label className="flex flex-col gap-1 text-11 text-ink-3">
       {label}
       <input className={field} value={String(draft[key] ?? "")} placeholder={placeholder} onChange={(e) => set(key, e.target.value)} />
     </label>
@@ -243,14 +243,14 @@ function AddressForm({ address, onClose }: { address: Address; onClose: () => vo
   return (
     <WalletDialog title={address.id ? "Edit address" : "Add address"} icon={MapPin} onClose={onClose} onSubmit={() => void submit()} error={error} errorId={errorId} busy={busy} initialFocus={first}>
       <div className="grid grid-cols-2 gap-2.5">
-        <label className="flex flex-col gap-1 text-[11px] text-ink-3">
+        <label className="flex flex-col gap-1 text-11 text-ink-3">
           Label
           <input ref={first} className={field} value={draft.label} placeholder="Home" onChange={(e) => set("label", e.target.value)} {...invalidProps(labelInvalid, errorId)} />
         </label>
         {input("name", "Full name")}
         {input("organization", "Company")}
         {input("phone", "Phone")}
-        <label className="col-span-2 flex flex-col gap-1 text-[11px] text-ink-3">
+        <label className="col-span-2 flex flex-col gap-1 text-11 text-ink-3">
           Street
           <textarea className={`${field} h-14 resize-none py-1.5`} value={draft.street} onChange={(e) => set("street", e.target.value)} />
         </label>
@@ -293,25 +293,25 @@ function CardForm({ onClose }: { onClose: () => void }) {
   };
   return (
     <WalletDialog title="Add card" icon={CreditCard} onClose={onClose} onSubmit={() => void submit()} error={error} errorId={errorId} busy={busy} initialFocus={first}>
-      <p className="-mt-2 mb-3 text-[11px] text-ink-3">The number goes straight to {credentialStoreName()}; Dive's database keeps only the last four digits. The security code is never saved.</p>
+      <p className="-mt-2 mb-3 text-11 text-ink-3">The number goes straight to {credentialStoreName()}; Dive's database keeps only the last four digits. The security code is never saved.</p>
       <div className="grid grid-cols-2 gap-2.5">
-        <label className="flex flex-col gap-1 text-[11px] text-ink-3">
+        <label className="flex flex-col gap-1 text-11 text-ink-3">
           Label
           <input ref={first} className={field} value={label} placeholder="Personal" onChange={(e) => setLabel(e.target.value)} />
         </label>
-        <label className="flex flex-col gap-1 text-[11px] text-ink-3">
+        <label className="flex flex-col gap-1 text-11 text-ink-3">
           Name on card
           <input className={field} value={cardholder} onChange={(e) => setCardholder(e.target.value)} />
         </label>
-        <label className="col-span-2 flex flex-col gap-1 text-[11px] text-ink-3">
+        <label className="col-span-2 flex flex-col gap-1 text-11 text-ink-3">
           Card number
           <input ref={numberField} className={`${field} font-mono`} value={number} inputMode="numeric" autoComplete="off" onChange={(e) => setNumber(e.target.value)} {...invalidProps(invalid === "number", errorId)} />
         </label>
-        <label className="flex flex-col gap-1 text-[11px] text-ink-3">
+        <label className="flex flex-col gap-1 text-11 text-ink-3">
           Expiry month
           <input ref={monthField} className={field} value={month} inputMode="numeric" placeholder="09" onChange={(e) => setMonth(e.target.value)} {...invalidProps(invalid === "month", errorId)} />
         </label>
-        <label className="flex flex-col gap-1 text-[11px] text-ink-3">
+        <label className="flex flex-col gap-1 text-11 text-ink-3">
           Expiry year
           <input ref={yearField} className={field} value={year} inputMode="numeric" placeholder="30 or 2030" onChange={(e) => setYear(e.target.value)} {...invalidProps(invalid === "year", errorId)} />
         </label>

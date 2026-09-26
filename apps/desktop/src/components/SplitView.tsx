@@ -169,7 +169,7 @@ function PaneAndDivider({ tab, active, last, divider, onActivate, onClose, onRes
         {/* The header is only a drag handle for the pointer; dnd-kit's
             attributes made it a button that did nothing from the keyboard.
             Focusing the pane is the title's own button instead. */}
-        <header ref={setNodeRef} {...listeners} onClick={onActivate} className={`flex h-7 shrink-0 cursor-grab items-center gap-2 px-2 text-[11px] ${active ? "bg-surface-2 text-ink shadow-[inset_0_2px_0_var(--color-highlight)]" : "bg-surface text-ink-2"}`}>
+        <header ref={setNodeRef} {...listeners} onClick={onActivate} className={`flex h-7 shrink-0 cursor-grab items-center gap-2 px-2 text-11 ${active ? "bg-surface-2 text-ink shadow-[inset_0_2px_0_var(--color-highlight)]" : "bg-surface text-ink-2"}`}>
           <Favicon src={tab.favicon} size={12} />
           <button
             type="button"

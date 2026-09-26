@@ -131,7 +131,7 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
   return (
     <div ref={stage} className="relative flex min-h-0 min-w-0 items-stretch bg-ground">
       {conditions && (
-        <button type="button" onClick={() => openPicker(true)} className="pressable absolute bottom-2 left-2 z-10 max-w-[calc(100%-60px)] truncate rounded-full border border-line-2 bg-surface/90 px-2.5 py-1 font-mono text-[9.5px] text-ink-2 shadow-lg backdrop-blur-md" title="Edit emulation conditions">
+        <button type="button" onClick={() => openPicker(true)} className="pressable absolute bottom-2 left-2 z-10 max-w-[calc(100%-60px)] truncate rounded-full border border-line-2 bg-surface/90 px-2.5 py-1 font-mono text-9.5 text-ink-2 shadow-lg backdrop-blur-md" title="Edit emulation conditions">
           <span className="mr-1.5 inline-block size-1.5 rounded-full bg-highlight" aria-hidden />
           {conditions}
         </button>
@@ -177,7 +177,7 @@ function Tool({ label, onClick, children }: { label: string; onClick: () => void
   return (
     <button type="button" aria-label={label} title={label} onClick={onClick} className="flex w-9 flex-col items-center gap-0.5 rounded-lg py-1 text-ink-2 hover:bg-surface-3 hover:text-ink">
       {children}
-      <span className="font-mono text-[9px] leading-none">{label.replace("Zoom ", "")}</span>
+      <span className="font-mono text-9 leading-none">{label.replace("Zoom ", "")}</span>
     </button>
   );
 }

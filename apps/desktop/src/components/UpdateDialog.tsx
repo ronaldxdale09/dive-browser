@@ -81,7 +81,7 @@ export function UpdateDialog() {
             <h3 id="update-dialog-title" className="text-sm font-semibold">
               Update available
             </h3>
-            <span className="rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-[10.5px] text-ink-2">{versionString}</span>
+            <span className="rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-10.5 text-ink-2">{versionString}</span>
           </div>
           <p className="mt-0.5 text-xs text-ink-3">A new build of Dive is ready. It installs in the background and restarts when you say.</p>
         </div>
@@ -98,13 +98,13 @@ export function UpdateDialog() {
 
       {update.notes && (
         <div className="mt-3 rounded-xl border border-line bg-surface-2/70 px-3 py-2">
-          <p className="text-[10.5px] font-medium tracking-[0.08em] text-ink-3 uppercase">What changed</p>
-          <p className="mt-1 line-clamp-3 text-[11.5px] leading-relaxed whitespace-pre-line text-ink-2">{update.notes}</p>
+          <p className="text-10.5 font-medium tracking-[0.08em] text-ink-3 uppercase">What changed</p>
+          <p className="mt-1 line-clamp-3 text-11.5 leading-relaxed whitespace-pre-line text-ink-2">{update.notes}</p>
         </div>
       )}
 
       {error && (
-        <div role="alert" className="mt-3 rounded-xl border border-danger/40 bg-danger/10 px-3 py-2 text-[11px] text-danger">
+        <div role="alert" className="mt-3 rounded-xl border border-danger/40 bg-danger/10 px-3 py-2 text-11 text-danger">
           {error}
         </div>
       )}

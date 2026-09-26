@@ -109,9 +109,9 @@ export function DefaultBrowserDialog() {
     toggle("import", true);
   };
   const importRow = current && (
-    <p className="mt-2.5 flex items-center gap-2 border-t border-line pt-2.5 text-[11px] text-ink-3">
+    <p className="mt-2.5 flex items-center gap-2 border-t border-line pt-2.5 text-11 text-ink-3">
       <span className="min-w-0 flex-1">Bring your bookmarks, history, passwords and form entries from {current} too.</span>
-      <button type="button" onClick={openImport} className="pressable h-7 shrink-0 rounded-full border border-line-2 px-2.5 text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink">
+      <button type="button" onClick={openImport} className="pressable h-7 shrink-0 rounded-full border border-line-2 px-2.5 text-11 text-ink-2 hover:bg-surface-2 hover:text-ink">
         Import…
       </button>
     </p>
@@ -190,7 +190,7 @@ export function DefaultBrowserDialog() {
     body = (
       <>
         <p className="text-xs text-ink-2">{defaultBrowserAskCopy()}</p>
-        {current && <p className="mt-1.5 text-[11px] text-ink-3">Currently: {current}</p>}
+        {current && <p className="mt-1.5 text-11 text-ink-3">Currently: {current}</p>}
       </>
     );
     offerImport = true;

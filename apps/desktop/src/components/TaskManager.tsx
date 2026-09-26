@@ -162,14 +162,14 @@ export function TaskManager() {
       >
         <div className="flex items-center gap-2 border-b border-line px-4 py-3">
           <h2 ref={heading} className="text-sm font-semibold">Task manager</h2>
-          <span className="text-[11px] text-ink-3">{holders > 0 ? `${formatMemory(total)} of JavaScript in ${holders} ${holders === 1 ? "tab" : "tabs"} across this profile` : "No JavaScript heap reported"}</span>
+          <span className="text-11 text-ink-3">{holders > 0 ? `${formatMemory(total)} of JavaScript in ${holders} ${holders === 1 ? "tab" : "tabs"} across this profile` : "No JavaScript heap reported"}</span>
           <button type="button" aria-label="Close task manager" title="Close task manager" onClick={() => toggle("tasks", false)} className="ml-auto grid size-6 place-items-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink">
             <Icon icon={X} size={12} />
           </button>
         </div>
         <div className="max-h-[calc(70vh-52px)] overflow-y-auto">
           <table className="w-full text-xs">
-            <thead className="sticky top-0 bg-surface text-[11px] text-ink-3">
+            <thead className="sticky top-0 bg-surface text-11 text-ink-3">
               <tr>
                 {header("title", "Tab", cell)}
                 {header("memory", "Memory", `${cell} w-24 text-right`)}
@@ -192,7 +192,7 @@ export function TaskManager() {
                   <td className={`${cell} text-right font-mono text-ink-2`}>{cpu[row.tab_id] === null || cpu[row.tab_id] === undefined ? "—" : `${cpu[row.tab_id]!.toFixed(1)}%`}</td>
                   <td className={`${cell} text-right font-mono text-ink-3`}>{row.nodes === null ? "—" : Math.round(row.nodes).toLocaleString()}</td>
                   <td className={`${cell} text-right`}>
-                    <button type="button" aria-label={`Close ${row.title}`} onClick={(e) => { focusAfterRemovalOf(e.currentTarget, heading.current); void closeTab(row.tab_id); }} className="rounded-full px-2 py-1 text-[11px] text-ink-3 hover:bg-surface-3 hover:text-ink">
+                    <button type="button" aria-label={`Close ${row.title}`} onClick={(e) => { focusAfterRemovalOf(e.currentTarget, heading.current); void closeTab(row.tab_id); }} className="rounded-full px-2 py-1 text-11 text-ink-3 hover:bg-surface-3 hover:text-ink">
                       Close
                     </button>
                   </td>

@@ -27,12 +27,12 @@ export class ChromeErrorBoundary extends Component<Props, State> {
     return (
       <main role="alert" className="grid h-full place-items-center bg-ground p-6 text-ink">
         <div className="w-full max-w-md rounded-2xl border border-line-2 bg-surface p-5 shadow-2xl">
-          <p className="text-[10px] font-semibold tracking-[0.14em] text-danger uppercase">Interface recovery</p>
+          <p className="text-10 font-semibold tracking-[0.14em] text-danger uppercase">Interface recovery</p>
           <h1 className="mt-2 text-base font-semibold">Dive's controls hit a problem</h1>
           <p className="mt-2 text-xs leading-relaxed text-ink-2">
             Your page data is still in the browser engine. Retry the controls, or reload this window if the problem continues.
           </p>
-          <pre className="mt-3 max-h-28 overflow-auto rounded-lg bg-ground p-2.5 font-mono text-[10.5px] leading-relaxed text-ink-3 select-text">
+          <pre className="mt-3 max-h-28 overflow-auto rounded-lg bg-ground p-2.5 font-mono text-10.5 leading-relaxed text-ink-3 select-text">
             {error.message || error.name}
           </pre>
           <div className="mt-4 flex justify-end gap-2">

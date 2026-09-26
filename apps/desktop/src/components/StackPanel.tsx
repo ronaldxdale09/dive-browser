@@ -44,13 +44,13 @@ export function StackPanel() {
           type="button"
           onClick={() => void scan()}
           disabled={busy || !activeTab}
-          className="flex h-7 items-center gap-1.5 rounded-lg border border-line-2 px-2.5 text-[11px] text-ink hover:bg-surface-2 disabled:opacity-50"
+          className="flex h-7 items-center gap-1.5 rounded-lg border border-line-2 px-2.5 text-11 text-ink hover:bg-surface-2 disabled:opacity-50"
         >
           <Icon icon={RefreshCw} size={12} className={busy ? "animate-spin" : undefined} />
           {report ? "Scan again" : "Detect stack"}
         </button>
         {report && (
-          <span className="text-[11px] text-ink-3">
+          <span className="text-11 text-ink-3">
             {report.technologies.length} found
             {report.server_rendered && " · server-rendered"}
           </span>
@@ -79,7 +79,7 @@ export function StackPanel() {
               if (found.length === 0) return null;
               return (
                 <section key={id}>
-                  <h3 className="mb-1 text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">{label}</h3>
+                  <h3 className="mb-1 text-10 font-medium tracking-[0.08em] text-ink-3 uppercase">{label}</h3>
                   <div className="flex flex-col gap-0.5">
                     {found.map((t) => <Row key={t.name} tech={t} />)}
                   </div>
@@ -88,21 +88,21 @@ export function StackPanel() {
             })}
             {report.generator && (
               <section>
-                <h3 className="mb-1 text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">Generator</h3>
-                <p className="px-2 font-mono text-[11px] text-ink-2">{report.generator}</p>
+                <h3 className="mb-1 text-10 font-medium tracking-[0.08em] text-ink-3 uppercase">Generator</h3>
+                <p className="px-2 font-mono text-11 text-ink-2">{report.generator}</p>
               </section>
             )}
             {report.packages.length > 0 && (
               <section>
-                <h3 className="mb-1 text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">
+                <h3 className="mb-1 text-10 font-medium tracking-[0.08em] text-ink-3 uppercase">
                   From source maps · {report.packages.length} packages
                 </h3>
-                <p className="mb-1.5 px-2 text-[11px] text-ink-3">
+                <p className="mb-1.5 px-2 text-11 text-ink-3">
                   Real dependencies named by the page's own bundles, not guessed from filenames.
                 </p>
                 <div className="flex flex-wrap gap-1 px-2">
                   {report.packages.map((p) => (
-                    <span key={p} className="rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-ink-2">{p}</span>
+                    <span key={p} className="rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-10 text-ink-2">{p}</span>
                   ))}
                 </div>
               </section>
@@ -121,9 +121,9 @@ function Row({ tech }: { tech: Detection }) {
         <Icon icon={Boxes} size={12} className="shrink-0 text-ink-3" />
         <span className="truncate text-ink">{tech.name}</span>
         {tech.version && (
-          <span className="shrink-0 rounded bg-highlight-soft px-1 font-mono text-[10px] text-highlight">{tech.version}</span>
+          <span className="shrink-0 rounded bg-highlight-soft px-1 font-mono text-10 text-highlight">{tech.version}</span>
         )}
-        <span className="ml-auto shrink-0 truncate pl-2 text-[10px] text-ink-3">{tech.evidence[0] ?? ""}</span>
+        <span className="ml-auto shrink-0 truncate pl-2 text-10 text-ink-3">{tech.evidence[0] ?? ""}</span>
       </div>
     </Tooltip>
   );

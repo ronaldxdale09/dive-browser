@@ -124,11 +124,11 @@ describe("themeCss", () => {
 
   it("maps density to the row height and gap", () => {
     const pick = (density: string) => Object.fromEntries(themeCss({ ...DEFAULT_PREFS, density }, "dark"));
-    expect(pick("compact")["--row-h"]).toBe("30px");
-    expect(pick("compact")["--ui-gap"]).toBe("2px");
+    expect(pick("compact")["--row-h"]).toBe("1.875rem");
+    expect(pick("compact")["--ui-gap"]).toBe("0.125rem");
     expect(pick("comfortable")["--row-h"]).toBe(DENSITY.comfortable.row);
-    expect(pick("relaxed")["--row-h"]).toBe("40px");
-    expect(pick("relaxed")["--ui-gap"]).toBe("6px");
+    expect(pick("relaxed")["--row-h"]).toBe("2.5rem");
+    expect(pick("relaxed")["--ui-gap"]).toBe("0.375rem");
   });
 
   it("maps the font preference to a stack", () => {
@@ -169,7 +169,7 @@ describe("sharing", () => {
     expect(() => importTheme('{"custom_ground":"#12"}')).toThrow(/custom_ground/);
     expect(() => importTheme('{"density":"tight"}')).toThrow(/density/);
     expect(() => importTheme('{"appearance_preset":"navy"}')).toThrow(/appearance_preset/);
-    expect(() => importTheme('{"ui_scale":2}')).toThrow(/ui_scale/);
+    expect(() => importTheme('{"ui_scale":2.5}')).toThrow(/ui_scale/);
     expect(() => importTheme("not json")).toThrow(/JSON/);
     expect(() => importTheme("[1]")).toThrow(/object/);
     expect(() => importTheme('{"homepage":"x"}')).toThrow(/none/);

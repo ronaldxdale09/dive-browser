@@ -139,7 +139,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
           <button
             type="button"
             onClick={onDone}
-            className="text-[11px] text-ink-3 hover:text-ink transition-colors px-1"
+            className="text-11 text-ink-3 hover:text-ink transition-colors px-1"
           >
             Done
           </button>
@@ -152,7 +152,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
         {!canGoBack && keyed.length === 0 && (
           <div className="space-y-1 rounded-xl border border-line bg-surface-2/40 p-3">
             <h3 className="text-xs font-semibold text-ink">Connect a model provider</h3>
-            <p className="text-[11px] leading-relaxed text-ink-2">
+            <p className="text-11 leading-relaxed text-ink-2">
               The agent reads and operates the page with a model you choose: a cloud provider with your own key, or a local one such as Ollama.
             </p>
           </div>
@@ -161,11 +161,11 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
         {/* Provider Selection */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">
+            <span className="text-11 font-medium tracking-[0.08em] text-ink-3 uppercase">
               Provider
             </span>
             {hasKey && (
-              <span className="text-[11px] font-medium text-highlight">
+              <span className="text-11 font-medium text-highlight">
                 {info?.needs_key ? "Connected" : "Ready"}
               </span>
             )}
@@ -188,7 +188,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
                   }`}
                 >
                   <span className="text-xs font-medium truncate w-full">{providers.find((p) => p.id === tp.id)?.name}</span>
-                  <span className="mt-0.5 text-[11px] text-ink-3">
+                  <span className="mt-0.5 text-11 text-ink-3">
                     {tp.badge || "Cloud"}
                   </span>
                 </button>
@@ -214,15 +214,15 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
             }}
           >
             <div className="flex items-center justify-between text-xs">
-              <span className="text-[11px] text-ink-3">
-                Default model: <code className="font-mono text-ink text-[10.5px]">{info.default_model}</code>
+              <span className="text-11 text-ink-3">
+                Default model: <code className="font-mono text-ink text-10.5">{info.default_model}</code>
               </span>
 
               {info.key_url && (
                 <button
                   type="button"
                   onClick={() => void openTab(info.key_url)}
-                  className="flex items-center gap-1 text-[11px] text-ink-3 hover:text-ink hover:underline transition-colors"
+                  className="flex items-center gap-1 text-11 text-ink-3 hover:text-ink hover:underline transition-colors"
                   title={info.key_url}
                 >
                   <span>Get an API key</span>
@@ -234,7 +234,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
             {/* Custom Endpoint Base URL */}
             {info.id === "custom" && (
               <div>
-                <label htmlFor="agent-base-url" className="block text-[11px] font-medium text-ink-2 mb-1">
+                <label htmlFor="agent-base-url" className="block text-11 font-medium text-ink-2 mb-1">
                   API Base URL
                 </label>
                 <input
@@ -252,7 +252,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
             {/* API Key Input */}
             {info.needs_key || info.id === "custom" ? (
               <div>
-                <label htmlFor="agent-api-key" className="block text-[11px] font-medium text-ink-2 mb-1">
+                <label htmlFor="agent-api-key" className="block text-11 font-medium text-ink-2 mb-1">
                   API key
                 </label>
                 <div className="relative flex items-center">
@@ -276,7 +276,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
                       <button
                         type="button"
                         onClick={() => setShowKey(!showKey)}
-                        className="px-1.5 py-0.5 text-[10px] text-ink-3 hover:text-ink"
+                        className="px-1.5 py-0.5 text-10 text-ink-3 hover:text-ink"
                       >
                         {showKey ? "Hide" : "Show"}
                       </button>
@@ -285,13 +285,13 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
                       type="button"
                       onClick={handlePaste}
                       disabled={busy}
-                      className="px-1.5 py-0.5 text-[10px] text-ink-3 hover:text-ink"
+                      className="px-1.5 py-0.5 text-10 text-ink-3 hover:text-ink"
                     >
                       Paste
                     </button>
                   </div>
                 </div>
-                <p className="mt-1 text-[10.5px] text-ink-3">
+                <p className="mt-1 text-10.5 text-ink-3">
                   Encrypted and stored in {credentialStoreName()}.
                 </p>
               </div>
@@ -299,9 +299,9 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
               /* Local Provider Notice */
               <div className="rounded-lg border border-line bg-surface-2/60 p-2.5 text-xs text-ink-2 space-y-1">
                 <span className="font-medium text-ink block">Local & Offline Model</span>
-                <p className="text-[11px] text-ink-3 leading-relaxed">
+                <p className="text-11 text-ink-3 leading-relaxed">
                   No API key required. Make sure {info.name} is running at{" "}
-                  <code className="rounded bg-surface-3 px-1 py-0.5 font-mono text-[10px] text-ink">
+                  <code className="rounded bg-surface-3 px-1 py-0.5 font-mono text-10 text-ink">
                     {info.base_url}
                   </code>{" "}
                   with a tool-capable model (e.g. <span className="text-ink font-mono">llama3.3</span>).
@@ -311,16 +311,16 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
 
             {/* Success state */}
             {verifiedSuccess && (
-              <div className="text-[11px] text-highlight font-medium">
+              <div className="text-11 text-highlight font-medium">
                 Connection verified! Loading agent…
               </div>
             )}
 
             {/* Error state */}
             {result && !result.ok && (
-              <div role="alert" className="rounded-lg border border-danger/30 bg-danger/10 px-2.5 py-1.5 text-[11px] text-danger space-y-0.5">
+              <div role="alert" className="rounded-lg border border-danger/30 bg-danger/10 px-2.5 py-1.5 text-11 text-danger space-y-0.5">
                 <span className="font-medium">Could not connect:</span>
-                <p className="text-[10.5px] opacity-90">{result.message}</p>
+                <p className="text-10.5 opacity-90">{result.message}</p>
               </div>
             )}
 
@@ -331,7 +331,7 @@ export function Setup({ canGoBack, onDone }: { canGoBack: boolean; onDone: () =>
                   type="button"
                   disabled={busy}
                   onClick={() => void submit(false)}
-                  className="text-[11px] text-ink-3 hover:text-ink transition-colors disabled:opacity-40"
+                  className="text-11 text-ink-3 hover:text-ink transition-colors disabled:opacity-40"
                 >
                   Save without verifying
                 </button>

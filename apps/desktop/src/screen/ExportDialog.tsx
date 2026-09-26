@@ -103,7 +103,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           </span>
           <div className="flex-1">
             <h2 className="text-sm font-semibold">Export</h2>
-            <p className="text-[11px] text-ink-3">
+            <p className="text-11 text-ink-3">
               {size.width}×{size.height} · {recordingClock(duration / 1000)} · {gif ? `GIF at ${ex.gifFps} fps` : `MP4 at ${ex.fps} fps`}
             </p>
           </div>
@@ -194,7 +194,7 @@ function Seg<T extends string | number>({ value, options, onChange }: { value: T
   return (
     <div role="radiogroup" className="grid gap-1 rounded-lg bg-surface-2 p-1" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
       {options.map((o) => (
-        <button key={String(o.value)} type="button" role="radio" aria-checked={o.value === value} onClick={() => onChange(o.value)} className={`h-7 rounded-md text-[11px] ${o.value === value ? "bg-surface text-ink shadow-sm ring-1 ring-line-2" : "text-ink-2 hover:text-ink"}`}>
+        <button key={String(o.value)} type="button" role="radio" aria-checked={o.value === value} onClick={() => onChange(o.value)} className={`h-7 rounded-md text-11 ${o.value === value ? "bg-surface text-ink shadow-sm ring-1 ring-line-2" : "text-ink-2 hover:text-ink"}`}>
           {o.label}
         </button>
       ))}

@@ -89,10 +89,10 @@ export function SharePopover() {
       </Tooltip>
       {open && (
         <div ref={panel} role="dialog" aria-label="Share" className="absolute right-0 z-40 mt-1 w-64 rounded-xl border border-line-2 bg-surface p-3 text-xs shadow-2xl">
-          <div className="mb-2 text-[10px] tracking-wider text-ink-3 uppercase">Open on your phone</div>
+          <div className="mb-2 text-10 tracking-wider text-ink-3 uppercase">Open on your phone</div>
           {error && <p role="alert" className="text-danger">{error}</p>}
           {!info && !error && (
-            <p role="status" className="text-[11px] text-ink-3">
+            <p role="status" className="text-11 text-ink-3">
               Finding this computer's address…
             </p>
           )}
@@ -100,7 +100,7 @@ export function SharePopover() {
             <>
               <div role="img" aria-label={`QR code for ${info.lan_url}`} className="grid place-items-center rounded-lg bg-white p-2 [&_svg]:h-40 [&_svg]:w-40" dangerouslySetInnerHTML={{ __html: info.qr_svg }} />
               <div className="mt-2 flex items-center gap-2">
-                <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink select-text" title={info.lan_url}>{info.lan_url}</code>
+                <code className="min-w-0 flex-1 truncate font-mono text-11 text-ink select-text" title={info.lan_url}>{info.lan_url}</code>
                 <button
                   type="button"
                   aria-label={copied ? "Copied" : "Copy link"}
@@ -125,7 +125,7 @@ export function SharePopover() {
                   {copied ? "Link copied" : ""}
                 </span>
               </div>
-              <p className="mt-2 text-[11px] text-ink-3">Same Wi-Fi required. Localhost is rewritten to this computer's LAN address.</p>
+              <p className="mt-2 text-11 text-ink-3">Same Wi-Fi required. Localhost is rewritten to this computer's LAN address.</p>
             </>
           )}
         </div>

@@ -145,7 +145,7 @@ export function SettingsDialog() {
             </button>
           ))}
           <span className="flex-1" />
-          {info && <p className="px-2 pb-1 font-mono text-[10px] text-ink-3">Dive {info.version}</p>}
+          {info && <p className="px-2 pb-1 font-mono text-10 text-ink-3">Dive {info.version}</p>}
         </nav>
 
         <div className="flex min-w-0 flex-1 flex-col">

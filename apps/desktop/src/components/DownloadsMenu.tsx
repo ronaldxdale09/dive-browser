@@ -84,7 +84,7 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
     <div ref={ref} className="relative">
       <FeatureButton icon={Download} label="Downloads" iconOnly={compact} active={open} hasPopup="dialog" onClick={() => setOpen((o) => !o)}>
         {active > 0 && (
-          <span className="ml-0.5 rounded-full bg-highlight px-1.5 py-px font-mono text-[10px] leading-4 text-highlight-ink" aria-label={`${active} in progress in this window`}>
+          <span className="ml-0.5 rounded-full bg-highlight px-1.5 py-px font-mono text-10 leading-4 text-highlight-ink" aria-label={`${active} in progress in this window`}>
             {active}
           </span>
         )}
@@ -92,9 +92,9 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
       {open && (
         <div ref={panel} role="dialog" aria-label="Downloads this session" className="surface-enter absolute right-0 z-50 mt-1 w-80 rounded-xl border border-line-2 bg-surface p-1 text-xs shadow-2xl">
           <div className="flex items-center px-2 pt-1 pb-1.5">
-            <span className="text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">This session</span>
+            <span className="text-10 font-medium tracking-[0.08em] text-ink-3 uppercase">This session</span>
             <span className="flex-1" />
-            <span className="max-w-40 truncate font-mono text-[10px] text-ink-3" title={folder}>
+            <span className="max-w-40 truncate font-mono text-10 text-ink-3" title={folder}>
               {folder}
             </span>
           </div>
@@ -117,12 +117,12 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
             </ul>
           )}
           <div className="mt-1 flex items-center gap-1 border-t border-line pt-1">
-            <button type="button" onClick={() => reveal(null)} className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink">
+            <button type="button" onClick={() => reveal(null)} className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-11 text-ink-2 hover:bg-surface-2 hover:text-ink">
               <Icon icon={FolderOpen} size={12} /> Open folder
             </button>
             <span className="flex-1" />
             {items.length > 0 && (
-              <button type="button" onClick={clear} className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11px] text-ink-3 hover:bg-surface-2 hover:text-ink">
+              <button type="button" onClick={clear} className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-11 text-ink-3 hover:bg-surface-2 hover:text-ink">
                 <Icon icon={Trash2} size={12} /> Clear list
               </button>
             )}
@@ -183,7 +183,7 @@ function Row({ item, onReveal, onOpen, onCancel }: { item: Item; onReveal: () =>
             />
           </span>
         )}
-        <span className="block truncate text-[10.5px] text-ink-3">
+        <span className="block truncate text-10.5 text-ink-3">
           {running
             ? item.paused
               ? "Paused"
@@ -210,7 +210,7 @@ function Row({ item, onReveal, onOpen, onCancel }: { item: Item; onReveal: () =>
           type="button"
           onClick={onReveal}
           aria-label={`Show ${item.name} in folder`}
-          className="h-6 shrink-0 rounded-full border border-line px-2 text-[10.5px] text-ink-2 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100"
+          className="h-6 shrink-0 rounded-full border border-line px-2 text-10.5 text-ink-2 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100"
         >
           Show
         </button>

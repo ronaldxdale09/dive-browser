@@ -80,7 +80,7 @@ export function ColorPanel() {
           type="button"
           onClick={() => void pick()}
           disabled={!activeTab}
-          className="flex h-7 items-center gap-1.5 rounded-lg bg-highlight px-2.5 text-[11px] font-medium text-ground hover:opacity-90 disabled:opacity-50"
+          className="flex h-7 items-center gap-1.5 rounded-lg bg-highlight px-2.5 text-11 font-medium text-ground hover:opacity-90 disabled:opacity-50"
         >
           <Icon icon={Pipette} size={12} />
           Pick a colour
@@ -89,12 +89,12 @@ export function ColorPanel() {
           type="button"
           onClick={() => void scan()}
           disabled={busy || !activeTab}
-          className="flex h-7 items-center gap-1.5 rounded-lg border border-line-2 px-2.5 text-[11px] text-ink hover:bg-surface-2 disabled:opacity-50"
+          className="flex h-7 items-center gap-1.5 rounded-lg border border-line-2 px-2.5 text-11 text-ink hover:bg-surface-2 disabled:opacity-50"
         >
           <Icon icon={RefreshCw} size={12} className={busy ? "animate-spin" : undefined} />
           {palette ? "Scan again" : "Page palette"}
         </button>
-        {palette && <span className="text-[11px] text-ink-3">{palette.colors.length} colours · {palette.scanned} elements</span>}
+        {palette && <span className="text-11 text-ink-3">{palette.colors.length} colours · {palette.scanned} elements</span>}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -103,7 +103,7 @@ export function ColorPanel() {
 
         {recent.length > 1 && (
           <section className="mt-3">
-            <h3 className="mb-1 text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">Recent</h3>
+            <h3 className="mb-1 text-10 font-medium tracking-[0.08em] text-ink-3 uppercase">Recent</h3>
             <div className="flex flex-wrap gap-1">
               {recent.map((hex) => (
                 <RecentSwatch key={hex} hex={hex} />
@@ -120,10 +120,10 @@ export function ColorPanel() {
 
         {palette && (
           <section className="mt-3">
-            <h3 className="mb-1 text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">
+            <h3 className="mb-1 text-10 font-medium tracking-[0.08em] text-ink-3 uppercase">
               Palette{palette.theme_color ? ` · theme ${palette.theme_color}` : ""}
             </h3>
-            <p className="mb-1.5 text-[11px] text-ink-3">Most used first. Click to copy.</p>
+            <p className="mb-1.5 text-11 text-ink-3">Most used first. Click to copy.</p>
             <div className="flex flex-col gap-0.5">
               {palette.colors.map((c) => <Swatch key={`${c.hex}-${c.alpha}-${c.role}`} entry={c} />)}
             </div>
@@ -149,7 +149,7 @@ function Picked({ colour }: { colour: ColorFormats }) {
           <CopyRow value={colour.hsl} />
         </div>
       </div>
-      <div className="mt-2 flex items-center gap-3 border-t border-line pt-2 text-[11px]">
+      <div className="mt-2 flex items-center gap-3 border-t border-line pt-2 text-11">
         <span className="text-ink-3">Contrast</span>
         <span className="flex items-center gap-1">
           <span className="size-3 rounded-sm bg-white ring-1 ring-line-2" aria-hidden />
@@ -205,11 +205,11 @@ function CopyRow({ value }: { value: string }) {
       type="button"
       aria-label={outcome === "failed" ? `Could not copy ${value}` : `Copy ${value}`}
       onClick={copy}
-      className="group flex items-center gap-1.5 rounded px-1 py-0.5 text-left font-mono text-[11px] text-ink hover:bg-surface-3"
+      className="group flex items-center gap-1.5 rounded px-1 py-0.5 text-left font-mono text-11 text-ink hover:bg-surface-3"
     >
       <span className="truncate">{value}</span>
       <Icon icon={outcome === "copied" ? Check : Copy} size={10} className={outcome === "copied" ? "text-highlight" : outcome === "failed" ? "text-danger" : "text-ink-3 opacity-0 group-hover:opacity-100"} />
-      {outcome === "failed" && <span className="font-sans text-[10px] text-danger">not copied</span>}
+      {outcome === "failed" && <span className="font-sans text-10 text-danger">not copied</span>}
     </button>
   );
 }
@@ -224,9 +224,9 @@ function Swatch({ entry }: { entry: PaletteEntry }) {
       className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-surface-2"
     >
       <span className="size-5 shrink-0 rounded-md ring-1 ring-line-2" style={{ background: entry.hex, opacity: entry.alpha ?? 1 }} />
-      <span className="font-mono text-[11px] text-ink">{entry.hex}</span>
-      <span className="rounded bg-surface-2 px-1 text-[10px] text-ink-3">{entry.role}</span>
-      <span className="ml-auto shrink-0 truncate pl-2 text-[10px] text-ink-3">
+      <span className="font-mono text-11 text-ink">{entry.hex}</span>
+      <span className="rounded bg-surface-2 px-1 text-10 text-ink-3">{entry.role}</span>
+      <span className="ml-auto shrink-0 truncate pl-2 text-10 text-ink-3">
         {outcome === "copied" ? "copied" : outcome === "failed" ? "could not copy" : `${entry.count}×${entry.sample ? ` · ${entry.sample}` : ""}`}
       </span>
     </button>

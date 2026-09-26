@@ -87,7 +87,7 @@ export function VitalsPanel() {
   if (!activeTab) return <div className="px-3 py-2 text-xs text-ink-3">Open a tab to measure its Web Vitals.</div>;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 px-2 pb-1 text-[11px] text-ink-3">
+      <div className="flex items-center gap-2 px-2 pb-1 text-11 text-ink-3">
         {loading ? (
           <span>Measuring while the page loads…</span>
         ) : reading ? (
@@ -120,8 +120,8 @@ export function VitalsPanel() {
           return (
             <div key={key} className="rounded-lg border border-line bg-surface-2 px-3 py-2" title={hint} aria-label={`${hint}: ${fmt(key, n)}${word ? `, ${word}` : ""}`}>
               <div className="flex items-baseline justify-between gap-2">
-                <span className="text-[10px] tracking-wider text-ink-3 uppercase">{label}</span>
-                {word && <span className={`text-[10px] ${COLOR[r]}`}>{word}</span>}
+                <span className="text-10 tracking-wider text-ink-3 uppercase">{label}</span>
+                {word && <span className={`text-10 ${COLOR[r]}`}>{word}</span>}
               </div>
               <div className={`font-mono text-lg tabular-nums ${COLOR[r]}`}>{fmt(key, n)}</div>
             </div>

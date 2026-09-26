@@ -196,7 +196,7 @@ export function PermissionDialog({ tabId, request }: { tabId: string; request: P
             <h2 id="permission-title" className="text-sm font-semibold text-ink">
               <span className="break-all">{request.origin}</span> wants to {wants}
             </h2>
-            <p className="mt-1 text-[11px] text-ink-3">{profile} · this container</p>
+            <p className="mt-1 text-11 text-ink-3">{profile} · this container</p>
           </div>
         </div>
         <div className="mt-4 flex items-center gap-2">
@@ -285,7 +285,7 @@ export function NavErrorPanel({ url, error, onRetry }: { url: string; error: str
         <p className="max-w-full truncate font-mono text-xs text-ink-3" title={url}>
           {url}
         </p>
-        <p className="font-mono text-[11px] text-ink-3">{error}</p>
+        <p className="font-mono text-11 text-ink-3">{error}</p>
         <div className="mt-1 flex flex-wrap items-center gap-2">
           <button type="button" onClick={retry} className="flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-sm text-accent-ink hover:opacity-90">
             <Icon icon={RotateCw} size={13} /> Retry

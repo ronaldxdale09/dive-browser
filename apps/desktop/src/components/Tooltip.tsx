@@ -205,10 +205,10 @@ export function Tooltip({
         // A long label wraps, balanced so the last line is not a lone word,
         // instead of running out of its box: a cap with no wrapping let
         // "Connect an agent: drive Dive from…" spill past the border.
-        className={`absolute z-50 w-max max-w-64 items-center gap-2 rounded-md border border-line-2 bg-surface-2 px-2 py-1 text-[11px] leading-tight text-ink shadow-lg transition-opacity duration-100 starting:opacity-0 ${shown ? "flex" : "hidden"} ${visible ? "pointer-events-auto" : "pointer-events-none"} ${keyboard ? "delay-0" : "delay-500"} ${position}`}
+        className={`absolute z-50 w-max max-w-64 items-center gap-2 rounded-md border border-line-2 bg-surface-2 px-2 py-1 text-11 leading-tight text-ink shadow-lg transition-opacity duration-100 starting:opacity-0 ${shown ? "flex" : "hidden"} ${visible ? "pointer-events-auto" : "pointer-events-none"} ${keyboard ? "delay-0" : "delay-500"} ${position}`}
       >
         <span className="min-w-0 text-balance">{label}</span>
-        {shortcut && <kbd className="shrink-0 font-mono text-[9px] whitespace-nowrap text-ink-3">{displayChord(shortcut)}</kbd>}
+        {shortcut && <kbd className="shrink-0 font-mono text-9 whitespace-nowrap text-ink-3">{displayChord(shortcut)}</kbd>}
       </span>
     </span>
   );

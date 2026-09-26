@@ -88,11 +88,11 @@ export function Developer({ info }: { info: AppInfo | null }) {
             <CopyBlock text={command} display={shown || undefined} displayTitle={command || undefined} />
             {info && token && (
               <>
-                <p className="mt-3 mb-1.5 text-[11px] text-ink-2">Cursor, and any client set up with JSON: add this to its mcp.json (Cursor keeps it at {cursorMcpJsonPath()}).</p>
+                <p className="mt-3 mb-1.5 text-11 text-ink-2">Cursor, and any client set up with JSON: add this to its mcp.json (Cursor keeps it at {cursorMcpJsonPath()}).</p>
                 <CopyBlock text={cursorConfig(info, token)} label="Copy mcp.json entry" display={cursorConfig(info, "••••••••")} />
               </>
             )}
-            <p className="mt-2 text-[11px] leading-relaxed text-ink-3">
+            <p className="mt-2 text-11 leading-relaxed text-ink-3">
               Only processes on this computer with the token file can connect. Page scripts are never run unless you start Dive with DIVE_MCP_ALLOW_EVAL=1.
             </p>
           </div>

@@ -103,7 +103,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
           // Not keyed on the count: a remount per blocked request restarted
           // its entrance animation many times a second on a busy page.
           <span
-            className="privacy-count privacy-motion ml-0.5 rounded-full bg-highlight-soft px-1.5 py-px font-mono text-[10px] leading-4 text-highlight"
+            className="privacy-count privacy-motion ml-0.5 rounded-full bg-highlight-soft px-1.5 py-px font-mono text-10 leading-4 text-highlight"
             aria-label={`${total} privacy actions on this page`}
           >
             {total}
@@ -130,17 +130,17 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
               <span aria-hidden="true" className={`absolute right-0.5 bottom-0.5 size-3 rounded-full border-2 border-surface-2 ${siteOn ? "bg-highlight" : "bg-ink-3"}`} />
             </div>
             <div className="min-w-0 flex-1">
-              <h3 className="text-[14px] font-semibold tracking-[-0.01em] text-ink">{headline}</h3>
-              <p className={`privacy-count privacy-motion mt-0.5 text-[11px] ${total > 0 ? "text-highlight" : "text-ink-3"}`} aria-live="polite">
+              <h3 className="text-14 font-semibold tracking-[-0.01em] text-ink">{headline}</h3>
+              <p className={`privacy-count privacy-motion mt-0.5 text-11 ${total > 0 ? "text-highlight" : "text-ink-3"}`} aria-live="polite">
                 {summary}
               </p>
-              {host && <p className="mt-1 truncate font-mono text-[10px] text-ink-3">{host}</p>}
+              {host && <p className="mt-1 truncate font-mono text-10 text-ink-3">{host}</p>}
             </div>
           </header>
 
           <section aria-label="Protection layers" className="px-3 py-2">
             {sleeping ? (
-              <p className="px-2.5 py-2 text-[11px] text-ink-3">This page is unloaded. Wake the tab to count ads and trackers again.</p>
+              <p className="px-2.5 py-2 text-11 text-ink-3">This page is unloaded. Wake the tab to count ads and trackers again.</p>
             ) : (
               <>
             <Layer icon={Megaphone} label="Ads blocked" value={String(counts.ads)} countKey={counts.ads} />
@@ -172,7 +172,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
             <div className="flex items-center gap-3">
               <div className="min-w-0 flex-1">
                 <p className="font-medium text-ink">Protection on this site</p>
-                <p className="mt-0.5 text-[10.5px] text-ink-3">
+                <p className="mt-0.5 text-10.5 text-ink-3">
                   {!host ? "Site controls unavailable" : paused ? `Resume on ${host}` : `Pause only on ${host}`}
                 </p>
               </div>
@@ -185,7 +185,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
               <div className="privacy-layer privacy-motion mt-3 flex items-center gap-3 rounded-xl bg-surface-2 px-3 py-2.5">
                 <div className="min-w-0 flex-1">
                   <p className="font-medium text-ink">DivePrivacy protection</p>
-                  <p className="mt-0.5 text-[10.5px] text-ink-3">Enable curated protection across workspaces.</p>
+                  <p className="mt-0.5 text-10.5 text-ink-3">Enable curated protection across workspaces.</p>
                 </div>
                 <Switch label="DivePrivacy protection" checked={false} onChange={(block_trackers) => void update({ block_trackers })} />
               </div>
@@ -193,15 +193,15 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
           </section>
 
           <footer className="flex items-center gap-2 border-t border-line bg-surface-2/45 px-3 py-2">
-            <span className="font-mono text-[9.5px] text-ink-3">{infoError ? "Rules unavailable" : info ? `Rules ${info.version}` : "Rules …"}</span>
-            <span className="min-w-0 flex-1 text-[9.5px] leading-tight text-ink-3">Across workspaces; site pauses stay host-specific.</span>
+            <span className="font-mono text-9.5 text-ink-3">{infoError ? "Rules unavailable" : info ? `Rules ${info.version}` : "Rules …"}</span>
+            <span className="min-w-0 flex-1 text-9.5 leading-tight text-ink-3">Across workspaces; site pauses stay host-specific.</span>
             <button
               type="button"
               onClick={() => {
                 setOpen(false);
                 openSettings("privacy");
               }}
-              className="privacy-motion flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[10.5px] text-ink-2 hover:bg-surface-3 hover:text-ink"
+              className="privacy-motion flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-10.5 text-ink-2 hover:bg-surface-3 hover:text-ink"
             >
               <Icon icon={SlidersHorizontal} size={12} /> All privacy settings
             </button>
@@ -235,9 +235,9 @@ function Layer({
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-ink-2">{label}</span>
-        {note && <span className="block text-[10.5px] text-ink-3">{note}</span>}
+        {note && <span className="block text-10.5 text-ink-3">{note}</span>}
       </span>
-      <span key={countKey} className={`privacy-motion text-[11px] ${countKey === undefined ? "text-ink-3" : "privacy-count font-mono tabular-nums text-ink"}`}>
+      <span key={countKey} className={`privacy-motion text-11 ${countKey === undefined ? "text-ink-3" : "privacy-count font-mono tabular-nums text-ink"}`}>
         {value}
       </span>
       {control}

@@ -74,7 +74,7 @@ export function BuildBadge({ align = "end", side = "below" }: {
           aria-haspopup="dialog"
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
-          className={`pressable flex h-5 shrink-0 items-center gap-1.5 rounded-md border px-1.5 font-mono text-[10px] font-semibold tracking-[0.1em] transition-[color,background-color,transform] ${tone}`}
+          className={`pressable flex h-5 shrink-0 items-center gap-1.5 rounded-md border px-1.5 font-mono text-10 font-semibold tracking-[0.1em] transition-[color,background-color,transform] ${tone}`}
         >
           <span className={`size-1.5 rounded-full ${dot}`} aria-hidden />
           {label}
@@ -84,7 +84,7 @@ export function BuildBadge({ align = "end", side = "below" }: {
         <div ref={panel} role="dialog" aria-label="Build details" className={`absolute z-50 w-64 max-w-[calc(100vw-16px)] rounded-xl border border-line-2 bg-surface p-1.5 text-xs shadow-2xl ${align === "start" ? "left-0" : "right-0"} ${side === "above" ? "bottom-full mb-1.5" : "mt-1.5"}`}>
           <div className="flex items-center gap-2 px-2 pt-1 pb-1.5">
             <span className={`size-1.5 rounded-full ${dot}`} aria-hidden />
-            <span className="text-[11px] font-medium tracking-[0.08em] text-ink-3 uppercase">{dev ? "Development build" : "Beta release"}</span>
+            <span className="text-11 font-medium tracking-[0.08em] text-ink-3 uppercase">{dev ? "Development build" : "Beta release"}</span>
           </div>
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 px-2 py-1">
             <Fact label="Version" value={info?.version} />
@@ -93,7 +93,7 @@ export function BuildBadge({ align = "end", side = "below" }: {
             <Fact label="Built" value={built} />
           </dl>
           <div className="mt-1 flex justify-end border-t border-line-2 px-1 pt-1.5">
-            <button type="button" onClick={copy} disabled={!info} className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
+            <button type="button" onClick={copy} disabled={!info} className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-11 text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
               <Icon icon={Copy} size={12} /> Copy details
             </button>
           </div>
@@ -106,8 +106,8 @@ export function BuildBadge({ align = "end", side = "below" }: {
 function Fact({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <>
-      <dt className="text-[11px] text-ink-3">{label}</dt>
-      <dd className="truncate font-mono text-[11px] text-ink select-text" title={value ?? undefined}>
+      <dt className="text-11 text-ink-3">{label}</dt>
+      <dd className="truncate font-mono text-11 text-ink select-text" title={value ?? undefined}>
         {value ?? "…"}
       </dd>
     </>

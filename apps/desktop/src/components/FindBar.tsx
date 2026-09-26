@@ -166,7 +166,7 @@ export function FindBar({ tabId }: { tabId?: string }) {
           placeholder="Find in page"
           className="h-7 w-52 bg-transparent px-2 text-xs outline-none placeholder:text-ink-3"
         />
-        <span aria-hidden="true" className="w-14 text-center font-mono text-[11px] text-ink-3 tabular-nums">
+        <span aria-hidden="true" className="w-14 text-center font-mono text-11 text-ink-3 tabular-nums">
           {idle || !query ? "" : `${shown.current}/${shown.total}`}
         </span>
         {/* Read out as words: an aria-label on a live region is not what

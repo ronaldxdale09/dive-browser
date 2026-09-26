@@ -64,7 +64,7 @@ export function RecordingDoneDialog() {
           </span>
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-semibold">Recording saved</h2>
-            <p id={fileId} className="truncate font-mono text-[11px] text-ink-3" title={result.path}>
+            <p id={fileId} className="truncate font-mono text-11 text-ink-3" title={result.path}>
               {name}
             </p>
           </div>
@@ -92,9 +92,9 @@ export function RecordingDoneDialog() {
             </div>
           )}
         </div>
-        {limitHit && <p className="mx-5 mt-2 text-[11px] text-ink-3">The recording reached its length limit and stopped on its own.</p>}
+        {limitHit && <p className="mx-5 mt-2 text-11 text-ink-3">The recording reached its length limit and stopped on its own.</p>}
         {micRequested && (micFailed || !result.has_audio) && (
-          <p className="mx-5 mt-2 text-[11px] text-danger">
+          <p className="mx-5 mt-2 text-11 text-danger">
             {result.has_audio ? "The microphone stopped partway through, so the rest of the recording is silent." : "The microphone could not be recorded, so this recording has no sound."}
           </p>
         )}
@@ -183,8 +183,8 @@ function usePreview(result: { path: string; format: string } | null): [Preview, 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-[10px] tracking-[0.06em] text-ink-3 uppercase">{label}</dt>
-      <dd className="font-mono text-[11px] text-ink">{value}</dd>
+      <dt className="text-10 tracking-[0.06em] text-ink-3 uppercase">{label}</dt>
+      <dd className="font-mono text-11 text-ink">{value}</dd>
     </div>
   );
 }

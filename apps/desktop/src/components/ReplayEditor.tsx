@@ -63,11 +63,11 @@ export function ReplayEditor({ tabId, requestId, onClose }: { tabId: string; req
     }
   };
 
-  const field = "w-full rounded-md border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink outline-none focus:border-highlight/60";
+  const field = "w-full rounded-md border border-line bg-surface px-2 py-1 font-mono text-11 text-ink outline-none focus:border-highlight/60";
   return (
     <div ref={dialog} role="dialog" aria-label="Replay request" className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto border-t border-line bg-surface-2 p-2 text-xs select-text">
       <div className="flex items-center gap-2">
-        <span className="text-[10px] tracking-wider text-ink-3 uppercase">Replay</span>
+        <span className="text-10 tracking-wider text-ink-3 uppercase">Replay</span>
         <span className="flex-1" />
         <IconButton icon={X} label="Close replay" size={12} onClick={onClose} />
       </div>
@@ -85,9 +85,9 @@ export function ReplayEditor({ tabId, requestId, onClose }: { tabId: string; req
               <input type="checkbox" checked={draft.with_cookies} onChange={(e) => setDraft({ ...draft, with_cookies: e.target.checked })} className="accent-highlight" />
               Send this tab's cookies
             </label>
-            {draft.with_cookies && !draft.url.includes(`//${draft.captured_host}`) && <span className="text-[11px] text-warn">cookies only go to {draft.captured_host}</span>}
+            {draft.with_cookies && !draft.url.includes(`//${draft.captured_host}`) && <span className="text-11 text-warn">cookies only go to {draft.captured_host}</span>}
             <span className="flex-1" />
-            <button type="button" disabled={busy} onClick={() => void send()} className="flex h-7 items-center gap-1.5 rounded-full bg-accent px-3 text-[11px] font-medium text-accent-ink disabled:opacity-40">
+            <button type="button" disabled={busy} onClick={() => void send()} className="flex h-7 items-center gap-1.5 rounded-full bg-accent px-3 text-11 font-medium text-accent-ink disabled:opacity-40">
               <Icon icon={Play} size={11} /> {busy ? "Sending…" : "Send"}
             </button>
           </div>
@@ -95,15 +95,15 @@ export function ReplayEditor({ tabId, requestId, onClose }: { tabId: string; req
       )}
       {response && (
         <div className="rounded-lg border border-line bg-surface p-2">
-          <div className="mb-1 flex items-center gap-3 font-mono text-[11px]">
+          <div className="mb-1 flex items-center gap-3 font-mono text-11">
             <span className={response.status >= 400 ? "text-danger" : response.status >= 300 ? "text-warn" : "text-good"}>{response.status}</span>
             <span className="text-ink-3">{response.elapsed_ms} ms</span>
           </div>
           <details className="mb-1">
-            <summary className="cursor-default text-[11px] text-ink-3">{Object.keys(response.headers).length} response headers</summary>
-            <pre className="mt-1 max-h-32 overflow-auto font-mono text-[10.5px] text-ink-2">{headersToText(response.headers)}</pre>
+            <summary className="cursor-default text-11 text-ink-3">{Object.keys(response.headers).length} response headers</summary>
+            <pre className="mt-1 max-h-32 overflow-auto font-mono text-10.5 text-ink-2">{headersToText(response.headers)}</pre>
           </details>
-          <pre className="max-h-64 overflow-auto font-mono text-[10.5px] whitespace-pre-wrap text-ink">{response.body || "(empty body)"}</pre>
+          <pre className="max-h-64 overflow-auto font-mono text-10.5 whitespace-pre-wrap text-ink">{response.body || "(empty body)"}</pre>
         </div>
       )}
     </div>

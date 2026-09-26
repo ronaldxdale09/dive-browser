@@ -157,18 +157,22 @@ export function App() {
       // rail is a full-height column with the traffic lights at its top, and
       // the main column has a single row of navigation, address, page
       // actions and the feature cluster. With the rail collapsed the tabs
-      // need a row of their own across the top, above the toolbar.
-      className={`grid h-full bg-ground text-ink ${oneBar ? "grid-rows-[44px_minmax(0,1fr)]" : "grid-rows-[40px_44px_minmax(0,1fr)]"}`}
+      // need a row of their own across the top, above the toolbar. Rows and
+      // the rail are in rem so the Interface size grows them with their
+      // text; in px, text at 200% overflowed a bar that stayed 40px tall.
+      // The bar only ever grows, and the traffic lights keep their place at
+      // its top-left, so nothing in it is clipped.
+      className={`grid h-full bg-ground text-ink ${oneBar ? "grid-rows-[2.75rem_minmax(0,1fr)]" : "grid-rows-[2.5rem_2.75rem_minmax(0,1fr)]"}`}
       // `--chrome-top`: where the chrome ends and a panel hung from it (the
       // main menu) begins, whichever shape the bar is in.
-      style={{ gridTemplateColumns: `${railWidth}px minmax(0,1fr)`, "--chrome-top": oneBar ? "46px" : "86px" } as React.CSSProperties}
+      style={{ gridTemplateColumns: `${railWidth / 16}rem minmax(0,1fr)`, "--chrome-top": oneBar ? "2.875rem" : "5.375rem" } as React.CSSProperties}
     >
       {/* Resize handles for the frameless Windows window; renders nothing
           elsewhere or while maximized. */}
-      <WindowResizeEdges top={oneBar ? 44 : 84} />
+      <WindowResizeEdges top={oneBar ? "2.75rem" : "5.25rem"} />
       {!oneBar && (
         <header aria-label="Title bar" className={`col-span-2 row-start-1 flex items-center gap-2 ${captionGutter}`} data-tauri-drag-region="true" {...windowDrag()}>
-          {isPrivateWindow() && <span className="px-2 font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
+          {isPrivateWindow() && <span className="px-2 font-mono text-10 tracking-[0.12em] text-ink-2">DIVE</span>}
           <BuildBadge align="start" />
           <nav aria-label="Tabs" className="h-full min-w-0 flex-1">
             <TabStrip />
@@ -194,10 +198,10 @@ export function App() {
                 <Wordmark />
               </>
             )}
-            {!effectiveRailExpanded && isPrivateWindow() && <span className="ml-auto font-mono text-[10px] tracking-[0.12em] text-ink-2">DIVE</span>}
+            {!effectiveRailExpanded && isPrivateWindow() && <span className="ml-auto font-mono text-10 tracking-[0.12em] text-ink-2">DIVE</span>}
           </div>
         )}
-        <div className={oneBar ? "h-[calc(100%-40px)]" : "h-full"}>
+        <div className={oneBar ? "h-[calc(100%-2.5rem)]" : "h-full"}>
           <Rail forceCollapsed={responsive.collapseRail} toggle={!(oneBar && effectiveRailExpanded)} />
         </div>
         {/* A rail that stops short of the title bar -- the traffic lights own

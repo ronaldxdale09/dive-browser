@@ -27,9 +27,9 @@ export function RailTooltip({ label, shortcut, children }: { label: string; shor
       {children}
       {at &&
         createPortal(
-          <span role="tooltip" style={{ left: at.left, top: at.top }} className="pointer-events-none fixed z-[60] flex -translate-y-1/2 items-center gap-2 rounded-md border border-line-2 bg-surface-2 px-2 py-1 text-[11px] leading-none whitespace-nowrap text-ink shadow-lg">
+          <span role="tooltip" style={{ left: at.left, top: at.top }} className="pointer-events-none fixed z-[60] flex -translate-y-1/2 items-center gap-2 rounded-md border border-line-2 bg-surface-2 px-2 py-1 text-11 leading-none whitespace-nowrap text-ink shadow-lg">
             {label}
-            {shortcut && <kbd className="font-mono text-[9px] text-ink-3">{displayChord(shortcut)}</kbd>}
+            {shortcut && <kbd className="font-mono text-9 text-ink-3">{displayChord(shortcut)}</kbd>}
           </span>,
           document.body,
         )}

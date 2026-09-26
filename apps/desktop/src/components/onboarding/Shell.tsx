@@ -35,8 +35,8 @@ export function Shell({ children }: { children: ReactNode }) {
           {STEPS.map((step, i) => {
             const state = i === at ? "current" : i < at ? (skipped.includes(step) ? "skipped" : "past") : "todo";
             return (
-              <li key={step} aria-current={state === "current" ? "step" : undefined} data-state={state} className="onboarding-step flex items-center gap-2 font-mono text-[10.5px] tracking-[0.16em] uppercase">
-                <span className="onboarding-step-dot grid size-5 place-items-center rounded-full border text-[9px]">{i + 1}</span>
+              <li key={step} aria-current={state === "current" ? "step" : undefined} data-state={state} className="onboarding-step flex items-center gap-2 font-mono text-10.5 tracking-[0.16em] uppercase">
+                <span className="onboarding-step-dot grid size-5 place-items-center rounded-full border text-9">{i + 1}</span>
                 {TITLES[step]}
                 {state === "skipped" && <span className="sr-only">skipped</span>}
               </li>

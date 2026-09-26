@@ -63,14 +63,14 @@ export function ProfileChip({ variant = "pill", placement = "below" }: { variant
         {variant !== "avatar" && (
           <span className={variant === "row" ? "flex min-w-0 flex-1 flex-col items-start leading-tight" : "contents"}>
             <span className="truncate font-medium">{current.name}</span>
-            {variant === "row" && <span className="truncate text-[10.5px] text-ink-3">Profile</span>}
+            {variant === "row" && <span className="truncate text-10.5 text-ink-3">Profile</span>}
           </span>
         )}
         {variant !== "avatar" && <Icon icon={placement === "above" ? ChevronUp : ChevronDown} size={12} className="shrink-0 text-ink-3" />}
       </button>
       {open && (
         <div ref={menu} role="menu" aria-label="Profiles" className={`surface-enter absolute left-0 z-50 w-[300px] rounded-xl border border-line-2 bg-surface p-1 text-xs shadow-2xl ${placement === "above" ? "bottom-full mb-1" : "top-9"}`} style={{ transformOrigin: placement === "above" ? "bottom left" : "top left" }}>
-          <p className="px-2 pt-1.5 pb-1 text-[10px] font-medium tracking-[0.08em] text-ink-3 uppercase">Profiles</p>
+          <p className="px-2 pt-1.5 pb-1 text-10 font-medium tracking-[0.08em] text-ink-3 uppercase">Profiles</p>
           {profiles.map((p) => {
             const isCurrent = p.id === current.id;
             const detail = p.note || `${spacesOf(p.id)} ${spacesOf(p.id) === 1 ? "workspace" : "workspaces"} · ${tabsOf(p.id)} ${tabsOf(p.id) === 1 ? "tab" : "tabs"}`;
@@ -90,7 +90,7 @@ export function ProfileChip({ variant = "pill", placement = "below" }: { variant
                 <AvatarImage kind="profile" seed={p.avatar} color={p.color} alt="" width={28} height={28} className="size-7 shrink-0 rounded-full" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate leading-4 font-medium">{p.name}</span>
-                  <span className="block truncate text-[10.5px] leading-4 text-ink-3">{detail}</span>
+                  <span className="block truncate text-10.5 leading-4 text-ink-3">{detail}</span>
                 </span>
                 <span className="grid shrink-0 place-items-center text-ink-3" title="Own cookies and logins">
                   <Icon icon={Shield} size={12} />
@@ -132,7 +132,7 @@ export function ProfileChip({ variant = "pill", placement = "below" }: { variant
             </span>
             New profile…
           </button>
-          <p className="px-2 pt-1.5 pb-1.5 text-[10.5px] leading-snug text-ink-3">Each profile keeps its own cookies, logins, history, bookmarks and workspaces, like a separate person using Dive.</p>
+          <p className="px-2 pt-1.5 pb-1.5 text-10.5 leading-snug text-ink-3">Each profile keeps its own cookies, logins, history, bookmarks and workspaces, like a separate person using Dive.</p>
         </div>
       )}
     </div>

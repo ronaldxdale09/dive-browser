@@ -86,20 +86,20 @@ function ProfileForm({ id }: { id: string | null }) {
           <AvatarImage kind="profile" seed={avatar} color={color} alt="" width={44} height={44} className="size-11 shrink-0 rounded-full" />
           <div className="min-w-0">
             <h2 className="text-sm font-semibold">{existing ? "Edit profile" : "New profile"}</h2>
-            <p className="text-[11px] text-ink-3">A profile is a person using Dive: its own cookies and logins, and its own workspaces.</p>
+            <p className="text-11 text-ink-3">A profile is a person using Dive: its own cookies and logins, and its own workspaces.</p>
           </div>
         </div>
 
-        <label className="mt-4 block text-[11px] text-ink-2">
+        <label className="mt-4 block text-11 text-ink-2">
           Name
           <input ref={nameField} value={name} onChange={(e) => setName(e.target.value)} aria-invalid={failure && aboutTheName(failure) ? true : undefined} aria-describedby={failure && aboutTheName(failure) ? failureId : undefined} placeholder="Ronald" maxLength={40} required className="mt-1 h-9 w-full rounded-lg border border-line bg-surface-2 px-3 text-xs text-ink outline-none focus:border-highlight/60" />
         </label>
-        <label className="mt-3 block text-[11px] text-ink-2">
+        <label className="mt-3 block text-11 text-ink-2">
           Shown under the name <span className="text-ink-3">(optional)</span>
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Work · ronald@company.com" maxLength={80} className="mt-1 h-9 w-full rounded-lg border border-line bg-surface-2 px-3 text-xs text-ink outline-none focus:border-highlight/60" />
         </label>
 
-        <p className="mt-4 text-[11px] text-ink-2">Face</p>
+        <p className="mt-4 text-11 text-ink-2">Face</p>
         <div role="radiogroup" aria-label="Face" className="mt-1.5 grid grid-cols-6 gap-2">
           {seeds.map((s) => (
             <button key={s} type="button" role="radio" aria-checked={avatar === s} aria-label={s === seedFromProfileName(name) ? "Face from the name" : `Face ${s}`} title={s === seedFromProfileName(name) ? "Face from the name" : s} onClick={() => setSeed(s)} className={`aspect-square rounded-full ring-offset-2 ring-offset-surface transition ${avatar === s ? "ring-2 ring-highlight" : "opacity-80 hover:opacity-100"}`}>
@@ -108,14 +108,14 @@ function ProfileForm({ id }: { id: string | null }) {
           ))}
         </div>
 
-        <p className="mt-4 text-[11px] text-ink-2">Colour</p>
+        <p className="mt-4 text-11 text-ink-2">Colour</p>
         <div role="radiogroup" aria-label="Colour" className="mt-1.5 flex gap-2">
           {PROFILE_COLORS.map((c) => (
             <button key={c} type="button" role="radio" aria-checked={color === c} aria-label={colorName(c)} title={colorName(c)} onClick={() => setColor(c)} className={`size-7 rounded-full ring-offset-2 ring-offset-surface ${color === c ? "ring-2 ring-highlight" : ""}`} style={{ background: c }} />
           ))}
         </div>
 
-        <p className="mt-4 flex items-center gap-1.5 text-[11px] text-ink-3">
+        <p className="mt-4 flex items-center gap-1.5 text-11 text-ink-3">
           <Icon icon={Shield} size={12} />
           {existing ? `${spaces} ${spaces === 1 ? "workspace" : "workspaces"} · own cookies and logins` : "Starts with a Home workspace and its own cookies."}
         </p>
@@ -143,7 +143,7 @@ function ProfileForm({ id }: { id: string | null }) {
           </button>
         </div>
         {failure && (
-          <p id={failureId} role="alert" className="mt-3 text-[11px] text-danger">
+          <p id={failureId} role="alert" className="mt-3 text-11 text-danger">
             {failure}
           </p>
         )}

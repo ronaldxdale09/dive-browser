@@ -57,12 +57,12 @@ export function A11yPanel() {
   if (sleeping) return <div className="px-3 py-2 text-xs text-ink-3">This tab is sleeping. Wake it to audit this page.</div>;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-3 px-2 pb-1 text-[11px] text-ink-3">
+      <div className="flex items-center gap-3 px-2 pb-1 text-11 text-ink-3">
         <button
           type="button"
           disabled={!activeTab || busy}
           onClick={() => void run()}
-          className="flex h-6 items-center gap-1.5 rounded-full bg-accent px-2.5 text-[11px] font-medium text-accent-ink disabled:opacity-40"
+          className="flex h-6 items-center gap-1.5 rounded-full bg-accent px-2.5 text-11 font-medium text-accent-ink disabled:opacity-40"
         >
           <Icon icon={Play} size={11} /> {busy ? "Running…" : "Run audit"}
         </button>
@@ -84,9 +84,9 @@ export function A11yPanel() {
           <details key={v.id} className="group border-b border-line/60 py-1.5">
             <summary className="flex cursor-pointer list-none items-center gap-2 rounded hover:bg-surface-2" title="Show the elements">
               <Icon icon={ChevronRight} size={11} className="shrink-0 text-ink-3 transition-transform group-open:rotate-90" />
-              <span className={`w-16 shrink-0 font-mono text-[10px] uppercase ${IMPACT[v.impact] ?? "text-ink-2"}`}>{v.impact}</span>
+              <span className={`w-16 shrink-0 font-mono text-10 uppercase ${IMPACT[v.impact] ?? "text-ink-2"}`}>{v.impact}</span>
               <span className="flex-1 text-ink">{v.help}</span>
-              <span className="font-mono text-[10px] text-ink-3">{v.count}×</span>
+              <span className="font-mono text-10 text-ink-3">{v.count}×</span>
               <button
                 type="button"
                 onClick={(e) => {
@@ -100,7 +100,7 @@ export function A11yPanel() {
                 <Icon icon={ExternalLink} size={11} />
               </button>
             </summary>
-            <ul className="mt-1 ml-[88px] text-[11px] text-ink-2">
+            <ul className="mt-1 ml-[88px] text-11 text-ink-2">
               {v.targets.map((t, i) => (
                 <li key={t} className="py-0.5">
                   <button
@@ -113,8 +113,8 @@ export function A11yPanel() {
                     <Icon icon={Locate} size={11} className="shrink-0 text-ink-3" />
                     <span className="truncate">{t}</span>
                   </button>
-                  {missing === t && <p className="mt-0.5 text-[10.5px] text-warn">Not on the page any more. Run the audit again.</p>}
-                  {v.notes[i] && <p className="mt-0.5 whitespace-pre-line text-[10.5px] leading-snug text-ink-3">{v.notes[i]}</p>}
+                  {missing === t && <p className="mt-0.5 text-10.5 text-warn">Not on the page any more. Run the audit again.</p>}
+                  {v.notes[i] && <p className="mt-0.5 whitespace-pre-line text-10.5 leading-snug text-ink-3">{v.notes[i]}</p>}
                 </li>
               ))}
             </ul>

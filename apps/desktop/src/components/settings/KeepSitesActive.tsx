@@ -70,7 +70,7 @@ function Sites({ profile }: { profile: string }) {
     </div>
     {error && <p role="alert" className="pb-3 text-xs text-danger">{error}</p>}
     {sites.map((site) => <div key={site} className="flex items-center justify-between gap-3 border-t border-line py-2 text-xs">
-      <span className="truncate font-mono text-[11px] text-ink-2">{site}</span>
+      <span className="truncate font-mono text-11 text-ink-2">{site}</span>
       <Button onClick={() => void save(site, false)} disabled={busy} ariaLabel={`Remove ${site}`}>Remove</Button>
     </div>)}
   </Group>;

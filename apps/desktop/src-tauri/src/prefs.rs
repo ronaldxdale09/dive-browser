@@ -183,7 +183,7 @@ pub struct Prefs {
     /// Chrome typeface: `geist` | `system` | `mono` | `serif`.
     #[serde(default = "default_ui_font")]
     pub ui_font: String,
-    /// Chrome size multiplier, 0.8 to 1.3; everything in the chrome scales.
+    /// Chrome size multiplier, 0.8 to 2.0; everything in the chrome scales, text included.
     #[serde(default = "default_ui_scale")]
     pub ui_scale: f64,
     /// Row heights and gaps: `compact` | `comfortable` | `relaxed`.
@@ -233,8 +233,9 @@ pub const APPEARANCE_PRESETS: &[&str] = &[
 ];
 /// Chrome typefaces that ship with the app or come from the OS.
 pub const UI_FONTS: &[&str] = &["geist", "system", "mono", "serif"];
-/// Chrome scale bounds.
-pub const UI_SCALE_RANGE: (f64, f64) = (0.8, 1.3);
+/// Chrome scale bounds. The chrome clamps to the same range (UI_SCALE_MIN and
+/// UI_SCALE_MAX in lib/theme.ts); twice the size is there for low vision.
+pub const UI_SCALE_RANGE: (f64, f64) = (0.8, 2.0);
 
 fn default_preset() -> String {
     "graphite".into()

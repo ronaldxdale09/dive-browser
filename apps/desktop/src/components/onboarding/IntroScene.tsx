@@ -112,7 +112,7 @@ export function IntroScene() {
         ref={skipButton}
         type="button"
         onClick={leave}
-        className="pressable absolute top-5 right-6 h-8 rounded-full border border-line-2 bg-surface/70 px-3.5 font-mono text-[11px] tracking-[0.12em] text-ink-2 uppercase backdrop-blur hover:bg-surface-2 hover:text-ink"
+        className="pressable absolute top-5 right-6 h-8 rounded-full border border-line-2 bg-surface/70 px-3.5 font-mono text-11 tracking-[0.12em] text-ink-2 uppercase backdrop-blur hover:bg-surface-2 hover:text-ink"
       >
         Skip
       </button>

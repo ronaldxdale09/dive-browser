@@ -95,7 +95,7 @@ export function WorkspaceDialog() {
             <h2 className="text-sm font-semibold">{existing ? "Edit workspace" : "New workspace"}</h2>
             {/* Someone meeting workspaces for the first time meets them here,
                 so the dialog says what one is rather than assuming. */}
-            <p className="text-[11px] text-ink-3">
+            <p className="text-11 text-ink-3">
               {existing ? `${count} ${count === 1 ? "tab" : "tabs"} live here` : "A separate set of tabs, with its own logins if you want them."}
             </p>
           </div>
@@ -151,7 +151,7 @@ export function WorkspaceDialog() {
           ))}
         </div>
         {existing && (
-          <p className="mt-4 flex items-center gap-1.5 text-[11px] text-ink-3">
+          <p className="mt-4 flex items-center gap-1.5 text-11 text-ink-3">
             <Icon icon={Shield} size={12} />
             {workspaces.filter((other) => other.container_id === existing.container_id).length === 1
               ? "Its own cookies and logins, chosen when it was created."
@@ -165,7 +165,7 @@ export function WorkspaceDialog() {
               <span className="flex items-center gap-1.5 text-ink">
                 <Icon icon={Shield} size={12} /> Separate cookies and sign-ins
               </span>
-              <span className="text-[11px] text-ink-3">Its own cookie jar, so you can be signed in as two people at once. Saved passwords and form entries stay shared across this profile.</span>
+              <span className="text-11 text-ink-3">Its own cookie jar, so you can be signed in as two people at once. Saved passwords and form entries stay shared across this profile.</span>
             </span>
           </label>
         )}
@@ -226,7 +226,7 @@ export function WorkspaceDialog() {
           </div>
         )}
         {failure && (
-          <p id={failureId} role="alert" className="mt-3 text-[11px] text-danger">
+          <p id={failureId} role="alert" className="mt-3 text-11 text-danger">
             {failure}
           </p>
         )}

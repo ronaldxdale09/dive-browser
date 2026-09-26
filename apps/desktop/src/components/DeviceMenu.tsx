@@ -34,7 +34,7 @@ export function DeviceMenu({ label }: { label?: string } = {}) {
         }}
         className={
           label
-            ? "pressable flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11.5px] text-ink-2 transition-[color,background-color,transform] hover:bg-surface-2 hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent aria-pressed:text-highlight"
+            ? "pressable flex h-7 items-center gap-1.5 rounded-lg px-2 text-11.5 text-ink-2 transition-[color,background-color,transform] hover:bg-surface-2 hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent aria-pressed:text-highlight"
             : "pressable grid size-7 place-items-center rounded-full text-ink-2 transition-[color,background-color,transform] hover:bg-surface-3 hover:text-ink disabled:opacity-35 aria-pressed:bg-surface-3 aria-pressed:text-highlight"
         }
       >

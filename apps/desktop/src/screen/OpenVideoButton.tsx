@@ -13,7 +13,7 @@ export function OpenVideoButton({ onOpened, className }: { onOpened?: () => void
       disabled={busy}
       title={busy ? IMPORT_BUSY : "Open an MP4, MOV, WebM, MKV or GIF in DiveScreen"}
       onClick={() => void open(onOpened)}
-      className={className ?? "flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-60"}
+      className={className ?? "flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-12 text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-60"}
     >
       <Icon icon={Film} size={14} />
       {busy ? "Importing video…" : "Open video…"}

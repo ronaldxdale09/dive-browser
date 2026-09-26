@@ -89,15 +89,15 @@ export function CredentialPromptCard({ tabId }: { tabId: string | null }) {
           <Icon icon={KeyRound} size={15} />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="text-[13px] leading-snug font-semibold text-ink [overflow-wrap:anywhere]">{heading}</h2>
+          <h2 className="text-13 leading-snug font-semibold text-ink [overflow-wrap:anywhere]">{heading}</h2>
           {missing ? (
-            <p className="mt-0.5 text-[11px] text-ink-3">Forget this login for {site(prompt.origin)}, then sign in again to save it.</p>
+            <p className="mt-0.5 text-11 text-ink-3">Forget this login for {site(prompt.origin)}, then sign in again to save it.</p>
           ) : (
             <>
-              <p className="mt-0.5 truncate text-[11px] text-ink-2" title={prompt.username}>
+              <p className="mt-0.5 truncate text-11 text-ink-2" title={prompt.username}>
                 {prompt.username || "No username"}
               </p>
-              <p className="text-[11px] text-ink-3">Kept in {credentialStoreName()} for this profile.</p>
+              <p className="text-11 text-ink-3">Kept in {credentialStoreName()} for this profile.</p>
             </>
           )}
         </div>

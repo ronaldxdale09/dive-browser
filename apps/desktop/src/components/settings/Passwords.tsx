@@ -111,13 +111,13 @@ export function Passwords() {
     <>
       <Group title="Saved logins" description={`Kept in this profile. Passwords live in ${credentialStoreName()}; Dive never writes them to its own files. Showing or copying one asks your computer to confirm it is you.`}>
         {error && (
-          <p role="alert" className="mt-2 mb-2 text-[11px] text-danger">
+          <p role="alert" className="mt-2 mb-2 text-11 text-danger">
             {error}
           </p>
         )}
-        {items === null && !error && <p className="py-2 text-[11px] text-ink-3">Loading…</p>}
+        {items === null && !error && <p className="py-2 text-11 text-ink-3">Loading…</p>}
         {items?.length === 0 && !adding && (
-          <p className="py-2 text-[11px] text-ink-3">No logins saved yet. Dive offers to save one when you sign in to a site, or add one below.</p>
+          <p className="py-2 text-11 text-ink-3">No logins saved yet. Dive offers to save one when you sign in to a site, or add one below.</p>
         )}
         {items && items.length > 0 && (
           <>
@@ -143,7 +143,7 @@ export function Passwords() {
               />
             </label>
             {shown.length === 0 ? (
-              <p className="py-2.5 text-[11px] text-ink-3">No saved login matches “{query.trim()}”.</p>
+              <p className="py-2.5 text-11 text-ink-3">No saved login matches “{query.trim()}”.</p>
             ) : (
               <LoginList logins={shown} onRemove={(c) => void remove(c)} onEdited={replaceRow} onError={setError} />
             )}
@@ -220,7 +220,7 @@ function ExportPasswords({ onError }: { onError: (message: string) => void }) {
   }
   return (
     <div role="group" aria-label="Export passwords" className="border-t border-line/60 py-2.5">
-      <p className="mb-2 text-[11px] text-warn">
+      <p className="mb-2 text-11 text-warn">
         The file will hold every saved password in plain text, readable by anyone and any app that can open it. Import it where you need it, then delete it.
       </p>
       <div className="flex flex-wrap items-center gap-2">
@@ -298,7 +298,7 @@ function NeverSaved() {
   return (
     <Group title="Never saved" description="Sites where you chose Never for this site. Dive fills what it already knows there but does not offer to save.">
       {error && (
-        <p role="alert" className="py-2 text-[11px] text-danger">
+        <p role="alert" className="py-2 text-11 text-danger">
           {error}
         </p>
       )}
@@ -386,7 +386,7 @@ function LoginRow({ credential: c, place, onRemove, onEdited, onError }: { crede
     <li {...placed} className={`flex items-center gap-3 py-2 ${positioned}`}>
       <div className="min-w-0 flex-1">
         <div className="truncate text-xs text-ink">{siteLabel(c.origin)}</div>
-        <div className="truncate text-[11px] text-ink-3">
+        <div className="truncate text-11 text-ink-3">
           {c.username}
           <span className="mx-1.5">·</span>
           <span className="font-mono" aria-label={shown === null ? "Password hidden" : "Password"}>
@@ -396,11 +396,11 @@ function LoginRow({ credential: c, place, onRemove, onEdited, onError }: { crede
       </div>
       {confirming ? (
         <>
-          <span className="shrink-0 text-[11px] text-ink-2">Forget this login?</span>
-          <button type="button" onClick={() => setConfirming(false)} className="h-7 shrink-0 rounded-full px-2.5 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
+          <span className="shrink-0 text-11 text-ink-2">Forget this login?</span>
+          <button type="button" onClick={() => setConfirming(false)} className="h-7 shrink-0 rounded-full px-2.5 text-11 text-ink-2 hover:bg-surface-3 hover:text-ink">
             Keep
           </button>
-          <button type="button" aria-label={`Forget login for ${c.username} on ${siteLabel(c.origin)} for good`} onClick={onRemove} className="h-7 shrink-0 rounded-full bg-danger px-2.5 text-[11px] font-medium text-danger-ink hover:brightness-110">
+          <button type="button" aria-label={`Forget login for ${c.username} on ${siteLabel(c.origin)} for good`} onClick={onRemove} className="h-7 shrink-0 rounded-full bg-danger px-2.5 text-11 font-medium text-danger-ink hover:brightness-110">
             Forget
           </button>
         </>
@@ -503,7 +503,7 @@ function AddLogin({ onSaved, onCancel, onError }: { onSaved: (c: Credential, rep
       <input name="username" aria-label="Username" value={username} onChange={edit(setUsername)} placeholder="Username or email" spellCheck={false} autoComplete="off" className={field} />
       <input name="password" aria-label="Password" type="password" value={password} onChange={edit(setPassword)} placeholder="Password" autoComplete="new-password" className={field} />
       {existing !== null && (
-        <p role="alert" className="text-[11px] text-warn">
+        <p role="alert" className="text-11 text-warn">
           {siteLabel(existing)} already has a saved password for {username.trim()}. Replace the saved password?
         </p>
       )}

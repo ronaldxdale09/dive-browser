@@ -89,7 +89,7 @@ export function ModelPicker({ onAddProvider, onOpenChange }: { onAddProvider: ()
         onClick={() => show(!open)}
         aria-expanded={open}
         aria-haspopup="dialog"
-        className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink aria-expanded:bg-surface-2 aria-expanded:text-ink"
+        className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded-full px-2.5 text-11 text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink aria-expanded:bg-surface-2 aria-expanded:text-ink"
         title="Model and provider"
       >
         {provider && <ProviderLogo id={provider.id} size={11} className="shrink-0" />}
@@ -106,13 +106,13 @@ export function ModelPicker({ onAddProvider, onOpenChange }: { onAddProvider: ()
                 type="button"
                 onClick={() => switchProvider(p.id)}
                 aria-pressed={p.id === prefs.agent_provider}
-                className="flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-line px-2 text-[11px] text-ink-2 hover:bg-surface-2 hover:text-ink aria-pressed:border-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink transition-colors"
+                className="flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-line px-2 text-11 text-ink-2 hover:bg-surface-2 hover:text-ink aria-pressed:border-transparent aria-pressed:bg-surface-3 aria-pressed:text-ink transition-colors"
               >
                 <ProviderLogo id={p.id} size={11} />
                 {p.name}
               </button>
             ))}
-            <button type="button" onClick={onAddProvider} className="flex h-6 shrink-0 items-center gap-0.5 rounded-full px-2 text-[11px] text-ink-3 hover:bg-surface-2 hover:text-ink" title="Add a provider">
+            <button type="button" onClick={onAddProvider} className="flex h-6 shrink-0 items-center gap-0.5 rounded-full px-2 text-11 text-ink-3 hover:bg-surface-2 hover:text-ink" title="Add a provider">
               <Icon icon={Plus} size={11} /> Add
             </button>
           </div>
@@ -128,13 +128,13 @@ export function ModelPicker({ onAddProvider, onOpenChange }: { onAddProvider: ()
           )}
 
           <div className="scroll-hidden max-h-56 overflow-y-auto">
-            {error && <p className="px-2 py-1.5 text-[11px] text-danger">{error}</p>}
-            {!error && loading && list.length === 0 && <p className="px-2 py-1.5 text-[11px] text-ink-3">Loading models…</p>}
-            {!error && !loading && list.length === 0 && provider?.lists_models && <p className="px-2 py-1.5 text-[11px] text-ink-3">No models listed. Type a model id below.</p>}
+            {error && <p className="px-2 py-1.5 text-11 text-danger">{error}</p>}
+            {!error && loading && list.length === 0 && <p className="px-2 py-1.5 text-11 text-ink-3">Loading models…</p>}
+            {!error && !loading && list.length === 0 && provider?.lists_models && <p className="px-2 py-1.5 text-11 text-ink-3">No models listed. Type a model id below.</p>}
             {filtered.map((m) => (
               <ModelRow key={m.id} model={m} selected={m.id === prefs.agent_model} onPick={() => void update({ agent_model: m.id })} />
             ))}
-            {list.length > 0 && filtered.length === 0 && <p className="px-2 py-1.5 text-[11px] text-ink-3">Nothing matches.</p>}
+            {list.length > 0 && filtered.length === 0 && <p className="px-2 py-1.5 text-11 text-ink-3">Nothing matches.</p>}
           </div>
 
           <input
@@ -144,14 +144,14 @@ export function ModelPicker({ onAddProvider, onOpenChange }: { onAddProvider: ()
             onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
             aria-label="Model id"
             spellCheck={false}
-            className="mx-1 mt-1 block h-7 w-[calc(100%-0.5rem)] rounded-lg border border-line bg-surface-2 px-2 font-mono text-[11px] text-ink outline-none focus:border-highlight/60"
+            className="mx-1 mt-1 block h-7 w-[calc(100%-0.5rem)] rounded-lg border border-line bg-surface-2 px-2 font-mono text-11 text-ink outline-none focus:border-highlight/60"
           />
 
           <div className="mt-1.5 flex items-center gap-2 border-t border-line px-1 pt-1.5 pb-0.5">
-            <span className="text-[11px] text-ink-3">Thinking</span>
+            <span className="text-11 text-ink-3">Thinking</span>
             <div role="radiogroup" aria-label="Reasoning effort" className="ml-auto inline-flex rounded-lg border border-line bg-surface-2 p-0.5">
               {EFFORTS.map((o, i) => (
-                <button key={o.value} type="button" role="radio" aria-checked={prefs.agent_reasoning === o.value} {...effortRadio(i)} onClick={() => void update({ agent_reasoning: o.value })} className="h-6 rounded-[6px] px-2 text-[11px] text-ink-2 hover:text-ink aria-checked:bg-surface-3 aria-checked:text-ink">
+                <button key={o.value} type="button" role="radio" aria-checked={prefs.agent_reasoning === o.value} {...effortRadio(i)} onClick={() => void update({ agent_reasoning: o.value })} className="h-6 rounded-[6px] px-2 text-11 text-ink-2 hover:text-ink aria-checked:bg-surface-3 aria-checked:text-ink">
                   {o.label}
                 </button>
               ))}
@@ -169,7 +169,7 @@ function ModelRow({ model, selected, onPick }: { model: ModelInfo; selected: boo
     <button type="button" onClick={onPick} aria-pressed={selected} className="flex min-h-8 w-full items-center gap-2 rounded-lg px-2 py-1 text-left hover:bg-surface-2 aria-pressed:bg-surface-2">
       <span className="min-w-0 flex-1">
         <span className="block truncate leading-4 text-ink">{model.name}</span>
-        {detail && <span className="block truncate font-mono text-[10px] leading-4 text-ink-3">{detail}</span>}
+        {detail && <span className="block truncate font-mono text-10 leading-4 text-ink-3">{detail}</span>}
       </span>
       {selected && <Icon icon={Check} size={12} className="shrink-0 text-highlight" />}
     </button>

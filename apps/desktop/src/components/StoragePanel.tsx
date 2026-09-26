@@ -131,7 +131,7 @@ export function StoragePanel() {
             type="button"
             aria-pressed={section === s}
             onClick={() => setSection(s)}
-            className="h-6 rounded-full px-2.5 text-[11px] text-ink-3 hover:bg-surface-2 hover:text-ink aria-pressed:bg-surface-3 aria-pressed:text-ink"
+            className="h-6 rounded-full px-2.5 text-11 text-ink-3 hover:bg-surface-2 hover:text-ink aria-pressed:bg-surface-3 aria-pressed:text-ink"
           >
             {s === "cookies" ? `Cookies (${data?.cookies.length ?? 0})` : s === "local" ? `Local (${data?.local.length ?? 0})` : `Session (${data?.session.length ?? 0})`}
           </button>
@@ -140,15 +140,15 @@ export function StoragePanel() {
         <IconButton icon={RefreshCw} label="Refresh storage" size={12} disabled={!activeTab} onClick={refresh} />
       </div>
       {error && <ReadError message={error} onRetry={refresh} />}
-      {!error && rows.length === 0 && <div className="px-3 py-2 font-mono text-[11.5px] text-ink-3">{!activeTab ? "Open a tab to inspect its storage." : loading ? "Reading…" : "Nothing stored."}</div>}
+      {!error && rows.length === 0 && <div className="px-3 py-2 font-mono text-11.5 text-ink-3">{!activeTab ? "Open a tab to inspect its storage." : loading ? "Reading…" : "Nothing stored."}</div>}
       {rows.length > 0 && (
-        <div className="flex gap-3 border-b border-line px-3 py-0.5 font-sans text-[10px] tracking-[0.06em] text-ink-3 uppercase" aria-hidden>
+        <div className="flex gap-3 border-b border-line px-3 py-0.5 font-sans text-10 tracking-[0.06em] text-ink-3 uppercase" aria-hidden>
           <span className="w-48 shrink-0">{section === "cookies" ? "Name" : "Key"}</span>
           <span className="min-w-0 flex-1">Value</span>
           {section === "cookies" && <span className="shrink-0">Domain · path · flags</span>}
         </div>
       )}
-      <div ref={scrollRef} data-testid="storage-scroll" className="min-h-0 flex-1 select-text overflow-auto font-mono text-[11.5px] leading-5">
+      <div ref={scrollRef} data-testid="storage-scroll" className="min-h-0 flex-1 select-text overflow-auto font-mono text-11.5 leading-5">
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {virtualizer.getVirtualItems().map((v) => {
             const row = rows[v.index]!;
@@ -165,7 +165,7 @@ export function StoragePanel() {
                 <span className="min-w-0 flex-1 truncate text-ink-2" title={row.cut ? `${row.value.slice(0, 300)}… (${bytes(row.size)})` : row.value}>
                   {row.value}
                 </span>
-                {row.cut && <span className="shrink-0 text-[10px] text-ink-3">{bytes(row.size)}</span>}
+                {row.cut && <span className="shrink-0 text-10 text-ink-3">{bytes(row.size)}</span>}
                 {row.meta && <span className="shrink-0 text-ink-3">{row.meta}</span>}
                 <button
                   type="button"

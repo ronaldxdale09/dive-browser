@@ -89,22 +89,22 @@ export function FormEntries() {
   return (
     <Group title="Form entries" description="Names, emails and addresses Dive offers while you type, kept in this profile. They come from forms you submit here and from Import from another browser.">
       {error && (
-        <p role="alert" className="mb-2 text-[11px] text-danger">
+        <p role="alert" className="mb-2 text-11 text-danger">
           {error}
         </p>
       )}
-      {items === null && !error && <p className="py-2 text-[11px] text-ink-3">Loading…</p>}
-      {items?.length === 0 && <p className="py-2 text-[11px] text-ink-3">Nothing remembered yet.</p>}
+      {items === null && !error && <p className="py-2 text-11 text-ink-3">Loading…</p>}
+      {items?.length === 0 && <p className="py-2 text-11 text-ink-3">Nothing remembered yet.</p>}
       {groups.length > 0 && (
         <ul className="divide-y divide-line/60">
           {groups.map((g) => (
             <li key={g.field} className="py-2">
-              <p className="text-[10.5px] tracking-[0.06em] text-ink-3 uppercase">{fieldLabel(g.field)}</p>
+              <p className="text-10.5 tracking-[0.06em] text-ink-3 uppercase">{fieldLabel(g.field)}</p>
               <ul>
                 {g.entries.map((e) => (
                   <li key={e.id} className="flex items-center gap-2 py-0.5">
                     <span className="min-w-0 flex-1 truncate text-xs text-ink">{e.value}</span>
-                    <span className="text-[10.5px] text-ink-3">{e.uses === 1 ? "used once" : `used ${e.uses.toLocaleString()} times`}</span>
+                    <span className="text-10.5 text-ink-3">{e.uses === 1 ? "used once" : `used ${e.uses.toLocaleString()} times`}</span>
                     <IconButton icon={Trash2} label={`Forget ${e.value}`} size={12} onClick={() => void remove(e)} />
                   </li>
                 ))}
@@ -117,7 +117,7 @@ export function FormEntries() {
         <div className="flex flex-wrap items-center gap-2 py-2">
           {confirming ? (
             <>
-              <span className="text-[11px] text-ink-2">Forget all {items.length.toLocaleString()} entries?</span>
+              <span className="text-11 text-ink-2">Forget all {items.length.toLocaleString()} entries?</span>
               <Button variant="danger" onClick={() => void clear()}>
                 Forget all
               </Button>

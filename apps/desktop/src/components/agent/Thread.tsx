@@ -141,7 +141,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
           type="button"
           data-native-overlay
           onClick={() => setMinimized(false)}
-          className="animate-agent-slide-up mb-2 flex items-center gap-2 self-center rounded-full border border-line-2 bg-surface/95 px-3 py-1.5 text-[11px] text-ink-2 shadow-2xl backdrop-blur-xl hover:text-ink"
+          className="animate-agent-slide-up mb-2 flex items-center gap-2 self-center rounded-full border border-line-2 bg-surface/95 px-3 py-1.5 text-11 text-ink-2 shadow-2xl backdrop-blur-xl hover:text-ink"
         >
           <Icon icon={ChevronUp} size={12} />
           {messages.length} message{messages.length === 1 ? "" : "s"}
@@ -191,7 +191,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
               disabled={!activeTab}
               title={s.hint}
               onClick={() => submit(s.prompt)}
-              className="animate-agent-slide-up rounded-full border border-line-2 bg-surface/90 px-3 py-1.5 text-[11px] text-ink-2 shadow-lg backdrop-blur-xl transition-colors hover:bg-surface-2 hover:text-ink focus-visible:ring-2 focus-visible:ring-highlight focus-visible:outline-none disabled:opacity-40"
+              className="animate-agent-slide-up rounded-full border border-line-2 bg-surface/90 px-3 py-1.5 text-11 text-ink-2 shadow-lg backdrop-blur-xl transition-colors hover:bg-surface-2 hover:text-ink focus-visible:ring-2 focus-visible:ring-highlight focus-visible:outline-none disabled:opacity-40"
             >
               {s.label}
             </button>
@@ -214,7 +214,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
           rows={Math.min(8, Math.max(2, draft.split("\n").length))}
           aria-label="Message the agent"
           placeholder={activeTab ? "Ask about this page, or say what to do…" : "Open a tab, then ask…"}
-          className="max-h-[38vh] w-full resize-none bg-transparent text-[13px] leading-6 text-ink outline-none placeholder:text-ink-3"
+          className="max-h-[38vh] w-full resize-none bg-transparent text-13 leading-6 text-ink outline-none placeholder:text-ink-3"
         />
 
         {/* What it can see and how it may act, then the one action. */}
@@ -229,7 +229,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
               onClick={() => setCleanSession(!cleanSession)}
               aria-pressed={cleanSession}
               aria-label="Clean session"
-              className={`flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] transition-colors ${
+              className={`flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-11 transition-colors ${
                 cleanSession ? "bg-highlight-soft text-highlight" : "text-ink-3 hover:bg-surface-2 hover:text-ink-2"
               }`}
             >
@@ -245,7 +245,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
               aria-pressed={includePage}
               aria-label={`Send this page with messages: ${current.title || current.url}`}
               title={includePage ? "The page goes with each message. Click to send only what you type." : "The page is not sent. Click to include its text, address and console."}
-              className={`flex h-7 min-w-0 max-w-[40%] items-center gap-1.5 rounded-full px-2.5 text-[11px] transition-[color,background-color,opacity] ${
+              className={`flex h-7 min-w-0 max-w-[40%] items-center gap-1.5 rounded-full px-2.5 text-11 transition-[color,background-color,opacity] ${
                 includePage ? "bg-surface-2 text-ink-2 hover:text-ink" : "text-ink-3 line-through decoration-ink-3/50 hover:text-ink-2"
               }`}
             >
@@ -259,7 +259,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
             <button
               type="button"
               onClick={() => (alwaysAutoApprove ? useBrowser.getState().openSettings("agent") : setSessionAutoApprove(false))}
-              className="flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-highlight-soft px-2.5 text-[11px] text-highlight"
+              className="flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-highlight-soft px-2.5 text-11 text-highlight"
               title={alwaysAutoApprove ? "Act without asking is on in Settings. Click to change it." : "Every action is being approved for this session. Click to require confirmation."}
             >
               <Icon icon={ShieldOff} size={11} /> {alwaysAutoApprove ? "Acts without asking" : "Auto-approve on"}
@@ -286,7 +286,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
               type="button"
               onClick={clear}
               title="Start a new conversation"
-              className="h-7 shrink-0 rounded-full px-2.5 text-[11px] text-ink-3 hover:bg-surface-2 hover:text-ink"
+              className="h-7 shrink-0 rounded-full px-2.5 text-11 text-ink-3 hover:bg-surface-2 hover:text-ink"
             >
               New
             </button>
@@ -375,7 +375,7 @@ const AssistantMessage = memo(function AssistantMessage({
         </span>
       )}
       {m.status && !waiting && (
-        <p role="status" className="py-1 text-[11px] text-ink-3 italic">
+        <p role="status" className="py-1 text-11 text-ink-3 italic">
           {m.status}
         </p>
       )}
@@ -383,7 +383,7 @@ const AssistantMessage = memo(function AssistantMessage({
           the one who can decide the site is not to be trusted. The agent was
           told to carry on with their task regardless. */}
       {m.flagged?.map((note) => (
-        <div key={note} className="mt-1.5 flex items-start gap-2 rounded-xl border border-warn/40 bg-warn/10 px-3 py-2 text-[11px] text-ink-2">
+        <div key={note} className="mt-1.5 flex items-start gap-2 rounded-xl border border-warn/40 bg-warn/10 px-3 py-2 text-11 text-ink-2">
           <Icon icon={ShieldAlert} size={13} className="mt-px shrink-0 text-warn" />
           <span className="min-w-0 select-text">
             <span className="font-medium text-ink">This page tried to instruct the agent.</span> {note}
@@ -391,13 +391,13 @@ const AssistantMessage = memo(function AssistantMessage({
         </div>
       ))}
       {m.error && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-danger/40 bg-danger/10 px-3 py-2 text-[11px] text-danger">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-danger/40 bg-danger/10 px-3 py-2 text-11 text-danger">
           <span className="min-w-0 flex-1">{m.error}</span>
           {onRetry && (
             <button
               type="button"
               onClick={onRetry}
-              className="flex shrink-0 items-center gap-1 rounded-full border border-danger/40 px-2 py-0.5 text-[10.5px] font-medium text-ink hover:bg-danger/15"
+              className="flex shrink-0 items-center gap-1 rounded-full border border-danger/40 px-2 py-0.5 text-10.5 font-medium text-ink hover:bg-danger/15"
             >
               <Icon icon={RotateCcw} size={10} /> Retry
             </button>
@@ -406,7 +406,7 @@ const AssistantMessage = memo(function AssistantMessage({
             <button
               type="button"
               onClick={() => useBrowser.getState().openSettings("agent")}
-              className="shrink-0 rounded-full border border-danger/40 px-2 py-0.5 text-[10.5px] font-medium text-ink hover:bg-danger/15"
+              className="shrink-0 rounded-full border border-danger/40 px-2 py-0.5 text-10.5 font-medium text-ink hover:bg-danger/15"
             >
               {m.errorKind === "auth" ? "Check the key" : "Change model"}
             </button>
@@ -414,9 +414,9 @@ const AssistantMessage = memo(function AssistantMessage({
         </div>
       )}
       {(m.stopped || replayable.length > 0 || (m.usage && !m.pending)) && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10.5px] text-ink-3">
+        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-10.5 text-ink-3">
           {m.stopped && (
-            <span className="rounded-full bg-surface-3 px-1.5 py-px tracking-wider uppercase text-[9px]">
+            <span className="rounded-full bg-surface-3 px-1.5 py-px tracking-wider uppercase text-9">
               stopped
             </span>
           )}
@@ -472,7 +472,7 @@ function Reasoning({ text, live }: { text: string; live: boolean }) {
         type="button"
         onClick={() => setOpen(!expanded)}
         aria-expanded={expanded}
-        className="flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-[11px] text-ink-3 hover:bg-surface-2 hover:text-ink-2 transition-colors"
+        className="flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-11 text-ink-3 hover:bg-surface-2 hover:text-ink-2 transition-colors"
       >
         <Icon icon={Brain} size={12} className={live ? "animate-pulse text-highlight motion-reduce:animate-none" : ""} />
         <span className="min-w-0 flex-1 truncate">{expanded ? "Thinking trace" : firstLine}</span>
@@ -483,7 +483,7 @@ function Reasoning({ text, live }: { text: string; live: boolean }) {
         />
       </button>
       {expanded && (
-        <div className="mt-1 max-h-48 overflow-y-auto border-l-2 border-line-2 pl-2.5 text-[11px] leading-relaxed whitespace-pre-wrap text-ink-3 font-mono">
+        <div className="mt-1 max-h-48 overflow-y-auto border-l-2 border-line-2 pl-2.5 text-11 leading-relaxed whitespace-pre-wrap text-ink-3 font-mono">
           {text}
         </div>
       )}

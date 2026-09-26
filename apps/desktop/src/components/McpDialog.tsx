@@ -108,7 +108,7 @@ export function McpDialog({ onClose }: { onClose: () => void }) {
             <Icon icon={Plug} size={17} />
           </span>
           <div className="min-w-0">
-            <h2 id="mcp-title" className="text-[15px] font-medium text-ink">Connect an agent</h2>
+            <h2 id="mcp-title" className="text-15 font-medium text-ink">Connect an agent</h2>
             <p id="mcp-description" className="mt-1 text-xs leading-relaxed text-ink-3">MCP gives your agent browser tools. The Dive skill teaches it how to use them.</p>
           </div>
         </div>
@@ -116,7 +116,7 @@ export function McpDialog({ onClose }: { onClose: () => void }) {
         <div className="min-h-0 overflow-y-auto px-5 pt-4 pb-4">
           <div className="flex flex-wrap items-center gap-2">
             {AGENTS.map(({ name, Mark }) => (
-              <span key={name} title={name} className="flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2 py-1 text-[10.5px] text-ink-2">
+              <span key={name} title={name} className="flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2 py-1 text-10.5 text-ink-2">
                 <span className="grid size-3.5 shrink-0 place-items-center text-ink">
                   <Mark size={14} />
                 </span>
@@ -124,7 +124,7 @@ export function McpDialog({ onClose }: { onClose: () => void }) {
               </span>
             ))}
           </div>
-          <p className="mt-2 text-[11px] text-ink-3">Skill --agent IDs. Any local Streamable HTTP client gets the same catalog.</p>
+          <p className="mt-2 text-11 text-ink-3">Skill --agent IDs. Any local Streamable HTTP client gets the same catalog.</p>
 
           <p className="mt-4 mb-2 text-xs text-ink-2">Paste this setup into your agent.</p>
           {loading && <p role="status" className="text-xs text-ink-3">Loading connection details…</p>}
@@ -145,7 +145,7 @@ export function McpDialog({ onClose }: { onClose: () => void }) {
                   {copyLabel}
                 </button>
               </div>
-              <pre aria-labelledby="mcp-setup-label" tabIndex={0} className="max-h-[280px] overflow-auto p-3 font-mono text-[11px] leading-relaxed break-words whitespace-pre-wrap text-ink select-text focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-highlight"><code>{shown}</code></pre>
+              <pre aria-labelledby="mcp-setup-label" tabIndex={0} className="max-h-[280px] overflow-auto p-3 font-mono text-11 leading-relaxed break-words whitespace-pre-wrap text-ink select-text focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-highlight"><code>{shown}</code></pre>
               {copyState === "copied" && <span role="status" className="sr-only">Setup copied to the clipboard</span>}
               {copyState === "failed" && <p role="alert" className="border-t border-line px-3 py-2 text-xs text-danger">Could not copy the setup. Try again.</p>}
             </div>
@@ -154,7 +154,7 @@ export function McpDialog({ onClose }: { onClose: () => void }) {
 
         <div className="flex shrink-0 items-center gap-2 border-t border-line bg-surface-2/60 px-5 py-3">
           <Icon icon={ShieldCheck} size={13} className="shrink-0 text-ink-3" />
-          <p className="min-w-0 flex-1 text-[11px] leading-relaxed text-ink-3">Local connection. Token required. Agent JavaScript is off by default.</p>
+          <p className="min-w-0 flex-1 text-11 leading-relaxed text-ink-3">Local connection. Token required. Agent JavaScript is off by default.</p>
           <button type="button" onClick={close} className="shrink-0 rounded-full border border-line-2 px-4 py-1.5 text-xs text-ink hover:bg-surface-3">
             Done
           </button>

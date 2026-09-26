@@ -251,13 +251,13 @@ export function NetworkPanel() {
         }
       }}
     >
-      <div className="flex items-center gap-3 px-2 pb-1 text-[11px] text-ink-3">
+      <div className="flex items-center gap-3 px-2 pb-1 text-11 text-ink-3">
         <input
           aria-label="Filter requests"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Filter"
-          className="h-6 w-56 rounded-md border border-line bg-surface-2 px-2 text-[11px] text-ink outline-none placeholder:text-ink-3 focus:border-highlight/60"
+          className="h-6 w-56 rounded-md border border-line bg-surface-2 px-2 text-11 text-ink outline-none placeholder:text-ink-3 focus:border-highlight/60"
         />
         <span>{filter.trim() ? `${shown.length} of ${rows.length} requests` : `${rows.length} requests`}</span>
         <span>{size(transferred)} transferred</span>
@@ -266,11 +266,11 @@ export function NetworkPanel() {
           Preserve log
         </label>
       </div>
-      <div ref={scrollRef} data-testid="network-scroll" className="min-h-16 flex-1 overflow-auto font-mono text-[11.5px] leading-5">
+      <div ref={scrollRef} data-testid="network-scroll" className="min-h-16 flex-1 overflow-auto font-mono text-11.5 leading-5">
         {/* A grid: one Tab stop, rows that say which is selected, and a row
             count that stays true though only the rows in view are mounted. */}
         <table role="grid" aria-label="Requests" aria-rowcount={shown.length + 1} className="w-full border-collapse">
-          <thead className="sticky top-0 bg-surface text-left text-[10px] tracking-wider text-ink-3 uppercase">
+          <thead className="sticky top-0 bg-surface text-left text-10 tracking-wider text-ink-3 uppercase">
             <tr aria-rowindex={1}>
               <th role="columnheader" className="px-3 font-medium">Name</th>
               <th role="columnheader" className="px-2 font-medium">Method</th>
@@ -302,7 +302,7 @@ export function NetworkPanel() {
         <DetailPane key={detail.id} tabId={activeTab} requestId={detail.id} status={detail.status} finished={detail.durationMs !== null} />
       )}
       {detail && replaying !== detail.id && (
-        <div className="flex items-center gap-3 border-t border-line bg-surface-2 px-3 py-1.5 font-mono text-[11px] text-ink-2 select-text">
+        <div className="flex items-center gap-3 border-t border-line bg-surface-2 px-3 py-1.5 font-mono text-11 text-ink-2 select-text">
           <span className="min-w-0 flex-1 truncate">
             <span className="text-ink">{detail.method}</span> {detail.url}
             {detail.mimeType && <span className="ml-3 text-ink-3">{detail.mimeType}</span>}
@@ -310,7 +310,7 @@ export function NetworkPanel() {
           </span>
           {/* A socket is a conversation, not a request that can be sent again. */}
           {detail.resourceType !== "WebSocket" && (
-            <button type="button" onClick={() => { openReplay(detail.id); }} className="flex h-6 shrink-0 items-center gap-1 rounded-full border border-line px-2 font-sans text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
+            <button type="button" onClick={() => { openReplay(detail.id); }} className="flex h-6 shrink-0 items-center gap-1 rounded-full border border-line px-2 font-sans text-11 text-ink-2 hover:bg-surface-3 hover:text-ink">
               <Icon icon={Repeat} size={11} /> Replay
             </button>
           )}
@@ -319,7 +319,7 @@ export function NetworkPanel() {
             disabled={!keyPresent}
             title={keyPresent ? "Ask the agent about this request" : "Add an API key in the Agent sidecar first"}
             onClick={() => askAgent(detail)}
-            className="flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-line px-2 font-sans text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40"
+            className="flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-line px-2 font-sans text-11 text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40"
           >
             <AgentIcon size={11} className="text-highlight" /> Explain
           </button>
@@ -347,7 +347,7 @@ function FrameList({ frames }: { frames: readonly FrameRow[] }) {
   const hidden = all ? 0 : Math.max(0, frames.length - FRAMES_SHOWN);
   const first = frames[0];
   return (
-    <div className="max-h-40 overflow-auto border-t border-line font-mono text-[11px]">
+    <div className="max-h-40 overflow-auto border-t border-line font-mono text-11">
       {hidden > 0 && (
         <button type="button" onClick={() => setAll(true)} className="block w-full border-b border-line/60 px-3 py-1 text-left font-sans text-ink-3 hover:bg-surface-2 hover:text-ink">
           Show {hidden} earlier {hidden === 1 ? "frame" : "frames"}
@@ -412,22 +412,22 @@ function DetailPane({ tabId, requestId, status, finished }: { tabId: string; req
       notify(`Could not copy: ${errorMessage(e)}`, 4000);
     }
   };
-  if (error) return <div className="border-t border-line px-3 py-2 font-mono text-[11px] text-ink-3">{error}</div>;
-  if (!detail) return <div className="border-t border-line px-3 py-2 font-mono text-[11px] text-ink-3">Reading…</div>;
+  if (error) return <div className="border-t border-line px-3 py-2 font-mono text-11 text-ink-3">{error}</div>;
+  if (!detail) return <div className="border-t border-line px-3 py-2 font-mono text-11 text-ink-3">Reading…</div>;
   const body = pretty ?? detail.response_body_note ?? (detail.status === null ? "No response yet." : "Body not kept: only JSON responses within the buffer budget are.");
-  const chip = "flex h-5 items-center gap-1 rounded-full border border-line px-1.5 font-sans text-[10px] text-ink-2 hover:bg-surface-3 hover:text-ink";
+  const chip = "flex h-5 items-center gap-1 rounded-full border border-line px-1.5 font-sans text-10 text-ink-2 hover:bg-surface-3 hover:text-ink";
   return (
-    <div className="grid max-h-[50%] shrink-0 grid-cols-2 gap-x-4 overflow-auto border-t border-line px-3 py-2 font-mono text-[11px] leading-5 select-text" data-testid="request-detail">
+    <div className="grid max-h-[50%] shrink-0 grid-cols-2 gap-x-4 overflow-auto border-t border-line px-3 py-2 font-mono text-11 leading-5 select-text" data-testid="request-detail">
       <section aria-label="Request">
         {detail.rewrites.length > 0 && (
-          <p className="mb-1.5 rounded-md border border-highlight/30 bg-highlight/10 px-2 py-1 text-[11px] text-ink" data-testid="rule-effects">
+          <p className="mb-1.5 rounded-md border border-highlight/30 bg-highlight/10 px-2 py-1 text-11 text-ink" data-testid="rule-effects">
             <span className="text-ink-3">Changed by a rule: </span>
             {detail.rewrites.join(" · ")}
             <span className="text-ink-3"> Headers below are as the page sent them.</span>
           </p>
         )}
         <div className="flex items-center gap-2">
-          <h4 className="flex-1 text-[10px] tracking-wider text-ink-3 uppercase">Request headers</h4>
+          <h4 className="flex-1 text-10 tracking-wider text-ink-3 uppercase">Request headers</h4>
           <button type="button" onClick={() => void copy("cURL command", toCurl(detail))} className={chip} title="Copy this request as a cURL command">
             <Icon icon={Terminal} size={10} /> Copy as cURL
           </button>
@@ -435,16 +435,16 @@ function DetailPane({ tabId, requestId, status, finished }: { tabId: string; req
         <Headers headers={detail.request_headers} />
         {detail.request_body && (
           <>
-            <h4 className="mt-2 text-[10px] tracking-wider text-ink-3 uppercase">Request body</h4>
+            <h4 className="mt-2 text-10 tracking-wider text-ink-3 uppercase">Request body</h4>
             <pre className="whitespace-pre-wrap break-all text-ink-2">{detail.request_body}</pre>
           </>
         )}
       </section>
       <section aria-label="Response">
-        <h4 className="text-[10px] tracking-wider text-ink-3 uppercase">Response headers</h4>
+        <h4 className="text-10 tracking-wider text-ink-3 uppercase">Response headers</h4>
         <Headers headers={detail.response_headers} />
         <div className="mt-2 flex items-center gap-2">
-          <h4 className="flex-1 text-[10px] tracking-wider text-ink-3 uppercase">Response body</h4>
+          <h4 className="flex-1 text-10 tracking-wider text-ink-3 uppercase">Response body</h4>
           {detail.response_body && (
             <button type="button" onClick={() => void copy("Response body", body)} className={chip} title="Copy the response body">
               <Icon icon={Copy} size={10} /> Copy body

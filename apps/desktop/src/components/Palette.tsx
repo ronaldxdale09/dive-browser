@@ -179,7 +179,7 @@ export function Palette() {
         >
           <Favicon src={t.favicon} size={14} />
           <span className="truncate">{titleOf(t)}</span>
-          <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(t.url)}</span>
+          <span className="ml-auto truncate pl-3 font-mono text-11 text-ink-3">{host(t.url)}</span>
         </Command.Item>
       ))}
     </Command.Group>
@@ -208,7 +208,7 @@ export function Palette() {
           >
             <Favicon src={t.favicon} size={14} />
             <span className="truncate">{titleOf(t)}</span>
-            <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(t.url)}</span>
+            <span className="ml-auto truncate pl-3 font-mono text-11 text-ink-3">{host(t.url)}</span>
           </Command.Item>
         ))}
       </Command.Group>
@@ -244,14 +244,14 @@ export function Palette() {
                 <Command.Item value={`${titleOf(lead.tab)} ${lead.tab.url}${ROW_ID}${lead.tab.id}`} title={paletteRowTitle(titleOf(lead.tab), lead.tab.url)} onSelect={() => { close(); void activateTab(lead.tab.id); }} className="flex items-center gap-2 rounded-lg px-3 py-2">
                   <Favicon src={lead.tab.favicon} size={14} />
                   <span className="truncate">{titleOf(lead.tab)}</span>
-                  <span className="rounded-md bg-surface-3 px-1.5 py-0.5 text-[10px] text-ink-2">Switch to tab</span>
-                  <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(lead.tab.url)}</span>
+                  <span className="rounded-md bg-surface-3 px-1.5 py-0.5 text-10 text-ink-2">Switch to tab</span>
+                  <span className="ml-auto truncate pl-3 font-mono text-11 text-ink-3">{host(lead.tab.url)}</span>
                 </Command.Item>
               ) : (
                 <Command.Item value={`${lead.kind} ${titleOf(lead.entry)} ${lead.entry.url}`} title={paletteRowTitle(titleOf(lead.entry), lead.entry.url)} onSelect={() => void go(lead.entry.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
                   {lead.kind === "bookmark" ? <Favicon src={lead.entry.favicon} size={14} fallback={Star} fallbackClassName="text-highlight" /> : <Favicon src={lead.entry.favicon} size={14} fallback={History} />}
                   <span className="truncate">{titleOf(lead.entry)}</span>
-                  <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(lead.entry.url)}</span>
+                  <span className="ml-auto truncate pl-3 font-mono text-11 text-ink-3">{host(lead.entry.url)}</span>
                 </Command.Item>
               )}
             </Command.Group>
@@ -275,7 +275,7 @@ export function Palette() {
                   <Icon icon={Server} size={14} className="shrink-0 text-highlight" />
                   <span className="font-mono">localhost:{d.port}</span>
                   <span className="text-ink-2">{d.framework}</span>
-                  {d.title && <span className="ml-auto truncate pl-3 text-[11px] text-ink-3" title={d.title}>{d.title}</span>}
+                  {d.title && <span className="ml-auto truncate pl-3 text-11 text-ink-3" title={d.title}>{d.title}</span>}
                 </Command.Item>
               ))}
             </Command.Group>
@@ -286,7 +286,7 @@ export function Palette() {
                 <Command.Item key={h.url} value={`history ${titleOf(h)} ${h.url}`} title={paletteRowTitle(titleOf(h), h.url)} onSelect={() => void go(h.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
                   <Favicon src={h.favicon} size={14} fallback={History} />
                   <span className="truncate">{titleOf(h)}</span>
-                  <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(h.url)}</span>
+                  <span className="ml-auto truncate pl-3 font-mono text-11 text-ink-3">{host(h.url)}</span>
                 </Command.Item>
               ))}
             </Command.Group>
@@ -297,7 +297,7 @@ export function Palette() {
                 <Command.Item key={b.url} value={`bookmark ${titleOf(b)} ${b.url}`} title={paletteRowTitle(titleOf(b), b.url)} onSelect={() => void go(b.url)} className="flex items-center gap-2 rounded-lg px-3 py-2">
                   <Favicon src={b.favicon} size={14} fallback={Star} fallbackClassName="text-highlight" />
                   <span className="truncate">{titleOf(b)}</span>
-                  <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(b.url)}</span>
+                  <span className="ml-auto truncate pl-3 font-mono text-11 text-ink-3">{host(b.url)}</span>
                 </Command.Item>
               ))}
             </Command.Group>
@@ -315,12 +315,12 @@ export function Palette() {
               >
                 <Icon icon={Terminal} size={14} className="shrink-0 text-ink-3" />
                 <span>{c.title}</span>
-                {c.keybinding && <kbd className="ml-auto rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-ink-2">{formatChord(c.keybinding)}</kbd>}
+                {c.keybinding && <kbd className="ml-auto rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-10 text-ink-2">{formatChord(c.keybinding)}</kbd>}
               </Command.Item>
             ))}
           </Command.Group>
         </Command.List>
-        <div aria-hidden className="flex h-8 items-center gap-4 border-t border-line px-4 text-[11px] text-ink-3">
+        <div aria-hidden className="flex h-8 items-center gap-4 border-t border-line px-4 text-11 text-ink-3">
           <span><kbd className="font-mono">↑↓</kbd> move</span>
           <span><kbd className="font-mono">↵</kbd> open</span>
           <span><kbd className="font-mono">esc</kbd> close</span>

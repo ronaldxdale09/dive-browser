@@ -31,7 +31,7 @@ export function RecorderModal() {
       filename="recorded.spec.ts"
       onClose={() => setOpen(false)}
       footer={
-        <button type="button" onClick={clear} className="text-[11px] text-ink-3 hover:text-ink hover:underline">
+        <button type="button" onClick={clear} className="text-11 text-ink-3 hover:text-ink hover:underline">
           Clear Steps
         </button>
       }

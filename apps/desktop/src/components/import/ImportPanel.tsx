@@ -87,8 +87,8 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
     return (
       <div role="alert" className="rounded-2xl border border-line bg-surface-2/60 px-4 py-5 text-center">
         <p className="text-xs font-medium text-ink">Dive could not look for other browsers</p>
-        <p className="mt-1 text-[11px] text-ink-3">{loadError}</p>
-        <button type="button" disabled={loading} onClick={() => void load(prefer ?? undefined)} className="pressable mt-3 h-7 rounded-full border border-line-2 px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40">
+        <p className="mt-1 text-11 text-ink-3">{loadError}</p>
+        <button type="button" disabled={loading} onClick={() => void load(prefer ?? undefined)} className="pressable mt-3 h-7 rounded-full border border-line-2 px-3 text-11 text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40">
           {loading ? "Looking…" : "Try again"}
         </button>
       </div>
@@ -98,7 +98,7 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
     return (
       <div className="rounded-2xl border border-line bg-surface-2/60 px-4 py-5 text-center">
         <p className="text-xs font-medium text-ink">No other browsers with data were found</p>
-        <p className="mt-1 text-[11px] text-ink-3">{importEmptyHint()}</p>
+        <p className="mt-1 text-11 text-ink-3">{importEmptyHint()}</p>
       </div>
     );
   }
@@ -115,21 +115,21 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
 
       {current?.access === "denied" && (
         <div className="mt-3 rounded-xl border border-line bg-surface-2/70 px-3 py-2.5">
-          <p className="flex items-start gap-2 text-[11px] leading-snug text-ink-2">
+          <p className="flex items-start gap-2 text-11 leading-snug text-ink-2">
             <Icon icon={FolderLock} size={13} className="mt-0.5 shrink-0 text-ink-3" />
             <span>{importDeniedNote(current.name)}</span>
           </p>
           {!isWindows() && (
             <>
               <div className="mt-2 flex flex-wrap gap-2 pl-5">
-                <button type="button" onClick={() => void openPrivacySettings()} className="pressable h-7 rounded-full bg-accent px-3 text-[11px] font-medium text-accent-ink hover:brightness-110">
+                <button type="button" onClick={() => void openPrivacySettings()} className="pressable h-7 rounded-full bg-accent px-3 text-11 font-medium text-accent-ink hover:brightness-110">
                   Allow access in System Settings…
                 </button>
-                <button type="button" disabled={loading} onClick={() => void load(prefer ?? undefined)} className="pressable h-7 rounded-full border border-line-2 px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40">
+                <button type="button" disabled={loading} onClick={() => void load(prefer ?? undefined)} className="pressable h-7 rounded-full border border-line-2 px-3 text-11 text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40">
                   {loading ? "Checking…" : "Check again"}
                 </button>
               </div>
-              <p className="mt-2 pl-5 text-[10.5px] text-ink-3">If it still says so after switching Dive on, quit and reopen Dive once.</p>
+              <p className="mt-2 pl-5 text-10.5 text-ink-3">If it still says so after switching Dive on, quit and reopen Dive once.</p>
             </>
           )}
         </div>
@@ -170,7 +170,7 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
       </div>
 
       {outcome && (
-        <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-ink-2">
+        <p role="status" className="mt-3 flex items-center gap-1.5 text-11 text-ink-2">
           <Icon icon={Check} size={12} className="text-highlight" />
           {outcome.summary.bookmarks + outcome.summary.history + outcome.summary.passwords + outcome.summary.forms === 0
             ? outcome.summary.warnings.length > 0
@@ -184,7 +184,7 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
         // costs the passwords, and says so, rather than the whole import.
         <ul role="alert" aria-label="Not imported" className="mt-2 grid gap-1">
           {outcome.summary.warnings.map((warning) => (
-            <li key={warning} className="flex items-start gap-1.5 text-[11px] leading-snug text-ink-2">
+            <li key={warning} className="flex items-start gap-1.5 text-11 leading-snug text-ink-2">
               <Icon icon={AlertTriangle} size={12} className="mt-px shrink-0 text-danger" />
               {warning}
             </li>
@@ -192,11 +192,11 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
         </ul>
       )}
       {error && (
-        <p role="alert" className="mt-3 text-[11px] text-danger">
+        <p role="alert" className="mt-3 text-11 text-danger">
           {error}
         </p>
       )}
-      <p className="mt-3 text-[10.5px] text-ink-3">
+      <p className="mt-3 text-10.5 text-ink-3">
         {canPasswords && passwords
           ? importPasswordNote({ firefox: current?.family === "firefox", browserName: current?.name ?? "the browser" })
           : "Cookies and extensions stay in the other browser."}
@@ -222,13 +222,13 @@ function SourceRow({ source, checked, onPick }: { source: ImportSource; checked:
       ) : source.icon ? (
         <img src={source.icon} alt="" width={28} height={28} className="size-7 shrink-0" />
       ) : (
-        <span className="grid size-7 shrink-0 place-items-center rounded-lg text-[11px] font-semibold text-white" style={{ background: mark.color }} aria-hidden>
+        <span className="grid size-7 shrink-0 place-items-center rounded-lg text-11 font-semibold text-white" style={{ background: mark.color }} aria-hidden>
           {mark.text}
         </span>
       )}
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs text-ink">{label}</span>
-        <span className="block truncate text-[10.5px] text-ink-3">
+        <span className="block truncate text-10.5 text-ink-3">
           {source.access === "ok" ? (source.passwords ? "Bookmarks, history, passwords and form entries" : "Bookmarks and history") : source.access === "denied" ? "Needs your permission" : "Nothing to import"}
         </span>
       </span>
