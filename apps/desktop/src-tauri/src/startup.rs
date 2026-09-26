@@ -433,8 +433,14 @@ fn build_chromium_args_with(
     }
     // `DIVE_DEFAULT_PROCESS_MODEL=1` leaves Chromium's own process model in
     // place, for telling a process-model fault apart from anything else.
+    //
+    // Only the limit, not `--process-per-site`: that switch put every tab of
+    // one site in a single renderer, so one runaway tab (a leaking web app,
+    // a hung script) froze or crashed every other tab of that site with it,
+    // and an out-of-memory kill took them all. The limit alone still caps the
+    // number of renderers; past it Chromium shares processes only when it
+    // must.
     if std::env::var_os("DIVE_DEFAULT_PROCESS_MODEL").is_none() {
-        args.push(("--process-per-site", None));
         args.push(("renderer-process-limit", Some(limit)));
     }
     let mut extra = extra_chromium_args(chromium_flags);
@@ -634,18 +640,23 @@ mod tests {
     #[test]
     fn test_chromium_args_default_formatting() {
         let args = build_chromium_args_with(None, "", false, &[]);
-        assert_eq!(args.len(), 4);
+        assert_eq!(args.len(), 3);
 
-        assert_eq!(args[0], ("--process-per-site", None));
-        assert_eq!(args[1], ("renderer-process-limit", Some("6".to_string())));
+        assert!(
+            !args
+                .iter()
+                .any(|(name, _)| name.contains("process-per-site")),
+            "one site's tabs must not share a renderer"
+        );
+        assert_eq!(args[0], ("renderer-process-limit", Some("6".to_string())));
         assert_eq!(
-            args[2],
+            args[1],
             (
                 "disable-features",
                 Some("ImmersiveReadAnything,SpareRendererForSitePerProcess".to_string())
             )
         );
-        assert_eq!(args[3], ("js-flags", Some(IDLE_RECLAIM_FLAGS.to_owned())));
+        assert_eq!(args[2], ("js-flags", Some(IDLE_RECLAIM_FLAGS.to_owned())));
 
         assert!(validate_switch_syntax(&args).is_ok());
     }
@@ -675,7 +686,7 @@ mod tests {
     #[test]
     fn test_chromium_args_custom_limit() {
         let args = build_chromium_args_with(Some("12"), "", false, &[]);
-        assert_eq!(args[1], ("renderer-process-limit", Some("12".to_string())));
+        assert_eq!(args[0], ("renderer-process-limit", Some("12".to_string())));
         assert!(validate_switch_syntax(&args).is_ok());
     }
 

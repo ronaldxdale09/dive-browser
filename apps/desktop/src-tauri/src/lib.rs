@@ -1411,18 +1411,23 @@ mod tests {
     #[test]
     fn test_chromium_switches_configuration() {
         let args = crate::startup::build_chromium_args(None);
-        assert_eq!(args.len(), 4);
-        assert_eq!(args[0], ("--process-per-site", None));
-        assert_eq!(args[1], ("renderer-process-limit", Some("6".to_string())));
+        assert_eq!(args.len(), 3);
+        assert!(
+            !args
+                .iter()
+                .any(|(name, _)| name.contains("process-per-site")),
+            "one site's tabs must not share a renderer"
+        );
+        assert_eq!(args[0], ("renderer-process-limit", Some("6".to_string())));
         assert_eq!(
-            args[2],
+            args[1],
             (
                 "disable-features",
                 Some("ImmersiveReadAnything,SpareRendererForSitePerProcess".to_string())
             )
         );
         assert_eq!(
-            args[3],
+            args[2],
             (
                 "js-flags",
                 Some(
