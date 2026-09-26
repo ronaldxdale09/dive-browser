@@ -1511,29 +1511,31 @@ fn locator_for(
 
 /// Map an accessibility role and name to a Playwright locator.
 pub fn playwright_locator(role: &str, name: &str) -> String {
+    let escaped: String = name
+        .chars()
+        .filter(|c| !c.is_control() && *c != '\u{2028}' && *c != '\u{2029}')
+        .collect::<String>()
+        .replace('\\', "\\\\")
+        .replace('\'', "\\'");
     let role = match role {
         "textbox" | "searchbox" => "textbox",
-        "link" => "link",
-        "button" => "button",
-        "checkbox" => "checkbox",
-        "radio" => "radio",
-        "combobox" => "combobox",
-        "option" => "option",
-        "menuitem" => "menuitem",
-        "tab" => "tab",
-        "switch" => "switch",
-        "slider" => "slider",
-        other => other,
+        // The role comes from the page's own `role` attribute. Written into
+        // the exported test as-is, a crafted one closed the string and
+        // planted code that ran with the test; every ARIA role is plain
+        // lowercase letters, so anything else is not a role at all.
+        other
+            if !other.is_empty()
+                && other.len() <= 32
+                && other.bytes().all(|b| b.is_ascii_lowercase()) =>
+        {
+            other
+        }
+        _ if escaped.is_empty() => return "locator('body')".to_owned(),
+        _ => return format!("getByText('{escaped}')"),
     };
-    if name.is_empty() {
+    if escaped.is_empty() {
         format!("getByRole('{role}')")
     } else {
-        let escaped: String = name
-            .chars()
-            .filter(|c| !c.is_control() && *c != '\u{2028}' && *c != '\u{2029}')
-            .collect::<String>()
-            .replace('\\', "\\\\")
-            .replace('\'', "\\'");
         format!("getByRole('{role}', {{ name: '{escaped}' }})")
     }
 }
@@ -1745,6 +1747,12 @@ mod tests {
             playwright_locator("button", "a\nb\u{2028}c"),
             "getByRole('button', { name: 'abc' })"
         );
+        // A role the page made up never reaches the test as code.
+        assert_eq!(
+            playwright_locator("x'); require('child_process'); ('", "Go"),
+            "getByText('Go')"
+        );
+        assert_eq!(playwright_locator("BUTTON", ""), "locator('body')");
     }
 
     #[test]
