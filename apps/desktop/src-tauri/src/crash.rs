@@ -190,6 +190,11 @@ pub struct Registry {
     inner: Mutex<HashMap<TabId, Attempts>>,
     /// When each tab's crash was last reported, to fold duplicate signals.
     seen: Mutex<HashMap<TabId, Instant>>,
+    /// When each tab's latest recovery reload began. A report observed before
+    /// that is about the crash the reload answers, however late it is
+    /// handled: the `DevTools` signal waits out `REASON_GRACE`, longer than
+    /// the first reload's delay, and was counted as a second crash.
+    reloaded: Mutex<HashMap<TabId, Instant>>,
     /// Background tabs that crashed, by the view that did: reloaded when the
     /// tab is next shown, rather than spending a renderer on a page nobody
     /// is looking at.
@@ -258,6 +263,12 @@ impl Registry {
         if views.get(&tab).is_none_or(|current| current != label) {
             return None;
         }
+        if lock(&self.reloaded)
+            .get(&tab)
+            .is_some_and(|reload| *reload > now)
+        {
+            return None;
+        }
         (!self.duplicate(tab, now)).then(|| Admitted {
             planned: self.on_crash(tab, now),
         })
@@ -283,6 +294,7 @@ impl Registry {
         // Once reload starts the renderer can crash again immediately. Time
         // alone cannot distinguish that new crash from the previous signals.
         lock(&self.seen).remove(&tab);
+        lock(&self.reloaded).insert(tab, Instant::now());
     }
 
     /// Record a crash and say what to do about it.
@@ -300,6 +312,7 @@ impl Registry {
         views.remove(&tab);
         lock(&self.inner).remove(&tab);
         lock(&self.seen).remove(&tab);
+        lock(&self.reloaded).remove(&tab);
         lock(&self.deferred).remove(&tab);
         #[cfg(feature = "cef")]
         lock(&self.hung).remove(&tab);
@@ -357,7 +370,14 @@ pub fn attach(app: &AppHandle<Runtime>, tab_id: TabId, view: &tauri::Webview<Run
                 if app.state::<AppState>().crashes.unhang(tab_id, &label) {
                     emit_soon(&app, TabResponsive { tab_id });
                 }
-                schedule_recovery(&app, tab_id, label.clone(), None, exit.into());
+                schedule_recovery(
+                    &app,
+                    tab_id,
+                    label.clone(),
+                    None,
+                    exit.into(),
+                    Instant::now(),
+                );
             }
             RendererEvent::Unresponsive(wait) => {
                 if app.state::<AppState>().crashes.hang(tab_id, &label, wait) {
@@ -492,6 +512,7 @@ pub fn watch(app: AppHandle<Runtime>, tab_id: TabId, view_label: String, session
                         let app = app.clone();
                         let label = view_label.clone();
                         let session = session.clone();
+                        let observed = Instant::now();
                         tauri::async_runtime::spawn(async move {
                             tokio::time::sleep(REASON_GRACE).await;
                             schedule_recovery(
@@ -500,6 +521,7 @@ pub fn watch(app: AppHandle<Runtime>, tab_id: TabId, view_label: String, session
                                 label,
                                 Some(session),
                                 CrashReason::Unknown,
+                                observed,
                             );
                         });
                     }
@@ -533,12 +555,15 @@ where
     }
 }
 
+/// `observed` is when the report was first seen, which for the `DevTools`
+/// signal is before it waited for the native one.
 fn schedule_recovery(
     app: &AppHandle<Runtime>,
     tab_id: TabId,
     view_label: String,
     session: Option<CdpSession>,
     reason: CrashReason,
+    observed: Instant,
 ) {
     let worker_app = app.clone();
     let source_label = view_label.clone();
@@ -546,7 +571,7 @@ fn schedule_recovery(
         &app.state::<AppState>().crashes,
         tab_id,
         &source_label,
-        Instant::now(),
+        observed,
         move |planned| async move {
             // Native callbacks can be reentrant. Fetch their session in the
             // worker, after admission, without locking the host in the callback.
@@ -860,15 +885,36 @@ mod tests {
         assert!(registry.admit(tab, "replacement", now).is_none());
         registry.bind_view(tab, "replacement");
         assert!(registry.begin_current_reload(tab, "replacement"));
+        // A crash of the reloaded page is a new one.
         assert_eq!(
             registry
-                .admit(tab, "replacement", now)
+                .admit(tab, "replacement", Instant::now())
                 .unwrap()
                 .planned
                 .unwrap()
                 .attempt,
             2
         );
+    }
+
+    #[test]
+    fn a_late_devtools_report_of_a_crash_already_reloaded_is_not_a_second_crash() {
+        let registry = Registry::default();
+        let tab = TabId::new();
+        registry.bind_view(tab, "view");
+        // CEF's report and the DevTools one are observed together; the
+        // DevTools one then waits out REASON_GRACE, and the first reload
+        // (250 ms) begins before it is handled.
+        let observed = Instant::now();
+        let first = registry
+            .admit(tab, "view", observed)
+            .unwrap()
+            .planned
+            .unwrap();
+        assert_eq!(first.attempt, 1);
+        assert!(registry.begin_current_reload(tab, "view"));
+        assert!(registry.admit(tab, "view", observed).is_none());
+        assert_eq!(lock(&registry.inner)[&tab].count, 1);
     }
 
     #[test]
