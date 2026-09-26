@@ -25,6 +25,13 @@ const MAX_CONTEXTS: usize = 4096;
 struct NamedContext {
     world: String,
     frame_id: String,
+    /// The document's origin as the engine reported it on creation.
+    origin: String,
+    /// Still alive. A destroyed context keeps its record: a binding call
+    /// made just before the page navigated is handled after the engine has
+    /// already reported the context gone, and ids are never reused within a
+    /// session, so what it was stays true.
+    live: bool,
     /// Creation order, so the newest context of a world in a frame wins
     /// when an old document's context has not been reported gone yet.
     order: u64,
@@ -58,6 +65,7 @@ impl Worlds {
                     return;
                 }
                 let frame_id = auxiliary["frameId"].as_str().unwrap_or_default();
+                let origin = context["origin"].as_str().unwrap_or_default();
                 if self.contexts.len() >= MAX_CONTEXTS
                     && let Some(oldest) = self
                         .contexts
@@ -79,32 +87,54 @@ impl Worlds {
                     NamedContext {
                         world: world.to_owned(),
                         frame_id: frame_id.to_owned(),
+                        origin: origin.to_owned(),
+                        live: true,
                         order: self.next,
                     },
                 );
             }
             "Runtime.executionContextDestroyed" => {
-                if let Some(id) = params["executionContextId"].as_i64() {
-                    self.contexts.remove(&id);
+                if let Some(context) = params["executionContextId"]
+                    .as_i64()
+                    .and_then(|id| self.contexts.get_mut(&id))
+                {
+                    context.live = false;
                 }
             }
-            "Runtime.executionContextsCleared" => self.contexts.clear(),
+            "Runtime.executionContextsCleared" => {
+                for context in self.contexts.values_mut() {
+                    context.live = false;
+                }
+            }
             _ => {}
         }
     }
 
-    /// The world a live context belongs to, when it is a named one.
+    /// The world a context belongs to, when it is a named one -- also for a
+    /// context already gone, whose calls may still be in flight.
     pub(crate) fn world_of(&self, context_id: i64) -> Option<&str> {
         self.contexts
             .get(&context_id)
             .map(|context| context.world.as_str())
     }
 
+    /// The origin the engine gave a named context when it was created.
+    /// Unlike asking the context, this still answers once the page has
+    /// navigated away -- the moment a submitted login is reported.
+    pub(crate) fn origin_of(&self, context_id: i64) -> Option<&str> {
+        self.contexts
+            .get(&context_id)
+            .map(|context| context.origin.as_str())
+            .filter(|origin| !origin.is_empty())
+    }
+
     /// The newest live context of `world` in `frame_id`.
     pub(crate) fn context_in(&self, world: &str, frame_id: &str) -> Option<i64> {
         self.contexts
             .iter()
-            .filter(|(_, context)| context.world == world && context.frame_id == frame_id)
+            .filter(|(_, context)| {
+                context.live && context.world == world && context.frame_id == frame_id
+            })
             .max_by_key(|(_, context)| context.order)
             .map(|(id, _)| *id)
     }
@@ -116,7 +146,22 @@ mod tests {
     use serde_json::json;
 
     fn created(id: i64, name: &str, frame: &str, default: bool) -> Value {
-        json!({"context": {"id": id, "name": name, "auxData": {"isDefault": default, "frameId": frame, "type": if default { "default" } else { "isolated" }}}})
+        json!({"context": {"id": id, "name": name, "origin": "https://a.test", "auxData": {"isDefault": default, "frameId": frame, "type": if default { "default" } else { "isolated" }}}})
+    }
+
+    #[test]
+    fn a_context_keeps_the_origin_it_was_created_with_after_it_is_gone() {
+        let mut worlds = Worlds::default();
+        worlds.observe(
+            "Runtime.executionContextCreated",
+            &created(9, "dive", "top", false),
+        );
+        worlds.observe(
+            "Runtime.executionContextDestroyed",
+            &json!({"executionContextId": 9}),
+        );
+        assert_eq!(worlds.origin_of(9), Some("https://a.test"));
+        assert_eq!(worlds.origin_of(10), None);
     }
 
     #[test]
@@ -155,7 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn the_newest_context_of_a_frame_wins_and_gone_ones_are_forgotten() {
+    fn the_newest_live_context_of_a_frame_wins_and_gone_ones_keep_their_record() {
         let mut worlds = Worlds::default();
         worlds.observe(
             "Runtime.executionContextCreated",
@@ -172,9 +217,11 @@ mod tests {
             &json!({"executionContextId": 5}),
         );
         assert_eq!(worlds.context_in("dive", "top"), Some(7));
-        assert_eq!(worlds.world_of(5), None);
+        // A call made just before the page navigated is judged after the
+        // context is reported gone; what it was still holds.
+        assert_eq!(worlds.world_of(5), Some("dive"));
         worlds.observe("Runtime.executionContextsCleared", &json!({}));
-        assert_eq!(worlds.world_of(7), None);
+        assert_eq!(worlds.world_of(7), Some("dive"));
         assert_eq!(worlds.context_in("dive", "top"), None);
     }
 

@@ -150,11 +150,17 @@ pub async fn evaluate(session: &CdpSession, params: Value) -> Result<Value, CdpE
     }
 }
 
-/// The origin of the document behind `context`, asked of that context
-/// itself. `location` is the document's own and no world can redefine it,
-/// so the answer names the site that actually called; a context already gone
-/// (the page navigated) answers nothing.
+/// The origin of the document behind `context`. The engine names it when the
+/// context is created, which no page script can touch, and that record
+/// outlives the context: a login is reported on submit, and by the time the
+/// report is handled the page has usually navigated and the context is gone,
+/// so asking it then answered nothing and the save prompt never came. Only a
+/// context never reported is asked directly; `location` is the document's
+/// own and no world can redefine it.
 pub async fn context_origin(session: &CdpSession, context: i64) -> Option<String> {
+    if let Some(origin) = session.context_origin(context) {
+        return crate::passwords::origin_of(&origin).ok();
+    }
     let result = evaluate_in(
         session,
         context,

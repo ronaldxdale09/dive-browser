@@ -502,13 +502,18 @@ impl CdpSession {
             .clone()
     }
 
-    /// The isolated world a live execution context belongs to, or `None`
-    /// for the page's own world, a context already gone, or one never
-    /// reported. `Runtime.enable` reports every context there is, so with
+    /// The isolated world an execution context belongs to (alive or already
+    /// gone), or `None` for the page's own world or one never reported. `Runtime.enable` reports every context there is, so with
     /// the domain on, `None` for a context that calls a binding means it is
     /// not one of ours.
     pub fn context_world(&self, context_id: i64) -> Option<String> {
         self.worlds().world_of(context_id).map(str::to_owned)
+    }
+
+    /// The origin the engine reported for a named context when it was
+    /// created; it outlives the context, unlike asking the context itself.
+    pub fn context_origin(&self, context_id: i64) -> Option<String> {
+        self.worlds().origin_of(context_id).map(str::to_owned)
     }
 
     /// The newest live context of `world` in the top frame's document.
@@ -720,7 +725,8 @@ mod tests {
         assert_eq!(session.main_frame().as_deref(), Some("top"));
         assert_eq!(session.world_context("dive"), Some(2));
         feed(json!({"method": "Runtime.executionContextsCleared", "params": {}}));
-        assert_eq!(session.context_world(2), None);
+        // Gone, but a call it made while alive is still judged as its own.
+        assert_eq!(session.context_world(2).as_deref(), Some("dive"));
         assert_eq!(session.world_context("dive"), None);
     }
 
