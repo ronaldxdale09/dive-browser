@@ -228,15 +228,24 @@ export function replayableSteps(steps: Step[]): Step[] {
   return steps.filter((s) => s.action && !s.error && s.summary !== undefined);
 }
 
-/** Mirror of the Rust locator builder so recorded steps export the same way. */
-export function playwrightLocator(role: string, name: string): string {
-  const r = role === "searchbox" ? "textbox" : role || "generic";
-  if (!name) return `getByRole('${r}')`;
-  const escaped = name
+/** Text made safe inside a single-quoted literal of the generated test. */
+function singleQuoted(text: string): string {
+  return text
     .replace(/[\p{Cc}\u2028\u2029]/gu, "")
     .replaceAll("\\", "\\\\")
     .replaceAll("'", "\\'");
-  return `getByRole('${r}', { name: '${escaped}' })`;
+}
+
+/**
+ * Mirror of the Rust locator builder so recorded steps export the same way.
+ * The role is escaped like the name. The host already accepts only the
+ * roles the recorder records, but whatever reaches this line becomes code in
+ * someone's test suite, so it is not trusted to have come that way.
+ */
+export function playwrightLocator(role: string, name: string): string {
+  const r = singleQuoted(role === "searchbox" ? "textbox" : role || "generic");
+  if (!name) return `getByRole('${r}')`;
+  return `getByRole('${r}', { name: '${singleQuoted(name)}' })`;
 }
 
 /**

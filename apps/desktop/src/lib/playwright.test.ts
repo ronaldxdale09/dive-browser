@@ -33,6 +33,9 @@ describe("recorded steps", () => {
     expect(steps[2]?.locator).toBe("getByRole('textbox', { name: 'Search' })");
     expect(playwrightLocator("link", "It's")).toBe("getByRole('link', { name: 'It\\'s' })");
     expect(playwrightLocator("link", "a\nb\u2028c")).toBe("getByRole('link', { name: 'abc' })");
+    // A role is escaped like a name, so none can close the literal it sits in.
+    expect(playwrightLocator("button'); process.exit(1); ('", "")).toBe("getByRole('button\\'); process.exit(1); (\\'')");
+    expect(playwrightLocator("x\\'\n", "Go")).toBe("getByRole('x\\\\\\'', { name: 'Go' })");
     const spec = toPlaywrightSpec(steps, undefined, "recorded");
     expect(spec).toContain("fill(\"dive\")");
   });
