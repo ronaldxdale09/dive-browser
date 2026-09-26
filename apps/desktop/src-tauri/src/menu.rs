@@ -59,6 +59,76 @@ pub(crate) fn main_window_command(command: &str) -> bool {
     matches!(command, "tab.new" | "window.new")
 }
 
+/// Commands a detached window's chrome carries out for the one page it
+/// shows (`runDetachedCommand` in the chrome; the two lists must agree).
+/// Anything else sent there was dropped on the floor -- after the keyboard
+/// had already been taken from the page for it.
+#[cfg(not(target_os = "windows"))]
+const POPOUT_COMMANDS: [&str; 11] = [
+    "tab.close",
+    "tab.reload",
+    "tab.back",
+    "tab.forward",
+    "tab.devtools",
+    "zoom.in",
+    "zoom.out",
+    "zoom.reset",
+    "page.save",
+    "find.open",
+    // A torn-off tab has an address bar; an app window does not.
+    "address.focus",
+];
+
+/// Commands about the browser rather than about a page: a history list or
+/// the palette means the same thing from any window, so from a detached one
+/// they raise the main window, where they live.
+#[cfg(not(target_os = "windows"))]
+const BROWSER_COMMANDS: [&str; 10] = [
+    "palette.open",
+    "tabs.search",
+    "history.open",
+    "bookmarks.open",
+    "downloads.open",
+    "browsing-data.open",
+    "shortcuts.open",
+    "about.open",
+    "workspace.new",
+    "workspace.edit",
+];
+
+/// Where a menu command goes.
+#[cfg(not(target_os = "windows"))]
+#[derive(Debug, PartialEq, Eq)]
+enum MenuTarget {
+    /// The chrome of the focused window, main or detached.
+    Focused,
+    /// The main window's chrome, raising the window first.
+    Main,
+    /// Nowhere: a page command a detached window has no way to carry out.
+    /// Sending it to the main window would act on a different page than the
+    /// one in front of the person.
+    Nowhere,
+}
+
+/// Route `command` given the focused detached window, if any: `Some(true)`
+/// for an installed app's window, `Some(false)` for a torn-off tab.
+#[cfg(not(target_os = "windows"))]
+fn menu_target(command: &str, focused_popout: Option<bool>) -> MenuTarget {
+    if main_window_command(command) {
+        return MenuTarget::Main;
+    }
+    let Some(app_window) = focused_popout else {
+        return MenuTarget::Focused;
+    };
+    if POPOUT_COMMANDS.contains(&command) && !(app_window && command == "address.focus") {
+        MenuTarget::Focused
+    } else if BROWSER_COMMANDS.contains(&command) {
+        MenuTarget::Main
+    } else {
+        MenuTarget::Nowhere
+    }
+}
+
 /// One chrome-owned menu item with its accelerator.
 // Only the native menu bar uses this, and only macOS has one: Windows
 // draws its controls in the chrome instead.
@@ -341,17 +411,30 @@ pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
             let host = lock(&state.host);
             match host.as_ref() {
                 Some(host) => {
-                    if main_window_command(&id) {
-                        if let Err(error) = host.focus_main_chrome() {
-                            tracing::warn!(%error, "focusing main window for menu failed");
+                    let focused = host
+                        .focused_popout()
+                        .map(|tab| host.app_for_tab(tab).is_some());
+                    match menu_target(&id, focused) {
+                        MenuTarget::Main => {
+                            if let Err(error) = host.focus_main_chrome() {
+                                tracing::warn!(%error, "focusing main window for menu failed");
+                                return;
+                            }
+                            crate::CHROME_LABEL.to_owned()
+                        }
+                        MenuTarget::Focused => {
+                            if FOCUS_CHROME.contains(&id.as_str()) {
+                                host.focus_chrome_for_menu();
+                            }
+                            host.chrome_for_menu()
+                        }
+                        MenuTarget::Nowhere => {
+                            tracing::debug!(
+                                command = id,
+                                "menu command has no page to act on in this window"
+                            );
                             return;
                         }
-                        crate::CHROME_LABEL.to_owned()
-                    } else {
-                        if FOCUS_CHROME.contains(&id.as_str()) {
-                            host.focus_chrome_for_menu();
-                        }
-                        host.chrome_for_menu()
                     }
                 }
                 None => crate::CHROME_LABEL.to_owned(),
@@ -364,4 +447,64 @@ pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
         native_input_receipt("menu-emit-returned", &command.0);
     });
     Ok(())
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_main_window_keeps_every_command() {
+        for command in ["find.open", "bookmark.toggle", "history.open", "zoom.in"] {
+            assert_eq!(menu_target(command, None), MenuTarget::Focused, "{command}");
+        }
+    }
+
+    #[test]
+    fn a_detached_window_gets_only_what_it_can_do_for_its_page() {
+        for command in [
+            "find.open",
+            "zoom.in",
+            "zoom.reset",
+            "page.save",
+            "tab.back",
+            "address.focus",
+        ] {
+            assert_eq!(
+                menu_target(command, Some(false)),
+                MenuTarget::Focused,
+                "{command}"
+            );
+        }
+        // Page commands the window cannot carry out are not sent to the main
+        // window either: they would act on a page nobody is looking at.
+        for command in [
+            "bookmark.toggle",
+            "capture.fullpage",
+            "sidecar.toggle",
+            "tab.next",
+        ] {
+            assert_eq!(
+                menu_target(command, Some(false)),
+                MenuTarget::Nowhere,
+                "{command}"
+            );
+        }
+        for command in ["history.open", "palette.open", "about.open", "tab.new"] {
+            assert_eq!(
+                menu_target(command, Some(false)),
+                MenuTarget::Main,
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_app_window_has_no_address_bar_to_focus() {
+        assert_eq!(
+            menu_target("address.focus", Some(true)),
+            MenuTarget::Nowhere
+        );
+        assert_eq!(menu_target("find.open", Some(true)), MenuTarget::Focused);
+    }
 }

@@ -1,6 +1,10 @@
 import { useCoversContent } from "../lib/overlay";
 import { windowDrag } from "../lib/windowDrag";
 import { DetachedCrashBanner, DetachedPrompts } from "./DetachedPrompts";
+import { FindBar } from "./FindBar";
+import { runDetachedCommand } from "../lib/detachedCommands";
+import { isMac, isWindows, shortcutFor } from "../lib/commands";
+import { selectAllInChromeField } from "../lib/chromeEditing";
 import { ArrowLeft, ArrowRight, Copy, EllipsisVertical, PanelsTopLeft, RotateCw, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { events, ipc } from "../lib/ipc";
@@ -16,7 +20,6 @@ import { errorMessage } from "../lib/errors";
 import { NavErrorPanel } from "./Content";
 import { inScope, originOf, useWebApps } from "../store/webapps";
 import { useWebAppIcon } from "../lib/useWebAppIcon";
-import { isWindows } from "../lib/commands";
 import { WindowResizeEdges } from "./WindowResizeEdges";
 import { WindowControls } from "./WindowControls";
 
@@ -35,6 +38,7 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
   const [app, setApp] = useState<WebApp | null>(null);
   const error = useBrowser((state) => state.error);
   const navError = useBrowser((state) => state.navError[tabId]);
+  const findOpen = useBrowser((state) => state.open.find);
   const loadPrefs = usePrefs((s) => s.load);
   const url = tab?.url ?? "";
   const { canBack, canForward } = useTabHistory(tab?.id ?? null, url, loading);
@@ -81,17 +85,22 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
     void ipc.popoutReady(tabId).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
   }, [ready, tabId]);
 
+  // The menu's shortcuts arrive as commands while this window is focused;
+  // the same chords typed while the chrome has the keyboard arrive as keys.
+  // An app window has no address bar, so ⌘L is not its to take.
   useEffect(() => {
     let stop: (() => void) | undefined;
     let live = true;
     void events.menuCommand.listen((e) => {
-      switch (e.payload) {
-        case "tab.close": run(ipc.tabClose(tabId)); break;
-        case "tab.reload": run(ipc.tabReload(tabId)); break;
-        default: break;
-      }
+      runDetachedCommand(e.payload, tabId);
     }).then((s) => { if (live) stop = s; else s(); });
-    return () => { live = false; stop?.(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || selectAllInChromeField(e, isMac())) return;
+      const command = shortcutFor(e);
+      if (command && runDetachedCommand(command, tabId)) e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => { live = false; stop?.(); window.removeEventListener("keydown", onKey); };
   }, [tabId]);
 
   const outside = app ? url !== "" && url !== "about:blank" && !inScope(url, app.scope) : false;
@@ -146,6 +155,13 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
       </div>
       <div ref={body} className="relative min-h-0 flex-1 bg-surface">
         <DetachedPrompts tabId={tabId} />
+        {findOpen && (
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-end p-2">
+            <div className="pointer-events-auto">
+              <FindBar tabId={tabId} />
+            </div>
+          </div>
+        )}
         {navError && <NavErrorPanel url={navError.url} error={navError.error} onRetry={() => run(ipc.tabReload(tabId))} />}
       </div>
     </div>

@@ -55,6 +55,11 @@ export function usePopoutPage(tabId: string) {
       if (!live || payload.tab_id !== tabId) return;
       useBrowser.setState((s) => ({ permissionRequests: withoutRequest(s.permissionRequests, tabId, payload) }));
     }).then((stop) => { if (live) stops.push(stop); else stop(); }).catch(report);
+    // Zoom steps start from the level the engine last reported, as in the
+    // main window; a site's remembered level arrives here as the page loads.
+    void events.tabZoom.listen(({ payload }) => {
+      if (live && payload.tab_id === tabId && payload.factor != null) useBrowser.getState().applyZoom(tabId, payload.factor);
+    }).then((stop) => { if (live) stops.push(stop); else stop(); }).catch(report);
     void events.tabCrashed.listen(({ payload }) => {
       if (live && payload.tab_id === tabId) useBrowser.getState().applyCrash(payload);
     }).then((stop) => { if (live) stops.push(stop); else stop(); }).catch(report);

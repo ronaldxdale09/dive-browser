@@ -106,7 +106,8 @@ interface BrowserState {
   zoom: Record<string, number>;
   /** The zoom new tabs open at (the Default zoom preference), mirrored here so the badge and the steps agree with the engine. */
   defaultZoom: number;
-  zoomStep: (direction: 1 | -1 | 0) => Promise<void>;
+  /** Step the zoom of `tabId`, or of this window's active tab when none is named. */
+  zoomStep: (direction: 1 | -1 | 0, tabId?: string) => Promise<void>;
   /** The engine applied this tab's zoom (site restore). Ignored while a step is in flight. */
   applyZoom: (id: string, factor: number) => void;
   /** The active tab's zoom as the engine has it: an explicit step, else the default new tabs open at. */
@@ -829,8 +830,9 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     if (!Number.isFinite(factor)) return;
     set((s) => (s.zoom[id] === factor ? s : { zoom: { ...s.zoom, [id]: factor } }));
   },
-  zoomStep: async (direction) => {
-    const id = tabInThisWindow(get().activeTab, get().detached);
+  zoomStep: async (direction, tabId) => {
+    // A detached window names its own tab: it has no active tab of its own.
+    const id = tabId ?? tabInThisWindow(get().activeTab, get().detached);
     if (!id) return;
     const current = get().zoomOf(id);
     const next = direction === 0 ? get().defaultZoom : nextZoom(current, direction);

@@ -1,4 +1,6 @@
 import { DetachedCrashBanner, DetachedPrompts } from "./DetachedPrompts";
+import { FindBar } from "./FindBar";
+import { runDetachedCommand } from "../lib/detachedCommands";
 import { windowDrag } from "../lib/windowDrag";
 import { isPrivateWindow } from "../lib/privateMode";
 import { PrivateBadge, PrivateWelcome } from "./PrivateMode";
@@ -39,6 +41,7 @@ export function Popout({ tabId }: { tabId: string }) {
   const error = useBrowser((state) => state.error);
   // A failed document request shows the same explanation as the main window.
   const navError = useBrowser((state) => state.navError[tabId]);
+  const findOpen = useBrowser((state) => state.open.find);
   const loadPrefs = usePrefs((s) => s.load);
   const url = tab?.url ?? "";
   // A window that has not gone anywhere yet is blank, not "about:blank":
@@ -111,33 +114,19 @@ export function Popout({ tabId }: { tabId: string }) {
     };
   }, [tabId]);
 
-  // Menu shortcuts (⌘W, ⌘R, ⌘L...) arrive as menu commands while this window
-  // is focused, whether the page or the chrome had the keyboard.
+  // Menu shortcuts (⌘W, ⌘R, ⌘L, ⌘F...) arrive as menu commands while this
+  // window is focused, whether the page or the chrome had the keyboard.
   useEffect(() => {
     let stop: (() => void) | undefined;
     let live = true;
+    const focusAddress = () => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    };
     void events.menuCommand
       .listen((e) => {
+        if (runDetachedCommand(e.payload, tabId, focusAddress)) return;
         switch (e.payload) {
-          case "tab.close":
-            run(ipc.tabClose(tabId));
-            break;
-          case "tab.reload":
-            run(ipc.tabReload(tabId));
-            break;
-          case "tab.back":
-            run(ipc.tabBack(tabId));
-            break;
-          case "tab.forward":
-            run(ipc.tabForward(tabId));
-            break;
-          case "tab.devtools":
-            run(ipc.tabDevtools(tabId));
-            break;
-          case "address.focus":
-            inputRef.current?.focus();
-            inputRef.current?.select();
-            break;
           case "tab.new":
           case "window.new":
             run(ipc.windowCommand(e.payload));
@@ -158,17 +147,20 @@ export function Popout({ tabId }: { tabId: string }) {
   }, [tabId]);
 
   useEffect(() => {
+    const focusAddress = () => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || selectAllInChromeField(e, isMac())) return;
       const command = shortcutFor(e);
       switch (command) {
-        case "tab.close": run(ipc.tabClose(tabId)); break;
-        case "address.focus": inputRef.current?.focus(); inputRef.current?.select(); break;
-        case "tab.reload": run(ipc.tabReload(tabId)); break;
+        case null: return;
         case "tab.new":
         case "window.new": run(ipc.windowCommand(command)); break;
         case "window.private": run(ipc.windowPrivate()); break;
-        default: return;
+        default:
+          if (!runDetachedCommand(command, tabId, focusAddress)) return;
       }
       e.preventDefault();
     };
@@ -267,6 +259,14 @@ export function Popout({ tabId }: { tabId: string }) {
       </div>
       <div ref={body} className="relative min-h-0 flex-1 bg-surface">
         <DetachedPrompts tabId={tabId} />
+        {/* Find hangs over the page, as in the main window. */}
+        {findOpen && (
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-end p-2">
+            <div className="pointer-events-auto">
+              <FindBar tabId={tabId} />
+            </div>
+          </div>
+        )}
         {privateStart && <PrivateWelcome onBrowse={() => { inputRef.current?.focus(); inputRef.current?.select(); }} />}
         {navError && <NavErrorPanel url={navError.url} error={navError.error} onRetry={() => run(ipc.tabReload(tabId))} />}
       </div>

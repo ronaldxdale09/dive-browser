@@ -62,6 +62,7 @@ beforeEach(() => {
     permissionDismissed = (payload) => callback({ event: "permission-dismissed", id: 0, payload });
     return () => undefined;
   });
+  vi.spyOn(events.tabZoom, "listen").mockResolvedValue(() => undefined);
   vi.spyOn(events.tabCrashed, "listen").mockImplementation(async (callback) => {
     tabCrashed = (payload) => callback({ event: "tab-crashed", id: 0, payload });
     return () => undefined;
@@ -180,6 +181,29 @@ describe("detached window prompts", () => {
     const banner = (await screen.findByText(/renderer crashed and Dive stopped reloading it/)).closest("[role=status]") as HTMLElement;
     fireEvent.click(within(banner).getByRole("button", { name: "Reload" }));
     expect(reload).toHaveBeenCalledWith("a");
+  });
+});
+
+describe("detached window shortcuts", () => {
+  it("opens find over its own page from the menu", async () => {
+    const find = vi.spyOn(ipc, "tabFind").mockResolvedValue({ current: 1, total: 2 });
+    render(<Popout tabId="a" />);
+    await waitFor(() => expect(menuEvent).toBeDefined());
+    act(() => menuEvent("find.open"));
+    const field = await screen.findByLabelText("Find in page");
+    fireEvent.change(field, { target: { value: "hello" } });
+    await waitFor(() => expect(find).toHaveBeenCalledWith("a", "hello", 1));
+  });
+
+  it("zooms and saves its own page from the menu", async () => {
+    const zoom = vi.spyOn(ipc, "tabZoom").mockResolvedValue(null);
+    const save = vi.spyOn(ipc, "pageSave").mockResolvedValue(null);
+    render(<Popout tabId="a" />);
+    await waitFor(() => expect(menuEvent).toBeDefined());
+    act(() => menuEvent("zoom.in"));
+    await waitFor(() => expect(zoom).toHaveBeenCalledWith("a", expect.any(Number)));
+    act(() => menuEvent("page.save"));
+    expect(save).toHaveBeenCalledWith("a");
   });
 });
 

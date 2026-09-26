@@ -6,13 +6,14 @@ import { useCoversContent } from "../lib/overlay";
 import { tabInThisWindow, useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
 
-/** Cmd+F bar: live count, Enter / Shift+Enter to step, Esc to close. */
-export function FindBar() {
-  const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
-  const sleeping = useBrowser((s) => {
-    const id = tabInThisWindow(s.activeTab, s.detached);
-    return id ? s.tabs.find((t) => t.id === id)?.state === "discarded" : false;
-  });
+/**
+ * Cmd+F bar: live count, Enter / Shift+Enter to step, Esc to close. A
+ * detached window names its tab; the main window searches its active one.
+ */
+export function FindBar({ tabId }: { tabId?: string }) {
+  const windowTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
+  const activeTab = tabId ?? windowTab;
+  const sleeping = useBrowser((s) => (activeTab ? s.tabs.find((t) => t.id === activeTab)?.state === "discarded" : false));
   const toggle = useBrowser((s) => s.toggle);
   // The page is a native view that paints above the chrome, so a panel over
   // it is invisible until the native mask is told where to let the chrome
