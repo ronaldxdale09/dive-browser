@@ -138,8 +138,11 @@ export function FindBar({ tabId }: { tabId?: string }) {
   return (
     // Floating: no ground of its own and no full-width strip, so it reads as
     // a panel over the page instead of another bar bolted under the toolbar.
-    <div data-native-overlay className="flex items-center">
-      <div className="surface-enter flex h-9 items-center gap-1 rounded-full border border-line-2 bg-surface/95 px-2 shadow-2xl backdrop-blur-xl">
+    <div className="flex items-center">
+      {/* The mark is on the pill, not its wrapper: the native mask takes the
+          marked element's rectangle and corner radius, and a square wrapper
+          showed the chrome's dark background in the corners around the pill. */}
+      <div data-native-overlay className="surface-enter flex h-9 items-center gap-1 rounded-full border border-line-2 bg-surface/95 px-2 shadow-2xl backdrop-blur-xl">
         <input
           ref={inputRef}
           aria-label="Find in page"

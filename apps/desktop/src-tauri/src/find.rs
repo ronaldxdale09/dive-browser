@@ -61,22 +61,51 @@ fn channel(tab: TabId) -> watch::Sender<Report> {
 #[cfg(feature = "cef")]
 pub fn attach(tab: TabId, view: &tauri::Webview<crate::Runtime>) {
     let reports = channel(tab);
+    let ordinal = std::sync::Mutex::new(None);
     let _ = view.with_webview(move |native| {
         native.set_find_handler(move |update: tauri_runtime_cef::FindUpdate| {
-            reports.send_replace(report_of(update));
+            let mut last = ordinal
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            reports.send_replace(report_of(
+                update.identifier,
+                update.count,
+                update.active_match_ordinal,
+                update.final_update,
+                &mut last,
+            ));
         });
     });
 }
 
-#[cfg(feature = "cef")]
-fn report_of(update: tauri_runtime_cef::FindUpdate) -> Report {
+/// One engine report as the bar reads it. Chromium names the highlighted
+/// match once, early in a search, and its later reports -- the final count
+/// among them -- say -1, "unchanged". Taken literally that turned "1 of 3"
+/// into "0 of 3" the moment counting finished, so the position a search last
+/// named is carried forward in `last` until the search names a new one.
+fn report_of(
+    identifier: i32,
+    count: i32,
+    active_match_ordinal: i32,
+    final_update: bool,
+    last: &mut Option<(i32, u32)>,
+) -> Report {
+    let current = match u32::try_from(active_match_ordinal) {
+        Ok(current) => {
+            *last = Some((identifier, current));
+            current
+        }
+        Err(_) => last
+            .filter(|(search, _)| *search == identifier)
+            .map_or(0, |(_, current)| current),
+    };
     Report {
-        identifier: update.identifier,
+        identifier,
         result: FindResult {
-            total: u32::try_from(update.count).unwrap_or(0),
-            current: u32::try_from(update.active_match_ordinal).unwrap_or(0),
+            total: u32::try_from(count).unwrap_or(0),
+            current,
         },
-        final_update: update.final_update,
+        final_update,
     }
 }
 
@@ -196,6 +225,24 @@ mod tests {
                 current: 1
             }
         );
+    }
+
+    #[test]
+    fn the_highlighted_match_survives_the_final_count() {
+        let mut last = None;
+        let early = report_of(7, 1, 1, false, &mut last);
+        assert_eq!(early.result.current, 1);
+        // The final report says -1: unchanged, not "no match".
+        let done = report_of(7, 3, -1, true, &mut last);
+        assert_eq!(
+            done.result,
+            FindResult {
+                total: 3,
+                current: 1
+            }
+        );
+        // A new search does not inherit the old position.
+        assert_eq!(report_of(8, 2, -1, true, &mut last).result.current, 0);
     }
 
     #[tokio::test]
