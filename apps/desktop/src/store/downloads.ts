@@ -9,6 +9,41 @@ export function downloadStatus(status: string): DownloadStatus {
   return status === "started" || status === "finished" || status === "cancelled" ? status : "failed";
 }
 
+/**
+ * Why a download failed, in words, from Chromium's interrupt reason. Empty
+ * when there is no reason, or none worth more than "Failed".
+ */
+export function downloadFailureReason(reason: string | null | undefined): string {
+  switch (reason) {
+    case "FILE_NO_SPACE":
+      return "Disk full";
+    case "FILE_ACCESS_DENIED":
+      return "No permission to save in that folder";
+    case "FILE_NAME_TOO_LONG":
+      return "File name too long";
+    case "FILE_TOO_LARGE":
+      return "Too large for that disk";
+    case "FILE_VIRUS_INFECTED":
+    case "FILE_BLOCKED":
+    case "FILE_SECURITY_CHECK_FAILED":
+      return "Blocked by a security check";
+    case "NETWORK_TIMEOUT":
+      return "Network timed out";
+    case "NETWORK_DISCONNECTED":
+      return "Network disconnected";
+    case "NETWORK_FAILED":
+    case "NETWORK_SERVER_DOWN":
+      return "Network error";
+    case "SERVER_UNAUTHORIZED":
+    case "SERVER_FORBIDDEN":
+      return "The server refused it";
+    default:
+      if (reason?.startsWith("SERVER_")) return "Server error";
+      if (reason?.startsWith("FILE_")) return "Could not write the file";
+      return "";
+  }
+}
+
 /** What a row says about a download's state. */
 export function downloadStatusLabel(status: DownloadStatus): string {
   switch (status) {
@@ -45,6 +80,10 @@ export interface Download {
   speed?: number;
   /** Whether it is paused. */
   paused?: boolean;
+  /** Why it failed, as Chromium named it. */
+  reason?: string | undefined;
+  /** It failed for want of a network and can pick up where it stopped. */
+  resumable?: boolean;
 }
 
 interface DownloadsState {
@@ -84,12 +123,19 @@ export function fold(items: Download[], notice: DownloadNotice, at = Date.now())
             ...(status === "finished" && d.total ? { received: d.total } : {}),
             tabId: notice.tab ?? d.tabId ?? null,
             ...(status === "started" ? {} : { speed: 0, paused: false }),
+            ...(notice.id == null ? {} : { id: notice.id }),
+            ...(status === "failed" && notice.reason ? { reason: notice.reason } : {}),
+            ...(status === "failed" ? { resumable: notice.resumable === true } : {}),
           }
         : d,
     );
   }
   const name = fileNameOr(notice.path, notice.url);
-  return [{ url: notice.url, path: notice.path, name, status, at, startedAt: at, tabId: notice.tab }, ...items].slice(0, CAP);
+  const row: Download = { url: notice.url, path: notice.path, name, status, at, startedAt: at, tabId: notice.tab };
+  if (notice.id != null) row.id = notice.id;
+  if (status === "failed" && notice.reason) row.reason = notice.reason;
+  if (status === "failed" && notice.resumable) row.resumable = true;
+  return [row, ...items].slice(0, CAP);
 }
 
 /**
@@ -120,6 +166,8 @@ export function foldProgress(items: Download[], update: DownloadProgress, at = D
     i === idx
       ? {
           ...d,
+          // A resumed download is running again: its failure is behind it.
+          ...(d.status === "failed" && d.resumable && !update.interrupted ? { status: "started" as const, reason: undefined, resumable: false } : {}),
           // `at` is deliberately not touched: it marks the last change of
           // state, and a row that ticks it every quarter second would reset
           // its own "just now" forever and re-key itself out of the DOM.

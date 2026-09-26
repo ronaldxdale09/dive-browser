@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fold, foldProgress, selectActiveInWindow } from "./downloads";
+import { downloadFailureReason, fold, foldProgress, selectActiveInWindow } from "./downloads";
 
 const started = { tab: null, url: "https://cdn.example.com/report.pdf", path: "/dl/report.pdf", status: "started" };
 
@@ -10,6 +10,30 @@ describe("downloads fold", () => {
     const done = fold(one, { ...started, status: "finished" }, 2000);
     expect(done).toHaveLength(1);
     expect(done[0]).toMatchObject({ status: "finished", at: 2000 });
+  });
+
+  it("keeps why a download failed, and whether it can pick up again", () => {
+    const one = fold([], started, 1000);
+    const full = fold(one, { ...started, status: "failed", reason: "FILE_NO_SPACE", id: 4 }, 2000);
+    expect(full[0]).toMatchObject({ status: "failed", reason: "FILE_NO_SPACE", resumable: false, id: 4 });
+    expect(downloadFailureReason(full[0]?.reason)).toBe("Disk full");
+    const dropped = fold(one, { ...started, status: "failed", reason: "NETWORK_FAILED", id: 4, resumable: true }, 2000);
+    expect(dropped[0]).toMatchObject({ status: "failed", resumable: true });
+    // Resumed: progress without an interruption puts it back in flight.
+    const again = foldProgress(dropped, { id: 4, url: started.url, path: started.path, received: 10, total: 100, speed: 5, paused: false }, 3000);
+    expect(again[0]).toMatchObject({ status: "started", resumable: false });
+    expect(again[0]?.reason).toBeUndefined();
+    // A report of the interruption itself does not.
+    const still = foldProgress(dropped, { id: 4, url: started.url, path: started.path, received: 10, total: 100, speed: 0, paused: false, interrupted: "NETWORK_FAILED" }, 3000);
+    expect(still[0]).toMatchObject({ status: "failed" });
+  });
+
+  it("names the common failures and says nothing it does not know", () => {
+    expect(downloadFailureReason("FILE_ACCESS_DENIED")).toBe("No permission to save in that folder");
+    expect(downloadFailureReason("NETWORK_DISCONNECTED")).toBe("Network disconnected");
+    expect(downloadFailureReason("SERVER_BAD_CONTENT")).toBe("Server error");
+    expect(downloadFailureReason(null)).toBe("");
+    expect(downloadFailureReason("SOMETHING_NEW")).toBe("");
   });
 
   it("matches a failure by URL when the engine has no path for it", () => {

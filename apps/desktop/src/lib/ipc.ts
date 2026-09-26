@@ -214,6 +214,8 @@ export const ipc = {
   downloadsOpen: async (path: string) => unwrap(await commands.downloadsOpen(path)),
   /** Stop a download still in flight; `id` comes from its progress reports. */
   downloadsCancel: async (id: number) => unwrap(await commands.downloadsCancel(id)),
+  /** Pick up a download the network interrupted. */
+  downloadsResume: async (id: number) => unwrap(await commands.downloadsResume(id)),
   /** Forget this session's downloads, in the engine as well as the chrome. */
   downloadsClear: async () => unwrap(await commands.downloadsClear()),
   /** The downloads kept for this profile across restarts, newest first. */

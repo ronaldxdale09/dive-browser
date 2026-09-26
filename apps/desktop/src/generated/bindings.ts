@@ -856,12 +856,19 @@ export const commands = {
 	/**
 	 *  Stop a download that is still going.
 	 *
-	 *  `id` is CEF's, reported with each progress update. The request is queued
-	 *  and applied on the download's next update, which for an active download is
-	 *  within a quarter of a second; one that has already finished never sees it,
-	 *  which is the right answer for a cancel that lost the race.
+	 *  `id` is CEF's, reported with each progress update. The engine's handle on
+	 *  the download is kept between updates, so the cancel applies at once --
+	 *  an interrupted download, which gets no more updates, included. One that
+	 *  has already finished never sees it, which is the right answer for a
+	 *  cancel that lost the race.
 	 */
 	downloadsCancel: (id: number) => typedError<null, AppError>(__TAURI_INVOKE("downloads_cancel", { id })),
+	/**
+	 *  Pick up a download the network interrupted, where it stopped. `id` is the
+	 *  one its failure notice carried. A download that failed for any other
+	 *  reason would only fail again, and the chrome does not offer it.
+	 */
+	downloadsResume: (id: number) => typedError<null, AppError>(__TAURI_INVOKE("downloads_resume", { id })),
 	/**
 	 *  Forget the downloads this session has seen.
 	 *
@@ -1031,8 +1038,8 @@ export const events = {
 	credentialPrompt: makeEvent<CredentialPrompt>("credential-prompt"),
 	devServersChanged: makeEvent<DevServersChanged>("dev-servers-changed"),
 	deviceEmulated: makeEvent<DeviceEmulated>("device-emulated"),
-	downloadNotice: makeEvent<DownloadNotice>("download-notice"),
-	downloadProgress: makeEvent<DownloadProgress>("download-progress"),
+	downloadNotice: makeEvent<DownloadNotice_Deserialize>("download-notice"),
+	downloadProgress: makeEvent<DownloadProgress_Deserialize>("download-progress"),
 	externalLinkAsked: makeEvent<ExternalLinkAsked>("external-link-asked"),
 	externalLinkClosed: makeEvent<ExternalLinkClosed>("external-link-closed"),
 	httpAuthAsked: makeEvent<HttpAuthAsked>("http-auth-asked"),
@@ -1719,7 +1726,10 @@ export type DeviceEmulated = {
 };
 
 /**  A download started or finished; shown as a toast. */
-export type DownloadNotice = {
+export type DownloadNotice = DownloadNotice_Serialize | DownloadNotice_Deserialize;
+
+/**  A download started or finished; shown as a toast. */
+export type DownloadNotice_Deserialize = {
 	/**  The tab the download came from, when a page asked for it. */
 	tab: TabId | null,
 	/**  Source URL. */
@@ -1728,6 +1738,36 @@ export type DownloadNotice = {
 	path: string,
 	/**  `started` | `finished` | `failed` | `cancelled`. */
 	status: string,
+	/**
+	 *  Why a download failed, when the engine said: Chromium's reason, such
+	 *  as `FILE_NO_SPACE`, `FILE_ACCESS_DENIED` or `NETWORK_FAILED`.
+	 */
+	reason?: string | null,
+	/**  The engine's id for the download, when known; resuming needs it. */
+	id?: number | null,
+	/**  The network dropped, and the download can pick up where it stopped. */
+	resumable?: boolean,
+};
+
+/**  A download started or finished; shown as a toast. */
+export type DownloadNotice_Serialize = {
+	/**  The tab the download came from, when a page asked for it. */
+	tab: TabId | null,
+	/**  Source URL. */
+	url: string,
+	/**  Where the file is (or will be) written. */
+	path: string,
+	/**  `started` | `finished` | `failed` | `cancelled`. */
+	status: string,
+	/**
+	 *  Why a download failed, when the engine said: Chromium's reason, such
+	 *  as `FILE_NO_SPACE`, `FILE_ACCESS_DENIED` or `NETWORK_FAILED`.
+	 */
+	reason?: string | null,
+	/**  The engine's id for the download, when known; resuming needs it. */
+	id?: number | null,
+	/**  The network dropped, and the download can pick up where it stopped. */
+	resumable?: boolean,
 };
 
 /**
@@ -1737,7 +1777,16 @@ export type DownloadNotice = {
  *  ended. This is the one the progress bar reads, and it arrives about four
  *  times a second per download.
  */
-export type DownloadProgress = {
+export type DownloadProgress = DownloadProgress_Serialize | DownloadProgress_Deserialize;
+
+/**
+ *  How far a download has got, while it is still going.
+ *
+ *  Separate from [`DownloadNotice`], which says only that something started or
+ *  ended. This is the one the progress bar reads, and it arrives about four
+ *  times a second per download.
+ */
+export type DownloadProgress_Deserialize = {
 	/**  CEF's id, and the handle for cancelling. */
 	id: number,
 	/**  Source URL, for matching against a row that has no path yet. */
@@ -1755,6 +1804,37 @@ export type DownloadProgress = {
 	speed: number | null,
 	/**  Whether it is paused. */
 	paused: boolean,
+	/**  Set when the engine interrupted it, with Chromium's reason. */
+	interrupted?: string | null,
+};
+
+/**
+ *  How far a download has got, while it is still going.
+ *
+ *  Separate from [`DownloadNotice`], which says only that something started or
+ *  ended. This is the one the progress bar reads, and it arrives about four
+ *  times a second per download.
+ */
+export type DownloadProgress_Serialize = {
+	/**  CEF's id, and the handle for cancelling. */
+	id: number,
+	/**  Source URL, for matching against a row that has no path yet. */
+	url: string,
+	/**  Destination, once CEF has decided on one. */
+	path: string,
+	/**
+	 *  Bytes written so far. A float because that is what JavaScript has, and
+	 *  it counts whole bytes exactly far past any file anyone will download.
+	 */
+	received: number | null,
+	/**  Total size when the server declared one. A chunked response has none. */
+	total: number | null,
+	/**  Bytes per second. */
+	speed: number | null,
+	/**  Whether it is paused. */
+	paused: boolean,
+	/**  Set when the engine interrupted it, with Chromium's reason. */
+	interrupted?: string | null,
 };
 
 /**  One download, as the Library lists it. */

@@ -683,10 +683,11 @@ pub(crate) fn open_with_shell(target: &std::ffi::OsStr, what: &str) -> AppResult
 
 /// Stop a download that is still going.
 ///
-/// `id` is CEF's, reported with each progress update. The request is queued
-/// and applied on the download's next update, which for an active download is
-/// within a quarter of a second; one that has already finished never sees it,
-/// which is the right answer for a cancel that lost the race.
+/// `id` is CEF's, reported with each progress update. The engine's handle on
+/// the download is kept between updates, so the cancel applies at once --
+/// an interrupted download, which gets no more updates, included. One that
+/// has already finished never sees it, which is the right answer for a
+/// cancel that lost the race.
 #[tauri::command]
 #[specta::specta]
 #[allow(clippy::unnecessary_wraps)] // The chrome's ipc layer unwraps a Result for every command.
@@ -694,6 +695,20 @@ pub(crate) fn downloads_cancel(state: State<'_, AppState>, id: u32) -> AppResult
     state.downloads.mark_cancelled(id);
     #[cfg(feature = "cef")]
     tauri_runtime_cef::downloads::control(id, tauri_runtime_cef::DownloadControl::Cancel);
+    #[cfg(not(feature = "cef"))]
+    let _ = id;
+    Ok(())
+}
+
+/// Pick up a download the network interrupted, where it stopped. `id` is the
+/// one its failure notice carried. A download that failed for any other
+/// reason would only fail again, and the chrome does not offer it.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::unnecessary_wraps)] // The chrome's ipc layer unwraps a Result for every command.
+pub(crate) fn downloads_resume(id: u32) -> AppResult<()> {
+    #[cfg(feature = "cef")]
+    tauri_runtime_cef::downloads::control(id, tauri_runtime_cef::DownloadControl::Resume);
     #[cfg(not(feature = "cef"))]
     let _ = id;
     Ok(())
@@ -1031,6 +1046,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             downloads_reveal,
             downloads_open,
             downloads_cancel,
+            downloads_resume,
             downloads_clear,
             tab_focus,
             mcp_token,

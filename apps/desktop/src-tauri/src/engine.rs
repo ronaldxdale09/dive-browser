@@ -111,7 +111,7 @@ fn bind_detached_new_tab_shortcuts(
 }
 
 /// A download started or finished; shown as a toast.
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type, Event)]
 pub struct DownloadNotice {
     /// The tab the download came from, when a page asked for it.
     pub tab: Option<TabId>,
@@ -121,6 +121,19 @@ pub struct DownloadNotice {
     pub path: String,
     /// `started` | `finished` | `failed` | `cancelled`.
     pub status: String,
+    /// Why a download failed, when the engine said: Chromium's reason, such
+    /// as `FILE_NO_SPACE`, `FILE_ACCESS_DENIED` or `NETWORK_FAILED`.
+    #[specta(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The engine's id for the download, when known; resuming needs it.
+    #[specta(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<u32>,
+    /// The network dropped, and the download can pick up where it stopped.
+    #[specta(optional)]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resumable: bool,
 }
 
 /// How far a download has got, while it is still going.
@@ -145,6 +158,10 @@ pub struct DownloadProgress {
     pub speed: f64,
     /// Whether it is paused.
     pub paused: bool,
+    /// Set when the engine interrupted it, with Chromium's reason.
+    #[specta(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interrupted: Option<String>,
 }
 
 /// How far the update download has got.
@@ -170,9 +187,14 @@ pub struct UpdateProgress {
 pub fn watch_download_progress(app: &AppHandle<Runtime>) {
     let app = app.clone();
     tauri_runtime_cef::downloads::on_download_progress(move |p| {
-        app.state::<AppState>()
-            .downloads
-            .track(p.id, &p.url, &p.path);
+        let state = app.state::<AppState>();
+        let downloads = &state.downloads;
+        downloads.track(p.id, &p.url, &p.path);
+        // Reported before the engine's finish, which names only the address
+        // and path: this is where the finish learns why it failed.
+        if let Some(reason) = &p.interrupted {
+            downloads.interrupted(p.id, reason);
+        }
         #[allow(clippy::cast_precision_loss)] // exact to 2^53 bytes; files are smaller.
         let _ = DownloadProgress {
             id: p.id,
@@ -182,6 +204,7 @@ pub fn watch_download_progress(app: &AppHandle<Runtime>) {
             total: p.total.map(|t| t as f64),
             speed: p.speed as f64,
             paused: p.paused,
+            interrupted: p.interrupted,
         }
         .emit(&app);
     });
@@ -250,6 +273,7 @@ fn handle_download(
                         url: url.to_string(),
                         path: String::new(),
                         status: "failed".into(),
+                        ..DownloadNotice::default()
                     }
                     .emit(app);
                     return false;
@@ -258,11 +282,14 @@ fn handle_download(
             if let Some((tab, nonce)) = source {
                 state.activity.download(tab, nonce, url.as_str(), true);
             }
+            let path = destination.to_string_lossy().into_owned();
+            state.downloads.placeholder(url.as_str(), &path);
             DownloadNotice {
                 tab: source.map(|(tab, _)| tab),
                 url: url.to_string(),
-                path: destination.to_string_lossy().into_owned(),
+                path,
                 status: "started".into(),
+                ..DownloadNotice::default()
             }
         }
         DownloadEvent::Finished { url, path, success } => {
@@ -274,8 +301,17 @@ fn handle_download(
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default();
             // Asked for, not gone wrong: a download the person cancelled says
-            // so rather than claiming it failed.
-            let cancelled = !success && state.downloads.take_cancelled(url.as_str(), &path);
+            // so rather than claiming it failed, and one the engine interrupted
+            // says why.
+            let ended = state.downloads.end(url.as_str(), &path);
+            let cancelled = !success && ended.cancelled;
+            // The empty file that held the name is only worth keeping under
+            // a finished download, which wrote over it.
+            let placeholder = state.downloads.take_placeholder(url.as_str(), &path);
+            if !success && let Some(placeholder) = placeholder {
+                remove_placeholder(placeholder);
+            }
+            let reason = (!success && !cancelled).then_some(ended.reason).flatten();
             DownloadNotice {
                 tab: source.map(|(tab, _)| tab),
                 url: url.to_string(),
@@ -288,6 +324,9 @@ fn handle_download(
                     "failed"
                 }
                 .into(),
+                resumable: reason.as_deref().is_some_and(download_resumable),
+                id: ended.id,
+                reason,
             }
         }
         _ => return true,
@@ -296,6 +335,30 @@ fn handle_download(
     persist_download(app, &notice);
     let _ = notice.emit(app);
     true
+}
+
+/// Whether a download that stopped for `reason` can pick up where it left
+/// off: only when the network went away. A full disk or a refused file would
+/// fail the same way again.
+fn download_resumable(reason: &str) -> bool {
+    #[cfg(feature = "cef")]
+    return tauri_runtime_cef::downloads::resumable(reason);
+    #[cfg(not(feature = "cef"))]
+    reason.starts_with("NETWORK_")
+}
+
+/// Delete the empty file [`unique_path`] made to hold a download's name,
+/// once that download failed or was cancelled. Only while it is still
+/// empty: anything with bytes in it is not ours to throw away. Off the
+/// engine's thread, since it touches the disk.
+fn remove_placeholder(path: PathBuf) {
+    tauri::async_runtime::spawn_blocking(move || {
+        if std::fs::metadata(&path).is_ok_and(|meta| meta.is_file() && meta.len() == 0)
+            && let Err(error) = std::fs::remove_file(&path)
+        {
+            tracing::debug!(%error, path = %path.display(), "could not remove a download's placeholder");
+        }
+    });
 }
 
 /// Keep a download in the profile's list, so the Library still shows it

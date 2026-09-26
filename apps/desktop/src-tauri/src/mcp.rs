@@ -3285,6 +3285,7 @@ impl Browser for AppBrowser {
                 url: String::new(),
                 path: path.to_string_lossy().into_owned(),
                 status: "finished".into(),
+                ..crate::engine::DownloadNotice::default()
             });
         Ok(json!({"path": path.to_string_lossy(), "bytes": bytes.len()}))
     }

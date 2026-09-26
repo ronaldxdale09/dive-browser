@@ -4,7 +4,7 @@ import { ipc, events } from "../lib/ipc";
 import { listenConsole, useConsole, usesNativeConsoleBatch } from "./console";
 import { listenNetwork, useNetwork } from "./network";
 import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
-import { useDownloads } from "./downloads";
+import { downloadFailureReason, useDownloads } from "./downloads";
 import { useLayout } from "./layout";
 import { canGoBack } from "../lib/useTabHistory";
 import type { CrashReason, DownloadNotice, CoreEvent, Decision, Duration, NavigationHistory, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
@@ -863,7 +863,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
               : { label: showInFileManagerLabel(), run: () => void ipc.downloadsReveal(d.path).catch((err: unknown) => set({ error: errorMessage(err) })) }
             : undefined;
           get().notify(
-            d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : d.status === "cancelled" ? `Download cancelled: ${name}` : `Download failed: ${name}`,
+            d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : d.status === "cancelled" ? `Download cancelled: ${name}` : downloadFailureReason(d.reason) ? `Download failed: ${name} (${downloadFailureReason(d.reason)})` : `Download failed: ${name}`,
             show ? 8000 : 5000,
             show,
           );

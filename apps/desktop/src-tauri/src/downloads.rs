@@ -56,6 +56,25 @@ pub struct Registry {
     /// the way it reports a failed one; without this a person who pressed
     /// Cancel was told the download had failed.
     cancelled: Mutex<std::collections::HashSet<u32>>,
+    /// Why the engine interrupted a download, by id, until its finish is
+    /// reported: `FILE_NO_SPACE`, `NETWORK_FAILED` and the like.
+    interrupted: Mutex<std::collections::HashMap<u32, String>>,
+    /// The empty files made to hold each download's name, by address, until
+    /// the download ends. One that failed or was cancelled leaves its
+    /// placeholder behind otherwise: a 0-byte file under the name of
+    /// something that never arrived.
+    placeholders: Mutex<Vec<(String, String)>>,
+}
+
+/// How a download ended, as far as this registry knows.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Ended {
+    /// The engine's id, when progress had named it.
+    pub id: Option<u32>,
+    /// The person asked for it to stop.
+    pub cancelled: bool,
+    /// Why the engine interrupted it, when it did.
+    pub reason: Option<String>,
 }
 
 impl Registry {
@@ -102,10 +121,16 @@ impl Registry {
         lock(&self.cancelled).insert(id);
     }
 
-    /// Whether the download that just ended at `path` (or, with no path yet,
-    /// from `url`) was one the person cancelled. Forgets it either way: it is
-    /// over, and ids are the engine's to reuse.
-    pub fn take_cancelled(&self, url: &str, path: &str) -> bool {
+    /// The engine interrupted download `id`, for `reason`.
+    pub fn interrupted(&self, id: u32, reason: &str) {
+        lock(&self.interrupted).insert(id, reason.to_owned());
+    }
+
+    /// The download that just ended at `path` (or, with no path yet, from
+    /// `url`): its id, whether the person cancelled it, and why the engine
+    /// interrupted it. Forgets all of it: it is over, and ids are the
+    /// engine's to reuse.
+    pub fn end(&self, url: &str, path: &str) -> Ended {
         let mut live = lock(&self.live);
         let ended: Vec<u32> = live
             .iter()
@@ -113,12 +138,38 @@ impl Registry {
             .map(|(id, _)| *id)
             .collect();
         let mut cancelled = lock(&self.cancelled);
-        let mut was = false;
+        let mut interrupted = lock(&self.interrupted);
+        let mut out = Ended::default();
         for id in ended {
             live.remove(&id);
-            was |= cancelled.remove(&id);
+            out.id = Some(id);
+            out.cancelled |= cancelled.remove(&id);
+            if let Some(reason) = interrupted.remove(&id) {
+                out.reason = Some(reason);
+            }
         }
-        was
+        out
+    }
+
+    /// Note the empty file made to hold a download's name at `path`.
+    pub fn placeholder(&self, url: &str, path: &str) {
+        let mut placeholders = lock(&self.placeholders);
+        placeholders.push((url.to_owned(), path.to_owned()));
+        // Bounded: a download whose finish never comes must not grow this.
+        let excess = placeholders.len().saturating_sub(KEEP);
+        placeholders.drain(..excess);
+    }
+
+    /// The placeholder belonging to a download that just ended, matched on
+    /// its path when the engine gave one and on its address otherwise.
+    pub fn take_placeholder(&self, url: &str, path: &str) -> Option<std::path::PathBuf> {
+        let mut placeholders = lock(&self.placeholders);
+        let index = placeholders
+            .iter()
+            .position(|(_, p)| !path.is_empty() && p == path)
+            .or_else(|| placeholders.iter().position(|(u, _)| u == url))?;
+        let (_, path) = placeholders.remove(index);
+        Some(std::path::PathBuf::from(path))
     }
 
     /// Forget everything. The chrome's list and this one are the same list as
@@ -150,6 +201,7 @@ mod tests {
             url: format!("https://example.com/{path}"),
             path: path.to_owned(),
             status: status.to_owned(),
+            ..DownloadNotice::default()
         }
     }
 
@@ -223,15 +275,62 @@ mod tests {
         registry.track(3, "https://a.test/f.zip", "/tmp/f.zip");
         registry.track(4, "https://a.test/g.zip", "/tmp/g.zip");
         registry.mark_cancelled(3);
-        assert!(registry.take_cancelled("https://a.test/f.zip", "/tmp/f.zip"));
+        assert!(registry.end("https://a.test/f.zip", "/tmp/f.zip").cancelled);
         // Spent once it has been reported.
-        assert!(!registry.take_cancelled("https://a.test/f.zip", "/tmp/f.zip"));
+        assert!(!registry.end("https://a.test/f.zip", "/tmp/f.zip").cancelled);
         // The other download failed on its own.
-        assert!(!registry.take_cancelled("https://a.test/g.zip", "/tmp/g.zip"));
+        assert!(!registry.end("https://a.test/g.zip", "/tmp/g.zip").cancelled);
         // A download with no destination yet is matched by its address.
         registry.track(5, "https://a.test/h", "");
         registry.mark_cancelled(5);
-        assert!(registry.take_cancelled("https://a.test/h", ""));
+        assert!(registry.end("https://a.test/h", "").cancelled);
+    }
+
+    #[test]
+    fn an_interrupted_download_says_why_and_which_it_was() {
+        let registry = Registry::default();
+        registry.track(8, "https://a.test/big.iso", "/tmp/big.iso");
+        registry.interrupted(8, "FILE_NO_SPACE");
+        assert_eq!(
+            registry.end("https://a.test/big.iso", "/tmp/big.iso"),
+            Ended {
+                id: Some(8),
+                cancelled: false,
+                reason: Some("FILE_NO_SPACE".into()),
+            }
+        );
+        // Told once: a later finish for the same file starts clean.
+        assert_eq!(
+            registry.end("https://a.test/big.iso", "/tmp/big.iso"),
+            Ended::default()
+        );
+    }
+
+    #[test]
+    fn a_placeholder_is_found_by_its_path_or_else_its_address() {
+        let registry = Registry::default();
+        registry.placeholder("https://a.test/f.zip", "/tmp/f.zip");
+        registry.placeholder("https://a.test/f.zip", "/tmp/f (1).zip");
+        assert_eq!(
+            registry.take_placeholder("https://a.test/f.zip", "/tmp/f (1).zip"),
+            Some(std::path::PathBuf::from("/tmp/f (1).zip"))
+        );
+        // A cancel reported before the engine settled on a path.
+        assert_eq!(
+            registry.take_placeholder("https://a.test/f.zip", ""),
+            Some(std::path::PathBuf::from("/tmp/f.zip"))
+        );
+        assert_eq!(registry.take_placeholder("https://a.test/f.zip", ""), None);
+    }
+
+    #[test]
+    fn placeholders_of_downloads_that_never_end_do_not_pile_up() {
+        let registry = Registry::default();
+        for i in 0..(KEEP + 20) {
+            registry.placeholder(&format!("https://a.test/{i}"), &format!("/tmp/{i}"));
+        }
+        assert_eq!(lock(&registry.placeholders).len(), KEEP);
+        assert_eq!(registry.take_placeholder("https://a.test/0", ""), None);
     }
 
     #[test]

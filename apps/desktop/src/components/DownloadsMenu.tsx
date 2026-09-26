@@ -1,10 +1,10 @@
 import { useDismiss } from "../lib/useDismiss";
-import { Download, FolderOpen, Trash2, X } from "lucide-react";
+import { Download, FolderOpen, RotateCw, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ipc } from "../lib/ipc";
 import { useShallow } from "zustand/react/shallow";
 import { useBrowser } from "../store/browser";
-import { downloadStatusLabel, selectActiveInWindow, useDownloads } from "../store/downloads";
+import { downloadFailureReason, downloadStatusLabel, selectActiveInWindow, useDownloads } from "../store/downloads";
 import type { Download as Item } from "../store/downloads";
 import { usePrefs } from "../store/prefs";
 import { EmptyState } from "./EmptyState";
@@ -79,6 +79,9 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
   const cancel = (id: number) => {
     void ipc.downloadsCancel(id).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
   };
+  const resume = (id: number) => {
+    void ipc.downloadsResume(id).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+  };
 
   return (
     <div ref={ref} className="relative">
@@ -112,6 +115,7 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
                   onReveal={() => reveal(d.path)}
                   onOpen={() => openFile(d.path)}
                   onCancel={d.id === undefined ? undefined : () => cancel(d.id as number)}
+                  onResume={d.id === undefined || !d.resumable ? undefined : () => resume(d.id as number)}
                 />
               ))}
             </ul>
@@ -133,7 +137,7 @@ export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
   );
 }
 
-function Row({ item, onReveal, onOpen, onCancel }: { item: Item; onReveal: () => void; onOpen: () => void; onCancel?: (() => void) | undefined }) {
+function Row({ item, onReveal, onOpen, onCancel, onResume }: { item: Item; onReveal: () => void; onOpen: () => void; onCancel?: (() => void) | undefined; onResume?: (() => void) | undefined }) {
   let host = "";
   try {
     host = new URL(item.url).host;
@@ -190,7 +194,9 @@ function Row({ item, onReveal, onOpen, onCancel }: { item: Item; onReveal: () =>
               : `${pct === null ? formatBytes(received) : `${pct}%`}${total ? ` of ${formatBytes(total)}` : ""}${item.speed ? ` · ${formatBytes(item.speed)}/s` : ""}`
             : item.status === "finished"
               ? `Saved${total ? ` · ${formatBytes(total)}` : ""}`
-              : downloadStatusLabel(item.status)}
+              : item.status === "failed" && downloadFailureReason(item.reason)
+                ? `Failed · ${downloadFailureReason(item.reason)}`
+                : downloadStatusLabel(item.status)}
           {host && ` · ${host}`} · {ago(item.at)}
         </span>
       </span>
@@ -203,6 +209,18 @@ function Row({ item, onReveal, onOpen, onCancel }: { item: Item; onReveal: () =>
           className="grid size-6 shrink-0 place-items-center rounded-full border border-line text-ink-3 opacity-0 hover:bg-surface-3 hover:text-ink focus:opacity-100 group-hover:opacity-100"
         >
           <Icon icon={X} size={11} />
+        </button>
+      )}
+      {item.status === "failed" && onResume && (
+        // Only a download the network interrupted: it picks up where it
+        // stopped. Any other failure would only happen again.
+        <button
+          type="button"
+          onClick={onResume}
+          aria-label={`Resume ${item.name}`}
+          className="flex h-6 shrink-0 items-center gap-1 rounded-full border border-line px-2 text-[10.5px] text-ink-2 hover:bg-surface-3 hover:text-ink"
+        >
+          <Icon icon={RotateCw} size={10} /> Resume
         </button>
       )}
       {item.status === "finished" && item.path && (
