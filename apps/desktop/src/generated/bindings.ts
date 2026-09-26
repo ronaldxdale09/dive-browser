@@ -67,6 +67,11 @@ export const commands = {
 	last_opened_at: string | null,
 	/**  Last windowed frame as JSON (`{"x","y","width","height"}`), or empty. */
 	bounds: string,
+	/**
+	 *  The workspace the app was installed from, whose container it opens
+	 *  in; absent for apps installed before Dive remembered it.
+	 */
+	workspace_id?: WorkspaceId | null,
 } | null, AppError>(__TAURI_INVOKE("webapp_for_tab", { id })),
 	/**  The installed app an app window is showing, by manifest id. */
 	webappForWindow: (appId: string) => typedError<{
@@ -96,6 +101,11 @@ export const commands = {
 	last_opened_at: string | null,
 	/**  Last windowed frame as JSON (`{"x","y","width","height"}`), or empty. */
 	bounds: string,
+	/**
+	 *  The workspace the app was installed from, whose container it opens
+	 *  in; absent for apps installed before Dive remembered it.
+	 */
+	workspace_id?: WorkspaceId | null,
 } | null, AppError>(__TAURI_INVOKE("webapp_for_window", { appId })),
 	/**
 	 *  An installed app's icon as a `data:` URL, the way bookmarks carry their
@@ -3052,6 +3062,11 @@ export type WebApp = {
 	last_opened_at: string | null,
 	/**  Last windowed frame as JSON (`{"x","y","width","height"}`), or empty. */
 	bounds: string,
+	/**
+	 *  The workspace the app was installed from, whose container it opens
+	 *  in; absent for apps installed before Dive remembered it.
+	 */
+	workspace_id?: WorkspaceId | null,
 };
 
 /**  What the page's manifest says, once checked against the install rules. */

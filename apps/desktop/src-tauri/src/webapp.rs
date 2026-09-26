@@ -295,6 +295,12 @@ pub(crate) async fn webapp_install(
     let icon_path = write_icon(&dir, &png)?;
 
     let existing = lock(&state.store).web_app(&app_id)?;
+    // The app opens where it was installed from: that workspace's container
+    // holds the cookies and logins the page was using.
+    let workspace_id = lock(&state.store)
+        .tab(id)
+        .ok()
+        .and_then(|tab| tab.workspace_id);
     let record = WebApp {
         id: app_id,
         name: field(probe.name, "name")?,
@@ -314,6 +320,7 @@ pub(crate) async fn webapp_install(
             .as_ref()
             .map(|e| e.bounds.clone())
             .unwrap_or_default(),
+        workspace_id,
     };
     lock(&state.store).add_web_app(&record)?;
 
@@ -341,7 +348,9 @@ pub(crate) async fn webapp_install(
 }
 
 /// Open an installed app: raise its window if it has one, otherwise open its
-/// start URL in the active workspace and tear that tab into an app window.
+/// start URL in the workspace it was installed from and tear that tab into an
+/// app window. An app from before Dive remembered that, or whose workspace
+/// has since been deleted, opens in the active workspace.
 pub(crate) fn open_by_id(
     main: &MainThread,
     app: &AppHandle<Runtime>,
@@ -360,7 +369,11 @@ pub(crate) fn open_by_id(
         }
         return Ok(tab);
     }
-    let workspace = (*lock(&state.active_workspace))
+    let installed_in = record
+        .workspace_id
+        .filter(|workspace| lock(&state.store).workspace(*workspace).is_ok());
+    let workspace = installed_in
+        .or(*lock(&state.active_workspace))
         .ok_or_else(|| AppError::new("no active workspace to open the app in"))?;
     let tab = open_tab(main, app, state, workspace, &record.start_url)?;
     detach_tab(main, app, state, tab.id, None, Some(&spec_for(&record)))?;
@@ -789,6 +802,7 @@ mod launcher {
                 created_at: String::new(),
                 last_opened_at: None,
                 bounds: String::new(),
+                workspace_id: None,
             }
         }
 

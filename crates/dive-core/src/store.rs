@@ -208,6 +208,11 @@ const MIGRATIONS: &[&str] = &[
         updated_at TEXT NOT NULL
     );
     CREATE INDEX agent_threads_updated ON agent_threads(updated_at);",
+    // v16: the workspace an app was installed from, so it opens with that
+    // workspace's container -- its cookies and logins -- rather than
+    // whichever workspace happens to be active. Empty for apps installed
+    // before this, which keep opening in the active workspace.
+    "ALTER TABLE web_apps ADD COLUMN workspace_id TEXT;",
 ];
 
 /// Setting that names the active workspace; the store reads it to know
@@ -301,6 +306,11 @@ fn web_app_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WebApp> {
         created_at: row.get(10)?,
         last_opened_at: row.get(11)?,
         bounds: row.get(12)?,
+        // A value that no longer parses is an app with no workspace of its
+        // own, which opens in the active one like an app from before v16.
+        workspace_id: row
+            .get::<_, Option<String>>(13)?
+            .and_then(|id| id.parse().ok()),
     })
 }
 
@@ -333,6 +343,10 @@ pub struct WebApp {
     pub last_opened_at: Option<String>,
     /// Last windowed frame as JSON (`{"x","y","width","height"}`), or empty.
     pub bounds: String,
+    /// The workspace the app was installed from, whose container it opens
+    /// in; absent for apps installed before Dive remembered it.
+    #[specta(optional)]
+    pub workspace_id: Option<WorkspaceId>,
 }
 
 /// A saved login for one site in one profile. The password itself lives in
@@ -1481,13 +1495,15 @@ impl Store {
     pub fn add_web_app(&self, app: &WebApp) -> Result<()> {
         self.conn.execute(
             "INSERT INTO web_apps (profile_id, id, name, short_name, start_url, scope, display,
-                theme_color, background_color, icon_path, manifest_url, created_at, last_opened_at, bounds)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                theme_color, background_color, icon_path, manifest_url, created_at, last_opened_at, bounds,
+                workspace_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
              ON CONFLICT(profile_id, id) DO UPDATE SET
                 name = excluded.name, short_name = excluded.short_name,
                 start_url = excluded.start_url, scope = excluded.scope, display = excluded.display,
                 theme_color = excluded.theme_color, background_color = excluded.background_color,
-                icon_path = excluded.icon_path, manifest_url = excluded.manifest_url",
+                icon_path = excluded.icon_path, manifest_url = excluded.manifest_url,
+                workspace_id = COALESCE(excluded.workspace_id, web_apps.workspace_id)",
             params![
                 self.scope()?,
                 app.id,
@@ -1503,6 +1519,7 @@ impl Store {
                 app.created_at,
                 app.last_opened_at,
                 app.bounds,
+                app.workspace_id.map(|id| id.to_string()),
             ],
         )?;
         Ok(())
@@ -1512,7 +1529,7 @@ impl Store {
     pub fn list_web_apps(&self) -> Result<Vec<WebApp>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, name, short_name, start_url, scope, display, theme_color, background_color,
-                    icon_path, manifest_url, created_at, last_opened_at, bounds
+                    icon_path, manifest_url, created_at, last_opened_at, bounds, workspace_id
              FROM web_apps WHERE profile_id = ?1
              ORDER BY COALESCE(last_opened_at, created_at) DESC, name",
         )?;
@@ -1525,7 +1542,7 @@ impl Store {
     pub fn web_app(&self, id: &str) -> Result<Option<WebApp>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, name, short_name, start_url, scope, display, theme_color, background_color,
-                    icon_path, manifest_url, created_at, last_opened_at, bounds
+                    icon_path, manifest_url, created_at, last_opened_at, bounds, workspace_id
              FROM web_apps WHERE profile_id = ?1 AND id = ?2",
         )?;
         let mut rows = stmt.query_map(params![self.scope()?, id], web_app_row)?;
@@ -3194,6 +3211,7 @@ mod tests {
             0xb4db_2559_061e_f61e,
             0xbe92_5ee4_9bbb_2be8,
             0x721f_a6d6_e53a_606b,
+            0xb383_f674_f622_412e,
         ];
         assert!(
             MIGRATIONS.len() >= SHIPPED.len(),
@@ -3318,6 +3336,7 @@ mod tests {
             created_at: "2026-09-10T00:00:00Z".into(),
             last_opened_at: None,
             bounds: String::new(),
+            workspace_id: None,
         }
     }
 
@@ -3388,5 +3407,40 @@ mod tests {
         let again = store.web_app("x").unwrap().unwrap();
         assert!(again.last_opened_at.is_some());
         assert_eq!(again.bounds, "{\"x\":1}");
+    }
+
+    #[test]
+    fn a_web_app_keeps_the_workspace_it_was_installed_from() {
+        let store = Store::in_memory().unwrap();
+        let workspace = WorkspaceId::new();
+        let app = WebApp {
+            workspace_id: Some(workspace),
+            ..sample_app("x", "https://x.example/")
+        };
+        store.add_web_app(&app).unwrap();
+        assert_eq!(
+            store.web_app("x").unwrap().unwrap().workspace_id,
+            Some(workspace)
+        );
+        // A reinstall that names no workspace keeps the one it had; one
+        // from another workspace moves the app there.
+        store
+            .add_web_app(&sample_app("x", "https://x.example/"))
+            .unwrap();
+        assert_eq!(
+            store.web_app("x").unwrap().unwrap().workspace_id,
+            Some(workspace)
+        );
+        let elsewhere = WorkspaceId::new();
+        store
+            .add_web_app(&WebApp {
+                workspace_id: Some(elsewhere),
+                ..sample_app("x", "https://x.example/")
+            })
+            .unwrap();
+        assert_eq!(
+            store.web_app("x").unwrap().unwrap().workspace_id,
+            Some(elsewhere)
+        );
     }
 }
