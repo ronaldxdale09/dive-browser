@@ -27,16 +27,28 @@ async function connect(target) {
     const request = pending.get(message.id);
     if (request) { pending.delete(message.id); clearTimeout(request.timer); request.resolve(message); }
   };
-  return async (expression) => {
+  const call = async (method, params) => {
     const id = ++sequence;
     const response = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => { pending.delete(id); reject(Error("CDP request timed out")); }, 60000);
       pending.set(id, { resolve, timer });
-      socket.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, returnByValue: true, awaitPromise: true, userGesture: true } }));
+      socket.send(JSON.stringify({ id, method, params }));
     });
     if (response.error || response.result?.exceptionDetails) throw Error(JSON.stringify(response.error || response.result.exceptionDetails));
-    return response.result.result.value;
+    return response.result;
   };
+  const evaluate = async (expression, contextId) =>
+    (await call("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true, userGesture: true, ...(contextId ? { contextId } : {}) })).result.value;
+  const page = (expression) => evaluate(expression);
+  // Dive's isolated world, where the capture and its __diveSubtitles live
+  // (page_world.rs). Asked for by name, the engine hands back the world the
+  // document already has.
+  page.dive = async (expression) => {
+    const frameId = (await call("Page.getFrameTree", {})).frameTree.frame.id;
+    const { executionContextId } = await call("Page.createIsolatedWorld", { frameId, worldName: "dive" });
+    return evaluate(expression, executionContextId);
+  };
+  return page;
 }
 
 async function eventually(probe, message, seconds = 15) {
@@ -91,7 +103,7 @@ try {
   const deadline = Date.now() + soak * 1000;
   while (Date.now() < deadline) {
     assert(await invoke("subtitle_running", { id: tab.id }));
-    assert(await page("window.__diveSubtitles.running()"));
+    assert(await page.dive("window.__diveSubtitles.running()"));
     const health = await page("({updates:subtitleObservation.updates,age:performance.now()-subtitleObservation.last,paused:fixtureVideo.paused})");
     assert.equal(health.paused, false, "Playback stopped during soak");
     assert(health.age < 20000, "Caption updates stalled during soak");
@@ -102,7 +114,9 @@ try {
   }
 
   await invoke("subtitle_stop", { id: tab.id });
-  await eventually(() => page('!window.__diveSubtitles.running() && !document.querySelector("[data-dive=subtitles]")'), "Stop did not remove capture");
+  await eventually(() => page.dive('!window.__diveSubtitles.running() && !document.querySelector("[data-dive=subtitles]")'), "Stop did not remove capture");
+  // The page's own world never sees the capture.
+  assert.equal(await page("typeof window.__diveSubtitles"), "undefined");
   assert.equal(await page("fixtureVideo.paused"), false, "Stopping subtitles interrupted playback");
   await invoke("subtitle_start", options);
   console.log("restart_caption", await eventually(caption, "Restart did not recover captions"));
