@@ -117,7 +117,7 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
   const ids = useMemo(() => (idKey ? idKey.split("\n") : []), [idKey]);
   const paneIds = new Set((split?.tabs ?? []).filter((id) => !detached.includes(id)));
   const essentials = useMemo(() => essentialTabs(all), [all]);
-  const [tablistRef, measuredNarrow] = useNarrowTabs(tabs.length);
+  const [tablistRef, measuredNarrow] = useNarrowTabs(narrowSample(tabs, active));
   const hiddenAcross = useHiddenTabs(tablistRef, tabs.length, active, vertical);
   // Rows down the rail are as wide as the rail: they never lose their titles,
   // and they scroll rather than hide.
@@ -349,25 +349,38 @@ const CLOSE_MIN = 88;
 const TITLE_MIN = 72;
 
 /**
+ * The tab whose width stands for every squeezable tab: the first one that is
+ * neither pinned (a fixed icon) nor active (it keeps a wider minimum). Chosen
+ * afresh every render, so pinning, activating or closing the one being
+ * watched moves the watch to another.
+ */
+export function narrowSample(tabs: readonly Tab[], active: string | null): string | null {
+  return tabs.find((t) => t.tier !== "pinned" && t.id !== active)?.id ?? null;
+}
+
+/**
  * Every unpinned tab is the same width, so watching one is enough to know
  * whether they have all become too narrow for a close button or a title.
  * Measured rather than a container query: size containment on a flex item
  * zeroes its intrinsic width, and the strip then collapsed to icons even
- * with the whole row free.
+ * with the whole row free. The tab's whole slot is measured, not its title
+ * button: the button widens when the close button goes, which brought the
+ * close button straight back.
  */
-function useNarrowTabs(count: number): [React.RefObject<HTMLDivElement | null>, Narrow] {
+function useNarrowTabs(sampleId: string | null): [React.RefObject<HTMLDivElement | null>, Narrow] {
   const ref = useRef<HTMLDivElement>(null);
   // Zero means "not laid out" (a hidden strip, or a test DOM), not "narrow".
   const [width, setWidth] = useState(0);
   useEffect(() => {
-    const sample = ref.current?.querySelector<HTMLElement>('[role="tab"]:not([data-pinned])');
-    if (!sample) return;
-    const measure = () => setWidth(sample.getBoundingClientRect().width);
+    const button = Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="tab"][data-tab-id]') ?? []).find((el) => el.dataset["tabId"] === sampleId);
+    const sample = button?.closest<HTMLElement>('[role="presentation"]') ?? null;
+    const measure = () => setWidth(sample ? sample.getBoundingClientRect().width : 0);
     measure();
+    if (!sample) return;
     const ro = new ResizeObserver(measure);
     ro.observe(sample);
     return () => ro.disconnect();
-  }, [count]);
+  }, [sampleId]);
   const close = width > 0 && width < CLOSE_MIN;
   const title = width > 0 && width < TITLE_MIN;
   return [ref, useMemo(() => ({ close, title }), [close, title])];

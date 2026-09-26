@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
-import { TabStrip, roveMenu } from "./TabStrip";
+import { TabStrip, narrowSample, roveMenu } from "./TabStrip";
 
 const tab: Tab = { id: "t1", workspace_id: "w1", url: "https://a.test/", title: "Alpha", favicon: null, tier: "today", position: 0, created_at: "", last_active_at: "", state: "active", scroll_x: 0, scroll_y: 0 } as Tab;
 
@@ -159,6 +159,25 @@ describe("crowded strip", () => {
     expect(active.className).toContain("min-w-32");
     expect(other.className).toContain("min-w-9");
     expect(other.className).not.toContain("min-w-32");
+  });
+
+  it("measures a squeezable tab, not the wider active one or a pinned icon", () => {
+    const many = Array.from({ length: 4 }, (_, i) => ({ ...tab, id: `t${i}`, position: i, title: `Tab ${i}` }));
+    const pinned = { ...tab, id: "p", tier: "pinned" as const, position: 0, title: "Pin" };
+    expect(narrowSample([pinned, ...many], "t0")).toBe("t1");
+    // The active tab is wide and a pinned one is a fixed icon; neither says how
+    // narrow the rest are.
+    useBrowser.setState({ tabs: [pinned, ...many], activeTab: "t0", activeWorkspace: "w1" });
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const button = this.querySelector('[role="tab"]');
+      const id = button instanceof HTMLElement ? button.dataset["tabId"] : undefined;
+      const width = id === "t0" ? 128 : id === "p" ? 36 : 60;
+      return { width, height: 30, top: 0, left: 0, right: width, bottom: 30, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+    });
+    render(<TabStrip />);
+    expect(screen.getByRole("tab", { name: /^Tab 2/ }).textContent).not.toContain("Tab 2");
+    expect(screen.getByRole("tab", { selected: true }).textContent).toContain("Tab 0");
+    rect.mockRestore();
   });
 
   it("keeps the active tab's title when the others are down to a favicon", () => {
