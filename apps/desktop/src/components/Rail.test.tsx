@@ -155,9 +155,19 @@ describe("Rail", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete workspace" }));
     expect(remove).not.toHaveBeenCalled();
     expect(screen.getByText(/Delete Client and close its 1 tab\?/)).toBeTruthy();
+    // The item that had focus is gone; focus lands on the safe answer.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(remove).toHaveBeenCalledWith(client.id);
+  });
+
+  it("puts the workspace menu away on Escape, confirming or not", () => {
+    render(<Rail />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: /^Client/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete workspace" }));
+    fireEvent.keyDown(screen.getByRole("button", { name: "Cancel" }), { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "Client" })).toBeNull();
   });
 
   it("offers editing from the context menu instead of opening the dialog on right-click", () => {

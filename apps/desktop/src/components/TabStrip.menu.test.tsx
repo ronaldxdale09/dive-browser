@@ -28,6 +28,28 @@ describe("tab context menu", () => {
     expect(screen.getByRole("menuitem", { name: "Make essential" }).querySelector("kbd")).toBeNull();
   });
 
+  it("moves the menu up by its measured height when it would run off the bottom", () => {
+    vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(320);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(208);
+    useBrowser.setState({ tabs: [tab], activeTab: "t1", activeWorkspace: "w1" });
+    render(<TabStrip />);
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Alpha/ }), { clientX: 40, clientY: window.innerHeight - 10 });
+    expect(screen.getByRole("menu", { name: "Tab actions" }).style.top).toBe(`${window.innerHeight - 320 - 12}px`);
+  });
+
+  it("hands focus to the neighbouring tab when Delete closes the focused one", () => {
+    const second = { ...tab, id: "t2", title: "Beta", position: 1 } as Tab;
+    const close = vi.fn().mockResolvedValue(undefined);
+    useBrowser.setState({ tabs: [tab, second], activeTab: "t1", activeWorkspace: "w1", closeTab: close });
+    render(<TabStrip />);
+    const alpha = screen.getByRole("tab", { name: /Alpha/ });
+    alpha.focus();
+    fireEvent.keyDown(alpha, { key: "Delete" });
+    expect(close).toHaveBeenCalledWith("t1");
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: /Beta/ }));
+  });
+
   it("closes on Escape and on a press outside the menu", async () => {
     vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
     useBrowser.setState({ tabs: [tab], activeTab: "t1", activeWorkspace: "w1" });

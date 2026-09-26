@@ -12,7 +12,7 @@ import { useIsDriven } from "../store/agentPresence";
 import { Icon, IconButton } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
 import { chordsByCommand, formatChord } from "../lib/commands";
-import { clampFloatingPosition } from "../lib/floating";
+import { clampFloatingPosition, useClampToViewport } from "../lib/floating";
 import { essentialTabs, orderTabs } from "../lib/tabOrder";
 import { copyText } from "../lib/clipboard";
 
@@ -546,6 +546,14 @@ const SortableTab = memo(function SortableTab({ tab: t, active, detached, inSpli
         onKeyDown={(e) => {
           if ((e.key === "Delete" || e.key === "Backspace") && !pinned) {
             e.preventDefault();
+            // The focused tab is about to go, and focus with it would fall to
+            // the page body, so the next key closes nothing. It moves to the
+            // neighbour first -- the next tab, or the previous one at the end
+            // -- so Delete can be pressed again to keep closing.
+            const list = e.currentTarget.closest('[role="tablist"]');
+            const tabs = list ? Array.from(list.querySelectorAll<HTMLElement>('[role="tab"]')) : [];
+            const at = tabs.indexOf(e.currentTarget);
+            (tabs[at + 1] ?? tabs[at - 1])?.focus();
             onClose();
             return;
           }
@@ -748,7 +756,9 @@ function TabMenu({ x, y, tier, detached, muted, split, onPin, onEssential, onWin
   const item = "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink";
   const chords = chordsByCommand();
   const rows = 6 + (essential ? 0 : 1) + (split ? 1 : 0);
-  const position = clampFloatingPosition({ x, y, width: 208, height: 12 + rows * 30 + 2 * 9, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
+  // A first guess from the row count; the menu's measured size corrects it.
+  const position = clampFloatingPosition({ x, y, width: 208, height: 12 + rows * 30 + 3 * 9, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
+  useClampToViewport(ref, x, y);
   return (
     <div ref={ref} role="menu" aria-label="Tab actions" style={{ left: position.x, top: position.y }} className="surface-enter fixed z-50 w-52 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
       {!essential && (

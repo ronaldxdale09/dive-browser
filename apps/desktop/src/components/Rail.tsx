@@ -20,7 +20,7 @@ import { QuickLinks } from "./QuickLinks";
 import { ProfileChip } from "./ProfileChip";
 import { TabStrip } from "./TabStrip";
 import { displayChord, runCommand } from "../lib/commands";
-import { clampFloatingPosition } from "../lib/floating";
+import { clampFloatingPosition, useClampToViewport } from "../lib/floating";
 
 /** Rail width in each mode; App.tsx sizes the grid column from these. */
 export const RAIL_WIDTH = { collapsed: 52, expanded: 232 };
@@ -390,7 +390,7 @@ function WorkspaceRow({
  */
 function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number; onClose: () => void }) {
   const root = useRef<HTMLDivElement>(null);
-  useFocusTrap(root, { menu: true });
+  useFocusTrap(root, { menu: true, onEscape: onClose });
   const workspaces = useBrowser((s) => s.workspaces);
   const count = useBrowser((s) => s.counts[id] ?? 0);
   const activate = useBrowser((s) => s.activateWorkspace);
@@ -401,7 +401,9 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
   const workspace = workspaces.find((w) => w.id === id);
   // Only a menu that renders covers the page; a stale id renders nothing.
   useCoversContent(Boolean(workspace));
+  // A first guess; the menu's measured size corrects it, confirming or not.
   const position = clampFloatingPosition({ x, y, width: 224, height: confirming ? 150 : 176, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
+  useClampToViewport(root, x, y);
   const item = "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink";
   if (!workspace) return null;
 
@@ -414,7 +416,6 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
         aria-label={workspace.name}
         style={{ left: position.x, top: position.y }}
         className="surface-enter fixed z-50 w-56 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl"
-        onKeyDown={(e) => e.key === "Escape" && onClose()}
       >
         <div className="flex items-center gap-2 px-2 pt-1 pb-2">
           <AvatarImage kind="workspace" seed={workspace.icon} color={workspace.color} alt="" width={20} height={20} className="size-5 rounded-md" />
@@ -427,7 +428,9 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
               {count === 0 ? `Delete ${workspace.name}? It has no open tabs.` : `Delete ${workspace.name} and close its ${count} ${count === 1 ? "tab" : "tabs"}?`}
             </p>
             <div className="mt-2 flex gap-2">
-              <button type="button" onClick={onClose} className="h-7 flex-1 rounded-full border border-line text-[11px] text-ink-2 hover:bg-surface-2">
+              {/* The confirm replaces the item that had focus, which would
+                  leave focus on nothing; it starts on the safe answer. */}
+              <button type="button" autoFocus onClick={onClose} className="h-7 flex-1 rounded-full border border-line text-[11px] text-ink-2 hover:bg-surface-2">
                 Cancel
               </button>
               <button
