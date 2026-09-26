@@ -750,6 +750,9 @@ pub fn chromium_forms(db: &Path) -> AppResult<Vec<ImportedFormEntry>> {
             continue;
         }
         out.push(ImportedFormEntry {
+            // Another browser keeps its autofill for every site at once, so
+            // there is no site to give these: they are listed, not offered.
+            origin: String::new(),
             field: field.to_lowercase(),
             value: value.trim().to_string(),
             uses: u32::try_from(uses).unwrap_or(1),
@@ -782,6 +785,9 @@ pub fn firefox_forms(db: &Path) -> AppResult<Vec<ImportedFormEntry>> {
             continue;
         }
         out.push(ImportedFormEntry {
+            // Another browser keeps its autofill for every site at once, so
+            // there is no site to give these: they are listed, not offered.
+            origin: String::new(),
             field: field.to_lowercase(),
             value: value.trim().to_string(),
             uses: u32::try_from(uses.unwrap_or(1)).unwrap_or(1),

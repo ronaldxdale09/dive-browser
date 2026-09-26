@@ -1,7 +1,13 @@
-//! Form entries in pages: a script asks, as the person types into a named
-//! field, what the profile remembers for that field, and reports what a
-//! submitted form held so it can be remembered. Private windows are
-//! offered entries but never add to them.
+//! Form entries in pages: a script in Dive's isolated world (see
+//! `page_world`) asks, as the person types into a named field, what the
+//! profile remembers for that field on this site, and reports what a
+//! submitted form held so it can be remembered for this site. Private
+//! windows are offered entries but never add to them.
+//!
+//! Entries belong to the site they were typed on, and the site is always the
+//! origin of the document that called, asked of its own context -- never
+//! anything its payload says. An entry from before sites were kept knows no
+//! site and is offered nowhere.
 
 use dive_cdp::{CdpEvent, CdpSession};
 use dive_core::TabId;
@@ -10,6 +16,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::Runtime;
 use crate::error::AppResult;
+use crate::page_world;
 use crate::state::AppState;
 
 const BINDING: &str = "__diveForms";
@@ -39,20 +46,8 @@ pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession)
     let mut events = session.subscribe_to(&["Runtime.bindingCalled"]);
     // Registered for every document to come, before the first navigation.
     // The view is still on its blank document, so there is no page to
-    // evaluate the script in now. Both calls go out together.
-    let setup = async {
-        let (binding, script) = tokio::join!(
-            session.call("Runtime.addBinding", json!({"name": BINDING})),
-            session.call(
-                "Page.addScriptToEvaluateOnNewDocument",
-                json!({"source": source}),
-            ),
-        );
-        binding?;
-        script?;
-        Ok::<(), dive_cdp::CdpError>(())
-    };
-    if let Err(error) = setup.await {
+    // evaluate the script in now.
+    if let Err(error) = page_world::install(&session, BINDING, &source).await {
         crate::cdp_feed::setup_failed(tab_id, "remembered form entries", &error);
         return;
     }
@@ -63,7 +58,18 @@ pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession)
             let Some(payload) = binding_payload(&event, &nonce) else {
                 continue;
             };
-            if let Err(error) = handle(&app, tab_id, &session, &nonce, &payload).await {
+            let Some(context) = page_world::calling_context(&session, &event) else {
+                continue;
+            };
+            let Some(origin) = page_world::context_origin(&session, context).await else {
+                continue;
+            };
+            let caller = Caller {
+                session: &session,
+                context,
+                origin: &origin,
+            };
+            if let Err(error) = handle(&app, tab_id, &caller, &nonce, &payload).await {
                 tracing::debug!(%tab_id, "form entries request failed: {error}");
             }
         }
@@ -106,10 +112,28 @@ pub fn submitted_entries(payload: &Value) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
+/// The document that called: its session, the context in Dive's world the
+/// call came from (where the answer goes), and that document's origin.
+struct Caller<'a> {
+    session: &'a CdpSession,
+    context: i64,
+    origin: &'a str,
+}
+
+/// The evaluation that hands the page script its matches. `token` pairs the
+/// answer with the question it answers; it is a number whatever was sent.
+fn offer_expression(nonce: &str, token: u64, values: &[String]) -> String {
+    format!(
+        "window.__diveFormsOffer && window.__diveFormsOffer({}, {token}, {})",
+        serde_json::to_string(nonce).unwrap_or_default(),
+        serde_json::to_string(values).unwrap_or_default()
+    )
+}
+
 async fn handle(
     app: &AppHandle<Runtime>,
     tab_id: TabId,
-    session: &CdpSession,
+    caller: &Caller<'_>,
     nonce: &str,
     payload: &Value,
 ) -> AppResult<()> {
@@ -121,25 +145,25 @@ async fn handle(
         "query" => {
             let field = text(&payload["field"]);
             let prefix = text(&payload["prefix"]);
-            let token = payload["token"].clone();
+            let token = payload["token"].as_u64().unwrap_or_default();
             let values: Vec<String> = {
                 let store = crate::state::lock(&state.store);
                 store
-                    .form_entries_for(profile, &field, &prefix, LIMIT)?
+                    .form_entries_for(profile, caller.origin, &field, &prefix, LIMIT)?
                     .into_iter()
                     .map(|e| e.value)
                     .filter(|v| v != &prefix)
                     .collect()
             };
-            let expression = format!(
-                "window.__diveFormsOffer && window.__diveFormsOffer({}, {}, {})",
-                serde_json::to_string(nonce).unwrap_or_default(),
-                token,
-                serde_json::to_string(&values).unwrap_or_default()
-            );
-            let _ = session
-                .call("Runtime.evaluate", json!({"expression": expression}))
-                .await;
+            // Back into the context that asked, which is in Dive's world:
+            // the page's own world never sees the values.
+            let expression = offer_expression(nonce, token, &values);
+            let _ = page_world::evaluate_in(
+                caller.session,
+                caller.context,
+                json!({"expression": expression}),
+            )
+            .await;
         }
         "used" | "submitted" if !crate::private_session::is_private() => {
             let entries = if payload["kind"] == "used" {
@@ -153,7 +177,7 @@ async fn handle(
             let now = dive_core::Timestamp::now();
             let store = crate::state::lock(&state.store);
             for (field, value) in entries {
-                store.record_form_entry(profile, &field, &value, now)?;
+                store.record_form_entry(profile, caller.origin, &field, &value, now)?;
             }
         }
         _ => {}
@@ -176,6 +200,14 @@ mod tests {
         assert_eq!(binding_payload(&ok, "n1").unwrap()["field"], "email");
         assert!(binding_payload(&ok, "n2").is_none());
         assert!(binding_payload(&event("__diveCredentials", r#"{"nonce":"n1"}"#), "n1").is_none());
+    }
+
+    #[test]
+    fn the_offer_carries_a_numeric_token_and_encoded_values() {
+        assert_eq!(
+            offer_expression("n1", 7, &["a\"b".to_owned()]),
+            r#"window.__diveFormsOffer && window.__diveFormsOffer("n1", 7, ["a\"b"])"#
+        );
     }
 
     #[test]

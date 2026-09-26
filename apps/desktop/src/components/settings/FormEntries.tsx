@@ -35,6 +35,20 @@ export function fieldLabel(field: string): string {
     .join(" ") || "field";
 }
 
+/**
+ * The site an entry is offered on, as the list shows it. An entry with no
+ * site (imported from another browser, or kept before entries remembered
+ * theirs) is offered nowhere, and says so.
+ */
+export function siteLabel(origin: string): string {
+  if (!origin) return "not offered";
+  try {
+    return new URL(origin).host;
+  } catch {
+    return origin;
+  }
+}
+
 /** Entries grouped by field, in the order the host returns them. */
 export function groupByField(entries: FormEntry[]): { field: string; entries: FormEntry[] }[] {
   const groups: { field: string; entries: FormEntry[] }[] = [];
@@ -87,7 +101,10 @@ export function FormEntries() {
 
   const groups = groupByField(items ?? []);
   return (
-    <Group title="Form entries" description="Names, emails and addresses Dive offers while you type, kept in this profile. They come from forms you submit here and from Import from another browser.">
+    <Group
+      title="Form entries"
+      description="Names, emails and addresses Dive offers while you type, kept in this profile and offered only on the site where you typed them. Entries imported from another browser belong to no site, so they are listed here but never offered."
+    >
       {error && (
         <p role="alert" className="mb-2 text-11 text-danger">
           {error}
@@ -104,6 +121,7 @@ export function FormEntries() {
                 {g.entries.map((e) => (
                   <li key={e.id} className="flex items-center gap-2 py-0.5">
                     <span className="min-w-0 flex-1 truncate text-xs text-ink">{e.value}</span>
+                    <span className="max-w-[40%] truncate text-10.5 text-ink-3">{siteLabel(e.origin)}</span>
                     <span className="text-10.5 text-ink-3">{e.uses === 1 ? "used once" : `used ${e.uses.toLocaleString()} times`}</span>
                     <IconButton icon={Trash2} label={`Forget ${e.value}`} size={12} onClick={() => void remove(e)} />
                   </li>

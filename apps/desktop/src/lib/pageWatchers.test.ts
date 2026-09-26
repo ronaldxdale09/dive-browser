@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import audioSource from "../../src-tauri/src/inject/audio.js?raw";
 import credentialsSource from "../../src-tauri/src/inject/credentials.js?raw";
+import formsSource from "../../src-tauri/src/inject/forms.js?raw";
 
 // Both scripts run in the top frame only; the tests host them in an iframe.
 const mainFrameOnly = /if \(window\.top !== window\) return;[^\n]*\n/;
@@ -197,3 +198,50 @@ describe("saved-login watcher", () => {
   });
 });
 
+describe("form-entry watcher", () => {
+  function entries() {
+    const page = frame();
+    laidOut(page);
+    const sent: { kind: string; field?: string; token?: number; value?: string }[] = [];
+    page.__diveForms = (payload: string) => sent.push(JSON.parse(payload));
+    const { document, trust } = trusting(page);
+    const source = formsSource.replace(mainFrameOnly, "").replaceAll("__NONCE__", '"n"').replaceAll("__BINDING__", "__diveForms");
+    page.document.body.innerHTML = '<input name="email" id="email">';
+    run(page, source, document);
+    const field = page.document.getElementById("email") as HTMLInputElement;
+    const queries = () => sent.filter((p) => p.kind === "query");
+    return { page, sent, queries, trust, field };
+  }
+
+  it("asks only when the person typed", () => {
+    const { page, queries, trust, field } = entries();
+    field.focus();
+    field.value = "d";
+    field.dispatchEvent(new page.Event("input", { bubbles: true }));
+    vi.advanceTimersByTime(200);
+    expect(queries()).toEqual([]);
+    field.dispatchEvent(trust(new page.Event("input", { bubbles: true })));
+    vi.advanceTimersByTime(200);
+    expect(queries()).toMatchObject([{ kind: "query", field: "email" }]);
+  });
+
+  it("lets only the person pick an entry into the field", () => {
+    const { page, sent, queries, trust, field } = entries();
+    field.focus();
+    field.value = "d";
+    field.dispatchEvent(trust(new page.Event("input", { bubbles: true })));
+    vi.advanceTimersByTime(200);
+    const token = queries()[0]!.token;
+    (page.__diveFormsOffer as (nonce: string, token: unknown, list: unknown[]) => void)("n", token, ["dale@a.test"]);
+    const list = page.document.querySelector("dive-form-entries") as HTMLElement;
+    expect(list.style.display).toBe("block");
+    field.dispatchEvent(new page.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    field.dispatchEvent(new page.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(field.value).toBe("d");
+    expect(sent.some((p) => p.kind === "used")).toBe(false);
+    field.dispatchEvent(trust(new page.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    field.dispatchEvent(trust(new page.KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(field.value).toBe("dale@a.test");
+    expect(sent.filter((p) => p.kind === "used")).toMatchObject([{ field: "email", value: "dale@a.test" }]);
+  });
+});

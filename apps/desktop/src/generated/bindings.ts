@@ -1809,6 +1809,12 @@ export type FormEntry = {
 	id: string,
 	/**  The profile the entry belongs to. */
 	profile_id: string,
+	/**
+	 *  `scheme://host[:port]` of the site it was typed on, and the only site
+	 *  it is offered to. Empty for an entry that came from before sites were
+	 *  kept, or from another browser, which is offered nowhere.
+	 */
+	origin: string,
 	/**  The field's `name` (or `id`) attribute, lower-cased. */
 	field: string,
 	/**  What was typed. */
