@@ -66,6 +66,7 @@ mod normal_window;
 mod omnibox;
 mod openapi;
 mod page_menu;
+mod page_world;
 mod pagescript;
 mod passwords;
 #[cfg(feature = "cef")]

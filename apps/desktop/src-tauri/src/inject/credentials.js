@@ -1,19 +1,24 @@
 // Saved logins in the page: notices login forms, asks the host whether it
 // knows a login for this site, fills on request, and reports a submitted
 // login so the chrome can offer to save it. Nothing here reads a saved
-// password on its own: the host sends one only after a fill was asked for.
+// password on its own: the host sends one only after a fill was asked for,
+// and a fill is only asked for when the person clicked or tabbed into the
+// login field. A page that learned a login was saved still cannot make it
+// appear in its fields without them.
 //
-// The nonce is the only thing stopping page script from forging reports or
-// asking for a fill; it lives in this closure, never on `window`.
+// This runs in Dive's isolated world (see page_world.rs): the page shares
+// the DOM with it but none of its JavaScript, so it can neither call the
+// binding nor replace anything this script calls. The nonce stays as a
+// second lock; it lives in this closure, never on `window`.
 
 (function () {
   if (window.top !== window) return; // main frame only
   if (window.__diveCredentialsInstalled) return;
   window.__diveCredentialsInstalled = true;
   const NONCE = __NONCE__;
-  // Taken now, before any page script runs: a page that later replaced the
-  // binding or JSON.stringify would otherwise be handed the nonce. The
-  // payload has no prototype, so an Object.prototype.toJSON sees nothing.
+  // Taken now, before anything else runs in this world. The world is ours
+  // alone, so this is belt and braces: the payload also has no prototype,
+  // so no `toJSON` anywhere sees it.
   const bind = window.__BINDING__;
   const stringify = JSON.stringify;
   const send = (fields) => {
@@ -69,26 +74,39 @@
     value: (nonce, list) => {
       if (nonce !== NONCE || !Array.isArray(list)) return;
       candidates = list.slice(0, 20);
-      // Only a lone login is ever filled unasked, so only then do fields
-      // that appear later need watching for.
-      if (candidates.length !== 1) observer.disconnect();
+      // The answer is in: nothing fills on its own, so nothing that appears
+      // later needs watching for. Focus on a field is what offers a login.
+      observer.disconnect();
       // A choice is coming: its live region goes in now, so it is already
       // there to be heard when the list first opens.
       if (candidates.length > 1) ensure();
-      maybeFillIdle();
       offerPending();
     },
   });
   let fillTarget = null;
-  // Focus that follows a click or a key press is the person's; focus that
-  // arrives on its own (the chrome handing the page back after its card
-  // closes) must not ask again, or the card would never stay closed.
-  let lastInteraction = 0;
-  const noteInteraction = (e) => {
-    if (e.isTrusted) lastInteraction = Date.now();
-  };
-  document.addEventListener("pointerdown", noteInteraction, true);
-  document.addEventListener("keydown", noteInteraction, true);
+  // Focus the person gave a login field: a real press on the field (or its
+  // label), or a real Tab that moved focus into it. Focus that arrives on
+  // its own -- the chrome handing the page back after its card closes, or
+  // page script calling `focus()` after a click somewhere else -- neither
+  // fills nor offers. Events page script dispatches are never `isTrusted`.
+  let gesture = { at: 0, target: null, tab: false };
+  document.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (e.isTrusted) gesture = { at: Date.now(), target: e.composedPath()[0] || e.target, tab: false };
+    },
+    true,
+  );
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.isTrusted && e.key === "Tab") gesture = { at: Date.now(), target: null, tab: true };
+    },
+    true,
+  );
+  const reaches = (from, el) =>
+    from === el || (from instanceof Node && [...(el.labels || [])].some((label) => label.contains(from)));
+  const personFocused = (el) => Date.now() - gesture.at <= 1500 && (gesture.tab || reaches(gesture.target, el));
   Object.defineProperty(window, "__diveCredentialsFill", {
     configurable: false,
     enumerable: false,
@@ -105,16 +123,6 @@
   const requestFill = (password, id) => {
     fillTarget = password;
     send({ kind: "fill", id });
-  };
-  // One saved login and untouched fields: fill as soon as the form is there,
-  // the way every password manager does for a lone login.
-  const maybeFillIdle = () => {
-    if (!candidates || candidates.length !== 1) return;
-    const password = passwordFields()[0];
-    if (!password || password.value) return;
-    const user = usernameFor(password);
-    if (user && user.value) return;
-    requestFill(password, candidates[0].id);
   };
   // ---- the saved-login list ----
   // Several logins known: the choice hangs under the field that was clicked,
@@ -269,7 +277,10 @@
         }
         return;
       }
-      if (!listShown() || e.target !== listFor || !candidates) return;
+      // Only the person's own keys walk or pick from the list: a page that
+      // dispatched ArrowDown and Enter would otherwise have a password filled
+      // into a field it can read.
+      if (!e.isTrusted || !listShown() || e.target !== listFor || !candidates) return;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const n = candidates.length;
@@ -309,7 +320,10 @@
   // The login fields around `el`: the password a pick fills, or null.
   const passwordOf = (el) =>
     el.type === "password" ? el : passwordFields().find((p) => usernameFor(p) === el) || null;
-  // Focus on a login field: fill a lone login, or offer the choice.
+  // The person's focus on a login field: fill a lone login, or offer the
+  // choice. A lone login waits for this rather than filling when the form
+  // appears, the way Chrome keeps a filled password from page script until
+  // the person has touched the page.
   const offerFor = (el) => {
     const password = passwordOf(el);
     if (!password || !candidates || candidates.length === 0) return;
@@ -325,7 +339,7 @@
       const el = e.target;
       if (!(el instanceof HTMLInputElement) || !passwordOf(el)) return;
       ask();
-      if (Date.now() - lastInteraction > 1500) return;
+      if (!personFocused(el)) return;
       offerFor(el);
     },
     true,
@@ -333,7 +347,7 @@
   // The host's answer can land after the click that focused the field.
   offerPending = () => {
     const el = document.activeElement;
-    if (el instanceof HTMLInputElement && Date.now() - lastInteraction <= 1500 && !listShown()) offerFor(el);
+    if (el instanceof HTMLInputElement && personFocused(el) && !listShown()) offerFor(el);
   };
   // A submitted form with a password: the chrome may offer to save it. On a
   // change-password form the new password is the one to keep: the field
@@ -378,20 +392,11 @@
         (node) => node.nodeType === 1 && (node.matches(selector) || node.querySelector(selector) !== null),
       ),
     );
+  // Once asked, the answer does the rest on focus: the observer is only
+  // there to notice the first login form.
   const observer = new MutationObserver((records) => {
-    if (!asked) {
-      if (adds(records, 'input[type="password"]')) ask();
-      return;
-    }
-    // Still waiting for the host's answer, which fills a lone login itself.
-    if (candidates === null) return;
-    // New fields can only matter for filling a lone login; with none saved,
-    // or several to choose from on focus, there is nothing left to watch for.
-    if (candidates.length !== 1) {
-      observer.disconnect();
-      return;
-    }
-    if (adds(records, "input")) maybeFillIdle();
+    if (!asked && adds(records, 'input[type="password"]')) ask();
+    if (asked) observer.disconnect();
   });
   const start = () => {
     observer.observe(document.documentElement, { childList: true, subtree: true });
