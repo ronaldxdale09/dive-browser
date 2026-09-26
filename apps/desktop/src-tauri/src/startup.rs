@@ -419,6 +419,15 @@ fn build_chromium_args_with(
     if use_mock_keychain {
         args.push(("use-mock-keychain", Some(String::new())));
     }
+    // The switch is one comma-separated list, so a path with a comma in it
+    // would be read as two. The registry refuses such a folder; this is the
+    // last place one could still get through, from a registry written by an
+    // older build or by hand.
+    let extension_paths: Vec<&str> = extension_paths
+        .iter()
+        .map(String::as_str)
+        .filter(|path| !path.contains(','))
+        .collect();
     if !extension_paths.is_empty() {
         args.push(("load-extension", Some(extension_paths.join(","))));
     }
@@ -683,6 +692,19 @@ mod tests {
             )
         );
         assert!(!args.iter().any(|(name, _)| *name == "--disable-extensions"));
+    }
+
+    #[test]
+    fn an_extension_path_with_a_comma_never_reaches_the_switch() {
+        let paths = vec!["/a/extension".to_owned(), "/b/x,/tmp/planted".to_owned()];
+        let args = build_chromium_args_with(None, "", false, &paths);
+        let loaded = args
+            .iter()
+            .find(|(name, _)| *name == "load-extension")
+            .and_then(|(_, value)| value.clone());
+        assert_eq!(loaded.as_deref(), Some("/a/extension"));
+        let only_bad = build_chromium_args_with(None, "", false, &paths[1..]);
+        assert!(!only_bad.iter().any(|(name, _)| *name == "load-extension"));
     }
 
     #[test]
