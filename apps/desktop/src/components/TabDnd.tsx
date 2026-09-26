@@ -15,7 +15,7 @@ import { arrayMove } from "@dnd-kit/sortable";
 import type { ReactNode } from "react";
 import { create } from "zustand";
 import { useBrowser } from "../store/browser";
-import { useLayout } from "../store/layout";
+import { useLayout, visibleSplit } from "../store/layout";
 import { useCoversContent } from "../lib/overlay";
 import { Favicon } from "./Favicon";
 import { orderTabs, tabLabel } from "./TabStrip";
@@ -193,8 +193,10 @@ export async function apply(plan: DropPlan) {
     case "split": {
       const ws = browser.activeWorkspace;
       if (!ws) return;
+      // The zones were drawn over what was on screen, so the drop lands there.
+      const shown = visibleSplit(useLayout.getState().splits[ws], browser.activeTab, browser.tabs, browser.detached);
       if (browser.detached.includes(plan.tab)) await browser.attachTab(plan.tab);
-      useLayout.getState().insert(ws, plan.tab, plan.index, browser.activeTab);
+      useLayout.getState().insert(ws, plan.tab, plan.index, browser.activeTab, shown);
       if (browser.activeTab !== plan.tab) await browser.activateTab(plan.tab);
       return;
     }

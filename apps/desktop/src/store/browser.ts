@@ -5,6 +5,7 @@ import { listenConsole, useConsole, usesNativeConsoleBatch } from "./console";
 import { listenNetwork, useNetwork } from "./network";
 import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
 import { useDownloads } from "./downloads";
+import { useLayout } from "./layout";
 import type { DownloadNotice, CoreEvent, Decision, Duration, NavigationHistory, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
 import { fileNameOr, fileUrl, opensInTab} from "../lib/paths";
@@ -628,6 +629,9 @@ export const useBrowser = create<BrowserState>((set, get) => ({
           once(unlistenWindowChanged, () => events.tabWindowChanged.listen((e) => {
             recordSnapshotDelta({ kind: "window", tab: e.payload.tab, detached: e.payload.detached });
             set(reduceWindowChange(get(), e.payload.tab, e.payload.detached));
+            // A torn-off tab is the other window's page; its split here
+            // would wait on a pane that is not coming back.
+            if (e.payload.detached) useLayout.getState().forget(e.payload.tab);
           }), (off) => { unlistenWindowChanged = off; }),
           once(unlistenDownload, () => events.downloadNotice.listen(downloadNotice), (off) => { unlistenDownload = off; }),
           once(unlistenDownloadProgress, () => events.downloadProgress.listen((e) => useDownloads.getState().progress(e.payload)), (off) => { unlistenDownloadProgress = off; }),
@@ -1013,7 +1017,17 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       useConsole.getState().drop(id);
       useNetwork.getState().drop(id);
       usePrivacy.getState().drop(id);
+      // Splits let go of a closed pane here, on the engine's word, rather
+      // than whenever the chrome's tab list lacks it: that list is briefly
+      // the old workspace's while a switch fetches the new one, and every
+      // pane of the new workspace's split looked closed.
+      useLayout.getState().forget(id);
       forgetClosedTab(id);
+    }
+    // A tab moved into another workspace leaves the split it sat in there.
+    // Essentials show in every workspace, so their splits stay.
+    if (event.type === "tab_upserted" && event.data.workspace_id && event.data.tier !== "essential") {
+      useLayout.getState().forget(event.data.id, event.data.workspace_id);
     }
     // Foreign-workspace tab events refresh badges without entering this strip.
     // Coalesced: a page load can emit several tab updates.

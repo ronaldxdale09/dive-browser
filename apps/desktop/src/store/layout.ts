@@ -39,10 +39,18 @@ interface LayoutState {
   setSidecarWidth: (px: number) => void;
   setDockPanel: (panel: DockPanel) => void;
   setOpenPanels: (open: Record<PersistedPanel, boolean>) => void;
-  /** Put `tab` into the workspace's split at `index`, creating the split beside `anchor` if there is none. */
-  insert: (workspace: string, tab: string, index: number, anchor: string | null) => void;
+  /**
+   * Put `tab` at `index` of `shown`, the split on screen, or when none shows
+   * start a split beside `anchor` that replaces any the workspace had.
+   */
+  insert: (workspace: string, tab: string, index: number, anchor: string | null, shown: Split | null) => void;
   /** Take `tab` out of the split; a split of one pane goes away. */
   remove: (workspace: string, tab: string) => void;
+  /**
+   * Take `tab` out of every split except `keep`'s: it closed or tore off
+   * (no `keep`), or it moved into workspace `keep`.
+   */
+  forget: (tab: string, keep?: string) => void;
   resize: (workspace: string, sizes: number[]) => void;
   clear: (workspace: string) => void;
 }
@@ -84,8 +92,14 @@ export const useLayout = create<LayoutState>()(
         if (cur.sidecar === open.sidecar && cur.dock === open.dock) return;
         set({ openPanels: { sidecar: open.sidecar, dock: open.dock } });
       },
-      insert: (ws, tab, index, anchor) => {
-        const next = insertPane(get().splits[ws], tab, index, anchor);
+      insert: (ws, tab, index, anchor, shown) => {
+        // A split waiting for one of its panes to be clicked is not what the
+        // drop zones were drawn over: they showed the single page, so the
+        // new split is that page and the dropped tab, not the hidden one.
+        const next = insertPane(shown ?? undefined, tab, index, anchor);
+        // Dropping a page beside itself changes nothing, and must not throw
+        // away the hidden split either.
+        if (!next && !shown) return;
         const rest = without(get().splits, ws);
         set({ splits: next ? { ...rest, [ws]: next } : rest });
       },
@@ -95,6 +109,17 @@ export const useLayout = create<LayoutState>()(
         const tabs = cur.tabs.filter((t) => t !== tab);
         const rest = without(get().splits, ws);
         set({ splits: tabs.length >= 2 ? { ...rest, [ws]: { tabs, sizes: even(tabs.length) } } : rest });
+      },
+      forget: (tab, keep) => {
+        const splits = get().splits;
+        let next: Record<string, Split> | null = null;
+        for (const [ws, split] of Object.entries(splits)) {
+          if (ws === keep || !split.tabs.includes(tab)) continue;
+          const tabs = split.tabs.filter((t) => t !== tab);
+          next = without(next ?? splits, ws);
+          if (tabs.length >= 2) next[ws] = { tabs, sizes: even(tabs.length) };
+        }
+        if (next) set({ splits: next });
       },
       resize: (ws, sizes) => {
         const cur = get().splits[ws];

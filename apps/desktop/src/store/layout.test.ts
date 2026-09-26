@@ -41,6 +41,41 @@ describe("visibleSplit", () => {
   });
 });
 
+describe("split upkeep", () => {
+  beforeEach(() => useLayout.setState({ splits: {} }));
+
+  it("replaces a hidden split when a tab is dropped onto the single page", () => {
+    useLayout.setState({ splits: { ws: { tabs: ["a", "b"], sizes: [0.5, 0.5] } } });
+    useLayout.getState().insert("ws", "d", 1, "c", null);
+    expect(useLayout.getState().splits.ws?.tabs).toEqual(["c", "d"]);
+  });
+
+  it("keeps the hidden split when the drop changes nothing", () => {
+    const hidden = { tabs: ["a", "b"], sizes: [0.5, 0.5] };
+    useLayout.setState({ splits: { ws: hidden } });
+    useLayout.getState().insert("ws", "c", 1, "c", null);
+    expect(useLayout.getState().splits.ws).toBe(hidden);
+  });
+
+  it("adds to the split on screen", () => {
+    const shown = { tabs: ["a", "b"], sizes: [0.5, 0.5] };
+    useLayout.setState({ splits: { ws: shown } });
+    useLayout.getState().insert("ws", "c", 2, "a", shown);
+    expect(useLayout.getState().splits.ws?.tabs).toEqual(["a", "b", "c"]);
+  });
+
+  it("forgets a closed pane in every workspace, or only outside the one it moved to", () => {
+    useLayout.setState({ splits: { one: { tabs: ["a", "b"], sizes: [0.5, 0.5] }, two: { tabs: ["c", "d", "e"], sizes: [1 / 3, 1 / 3, 1 / 3] } } });
+    useLayout.getState().forget("d");
+    expect(useLayout.getState().splits.two?.tabs).toEqual(["c", "e"]);
+    expect(useLayout.getState().splits.one?.tabs).toEqual(["a", "b"]);
+    useLayout.getState().forget("a", "one");
+    expect(useLayout.getState().splits.one?.tabs).toEqual(["a", "b"]);
+    useLayout.getState().forget("a", "two");
+    expect(useLayout.getState().splits.one).toBeUndefined();
+  });
+});
+
 describe("panel layout persistence", () => {
   beforeEach(() => {
     uiStorage.clear();
