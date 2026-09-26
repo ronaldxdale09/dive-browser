@@ -233,8 +233,8 @@ pub const APPEARANCE_PRESETS: &[&str] = &[
 ];
 /// Chrome typefaces that ship with the app or come from the OS.
 pub const UI_FONTS: &[&str] = &["geist", "system", "mono", "serif"];
-/// Chrome scale bounds. The chrome clamps to the same range (UI_SCALE_MIN and
-/// UI_SCALE_MAX in lib/theme.ts); twice the size is there for low vision.
+/// Chrome scale bounds. The chrome clamps to the same range (`UI_SCALE_MIN` and
+/// `UI_SCALE_MAX` in lib/theme.ts); twice the size is there for low vision.
 pub const UI_SCALE_RANGE: (f64, f64) = (0.8, 2.0);
 
 fn default_preset() -> String {

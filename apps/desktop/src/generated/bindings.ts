@@ -2489,7 +2489,7 @@ export type Prefs = {
 	custom_highlight?: string,
 	/**  Chrome typeface: `geist` | `system` | `mono` | `serif`. */
 	ui_font?: string,
-	/**  Chrome size multiplier, 0.8 to 1.3; everything in the chrome scales. */
+	/**  Chrome size multiplier, 0.8 to 2.0; everything in the chrome scales, text included. */
 	ui_scale?: number | null,
 	/**  Row heights and gaps: `compact` | `comfortable` | `relaxed`. */
 	density?: string,
