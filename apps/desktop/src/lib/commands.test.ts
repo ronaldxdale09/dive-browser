@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import menuSource from "../../src-tauri/src/menu.rs?raw";
-import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel, credentialStoreName, credentialStoreTitle, defaultDownloadsFolderLabel, defaultDownloadsHint, defaultDownloadsPlaceholder, importFromWhere, importLookingLabel, importDeniedNote, importPasswordNote, importEmptyHint, importSourcesHint, importPasswordsHint, unpackedExtensionHint } from "./commands";
+import { COMMAND_TITLES, SHORTCUTS, UI_COMMANDS, chordOf, chordsByCommand, chromeCommands, formatChord, isEditable, isMac, runCommand, shortcutFor, tabForSlot, EDIT_BOOKMARK, displayChord, fileManagerName, showInFileManagerLabel, credentialStoreName, credentialStoreTitle, defaultDownloadsFolderLabel, defaultDownloadsHint, defaultDownloadsPlaceholder, importFromWhere, importLookingLabel, importDeniedNote, importPasswordNote, importEmptyHint, importSourcesHint, importPasswordsHint, unpackedExtensionHint } from "./commands";
 import { events, ipc } from "./ipc";
 import { tabInThisWindow, useBrowser } from "../store/browser";
 import type { Tab } from "./ipc";
@@ -406,7 +406,7 @@ describe("command dispatch", () => {
     expect(activate).toHaveBeenLastCalledWith("c");
   });
 
-  it("steps in the strip's order, skipping essentials and tabs in their own window", async () => {
+  it("steps in the order tabs are drawn, essentials first, skipping tabs in their own window", async () => {
     const activate = vi.spyOn(ipc, "tabActivate").mockResolvedValue(null);
     // Store order is arrival order; the strip shows pinned first, then by position.
     useBrowser.setState({
@@ -421,16 +421,47 @@ describe("command dispatch", () => {
       activeTab: "late",
     });
 
+    // From the last tab ⌃Tab wraps round to the essentials, not past them.
+    await UI_COMMANDS["tab.next"]!();
+    expect(activate).toHaveBeenLastCalledWith("essential");
+
+    useBrowser.setState({ activeTab: "essential" });
     await UI_COMMANDS["tab.next"]!();
     expect(activate).toHaveBeenLastCalledWith("pinned");
-
-    useBrowser.setState({ activeTab: "pinned" });
-    await UI_COMMANDS["tab.next"]!();
-    expect(activate).toHaveBeenLastCalledWith("early");
 
     useBrowser.setState({ activeTab: "early" });
     await UI_COMMANDS["tab.prev"]!();
     expect(activate).toHaveBeenLastCalledWith("pinned");
+    useBrowser.setState({ detached: [] });
+  });
+
+  it("goes straight to tab N with ⌃N, and to the last tab with ⌃9", async () => {
+    const activate = vi.spyOn(ipc, "tabActivate").mockResolvedValue(null);
+    useBrowser.setState({
+      tabs: [
+        { ...tab("b"), position: 1 },
+        { ...tab("essential"), tier: "essential", position: 0 },
+        { ...tab("a"), position: 0 },
+        { ...tab("popout"), position: 2 },
+      ],
+      detached: ["popout"],
+      activeTab: "a",
+    });
+    expect(SHORTCUTS["ctrl+1"]).toBe("tab.select.1");
+    expect(SHORTCUTS["mod+1"]).toBe("workspace.jump.1");
+    await UI_COMMANDS["tab.select.1"]!();
+    expect(activate).toHaveBeenLastCalledWith("essential");
+    await UI_COMMANDS["tab.select.3"]!();
+    expect(activate).toHaveBeenLastCalledWith("b");
+    await UI_COMMANDS["tab.select.9"]!();
+    expect(activate).toHaveBeenLastCalledWith("b");
+    activate.mockClear();
+    useBrowser.setState({ activeTab: "a" });
+    // Past the end, and already there, nothing moves.
+    await UI_COMMANDS["tab.select.7"]!();
+    await UI_COMMANDS["tab.select.2"]!();
+    expect(activate).not.toHaveBeenCalled();
+    expect(tabForSlot([], 9)).toBeUndefined();
     useBrowser.setState({ detached: [] });
   });
 

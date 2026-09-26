@@ -62,10 +62,13 @@ export function Shortcuts() {
 export function chromeChords(known: Command[], shortcuts: Record<string, string> = SHORTCUTS): { title: string; keys: string }[] {
   const seen = new Set(known.filter((c) => c.keybinding).map((c) => c.id));
   const rows = Object.entries(chordsByCommand(shortcuts))
-    .filter(([id]) => !seen.has(id) && !id.startsWith("workspace.jump.") && id in COMMAND_TITLES)
+    .filter(([id]) => !seen.has(id) && !id.startsWith("workspace.jump.") && !id.startsWith("tab.select.") && id in COMMAND_TITLES)
     .map(([id, chord]) => ({ title: COMMAND_TITLES[id]!, keys: formatChord(chord) }));
   if (Object.keys(shortcuts).some((chord) => shortcuts[chord]?.startsWith("workspace.jump."))) {
     rows.push({ title: "Switch to workspace 1–9", keys: `${formatChord("mod+1")} … ${formatChord("mod+9")}` });
+  }
+  if (Object.keys(shortcuts).some((chord) => shortcuts[chord]?.startsWith("tab.select."))) {
+    rows.push({ title: "Go to tab 1–8, or the last", keys: `${formatChord("ctrl+1")} … ${formatChord("ctrl+9")}` });
   }
   return rows;
 }

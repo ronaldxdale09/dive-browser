@@ -272,7 +272,7 @@ fn workspaces_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
 /// Page history, tab traversal and the Chrome-compatible library shortcuts.
 #[cfg(not(target_os = "windows"))]
 fn history_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
-    SubmenuBuilder::new(app, "History")
+    let mut menu = SubmenuBuilder::new(app, "History")
         .item(&item(app, "tab.back", "Back", "CmdOrCtrl+BracketLeft")?)
         .item(&item(
             app,
@@ -292,8 +292,15 @@ fn history_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
             "tab.next",
             "Next Tab",
             "CmdOrCtrl+Shift+BracketRight",
-        )?)
-        .separator()
+        )?);
+    // ⌃1…⌃8 go to the tab in that place and ⌃9 to the last. Registered here
+    // so they work while a page holds the keyboard; ⌘1…⌘9 stay the
+    // workspaces'. On macOS alone: elsewhere Ctrl is the command key, and
+    // the two sets would be the same chords.
+    if cfg!(target_os = "macos") {
+        menu = menu.item(&go_to_tab_menu(app)?);
+    }
+    menu.separator()
         .item(&item(
             app,
             "tabs.search",
@@ -320,6 +327,26 @@ fn history_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
             "CmdOrCtrl+Shift+Backspace",
         )?)
         .build()
+}
+
+/// ⌃1…⌃8 for the tab in that place, ⌃9 for the last one.
+#[cfg(not(target_os = "windows"))]
+fn go_to_tab_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
+    let mut menu = SubmenuBuilder::new(app, "Go to Tab");
+    for n in 1..=9 {
+        let title = if n == 9 {
+            "Last Tab".to_owned()
+        } else {
+            format!("Tab {n}")
+        };
+        menu = menu.item(&item(
+            app,
+            &format!("tab.select.{n}"),
+            &title,
+            &format!("Ctrl+{n}"),
+        )?);
+    }
+    menu.build()
 }
 
 /// Label of the chrome a menu command goes to, with the keyboard moved there

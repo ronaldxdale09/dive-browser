@@ -39,15 +39,15 @@ export function groupShortcuts(shortcuts: Record<string, string> = SHORTCUTS, kn
   const titles = new Map(known.map((c) => [c.id, c.title]));
   const byId = new Map<string, string[]>();
   for (const [chord, id] of Object.entries(shortcuts)) {
-    const key = id.startsWith("workspace.jump.") ? "workspace.jump" : id;
+    const key = id.startsWith("workspace.jump.") ? "workspace.jump" : id.startsWith("tab.select.") ? "tab.select" : id;
     byId.set(key, [...(byId.get(key) ?? []), chord]);
   }
   // Commands the host binds that the chrome's map does not know about.
   for (const c of known) if (c.keybinding && !byId.has(c.id)) byId.set(c.id, [c.keybinding]);
   const rows = [...byId.entries()].map(([id, chords]) => ({
     id,
-    title: id === "workspace.jump" ? "Switch to workspace 1–9" : (titles.get(id) ?? COMMAND_TITLES[id] ?? id),
-    chords: id === "workspace.jump" ? ["mod+1 … mod+9"] : chords,
+    title: id === "workspace.jump" ? "Switch to workspace 1–9" : id === "tab.select" ? "Go to tab 1–8, or the last" : (titles.get(id) ?? COMMAND_TITLES[id] ?? id),
+    chords: id === "workspace.jump" ? ["mod+1 … mod+9"] : id === "tab.select" ? ["ctrl+1 … ctrl+9"] : chords,
   }));
   const areas = AREAS.map((a) => ({ title: a.title, rows: [] as ShortcutRow[] }));
   for (const row of rows) areas[AREAS.findIndex((a) => a.match(row.id))]!.rows.push(row);

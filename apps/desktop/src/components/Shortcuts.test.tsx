@@ -32,8 +32,10 @@ describe("groupShortcuts", () => {
     const jump = rows.find((r) => r.id === "workspace.jump");
     expect(jump?.title).toBe("Switch to workspace 1–9");
     expect(jump?.chords).toEqual(["mod+1 … mod+9"]);
-    const expected = Object.keys(SHORTCUTS).filter((c) => !/^mod\+[1-9]$/.test(c));
-    expect(chords.filter((c) => c !== "mod+1 … mod+9").sort()).toEqual(expected.sort());
+    const select = rows.find((r) => r.id === "tab.select");
+    expect(select?.chords).toEqual(["ctrl+1 … ctrl+9"]);
+    const expected = Object.keys(SHORTCUTS).filter((c) => !/^(mod|ctrl)\+[1-9]$/.test(c));
+    expect(chords.filter((c) => c !== "mod+1 … mod+9" && c !== "ctrl+1 … ctrl+9").sort()).toEqual(expected.sort());
     // Every row has a human title, not a bare id.
     for (const r of rows) expect(r.title, r.id).not.toBe(r.id);
     expect(areas.map((a) => a.title)).toEqual(["Tabs", "Workspaces", "Page", "Capture and record", "Panels and tools"]);

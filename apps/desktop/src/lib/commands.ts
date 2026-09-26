@@ -6,13 +6,15 @@ import { usePrefs } from "../store/prefs";
 import { useRecording } from "../store/recording";
 import { useRecorder } from "../store/recorder";
 import { usePicker } from "../store/simulator";
-import type { Command } from "./ipc";
+import type { Command, Tab } from "./ipc";
 import { traceInputCommand } from "./inputTimingProbe";
 import { errorMessage } from "./errors";
-import { orderTabs } from "./tabOrder";
+import { essentialTabs, orderTabs } from "./tabOrder";
 
 /** Rail positions a workspace chord can reach. */
 const WORKSPACE_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+/** Strip positions a tab chord can reach; the ninth is always the last tab, as in every browser. */
+const TAB_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 /**
  * The one place chrome-side commands are dispatched. The palette and the
@@ -156,6 +158,9 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   // ⌘1…⌘9 land on the workspace in that rail position, the way every other
   // browser's ⌘1…⌘9 lands on a tab.
   ...Object.fromEntries(WORKSPACE_SLOTS.map((n) => [`workspace.jump.${n}`, () => jumpToWorkspace(n - 1)])),
+  // ⌃1…⌃8 land on the tab in that place, ⌃9 on the last; ⌘1…⌘9 stay the
+  // workspaces'.
+  ...Object.fromEntries(TAB_SLOTS.map((n) => [`tab.select.${n}`, () => selectTab(n)])),
 };
 
 /** Create a blank tab and move it into its own browser window. */
@@ -220,13 +225,34 @@ export const OPEN_SHARE = "dive:open-share";
 export const BOOKMARKS_CHANGED = "dive:bookmarks-changed";
 
 /**
+ * The tabs the keyboard walks, in the order they are drawn: the essentials
+ * first, then the strip (pinned, then by position). Tabs that live in a
+ * window of their own are not this window's to show.
+ */
+export function keyboardTabOrder(all: Tab[], detached: readonly string[]): Tab[] {
+  return [...essentialTabs(all), ...orderTabs(all)].filter((t) => !detached.includes(t.id));
+}
+
+/** The tab ⌃`n` lands on: the `n`th, or the last for 9 and for a number past the end. */
+export function tabForSlot(tabs: readonly Tab[], n: number): Tab | undefined {
+  if (n >= 9) return tabs.at(-1);
+  return tabs[n - 1];
+}
+
+function selectTab(n: number) {
+  const { tabs: all, detached, activeTab, activateTab } = useBrowser.getState();
+  const target = tabForSlot(keyboardTabOrder(all, detached), n);
+  return target && target.id !== activeTab ? activateTab(target.id) : undefined;
+}
+
+/**
  * Activate the tab `delta` places away, wrapping at both ends. Walks the
- * strip's order (pinned first, then by position) and skips tabs that live in
- * their own window, so the chord lands where the eye expects.
+ * order the tabs are drawn in, essentials included, so the chord lands where
+ * the eye expects.
  */
 function stepTab(delta: number) {
   const { tabs: all, detached, activeTab, activateTab } = useBrowser.getState();
-  const tabs = orderTabs(all).filter((t) => !detached.includes(t.id));
+  const tabs = keyboardTabOrder(all, detached);
   if (tabs.length === 0) return;
   const from = tabs.findIndex((t) => t.id === activeTab);
   const next = tabs[(((from < 0 ? 0 : from + delta) % tabs.length) + tabs.length) % tabs.length];
@@ -313,6 +339,7 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+alt+shift+n": "workspace.new",
   "mod+shift+e": "workspace.edit",
   ...Object.fromEntries(WORKSPACE_SLOTS.map((n) => [`mod+${n}`, `workspace.jump.${n}`])),
+  ...Object.fromEntries(TAB_SLOTS.map((n) => [`ctrl+${n}`, `tab.select.${n}`])),
 };
 
 /**
@@ -389,6 +416,7 @@ export const COMMAND_TITLES: Record<string, string> = {
   "workspace.new": "New workspace",
   "workspace.edit": "Edit current workspace",
   ...Object.fromEntries(WORKSPACE_SLOTS.map((n) => [`workspace.jump.${n}`, `Switch to workspace ${n}`])),
+  ...Object.fromEntries(TAB_SLOTS.map((n) => [`tab.select.${n}`, n === 9 ? "Go to the last tab" : `Go to tab ${n}`])),
 };
 
 /** The first chord bound to each command, by command id. */
@@ -439,7 +467,7 @@ export function chromeCommands(known: Command[] = []): Command[] {
   const { activeTab, detached } = useBrowser.getState();
   const here = tabInThisWindow(activeTab, detached);
   return Object.keys(UI_COMMANDS)
-    .filter((id) => !seen.has(id) && id in COMMAND_TITLES && !id.startsWith("workspace.jump.") && (id !== "private.exit" || isPrivateWindow()) && !(isPrivateWindow() && PRIVATE_REFUSED.includes(id)) && (here || !NEEDS_THIS_WINDOW.has(id)))
+    .filter((id) => !seen.has(id) && id in COMMAND_TITLES && !id.startsWith("workspace.jump.") && !id.startsWith("tab.select.") && (id !== "private.exit" || isPrivateWindow()) && !(isPrivateWindow() && PRIVATE_REFUSED.includes(id)) && (here || !NEEDS_THIS_WINDOW.has(id)))
     .map((id) => ({ id, title: COMMAND_TITLES[id]!, keybinding: chords[id] ?? null, scope: "global" as const }));
 }
 
@@ -503,6 +531,7 @@ const CHORDS_IN_FIELDS = new Set([
   "mod+shift+]",
   "ctrl+tab",
   "ctrl+shift+tab",
+  ...TAB_SLOTS.map((n) => `ctrl+${n}`),
   // Stepping through matches works from the find field itself.
   "mod+g",
   "mod+shift+g",
