@@ -638,9 +638,10 @@ impl TabHost {
                 }
                 // Off the engine's stack: the store write and the event to
                 // the chrome must not re-enter CEF from inside its callback.
+                // On a blocking thread, since the write is SQLite.
                 let app = title_app.clone();
                 let nonce = title_nonce.clone();
-                tauri::async_runtime::spawn(async move {
+                tauri::async_runtime::spawn_blocking(move || {
                     update_session_tab(&app, tab_id, &nonce, |t| t.title = title);
                 });
             });
@@ -775,7 +776,7 @@ impl TabHost {
                 });
                 let app = nav_app.clone();
                 let nonce = nav_nonce.clone();
-                tauri::async_runtime::spawn(async move {
+                tauri::async_runtime::spawn_blocking(move || {
                     update_session_tab(&app, tab_id, &nonce, |t| {
                         t.url = reported_url(&t.url, url);
                     });
@@ -2082,19 +2083,19 @@ fn apply_site_zoom(app: &AppHandle<Runtime>, tab_id: TabId, url: &str) {
 }
 
 /// A late callback from a closing renderer must not overwrite its replacement.
+///
+/// Blocking: it writes the store. Callers on the async runtime hand it to
+/// `spawn_blocking`, since several SQLite statements per title or address
+/// change of every tab held up whatever else was queued on that worker.
 fn update_session_tab(app: &AppHandle<Runtime>, id: TabId, nonce: &str, f: impl FnOnce(&mut Tab)) {
     let state = app.state::<AppState>();
-    // Check under the host lock, then let it go before the row is written.
-    // Holding it across the SQLite writes in `update_tab` stalled every tab
-    // operation on the main thread for every title and address change of
-    // every tab. What that opens -- the view replaced between the check and
-    // the write -- is a window of microseconds, and the replacement's own
-    // callbacks follow with the right values.
-    let current = {
-        let _host = lock(&state.host);
-        state.activity.session_current(id, nonce)
-    };
-    if current {
+    // The activity registry answers from its own small lock. This used to
+    // take the host lock around the check as well, which guarded nothing the
+    // registry does not -- the view can be replaced between the check and
+    // the write either way, a window of microseconds that the replacement's
+    // own callbacks close -- and made every title and address change of
+    // every tab wait on the lock the main thread needs for tab operations.
+    if state.activity.session_current(id, nonce) {
         update_tab(app, id, f);
     }
 }

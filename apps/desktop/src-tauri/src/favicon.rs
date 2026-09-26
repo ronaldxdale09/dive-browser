@@ -201,9 +201,9 @@ enum Resolved {
 pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
     // Subscribed before the task is spawned: the caller navigates as soon as
     // the other feeds are ready, and a subscription taken inside the task
-    // could miss the first load entirely.
-    // Only the page's own navigations and loads wake it; `Page` is enabled by
-    // the tab's setup, once, with everything else the tab listens on.
+    // could miss the first load entirely. Only the page's own navigations and
+    // loads wake it; `Page` is enabled by the tab's setup, once, with
+    // everything else the tab listens on.
     let mut events = session.subscribe_to(&[
         "Page.frameNavigated",
         "Page.navigatedWithinDocument",
@@ -226,9 +226,17 @@ pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
                             // Sites we have seen before get their mark back at
                             // once instead of flashing the fallback globe for
                             // as long as the page takes to load.
-                            let known = cached(&app, &next).map(|entry| entry.key);
+                            //
+                            // Both steps are SQLite, so they run on a blocking
+                            // thread; awaited, so a later navigation's update
+                            // cannot overtake this one.
+                            let (write_app, site) = (app.clone(), next.clone());
+                            let _ = tauri::async_runtime::spawn_blocking(move || {
+                                let known = cached(&write_app, &site).map(|entry| entry.key);
+                                update_tab(&write_app, tab_id, |t| t.favicon = known);
+                            })
+                            .await;
                             origin = Some(next);
-                            update_tab(&app, tab_id, |t| t.favicon = known);
                         }
                         continue;
                     }
@@ -268,8 +276,12 @@ pub fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
                                     return;
                                 }
                                 // `update_tab` writes and announces nothing
-                                // when the tab already wears this key.
-                                update_tab(&app, tab_id, |t| t.favicon = Some(key));
+                                // when the tab already wears this key. It is
+                                // SQLite, so it runs off the async workers.
+                                let _ = tauri::async_runtime::spawn_blocking(move || {
+                                    update_tab(&app, tab_id, |t| t.favicon = Some(key));
+                                })
+                                .await;
                                 return;
                             }
                         }
