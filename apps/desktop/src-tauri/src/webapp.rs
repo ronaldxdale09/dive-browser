@@ -211,29 +211,25 @@ async fn icon_from_page(session: &dive_cdp::CdpSession, icon_url: &str) -> Resul
 
 /// Fall back to fetching the icon ourselves and resizing it. Handles PNG and
 /// JPEG; an SVG on a CDN without CORS is the one case neither path covers.
-async fn icon_from_network(icon_url: &str) -> Result<Vec<u8>, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let response = client
-        .get(icon_url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("icon {}", response.status()));
-    }
-    if response
-        .content_length()
-        .is_some_and(|n| usize::try_from(n).map_or(true, |n| n > MAX_ICON_BYTES))
-    {
-        return Err("icon too large".into());
-    }
-    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
-    if bytes.len() > MAX_ICON_BYTES {
-        return Err("icon too large".into());
-    }
+///
+/// The page chose the address, so the fetch is held to the public internet
+/// (see [`crate::netfetch`]) unless the app itself is served from this
+/// machine, where a dev server keeps its icons beside it.
+async fn icon_from_network(icon_url: &str, tab_url: &str) -> Result<Vec<u8>, String> {
+    let local = |u: &str| url::Url::parse(u).is_ok_and(|u| crate::netfetch::names_local_host(&u));
+    let reach = if local(tab_url) && local(icon_url) {
+        crate::netfetch::Reach::AlsoLocal
+    } else {
+        crate::netfetch::Reach::Public
+    };
+    let bytes = crate::netfetch::get(
+        icon_url,
+        reach,
+        MAX_ICON_BYTES,
+        Duration::from_secs(15),
+        true,
+    )
+    .await?;
     let image = image::load_from_memory(&bytes).map_err(|e| format!("undecodable icon: {e}"))?;
     let square = image.resize_to_fill(ICON_SIZE, ICON_SIZE, image::imageops::FilterType::Lanczos3);
     let mut out = std::io::Cursor::new(Vec::new());
@@ -283,13 +279,16 @@ pub(crate) async fn webapp_install(
     let icon_url = field(probe.icon_url, "icon")?;
 
     let session = cdp_for(&state, id)?;
+    let tab_url = lock(&state.store).tab(id)?.url;
     let png = match icon_from_page(&session, &icon_url).await {
         Ok(png) => png,
-        Err(in_page) => icon_from_network(&icon_url).await.map_err(|network| {
-            AppError::new(format!(
-                "could not fetch the app icon: {in_page}; {network}"
-            ))
-        })?,
+        Err(in_page) => icon_from_network(&icon_url, &tab_url)
+            .await
+            .map_err(|network| {
+                AppError::new(format!(
+                    "could not fetch the app icon: {in_page}; {network}"
+                ))
+            })?,
     };
     let dir = app_dir(&app_id);
     let icon_path = write_icon(&dir, &png)?;

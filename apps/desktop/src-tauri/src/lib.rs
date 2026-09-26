@@ -59,6 +59,7 @@ mod menu;
 mod meta;
 mod navigation;
 mod netconfig;
+mod netfetch;
 mod network;
 #[cfg(feature = "cef")]
 mod network_probe;

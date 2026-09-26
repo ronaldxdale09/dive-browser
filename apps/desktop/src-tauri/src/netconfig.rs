@@ -135,6 +135,41 @@ pub fn record_running(config: &NetworkConfig) {
     let _ = RUNNING.set(config.clone());
 }
 
+/// How a fetch the host makes itself should leave the machine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostProxy {
+    /// However the environment says (`HTTPS_PROXY` and the rest). A PAC
+    /// script is not something the host can run, so it lands here too.
+    System,
+    /// Straight out, as Settings asked of the engine.
+    Direct,
+    /// Through this proxy, as a URL.
+    Server(String),
+}
+
+/// The proxy the engine was started with, for host fetches that should take
+/// the same way out as the pages they are made for. A fetch that ignored a
+/// proxy the person set would reach the network from somewhere they did not
+/// choose.
+pub fn host_proxy() -> HostProxy {
+    let Some(running) = RUNNING.get() else {
+        return HostProxy::System;
+    };
+    host_proxy_of(running)
+}
+
+fn host_proxy_of(config: &NetworkConfig) -> HostProxy {
+    match config.proxy_mode.as_str() {
+        "direct" => HostProxy::Direct,
+        "manual" => match proxy_authority(&config.proxy_server) {
+            Some(server) if server.contains("://") => HostProxy::Server(server.to_owned()),
+            Some(server) => HostProxy::Server(format!("http://{server}")),
+            None => HostProxy::System,
+        },
+        _ => HostProxy::System,
+    }
+}
+
 /// Whether `saved` would start the engine differently from how it is
 /// running now, so Settings can offer the restart that puts it into force.
 /// Compared by the switches it produces: an edit that changes nothing the
@@ -428,6 +463,33 @@ mod tests {
             vec!["proxy-pac-url"]
         );
         assert!(names(&config(&[("proxy_mode", "pac"), ("proxy_pac_url", "wpad")])).is_empty());
+    }
+
+    #[test]
+    fn host_fetches_leave_the_way_the_engine_does() {
+        assert_eq!(
+            host_proxy_of(&config(&[
+                ("proxy_mode", "manual"),
+                ("proxy_server", "10.0.0.2:8080")
+            ])),
+            HostProxy::Server("http://10.0.0.2:8080".into())
+        );
+        assert_eq!(
+            host_proxy_of(&config(&[
+                ("proxy_mode", "manual"),
+                ("proxy_server", "socks5://10.0.0.2:1080")
+            ])),
+            HostProxy::Server("socks5://10.0.0.2:1080".into())
+        );
+        assert_eq!(
+            host_proxy_of(&config(&[("proxy_mode", "direct")])),
+            HostProxy::Direct
+        );
+        assert_eq!(
+            host_proxy_of(&config(&[("proxy_mode", "pac")])),
+            HostProxy::System
+        );
+        assert_eq!(host_proxy_of(&config(&[])), HostProxy::System);
     }
 
     #[test]
