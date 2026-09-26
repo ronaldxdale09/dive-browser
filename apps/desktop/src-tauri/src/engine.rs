@@ -1075,6 +1075,8 @@ impl TabHost {
         crate::find::attach(tab_id, &view);
         #[cfg(feature = "cef")]
         crate::crash::attach(app, tab_id, &view);
+        #[cfg(feature = "cef")]
+        crate::cert_error::attach(app, tab_id, &view);
         self.views.insert(tab_id, view);
         // A pane whose page was asleep kept its place in the split. Its new
         // view starts over the whole content area and hidden, so it is moved
@@ -2089,6 +2091,7 @@ fn attach_cdp(
                             phase: crate::loading::LoadPhase::Failed,
                             url: None,
                             error: Some("ERR_DIVE_PROTOCOL_OVERLOAD".into()),
+                            method: None,
                         }).emit(failed_view.app_handle());
                     }
                     break;
@@ -2123,6 +2126,7 @@ fn attach_cdp(
                     phase: crate::loading::LoadPhase::Failed,
                     url: None,
                     error: Some(reason.clone()),
+                    method: None,
                 })
                 .emit(&failure_app);
             }

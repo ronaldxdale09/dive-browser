@@ -37,6 +37,12 @@ pub struct TabLoad {
     pub url: Option<String>,
     /// Chromium's error text for `Failed`, e.g. `net::ERR_NAME_NOT_RESOLVED`.
     pub error: Option<String>,
+    /// The failed document request's method, for `Failed`. A form's answer
+    /// (`POST`) is never retried on its own: sending it again could repeat
+    /// whatever the form did.
+    #[specta(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
 }
 
 /// Main-frame identity and the current document request, never inferred from
@@ -56,6 +62,22 @@ struct Navigation {
 struct DocumentRequest {
     id: String,
     url: String,
+    method: String,
+}
+
+impl DocumentRequest {
+    fn from_params(p: &serde_json::Value) -> Option<Self> {
+        let request = p.get("request")?;
+        Some(Self {
+            id: p.get("requestId")?.as_str()?.to_owned(),
+            url: request.get("url")?.as_str()?.to_owned(),
+            method: request
+                .get("method")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("GET")
+                .to_owned(),
+        })
+    }
 }
 
 impl Navigation {
@@ -133,11 +155,13 @@ fn main_commit(event: &CdpEvent) -> Option<bool> {
     )
 }
 
-/// What belonged to the page a tab just left. A sign-in card or an https
-/// upgrade note from the old document must not be offered on the new one.
+/// What belonged to the page a tab just left. A sign-in card, a certificate
+/// question or an https upgrade note from the old document must not be
+/// offered on the new one.
 fn committed(app: &AppHandle<Runtime>, tab_id: TabId, error_page: bool) {
     crate::https_only::committed(tab_id, error_page);
     crate::http_auth::abandon_tab(app, tab_id);
+    crate::cert_error::forget_tab(app, tab_id);
 }
 
 /// Map one `DevTools` event to a main-frame load-state change. Only the latest
@@ -181,6 +205,7 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent, main: &MainFrame) -> Option<Ta
                 },
                 url: navigation.url.clone(),
                 error: None,
+                method: None,
             }),
         "Network.requestWillBeSent" => {
             if p.get("type")?.as_str()? != "Document"
@@ -188,10 +213,7 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent, main: &MainFrame) -> Option<Ta
             {
                 return None;
             }
-            let request = DocumentRequest {
-                id: p.get("requestId")?.as_str()?.to_owned(),
-                url: p.get("request")?.get("url")?.as_str()?.to_owned(),
-            };
+            let request = DocumentRequest::from_params(p)?;
             let url = request.url.clone();
             // Redirects reuse the request ID; a superseding navigation replaces
             // it. Either way, error UI must describe the requested URL.
@@ -201,6 +223,7 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent, main: &MainFrame) -> Option<Ta
                 phase: LoadPhase::Started,
                 url: Some(url),
                 error: None,
+                method: None,
             })
         }
         "Network.loadingFinished" => {
@@ -236,6 +259,7 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent, main: &MainFrame) -> Option<Ta
                 phase: LoadPhase::Failed,
                 url: Some(request.url),
                 error: Some(error.to_owned()),
+                method: Some(request.method),
             })
         }
         _ => None,

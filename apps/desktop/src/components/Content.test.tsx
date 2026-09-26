@@ -5,6 +5,9 @@ import { ipc } from "../lib/ipc";
 import { contentCoverDepth, resetContentCover, useCoversContent } from "../lib/overlay";
 import { tabInThisWindow, useBrowser } from "../store/browser";
 import { useJsDialog } from "../store/jsDialog";
+import { useCertError } from "../store/certError";
+import { usePrefs } from "../store/prefs";
+import { resetRetries } from "../lib/autoRetry";
 import { Content, NavErrorPanel, describePermission } from "./Content";
 
 // The welcome screen, the device simulator and its picker have tests of
@@ -25,6 +28,7 @@ const tab: Tab = {
   last_active_at: "2026-09-03T00:00:00Z",
 };
 const initial = useBrowser.getState();
+const initialPrefs = usePrefs.getState();
 
 beforeEach(() => {
   useJsDialog.setState({ byTab: {}, listening: true });
@@ -41,6 +45,8 @@ afterEach(() => {
   cleanup();
   resetContentCover();
   useBrowser.setState(initial, true);
+  useCertError.setState({ byTab: {} });
+  usePrefs.setState(initialPrefs, true);
   vi.restoreAllMocks();
 });
 
@@ -145,6 +151,100 @@ describe("Content error panel", () => {
     useBrowser.setState({ detached: ["t1"], navError: { t1: { url: "http://localhost:3000/", error: "net::ERR_CONNECTION_REFUSED" } } });
     render(<Content />);
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("offers to pause protection on the site it blocked, and reloads", async () => {
+    usePrefs.setState({ prefs: { ...usePrefs.getState().prefs, block_trackers: true, privacy_exceptions: [] } });
+    const update = vi.spyOn(usePrefs.getState(), "update").mockResolvedValue(undefined);
+    usePrefs.setState({ update });
+    useBrowser.setState({ navError: { t1: { url: "https://Tracker.example/pixel", error: "net::ERR_BLOCKED_BY_CLIENT" } } });
+    render(<Content />);
+    fireEvent.click(screen.getByRole("button", { name: "Pause protection for this site" }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ privacy_exceptions: ["tracker.example"] }));
+    await waitFor(() => expect(ipc.tabReload).toHaveBeenCalledWith("t1"));
+  });
+});
+
+describe("Content automatic retry", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    resetRetries("t1");
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("retries a page that failed for want of a network, backing off, and then stops", () => {
+    useBrowser.setState({ navError: { t1: { url: "https://news.example/", error: "net::ERR_INTERNET_DISCONNECTED" } } });
+    const { unmount } = render(<Content />);
+    act(() => vi.advanceTimersByTime(2000));
+    expect(ipc.tabReload).toHaveBeenCalledTimes(1);
+    // The retry fails again: a new panel picks the schedule up where it was.
+    unmount();
+    const again = render(<Content />);
+    act(() => vi.advanceTimersByTime(4999));
+    expect(ipc.tabReload).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime(1));
+    expect(ipc.tabReload).toHaveBeenCalledTimes(2);
+    again.unmount();
+    const third = render(<Content />);
+    act(() => vi.advanceTimersByTime(15000));
+    expect(ipc.tabReload).toHaveBeenCalledTimes(3);
+    third.unmount();
+    render(<Content />);
+    act(() => vi.advanceTimersByTime(60000));
+    expect(ipc.tabReload).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries once when the network comes back", () => {
+    useBrowser.setState({ navError: { t1: { url: "https://nope.example/", error: "net::ERR_NAME_NOT_RESOLVED" } } });
+    render(<Content />);
+    act(() => vi.advanceTimersByTime(30000));
+    expect(ipc.tabReload).not.toHaveBeenCalled();
+    act(() => void window.dispatchEvent(new Event("online")));
+    expect(ipc.tabReload).toHaveBeenCalledTimes(1);
+  });
+
+  it("never resends a form or retries a refused site on its own", () => {
+    useBrowser.setState({ navError: { t1: { url: "https://shop.example/pay", error: "net::ERR_INTERNET_DISCONNECTED", method: "POST" } } });
+    const { unmount } = render(<Content />);
+    act(() => vi.advanceTimersByTime(30000));
+    act(() => void window.dispatchEvent(new Event("online")));
+    expect(ipc.tabReload).not.toHaveBeenCalled();
+    unmount();
+    useBrowser.setState({ navError: { t1: { url: "http://localhost:3000/", error: "net::ERR_CONNECTION_REFUSED" } } });
+    render(<Content />);
+    act(() => vi.advanceTimersByTime(30000));
+    expect(ipc.tabReload).not.toHaveBeenCalled();
+  });
+});
+
+describe("Content certificate interstitial", () => {
+  const asked = { tab_id: "t1", request_id: "cert-1", url: "https://staging.example/", host: "staging.example", error: "ERR_CERT_AUTHORITY_INVALID" };
+
+  it("leads with going back and marks proceeding as unsafe", async () => {
+    const answer = vi.spyOn(ipc, "certErrorAnswer").mockResolvedValue(true);
+    useCertError.setState({ byTab: { t1: asked }, listening: true });
+    vi.spyOn(ipc, "certErrorPending").mockResolvedValue(asked);
+    render(<Content />);
+    // The panel asks the host for the question once, in case it missed the event.
+    await act(async () => { await Promise.resolve(); });
+    const panel = screen.getByRole("alert");
+    expect(panel.textContent).toContain("Your connection to staging.example is not private");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Back to safety" }));
+    expect(contentCoverDepth()).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "Proceed to staging.example (unsafe)" }));
+    await waitFor(() => expect(answer).toHaveBeenCalledWith("t1", "cert-1", true));
+    expect(screen.queryByText(/is not private/)).toBeNull();
+  });
+
+  it("refuses the request when the person goes back", async () => {
+    const answer = vi.spyOn(ipc, "certErrorAnswer").mockResolvedValue(true);
+    useCertError.setState({ byTab: { t1: asked }, listening: true });
+    vi.spyOn(ipc, "certErrorPending").mockResolvedValue(asked);
+    render(<Content />);
+    fireEvent.click(screen.getByRole("button", { name: "Back to safety" }));
+    await waitFor(() => expect(answer).toHaveBeenCalledWith("t1", "cert-1", false));
   });
 });
 

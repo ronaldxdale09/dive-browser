@@ -750,6 +750,27 @@ export const commands = {
 	 */
 	tabUnresponsiveAnswer: (id: TabId, end: boolean) => typedError<boolean, AppError>(__TAURI_INVOKE("tab_unresponsive_answer", { id, end })),
 	/**
+	 *  Answer a certificate question: `proceed` loads the page anyway and trusts
+	 *  this certificate for this host until Dive quits; otherwise the navigation
+	 *  fails and the page stays where it was. False when it was no longer waiting.
+	 */
+	certErrorAnswer: (id: TabId, requestId: string, proceed: boolean) => typedError<boolean, AppError>(__TAURI_INVOKE("cert_error_answer", { id, requestId, proceed })),
+	/**
+	 *  The certificate question waiting in tab `id`, for a chrome that has just
+	 *  loaded and missed the event.
+	 */
+	certErrorPending: (id: TabId) => __TAURI_INVOKE<{
+	tab_id: TabId,
+	/**  Opaque; pass it back to `cert_error_answer`. */
+	request_id: string,
+	/**  The address that was asked for. */
+	url: string,
+	/**  Its host, as the unsafe button names it. */
+	host: string,
+	/**  Chromium's name for the error, such as `ERR_CERT_AUTHORITY_INVALID`. */
+	error: string,
+} | null>("cert_error_pending", { id }),
+	/**
 	 *  Round the corners of the page views to match the chrome's corner
 	 *  preference; zero makes them square again.
 	 */
@@ -1004,6 +1025,8 @@ export const commands = {
 export const events = {
 	agentPointer: makeEvent<AgentPointer>("agent-pointer"),
 	agentPresence: makeEvent<AgentPresence>("agent-presence"),
+	certErrorAsked: makeEvent<CertErrorAsked>("cert-error-asked"),
+	certErrorClosed: makeEvent<CertErrorClosed>("cert-error-closed"),
 	consoleEntry: makeEvent<ConsoleEntry>("console-entry"),
 	credentialPrompt: makeEvent<CredentialPrompt>("credential-prompt"),
 	devServersChanged: makeEvent<DevServersChanged>("dev-servers-changed"),
@@ -1032,7 +1055,7 @@ export const events = {
 	tabAudio: makeEvent<TabAudio>("tab-audio"),
 	tabCrashed: makeEvent<TabCrashed>("tab-crashed"),
 	tabHistoryChanged: makeEvent<TabHistoryChanged>("tab-history-changed"),
-	tabLoad: makeEvent<TabLoad>("tab-load"),
+	tabLoad: makeEvent<TabLoad_Deserialize>("tab-load"),
 	tabResponsive: makeEvent<TabResponsive>("tab-responsive"),
 	tabUnresponsive: makeEvent<TabUnresponsive>("tab-unresponsive"),
 	tabWindowChanged: makeEvent<TabWindowChanged>("tab-window-changed"),
@@ -1279,6 +1302,25 @@ export type Category =
 "platform" |
 /**  Measurement, error reporting and support widgets. */
 "analytics";
+
+/**  A page's certificate was refused, and the person can decide. */
+export type CertErrorAsked = {
+	tab_id: TabId,
+	/**  Opaque; pass it back to `cert_error_answer`. */
+	request_id: string,
+	/**  The address that was asked for. */
+	url: string,
+	/**  Its host, as the unsafe button names it. */
+	host: string,
+	/**  Chromium's name for the error, such as `ERR_CERT_AUTHORITY_INVALID`. */
+	error: string,
+};
+
+/**  A certificate question that is no longer waiting. */
+export type CertErrorClosed = {
+	tab_id: TabId,
+	request_id: string,
+};
 
 /**  A streamed piece of the reply. */
 export type ChatDelta =
@@ -3233,7 +3275,10 @@ export type TabHistoryChanged = {
 export type TabId = string;
 
 /**  A change in a tab's loading state. */
-export type TabLoad = {
+export type TabLoad = TabLoad_Serialize | TabLoad_Deserialize;
+
+/**  A change in a tab's loading state. */
+export type TabLoad_Deserialize = {
 	/**  The tab. */
 	tab_id: TabId,
 	/**  What happened. */
@@ -3242,6 +3287,30 @@ export type TabLoad = {
 	url: string | null,
 	/**  Chromium's error text for `Failed`, e.g. `net::ERR_NAME_NOT_RESOLVED`. */
 	error: string | null,
+	/**
+	 *  The failed document request's method, for `Failed`. A form's answer
+	 *  (`POST`) is never retried on its own: sending it again could repeat
+	 *  whatever the form did.
+	 */
+	method?: string | null,
+};
+
+/**  A change in a tab's loading state. */
+export type TabLoad_Serialize = {
+	/**  The tab. */
+	tab_id: TabId,
+	/**  What happened. */
+	phase: LoadPhase,
+	/**  The URL involved, when the engine reported one. */
+	url: string | null,
+	/**  Chromium's error text for `Failed`, e.g. `net::ERR_NAME_NOT_RESOLVED`. */
+	error: string | null,
+	/**
+	 *  The failed document request's method, for `Failed`. A form's answer
+	 *  (`POST`) is never retried on its own: sending it again could repeat
+	 *  whatever the form did.
+	 */
+	method?: string | null,
 };
 
 /**

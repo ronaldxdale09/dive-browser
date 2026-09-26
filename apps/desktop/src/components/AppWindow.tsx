@@ -17,7 +17,7 @@ import { usePopoutPage } from "../lib/usePopoutPage";
 import { useTabHistory } from "../lib/useTabHistory";
 import { useDismiss } from "../lib/useDismiss";
 import { errorMessage } from "../lib/errors";
-import { NavErrorPanel } from "./Content";
+import { PageErrorPanels } from "./Content";
 import { inScope, originOf, useWebApps } from "../store/webapps";
 import { useWebAppIcon } from "../lib/useWebAppIcon";
 import { useFaviconSrc } from "../lib/favicons";
@@ -38,7 +38,6 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
   const { tab, loading, ready } = usePopoutPage(tabId);
   const [app, setApp] = useState<WebApp | null>(null);
   const error = useBrowser((state) => state.error);
-  const navError = useBrowser((state) => state.navError[tabId]);
   const findOpen = useBrowser((state) => state.open.find);
   const loadPrefs = usePrefs((s) => s.load);
   const url = tab?.url ?? "";
@@ -177,7 +176,8 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
             </div>
           </div>
         )}
-        {navError && <NavErrorPanel url={navError.url} error={navError.error} onRetry={() => run(ipc.tabReload(tabId))} />}
+        {/* The window's own tab: a certificate question or a failed load, with its retries. */}
+        <PageErrorPanels tabId={tabId} active />
       </div>
     </div>
   );

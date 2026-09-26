@@ -7,6 +7,7 @@ import type { Tab } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { suspendDevice } from "../store/emulation";
 import { MAX_PANES, MIN_PANE, useLayout, type Split } from "../store/layout";
+import { PageErrorPanels } from "./Content";
 import { Favicon } from "./Favicon";
 import { Icon } from "./Icon";
 import { paneId, zoneId } from "./TabDnd";
@@ -202,6 +203,9 @@ function PaneAndDivider({ tab, active, last, divider, onActivate, onClose, onRes
         </header>
         <div ref={register} className="relative min-h-0 flex-1 bg-surface">
           {preview && <img aria-hidden src={preview} className="pointer-events-none absolute inset-0 size-full object-fill" />}
+          {/* Each pane answers for its own page: one pane failing to load
+              must not hide the others behind its error. */}
+          <PageErrorPanels tabId={tab.id} active={active} />
         </div>
       </section>
       {!last && (

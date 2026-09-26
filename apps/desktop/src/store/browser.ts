@@ -171,7 +171,8 @@ interface BrowserState {
   applyEvent: (event: CoreEvent) => void;
 }
 
-export type NavError = { url: string; error: string };
+/** A failed document request. `method` is the request's own, when the engine said: a form's answer is never retried on its own. */
+export type NavError = { url: string; error: string; method?: string };
 /** What reader view and translation have done to a tab's page. */
 export type PageMode = { reader: boolean; translated: string | null };
 export type NoticeAction = { label: string; run: () => void };
@@ -430,7 +431,7 @@ export function reduceLoad(state: LoadState, load: TabLoad): Partial<LoadState> 
     case "stopped":
       return { loading: without(state.loading, id), crashedTabs: without(state.crashedTabs, id) };
     case "failed":
-      return { loading: without(state.loading, id), navError: { ...state.navError, [id]: { url: load.url ?? "", error: load.error ?? "" } } };
+      return { loading: without(state.loading, id), navError: { ...state.navError, [id]: { url: load.url ?? "", error: load.error ?? "", ...(load.method ? { method: load.method } : {}) } } };
   }
 }
 

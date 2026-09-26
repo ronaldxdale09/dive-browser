@@ -877,6 +877,7 @@ pub fn attach(
                                 phase: crate::loading::LoadPhase::Failed,
                                 url: None,
                                 error: Some("ERR_DIVE_REQUEST_RECOVERY".into()),
+                                method: None,
                             })
                             .emit(&app);
                         }

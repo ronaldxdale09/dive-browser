@@ -18,6 +18,7 @@ mod browser_import;
 mod buffers;
 mod capture_scope;
 mod cdp_feed;
+mod cert_error;
 mod clipboard_secret;
 mod color;
 mod commands;

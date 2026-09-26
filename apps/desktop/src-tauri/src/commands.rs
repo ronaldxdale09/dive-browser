@@ -1007,6 +1007,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             chrome_ready,
             log_chrome_error,
             tab_unresponsive_answer,
+            cert_error_answer,
+            cert_error_pending,
             layout_set_corner_radius,
             window_set_background,
             layout_set_overlay_regions,
@@ -1073,6 +1075,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::crash::TabCrashed,
             crate::crash::TabUnresponsive,
             crate::crash::TabResponsive,
+            crate::cert_error::CertErrorAsked,
+            crate::cert_error::CertErrorClosed,
             crate::devservers::DevServersChanged,
             crate::rules::RulesChanged,
             crate::inspect::InspectEvent,
@@ -1622,7 +1626,7 @@ fn close_views(app: &AppHandle<Runtime>, state: &AppState, tabs: &[TabId]) {
 /// Forget everything kept about tab `id` outside the host and the store:
 /// its recording (saved, not thrown away), its subtitles, its buffered console and network rows, its
 /// inspector picks, its crash budget, its privacy report, a sign-in prompt
-/// still waiting, and a pending https upgrade. Every path that closes a tab
+/// still waiting, a certificate question, and a pending https upgrade. Every path that closes a tab
 /// calls this, so none of them leaks what another path cleans up.
 pub(crate) fn forget_tab_state(app: &AppHandle<Runtime>, state: &AppState, id: TabId) {
     crate::subtitles::stop_tab(app, id);
@@ -1632,6 +1636,7 @@ pub(crate) fn forget_tab_state(app: &AppHandle<Runtime>, state: &AppState, id: T
     state.crashes.drop_tab(id);
     state.privacy_pages.drop_tab(id);
     state.http_auth.forget_tab(id);
+    crate::cert_error::forget_tab(app, id);
     crate::https_only::forget(id);
 }
 
@@ -4909,6 +4914,33 @@ pub(crate) fn log_chrome_error(
         "chrome error: {}",
         clip(&message)
     );
+}
+
+/// Answer a certificate question: `proceed` loads the page anyway and trusts
+/// this certificate for this host until Dive quits; otherwise the navigation
+/// fails and the page stays where it was. False when it was no longer waiting.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::needless_pass_by_value)] // Tauri hands command arguments over by value.
+pub(crate) fn cert_error_answer(
+    app: AppHandle<Runtime>,
+    id: TabId,
+    request_id: String,
+    proceed: bool,
+) -> AppResult<bool> {
+    // On the main thread: the engine's callback belongs to its UI thread,
+    // and continuing a request there is how every other answer is given.
+    on_main(&app, move |_, app, _| {
+        Ok(crate::cert_error::answer(app, id, &request_id, proceed))
+    })
+}
+
+/// The certificate question waiting in tab `id`, for a chrome that has just
+/// loaded and missed the event.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn cert_error_pending(id: TabId) -> Option<crate::cert_error::CertErrorAsked> {
+    crate::cert_error::pending(id)
 }
 
 /// Answer a page that stopped responding: `end` ends its renderer (the tab

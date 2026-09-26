@@ -21,7 +21,7 @@ import { useTabHistory } from "../lib/useTabHistory";
 import { isMac, isWindows, shortcutFor } from "../lib/commands";
 import { selectAllInChromeField } from "../lib/chromeEditing";
 import { errorMessage } from "../lib/errors";
-import { NavErrorPanel } from "./Content";
+import { PageErrorPanels } from "./Content";
 import { WindowResizeEdges } from "./WindowResizeEdges";
 import { WindowControls } from "./WindowControls";
 
@@ -39,8 +39,6 @@ function run(action: Promise<unknown>) {
 export function Popout({ tabId }: { tabId: string }) {
   const { tab, loading, ready } = usePopoutPage(tabId);
   const error = useBrowser((state) => state.error);
-  // A failed document request shows the same explanation as the main window.
-  const navError = useBrowser((state) => state.navError[tabId]);
   const findOpen = useBrowser((state) => state.open.find);
   const loadPrefs = usePrefs((s) => s.load);
   const url = tab?.url ?? "";
@@ -268,7 +266,8 @@ export function Popout({ tabId }: { tabId: string }) {
           </div>
         )}
         {privateStart && <PrivateWelcome onBrowse={() => { inputRef.current?.focus(); inputRef.current?.select(); }} />}
-        {navError && <NavErrorPanel url={navError.url} error={navError.error} onRetry={() => run(ipc.tabReload(tabId))} />}
+        {/* The window's own tab: a certificate question or a failed load, with its retries. */}
+        <PageErrorPanels tabId={tabId} active />
       </div>
     </div>
   );

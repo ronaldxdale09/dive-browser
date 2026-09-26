@@ -1,18 +1,22 @@
 import { Select } from "./Select";
 import { isPrivateWindow } from "../lib/privateMode";
 import { PrivateWelcome } from "./PrivateMode";
-import { AlertTriangle, Check, Hourglass, RotateCw, Search, ShieldOff, ShieldQuestion, WifiOff, X } from "lucide-react";
+import { AlertTriangle, Check, Hourglass, RotateCw, Search, ShieldAlert, ShieldOff, ShieldQuestion, WifiOff, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
 import { createBoundsReporter, elementBounds } from "../lib/boundsReporter";
 import { isWindows } from "../lib/commands";
 import { RESIZE_GUTTER, useWindowMaximized } from "../lib/windowResize";
-import { describeNavError, searchTermFor } from "../lib/navError";
+import { describeNavError, errorCode, searchTermFor } from "../lib/navError";
+import { resetRetries, useAutoRetry } from "../lib/autoRetry";
+import { canGoBack } from "../lib/useTabHistory";
+import { useCertError } from "../store/certError";
+import { usePrefs } from "../store/prefs";
 import { useContentPreview, useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { tabInThisWindow, useBrowser } from "../store/browser";
 import type { PermissionRequest } from "../store/browser";
-import type { CrashReason } from "../lib/ipc";
+import type { CertErrorAsked, CrashReason } from "../lib/ipc";
 import { Icon } from "./Icon";
 import { selectDevice, useEmulation } from "../store/emulation";
 import { useJsDialog } from "../store/jsDialog";
@@ -59,7 +63,6 @@ export function Content() {
   const dragging = useTabDrag((s) => s.dragging);
   const crash = useBrowser((s) => (activeTab ? s.crashedTabs[activeTab] : undefined));
   const hung = useBrowser((s) => (activeTab ? s.unresponsiveTabs[activeTab] === true : false));
-  const navError = useBrowser((s) => (activeTab ? s.navError[activeTab] : undefined));
   const asked = useBrowser((s) => (activeTab ? s.permissionRequests[activeTab]?.[0] : undefined));
   const findOpen = useBrowser((s) => s.open.find);
   // The page's questions start below whatever already floats at the top of
@@ -100,7 +103,8 @@ export function Content() {
             <FullPage />
           )}
           {dragging && !sel && <DropZones dragging={dragging} split={shown} activeTab={activeTab} />}
-          {activeTab && navError && <NavErrorPanel url={navError.url} error={navError.error} />}
+          {/* A split draws each pane's failure inside that pane (see SplitView). */}
+          {activeTab && !shown && <PageErrorPanels tabId={activeTab} active />}
         </div>
         <Suspense fallback={pickerOpen ? <div className="h-full w-[min(420px,46%)] min-w-[300px] shrink-0 border-l border-line bg-surface" aria-label="Loading device picker" /> : null}>
           {pickerOpen && <DevicePicker />}
@@ -270,23 +274,42 @@ export function PermissionDialog({ tabId, request }: { tabId: string; request: P
  * What the page area shows when the document request itself failed. The
  * native view paints above the chrome, so this hides the page while it is
  * up; a retry or a new navigation takes it down.
+ *
+ * `tabId` is the tab whose page failed: in a split each pane has its own
+ * panel, and a popout's tab is not the main window's active one. `active`
+ * says it is the page being looked at, which is the only one Dive retries
+ * without being asked.
  */
-export function NavErrorPanel({ url, error, onRetry }: { url: string; error: string; onRetry?: () => void }) {
+export function NavErrorPanel({ url, error, method, tabId: forTab, active = true, onRetry }: { url: string; error: string; method?: string | undefined; tabId?: string | null; active?: boolean; onRetry?: () => void }) {
   useCoversContent(true);
-  const reload = useBrowser((s) => s.reload);
   const navigate = useBrowser((s) => s.navigate);
-  const activeTab = useBrowser((s) => s.activeTab);
-  const retry = onRetry ?? (() => void reload());
+  const storeActive = useBrowser((s) => s.activeTab);
+  const tabId = forTab === undefined ? storeActive : forTab;
+  const blockTrackers = usePrefs((s) => s.prefs.block_trackers);
+  const exceptions = usePrefs((s) => s.prefs.privacy_exceptions);
+  const updatePrefs = usePrefs((s) => s.update);
+  const fail = (e: unknown) => useBrowser.setState({ error: errorMessage(e) });
+  const reloadTab = () => {
+    if (onRetry) onRetry();
+    else if (tabId) void ipc.tabReload(tabId).catch(fail);
+  };
+  // Pressing Retry is the person's own attempt: the automatic schedule
+  // starts over after it rather than counting it.
+  const retry = () => {
+    if (tabId) resetRetries(tabId);
+    reloadTab();
+  };
+  useAutoRetry({ tabId, url, error, method, active, retry: reloadTab });
   const text = describeNavError(error, url);
   // An https page that failed may be one Dive asked for over https itself.
   // The host knows; asking it here keeps the upgrade out of every load event
   // for the sake of a button that is almost never needed.
   const [upgraded, setUpgraded] = useState<string | null>(null);
   useEffect(() => {
-    if (!activeTab || !url.startsWith("https://")) return;
+    if (!tabId || !url.startsWith("https://")) return;
     let alive = true;
     void ipc
-      .httpsOnlyUpgraded(activeTab, url)
+      .httpsOnlyUpgraded(tabId, url)
       .then((host) => {
         if (alive) setUpgraded(host);
       })
@@ -297,7 +320,7 @@ export function NavErrorPanel({ url, error, onRetry }: { url: string; error: str
       alive = false;
       setUpgraded(null);
     };
-  }, [activeTab, url, error]);
+  }, [tabId, url, error]);
   // Allowing plain http is a write on the host; while it runs the button
   // cannot be pressed twice, and a refusal is said here rather than lost.
   const [allowing, setAllowing] = useState(false);
@@ -313,14 +336,31 @@ export function NavErrorPanel({ url, error, onRetry }: { url: string; error: str
       setAllowing(false);
     }
   };
-  const offline = /ERR_INTERNET_DISCONNECTED/.test(error);
+  const code = errorCode(error);
+  const offline = code === "ERR_INTERNET_DISCONNECTED";
   // A host that does not exist is often a typo for one that does.
-  const term = /ERR_NAME_NOT_RESOLVED/.test(error) ? searchTermFor(url) : "";
+  const term = code === "ERR_NAME_NOT_RESOLVED" ? searchTermFor(url) : "";
+  // Blocked by protection is a decision the person can undo for this site,
+  // right here, instead of hunting for the shield in the toolbar.
+  const blockedHost = code === "ERR_BLOCKED_BY_CLIENT" && blockTrackers ? hostOf(url) : null;
+  const pausable = blockedHost !== null && !exceptions.includes(blockedHost);
+  const [pausing, setPausing] = useState(false);
+  const pauseProtection = async (host: string) => {
+    setPausing(true);
+    try {
+      await updatePrefs({ privacy_exceptions: [...exceptions.filter((known) => known !== host), host] });
+      reloadTab();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setPausing(false);
+    }
+  };
   return (
-    <div data-native-overlay role="alert" aria-labelledby="nav-error-title" className="absolute inset-0 z-10 grid place-items-center bg-surface p-6">
+    <div data-native-overlay role="alert" aria-labelledby={tabId ? `nav-error-title-${tabId}` : "nav-error-title"} className="absolute inset-0 z-10 grid place-items-center overflow-auto bg-surface p-6">
       <div className="flex w-full max-w-md flex-col items-start gap-3">
         <Icon icon={offline ? WifiOff : AlertTriangle} size={28} className="text-ink-3" />
-        <h2 id="nav-error-title" className="text-lg font-semibold text-ink">
+        <h2 id={tabId ? `nav-error-title-${tabId}` : "nav-error-title"} className="text-lg font-semibold text-ink">
           {text.title}
         </h2>
         <p className="text-sm text-ink-2">{text.detail}</p>
@@ -334,15 +374,24 @@ export function NavErrorPanel({ url, error, onRetry }: { url: string; error: str
             <Icon icon={RotateCw} size={13} /> Retry
           </button>
           {term && (
-            <button type="button" onClick={() => void navigate(term)} className="flex h-8 items-center gap-1.5 rounded-lg border border-line-2 px-3 text-sm text-ink hover:bg-surface-2">
+            <button
+              type="button"
+              onClick={() => (forTab ? void ipc.tabNavigate(forTab, term).catch(fail) : void navigate(term))}
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-line-2 px-3 text-sm text-ink hover:bg-surface-2"
+            >
               <Icon icon={Search} size={13} /> Search for “{term}”
             </button>
           )}
-          {upgraded && activeTab && (
+          {pausable && blockedHost && (
+            <button type="button" disabled={pausing} onClick={() => void pauseProtection(blockedHost)} className="flex h-8 items-center gap-1.5 rounded-lg border border-line-2 px-3 text-sm text-ink hover:bg-surface-2 disabled:opacity-50">
+              <Icon icon={ShieldOff} size={13} /> Pause protection for this site
+            </button>
+          )}
+          {upgraded && tabId && (
             <button
               type="button"
               disabled={allowing}
-              onClick={() => void allowHttp(activeTab)}
+              onClick={() => void allowHttp(tabId)}
               title={`Load ${upgraded} over http from now on. Anything on the network between you and it can read and change the page.`}
               className="flex h-8 items-center gap-1.5 rounded-lg border border-warn/50 px-3 text-sm text-ink hover:bg-warn/10 disabled:opacity-50"
             >
@@ -360,6 +409,106 @@ export function NavErrorPanel({ url, error, onRetry }: { url: string; error: str
       </div>
     </div>
   );
+}
+
+/** The host of an http(s) address, lowercased, or null. */
+function hostOf(raw: string): string | null {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.hostname.toLowerCase().replace(/\.$/, "") || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The engine stopped a page on a certificate it would not accept, and is
+ * holding the request until the person decides. Going back is the answer
+ * the panel leads with; proceeding is there, smaller and plainly marked,
+ * and is remembered only for this certificate until Dive quits.
+ */
+export function CertErrorPanel({ asked }: { asked: CertErrorAsked }) {
+  useCoversContent(true);
+  const answer = useCertError((s) => s.answer);
+  const back = useRef<HTMLButtonElement>(null);
+  const text = describeNavError(asked.error, asked.url);
+  useEffect(() => {
+    back.current?.focus({ preventScroll: true });
+  }, [asked.request_id]);
+  const goBack = async () => {
+    const failed = failureOf(asked.tab_id);
+    await answer(asked, false);
+    // The refusal fails the navigation, and the engine commits an error
+    // page for it. Once it has, going back lands on the page the person
+    // came from; before, it would skip one further. With nothing to go
+    // back to, the error panel stays and says what happened.
+    if (!(await failed)) return;
+    const history = await ipc.tabHistory(asked.tab_id).catch(() => null);
+    if (canGoBack(history)) void ipc.tabBack(asked.tab_id).catch(() => undefined);
+  };
+  return (
+    <div data-native-overlay role="alert" aria-labelledby={`cert-error-title-${asked.tab_id}`} className="absolute inset-0 z-20 grid place-items-center overflow-auto bg-surface p-6">
+      <div className="flex w-full max-w-md flex-col items-start gap-3">
+        <Icon icon={ShieldAlert} size={28} className="text-danger" />
+        <h2 id={`cert-error-title-${asked.tab_id}`} className="text-lg font-semibold text-ink">
+          Your connection to {asked.host || "this site"} is not private
+        </h2>
+        <p className="text-sm text-ink-2">
+          {text.detail} Someone could be pretending to be {asked.host || "the site"} to read what you send it, such as passwords or card numbers.
+        </p>
+        {text.hint && <p className="text-sm text-ink-2">{text.hint}</p>}
+        <p className="max-w-full truncate font-mono text-xs text-ink-3" title={asked.url}>
+          {asked.url}
+        </p>
+        <p className="font-mono text-[11px] text-ink-3">{asked.error}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-3">
+          <button ref={back} type="button" onClick={() => void goBack()} className="flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-sm text-accent-ink hover:opacity-90">
+            Back to safety
+          </button>
+          <button type="button" onClick={() => void answer(asked, true)} className="text-xs text-ink-3 underline underline-offset-2 hover:text-danger">
+            Proceed to {asked.host || "the site"} (unsafe)
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Resolves true once `tabId` reports a failed load, false after a few seconds without one. */
+function failureOf(tabId: string, timeoutMs = 3000): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (failed: boolean) => {
+      if (settled) return;
+      settled = true;
+      stop();
+      clearTimeout(timer);
+      resolve(failed);
+    };
+    const stop = useBrowser.subscribe((s, prev) => {
+      if (s.navError[tabId] && s.navError[tabId] !== prev.navError[tabId]) finish(true);
+    });
+    const timer = setTimeout(() => finish(false), timeoutMs);
+  });
+}
+
+/**
+ * Whatever stands in for `tabId`'s page when it has none to show: a
+ * certificate question the engine is waiting on, or the failure of the
+ * document request. Drawn inside the rectangle the page would occupy, so in
+ * a split each pane speaks for its own tab.
+ */
+export function PageErrorPanels({ tabId, active }: { tabId: string; active: boolean }) {
+  const navError = useBrowser((s) => s.navError[tabId]);
+  const asked = useCertError((s) => s.byTab[tabId]);
+  const recover = useCertError((s) => s.recover);
+  useEffect(() => {
+    void recover(tabId);
+  }, [recover, tabId]);
+  if (asked) return <CertErrorPanel asked={asked} />;
+  if (!navError) return null;
+  return <NavErrorPanel tabId={tabId} active={active} url={navError.url} error={navError.error} method={navError.method} />;
 }
 
 /** The page filling the area. Reports its own rectangle. */

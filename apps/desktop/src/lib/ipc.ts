@@ -22,7 +22,7 @@ export const events = {
     once: (callback: EventCallback<string>) => generatedEvents.menuCommand(getCurrentWebview()).once(callback),
   },
 };
-export type { CrashReason, TabUnresponsive, TabResponsive, ExternalLinkAsked, TabAudio, TaskRow, Address, Card, CardDraft, RestoreSummary, ClearOutcome, DownloadRecord } from "../generated/bindings";
+export type { CertErrorAsked, CertErrorClosed, CrashReason, TabUnresponsive, TabResponsive, ExternalLinkAsked, TabAudio, TaskRow, Address, Card, CardDraft, RestoreSummary, ClearOutcome, DownloadRecord } from "../generated/bindings";
 export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, CsvImportSummary, LoginSave, PasswordExport, FormEntry, HttpAuthAsked, HttpAuthClosed, JsDialogAsked, JsDialogClosed } from "../generated/bindings";
 export type { ExtensionInfo, ExtensionList };
 export type { WebApp, WebAppProbe } from "../generated/bindings";
@@ -127,6 +127,10 @@ export const ipc = {
   httpsOnlyUpgraded: (id: string, url: string) => commands.httpsOnlyUpgraded(id, url),
   /** Keep reaching this host in the clear, and go back to its http address. */
   httpsOnlyAllow: async (id: string, url: string) => unwrap(await commands.httpsOnlyAllow(id, url)),
+  /** Go back from a certificate error, or proceed past it for this session. */
+  certErrorAnswer: async (id: string, requestId: string, proceed: boolean) => unwrap(await commands.certErrorAnswer(id, requestId, proceed)),
+  /** The certificate question waiting in a tab, if any. */
+  certErrorPending: (id: string) => commands.certErrorPending(id),
   tabFillVideo: async (id: string) => unwrap(await commands.tabFillVideo(id)),
   tabSetTier: async (id: string, tier: TabTier) => unwrap(await commands.tabSetTier(id, tier)),
   /** Move a tab to another workspace of its profile that shares its cookies; refused otherwise. */
