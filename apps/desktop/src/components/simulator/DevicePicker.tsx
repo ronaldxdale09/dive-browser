@@ -15,7 +15,7 @@ import { DEVICE_GROUPS, devicesIn, searchDevices } from "../../data/devices";
 import type { DeviceGroup, DevicePreset } from "../../data/devices";
 import { tabInThisWindow, useBrowser } from "../../store/browser";
 import { usePicker } from "../../store/simulator";
-import { PLACES, baseFor, selectDevice, selectEnvironment, selectMedia, selectThrottle, useEmulation } from "../../store/emulation";
+import { PLACES, baseFor, customSizeProblem, selectDevice, selectEnvironment, selectMedia, selectThrottle, useEmulation } from "../../store/emulation";
 import { Icon, IconButton } from "../Icon";
 
 export { usePicker };
@@ -39,6 +39,7 @@ export function DevicePicker() {
   const toggleLandscape = useEmulation((s) => s.toggleLandscape);
   const [query, setQuery] = useState("");
   const [custom, setCustom] = useState({ width: sel?.custom?.width ?? 1024, height: sel?.custom?.height ?? 768 });
+  const customProblem = customSizeProblem(Math.max(200, custom.width), Math.max(200, custom.height));
   const search = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -133,6 +134,7 @@ export function DevicePicker() {
               className="flex items-center gap-2"
               onSubmit={(e) => {
                 e.preventDefault();
+                if (customProblem) return;
                 void setCustomSize(tab, Math.max(200, custom.width), Math.max(200, custom.height));
               }}
             >
@@ -144,6 +146,11 @@ export function DevicePicker() {
               </button>
               {sel?.deviceId === "custom" && <Icon icon={Check} size={13} className="text-highlight" />}
             </form>
+            {customProblem && (
+              <p role="alert" className="pt-2 text-[11px] text-danger">
+                {customProblem}
+              </p>
+            )}
           </Section>
 
           <Environment tab={tab} />

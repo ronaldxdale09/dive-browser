@@ -12,6 +12,7 @@ import { useEffect, useRef } from "react";
 import type { DevicePreset } from "../../data/devices";
 import { stripsFor } from "../../data/devices";
 import { createBoundsReporter, elementBounds } from "../../lib/boundsReporter";
+import type { Bounds } from "../../lib/boundsReporter";
 import { BottomBar, Cutout, HomeIndicator, StatusBar, TopBar } from "./Chrome";
 import type { Layout, UiMode } from "./geometry";
 
@@ -29,8 +30,29 @@ export interface DeviceFrameProps {
   preview?: string | null;
   /** Called with the page slot's rectangle whenever it moves or resizes. */
   onPageRect: (rect: { x: number; y: number; width: number; height: number }) => void;
+  /**
+   * The scrolling area the frame sits in. The reported rectangle is cut to
+   * it and follows its scrolling: the native page paints above the chrome,
+   * so a slot running past the stage put the page over the toolbar or the
+   * picker, and scrolling moved the frame out from under it.
+   */
+  viewport?: React.RefObject<HTMLElement | null>;
   /** Optional caption under the frame. */
   caption?: string;
+}
+
+/**
+ * The part of `rect` inside `clip`, or `rect` itself without one. Nothing
+ * showing is an empty rectangle at the clip's corner, which hides the view.
+ */
+export function clipBounds(rect: Bounds, clip: Bounds | null): Bounds {
+  if (!clip) return rect;
+  const x = Math.max(rect.x, clip.x);
+  const y = Math.max(rect.y, clip.y);
+  const right = Math.min(rect.x + rect.width, clip.x + clip.width);
+  const bottom = Math.min(rect.y + rect.height, clip.y + clip.height);
+  if (right <= x || bottom <= y) return { x: clip.x, y: clip.y, width: 0, height: 0 };
+  return { x, y, width: right - x, height: bottom - y };
 }
 
 /** The body colour and finish for a frame kind. */
@@ -109,7 +131,7 @@ function SideButtons({ device, landscape, outer, scale }: { device: DevicePreset
   );
 }
 
-export function DeviceFrame({ device, landscape, mode, layout, dark, url, secure, preview, onPageRect, caption }: DeviceFrameProps) {
+export function DeviceFrame({ device, landscape, mode, layout, dark, url, secure, preview, onPageRect, viewport, caption }: DeviceFrameProps) {
   const slot = useRef<HTMLDivElement>(null);
   const { scale, screen, strips, bezel, outer } = layout;
   const body = bodyStyle(device, scale);
@@ -118,19 +140,23 @@ export function DeviceFrame({ device, landscape, mode, layout, dark, url, secure
   useEffect(() => {
     const el = slot.current;
     if (!el) return;
-    const reporter = createBoundsReporter(() => elementBounds(el), onPageRect);
+    const clip = viewport?.current ?? null;
+    const reporter = createBoundsReporter(() => clipBounds(elementBounds(el), clip ? elementBounds(clip) : null), onPageRect);
     reporter.schedule();
     const ro = new ResizeObserver(reporter.schedule);
     ro.observe(el);
+    if (clip) ro.observe(clip);
     window.addEventListener("resize", reporter.schedule);
+    clip?.addEventListener("scroll", reporter.schedule, { passive: true });
     return () => {
       reporter.dispose();
       ro.disconnect();
       window.removeEventListener("resize", reporter.schedule);
+      clip?.removeEventListener("scroll", reporter.schedule);
     };
     // Layout changes move the slot without resizing it (a zoom change at the
     // same fit), so the effect re-runs on every layout as well.
-  }, [onPageRect, layout]);
+  }, [onPageRect, layout, viewport]);
 
   const statusHeight = mode === "none" ? 0 : strips.top - (mode === "browser" ? topBarHeight(device, landscape) : 0);
 

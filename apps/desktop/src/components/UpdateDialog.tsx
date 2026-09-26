@@ -3,7 +3,6 @@ import { useCallback, useRef, useState } from "react";
 import { REPO_URL } from "../lib/constants";
 import { useCoversContent } from "../lib/overlay";
 import { formatBytes } from "../lib/paths";
-import { useFocusTrap } from "../lib/useFocusTrap";
 import { useBrowser } from "../store/browser";
 import { useUpdates } from "../store/updates";
 import { Icon } from "./Icon";
@@ -34,6 +33,9 @@ export function UpdateDialog() {
   const visible = status === "available" && update !== null && !dismissed;
 
   const handleDismiss = useCallback(() => {
+    // Hidden mid-install, a failure had nowhere to show; the card stays up
+    // until the install restarts Dive or reports why it could not.
+    if (useUpdates.getState().installing) return;
     setExiting(true);
     setTimeout(() => {
       dismiss();
@@ -43,8 +45,10 @@ export function UpdateDialog() {
 
   // `role="dialog"` alone does not put it on screen: the mask is only built
   // while something claims to cover content, and nothing claimed this one.
+  // No focus trap: this is a notice in the corner, not a modal. Trapping
+  // focus took the keyboard from whatever was being typed into, and the next
+  // Space or Enter dismissed the update. Escape closes it only from inside.
   useCoversContent(visible);
-  useFocusTrap(root, { active: visible, onEscape: handleDismiss });
 
   if (!visible || !update) return null;
 
@@ -54,7 +58,13 @@ export function UpdateDialog() {
     <div
       ref={root}
       role="dialog"
+      aria-modal="false"
       aria-labelledby="update-dialog-title"
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return;
+        e.stopPropagation();
+        handleDismiss();
+      }}
       className={`surface-enter fixed right-4 bottom-4 z-50 w-[min(380px,calc(100vw-24px))] rounded-2xl border border-line-2 bg-surface/95 p-4 text-ink shadow-2xl backdrop-blur-xl transition-[opacity,transform] duration-150 ease-out ${
         exiting ? "pointer-events-none translate-y-2 opacity-0" : "translate-y-0 opacity-100"
       }`}
@@ -78,8 +88,9 @@ export function UpdateDialog() {
         <button
           type="button"
           onClick={handleDismiss}
+          disabled={installing}
           aria-label="Dismiss update"
-          className="pressable grid size-6 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-ink"
+          className="pressable grid size-6 shrink-0 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-ink disabled:opacity-40"
         >
           <Icon icon={X} size={12} />
         </button>

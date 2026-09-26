@@ -5,6 +5,7 @@ import { ipc } from "../../lib/ipc";
 import { useBrowser } from "../../store/browser";
 import { resetPushed, useEmulation } from "../../store/emulation";
 import { DeviceStage } from "./DeviceStage";
+import { clipBounds } from "./DeviceFrame";
 
 const tab: Tab = {
   id: "tab-1",
@@ -105,6 +106,25 @@ describe("DeviceStage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Leave the simulator" }));
     expect(useEmulation.getState().byTab[tab.id]).toBeUndefined();
     await vi.waitFor(() => expect(ipc.tabEmulate).toHaveBeenLastCalledWith(tab.id, null, true));
+  });
+
+  it("tells the engine about a new device at a fixed zoom, where the scale does not change", async () => {
+    const fixed = { ...iphone, zoom: 100 as const };
+    useEmulation.setState({ byTab: { [tab.id]: fixed } });
+    const { rerender } = render(<DeviceStage tabId={tab.id} sel={fixed} />);
+    await vi.waitFor(() => expect(ipc.tabEmulate).toHaveBeenCalledTimes(1));
+    const pixel = { ...fixed, deviceId: "pixel-8" };
+    useEmulation.setState({ byTab: { [tab.id]: pixel } });
+    rerender(<DeviceStage tabId={tab.id} sel={pixel} />);
+    await vi.waitFor(() => expect(ipc.tabEmulate).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(ipc.tabEmulate).mock.calls[1]?.[1]).toMatchObject({ width: 412, platform: "Android" });
+  });
+
+  it("keeps the page's rectangle inside the stage", () => {
+    const stage = { x: 0, y: 0, width: 800, height: 600 };
+    expect(clipBounds({ x: 100, y: -200, width: 400, height: 1000 }, stage)).toEqual({ x: 100, y: 0, width: 400, height: 600 });
+    expect(clipBounds({ x: 900, y: 0, width: 100, height: 100 }, stage)).toEqual({ x: 0, y: 0, width: 0, height: 0 });
+    expect(clipBounds({ x: 10, y: 10, width: 20, height: 20 }, null)).toEqual({ x: 10, y: 10, width: 20, height: 20 });
   });
 
   it("draws Chrome's bars for an Android phone", () => {

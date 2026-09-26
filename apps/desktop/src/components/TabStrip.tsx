@@ -286,7 +286,9 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
                 // The menu's tab is one pane; the other is its partner. Whichever
                 // is not the anchor is the one inserted beside it.
                 const joining = action.anchor === menu.id ? action.partner.id : menu.id;
-                insertPane(workspace, joining, action.index, action.anchor);
+                // Joining the split only when the anchor is one of its panes;
+                // otherwise the two tabs start a split of their own.
+                insertPane(workspace, joining, action.index, action.anchor, split?.tabs.includes(action.anchor) ? split : null);
                 void activate(menu.id);
               }
             }

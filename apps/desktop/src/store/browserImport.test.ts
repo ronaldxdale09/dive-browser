@@ -52,6 +52,6 @@ describe("browser import", () => {
     vi.spyOn(ipc, "browserImportSources").mockRejectedValue(new Error("no home"));
     await useBrowserImport.getState().load();
     expect(useBrowserImport.getState().sources).toEqual([]);
-    expect(useBrowserImport.getState().error).toBe("no home");
+    expect(useBrowserImport.getState().loadError).toBe("no home");
   });
 });

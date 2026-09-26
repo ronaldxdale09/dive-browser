@@ -38,6 +38,7 @@ const UI_MODES: { id: UiMode; label: string }[] = [
 
 export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelection }) {
   const stage = useRef<HTMLDivElement>(null);
+  const viewport = useRef<HTMLDivElement>(null);
   const [available, setAvailable] = useState({ width: 0, height: 0 });
   const tab = useBrowser((s) => s.tabs.find((t) => t.id === tabId));
   const media = useEmulation(selectMedia(tabId));
@@ -83,9 +84,14 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
   const layoutScale = layout?.scale;
 
   // The engine hears the scale after the stage has measured it, never a guess.
+  // A new device at a fixed zoom keeps the same scale, so the device itself
+  // is a reason to push too; an unchanged payload is dropped before IPC.
+  // Also the way back from a split pane or a popout, which lifted the device.
+  const customWidth = sel.custom?.width;
+  const customHeight = sel.custom?.height;
   useEffect(() => {
     if (layoutScale !== undefined) void setScale(tabId, layoutScale);
-  }, [layoutScale, tabId, setScale]);
+  }, [layoutScale, tabId, setScale, sel.deviceId, sel.landscape, sel.ui, customWidth, customHeight]);
 
   const onPageRect = useCallback((rect: { x: number; y: number; width: number; height: number }) => {
     void ipc.setContentBounds(rect).catch(() => undefined);
@@ -130,7 +136,10 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
           {conditions}
         </button>
       )}
-      <div className="scroll-hidden grid min-w-0 flex-1 place-items-center overflow-auto p-6" style={{ background: "radial-gradient(ellipse at 50% 40%, rgba(255,255,255,0.035), transparent 60%)" }}>
+      {/* `safe center`: a frame larger than the stage at a fixed zoom starts
+          at the top left and scrolls, instead of centring off both edges
+          where no scrolling reaches. */}
+      <div ref={viewport} className="scroll-hidden grid min-w-0 flex-1 overflow-auto p-6 [place-items:safe_center]" style={{ background: "radial-gradient(ellipse at 50% 40%, rgba(255,255,255,0.035), transparent 60%)" }}>
         {layout && (
           <DeviceFrame
             device={device}
@@ -142,6 +151,7 @@ export function DeviceStage({ tabId, sel }: { tabId: string; sel: DeviceSelectio
             secure={secure}
             preview={preview}
             onPageRect={onPageRect}
+            viewport={viewport}
             caption={`${device.name} · viewport ${layout.viewport.width}×${layout.viewport.height} @${device.dpr}x · shown at ${Math.round(layout.scale * 100)}%`}
           />
         )}

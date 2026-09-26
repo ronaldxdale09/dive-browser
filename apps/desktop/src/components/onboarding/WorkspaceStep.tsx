@@ -8,6 +8,8 @@ import { AvatarImage } from "../AvatarImage";
 import { StepActions, stepLabel } from "./Shell";
 
 const SWATCHES = ["#7FD8C8", "#F0B35E", "#E58C8C", "#8FB8F0", "#B79CF0", "#9ED67B", "#E9E9E9"];
+/** The mark a new install's first workspace gets from the core (`Workspace::default_icon`). */
+const INSTALL_MARK = "layers";
 /** Names people reach for first; one click fills the field. */
 const IDEAS = ["Work", "Side project", "Client", "Research"];
 
@@ -23,14 +25,19 @@ export function WorkspaceStep() {
   const workspace = workspaces.find((w) => w.id === activeWorkspace) ?? workspaces[0];
   const [name, setName] = useState("");
   const [color, setColor] = useState(workspace?.color ?? SWATCHES[0]!);
-  const [seed, setSeed] = useState("");
+  // A mark picked earlier stays when setup is replayed. Only one that merely
+  // followed the stored name, or the one a new install starts with, goes on
+  // following what is typed; replaying used to redraw a chosen mark from it.
+  const picked = workspace && workspace.icon !== seedFromName(workspace.name) && workspace.icon !== INSTALL_MARK ? workspace.icon : "";
+  const [seed, setSeed] = useState(picked);
   const [saving, setSaving] = useState(false);
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => {
     field.current?.focus({ preventScroll: true });
   }, []);
   const icon = seed || seedFromName(name || workspace?.name || "Home");
-  const seeds = [seedFromName(name), ...AVATAR_SEEDS.filter((s) => s !== seedFromName(name))].slice(0, 8);
+  const lead = [...new Set([seedFromName(name), ...(picked ? [picked] : [])])];
+  const seeds = [...lead, ...AVATAR_SEEDS.filter((s) => !lead.includes(s))].slice(0, 8);
 
   const submit = async () => {
     if (!workspace) return;

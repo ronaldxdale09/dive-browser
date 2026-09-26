@@ -9,6 +9,7 @@ import { useConsole } from "./console";
 import { useNetwork } from "./network";
 import { useTabAudio } from "./tabAudio";
 import { useEmulation } from "./emulation";
+import { useLayout } from "./layout";
 
 const tab = (id: string, url = "https://x"): Tab => ({
   id, workspace_id: "w", tier: "today", url, title: "", position: 0, state: "active", last_active_at: "2026-01-01T00:00:00Z", favicon: null,
@@ -659,6 +660,21 @@ describe("reopening closed tabs", () => {
     expect(open).toHaveBeenCalledWith("w1", "https://b.test/");
     expect(reorder).toHaveBeenCalledWith("w1", ["a", "b2", "c"]);
     expect(orderWithAt([t("a", "https://a.test/"), t("b", "https://b.test/")], "w1", "b", 99)).toEqual(["a", "b"]);
+  });
+
+  it("lets a split go of a pane the engine closed or moved, never of one merely out of view", () => {
+    const split = { tabs: ["a", "b"], sizes: [0.5, 0.5] };
+    useLayout.setState({ splits: { w2: split } });
+    // Mid-switch the tab list is still the old workspace's; the split waits.
+    useBrowser.setState({ tabs: [t("x", "https://x.test/")], activeTab: "x", activeWorkspace: "w2" });
+    useBrowser.getState().applyEvent({ type: "tab_upserted", data: t("x", "https://x.test/") });
+    expect(useLayout.getState().splits.w2).toBe(split);
+    useBrowser.getState().applyEvent({ type: "tab_upserted", data: t("a", "https://a.test/", "w3") });
+    expect(useLayout.getState().splits.w2).toBeUndefined();
+    useLayout.setState({ splits: { w2: split } });
+    useBrowser.getState().applyEvent({ type: "tab_closed", data: "b" });
+    expect(useLayout.getState().splits.w2).toBeUndefined();
+    useLayout.setState({ splits: {} });
   });
 
   it("says when there is nothing to reopen", async () => {

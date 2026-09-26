@@ -941,6 +941,20 @@ impl TabHost {
         #[cfg(feature = "cef")]
         crate::js_dialog::attach(app, tab_id, &view);
         self.views.insert(tab_id, view);
+        // A pane whose page was asleep kept its place in the split. Its new
+        // view starts over the whole content area and hidden, so it is moved
+        // into its pane and shown there; otherwise the pane stayed blank until
+        // the split's panes next changed, which clicking it never does.
+        if self.panes.iter().any(|p| p.tab == tab_id) && !self.popouts.contains_key(&tab_id) {
+            let b = self.rect_for(tab_id);
+            if let Some(view) = self.views.get(&tab_id) {
+                view.set_bounds(tauri::Rect {
+                    position: b.position().into(),
+                    size: b.size().into(),
+                })?;
+            }
+            self.apply_visibility()?;
+        }
         Ok(())
     }
 
@@ -1296,9 +1310,13 @@ impl TabHost {
     /// showing each pane's tab at its rectangle.
     pub fn set_panes(&mut self, panes: Vec<PaneBounds>) -> tauri::Result<()> {
         let before: Vec<TabId> = self.panes.iter().map(|p| p.tab).collect();
+        // A pane without a view (asleep, or not yet restored) keeps its
+        // rectangle: dropping it left the pane blank, and the view created
+        // for it later went over the whole content area instead. `open`
+        // places that view once it exists.
         self.panes = panes
             .into_iter()
-            .filter(|p| self.views.contains_key(&p.tab) && !self.popouts.contains_key(&p.tab))
+            .filter(|p| !self.popouts.contains_key(&p.tab))
             .collect();
         self.layout()?;
         // Showing also focuses the active page, so only do it when the set of

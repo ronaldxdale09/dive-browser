@@ -61,10 +61,15 @@ export const useUpdates = create<UpdatesState>((set, get) => ({
     try {
       await ipc.updateInstall();
     } catch (e) {
-      set({ installing: false, error: errorMessage(e) });
+      // Back on screen with the reason: an install started from Settings, or
+      // from a card waved away earlier, otherwise failed where no one looked.
+      set({ installing: false, error: errorMessage(e), dismissed: false });
     }
   },
-  dismiss: () => set({ dismissed: true }),
+  dismiss: () => {
+    if (get().installing) return;
+    set({ dismissed: true });
+  },
   reopen: () => set({ dismissed: false }),
 }));
 

@@ -27,6 +27,10 @@ export function WorkspaceDialog() {
   const [seed, setSeed] = useState(existing?.icon ?? "");
   const [separate, setSeparate] = useState(true);
   const [confirming, setConfirming] = useState(false);
+  // One save at a time: a second Enter while the first was on its way
+  // created the workspace twice.
+  const [saving, setSaving] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   const count = useBrowser((s) => (existing ? (s.counts[existing.id] ?? 0) : 0));
   useCoversContent(Boolean(editing));
   const root = useRef<HTMLDivElement>(null);
@@ -42,14 +46,26 @@ export function WorkspaceDialog() {
   const named = seedFromName(name);
   const lead = [...new Set([...(existing?.icon ? [existing.icon] : []), named])];
   const seeds = [...lead, ...AVATAR_SEEDS.filter((s) => !lead.includes(s))].slice(0, 14);
+  // The store closes the dialog once the engine has done it; a failure
+  // leaves it open with everything typed, and says why.
+  const attempt = async (action: () => Promise<boolean>) => {
+    if (saving) return;
+    setSaving(true);
+    setFailure(null);
+    if (await action()) return;
+    setSaving(false);
+    setFailure(useBrowser.getState().error ?? "That did not work. Try again.");
+  };
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (existing) void update(existing.id, { name, color, icon });
-    else void create({ name, color, icon }, separate);
+    if (!name.trim()) return;
+    void attempt(() => (existing ? update(existing.id, { name, color, icon }) : create({ name, color, icon }, separate)));
   };
 
   return (
-    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 ${className}`} onMouseDown={close}>
+    // Scrolls rather than clips: at the window's smallest height a fixed top
+    // margin pushed Save and Delete below the bottom edge.
+    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 flex overflow-y-auto p-4 ${className}`} onMouseDown={close}>
       <form
         onSubmit={submit}
         onMouseDown={(e) => e.stopPropagation()}
@@ -57,7 +73,8 @@ export function WorkspaceDialog() {
         aria-modal="true"
         aria-label={existing ? "Edit workspace" : "New workspace"}
         onKeyDown={(e) => e.key === "Escape" && close()}
-        className="mx-auto mt-28 w-[380px] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
+        aria-busy={saving}
+        className="m-auto w-[380px] max-w-full shrink-0 rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
       >
         <div className="flex items-center gap-2.5">
           <AvatarImage kind="workspace" seed={icon} color={color} alt="" width={32} height={32} className="size-8 shrink-0 rounded-[11px]" />
@@ -147,8 +164,9 @@ export function WorkspaceDialog() {
               </button>
               <button
                 type="button"
-                onClick={() => existing && void remove(existing.id)}
-                className="h-8 rounded-full bg-danger px-4 text-xs font-medium text-danger-ink"
+                disabled={saving}
+                onClick={() => existing && void attempt(() => remove(existing.id))}
+                className="h-8 rounded-full bg-danger px-4 text-xs font-medium text-danger-ink disabled:opacity-40"
               >
                 Delete workspace
               </button>
@@ -169,10 +187,15 @@ export function WorkspaceDialog() {
             <button type="button" onClick={close} className="h-8 rounded-full px-3 text-xs text-ink-2 hover:bg-surface-2">
               Cancel
             </button>
-            <button type="submit" disabled={!name.trim()} className="h-8 rounded-full bg-accent px-4 text-xs font-medium text-accent-ink disabled:opacity-40">
+            <button type="submit" disabled={!name.trim() || saving} className="h-8 rounded-full bg-accent px-4 text-xs font-medium text-accent-ink disabled:opacity-40">
               {existing ? "Save" : "Create"}
             </button>
           </div>
+        )}
+        {failure && (
+          <p role="alert" className="mt-3 text-[11px] text-danger">
+            {failure}
+          </p>
         )}
       </form>
     </div>

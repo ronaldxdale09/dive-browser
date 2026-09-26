@@ -1,4 +1,4 @@
-import { Check, FolderLock, History, KeyRound, Loader2, Star, TextCursorInput } from "lucide-react";
+import { AlertTriangle, Check, FolderLock, History, KeyRound, Loader2, Star, TextCursorInput } from "lucide-react";
 import { useEffect } from "react";
 import type { ImportSource } from "../../lib/ipc";
 import { importDeniedNote, importEmptyHint, importLookingLabel, importPasswordNote, isWindows } from "../../lib/commands";
@@ -50,6 +50,7 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
   const importing = useBrowserImport((s) => s.importing);
   const outcome = useBrowserImport((s) => s.outcome);
   const error = useBrowserImport((s) => s.error);
+  const loadError = useBrowserImport((s) => s.loadError);
   const load = useBrowserImport((s) => s.load);
   const select = useBrowserImport((s) => s.select);
   const setBookmarks = useBrowserImport((s) => s.setBookmarks);
@@ -79,6 +80,18 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
       <p role="status" className="flex items-center gap-2 py-6 text-xs text-ink-3">
         <Icon icon={Loader2} size={13} className="animate-spin" /> {importLookingLabel()}
       </p>
+    );
+  }
+  if (sources.length === 0 && loadError) {
+    // Not "no other browsers": the look itself failed, and may not next time.
+    return (
+      <div role="alert" className="rounded-2xl border border-line bg-surface-2/60 px-4 py-5 text-center">
+        <p className="text-xs font-medium text-ink">Dive could not look for other browsers</p>
+        <p className="mt-1 text-[11px] text-ink-3">{loadError}</p>
+        <button type="button" disabled={loading} onClick={() => void load(prefer ?? undefined)} className="pressable mt-3 h-7 rounded-full border border-line-2 px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40">
+          {loading ? "Looking…" : "Try again"}
+        </button>
+      </div>
     );
   }
   if (sources.length === 0) {
@@ -160,9 +173,23 @@ export function ImportPanel({ prefer, compact = false }: { prefer?: string | nul
         <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-ink-2">
           <Icon icon={Check} size={12} className="text-highlight" />
           {outcome.summary.bookmarks + outcome.summary.history + outcome.summary.passwords + outcome.summary.forms === 0
-            ? `Nothing new from ${outcome.source.name}: everything there was already here.`
+            ? outcome.summary.warnings.length > 0
+              ? `Nothing new from ${outcome.source.name}.`
+              : `Nothing new from ${outcome.source.name}: everything there was already here.`
             : `Brought in ${describeOutcome(outcome.summary.bookmarks, outcome.summary.history, bookmarks, history, outcome.summary.passwords, passwords && outcome.source.passwords, outcome.summary.forms, forms && outcome.source.forms)} from ${outcome.source.name}. Anything already here was kept.`}
         </p>
+      )}
+      {outcome && outcome.summary.warnings.length > 0 && (
+        // What did not come over, beside what did: a refused keychain prompt
+        // costs the passwords, and says so, rather than the whole import.
+        <ul role="alert" aria-label="Not imported" className="mt-2 grid gap-1">
+          {outcome.summary.warnings.map((warning) => (
+            <li key={warning} className="flex items-start gap-1.5 text-[11px] leading-snug text-ink-2">
+              <Icon icon={AlertTriangle} size={12} className="mt-px shrink-0 text-danger" />
+              {warning}
+            </li>
+          ))}
+        </ul>
       )}
       {error && (
         <p role="alert" className="mt-3 text-[11px] text-danger">

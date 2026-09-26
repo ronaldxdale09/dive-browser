@@ -17,14 +17,19 @@ export function ProfileStep() {
   const profile = profiles.find((p) => p.id === activeProfile) ?? profiles[0];
   const [name, setName] = useState("");
   const [color, setColor] = useState(profile?.color ?? PROFILE_COLORS[0]!);
-  const [seed, setSeed] = useState("");
+  // A face picked earlier stays when setup is replayed. Only one that
+  // merely followed the stored name (or the nameless default) goes on
+  // following what is typed; replaying used to redraw a chosen face from it.
+  const picked = profile && profile.avatar !== seedFromProfileName(profile.name) && profile.avatar !== seedFromProfileName("") ? profile.avatar : "";
+  const [seed, setSeed] = useState(picked);
   const [saving, setSaving] = useState(false);
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => {
     field.current?.focus({ preventScroll: true });
   }, []);
   const avatar = seed || seedFromProfileName(name || profile?.name || "");
-  const seeds = [seedFromProfileName(name), ...PROFILE_SEEDS.filter((s) => s !== seedFromProfileName(name))].slice(0, 8);
+  const lead = [...new Set([seedFromProfileName(name), ...(picked ? [picked] : [])])];
+  const seeds = [...lead, ...PROFILE_SEEDS.filter((s) => !lead.includes(s))].slice(0, 8);
 
   // The field shows the profile's current name as its placeholder, so leaving
   // it empty keeps that name; Continue is never dead on a fresh install.

@@ -40,6 +40,7 @@ export function FeaturesStep() {
   const [tour, setTour] = useState(false);
   const status = useDefaultBrowser((s) => s.status);
   const phase = useDefaultBrowser((s) => s.phase);
+  const timedOut = useDefaultBrowser((s) => s.timedOut);
   const refresh = useDefaultBrowser((s) => s.refresh);
   const makeDefault = useDefaultBrowser((s) => s.makeDefault);
   useEffect(() => {
@@ -92,7 +93,7 @@ export function FeaturesStep() {
           </span>
           <span className="min-w-0 flex-1 truncate text-xs">
             <span className="text-ink">{isDefault ? "Dive is your default browser" : "Open links from other apps in Dive"}</span>
-            <span className="text-ink-3">{isDefault ? " · Links already open here." : defaultBrowserOnboardingHint(phase === "waiting")}</span>
+            <span className="text-ink-3">{isDefault ? " · Links already open here." : defaultBrowserOnboardingHint(phase === "waiting" && !timedOut)}</span>
           </span>
           {!isDefault && (
             <button type="button" disabled={!canAsk} onClick={() => void makeDefault()} className="pressable h-7 shrink-0 rounded-full border border-line-2 px-3 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink disabled:opacity-40">

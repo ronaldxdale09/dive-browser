@@ -191,6 +191,15 @@ pub fn delete_card(state: &AppState, profile: ProfileId, id: &str) -> AppResult<
     Ok(removed)
 }
 
+/// Remove the number behind card `id`, whose row is about to go with its
+/// profile. An item already gone counts as removed.
+pub fn delete_card_secret(id: &str) -> AppResult<()> {
+    match entry(id)?.delete_credential() {
+        Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
+        Err(error) => Err(AppError::new(error)),
+    }
+}
+
 /// Put a saved address, or a card, into the tab's form. Returns how many
 /// fields were filled -- zero means nothing on the page looked like one.
 pub async fn fill_into(

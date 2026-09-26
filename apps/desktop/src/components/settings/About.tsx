@@ -114,12 +114,17 @@ function Updates({ channel, updater }: { channel: string | null; updater: boolea
         label={status === "available" && update ? `Dive ${update.version} is available` : "Check for updates"}
         hint={
           status === "available" ? (
-            update?.notes ? <span className="block whitespace-pre-wrap">{update.notes}</span> : "Installing restarts Dive."
+            // A failed install says why here too: this row is where someone
+            // who clicked Install in Settings is looking.
+            <>
+              {update?.notes ? <span className="block whitespace-pre-wrap">{update.notes}</span> : "Installing restarts Dive."}
+              {error && <span className="block text-danger">{error}</span>}
+            </>
           ) : silent ? (
             channel === "dev" ? "Updates are delivered to release builds." : "This build has no updater."
           ) : status === "none" ? (
             "Nothing newer on the release channel."
-          ) : status === "error" ? (
+          ) : status === "error" || error ? (
             <span className="text-danger">{error}</span>
           ) : (
             privateWindow ? "Private windows do not check for updates on their own." : "Dive checks shortly after launch."

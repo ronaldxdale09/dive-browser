@@ -166,6 +166,13 @@ pub fn device_calls(device: Option<&Device>) -> AppResult<Vec<Call>> {
                 "Emulation.setTouchEmulationEnabled",
                 json!({"enabled": false}),
             ),
+            // Turning touch emulation off does not stop the mouse being sent
+            // as touches: a page left phone mode with hover and right-click
+            // still dead until this was switched off as well.
+            Call::required(
+                "Emulation.setEmitTouchEventsForMouse",
+                json!({"enabled": false}),
+            ),
             Call::required("Emulation.setUserAgentOverride", json!({"userAgent": ""})),
             Call::optional("Emulation.setSafeAreaInsetsOverride", json!({"insets": {}})),
             Call::optional("Emulation.setScrollbarsHidden", json!({"hidden": false})),
@@ -1099,6 +1106,11 @@ mod tests {
         assert_eq!(
             find(&calls, "Emulation.setScrollbarsHidden").params["hidden"],
             false
+        );
+        assert_eq!(
+            find(&calls, "Emulation.setEmitTouchEventsForMouse").params["enabled"],
+            false,
+            "the mouse is a mouse again once phone mode is left"
         );
     }
 

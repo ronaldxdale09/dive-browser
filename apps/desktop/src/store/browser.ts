@@ -5,6 +5,7 @@ import { listenConsole, useConsole, usesNativeConsoleBatch } from "./console";
 import { listenNetwork, useNetwork } from "./network";
 import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
 import { useDownloads } from "./downloads";
+import { useLayout } from "./layout";
 import type { DownloadNotice, CoreEvent, Decision, Duration, NavigationHistory, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
 import { fileNameOr, fileUrl, opensInTab} from "../lib/paths";
@@ -29,9 +30,13 @@ interface BrowserState {
   /** The profile dialog: `{ id: null }` creates, `{ id }` edits, `null` is closed. */
   editingProfile: { id: string | null } | null;
   setEditingProfile: (v: { id: string | null } | null) => void;
-  createProfile: (draft: ProfileDraftInput) => Promise<void>;
-  updateProfile: (id: string, draft: ProfileDraftInput) => Promise<void>;
-  deleteProfile: (id: string) => Promise<void>;
+  /**
+   * The profile and workspace actions resolve to whether the engine did it.
+   * The dialog stays open on a failure, with what was typed still in it.
+   */
+  createProfile: (draft: ProfileDraftInput) => Promise<boolean>;
+  updateProfile: (id: string, draft: ProfileDraftInput) => Promise<boolean>;
+  deleteProfile: (id: string) => Promise<boolean>;
   activateProfile: (id: string) => Promise<void>;
   tabs: Tab[];
   activeTab: string | null;
@@ -123,9 +128,9 @@ interface BrowserState {
   counts: Record<string, number>;
   refreshCounts: () => Promise<void>;
   reorderWorkspaces: (ordered: string[]) => Promise<void>;
-  createWorkspace: (draft: { name: string; color: string; icon: string }, separateContainer: boolean) => Promise<void>;
-  updateWorkspace: (id: string, draft: { name: string; color: string; icon: string }) => Promise<void>;
-  deleteWorkspace: (id: string) => Promise<void>;
+  createWorkspace: (draft: { name: string; color: string; icon: string }, separateContainer: boolean) => Promise<boolean>;
+  updateWorkspace: (id: string, draft: { name: string; color: string; icon: string }) => Promise<boolean>;
+  deleteWorkspace: (id: string) => Promise<boolean>;
   editing: { id: string | null } | null;
   setEditing: (v: { id: string | null } | null) => void;
   toggle: (panel: UiPanel, value?: boolean) => void;
@@ -480,22 +485,27 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     supersedeSnapshots();
     set({ editingProfile });
   },
+  // Each closes its dialog only once the engine has done it: closing on a
+  // failure too threw away what had been typed, with the error somewhere else.
   createProfile: async (draft) => {
     const intent = supersedeSnapshots();
-    await run(set, () => ipc.profileCreate(draft));
+    if (!(await succeeded(set, () => ipc.profileCreate(draft)))) return false;
     await applyLatestSnapshot(set, { editingProfile: null }, intent);
     void get().refreshCounts();
+    return true;
   },
   updateProfile: async (id, draft) => {
     const intent = supersedeSnapshots();
-    await run(set, () => ipc.profileUpdate(id, draft));
+    if (!(await succeeded(set, () => ipc.profileUpdate(id, draft)))) return false;
     if (intent === intentRevision) set({ editingProfile: null });
+    return true;
   },
   deleteProfile: async (id) => {
     const intent = supersedeSnapshots();
-    await run(set, () => ipc.profileDelete(id));
+    if (!(await succeeded(set, () => ipc.profileDelete(id)))) return false;
     await applyLatestSnapshot(set, { editingProfile: null }, intent);
     void get().refreshCounts();
+    return true;
   },
   activateProfile: async (id) => {
     if (get().activeProfile === id) return;
@@ -628,6 +638,9 @@ export const useBrowser = create<BrowserState>((set, get) => ({
           once(unlistenWindowChanged, () => events.tabWindowChanged.listen((e) => {
             recordSnapshotDelta({ kind: "window", tab: e.payload.tab, detached: e.payload.detached });
             set(reduceWindowChange(get(), e.payload.tab, e.payload.detached));
+            // A torn-off tab is the other window's page; its split here
+            // would wait on a pane that is not coming back.
+            if (e.payload.detached) useLayout.getState().forget(e.payload.tab);
           }), (off) => { unlistenWindowChanged = off; }),
           once(unlistenDownload, () => events.downloadNotice.listen(downloadNotice), (off) => { unlistenDownload = off; }),
           once(unlistenDownloadProgress, () => events.downloadProgress.listen((e) => useDownloads.getState().progress(e.payload)), (off) => { unlistenDownloadProgress = off; }),
@@ -965,20 +978,23 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   },
   createWorkspace: async (draft, separateContainer) => {
     const intent = supersedeSnapshots();
-    await run(set, () => ipc.workspaceCreate(draft, separateContainer));
+    if (!(await succeeded(set, () => ipc.workspaceCreate(draft, separateContainer)))) return false;
     await applyLatestSnapshot(set, { editing: null }, intent);
     void get().refreshCounts();
+    return true;
   },
   updateWorkspace: async (id, draft) => {
     const intent = supersedeSnapshots();
-    await run(set, () => ipc.workspaceUpdate(id, draft));
+    if (!(await succeeded(set, () => ipc.workspaceUpdate(id, draft)))) return false;
     if (intent === intentRevision) set({ editing: null });
+    return true;
   },
   deleteWorkspace: async (id) => {
     const intent = supersedeSnapshots();
-    await run(set, () => ipc.workspaceDelete(id));
+    if (!(await succeeded(set, () => ipc.workspaceDelete(id)))) return false;
     await applyLatestSnapshot(set, { editing: null }, intent);
     void get().refreshCounts();
+    return true;
   },
 
   toggle: (panel, value) => set((s) => ({ open: togglePanel(s.open, panel, value), ...(panel === "palette" ? { paletteFocus: "all" as const } : {}) })),
@@ -1013,7 +1029,17 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       useConsole.getState().drop(id);
       useNetwork.getState().drop(id);
       usePrivacy.getState().drop(id);
+      // Splits let go of a closed pane here, on the engine's word, rather
+      // than whenever the chrome's tab list lacks it: that list is briefly
+      // the old workspace's while a switch fetches the new one, and every
+      // pane of the new workspace's split looked closed.
+      useLayout.getState().forget(id);
       forgetClosedTab(id);
+    }
+    // A tab moved into another workspace leaves the split it sat in there.
+    // Essentials show in every workspace, so their splits stay.
+    if (event.type === "tab_upserted" && event.data.workspace_id && event.data.tier !== "essential") {
+      useLayout.getState().forget(event.data.id, event.data.workspace_id);
     }
     // Foreign-workspace tab events refresh badges without entering this strip.
     // Coalesced: a page load can emit several tab updates.
@@ -1030,6 +1056,18 @@ function scheduleCounts(get: () => BrowserState) {
     countsTimer = null;
     void get().refreshCounts();
   }, 300);
+}
+
+/** Like `run`, for a call whose result is nothing: whether it went through. */
+async function succeeded(set: (p: Partial<BrowserState>) => void, f: () => Promise<unknown>): Promise<boolean> {
+  try {
+    await f();
+    set({ error: null });
+    return true;
+  } catch (e) {
+    set({ error: errorMessage(e) });
+    return false;
+  }
 }
 
 async function run<T>(set: (p: Partial<BrowserState>) => void, f: () => Promise<T>): Promise<T | undefined> {

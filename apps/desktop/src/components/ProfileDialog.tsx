@@ -30,6 +30,10 @@ function ProfileForm({ id }: { id: string | null }) {
   // typed; picking one below pins it.
   const [seed, setSeed] = useState(existing?.avatar ?? "");
   const [confirming, setConfirming] = useState(false);
+  // One save at a time: a second Enter while the first was on its way
+  // created the profile twice.
+  const [saving, setSaving] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   useCoversContent(true);
   const root = useRef<HTMLDivElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
@@ -40,15 +44,27 @@ function ProfileForm({ id }: { id: string | null }) {
   const spaces = existing ? workspaces.filter((w) => w.profile_id === existing.id).length : 0;
   const last = profiles.length <= 1;
 
+  // The store closes the dialog once the engine has done it; a failure
+  // leaves it open with everything typed, and says why.
+  const attempt = async (action: () => Promise<boolean>) => {
+    if (saving) return;
+    setSaving(true);
+    setFailure(null);
+    if (await action()) return;
+    setSaving(false);
+    setFailure(useBrowser.getState().error ?? "That did not work. Try again.");
+  };
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!name.trim()) return;
     const draft = { name, color, avatar, note };
-    if (existing) void update(existing.id, draft);
-    else void create(draft);
+    void attempt(() => (existing ? update(existing.id, draft) : create(draft)));
   };
 
   return (
-    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 ${className}`} onMouseDown={close}>
+    // Scrolls rather than clips: at the window's smallest height a fixed top
+    // margin pushed Save and Delete below the bottom edge.
+    <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 flex overflow-y-auto p-4 ${className}`} onMouseDown={close}>
       <form
         onSubmit={submit}
         onMouseDown={(e) => e.stopPropagation()}
@@ -56,7 +72,8 @@ function ProfileForm({ id }: { id: string | null }) {
         aria-modal="true"
         aria-label={existing ? "Edit profile" : "New profile"}
         onKeyDown={(e) => e.key === "Escape" && close()}
-        className="mx-auto mt-24 w-[420px] rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
+        aria-busy={saving}
+        className="m-auto w-[420px] max-w-full shrink-0 rounded-2xl border border-line-2 bg-surface p-4 shadow-2xl"
       >
         <div className="flex items-center gap-3">
           <AvatarImage kind="profile" seed={avatar} color={color} alt="" width={44} height={44} className="size-11 shrink-0 rounded-full" />
@@ -105,7 +122,7 @@ function ProfileForm({ id }: { id: string | null }) {
           {existing && confirming && (
             <>
               <span className="text-xs text-ink-2">Delete {existing.name} and its {spaces} {spaces === 1 ? "workspace" : "workspaces"}?</span>
-              <button type="button" onClick={() => void remove(existing.id)} className="h-8 rounded-lg bg-danger px-3 text-xs font-medium text-danger-ink">
+              <button type="button" disabled={saving} onClick={() => void attempt(() => remove(existing.id))} className="h-8 rounded-lg bg-danger px-3 text-xs font-medium text-danger-ink disabled:opacity-40">
                 Delete
               </button>
             </>
@@ -114,10 +131,15 @@ function ProfileForm({ id }: { id: string | null }) {
           <button type="button" onClick={close} className="h-8 rounded-lg px-3 text-xs text-ink-2 hover:bg-surface-2 hover:text-ink">
             Cancel
           </button>
-          <button type="submit" disabled={!name.trim()} className="h-8 rounded-lg bg-accent px-3.5 text-xs font-medium text-accent-ink hover:brightness-110 disabled:opacity-40">
+          <button type="submit" disabled={!name.trim() || saving} className="h-8 rounded-lg bg-accent px-3.5 text-xs font-medium text-accent-ink hover:brightness-110 disabled:opacity-40">
             {existing ? "Save" : "Create profile"}
           </button>
         </div>
+        {failure && (
+          <p role="alert" className="mt-3 text-[11px] text-danger">
+            {failure}
+          </p>
+        )}
       </form>
     </div>
   );

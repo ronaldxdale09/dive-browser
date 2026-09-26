@@ -5,6 +5,7 @@ import { ipc } from "../lib/ipc";
 import { useContentPreview } from "../lib/overlay";
 import type { Tab } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
+import { suspendDevice } from "../store/emulation";
 import { MAX_PANES, MIN_PANE, useLayout, type Split } from "../store/layout";
 import { Favicon } from "./Favicon";
 import { Icon } from "./Icon";
@@ -43,7 +44,21 @@ export function SplitView({ split, workspace }: { split: Split; workspace: strin
 
   const maximized = useWindowMaximized();
   const inset = isWindows() && !maximized ? RESIZE_GUTTER : 0;
+  // The panes drawn so far: a pane whose tab has not reached the list yet
+  // (a restore, a snapshot still on its way) has no body to measure, and
+  // once it arrives the rectangles have to go out again.
+  const drawn = split.tabs.filter((id) => tabs.some((t) => t.id === id)).join(" ");
 
+  // A pane beside the active one shows its page at the pane's size, not at
+  // the device it was being simulated on: the stage that scaled it is not
+  // on screen. The stage puts the device back when the tab is shown alone.
+  useEffect(() => {
+    for (const id of split.tabs) void suspendDevice(id);
+  }, [split.tabs]);
+
+  // Sent again when the active pane changes as well: clicking a blank pane
+  // is how someone asks for its page, and the engine wakes a sleeping page
+  // for every pane it is sent.
   useEffect(() => {
     const el = root.current;
     if (!el) return;
@@ -73,7 +88,7 @@ export function SplitView({ split, workspace }: { split: Split; workspace: strin
       ro.disconnect();
       window.removeEventListener("resize", report);
     };
-  }, [split.tabs, inset]);
+  }, [split.tabs, inset, drawn, active]);
 
   // Leaving the split returns the engine to a single page.
   useEffect(() => () => void ipc.setPanes([]).catch(() => undefined), []);

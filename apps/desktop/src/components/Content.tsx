@@ -3,7 +3,6 @@ import { isPrivateWindow } from "../lib/privateMode";
 import { PrivateWelcome } from "./PrivateMode";
 import { AlertTriangle, Check, RotateCw, Search, ShieldOff, ShieldQuestion, WifiOff, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
 import { ipc } from "../lib/ipc";
 import { createBoundsReporter, elementBounds } from "../lib/boundsReporter";
 import { isWindows } from "../lib/commands";
@@ -45,11 +44,10 @@ export function Content() {
   const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const workspace = useBrowser((s) => s.activeWorkspace);
   const detached = useBrowser((s) => s.detached);
+  // A closed, moved or torn-off tab leaves its split in the browser store,
+  // on the engine's events: pruning here against the tab list removed the
+  // split of a workspace being switched to, whose tabs had not arrived yet.
   const split = useLayout((s) => (workspace ? s.splits[workspace] : undefined));
-  const remove = useLayout((s) => s.remove);
-  // Ids and the one tab drawn here, not the list: a title or favicon change
-  // in any tab re-rendered the whole content area.
-  const tabIds = useBrowser(useShallow((s) => s.tabs.map((t) => t.id)));
   const shown = useBrowser((s) => visibleSplit(split, activeTab, s.tabs, detached));
   const sel = useEmulation(selectDevice(activeTab));
   const pickerOpen = usePicker((s) => s.open);
@@ -64,14 +62,6 @@ export function Content() {
   // the page: the find bar (8px inset + 36px tall) or the crash notice row.
   const promptTop = 8 + Math.max(findOpen ? FIND_BAR_HEIGHT : 0, activeTab && crash ? CRASH_ROW_HEIGHT : 0);
   useStartupDevice(activeTab);
-
-  // A closed or torn-off tab leaves its split, so the split does not wait on
-  // a pane that will never come back.
-  useEffect(() => {
-    if (!split || !workspace) return;
-    const live = new Set(tabIds);
-    for (const t of split.tabs) if (!live.has(t) || detached.includes(t)) remove(workspace, t);
-  }, [split, workspace, tabIds, detached, remove]);
 
   return (
     // The picker is a column beside the page, never over it: the native view

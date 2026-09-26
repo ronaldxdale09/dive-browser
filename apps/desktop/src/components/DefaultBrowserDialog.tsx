@@ -1,5 +1,5 @@
 import { Check, Globe } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import { useBrowser } from "../store/browser";
 import { useDefaultBrowser } from "../store/defaultBrowser";
 import { browserForBundle, useBrowserImport } from "../store/browserImport";
@@ -9,10 +9,7 @@ import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { isWindows } from "../lib/commands";
 
-/** How long to wait for macOS's own confirmation before giving up. */
-export const WAIT_TIMEOUT_MS = 20_000;
-/** How often to re-ask the host while waiting. */
-export const POLL_INTERVAL_MS = 1_000;
+export { POLL_INTERVAL_MS, WAIT_TIMEOUT_MS, WINDOWS_WAIT_TIMEOUT_MS } from "../store/defaultBrowser";
 
 const KNOWN: Record<string, string> = {
   "com.apple.safari": "Safari",
@@ -78,12 +75,11 @@ export function DefaultBrowserDialog() {
   const status = useDefaultBrowser((s) => s.status);
   const phase = useDefaultBrowser((s) => s.phase);
   const error = useDefaultBrowser((s) => s.error);
-  const refresh = useDefaultBrowser((s) => s.refresh);
   const decline = useDefaultBrowser((s) => s.decline);
   const makeDefault = useDefaultBrowser((s) => s.makeDefault);
   const reset = useDefaultBrowser((s) => s.reset);
-  // Set when the wait runs out; `start` clears it, and closing unmounts it.
-  const [timedOut, setTimedOut] = useState(false);
+  // The store follows the answer, so setup's own button hears it too.
+  const timedOut = useDefaultBrowser((s) => s.timedOut);
   useCoversContent(open);
   const root = useRef<HTMLDivElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
@@ -97,23 +93,6 @@ export function DefaultBrowserDialog() {
     decline();
     close();
   };
-
-  // Poll while macOS has the floor. The interval and the deadline both go
-  // when the phase moves on, so a stale poll can never flip the phase later.
-  useEffect(() => {
-    if (phase !== "waiting") return;
-    const started = Date.now();
-    const timer = window.setInterval(() => {
-      void refresh().then((s) => {
-        if (s?.is_default) useDefaultBrowser.setState({ phase: "done" });
-        else if (Date.now() - started >= WAIT_TIMEOUT_MS) {
-          window.clearInterval(timer);
-          setTimedOut(true);
-        }
-      });
-    }, POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [phase, refresh, setTimedOut]);
 
   if (!open) return null;
 
@@ -138,10 +117,7 @@ export function DefaultBrowserDialog() {
   );
   const title = alreadyDefault ? "Dive is your default browser" : done ? "Dive is now your default browser" : "Make Dive your default browser";
 
-  const start = () => {
-    setTimedOut(false);
-    void makeDefault();
-  };
+  const start = () => void makeDefault();
 
   let body: React.ReactNode;
   let actions: React.ReactNode;
