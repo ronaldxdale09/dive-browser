@@ -10,7 +10,7 @@ let video: HTMLVideoElement;
 let sampleRate: number;
 
 function install() {
-  return window.eval(`(function(){${script.replaceAll("__AUDIO_BINDING__", "__testAudio")}})()`);
+  return window.eval(`(function(){${script.replaceAll("__AUDIO_BINDING__", "__testAudio").replaceAll("__NONCE__", '"n1"')}})()`);
 }
 function feed(count = 2) {
   for (let i = 0; i < count; i++) processors.at(-1)?.onaudioprocess?.({
@@ -138,6 +138,8 @@ it("ends capture on page departure", () => {
   window.dispatchEvent(new Event("pagehide"));
   expect(page.__diveSubtitles!.running()).toBe(false);
   expect(packets.map((p) => JSON.parse(p)).at(-1).kind).toBe("ended");
+  // Every message carries the session's nonce, which the host checks.
+  expect(packets.every((p) => JSON.parse(p).nonce === "n1")).toBe(true);
   expect(document.querySelector("[data-dive=subtitles]")).toBeNull();
 });
 

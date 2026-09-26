@@ -54,6 +54,12 @@ const WINDOW_SECS: usize = 5;
 const STEP_SECS: f64 = 0.8;
 /// Longest audio kept in the ring, so a tab left running does not grow forever.
 const MAX_BUFFER_SECS: usize = 8;
+/// How far ahead of the host's epoch a message may be. The tap counts one
+/// epoch per seek, pause or source change and reports each, so a real jump
+/// is one or two; a message claiming more is not from the tap, and taking
+/// it would pin the buffer to an epoch nothing real ever reaches, silencing
+/// the session.
+const MAX_EPOCH_STEP: u64 = 64;
 
 /// Read a positive number from `key`, or use `default`.
 fn env_num<T: std::str::FromStr + PartialOrd + Copy>(key: &str, default: T, min: T) -> T {
@@ -683,8 +689,15 @@ pub async fn start(
     };
     let input = Arc::new(Mutex::new(AudioInput::default()));
     // Subscribe before injection so even the first state/audio message is seen.
-    route_audio(&session, binding.clone(), stop.clone(), input.clone());
-    if let Err(e) = install_audio_tap(&session, &binding).await {
+    let nonce = TabId::new().to_string().replace('-', "");
+    route_audio(
+        &session,
+        binding.clone(),
+        nonce.clone(),
+        stop.clone(),
+        input.clone(),
+    );
+    if let Err(e) = install_audio_tap(&session, &binding, &nonce).await {
         finish(&app, tab, Some(&binding), Some(e.clone()));
         return Err(e);
     }
@@ -822,9 +835,13 @@ fn cleanup_page(session: &CdpSession, binding: &str) {
     let session = session.clone();
     let binding = serde_json::to_string(binding).unwrap_or_default();
     tauri::async_runtime::spawn(async move {
-        let _ = session.call("Runtime.evaluate", json!({"expression": format!(
-            "if (window.__diveSubtitles?.binding === {binding}) window.__diveSubtitles.stop()"
-        )})).await;
+        let _ = crate::page_world::evaluate(
+            &session,
+            json!({"expression": format!(
+                "if (window.__diveSubtitles?.binding === {binding}) window.__diveSubtitles.stop()"
+            )}),
+        )
+        .await;
         let _ = session
             .call(
                 "Runtime.removeBinding",
@@ -1016,24 +1033,35 @@ fn transcribe(
     Err("no transcription engine".into())
 }
 
-async fn install_audio_tap(session: &CdpSession, binding: &str) -> Result<(), String> {
-    let script =
-        crate::pagescript::build("subtitles.js", &[("__AUDIO_BINDING__", binding.to_owned())]);
+/// Put the tap into Dive's isolated world of the current document (see
+/// `page_world`): its binding exists only there, and the page can neither
+/// call it to feed the model its own audio nor stop or restyle the captions
+/// through `__diveSubtitles`. The video element and its captured stream are
+/// the DOM's, which that world shares.
+async fn install_audio_tap(session: &CdpSession, binding: &str, nonce: &str) -> Result<(), String> {
+    let script = crate::pagescript::build(
+        "subtitles.js",
+        &[
+            ("__AUDIO_BINDING__", binding.to_owned()),
+            (
+                "__NONCE__",
+                serde_json::to_string(nonce).unwrap_or_else(|_| "null".into()),
+            ),
+        ],
+    );
     session
         .call("Runtime.enable", json!({}))
         .await
         .map_err(|e| e.to_string())?;
-    session
-        .call("Runtime.addBinding", json!({"name": binding}))
+    crate::page_world::add_binding(session, binding)
         .await
         .map_err(|e| e.to_string())?;
-    let result = session
-        .call(
-            "Runtime.evaluate",
-            json!({"expression": script, "returnByValue": true}),
-        )
-        .await
-        .map_err(|e| format!("could not start the audio tap: {e}"))?;
+    let result = crate::page_world::evaluate(
+        session,
+        json!({"expression": script, "returnByValue": true}),
+    )
+    .await
+    .map_err(|e| format!("could not start the audio tap: {e}"))?;
     if result["result"]["value"]["ok"] == true {
         Ok(())
     } else {
@@ -1045,9 +1073,66 @@ async fn install_audio_tap(session: &CdpSession, binding: &str) -> Result<(), St
     }
 }
 
+/// A message from this session's tap: our binding, called from Dive's
+/// world, small enough, and carrying the session's nonce.
+fn tap_message(
+    session: &CdpSession,
+    event: &dive_cdp::CdpEvent,
+    binding: &str,
+    nonce: &str,
+) -> Option<AudioMessage> {
+    if event.method != "Runtime.bindingCalled" || event.params["name"].as_str() != Some(binding) {
+        return None;
+    }
+    crate::page_world::calling_context(session, event)?;
+    decode_message(event.params["payload"].as_str()?, nonce)
+}
+
+/// Parse a tap payload carrying `nonce`.
+fn decode_message(payload: &str, nonce: &str) -> Option<AudioMessage> {
+    if payload.len() > 8192 {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+    if value["nonce"].as_str() != Some(nonce) {
+        return None;
+    }
+    serde_json::from_value(value).ok()
+}
+
+/// Whether a message's epoch can be taken: not behind the buffer, and not
+/// further ahead than the tap ever moves.
+fn epoch_in_reach(buffer: &AudioInput, epoch: u64) -> bool {
+    epoch >= buffer.epoch && epoch - buffer.epoch <= MAX_EPOCH_STEP
+}
+
+/// Apply one message from the tap to the buffer.
+fn apply_message(buffer: &mut AudioInput, message: AudioMessage) {
+    match message {
+        AudioMessage::Audio { epoch, pcm } if epoch_in_reach(buffer, epoch) => {
+            if let Some(samples) = decode_pcm(&pcm) {
+                buffer.append(epoch, &samples);
+            }
+        }
+        AudioMessage::Reset { epoch } if epoch_in_reach(buffer, epoch) => buffer.reset(epoch),
+        AudioMessage::State { epoch, state } if epoch_in_reach(buffer, epoch) => {
+            if epoch != buffer.epoch {
+                buffer.reset(epoch);
+            }
+            buffer.status = state.chars().take(200).collect();
+        }
+        AudioMessage::Error { error } => {
+            buffer.error = Some(error.chars().take(500).collect());
+        }
+        AudioMessage::Ended => buffer.ended = true,
+        _ => {}
+    }
+}
+
 fn route_audio(
     session: &CdpSession,
     binding: String,
+    nonce: String,
     stop: Arc<AtomicBool>,
     input: Arc<Mutex<AudioInput>>,
 ) {
@@ -1093,39 +1178,15 @@ fn route_audio(
                     .ended = true;
                 break;
             }
-            if event.method != "Runtime.bindingCalled"
-                || event.params["name"].as_str() != Some(&binding)
-            {
-                continue;
-            }
-            let Some(payload) = event.params["payload"].as_str().filter(|p| p.len() <= 8192) else {
+            let Some(message) = tap_message(&session, &event, &binding, &nonce) else {
                 continue;
             };
-            let Ok(message) = serde_json::from_str::<AudioMessage>(payload) else {
-                continue;
-            };
-            let mut buffer = input
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            match message {
-                AudioMessage::Audio { epoch, pcm } => {
-                    if let Some(samples) = decode_pcm(&pcm) {
-                        buffer.append(epoch, &samples);
-                    }
-                }
-                AudioMessage::Reset { epoch } if epoch >= buffer.epoch => buffer.reset(epoch),
-                AudioMessage::State { epoch, state } if epoch >= buffer.epoch => {
-                    if epoch != buffer.epoch {
-                        buffer.reset(epoch);
-                    }
-                    buffer.status = state.chars().take(200).collect();
-                }
-                AudioMessage::Error { error } => {
-                    buffer.error = Some(error.chars().take(500).collect());
-                }
-                AudioMessage::Ended => buffer.ended = true,
-                _ => {}
-            }
+            apply_message(
+                &mut input
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                message,
+            );
         }
     });
 }
@@ -1157,9 +1218,7 @@ fn push_caption(session: &CdpSession, binding: &str, epoch: u64, text: &str) {
     );
     let s = session.clone();
     tauri::async_runtime::spawn(async move {
-        let _ = s
-            .call("Runtime.evaluate", json!({"expression": expr}))
-            .await;
+        let _ = crate::page_world::evaluate(&s, json!({"expression": expr})).await;
     });
 }
 
@@ -1180,6 +1239,7 @@ mod tests {
         route_audio(
             &session,
             "test".into(),
+            "n".into(),
             Arc::new(AtomicBool::new(false)),
             input.clone(),
         );
@@ -1223,6 +1283,49 @@ mod tests {
         assert!(registry.take(tab, Some("new-session")).is_some());
         assert!(flag.load(Ordering::SeqCst));
         assert!(!registry.is_running(tab));
+    }
+
+    #[test]
+    fn only_the_sessions_tap_is_heard() {
+        let message = |nonce: &str| format!(r#"{{"kind":"reset","epoch":1,"nonce":"{nonce}"}}"#);
+        assert!(matches!(
+            decode_message(&message("n1"), "n1"),
+            Some(AudioMessage::Reset { epoch: 1 })
+        ));
+        assert!(decode_message(&message("n2"), "n1").is_none());
+        assert!(decode_message(r#"{"kind":"ended"}"#, "n1").is_none());
+        assert!(decode_message(&"x".repeat(9000), "n1").is_none());
+    }
+
+    #[test]
+    fn an_epoch_far_ahead_cannot_silence_the_session() {
+        let mut input = AudioInput::default();
+        // A message claiming an epoch the tap never reaches is dropped;
+        // taking it would have made every real frame after it look stale.
+        apply_message(&mut input, AudioMessage::Reset { epoch: u64::MAX });
+        apply_message(
+            &mut input,
+            AudioMessage::State {
+                epoch: MAX_EPOCH_STEP + 1,
+                state: "x".into(),
+            },
+        );
+        assert_eq!(input.epoch, 0);
+        assert!(input.status.is_empty());
+        apply_message(&mut input, AudioMessage::Reset { epoch: 2 });
+        assert_eq!(input.epoch, 2);
+        let pcm = base64::engine::general_purpose::STANDARD.encode([0u8, 64, 0, 64]);
+        apply_message(
+            &mut input,
+            AudioMessage::Audio {
+                epoch: 2,
+                pcm: pcm.clone(),
+            },
+        );
+        assert_eq!(input.samples.len(), 2);
+        // Behind the buffer is stale, as before.
+        apply_message(&mut input, AudioMessage::Audio { epoch: 1, pcm });
+        assert_eq!(input.samples.len(), 2);
     }
 
     #[test]
