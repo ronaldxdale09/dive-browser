@@ -53,6 +53,12 @@ interface BrowserState {
   reopenClosedTab: (at?: number) => Promise<void>;
   /** Close every unpinned tab in the workspace but `keep`, with an Undo that brings them back. */
   closeOtherTabs: (keep: string) => Promise<void>;
+  /** Close the unpinned tabs after `id` in its strip, with the same Undo. */
+  closeTabsToRight: (id: string) => Promise<void>;
+  /** Open `id`'s page again in a new tab beside it. */
+  duplicateTab: (id: string) => Promise<void>;
+  /** Move `id` to another workspace of its profile. */
+  moveTabToWorkspace: (id: string, workspace: string) => Promise<void>;
   detachTab: (id: string, at: { x: number; y: number } | null) => Promise<void>;
   attachTab: (id: string) => Promise<void>;
   open: Record<Exclude<UiPanel, "extensions" | "import" | "apps">, boolean> & { extensions?: boolean; import?: boolean; apps?: boolean };
@@ -895,18 +901,23 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   closeOtherTabs: async (keep) => {
     const kept = get().tabs.find((t) => t.id === keep);
     const others = get().tabs.filter((t) => t.id !== keep && t.tier !== "pinned" && t.tier !== "essential" && (!kept || t.workspace_id === kept.workspace_id));
-    if (others.length === 0) return;
-    // One at a time, so the closed-tab stack keeps their order and Undo puts them back the same way.
-    for (const t of others) await get().closeTab(t.id);
-    const n = others.length;
-    get().notify(`Closed ${n} ${n === 1 ? "tab" : "tabs"}`, 10000, {
-      label: "Undo",
-      run: () => {
-        void (async () => {
-          for (let i = 0; i < n; i++) await get().reopenClosedTab();
-        })();
-      },
-    });
+    await closeWithUndo(get, others);
+  },
+  closeTabsToRight: async (id) => {
+    await closeWithUndo(get, tabsToTheRight(get().tabs, id));
+  },
+  duplicateTab: async (id) => {
+    const source = get().tabs.find((t) => t.id === id);
+    const ws = source?.workspace_id ?? get().activeWorkspace;
+    if (!source || !ws) return;
+    const at = stripIndex(get().tabs, id);
+    const opened = await run(set, () => ipc.tabOpen(ws, source.url));
+    // Beside its source, as in every browser, not at the end of the strip.
+    if (opened?.id && at >= 0) await ipc.tabReorder(ws, orderWithAt(get().tabs, ws, opened.id, at + 1)).catch(() => undefined);
+  },
+  moveTabToWorkspace: async (id, workspace) => {
+    const name = get().workspaces.find((w) => w.id === workspace)?.name;
+    if (await succeeded(set, () => ipc.tabMoveToWorkspace(id, workspace))) get().notify(name ? `Moved to ${name}` : "Moved", 3000);
   },
   closeTab: async (id) => {
     if (closingTabs.has(id)) return;
@@ -1300,6 +1311,31 @@ export function countsChanged(event: CoreEvent): boolean {
   if (tabWorkspaces.has(id) && tabWorkspaces.get(id) === workspace_id) return false;
   tabWorkspaces.set(id, workspace_id);
   return true;
+}
+
+/** The unpinned tabs after `id` in its workspace's strip, as drawn. */
+export function tabsToTheRight(tabs: readonly Tab[], id: string): Tab[] {
+  const tab = tabs.find((t) => t.id === id);
+  if (!tab) return [];
+  const strip = stripOf(tabs, tab.workspace_id);
+  const at = strip.findIndex((t) => t.id === id);
+  return at === -1 ? [] : strip.slice(at + 1).filter((t) => t.tier === "today");
+}
+
+/** Close `tabs` and offer an Undo that brings every one of them back. */
+async function closeWithUndo(get: () => BrowserState, tabs: readonly Tab[]) {
+  if (tabs.length === 0) return;
+  // One at a time, so the closed-tab stack keeps their order and Undo puts them back the same way.
+  for (const t of tabs) await get().closeTab(t.id);
+  const n = tabs.length;
+  get().notify(`Closed ${n} ${n === 1 ? "tab" : "tabs"}`, 10000, {
+    label: "Undo",
+    run: () => {
+      void (async () => {
+        for (let i = 0; i < n; i++) await get().reopenClosedTab();
+      })();
+    },
+  });
 }
 
 let countsTimer: ReturnType<typeof setTimeout> | null = null;

@@ -129,6 +129,8 @@ export const ipc = {
   httpsOnlyAllow: async (id: string, url: string) => unwrap(await commands.httpsOnlyAllow(id, url)),
   tabFillVideo: async (id: string) => unwrap(await commands.tabFillVideo(id)),
   tabSetTier: async (id: string, tier: TabTier) => unwrap(await commands.tabSetTier(id, tier)),
+  /** Move a tab to another workspace of its profile that shares its cookies; refused otherwise. */
+  tabMoveToWorkspace: async (id: string, workspace: string) => unwrap(await commands.tabMoveToWorkspace(id, workspace)),
   tabZoom: async (id: string, factor: number) => unwrap(await commands.tabZoom(id, factor)),
   tabDevtools: async (id: string) => unwrap(await commands.tabDevtools(id)),
   tabScreencastStart: async (id: string, options: RecordOptions) => unwrap(await commands.tabScreencastStart(id, options)),

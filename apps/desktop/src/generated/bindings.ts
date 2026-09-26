@@ -246,6 +246,12 @@ export const commands = {
 	tabFillVideo: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_fill_video", { id })),
 	/**  Move a tab between the Essential, Pinned and Today strips. */
 	tabSetTier: (id: TabId, tier: TabTier) => typedError<null, AppError>(__TAURI_INVOKE("tab_set_tier", { id, tier })),
+	/**
+	 *  Move a tab into another workspace of its profile, at the end of that
+	 *  workspace's strip. A tab on screen leaves the screen, and the workspace
+	 *  it left shows the tab it would on switching to it.
+	 */
+	tabMoveToWorkspace: (id: TabId, workspace: WorkspaceId) => typedError<null, AppError>(__TAURI_INVOKE("tab_move_to_workspace", { id, workspace })),
 	/**  Forget a bookmark by URL. */
 	bookmarkRemove: (url: string) => typedError<boolean, AppError>(__TAURI_INVOKE("bookmark_remove", { url })),
 	/**  Every login saved in the active profile. */

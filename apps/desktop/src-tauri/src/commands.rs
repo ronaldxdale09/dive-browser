@@ -871,6 +871,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             tab_print,
             tab_fill_video,
             tab_set_tier,
+            tab_move_to_workspace,
             bookmark_remove,
             passwords_list,
             passwords_for_url,
@@ -2945,6 +2946,99 @@ pub(crate) async fn tab_fill_video(state: State<'_, AppState>, id: TabId) -> App
 pub(crate) fn tab_print(app: AppHandle<Runtime>, id: TabId) -> AppResult<()> {
     on_main(&app, move |_, _, state| {
         with_view(state, id, tauri::Webview::print)
+    })
+}
+
+/// Why a tab cannot move to `target`, or `None` when it can. A tab moves
+/// between the workspaces of its own profile that share its cookie jar: the
+/// live page is signed in with that jar, and carrying it into another would
+/// show one set of logins under another's name. An essential is already in
+/// every workspace.
+fn move_refusal(tab: &Tab, source: Option<&Workspace>, target: &Workspace) -> Option<&'static str> {
+    if tab.tier == dive_core::TabTier::Essential {
+        return Some("an essential is already in every workspace");
+    }
+    let source = source?;
+    if source.profile_id != target.profile_id {
+        return Some("a tab can only move to a workspace of its own profile");
+    }
+    if source.container_id != target.container_id {
+        return Some(
+            "that workspace keeps its own cookies and logins; open the page there instead",
+        );
+    }
+    None
+}
+
+/// Move a tab into another workspace of its profile, at the end of that
+/// workspace's strip. A tab on screen leaves the screen, and the workspace
+/// it left shows the tab it would on switching to it.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_move_to_workspace(
+    app: AppHandle<Runtime>,
+    id: TabId,
+    workspace: WorkspaceId,
+) -> AppResult<()> {
+    on_main(&app, move |main, app, state| {
+        // Host before store, as everywhere.
+        let (tab, from, was_showing, previous) = {
+            let host = lock(&state.host);
+            let store = lock(&state.store);
+            let mut tab = store.tab(id)?;
+            if tab.workspace_id == Some(workspace) {
+                return Ok(());
+            }
+            let target = store.workspace(workspace)?;
+            let source = tab
+                .workspace_id
+                .map(|from| store.workspace(from))
+                .transpose()?;
+            if let Some(reason) = move_refusal(&tab, source.as_ref(), &target) {
+                return Err(AppError::new(reason));
+            }
+            let end = store
+                .tabs_for_workspace(workspace)?
+                .iter()
+                .filter(|t| t.workspace_id == Some(workspace))
+                .map(|t| t.position)
+                .max()
+                .map_or(0, |p| p + 1);
+            let from = tab.workspace_id;
+            tab.workspace_id = Some(workspace);
+            tab.position = end;
+            store.upsert_tab(&tab)?;
+            let (was_showing, previous) = host.as_ref().map_or((false, None), |host| {
+                (
+                    !host.is_detached(id) && host.showing().contains(&id),
+                    host.active(),
+                )
+            });
+            (tab, from, was_showing, previous)
+        };
+        state.bus.publish(CoreEvent::TabUpserted(tab));
+        if !was_showing {
+            return Ok(());
+        }
+        // The page belongs to another workspace now; the main window shows
+        // what this one would, the tab that was in front if that was not it.
+        if let Some(host) = lock(&state.host).as_mut() {
+            host.deactivate_all()?;
+        }
+        let next = match (previous, from) {
+            (Some(active), _) if active != id => Some(active),
+            (_, Some(from)) => {
+                let detached = lock(&state.host)
+                    .as_ref()
+                    .map_or_else(Vec::new, crate::engine::TabHost::detached);
+                workspace_tab_to_show(&lock(&state.store), from, &detached)?
+            }
+            _ => None,
+        };
+        if let Some(next) = next {
+            activate_tab(main, app, state, next)?;
+        }
+        Ok(())
     })
 }
 
@@ -5126,6 +5220,26 @@ mod tests {
             other_workspace_tabs(&store, Some(here.id)).unwrap(),
             vec![away]
         );
+    }
+
+    #[test]
+    fn a_tab_moves_only_where_its_page_keeps_its_logins() {
+        let store = dive_core::Store::in_memory().unwrap();
+        let profile = store.ensure_default_profile().unwrap();
+        let work = Workspace::new("Work", profile.container_id, profile.id, 0);
+        let play = Workspace::new("Play", profile.container_id, profile.id, 1);
+        let sealed_jar = dive_core::Container::new("Sealed");
+        store.upsert_container(&sealed_jar).unwrap();
+        let sealed = Workspace::new("Sealed", sealed_jar.id, profile.id, 2);
+        let other_profile = dive_core::Profile::new("Other", profile.container_id, 1);
+        let theirs = Workspace::new("Theirs", profile.container_id, other_profile.id, 3);
+        let tab = Tab::new(work.id, "https://a.test", 0);
+        assert_eq!(move_refusal(&tab, Some(&work), &play), None);
+        assert!(move_refusal(&tab, Some(&work), &sealed).is_some());
+        assert!(move_refusal(&tab, Some(&work), &theirs).is_some());
+        let mut essential = tab.clone();
+        essential.tier = dive_core::TabTier::Essential;
+        assert!(move_refusal(&essential, Some(&work), &play).is_some());
     }
 
     #[test]

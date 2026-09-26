@@ -1,10 +1,11 @@
 import { SortableContext, horizontalListSortingStrategy, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AppWindow, Columns2, CopyPlus, Link, Loader2, Moon, Pin, Plus, Star, Volume2, VolumeX, X } from "lucide-react";
+import { AppWindow, ArrowRightToLine, ChevronRight, Columns2, CopyPlus, FolderInput, Link, Loader2, Moon, Pin, Plus, RotateCw, Star, Volume2, VolumeX, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useBrowser } from "../store/browser";
+import { tabsToTheRight, useBrowser } from "../store/browser";
 import { MAX_PANES, useLayout, type Split } from "../store/layout";
-import type { Tab } from "../lib/ipc";
+import type { Tab, Workspace } from "../lib/ipc";
+import { ipc } from "../lib/ipc";
 import { Favicon } from "./Favicon";
 import { useTabAudio } from "../store/tabAudio";
 import { DrivingMark } from "./agent/DrivingMark";
@@ -92,7 +93,11 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
   const workspace = useBrowser((s) => s.activeWorkspace);
   const activate = useBrowser((s) => s.activateTab);
   const close = useBrowser((s) => s.closeTab);
-  const openTab = useBrowser((s) => s.openTab);
+  const duplicateTab = useBrowser((s) => s.duplicateTab);
+  const closeRight = useBrowser((s) => s.closeTabsToRight);
+  const moveTab = useBrowser((s) => s.moveTabToWorkspace);
+  const workspaces = useBrowser((s) => s.workspaces);
+  const activeProfile = useBrowser((s) => s.activeProfile);
   const toggle = useBrowser((s) => s.toggle);
   const openPalette = useBrowser((s) => s.openPalette);
   const closeOthers = useBrowser((s) => s.closeOtherTabs);
@@ -304,8 +309,21 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
             setMenu(null);
           }}
           onDuplicate={() => {
-            const t = all.find((x) => x.id === menu.id);
-            if (t) void openTab(t.url);
+            void duplicateTab(menu.id);
+            setMenu(null);
+          }}
+          onReload={() => {
+            void ipc.tabReload(menu.id).catch((e: unknown) => useBrowser.setState({ error: String(e) }));
+            setMenu(null);
+          }}
+          canCloseRight={tabsToTheRight(all, menu.id).length > 0}
+          onCloseRight={() => {
+            void closeRight(menu.id);
+            setMenu(null);
+          }}
+          moveTargets={moveTargets(all.find((t) => t.id === menu.id), workspaces, activeProfile)}
+          onMove={(target) => {
+            void moveTab(menu.id, target);
             setMenu(null);
           }}
           onCopy={() => {
@@ -716,6 +734,23 @@ async function copyAddress(url: string) {
   }
 }
 
+/** A workspace a tab can be moved to, and why not when it cannot. */
+export type MoveTarget = { id: string; name: string; refusal: string | null };
+
+/**
+ * The other workspaces of the tab's profile, for "Move to workspace". One
+ * that keeps its own cookies is listed but refused: the page is signed in
+ * with this workspace's, and the engine will not carry it across. An
+ * essential is in every workspace already and has nowhere to go.
+ */
+export function moveTargets(tab: Tab | undefined, workspaces: readonly Workspace[], profile: string | null): MoveTarget[] {
+  if (!tab || tab.tier === "essential" || !tab.workspace_id) return [];
+  const home = workspaces.find((w) => w.id === tab.workspace_id);
+  return workspaces
+    .filter((w) => w.id !== tab.workspace_id && (!profile || w.profile_id === profile))
+    .map((w) => ({ id: w.id, name: w.name, refusal: home && w.container_id !== home.container_id ? "Keeps its own cookies and logins" : null }));
+}
+
 /** The menu item that focus should move to for an arrow, Home or End key; null for other keys. */
 export function roveMenu(key: string, items: readonly HTMLElement[], current: Element | null): HTMLElement | null {
   if (items.length === 0) return null;
@@ -734,12 +769,21 @@ export function roveMenu(key: string, items: readonly HTMLElement[], current: El
   }
 }
 
-function TabMenu({ x, y, tier, detached, muted, split, onPin, onEssential, onWindow, onSplit, onMute, onClose, onCloseOthers, onDuplicate, onCopy, onDismiss }: { x: number; y: number; tier: Tab["tier"]; detached: boolean; muted: boolean; split: SplitAction | null; onPin: (v: boolean) => void; onEssential: (v: boolean) => void; onWindow: (out: boolean) => void; onSplit: (action: SplitAction) => void; onMute: (v: boolean) => void; onClose: () => void; onCloseOthers: () => void; onDuplicate: () => void; onCopy: () => void; onDismiss: () => void }) {
+function TabMenu({ x, y, tier, detached, muted, split, canCloseRight, moveTargets: targets, onPin, onEssential, onWindow, onSplit, onMute, onReload, onClose, onCloseOthers, onCloseRight, onDuplicate, onCopy, onMove, onDismiss }: { x: number; y: number; tier: Tab["tier"]; detached: boolean; muted: boolean; split: SplitAction | null; canCloseRight: boolean; moveTargets: MoveTarget[]; onPin: (v: boolean) => void; onEssential: (v: boolean) => void; onWindow: (out: boolean) => void; onSplit: (action: SplitAction) => void; onMute: (v: boolean) => void; onReload: () => void; onClose: () => void; onCloseOthers: () => void; onCloseRight: () => void; onDuplicate: () => void; onCopy: () => void; onMove: (workspace: string) => void; onDismiss: () => void }) {
   useCoversContent(true);
   const ref = useRef<HTMLDivElement>(null);
+  const moveRef = useRef<HTMLDivElement>(null);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const moveOpenRef = useRef(false);
+  useEffect(() => {
+    moveOpenRef.current = moveOpen;
+    if (moveOpen) moveRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')?.focus();
+  }, [moveOpen]);
   // Like every other menu: a press anywhere else or Escape puts it away.
   // Focus lands on the first item so the arrow keys walk the list, and goes
-  // back to where it came from when the menu closes.
+  // back to where it came from when the menu closes. The workspace list is a
+  // menu of its own: the arrows walk it while it is open, and Left or Escape
+  // go back to the row that opened it.
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
@@ -747,11 +791,24 @@ function TabMenu({ x, y, tier, detached, muted, split, onPin, onEssential, onWin
       if (!ref.current?.contains(e.target as Node)) onDismiss();
     };
     const onKey = (e: KeyboardEvent) => {
+      const inSubmenu = moveOpenRef.current && moveRef.current?.contains(document.activeElement) === true;
+      if (inSubmenu && (e.key === "Escape" || e.key === "ArrowLeft")) {
+        e.preventDefault();
+        setMoveOpen(false);
+        ref.current?.querySelector<HTMLElement>("[data-move-trigger]")?.focus();
+        return;
+      }
       if (e.key === "Escape") {
         onDismiss();
         return;
       }
-      const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+      if (!inSubmenu && e.key === "ArrowRight" && document.activeElement instanceof HTMLElement && document.activeElement.hasAttribute("data-move-trigger")) {
+        e.preventDefault();
+        setMoveOpen(true);
+        return;
+      }
+      const scope = inSubmenu ? moveRef.current : ref.current;
+      const items = Array.from(scope?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []).filter((el) => inSubmenu || !moveRef.current?.contains(el));
       const next = roveMenu(e.key, items, document.activeElement);
       if (next) {
         e.preventDefault();
@@ -770,12 +827,22 @@ function TabMenu({ x, y, tier, detached, muted, split, onPin, onEssential, onWin
   const essential = tier === "essential";
   const item = "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink";
   const chords = chordsByCommand();
-  const rows = 6 + (essential ? 0 : 1) + (split ? 1 : 0);
+  const rows = 9 + (essential ? 0 : 1) + (split ? 1 : 0) + (targets.length > 0 ? 1 : 0);
   // A first guess from the row count; the menu's measured size corrects it.
-  const position = clampFloatingPosition({ x, y, width: 208, height: 12 + rows * 30 + 3 * 9, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
+  const position = clampFloatingPosition({ x, y, width: 208, height: 12 + rows * 30 + 4 * 9, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
   useClampToViewport(ref, x, y);
+  // The workspace list opens on whichever side has room.
+  const moveLeft = position.x + 208 * 2 + 8 > window.innerWidth;
   return (
     <div ref={ref} role="menu" aria-label="Tab actions" style={{ left: position.x, top: position.y }} className="surface-enter fixed z-50 w-52 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <button type="button" role="menuitem" className={item} aria-keyshortcuts={chords["tab.reload"]} onClick={onReload}>
+        <Icon icon={RotateCw} size={13} /> Reload
+        <MenuChord chord={chords["tab.reload"]} />
+      </button>
+      <button type="button" role="menuitem" className={item} onClick={onDuplicate}>
+        <Icon icon={CopyPlus} size={13} /> Duplicate tab
+      </button>
+      <div className="my-1 h-px bg-line" role="separator" />
       {!essential && (
         <button type="button" role="menuitem" className={item} aria-keyshortcuts={chords["tab.pin"]} onClick={() => onPin(!pinned)}>
           <Icon icon={Pin} size={13} /> {pinned ? "Unpin tab" : "Pin tab"}
@@ -795,12 +862,37 @@ function TabMenu({ x, y, tier, detached, muted, split, onPin, onEssential, onWin
         <Icon icon={AppWindow} size={13} /> {detached ? "Move back to this window" : "Open in new window"}
         <MenuChord chord={chords["tab.detach"]} />
       </button>
+      {targets.length > 0 && (
+        <div className="relative" onMouseLeave={() => setMoveOpen(false)}>
+          <button type="button" role="menuitem" data-move-trigger aria-haspopup="menu" aria-expanded={moveOpen} className={item} onMouseEnter={() => setMoveOpen(true)} onClick={() => setMoveOpen((open) => !open)}>
+            <Icon icon={FolderInput} size={13} /> Move to workspace
+            <Icon icon={ChevronRight} size={12} className="ml-auto text-ink-3" />
+          </button>
+          {moveOpen && (
+            <div ref={moveRef} role="menu" aria-label="Move to workspace" className={`absolute top-0 z-50 w-52 rounded-xl border border-line-2 bg-surface p-1.5 shadow-2xl ${moveLeft ? "right-full mr-1.5" : "left-full ml-1.5"}`}>
+              {targets.map((target) => (
+                <button
+                  key={target.id}
+                  type="button"
+                  role="menuitem"
+                  aria-disabled={target.refusal ? true : undefined}
+                  title={target.refusal ?? undefined}
+                  className={`${item} ${target.refusal ? "opacity-50" : ""}`}
+                  onClick={() => {
+                    if (!target.refusal) onMove(target.id);
+                  }}
+                >
+                  <span className="min-w-0 flex-1 truncate">{target.name}</span>
+                  {target.refusal && <span className="sr-only">. {target.refusal}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div className="my-1 h-px bg-line" role="separator" />
       <button type="button" role="menuitem" className={item} onClick={() => onMute(!muted)}>
         <Icon icon={muted ? Volume2 : VolumeX} size={13} /> {muted ? "Unmute tab" : "Mute tab"}
-      </button>
-      <button type="button" role="menuitem" className={item} onClick={onDuplicate}>
-        <Icon icon={CopyPlus} size={13} /> Duplicate tab
       </button>
       <button type="button" role="menuitem" className={item} onClick={onCopy}>
         <Icon icon={Link} size={13} /> Copy address
@@ -813,6 +905,11 @@ function TabMenu({ x, y, tier, detached, muted, split, onPin, onEssential, onWin
       <button type="button" role="menuitem" className={item} onClick={onCloseOthers}>
         <Icon icon={X} size={13} /> Close other tabs
       </button>
+      {canCloseRight && (
+        <button type="button" role="menuitem" className={item} onClick={onCloseRight}>
+          <Icon icon={ArrowRightToLine} size={13} /> Close tabs to the right
+        </button>
+      )}
     </div>
   );
 }

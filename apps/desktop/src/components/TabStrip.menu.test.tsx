@@ -7,8 +7,12 @@ import { TabStrip, narrowSample, roveMenu } from "./TabStrip";
 
 const tab: Tab = { id: "t1", workspace_id: "w1", url: "https://a.test/", title: "Alpha", favicon: null, tier: "today", position: 0, created_at: "", last_active_at: "", state: "active", scroll_x: 0, scroll_y: 0 } as Tab;
 
+const initial = useBrowser.getState();
+
 afterEach(() => {
   cleanup();
+  // A test may stand in for a store action; the next one gets the real ones.
+  useBrowser.setState(initial, true);
   vi.restoreAllMocks();
 });
 
@@ -72,9 +76,9 @@ describe("tab context menu", () => {
     alpha.focus();
     fireEvent.contextMenu(alpha);
     expect(screen.getByRole("menu", { name: "Tab actions" })).toBeTruthy();
-    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Pin tab" }));
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Reload" }));
     fireEvent.keyDown(window, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Make essential" }));
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Duplicate tab" }));
     fireEvent.keyDown(window, { key: "ArrowUp" });
     fireEvent.keyDown(window, { key: "ArrowUp" });
     expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Close other tabs" }));
@@ -97,6 +101,61 @@ describe("tab context menu", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Copy address" }));
     await waitFor(() => expect(write).toHaveBeenCalledWith("https://a.test/"));
     await waitFor(() => expect(useBrowser.getState().notice).toBe("Copied the address"));
+  });
+
+  it("opens a duplicate beside its source, reloads, and closes the tabs to the right", async () => {
+    vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
+    vi.spyOn(ipc, "tabOpen").mockResolvedValue({ id: "copy" } as never);
+    const reorder = vi.spyOn(ipc, "tabReorder").mockResolvedValue(null as never);
+    const reload = vi.spyOn(ipc, "tabReload").mockResolvedValue(null as never);
+    vi.spyOn(ipc, "tabScrollPosition").mockResolvedValue(null);
+    const close = vi.spyOn(ipc, "tabClose").mockResolvedValue(null as never);
+    const beta = { ...tab, id: "t2", title: "Beta", position: 1 } as Tab;
+    const gamma = { ...tab, id: "t3", title: "Gamma", position: 2 } as Tab;
+    useBrowser.setState({ tabs: [tab, beta, gamma], activeTab: "t1", activeWorkspace: "w1" });
+    render(<TabStrip />);
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Alpha/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Duplicate tab" }));
+    await waitFor(() => expect(reorder).toHaveBeenCalledWith("w1", ["t1", "copy", "t2", "t3"]));
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Beta/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Reload/ }));
+    expect(reload).toHaveBeenCalledWith("t2");
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Beta/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Close tabs to the right" }));
+    await waitFor(() => expect(close.mock.calls.map((c) => c[0])).toEqual(["t3"]));
+    // The last tab has nothing to its right.
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Gamma/ }));
+    expect(screen.queryByRole("menuitem", { name: "Close tabs to the right" })).toBeNull();
+  });
+
+  it("moves a tab to another workspace of its profile, and says why not where it cannot go", async () => {
+    vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
+    const move = vi.spyOn(ipc, "tabMoveToWorkspace").mockResolvedValue(null as never);
+    const workspace = (id: string, name: string, container_id: string, profile_id = "p1") => ({ id, name, color: "#fff", icon: "home", container_id, profile_id, position: 0, created_at: "" });
+    useBrowser.setState({
+      tabs: [tab],
+      activeTab: "t1",
+      activeWorkspace: "w1",
+      activeProfile: "p1",
+      workspaces: [workspace("w1", "Home", "c1"), workspace("w2", "Work", "c1"), workspace("w3", "Bank", "c2"), workspace("w4", "Theirs", "c1", "p2")],
+    });
+    render(<TabStrip />);
+    fireEvent.contextMenu(screen.getByRole("tab", { name: /Alpha/ }));
+    const trigger = screen.getByRole("menuitem", { name: "Move to workspace" });
+    trigger.focus();
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    const list = await screen.findByRole("menu", { name: "Move to workspace" });
+    const names = Array.from(list.querySelectorAll('[role="menuitem"]')).map((el) => el.textContent);
+    expect(names).toEqual(["Work", "Bank. Keeps its own cookies and logins"]);
+    expect(document.activeElement?.textContent).toBe("Work");
+    fireEvent.click(screen.getByRole("menuitem", { name: /Bank/ }));
+    expect(move).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    expect(screen.queryByRole("menu", { name: "Move to workspace" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Work" }));
+    expect(move).toHaveBeenCalledWith("t1", "w2");
   });
 
   it("roves with wrap-around and ignores other keys", () => {
