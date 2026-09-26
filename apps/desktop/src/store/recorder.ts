@@ -18,6 +18,7 @@ interface RecorderState {
 }
 
 let listening: Promise<() => void> | null = null;
+let watchingCloses = false;
 
 /**
  * Subscribe once to recorded steps. A failed subscription is forgotten so the
@@ -31,6 +32,31 @@ function listenSteps(onStep: (step: RecordedStep, tab: string) => void): Promise
   });
   listening = request;
   return request;
+}
+
+/**
+ * Stop recording when the recorded tab closes, so the steps are shown
+ * rather than left waiting for a Stop that finds nothing. Subscribed once;
+ * outside Tauri (tests) there is no event bridge and nothing to watch.
+ */
+function watchCloses(onClose: (tab: string) => void) {
+  if (watchingCloses) return;
+  watchingCloses = true;
+  void events.stateChanged.listen((e) => {
+    if (e.payload.type === "tab_closed") onClose(e.payload.data);
+  }).catch(() => {
+    watchingCloses = false;
+  });
+}
+
+/**
+ * The steps to show once recording stops. Closing the tab makes the host
+ * forget its copy, so its empty answer then must not replace the steps the
+ * chrome collected as they came in; that turned a closed tab's recording
+ * into "Nothing was recorded". Pure for tests.
+ */
+export function finalSteps(hostSteps: readonly RecordedStep[], collected: readonly RecordedStep[]): RecordedStep[] {
+  return hostSteps.length > 0 ? [...hostSteps] : [...collected];
 }
 
 /** As many steps as the host keeps (its RECORDED_STEP_CAP); a runaway page must not grow this list without end. */
@@ -54,6 +80,9 @@ export const useRecorder = create<RecorderState>((set, get) => ({
       await listenSteps((step, tab) => {
         if (tab === get().recordingTab) set((s) => ({ steps: appendStep(s.steps, step) }));
       });
+      watchCloses((closed) => {
+        if (closed === get().recordingTab) void get().stop();
+      });
       await ipc.tabRecordStart(tabId);
       const tab = useBrowser.getState().tabs.find((t) => t.id === tabId);
       set({ recordingTab: tabId, startUrl: tab?.url ?? null, startTitle: tab?.title ?? null, steps: [], isOpen: false });
@@ -64,7 +93,8 @@ export const useRecorder = create<RecorderState>((set, get) => ({
   stop: async () => {
     const tab = get().recordingTab;
     if (!tab) return;
-    const steps = await ipc.tabRecordStop(tab).catch(() => get().steps);
+    const hostSteps = await ipc.tabRecordStop(tab).catch((): RecordedStep[] => []);
+    const steps = finalSteps(hostSteps, get().steps);
     set({ recordingTab: null, steps, isOpen: steps.length > 0 });
   },
   clear: () => set({ steps: [], isOpen: false }),
