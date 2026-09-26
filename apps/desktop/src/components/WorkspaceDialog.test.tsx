@@ -1,5 +1,5 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Workspace } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { WorkspaceDialog } from "./WorkspaceDialog";
@@ -36,5 +36,29 @@ describe("WorkspaceDialog", () => {
     render(<WorkspaceDialog />);
     expect(screen.getByRole("radio", { name: "Mint", checked: true })).toBeTruthy();
     expect(screen.queryByRole("radio", { name: "Current colour" })).toBeNull();
+  });
+
+  it("creates once for a double Enter, and stays open with the name when the engine refuses", async () => {
+    let refuse!: () => void;
+    const create = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          refuse = () => {
+            useBrowser.setState({ error: "workspace name is taken" });
+            resolve(false);
+          };
+        }),
+    );
+    useBrowser.setState({ workspaces: [ws("home", "c1")], editing: { id: null }, createWorkspace: create });
+    render(<WorkspaceDialog />);
+    fireEvent.change(screen.getByPlaceholderText(/Client, Side project/), { target: { value: "Client" } });
+    const form = screen.getByRole("dialog", { name: "New workspace" });
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    expect(create).toHaveBeenCalledTimes(1);
+    refuse();
+    expect((await screen.findByRole("alert")).textContent).toBe("workspace name is taken");
+    expect((screen.getByPlaceholderText(/Client, Side project/) as HTMLInputElement).value).toBe("Client");
+    expect(useBrowser.getState().editing).toEqual({ id: null });
   });
 });

@@ -30,9 +30,13 @@ interface BrowserState {
   /** The profile dialog: `{ id: null }` creates, `{ id }` edits, `null` is closed. */
   editingProfile: { id: string | null } | null;
   setEditingProfile: (v: { id: string | null } | null) => void;
-  createProfile: (draft: ProfileDraftInput) => Promise<void>;
-  updateProfile: (id: string, draft: ProfileDraftInput) => Promise<void>;
-  deleteProfile: (id: string) => Promise<void>;
+  /**
+   * The profile and workspace actions resolve to whether the engine did it.
+   * The dialog stays open on a failure, with what was typed still in it.
+   */
+  createProfile: (draft: ProfileDraftInput) => Promise<boolean>;
+  updateProfile: (id: string, draft: ProfileDraftInput) => Promise<boolean>;
+  deleteProfile: (id: string) => Promise<boolean>;
   activateProfile: (id: string) => Promise<void>;
   tabs: Tab[];
   activeTab: string | null;
@@ -124,9 +128,9 @@ interface BrowserState {
   counts: Record<string, number>;
   refreshCounts: () => Promise<void>;
   reorderWorkspaces: (ordered: string[]) => Promise<void>;
-  createWorkspace: (draft: { name: string; color: string; icon: string }, separateContainer: boolean) => Promise<void>;
-  updateWorkspace: (id: string, draft: { name: string; color: string; icon: string }) => Promise<void>;
-  deleteWorkspace: (id: string) => Promise<void>;
+  createWorkspace: (draft: { name: string; color: string; icon: string }, separateContainer: boolean) => Promise<boolean>;
+  updateWorkspace: (id: string, draft: { name: string; color: string; icon: string }) => Promise<boolean>;
+  deleteWorkspace: (id: string) => Promise<boolean>;
   editing: { id: string | null } | null;
   setEditing: (v: { id: string | null } | null) => void;
   toggle: (panel: UiPanel, value?: boolean) => void;
@@ -481,22 +485,27 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     supersedeSnapshots();
     set({ editingProfile });
   },
+  // Each closes its dialog only once the engine has done it: closing on a
+  // failure too threw away what had been typed, with the error somewhere else.
   createProfile: async (draft) => {
     const intent = supersedeSnapshots();
-    await run(set, () => ipc.profileCreate(draft));
+    if (!(await succeeded(set, () => ipc.profileCreate(draft)))) return false;
     await applyLatestSnapshot(set, { editingProfile: null }, intent);
     void get().refreshCounts();
+    return true;
   },
   updateProfile: async (id, draft) => {
     const intent = supersedeSnapshots();
-    await run(set, () => ipc.profileUpdate(id, draft));
+    if (!(await succeeded(set, () => ipc.profileUpdate(id, draft)))) return false;
     if (intent === intentRevision) set({ editingProfile: null });
+    return true;
   },
   deleteProfile: async (id) => {
     const intent = supersedeSnapshots();
-    await run(set, () => ipc.profileDelete(id));
+    if (!(await succeeded(set, () => ipc.profileDelete(id)))) return false;
     await applyLatestSnapshot(set, { editingProfile: null }, intent);
     void get().refreshCounts();
+    return true;
   },
   activateProfile: async (id) => {
     if (get().activeProfile === id) return;
@@ -969,20 +978,23 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   },
   createWorkspace: async (draft, separateContainer) => {
     const intent = supersedeSnapshots();
-    await run(set, () => ipc.workspaceCreate(draft, separateContainer));
+    if (!(await succeeded(set, () => ipc.workspaceCreate(draft, separateContainer)))) return false;
     await applyLatestSnapshot(set, { editing: null }, intent);
     void get().refreshCounts();
+    return true;
   },
   updateWorkspace: async (id, draft) => {
     const intent = supersedeSnapshots();
-    await run(set, () => ipc.workspaceUpdate(id, draft));
+    if (!(await succeeded(set, () => ipc.workspaceUpdate(id, draft)))) return false;
     if (intent === intentRevision) set({ editing: null });
+    return true;
   },
   deleteWorkspace: async (id) => {
     const intent = supersedeSnapshots();
-    await run(set, () => ipc.workspaceDelete(id));
+    if (!(await succeeded(set, () => ipc.workspaceDelete(id)))) return false;
     await applyLatestSnapshot(set, { editing: null }, intent);
     void get().refreshCounts();
+    return true;
   },
 
   toggle: (panel, value) => set((s) => ({ open: togglePanel(s.open, panel, value), ...(panel === "palette" ? { paletteFocus: "all" as const } : {}) })),
@@ -1044,6 +1056,18 @@ function scheduleCounts(get: () => BrowserState) {
     countsTimer = null;
     void get().refreshCounts();
   }, 300);
+}
+
+/** Like `run`, for a call whose result is nothing: whether it went through. */
+async function succeeded(set: (p: Partial<BrowserState>) => void, f: () => Promise<unknown>): Promise<boolean> {
+  try {
+    await f();
+    set({ error: null });
+    return true;
+  } catch (e) {
+    set({ error: errorMessage(e) });
+    return false;
+  }
 }
 
 async function run<T>(set: (p: Partial<BrowserState>) => void, f: () => Promise<T>): Promise<T | undefined> {
