@@ -112,6 +112,15 @@ describe("McpDialog", () => {
     expect(screen.getByRole("dialog").textContent).not.toMatch(/OpenCode can read/);
   });
 
+  it("says the port is taken instead of offering a URL nothing of Dive's answers", async () => {
+    vi.spyOn(ipc, "appInfo").mockResolvedValue({ ...info, mcp_url: "", mcp_error: "Port 7391 is in use by another program, so the MCP server is not running." });
+    vi.spyOn(ipc, "mcpToken").mockResolvedValue("secret-token");
+    render(<McpDialog onClose={() => {}} />);
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Port 7391 is in use");
+    expect(screen.queryByRole("button", { name: "Copy setup" })).toBeNull();
+  });
+
   it("does not offer setup when the server is not running, and says why it might not be", async () => {
     vi.spyOn(ipc, "appInfo").mockResolvedValue({ ...info, mcp_url: "" });
     vi.spyOn(ipc, "mcpToken").mockResolvedValue("");

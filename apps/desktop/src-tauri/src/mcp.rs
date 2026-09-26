@@ -3501,12 +3501,60 @@ pub fn advertised_port() -> u16 {
         .unwrap_or(7391)
 }
 
-/// URL this window may show. Empty when the server is off or this process is private.
-pub fn advertised_url(port: u16, private: bool) -> String {
-    if port == 0 || private {
-        String::new()
+/// Where the MCP server stands in this process.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Status {
+    /// Not started: switched off, private, or not yet asked for.
+    Off,
+    /// Listening at this address.
+    Listening(std::net::SocketAddr),
+    /// Could not listen; the reason, in words.
+    Failed(String),
+}
+
+/// The server's status, as its start left it. Process-wide, like the server.
+fn status() -> &'static std::sync::Mutex<Status> {
+    static STATUS: std::sync::OnceLock<std::sync::Mutex<Status>> = std::sync::OnceLock::new();
+    STATUS.get_or_init(|| std::sync::Mutex::new(Status::Off))
+}
+
+fn set_status(next: Status) {
+    *crate::state::lock(status()) = next;
+}
+
+/// The server's status right now.
+pub fn current_status() -> Status {
+    crate::state::lock(status()).clone()
+}
+
+/// URL this window may show: only an address the server really bound. Empty
+/// when the server is off, failed to start, or this process is private -- a
+/// URL for a port another program holds would send an agent's requests,
+/// token and all, to that program.
+pub fn advertised_url(status: &Status, private: bool) -> String {
+    match status {
+        Status::Listening(addr) if !private => format!("http://{addr}/mcp"),
+        _ => String::new(),
+    }
+}
+
+/// Why the server is not running, in words the Settings pane can show; empty
+/// when it is, or when it was never meant to.
+pub fn failure(status: &Status, private: bool) -> String {
+    match status {
+        Status::Failed(reason) if !private => reason.clone(),
+        _ => String::new(),
+    }
+}
+
+/// A bind failure as the person reads it.
+fn describe_bind_error(port: u16, error: &std::io::Error) -> String {
+    if error.kind() == std::io::ErrorKind::AddrInUse {
+        format!(
+            "Port {port} is in use by another program, so the MCP server is not running. Quit that program, or set DIVE_MCP_PORT to a free port, and restart Dive."
+        )
     } else {
-        format!("http://127.0.0.1:{port}/mcp")
+        format!("The MCP server could not start on port {port}: {error}")
     }
 }
 
@@ -3521,6 +3569,9 @@ pub fn start(app: AppHandle<Runtime>) {
         Ok(t) => t,
         Err(e) => {
             tracing::warn!("mcp server disabled: cannot create token file: {e}");
+            set_status(Status::Failed(format!(
+                "The MCP server is off: its token file could not be written ({e})."
+            )));
             return;
         }
     };
@@ -3532,6 +3583,7 @@ pub fn start(app: AppHandle<Runtime>) {
     tauri::async_runtime::spawn(async move {
         match dive_mcp::serve(browser, config, ([127, 0, 0, 1], port).into()).await {
             Ok(handle) => {
+                set_status(Status::Listening(handle.addr));
                 tracing::info!(
                     url = handle.url(),
                     "mcp: add with `claude mcp add --transport http dive {} --header \"Authorization: Bearer $(cat '{}')\"`",
@@ -3541,7 +3593,10 @@ pub fn start(app: AppHandle<Runtime>) {
                 // Keep the handle alive for the life of the process.
                 std::mem::forget(handle);
             }
-            Err(e) => tracing::warn!("mcp server failed to start on port {port}: {e}"),
+            Err(e) => {
+                tracing::warn!("mcp server failed to start on port {port}: {e}");
+                set_status(Status::Failed(describe_bind_error(port, &e)));
+            }
         }
     });
 }
@@ -3651,9 +3706,32 @@ mod tool_session_tests {
     fn a_private_window_does_not_advertise_the_mcp_url() {
         // lib.rs starts the server only when !is_private(). Showing :7391
         // from a private Settings pane would be the other process.
-        assert_eq!(advertised_url(7391, true), "");
-        assert_eq!(advertised_url(0, false), "");
-        assert_eq!(advertised_url(7391, false), "http://127.0.0.1:7391/mcp");
+        let listening = Status::Listening(([127, 0, 0, 1], 7391).into());
+        assert_eq!(advertised_url(&listening, true), "");
+        assert_eq!(advertised_url(&Status::Off, false), "");
+        assert_eq!(
+            advertised_url(&listening, false),
+            "http://127.0.0.1:7391/mcp"
+        );
+    }
+
+    #[test]
+    fn only_a_port_the_server_really_bound_is_advertised() {
+        let failed = Status::Failed(describe_bind_error(
+            7391,
+            &std::io::Error::from(std::io::ErrorKind::AddrInUse),
+        ));
+        assert_eq!(
+            advertised_url(&failed, false),
+            "",
+            "another program holds it"
+        );
+        assert!(failure(&failed, false).contains("Port 7391 is in use"));
+        assert_eq!(failure(&failed, true), "");
+        assert_eq!(failure(&Status::Off, false), "");
+        // An ephemeral bind is advertised as bound, not as asked for.
+        let bound = Status::Listening(([127, 0, 0, 1], 50123).into());
+        assert_eq!(advertised_url(&bound, false), "http://127.0.0.1:50123/mcp");
     }
 
     #[test]

@@ -806,7 +806,7 @@ export const commands = {
 	 *  tauri-specta cannot export `serde_json::Value` in a function signature.
 	 */
 	commandRun: (id: string, argsJson: string | null) => typedError<string, AppError>(__TAURI_INVOKE("command_run", { id, argsJson })),
-	appInfo: () => __TAURI_INVOKE<AppInfo>("app_info"),
+	appInfo: () => __TAURI_INVOKE<AppInfo_Serialize>("app_info"),
 	/**  Return bundled ruleset metadata without reading browsing state. */
 	privacyInfo: () => __TAURI_INVOKE<PrivacyInfo>("privacy_info"),
 	/**  Current user preferences. */
@@ -1180,15 +1180,59 @@ export type AppError = {
 };
 
 /**  Facts the Settings dialog shows. */
-export type AppInfo = {
+export type AppInfo = AppInfo_Serialize | AppInfo_Deserialize;
+
+/**  Facts the Settings dialog shows. */
+export type AppInfo_Deserialize = {
 	/**  Package version. */
 	version: string,
 	/**  Build identity. */
 	build: BuildInfo,
 	/**  Application data directory. */
 	data_dir: string,
-	/**  MCP endpoint, empty when the server is off or this window is private. */
+	/**
+	 *  MCP endpoint, empty when the server is off, could not start, or this
+	 *  window is private. Always the address the server really bound.
+	 */
 	mcp_url: string,
+	/**
+	 *  Why the MCP server is not running when it was meant to be, such as
+	 *  its port being taken by another program.
+	 */
+	mcp_error?: string | null,
+	/**  Path of the bearer token file. */
+	mcp_token_path: string,
+	/**
+	 *  Device preset to put the first tab on at startup, from `DIVE_SIMULATE`.
+	 *  Lets automation and smoke tests bring the simulator up without a
+	 *  click, the way `DIVE_OPEN_URL` opens a tab.
+	 */
+	simulate: string | null,
+	/**
+	 *  Whether this binary registered the updater. A release-channel label
+	 *  without a pubkey still cannot check; About must not say we are current.
+	 */
+	updater: boolean,
+};
+
+/**  Facts the Settings dialog shows. */
+export type AppInfo_Serialize = {
+	/**  Package version. */
+	version: string,
+	/**  Build identity. */
+	build: BuildInfo,
+	/**  Application data directory. */
+	data_dir: string,
+	/**
+	 *  MCP endpoint, empty when the server is off, could not start, or this
+	 *  window is private. Always the address the server really bound.
+	 */
+	mcp_url: string,
+	/**
+	 *  Why the MCP server is not running when it was meant to be, such as
+	 *  its port being taken by another program.
+	 */
+	mcp_error?: string | null,
 	/**  Path of the bearer token file. */
 	mcp_token_path: string,
 	/**

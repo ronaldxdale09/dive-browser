@@ -81,8 +81,14 @@ pub struct AppInfo {
     pub build: BuildInfo,
     /// Application data directory.
     pub data_dir: String,
-    /// MCP endpoint, empty when the server is off or this window is private.
+    /// MCP endpoint, empty when the server is off, could not start, or this
+    /// window is private. Always the address the server really bound.
     pub mcp_url: String,
+    /// Why the MCP server is not running when it was meant to be, such as
+    /// its port being taken by another program.
+    #[specta(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_error: Option<String>,
     /// Path of the bearer token file.
     pub mcp_token_path: String,
     /// Device preset to put the first tab on at startup, from `DIVE_SIMULATE`.
@@ -180,6 +186,7 @@ pub(crate) fn favicons_for(state: State<'_, AppState>, urls: Vec<String>) -> Vec
 #[specta::specta]
 pub(crate) fn app_info() -> AppInfo {
     let private = crate::private_session::is_private();
+    let mcp = crate::mcp::current_status();
     AppInfo {
         version: env!("CARGO_PKG_VERSION").to_owned(),
         build: BuildInfo {
@@ -195,7 +202,8 @@ pub(crate) fn app_info() -> AppInfo {
             built_at: env!("DIVE_BUILD_UNIX").parse::<u64>().unwrap_or(0) as f64,
         },
         data_dir: crate::state::data_root().to_string_lossy().into_owned(),
-        mcp_url: crate::mcp::advertised_url(crate::mcp::advertised_port(), private),
+        mcp_url: crate::mcp::advertised_url(&mcp, private),
+        mcp_error: Some(crate::mcp::failure(&mcp, private)).filter(|reason| !reason.is_empty()),
         mcp_token_path: if private {
             String::new()
         } else {

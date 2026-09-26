@@ -131,7 +131,8 @@ export function McpDialog({ onClose }: { onClose: () => void }) {
           <p className="mt-4 mb-2 text-xs text-ink-2">Paste this setup into your agent.</p>
           {loading && <p role="status" className="text-xs text-ink-3">Loading connection details…</p>}
           {failed && <p role="alert" className="text-xs text-danger">Dive could not read its own MCP details. Check Settings › Developer.</p>}
-          {!failed && !url && info && (
+          {!failed && !url && info?.mcp_error && <p role="alert" className="text-xs text-danger">{info.mcp_error}</p>}
+          {!failed && !url && info && !info.mcp_error && (
             <p role="status" className="text-xs text-ink-3">
               The MCP server is not running in this window. It runs in normal windows, not private ones. If another program is holding its port, quit that program, or start Dive with DIVE_MCP_PORT set to a free port.
             </p>
