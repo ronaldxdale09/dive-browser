@@ -1001,18 +1001,12 @@ fn component_targets(profile: &std::path::Path, what: ClearRequest) -> Vec<std::
     targets
 }
 
-fn remove_target(path: &std::path::Path) -> AppResult<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-    if path.is_dir() {
-        std::fs::remove_dir_all(path).map_err(AppError::new)
-    } else {
-        std::fs::remove_file(path).map_err(AppError::new)
-    }
-}
-
 /// Finish deferred profile cleanup before CEF opens or locks profile files.
+///
+/// Each target is moved into the trash rather than deleted here: this runs
+/// on the launch path, and deleting a cache of thousands of files held the
+/// window back for as long as that took. The trash is emptied in the
+/// background once the store is open.
 pub fn finish_pending_clear() -> AppResult<()> {
     let pending_path = pending_clear_path();
     if !pending_path.exists() {
@@ -1023,10 +1017,11 @@ pub fn finish_pending_clear() -> AppResult<()> {
     )
     .map_err(|error| AppError::new(format!("invalid pending browser-data cleanup: {error}")))?;
     let root = crate::state::profiles_root();
+    let trash = crate::state::trash_root();
     for name in &pending.profiles {
         let profile = safe_profile(&root, name)?;
         for target in component_targets(&profile, pending.what) {
-            remove_target(&target)?;
+            crate::state::discard_path(&target, &trash).map_err(AppError::new)?;
         }
     }
     std::fs::remove_file(pending_path).map_err(AppError::new)

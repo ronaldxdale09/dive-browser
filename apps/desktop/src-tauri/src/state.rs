@@ -123,8 +123,11 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
     };
     let active = seed_defaults(&store)?;
     if !crate::private_session::is_private() {
-        sweep_container_deletions(&store, &profiles_root());
+        sweep_container_deletions(&store, &profiles_root(), &trash_root());
     }
+    // After the sweep and the deferred clear, which both only move things
+    // into the trash: the deleting happens while the browser starts.
+    empty_trash(trash_root());
     if crate::private_session::is_private() {
         for mut container in store.containers()? {
             container.persist_cookies = false;
@@ -245,10 +248,89 @@ fn write_pending(store: &Store, pending: &[String]) -> dive_core::Result<()> {
     store.set_setting(PENDING_CONTAINER_DELETIONS, &text)
 }
 
+/// Where files and folders being deleted wait for the thread that deletes
+/// them; see [`discard_path`].
+pub fn trash_root() -> PathBuf {
+    data_root().join("trash")
+}
+
+/// Take `path` out of the way at once by renaming it into `trash`.
+///
+/// Launch has to get a deleted profile's folder, or a cleared cache, out of
+/// the way before CEF opens the profiles, and deleting a cache of thousands
+/// of files there held the window back for as long as that took. A rename
+/// within one volume is a single metadata change however much it moves, and
+/// [`empty_trash`] deletes the rest on a thread of its own. Where a rename
+/// cannot work (another volume), the path is deleted in place, as before. A
+/// path that is already gone is not an error.
+pub fn discard_path(path: &std::path::Path, trash: &std::path::Path) -> std::io::Result<()> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let name = path
+        .file_name()
+        .map_or_else(|| "item".into(), |n| n.to_string_lossy().into_owned());
+    let next = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let moved = std::fs::create_dir_all(trash)
+        .and_then(|()| std::fs::rename(path, trash.join(format!("{stamp}-{next}-{name}"))));
+    match moved {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            tracing::debug!(path = %path.display(), "not moved to the trash, deleting in place: {e}");
+            if meta.is_dir() {
+                std::fs::remove_dir_all(path)
+            } else {
+                std::fs::remove_file(path)
+            }
+        }
+    }
+}
+
+/// Delete everything in `trash` on a thread of its own, including whatever
+/// an earlier run left half-deleted when it quit.
+pub fn empty_trash(trash: PathBuf) {
+    let spawned = std::thread::Builder::new()
+        .name("dive-trash".into())
+        .spawn(move || empty_trash_now(&trash));
+    if let Err(e) = spawned {
+        tracing::warn!("could not start emptying the trash: {e}");
+    }
+}
+
+/// Delete everything in `trash`, here and now.
+fn empty_trash_now(trash: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(trash) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let removed = if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        if let Err(e) = removed {
+            tracing::warn!(path = %path.display(), "could not delete from the trash: {e}");
+        }
+    }
+}
+
 /// Remove the folders of containers deleted in an earlier session. One that
 /// cannot be removed yet stays queued for the launch after; one that a
-/// container names again (restored from a backup since) is left alone.
-pub(crate) fn sweep_container_deletions(store: &Store, root: &std::path::Path) {
+/// container names again (restored from a backup since) is left alone. The
+/// folders are moved into `trash`, which is instant; the deleting happens
+/// in the background.
+pub(crate) fn sweep_container_deletions(
+    store: &Store,
+    root: &std::path::Path,
+    trash: &std::path::Path,
+) {
     let pending = pending_container_deletions(store);
     if pending.is_empty() {
         return;
@@ -262,9 +344,8 @@ pub(crate) fn sweep_container_deletions(store: &Store, root: &std::path::Path) {
         if !is_plain_folder_name(&dir) || in_use.contains(&dir) {
             continue;
         }
-        match std::fs::remove_dir_all(root.join(&dir)) {
+        match discard_path(&root.join(&dir), trash) {
             Ok(()) => tracing::info!(%dir, "removed a deleted profile's data"),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => {
                 tracing::warn!(%dir, "a deleted profile's data could not be removed yet: {e}");
                 left.push(dir);
@@ -286,6 +367,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn discarding_moves_files_and_folders_aside_and_ignores_what_is_gone() {
+        let root = tempfile::tempdir().unwrap();
+        let trash = root.path().join("trash");
+        let folder = root.path().join("Cache");
+        std::fs::create_dir_all(folder.join("deep/er")).unwrap();
+        std::fs::write(folder.join("deep/er/f"), b"x").unwrap();
+        let file = root.path().join("Cookies");
+        std::fs::write(&file, b"x").unwrap();
+        discard_path(&folder, &trash).unwrap();
+        discard_path(&file, &trash).unwrap();
+        discard_path(&root.path().join("never-there"), &trash).unwrap();
+        assert!(!folder.exists() && !file.exists());
+        assert_eq!(std::fs::read_dir(&trash).unwrap().count(), 2);
+        empty_trash_now(&trash);
+        assert_eq!(std::fs::read_dir(&trash).unwrap().count(), 0);
+    }
+
+    #[test]
     fn deleted_container_folders_go_at_the_next_launch_and_nothing_else_does() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::in_memory().unwrap();
@@ -304,8 +403,13 @@ mod tests {
             ],
         )
         .unwrap();
-        sweep_container_deletions(&store, root.path());
+        let trash = root.path().join("trash");
+        sweep_container_deletions(&store, root.path(), &trash);
         assert!(!root.path().join("container-gone").exists());
+        // Moved aside at once, and gone once the trash is emptied.
+        assert_eq!(std::fs::read_dir(&trash).unwrap().count(), 1);
+        empty_trash_now(&trash);
+        assert_eq!(std::fs::read_dir(&trash).unwrap().count(), 0);
         // Still named by a container, or never a plain folder name: kept.
         assert!(root.path().join(&kept.cache_dir).exists());
         assert!(root.path().join("neighbour").exists());
