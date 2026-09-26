@@ -9,6 +9,7 @@
 //! session whatever the preference says, and the request carries no cookies,
 //! no referrer and no history -- just the letters typed.
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde_json::Value;
@@ -37,7 +38,9 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ),
     (
         "google",
-        "https://suggestqueries.google.com/complete/search?client=firefox&q={query}",
+        // Without `oe` Google answers in a legacy charset picked from the
+        // query's language, which reads as mojibake once decoded as UTF-8.
+        "https://suggestqueries.google.com/complete/search?client=firefox&oe=utf-8&q={query}",
     ),
     ("bing", "https://api.bing.com/osjson.aspx?query={query}"),
     ("brave", "https://search.brave.com/api/suggest?q={query}"),
@@ -54,6 +57,24 @@ fn endpoint_for(engine: &str) -> Option<&'static str> {
         .find(|(key, _)| *key == engine)
         .or_else(|| ENDPOINTS.first())
         .map(|(_, template)| *template)
+}
+
+/// The one client every completion request goes through.
+///
+/// A client owns its connection pool, so building one per request opened a
+/// fresh TLS connection to the engine for every keystroke; shared, the
+/// connection from the last letter is still open for the next. It still keeps
+/// no cookie store, so sharing it carries nothing from one query to the next.
+fn client() -> AppResult<&'static reqwest::Client> {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client);
+    }
+    let built = reqwest::Client::builder()
+        .timeout(TIMEOUT)
+        .build()
+        .map_err(AppError::new)?;
+    Ok(CLIENT.get_or_init(|| built))
 }
 
 /// The completions in an `OpenSearch` reply, cleaned up.
@@ -124,12 +145,7 @@ pub async fn suggest(engine: &str, query: &str) -> AppResult<Vec<String>> {
         "{query}",
         &url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>(),
     );
-    let client = reqwest::Client::builder()
-        .timeout(TIMEOUT)
-        // No cookie store: completions are asked anonymously, every time.
-        .build()
-        .map_err(AppError::new)?;
-    let response = match client.get(&url).send().await {
+    let response = match client()?.get(&url).send().await {
         Ok(response) => response,
         Err(error) => {
             tracing::debug!(%engine, "suggestions unavailable: {error}");
@@ -182,6 +198,12 @@ mod tests {
         assert!(endpoint_for("custom").is_none());
         assert_eq!(endpoint_for("kagi"), endpoint_for("duckduckgo"));
         assert!(endpoint_for("google").unwrap().contains("suggestqueries"));
+        assert!(endpoint_for("google").unwrap().contains("oe=utf-8"));
+    }
+
+    #[test]
+    fn every_request_shares_one_client() {
+        assert!(std::ptr::eq(client().unwrap(), client().unwrap()));
     }
 
     #[tokio::test]
