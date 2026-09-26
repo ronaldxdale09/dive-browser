@@ -134,6 +134,30 @@ describe("Onboarding", () => {
     expect(await screen.findByRole("heading", { name: "What's inside" })).toBeTruthy();
   });
 
+  it("keeps a picked face and mark when setup is replayed", async () => {
+    useBrowser.setState({ profiles: [{ ...profile, name: "Ada", avatar: "ninja" }], workspaces: [{ ...workspace, name: "Work", icon: "rocket" }] });
+    usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
+    act(() => useOnboarding.setState({ stage: "profile", skipped: [] }));
+    render(<Onboarding />);
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(updateProfile).toHaveBeenCalledWith("p1", expect.objectContaining({ name: "Ada", avatar: "ninja" })));
+    act(() => useOnboarding.setState({ stage: "workspace", skipped: [] }));
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(updateWorkspace).toHaveBeenCalledWith("w1", expect.objectContaining({ name: "Work", icon: "rocket" })));
+  });
+
+  it("hears the system's answer after Set as default, as the dialog does", async () => {
+    vi.spyOn(ipc, "defaultBrowserSet").mockResolvedValue({ supported: true, is_default: false, current: "com.brave.browser" });
+    usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
+    act(() => useOnboarding.setState({ stage: "features", skipped: [] }));
+    render(<Onboarding />);
+    fireEvent.click(await screen.findByRole("button", { name: "Set as default" }));
+    await waitFor(() => expect(useDefaultBrowser.getState().phase).toBe("waiting"));
+    vi.mocked(ipc.defaultBrowserStatus).mockResolvedValue({ supported: true, is_default: true, current: "app.dive.browser" });
+    expect(await screen.findByText("Dive is your default browser", {}, { timeout: 3000 })).toBeTruthy();
+    useDefaultBrowser.getState().reset();
+  });
+
   it("lets a step be skipped and walked back", async () => {
     usePrefs.setState({ prefs: DEFAULT_PREFS, loaded: true });
     act(() => useOnboarding.setState({ stage: "profile", skipped: [] }));

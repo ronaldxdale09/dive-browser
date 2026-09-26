@@ -4,7 +4,7 @@ import type { DefaultBrowserStatus } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { useDefaultBrowser } from "../store/defaultBrowser";
-import { DefaultBrowserDialog, POLL_INTERVAL_MS, WAIT_TIMEOUT_MS, defaultBrowserAskCopy, defaultBrowserOnboardingHint, defaultBrowserSettingsPath, defaultBrowserTimeoutCopy, defaultBrowserWaitingCopy, prettyBundleId } from "./DefaultBrowserDialog";
+import { DefaultBrowserDialog, POLL_INTERVAL_MS, WAIT_TIMEOUT_MS, WINDOWS_WAIT_TIMEOUT_MS, defaultBrowserAskCopy, defaultBrowserOnboardingHint, defaultBrowserSettingsPath, defaultBrowserTimeoutCopy, defaultBrowserWaitingCopy, prettyBundleId } from "./DefaultBrowserDialog";
 
 const notDefault: DefaultBrowserStatus = { supported: true, is_default: false, current: "com.apple.Safari" };
 const isDefault: DefaultBrowserStatus = { supported: true, is_default: true, current: "com.dive.browser" };
@@ -24,6 +24,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  useDefaultBrowser.getState().reset();
   vi.restoreAllMocks();
   vi.useRealTimers();
   if (platform) Object.defineProperty(navigator, "platform", platform);
@@ -103,6 +104,13 @@ describe("DefaultBrowserDialog", () => {
       await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 3);
     });
     expect(vi.mocked(ipc.defaultBrowserStatus).mock.calls.length).toBe(polls);
+    // Back from System Settings, where it was set by hand: Dive looks again.
+    vi.mocked(ipc.defaultBrowserStatus).mockResolvedValue(isDefault);
+    await act(async () => {
+      fireEvent(window, new Event("focus"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole("dialog", { name: "Dive is now your default browser" })).toBeTruthy();
   });
 
   it("points a timed-out ask at Windows Settings, not Desktop & Dock", async () => {
@@ -118,7 +126,7 @@ describe("DefaultBrowserDialog", () => {
     expect(screen.getByText(/Waiting for Windows/)).toBeTruthy();
     expect(screen.queryByText(/Waiting for macOS/)).toBeNull();
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(WAIT_TIMEOUT_MS + POLL_INTERVAL_MS);
+      await vi.advanceTimersByTimeAsync(WINDOWS_WAIT_TIMEOUT_MS + POLL_INTERVAL_MS);
     });
     expect(screen.getByText(/Still not the default/)).toBeTruthy();
     expect(screen.getByText(/Settings › Apps › Default apps/)).toBeTruthy();
