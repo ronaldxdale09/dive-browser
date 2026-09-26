@@ -14,15 +14,27 @@ use crate::Runtime;
 use crate::error::{AppError, AppResult};
 use crate::state::{AppState, lock};
 
+/// What the menu offers on a page, by where the page is shown. A private
+/// window refuses the agent, so the menu does not offer it. A page in its own
+/// window gets none of the items the main window's chrome carries out.
+fn options(detached: bool) -> ContextMenuOptions {
+    ContextMenuOptions {
+        agent: !crate::private_session::is_private(),
+        main_window: !detached,
+    }
+}
+
 /// Install the menu handler on a page view. Choices arrive on a CEF
 /// thread and are carried to the main thread before anything is touched.
-pub fn attach(app: &AppHandle<Runtime>, tab_id: TabId, view: &tauri::Webview<Runtime>) {
+pub fn attach(
+    app: &AppHandle<Runtime>,
+    tab_id: TabId,
+    view: &tauri::Webview<Runtime>,
+    detached: bool,
+) {
     let app = app.clone();
     if let Err(error) = view.with_webview(move |native| {
-        // A private window refuses the agent, so the menu does not offer it.
-        native.set_context_menu_options(ContextMenuOptions {
-            agent: !crate::private_session::is_private(),
-        });
+        native.set_context_menu_options(options(detached));
         native.set_context_menu_handler(move |command| {
             let app = app.clone();
             let _ = app.clone().run_on_main_thread(move || {
@@ -34,6 +46,15 @@ pub fn attach(app: &AppHandle<Runtime>, tab_id: TabId, view: &tauri::Webview<Run
         });
     }) {
         tracing::warn!(%tab_id, "page menu unavailable on this tab: {error}");
+    }
+}
+
+/// Keep the menu in step with the window the page moved to.
+pub fn set_detached(view: &tauri::Webview<Runtime>, detached: bool) {
+    if let Err(error) =
+        view.with_webview(move |native| native.set_context_menu_options(options(detached)))
+    {
+        tracing::warn!("page menu options not updated: {error}");
     }
 }
 
@@ -94,10 +115,10 @@ fn carry_out(
             )?;
             open_beside(&main, app, &state, tab_id, &url, true)
         }
-        ContextMenuAction::CaptureFullPage => chrome(app, "capture.fullpage"),
-        ContextMenuAction::QrCode => chrome(app, "share.open"),
-        ContextMenuAction::AskAgent => chrome(app, "sidecar.open"),
-        ContextMenuAction::DeviceSimulator => chrome(app, "simulator.toggle"),
+        ContextMenuAction::CaptureFullPage => chrome(app, &state, tab_id, "capture.fullpage"),
+        ContextMenuAction::QrCode => chrome(app, &state, tab_id, "share.open"),
+        ContextMenuAction::AskAgent => chrome(app, &state, tab_id, "sidecar.open"),
+        ContextMenuAction::DeviceSimulator => chrome(app, &state, tab_id, "simulator.toggle"),
         ContextMenuAction::ViewSource => {
             let url = source_url_for(&command.page_url)?;
             open_beside(&main, app, &state, tab_id, &url, true)
@@ -159,8 +180,25 @@ fn download(state: &AppState, tab_id: TabId, url: &str) -> AppResult<()> {
     })
 }
 
-/// Run one of the chrome's own commands, the way the native menu does.
-fn chrome(app: &AppHandle<Runtime>, command: &str) -> AppResult<()> {
+/// Run one of the main window's chrome commands, the way the native menu
+/// does. Those commands act on the main window's active tab, so a page in
+/// a window of its own -- which the menu stops offering them to, but a menu
+/// opened before the page moved can still ask -- is refused rather than
+/// having them carried out on a page nobody right-clicked.
+fn chrome(
+    app: &AppHandle<Runtime>,
+    state: &AppState,
+    tab_id: TabId,
+    command: &str,
+) -> AppResult<()> {
+    let detached = lock(&state.host)
+        .as_ref()
+        .is_some_and(|host| host.is_detached(tab_id));
+    if detached {
+        return Err(AppError::new(
+            "that works on pages in the main window; move the tab back to use it",
+        ));
+    }
     crate::menu::MenuCommand(command.to_owned()).emit_to(app, crate::CHROME_LABEL)?;
     Ok(())
 }

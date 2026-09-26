@@ -96,11 +96,19 @@ pub fn action_for(disposition: WindowOpenDisposition) -> Option<ContextMenuActio
 pub struct ContextMenuOptions {
     /// Whether "Ask the Agent" applies; a private window has no agent.
     pub agent: bool,
+    /// Whether the page is in the window whose chrome carries out Capture
+    /// Full Page, the QR code and the Device Simulator. A page in a window
+    /// of its own has no such chrome, and offering them there acted on
+    /// whatever page the main window showed instead.
+    pub main_window: bool,
 }
 
 impl Default for ContextMenuOptions {
     fn default() -> Self {
-        Self { agent: true }
+        Self {
+            agent: true,
+            main_window: true,
+        }
     }
 }
 
@@ -248,17 +256,22 @@ wrap_context_menu_handler! {
       // reaches for when the page is serving them yesterday's script.
       native(model, MenuId::RELOAD_NOCACHE, "Hard Reload", true);
       model.add_separator();
+      let options = self.bridge.options();
       item(model, ContextMenuAction::SavePage, "Save As…");
-      item(model, ContextMenuAction::CaptureFullPage, "Capture Full Page");
+      if options.main_window {
+        item(model, ContextMenuAction::CaptureFullPage, "Capture Full Page");
+      }
       native(model, MenuId::PRINT, "Print…", true);
       model.add_separator();
-      item(model, ContextMenuAction::QrCode, "Create QR Code for This Page");
-      model.add_separator();
-      if self.bridge.options().agent {
-        item(model, ContextMenuAction::AskAgent, "Ask the Agent About This Page");
+      if options.main_window {
+        item(model, ContextMenuAction::QrCode, "Create QR Code for This Page");
+        model.add_separator();
+        if options.agent {
+          item(model, ContextMenuAction::AskAgent, "Ask the Agent About This Page");
+        }
+        item(model, ContextMenuAction::DeviceSimulator, "Device Simulator");
+        model.add_separator();
       }
-      item(model, ContextMenuAction::DeviceSimulator, "Device Simulator");
-      model.add_separator();
       // CEF's own View Source opens a popup window, which the application
       // routes elsewhere; the application opens the source in a tab instead.
       item(model, ContextMenuAction::ViewSource, "View Page Source");
@@ -308,8 +321,13 @@ mod tests {
     fn options_default_to_everything_and_take_what_the_app_sets() {
         let bridge = ContextMenuBridge::default();
         assert!(bridge.options().agent);
-        bridge.set_options(ContextMenuOptions { agent: false });
+        assert!(bridge.options().main_window);
+        bridge.set_options(ContextMenuOptions {
+            agent: false,
+            main_window: false,
+        });
         assert!(!bridge.options().agent);
+        assert!(!bridge.options().main_window);
     }
 
     #[test]

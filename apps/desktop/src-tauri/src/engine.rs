@@ -937,7 +937,7 @@ impl TabHost {
         }
         Self::round_view(&view, self.corner_radius);
         #[cfg(feature = "cef")]
-        crate::page_menu::attach(app, tab_id, &view);
+        crate::page_menu::attach(app, tab_id, &view, self.popouts.contains_key(&tab_id));
         #[cfg(feature = "cef")]
         crate::js_dialog::attach(app, tab_id, &view);
         self.views.insert(tab_id, view);
@@ -1487,6 +1487,8 @@ impl TabHost {
         crate::titlebar::keep_drags_in_chrome_soon(&window);
         view.reparent(&window)?;
         window_guard.disarm();
+        #[cfg(feature = "cef")]
+        crate::page_menu::set_detached(&view, true);
         #[cfg(all(feature = "cef", target_os = "macos"))]
         bind_detached_new_tab_shortcuts(&view, &chrome_view, &self.window);
         let bounds = popout_content_bounds(width, height);
@@ -1555,6 +1557,8 @@ impl TabHost {
         // tab where it was instead of in a window nobody tracks.
         if let Some(view) = self.views.get(&id) {
             view.reparent(&self.window)?;
+            #[cfg(feature = "cef")]
+            crate::page_menu::set_detached(view, false);
             #[cfg(all(feature = "cef", target_os = "macos"))]
             refresh_new_tab_shortcut(view, &self.window);
             view.hide()?;
