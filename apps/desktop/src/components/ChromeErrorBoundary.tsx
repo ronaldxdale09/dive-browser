@@ -1,5 +1,8 @@
 import { Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
+import { reportChromeError } from "../lib/chromeErrors";
+import { ipc } from "../lib/ipc";
+import { useCoversContent } from "../lib/overlay";
 
 interface Props {
   children: ReactNode;
@@ -9,7 +12,20 @@ interface State {
   error: Error | null;
 }
 
-/** Keep a bad chrome render from turning the entire browser window blank. */
+/** Holds the page covered for as long as the recovery card is mounted. */
+function CoverPage() {
+  useCoversContent(true);
+  return null;
+}
+
+/**
+ * Keep a bad chrome render from turning the entire browser window blank.
+ *
+ * The page is a native view painted above the chrome, so a recovery card
+ * drawn where the page sits would be hidden under it: the page is covered
+ * while the card is up, straight away from the catch and then through the
+ * same overlay bookkeeping every dialog uses, which uncovers it on Try again.
+ */
 export class ChromeErrorBoundary extends Component<Props, State> {
   state: State = { error: null };
 
@@ -19,13 +35,16 @@ export class ChromeErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("Dive chrome render failed", error, info.componentStack);
+    reportChromeError("render", error, info.componentStack);
+    void ipc.setContentCovered(true).catch(() => undefined);
   }
 
   render() {
     const { error } = this.state;
     if (!error) return this.props.children;
     return (
-      <main role="alert" className="grid h-full place-items-center bg-ground p-6 text-ink">
+      <main role="alert" data-native-overlay className="grid h-full place-items-center bg-ground p-6 text-ink">
+        <CoverPage />
         <div className="w-full max-w-md rounded-2xl border border-line-2 bg-surface p-5 shadow-2xl">
           <p className="text-10 font-semibold tracking-[0.14em] text-danger uppercase">Interface recovery</p>
           <h1 className="mt-2 text-base font-semibold">Dive's controls hit a problem</h1>

@@ -1,11 +1,15 @@
 import { Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
+import { reportChromeError } from "../lib/chromeErrors";
 
 /** An optional tool failing must leave navigation and the surrounding chrome usable. */
 export class PanelErrorBoundary extends Component<{ label: string; children: ReactNode; fallback?: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
-  componentDidCatch(error: Error, info: ErrorInfo) { console.error(`${this.props.label} failed`, error, info.componentStack); }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error(`${this.props.label} failed`, error, info.componentStack);
+    reportChromeError(`panel: ${this.props.label}`, error, info.componentStack);
+  }
   render() {
     if (!this.state.failed) return this.props.children;
     if (this.props.fallback) return this.props.fallback;

@@ -22,6 +22,7 @@ import { DropZones, SplitView } from "./SplitView";
 import { CredentialPromptCard } from "./CredentialPromptCard";
 import { ExternalLinkDialog } from "./ExternalLinkDialog";
 import { PagePrompts } from "./PagePrompts";
+import { IsolatedPanel } from "./IsolatedPanel";
 import { useTabDrag } from "./TabDnd";
 import { InternalPage, isInternalUrl } from "./internal/InternalPage";
 import { errorMessage } from "../lib/errors";
@@ -51,6 +52,7 @@ export function Content() {
   const split = useLayout((s) => (workspace ? s.splits[workspace] : undefined));
   const shown = useBrowser((s) => visibleSplit(split, activeTab, s.tabs, detached));
   const sel = useEmulation(selectDevice(activeTab));
+  const setDevice = useEmulation((s) => s.setDevice);
   const pickerOpen = usePicker((s) => s.open);
   // One of Dive's own pages: drawn here by the chrome, no native view.
   const internal = useBrowser((s) => s.tabs.find((t) => t.id === activeTab && isInternalUrl(t.url)));
@@ -85,9 +87,13 @@ export function Content() {
           {internal ? (
             <InternalPage key={internal.id} tab={internal} />
           ) : activeTab && sel ? (
-            <Suspense fallback={<div className="min-h-0 bg-ground" aria-label="Loading device simulator" />}>
-              <DeviceStage key={activeTab} tabId={activeTab} sel={sel} />
-            </Suspense>
+            // A simulator that fails leaves the tab browsable: closing it puts
+            // the page back at full size.
+            <IsolatedPanel key={activeTab} label="Device simulator" onClose={() => void setDevice(activeTab, null)}>
+              <Suspense fallback={<div className="min-h-0 bg-ground" aria-label="Loading device simulator" />}>
+                <DeviceStage tabId={activeTab} sel={sel} />
+              </Suspense>
+            </IsolatedPanel>
           ) : shown && workspace ? (
             <SplitView split={shown} workspace={workspace} />
           ) : (

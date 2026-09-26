@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import { ChromeRoot } from "./components/ChromeRoot";
 import { ChromeErrorBoundary } from "./components/ChromeErrorBoundary";
 import { startStartupTelemetry } from "./lib/startup";
+import { installChromeErrorReporting } from "./lib/chromeErrors";
+import { ipc } from "./lib/ipc";
 import "./styles.css";
 import { isPrivateWindow } from "./lib/privateMode";
 import { loadUiStorage } from "./lib/uiStorage";
@@ -12,6 +14,14 @@ import { useRecording } from "./store/recording";
 import { rememberedModel, useSubtitles } from "./store/subtitles";
 
 if (isPrivateWindow()) document.documentElement.dataset.private = "true";
+
+// Errors outside React's reach (a throw in an event handler, a promise nobody
+// awaited) go to the host log too; the console is only seen with devtools open.
+installChromeErrorReporting();
+// This document is new: a first boot, or a reload after the chrome's renderer
+// died. Whatever cover or overlay mask the last document left over the page
+// belonged to dialogs that no longer exist, so the host takes it down.
+void ipc.chromeReady().catch(() => undefined);
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");

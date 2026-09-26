@@ -17,6 +17,7 @@ import { Splash } from "./components/Splash";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { IsolatedPanel } from "./components/IsolatedPanel";
 import { SessionRecoveryCard } from "./components/SessionRecoveryCard";
+import { PanelErrorBoundary } from "./components/PanelErrorBoundary";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { clampSize, dockLimitsFor } from "./lib/resize";
 import { useBrowser } from "./store/browser";
@@ -258,16 +259,20 @@ export function App() {
       {/* Over the page, not beside it: the agent is used in bursts, and the
           page it works on should stay the size it was. */}
       {showSidecar && (
-        <Suspense fallback={null}>
-          <AgentDock inset={railWidth} />
-        </Suspense>
+        <PanelErrorBoundary label="Agent" fallback={<AgentUnavailable onClose={() => toggle("sidecar", false)} />}>
+          <Suspense fallback={null}>
+            <AgentDock inset={railWidth} />
+          </Suspense>
+        </PanelErrorBoundary>
       )}
       <Suspense fallback={(open.palette || open.settings || open.library || open.extensions || open.shortcuts || open.defaultBrowser || open.subtitles || open.import) ? <DialogLoading onClose={() => {
         for (const panel of ["palette", "settings", "library", "shortcuts", "defaultBrowser", "subtitles", "import"] as const) toggle(panel, false);
       }} /> : null}>
-        {open.palette && <Palette />}
-        {open.settings && <SettingsDialog />}
-        {open.library && <Library />}
+        {/* Each in its own boundary: one dialog that throws closes itself
+            rather than taking the whole window's controls down. */}
+        {open.palette && <IsolatedPanel label="Command palette" modal onClose={() => toggle("palette", false)}><Palette /></IsolatedPanel>}
+        {open.settings && <IsolatedPanel label="Settings" modal onClose={() => toggle("settings", false)}><SettingsDialog /></IsolatedPanel>}
+        {open.library && <IsolatedPanel label="Library" modal onClose={() => toggle("library", false)}><Library /></IsolatedPanel>}
         {open.shortcuts && <Shortcuts />}
         {open.apps && <AppsDialog />}
         {open.defaultBrowser && <DefaultBrowserDialog />}
@@ -356,6 +361,24 @@ function BrowserToasts() {
       onDismissNotice={() => useBrowser.setState({ notice: null, noticeAction: null })}
       onDismissError={() => useBrowser.setState({ error: null })}
     />
+  );
+}
+
+/**
+ * The agent's composer failed. It floats where the composer does, over the
+ * page, so it says so there and can be closed; the rest of the window keeps
+ * working.
+ */
+function AgentUnavailable({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[45] flex justify-center px-4 pb-4">
+      <div data-native-overlay role="alert" className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-line-2 bg-surface p-4 text-sm text-ink-2 shadow-2xl">
+        <p>Agent is unavailable. You can keep browsing.</p>
+        <button type="button" onClick={onClose} aria-label="Close Agent" className="min-h-9 rounded-lg border border-line-2 px-3 text-sm text-ink hover:bg-surface-3">
+          Close
+        </button>
+      </div>
+    </div>
   );
 }
 
