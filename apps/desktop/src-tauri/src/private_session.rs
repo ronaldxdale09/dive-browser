@@ -6,13 +6,12 @@ use std::process::{ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
+use crate::Runtime;
 use crate::error::{AppError, AppResult};
-use crate::{MAIN_WINDOW, Runtime};
 
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
-static MAIN_CLOSED: AtomicBool = AtomicBool::new(false);
 static ROOT: OnceLock<PathBuf> = OnceLock::new();
 /// Kept alive for the life of the process so the directory is not removed out
 /// from under the session; `cleanup` deletes it explicitly on the way out.
@@ -261,60 +260,6 @@ pub fn start_window_channel(app: AppHandle<Runtime>) {
             }
         }
     });
-}
-
-/// Keep the private context alive in the hidden trusted chrome while another
-/// private window is open. Closing the last visible window terminates the session.
-pub fn close_main(window: &tauri::Window<Runtime>) -> bool {
-    if !is_private() || window.label() != MAIN_WINDOW {
-        return false;
-    }
-    let app = window.app_handle();
-    let state = app.state::<crate::state::AppState>();
-    let detached = crate::state::lock(&state.host)
-        .as_ref()
-        .map_or_else(Vec::new, crate::engine::TabHost::detached);
-    if detached.is_empty() {
-        return false;
-    }
-    let Some(main) = crate::engine::MainThread::here() else {
-        return false;
-    };
-    let attached = {
-        let store = crate::state::lock(&state.store);
-        store
-            .workspaces()
-            .unwrap_or_default()
-            .into_iter()
-            .flat_map(|workspace| store.tabs_for_workspace(workspace.id).unwrap_or_default())
-            .filter(|tab| !detached.contains(&tab.id))
-            .map(|tab| tab.id)
-            .collect::<std::collections::HashSet<_>>()
-    };
-    for tab in attached {
-        let _ = crate::commands::close_tab(&main, app, &state, tab);
-    }
-    if window.hide().is_err() {
-        return false;
-    }
-    MAIN_CLOSED.store(true, Ordering::Release);
-    true
-}
-
-pub fn reveal_main(window: &tauri::Window<Runtime>) -> tauri::Result<()> {
-    if is_private() && MAIN_CLOSED.swap(false, Ordering::AcqRel) {
-        window.show()?;
-    }
-    Ok(())
-}
-
-pub fn window_destroyed(app: &AppHandle<Runtime>) {
-    if is_private()
-        && MAIN_CLOSED.load(Ordering::Acquire)
-        && app.windows().keys().all(|label| label == MAIN_WINDOW)
-    {
-        app.exit(0);
-    }
 }
 
 /// A developer who launched Dive with `--remote-debugging-port=P` gets the

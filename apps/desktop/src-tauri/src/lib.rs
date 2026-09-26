@@ -49,6 +49,7 @@ mod js_dialog;
 mod lifecycle_probe;
 mod loading;
 mod locator;
+mod main_window;
 mod mcp;
 mod memory_probe;
 mod menu;
@@ -145,6 +146,11 @@ fn reopen_window(app: &tauri::AppHandle<Runtime>) {
     tracing::info!(found = window.is_some(), "dock reopen");
     match window {
         Some(window) => {
+            // A main window closed while other windows stayed open is only
+            // hidden; bring it back with its pages' sound.
+            if window.label() == MAIN_WINDOW {
+                main_window::reopen(app);
+            }
             // Unconditional: the getter can lag the actual state, and
             // unminimizing a window that is not minimized is harmless.
             let _ = window.unminimize();
@@ -333,11 +339,6 @@ pub fn run() {
             // any browser window does. The tab tears the window down itself,
             // so the request is cancelled here.
             use tauri::Manager;
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event
-                && private_session::close_main(window) {
-                api.prevent_close();
-                return;
-            }
             if window.label() == MAIN_WINDOW {
                 match event {
                     tauri::WindowEvent::CloseRequested { .. }
@@ -353,10 +354,18 @@ pub fn run() {
                     _ => {}
                 }
             }
-            // Closing the main window with popouts open would leave a headless
-            // app: the tab host's window is gone but its views and the popouts
-            // stay. Quit instead, the way a browser does when its primary
-            // window goes away.
+            // The main window hosts every tab's view, so with a torn-off tab
+            // or an app window still open it is hidden rather than closed,
+            // and Dive quits with the last of those windows instead.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                && main_window::close(window) {
+                api.prevent_close();
+                return;
+            }
+            // Any other window left besides the main one (a DevTools window)
+            // would leave a headless app once the tab host's window is gone.
+            // Quit instead, the way a browser does when its primary window
+            // goes away.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event
                 && window.label() == MAIN_WINDOW
                 && !window
@@ -547,7 +556,7 @@ pub fn run() {
             ..
         } => {
             tracing::info!(%label, "window destroyed");
-            private_session::window_destroyed(app);
+            main_window::window_destroyed(app);
         }
         tauri::RunEvent::WindowEvent {
             label,
@@ -747,6 +756,9 @@ fn open_handed_urls(app: &tauri::AppHandle<Runtime>, urls: Vec<String>) {
         let Some(workspace) = *state::lock(&state.active_workspace) else {
             return;
         };
+        // Nothing handed over at all is a plain relaunch, which asks for the
+        // main window.
+        let mut in_main = urls.is_empty();
         for url in urls {
             if let Some(id) = url.strip_prefix(webapp::LAUNCH_PREFIX) {
                 match webapp::open_by_id(&main, &handle, &state, id) {
@@ -759,12 +771,16 @@ fn open_handed_urls(app: &tauri::AppHandle<Runtime>, urls: Vec<String>) {
                 }
                 continue;
             }
+            in_main = true;
             match commands::open_tab(&main, &handle, &state, workspace, &url) {
                 Ok(tab) => tracing::info!(%tab.id, url, "opened a link handed by the system"),
                 Err(e) => tracing::warn!(url, "could not open a handed link: {e}"),
             }
         }
-        if let Some(window) = handle.get_window(MAIN_WINDOW) {
+        // A launcher opens its app's own window; the main window comes
+        // forward only for links that landed in it.
+        if in_main && let Some(window) = handle.get_window(MAIN_WINDOW) {
+            main_window::reopen(&handle);
             let _ = window.show();
             let _ = window.set_focus();
         }

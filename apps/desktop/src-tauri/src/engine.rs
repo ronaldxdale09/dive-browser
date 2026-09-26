@@ -1567,7 +1567,7 @@ impl TabHost {
             return Ok(());
         };
         self.live_overlays.remove(&popout.chrome);
-        crate::private_session::reveal_main(&self.window)?;
+        self.reveal_main()?;
         let _ = popout.window.destroy();
         let _ = self.window.set_focus();
         self.layout()
@@ -1664,9 +1664,28 @@ impl TabHost {
             .into_iter()
             .find(|view| view.label() == CHROME_LABEL)
             .ok_or(tauri::Error::WebviewNotFound)?;
-        crate::private_session::reveal_main(&self.window)?;
+        self.reveal_main()?;
         self.window.set_focus()?;
         chrome.set_focus()
+    }
+
+    /// Show the main window again if it was closed while other windows
+    /// stayed open, and let its pages be heard again.
+    pub fn reveal_main(&self) -> tauri::Result<()> {
+        if crate::main_window::reveal(&self.window)? {
+            self.quiet_main_tabs(false);
+        }
+        Ok(())
+    }
+
+    /// Silence the pages the main window holds while it is closed, or give
+    /// each back the sound it had: a tab muted on purpose stays muted.
+    pub fn quiet_main_tabs(&self, quiet: bool) {
+        for (tab, view) in &self.views {
+            if !self.popouts.contains_key(tab) {
+                crate::tab_audio::apply_to_view(view, quiet || crate::tab_audio::is_muted(*tab));
+            }
+        }
     }
 
     /// Raise a popout window and put the keyboard in its page. Shown and

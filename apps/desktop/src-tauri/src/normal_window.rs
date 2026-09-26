@@ -96,6 +96,7 @@ impl Broker {
                         let app = app.clone();
                         let (tx, rx) = std::sync::mpsc::channel();
                         app.clone().run_on_main_thread(move || {
+                            crate::main_window::reopen(&app);
                             let result = app
                                 .get_window(crate::MAIN_WINDOW)
                                 .ok_or_else(|| AppError::new("normal window missing"))

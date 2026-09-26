@@ -106,23 +106,31 @@ pub fn apply(
     tab_id: TabId,
     muted: bool,
 ) {
+    let result = host.with_view(tab_id, |view| {
+        apply_to_view(view, muted);
+        Ok(())
+    });
+    // A tab with no live view keeps the intent; the next view applies it.
+    if let Err(error) = result {
+        tracing::debug!(%tab_id, "mute not applied to a view: {error}");
+    }
+}
+
+/// Silence one view natively, or let it be heard. Leaves the tab's recorded
+/// state alone, so a caller that silences a view for its own reasons puts
+/// the tab back as it was by applying `is_muted` again.
+pub fn apply_to_view(view: &tauri::Webview<crate::Runtime>, muted: bool) {
     #[cfg(feature = "cef")]
-    {
-        let result = host.with_view(tab_id, |view| {
-            view.with_webview(move |native| {
-                use cef::{ImplBrowser, ImplBrowserHost};
-                if let Some(host) = native.browser().host() {
-                    host.set_audio_muted(i32::from(muted));
-                }
-            })
-        });
-        // A tab with no live view keeps the intent; the next view applies it.
-        if let Err(error) = result {
-            tracing::debug!(%tab_id, "mute not applied to a view: {error}");
+    if let Err(error) = view.with_webview(move |native| {
+        use cef::{ImplBrowser, ImplBrowserHost};
+        if let Some(host) = native.browser().host() {
+            host.set_audio_muted(i32::from(muted));
         }
+    }) {
+        tracing::debug!("mute not applied to a view: {error}");
     }
     #[cfg(not(feature = "cef"))]
-    let _ = (host, tab_id, muted);
+    let _ = (view, muted);
 }
 
 /// Report what this tab is doing now, for a chrome that just opened or a tab
