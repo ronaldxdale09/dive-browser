@@ -259,10 +259,14 @@ describe("command dispatch", () => {
   it("routes the new commands to the store", async () => {
     const print = vi.spyOn(ipc, "tabPrint").mockResolvedValue(null);
     const stop = vi.spyOn(ipc, "tabStop").mockResolvedValue(null);
-    useBrowser.setState({ tabs: [tab("a")], activeTab: "a" });
+    const notify = vi.spyOn(useBrowser.getState(), "notify").mockImplementation(() => undefined);
+    useBrowser.setState({ tabs: [tab("a")], activeTab: "a", notify });
     await UI_COMMANDS["tab.print"]!();
     await UI_COMMANDS["tab.stop"]!();
-    expect(print).toHaveBeenCalledWith("a");
+    // The engine cannot print, so ⌘P says so instead of calling a no-op.
+    expect(print).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(expect.stringMatching(/^Printing is not available/), 6000);
+    useBrowser.setState({ notify: useBrowser.getInitialState().notify });
     expect(stop).toHaveBeenCalledWith("a");
     await UI_COMMANDS["library.open"]!();
     expect(useBrowser.getState().open).toMatchObject({ library: true, shortcuts: false, settings: false });

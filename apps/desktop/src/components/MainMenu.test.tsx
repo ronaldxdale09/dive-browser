@@ -103,21 +103,29 @@ describe("MainMenu", () => {
   });
 
   it("synchronizes keyboard selection with rendered menu items past the zoom row", async () => {
-    const printSpy = vi.spyOn(ipc, "tabPrint").mockResolvedValue(undefined as never);
+    const pipSpy = vi.spyOn(ipc, "tabPictureInPicture").mockResolvedValue(null as never);
     render(<MainMenu />);
     const menuItems = screen.getAllByRole("menuitem");
-    const printItem = screen.getByRole("menuitem", { name: /Print/ });
-    const printIndex = menuItems.indexOf(printItem);
-    expect(printIndex).toBeGreaterThan(0);
+    const pipItem = screen.getByRole("menuitem", { name: /Picture in Picture/ });
+    const pipIndex = menuItems.indexOf(pipItem);
+    expect(pipIndex).toBeGreaterThan(0);
 
-    // Hovering on Print sets cursor to printIndex
-    fireEvent.mouseEnter(printItem);
+    // Hovering on Picture in Picture sets the cursor to it
+    fireEvent.mouseEnter(pipItem);
 
-    // Enter executes the selected item (Print)
+    // Enter executes the selected item
     const search = screen.getByRole("textbox", { name: "Search the menu" });
     fireEvent.keyDown(search, { key: "Enter" });
     // Menu closes and command runs
     await waitFor(() => expect(useBrowser.getState().open.menu).toBe(false));
-    expect(printSpy).toHaveBeenCalledWith("t1");
+    expect(pipSpy).toHaveBeenCalledWith("t1");
+  });
+
+  it("keeps Print findable but disabled, saying why, since this engine cannot print", () => {
+    render(<MainMenu />);
+    const print = screen.getByRole("menuitem", { name: /Print/ }) as HTMLButtonElement;
+    expect(print.disabled).toBe(true);
+    expect(print.textContent).toContain("Not available yet");
+    expect(print.getAttribute("title")).toBe("Not available yet");
   });
 });

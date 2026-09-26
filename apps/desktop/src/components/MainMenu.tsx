@@ -56,6 +56,8 @@ interface Item {
   more?: boolean;
   keywords?: string;
   disabled?: boolean;
+  /** Why a disabled item is disabled, shown in its row and on hover. */
+  hint?: string;
   run: () => void | Promise<void>;
 }
 
@@ -137,6 +139,7 @@ export function MainMenu() {
             <button
               type="button"
               aria-label="Clear"
+              title="Clear the search"
               onClick={() => {
                 setQuery("");
                 setCursor(0);
@@ -161,13 +164,15 @@ export function MainMenu() {
                       type="button"
                       role="menuitem"
                       disabled={item.disabled}
+                      title={item.hint}
+                      aria-description={item.hint}
                       onMouseEnter={() => setCursor(i)}
                       onClick={() => void item.run()}
                       className={`flex h-9 w-full items-center gap-3 px-4 text-left text-[13px] text-ink transition-colors disabled:opacity-40 ${cursor === i ? "bg-surface-2" : ""}`}
                     >
                       <span className="grid size-5 shrink-0 place-items-center text-ink-2">{item.glyph ?? (item.icon && <Icon icon={item.icon} size={15} />)}</span>
                       <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                      {item.shortcut && <kbd className="font-mono text-[11px] text-ink-3">{displayChord(item.shortcut)}</kbd>}
+                      {item.hint ? <span className="shrink-0 text-[11px] text-ink-3">{item.hint}</span> : item.shortcut && <kbd className="font-mono text-[11px] text-ink-3">{displayChord(item.shortcut)}</kbd>}
                       {item.more && <Icon icon={ChevronRight} size={13} className="text-ink-3" />}
                     </button>
                   );
@@ -299,7 +304,9 @@ function useMenu(close: () => void): Group[] {
     {
       id: "page",
       items: [
-        { id: "print", label: "Print…", icon: Printer, shortcut: "⌘P", disabled: !here, run: done(() => runCommand("tab.print")) },
+        // Printing is not in this engine; the row stays so it can be found,
+        // and says why it cannot be used rather than doing nothing.
+        { id: "print", label: "Print…", icon: Printer, disabled: true, hint: "Not available yet", run: done(() => runCommand("tab.print")) },
         { id: "pip", label: "Picture in Picture", icon: PictureInPicture2, disabled: !here, run: done(() => runCommand("video.pip")) },
         { id: "find", label: "Find in page", icon: TextSearch, shortcut: "⌘F", disabled: !here, run: done(() => b().toggle("find", true)) },
         { id: "report", label: "Copy bug report", icon: Wand2, shortcut: "⌘⇧B", keywords: "issue compose report a bug", disabled: !here, run: done(() => runCommand("report.compose")) },

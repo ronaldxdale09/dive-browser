@@ -125,7 +125,12 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "settings.subtitles": () => useBrowser.getState().openSettings("subtitles"),
   "default-browser.open": () => useBrowser.getState().toggle("defaultBrowser", true),
   "about.open": () => useBrowser.getState().openSettings("about"),
-  "tab.print": () => useBrowser.getState().print(),
+  // This engine has no print handler: window.print() and the host's print
+  // call open nothing. Saying so beats a ⌘P that silently does nothing.
+  "tab.print": () => {
+    const chords = chordsByCommand();
+    useBrowser.getState().notify(`Printing is not available in Dive yet. Save the page (${formatChord(chords["page.save"] ?? "mod+s")}) or capture it (${formatChord(chords["capture.fullpage"] ?? "mod+shift+s")}) instead.`, 6000);
+  },
   "video.pip": () => useBrowser.getState().pictureInPicture(),
   "tab.fillVideo": () => useBrowser.getState().fillVideo(),
   "tab.stop": () => useBrowser.getState().stop(),
