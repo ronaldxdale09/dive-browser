@@ -89,12 +89,25 @@ pub fn brand_of(number: &str) -> String {
     }
 }
 
-/// Whether an expiry is a real month, and not in the past.
-pub fn expiry_ok(month: u32, year: u32, now: (u32, u32)) -> bool {
-    if !(1..=12).contains(&month) || !(2000..=2100).contains(&year) {
-        return false;
+/// A card's expiry as saved: a real month and a four-digit year, not in the
+/// past. A two-digit year is the one printed on the card, so "30" means
+/// 2030; read as the year 30 it was refused as long expired.
+pub fn normalize_expiry(month: u32, year: u32, now: (u32, u32)) -> Result<(u32, u32), String> {
+    if !(1..=12).contains(&month) {
+        return Err(format!(
+            "{month} is not a valid month; use a number from 1 to 12"
+        ));
     }
-    (year, month) >= (now.1, now.0)
+    let year = if year < 100 { 2000 + year } else { year };
+    if !(2000..=2100).contains(&year) {
+        return Err(format!(
+            "{year} is not a valid year; use two or four digits, like 30 or 2030"
+        ));
+    }
+    if (year, month) < (now.1, now.0) {
+        return Err(format!("that expiry date ({month:02}/{year}) has passed"));
+    }
+    Ok((month, year))
 }
 
 /// Save an address. A new one gets an id; an existing id is updated.
@@ -122,10 +135,12 @@ pub fn save_card(state: &AppState, profile: ProfileId, draft: &CardDraft) -> App
         return Err(AppError::new("that does not look like a card number"));
     }
     let now = Timestamp::now();
-    let (month, year) = current_month_year(now);
-    if !expiry_ok(draft.expiry_month, draft.expiry_year, (month, year)) {
-        return Err(AppError::new("that expiry date has passed"));
-    }
+    let (expiry_month, expiry_year) = normalize_expiry(
+        draft.expiry_month,
+        draft.expiry_year,
+        current_month_year(now),
+    )
+    .map_err(AppError::new)?;
     let card = Card {
         id: dive_core::TabId::new().to_string(),
         profile_id: profile.to_string(),
@@ -140,8 +155,8 @@ pub fn save_card(state: &AppState, profile: ProfileId, draft: &CardDraft) -> App
             .rev()
             .collect(),
         brand: brand_of(&number),
-        expiry_month: draft.expiry_month,
-        expiry_year: draft.expiry_year,
+        expiry_month,
+        expiry_year,
         created_at: now.to_rfc3339(),
         last_used_at: None,
         uses: 0,
@@ -182,13 +197,23 @@ pub fn card_fill(state: &AppState, profile: ProfileId, id: &str) -> AppResult<Ca
 
 /// Forget a card, keychain item and all.
 pub fn delete_card(state: &AppState, profile: ProfileId, id: &str) -> AppResult<bool> {
-    let removed = lock(&state.store).remove_card(profile, id)?;
-    if removed && let Ok(entry) = entry(id) {
-        // A keychain item whose row is gone can never be read again, so a
-        // failure to delete it is not worth failing the call over.
-        let _ = entry.delete_credential();
+    let mine = lock(&state.store)
+        .cards(profile)?
+        .iter()
+        .any(|card| card.id == id);
+    if !mine {
+        return Ok(false);
     }
-    Ok(removed)
+    // The number goes first, and the row only once it has. Removing the row
+    // first and ignoring a refused keychain delete left the number in the OS
+    // store with nothing in Dive that could ever name it again.
+    delete_card_secret(id).map_err(|error| {
+        AppError::new(format!(
+            "the card number could not be removed, so the card was kept: {}",
+            error.message
+        ))
+    })?;
+    Ok(lock(&state.store).remove_card(profile, id)?)
 }
 
 /// Remove the number behind card `id`, whose row is about to go with its
@@ -277,14 +302,46 @@ mod tests {
     #[test]
     fn refuses_an_expiry_that_has_passed() {
         let now = (9, 2026);
-        assert!(expiry_ok(9, 2026, now));
-        assert!(expiry_ok(1, 2030, now));
-        assert!(!expiry_ok(8, 2026, now));
-        assert!(!expiry_ok(12, 2025, now));
+        assert_eq!(normalize_expiry(9, 2026, now), Ok((9, 2026)));
+        assert_eq!(normalize_expiry(1, 2030, now), Ok((1, 2030)));
+        assert!(
+            normalize_expiry(8, 2026, now)
+                .unwrap_err()
+                .contains("passed")
+        );
+        assert!(
+            normalize_expiry(12, 2025, now)
+                .unwrap_err()
+                .contains("passed")
+        );
         // Not a month at all.
-        assert!(!expiry_ok(0, 2030, now));
-        assert!(!expiry_ok(13, 2030, now));
-        assert!(!expiry_ok(6, 1999, now));
+        assert!(
+            normalize_expiry(0, 2030, now)
+                .unwrap_err()
+                .contains("not a valid month")
+        );
+        assert!(
+            normalize_expiry(13, 2030, now)
+                .unwrap_err()
+                .contains("not a valid month")
+        );
+        assert!(
+            normalize_expiry(6, 1999, now)
+                .unwrap_err()
+                .contains("not a valid year")
+        );
+    }
+
+    #[test]
+    fn a_two_digit_year_is_this_century() {
+        let now = (9, 2026);
+        assert_eq!(normalize_expiry(9, 30, now), Ok((9, 2030)));
+        assert_eq!(normalize_expiry(9, 26, now), Ok((9, 2026)));
+        assert!(
+            normalize_expiry(1, 25, now)
+                .unwrap_err()
+                .contains("01/2025")
+        );
     }
 
     #[test]

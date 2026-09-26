@@ -2819,26 +2819,26 @@ pub(crate) fn cards_list(state: State<'_, AppState>) -> AppResult<Vec<dive_core:
 /// Save a card: its listing here, its number in the keychain.
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn card_save(
-    state: State<'_, AppState>,
+pub(crate) async fn card_save(
+    app: AppHandle<Runtime>,
     draft: crate::autofill::CardDraft,
 ) -> AppResult<dive_core::Card> {
-    let profile = {
-        let store = lock(&state.store);
-        active_profile(&store, *lock(&state.active_workspace))?
-    };
-    crate::autofill::save_card(&state, profile.id, &draft)
+    with_state_blocking(app, move |state| {
+        let profile = active_profile_id(state)?;
+        crate::autofill::save_card(state, profile, &draft)
+    })
+    .await
 }
 
 /// Forget a card, keychain item and all.
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn card_delete(state: State<'_, AppState>, id: String) -> AppResult<bool> {
-    let profile = {
-        let store = lock(&state.store);
-        active_profile(&store, *lock(&state.active_workspace))?
-    };
-    crate::autofill::delete_card(&state, profile.id, &id)
+pub(crate) async fn card_delete(app: AppHandle<Runtime>, id: String) -> AppResult<bool> {
+    with_state_blocking(app, move |state| {
+        let profile = active_profile_id(state)?;
+        crate::autofill::delete_card(state, profile, &id)
+    })
+    .await
 }
 
 /// Put a saved card into the tab's form. This is the only path that reads a

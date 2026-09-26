@@ -10,6 +10,10 @@ import { useBrowser } from "./browser";
  * A card's number is never here: the host keeps it in the Keychain and reads
  * it only for the one fill the person asked for, so nothing in the chrome
  * ever holds it.
+ *
+ * What is here belongs to the active profile, and is dropped when the
+ * profile changes: the lists used to stay loaded, so after a switch the
+ * wallet offered the previous profile's addresses and cards.
  */
 interface WalletStore {
   addresses: Address[];
@@ -17,9 +21,11 @@ interface WalletStore {
   loaded: boolean;
   error: string | null;
   load: () => Promise<void>;
-  saveAddress: (address: Address) => Promise<boolean>;
+  /** Save an address; resolves to why it failed, or null once saved. */
+  saveAddress: (address: Address) => Promise<string | null>;
   deleteAddress: (id: string) => Promise<void>;
-  saveCard: (draft: CardDraft) => Promise<boolean>;
+  /** Save a card; resolves to why it failed, or null once saved. */
+  saveCard: (draft: CardDraft) => Promise<string | null>;
   deleteCard: (id: string) => Promise<void>;
   /** Fill a form on `tabId`, and say how it went. */
   fillAddress: (tabId: string, id: string) => Promise<void>;
@@ -58,27 +64,34 @@ export function fillMessage(filled: number, what: string): string {
   return `Filled ${filled} ${filled === 1 ? "field" : "fields"}.`;
 }
 
+/**
+ * Bumped on every profile switch. A load that started under the previous
+ * profile checks it before writing, so its answer cannot land after the
+ * switch and put the old profile's cards back.
+ */
+let generation = 0;
+
 export const useWallet = create<WalletStore>((set, get) => ({
   addresses: [],
   cards: [],
   loaded: false,
   error: null,
   load: async () => {
+    const started = generation;
     try {
       const [addresses, cards] = await Promise.all([ipc.addressesList(), ipc.cardsList()]);
-      set({ addresses, cards, loaded: true, error: null });
+      if (started === generation) set({ addresses, cards, loaded: true, error: null });
     } catch (error) {
-      set({ error: errorMessage(error), loaded: true });
+      if (started === generation) set({ error: errorMessage(error), loaded: true });
     }
   },
   saveAddress: async (address) => {
     try {
       await ipc.addressSave(address);
       await get().load();
-      return true;
+      return null;
     } catch (error) {
-      set({ error: errorMessage(error) });
-      return false;
+      return errorMessage(error);
     }
   },
   deleteAddress: async (id) => {
@@ -93,10 +106,9 @@ export const useWallet = create<WalletStore>((set, get) => ({
     try {
       await ipc.cardSave(draft);
       await get().load();
-      return true;
+      return null;
     } catch (error) {
-      set({ error: errorMessage(error) });
-      return false;
+      return errorMessage(error);
     }
   },
   deleteCard: async (id) => {
@@ -122,3 +134,13 @@ export const useWallet = create<WalletStore>((set, get) => ({
     }
   },
 }));
+
+/** Forget the lists when the active profile changes; whoever shows them loads again. */
+export function forgetWallet(): void {
+  generation += 1;
+  useWallet.setState({ addresses: [], cards: [], loaded: false, error: null });
+}
+
+useBrowser.subscribe((state, previous) => {
+  if (state.activeProfile !== previous.activeProfile) forgetWallet();
+});

@@ -1,10 +1,12 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Card } from "../../lib/ipc";
 import { useWallet } from "../../store/wallet";
 import { Wallet } from "./Wallet";
 
 const initial = useWallet.getState();
+const card: Card = { id: "c1", profile_id: "p1", label: "", cardholder: "Dale", last4: "4242", brand: "visa", expiry_month: 9, expiry_year: 2030, created_at: "", last_used_at: null, uses: 0 };
 const platform = Object.getOwnPropertyDescriptor(navigator, "platform");
 
 beforeEach(() => {
@@ -44,6 +46,32 @@ describe("Settings › Wallet", () => {
     fireEvent.keyDown(address, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Add address" })).toBeNull();
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+  });
+
+  it("asks before deleting a card", async () => {
+    const deleteCard = vi.fn().mockResolvedValue(undefined);
+    useWallet.setState({ cards: [card], deleteCard });
+    render(<Wallet />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Visa •••• 4242, 09/2030" }));
+    expect(deleteCard).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Visa •••• 4242, 09/2030" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Visa •••• 4242, 09/2030 for good" }));
+    await waitFor(() => expect(deleteCard).toHaveBeenCalledWith("c1"));
+  });
+
+  it("says why a card was refused inside the form, and saves on Enter", async () => {
+    const saveCard = vi.fn().mockResolvedValue("13 is not a valid month; use a number from 1 to 12");
+    useWallet.setState({ saveCard });
+    render(<Wallet />);
+    fireEvent.click(screen.getByRole("button", { name: "Add card…" }));
+    const dialog = screen.getByRole("dialog", { name: "Add card" });
+    fireEvent.change(screen.getByLabelText("Expiry month"), { target: { value: "13" } });
+    fireEvent.change(screen.getByLabelText("Expiry year"), { target: { value: "30" } });
+    fireEvent.submit(screen.getByLabelText("Expiry year"));
+    await waitFor(() => expect(saveCard).toHaveBeenCalledWith(expect.objectContaining({ expiry_month: 13, expiry_year: 30 })));
+    expect((await screen.findByRole("alert")).textContent).toContain("not a valid month");
+    expect(dialog.contains(screen.getByRole("alert"))).toBe(true);
   });
 
   it("lets Escape dismiss Add card without closing Settings", () => {

@@ -29,7 +29,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  useBrowser.setState({ notice: null });
+  useBrowser.setState({ notice: null, activeProfile: null });
 });
 
 describe("describeCard", () => {
@@ -61,9 +61,27 @@ describe("useWallet", () => {
     expect(ipc.cardFill).toHaveBeenCalledWith("t1", "c1");
   });
 
-  it("keeps a refused card out of the list and says why", async () => {
+  it("keeps a refused card out of the list and hands the reason to the form", async () => {
     vi.spyOn(ipc, "cardSave").mockRejectedValue(new Error("that does not look like a card number"));
-    expect(await useWallet.getState().saveCard({ label: "", cardholder: "Dale", number: "1234", expiry_month: 9, expiry_year: 2030 })).toBe(false);
-    expect(useWallet.getState().error).toContain("card number");
+    expect(await useWallet.getState().saveCard({ label: "", cardholder: "Dale", number: "1234", expiry_month: 9, expiry_year: 2030 })).toContain("card number");
+    // The form shows it; the page behind the form does not.
+    expect(useWallet.getState().error).toBeNull();
+    expect(useWallet.getState().cards).toEqual([]);
+  });
+
+  it("forgets the lists when the profile changes, even mid-load", async () => {
+    useBrowser.setState({ activeProfile: "p1" });
+    await useWallet.getState().load();
+    expect(useWallet.getState().cards).toEqual([card]);
+
+    let answer: (cards: Card[]) => void = () => {};
+    vi.mocked(ipc.cardsList).mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    const pending = useWallet.getState().load();
+    useBrowser.setState({ activeProfile: "p2" });
+    expect(useWallet.getState()).toMatchObject({ addresses: [], cards: [], loaded: false });
+    answer([card]);
+    await pending;
+    // The first profile's answer arrived after the switch and was dropped.
+    expect(useWallet.getState()).toMatchObject({ cards: [], loaded: false });
   });
 });
