@@ -103,18 +103,25 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
   const insertPane = useLayout((s) => s.insert);
   const removePane = useLayout((s) => s.remove);
   const split = useLayout((s) => (workspace ? s.splits[workspace] : undefined));
-  const loading = useBrowser((s) => s.loading);
-  const muted = useTabAudio((s) => s.byTab);
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const menuTab = menu?.id ?? null;
   const setMuted = useTabAudio((s) => s.setMuted);
+  // Only the menu's own tab: the whole map changed with every tab that
+  // started or stopped playing, and re-rendered the strip each time.
+  const menuMuted = useTabAudio((s) => (menuTab ? s.byTab[menuTab]?.muted === true : false));
   const tabs = useMemo(() => orderTabs(all), [all]);
+  // The sortable context rebuilds, and re-renders every tab in it, whenever
+  // its items array is new. The strip re-renders on every title, address and
+  // favicon change, so the list is rebuilt only when the ids themselves move.
+  const idKey = tabs.map((t) => t.id).join("\n");
+  const ids = useMemo(() => (idKey ? idKey.split("\n") : []), [idKey]);
   const paneIds = new Set((split?.tabs ?? []).filter((id) => !detached.includes(id)));
   const essentials = useMemo(() => essentialTabs(all), [all]);
-  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [tablistRef, measuredNarrow] = useNarrowTabs(tabs.length);
   const hiddenAcross = useHiddenTabs(tablistRef, tabs.length, active, vertical);
   // Rows down the rail are as wide as the rail: they never lose their titles,
   // and they scroll rather than hide.
-  const narrow: Narrow = vertical ? { title: false, close: false } : measuredNarrow;
+  const narrow: Narrow = vertical ? WIDE : measuredNarrow;
   const hidden = vertical ? 0 : hiddenAcross;
   // Roving tabindex: one tab is in the Tab order at a time, the focused one
   // if any, else the active one. The arrow keys move focus without activating.
@@ -170,7 +177,6 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
                 key={t.id}
                 tab={t}
                 active={t.id === active}
-                loading={loading[t.id] === true}
                 vertical={vertical}
                 tabIndex={t.id === active || (!hasActiveEssential && idx === 0) ? 0 : -1}
                 onActivate={() => void activate(t.id)}
@@ -181,7 +187,7 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
           <span className={vertical ? "mx-2 my-0.5 h-px shrink-0 bg-line-2" : "mx-0.5 h-4 w-px shrink-0 bg-line-2"} aria-hidden data-testid="essentials-divider" />
         </>
       )}
-      <SortableContext items={tabs.map((t) => t.id)} strategy={vertical ? verticalListSortingStrategy : horizontalListSortingStrategy}>
+      <SortableContext items={ids} strategy={vertical ? verticalListSortingStrategy : horizontalListSortingStrategy}>
         {/* Tabs share the row the way Chrome's do: each starts at a
             comfortable intrinsic width and they shrink together as more open, down to
             a favicon alone. The list itself shrinks with them, so whatever
@@ -224,7 +230,6 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
               key={t.id}
               tab={t}
               active={t.id === active}
-              loading={loading[t.id] === true}
               detached={detached.includes(t.id)}
               inSplit={paneIds.has(t.id) && paneIds.size >= 2}
               narrow={narrow}
@@ -259,7 +264,7 @@ export function TabStrip({ orientation = "horizontal" }: { orientation?: "horizo
           y={menu.y}
           tier={all.find((t) => t.id === menu.id)?.tier ?? "today"}
           detached={detached.includes(menu.id)}
-          muted={muted[menu.id]?.muted === true}
+          muted={menuMuted}
           split={(() => { const t = all.find((x) => x.id === menu.id); return t ? splitAction(t, active, split, tabs, detached) : null; })()}
           onPin={(v) => {
             void setPinned(menu.id, v);
@@ -366,6 +371,8 @@ function useNarrowTabs(count: number): [React.RefObject<HTMLDivElement | null>, 
 }
 
 type Narrow = { close: boolean; title: boolean };
+/** One object, so a memoised tab down the rail is not handed a new one on every render. */
+const WIDE: Narrow = { close: false, title: false };
 
 /** Which of a scrolling list's children lie wholly or partly outside its viewport. */
 /**
@@ -436,10 +443,6 @@ export function revealScrollTop(list: { top: number; bottom: number; scrollTop: 
 }
 
 /**
- * One tab in the strip. Memoised: the strip re-renders on every load-state
- * tick of any tab, and each tab only needs its own boolean.
- */
-/**
  * The speaker on a tab that is making a sound, and the way to silence it.
  *
  * It is how you find the tab that started talking, so it shows on any tab
@@ -473,11 +476,17 @@ function TabSpeaker({ tab, pinned }: { tab: Tab; pinned: boolean }) {
   );
 }
 
-const SortableTab = memo(function SortableTab({ tab: t, active, loading, detached, inSplit, narrow, vertical = false, inTabOrder, onFocus: focusTab, onActivate: activateTab, onClose: closeTab, onMenu: openMenu }: { tab: Tab; active: boolean; loading: boolean; detached: boolean; inSplit: boolean; narrow: Narrow; vertical?: boolean; inTabOrder: boolean; onFocus: (id: string) => void; onActivate: (id: string) => void; onClose: (id: string) => void; onMenu: (id: string, x: number, y: number) => void }) {
+/**
+ * One tab in the strip. Memoised, and it reads its own load state: the strip
+ * no longer re-renders on every load tick of any tab, and a tab re-renders
+ * only for its own.
+ */
+const SortableTab = memo(function SortableTab({ tab: t, active, detached, inSplit, narrow, vertical = false, inTabOrder, onFocus: focusTab, onActivate: activateTab, onClose: closeTab, onMenu: openMenu }: { tab: Tab; active: boolean; detached: boolean; inSplit: boolean; narrow: Narrow; vertical?: boolean; inTabOrder: boolean; onFocus: (id: string) => void; onActivate: (id: string) => void; onClose: (id: string) => void; onMenu: (id: string, x: number, y: number) => void }) {
   // The active tab keeps its title however crowded the strip gets; only the
   // others fall back to a bare favicon.
   const bare = narrow.title && !active;
   const driven = useIsDriven(t.id);
+  const loading = useBrowser((s) => s.loading[t.id] === true);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id });
   const onFocus = () => focusTab(t.id);
   const onActivate = () => activateTab(t.id);
@@ -619,7 +628,6 @@ const SortableTab = memo(function SortableTab({ tab: t, active, loading, detache
 function EssentialTab({
   tab: t,
   active,
-  loading,
   vertical = false,
   tabIndex = -1,
   onActivate,
@@ -627,12 +635,12 @@ function EssentialTab({
 }: {
   tab: Tab;
   active: boolean;
-  loading: boolean;
   vertical?: boolean;
   tabIndex?: number;
   onActivate: () => void;
   onMenu: (x: number, y: number) => void;
 }) {
+  const loading = useBrowser((s) => s.loading[t.id] === true);
   return (
     <div
       role="tab"

@@ -2,6 +2,7 @@ import { useDismiss } from "../lib/useDismiss";
 import { Download, FolderOpen, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ipc } from "../lib/ipc";
+import { useShallow } from "zustand/react/shallow";
 import { useBrowser } from "../store/browser";
 import { selectActiveInWindow, useDownloads } from "../store/downloads";
 import type { Download as Item } from "../store/downloads";
@@ -18,9 +19,10 @@ import { defaultDownloadsFolderLabel } from "../lib/commands";
 /** Downloads: this session's files. The chip counts this window, not a torn-off tab. */
 export function DownloadsMenu({ compact = false }: { compact?: boolean } = {}) {
   const items = useDownloads((s) => s.items);
-  const tabs = useBrowser((s) => s.tabs);
-  const detached = useBrowser((s) => s.detached);
-  const here = new Set(tabs.filter((t) => !detached.includes(t.id)).map((t) => t.id));
+  // Ids only, compared by value: the chip only asks which tabs are in this
+  // window, and the whole list changes with every title and favicon.
+  const hereIds = useBrowser(useShallow((s) => s.tabs.filter((t) => !s.detached.includes(t.id)).map((t) => t.id)));
+  const here = new Set(hereIds);
   const active = selectActiveInWindow(items, here);
   const clearList = useDownloads((s) => s.clear);
   // The engine keeps its own list, which is what an agent sees through MCP.

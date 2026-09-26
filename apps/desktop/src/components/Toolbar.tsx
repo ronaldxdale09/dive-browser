@@ -11,6 +11,7 @@ import { BookmarkButton } from "./BookmarkButton";
 import { PageActions } from "./PageActions";
 import { AddressSuggestions, optionId, useAddressSuggestions } from "./AddressSuggestions";
 import type { Suggestion } from "../lib/omnibox";
+import type { Tab } from "../lib/ipc";
 import { DownloadsMenu } from "./DownloadsMenu";
 import { useDownloads } from "../store/downloads";
 import { ProtectionMenu } from "./ProtectionMenu";
@@ -25,9 +26,10 @@ import { runCommand } from "../lib/commands";
 import { usePrefs } from "../store/prefs";
 import { NavigationButtons } from "./NavigationButtons";
 
+const NO_TABS: Tab[] = [];
+
 /** Navigation row: nav icons, the omnibox pill and, as glyphs, the actions that act on the page. */
 export function Toolbar({ compact = false, trailing = true }: { compact?: boolean; singleAuxPanel?: boolean; /** Render the browser's own controls (downloads, privacy, menu) at the end; off when the bar places them after the feature cluster. */ trailing?: boolean }) {
-  const tabs = useBrowser((s) => s.tabs);
   const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const navigate = useBrowser((s) => s.navigate);
   const activateTab = useBrowser((s) => s.activateTab);
@@ -38,7 +40,9 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
     const id = tabInThisWindow(s.activeTab, s.detached);
     return id ? s.loading[id] === true : false;
   });
-  const current = tabs.find((t) => t.id === activeTab);
+  // The active tab, not the list: a background tab's title or favicon
+  // changing must not re-render the address bar.
+  const current = useBrowser((s) => s.tabs.find((t) => t.id === activeTab));
   const failedUrl = useBrowser((s) => {
     const id = tabInThisWindow(s.activeTab, s.detached);
     return id ? s.navError[id]?.url : undefined;
@@ -66,6 +70,8 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
   // is not a question. The list is a listbox the input drives, so the input
   // never loses focus to it.
   const listId = useId();
+  // Open tabs are offered only while typing, so only then is the list followed.
+  const tabs = useBrowser((s) => (editing ? s.tabs : NO_TABS));
   const { rows, highlight, setHighlight, move } = useAddressSuggestions(draft.value, editing && draft.value.trim() !== url, tabs);
   const finishEditing = () => {
     setEditing(false);

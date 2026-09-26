@@ -3,6 +3,7 @@ import { isPrivateWindow } from "../lib/privateMode";
 import { PrivateWelcome } from "./PrivateMode";
 import { AlertTriangle, Check, RotateCw, Search, ShieldOff, ShieldQuestion, WifiOff, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { ipc } from "../lib/ipc";
 import { createBoundsReporter, elementBounds } from "../lib/boundsReporter";
 import { isWindows } from "../lib/commands";
@@ -38,15 +39,17 @@ const Welcome = lazy(() => import("./Welcome").then(({ Welcome }) => ({ default:
 export function Content() {
   const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const workspace = useBrowser((s) => s.activeWorkspace);
-  const tabs = useBrowser((s) => s.tabs);
   const detached = useBrowser((s) => s.detached);
   const split = useLayout((s) => (workspace ? s.splits[workspace] : undefined));
   const remove = useLayout((s) => s.remove);
-  const shown = visibleSplit(split, activeTab, tabs, detached);
+  // Ids and the one tab drawn here, not the list: a title or favicon change
+  // in any tab re-rendered the whole content area.
+  const tabIds = useBrowser(useShallow((s) => s.tabs.map((t) => t.id)));
+  const shown = useBrowser((s) => visibleSplit(split, activeTab, s.tabs, detached));
   const sel = useEmulation(selectDevice(activeTab));
   const pickerOpen = usePicker((s) => s.open);
   // One of Dive's own pages: drawn here by the chrome, no native view.
-  const internal = tabs.find((t) => t.id === activeTab && isInternalUrl(t.url));
+  const internal = useBrowser((s) => s.tabs.find((t) => t.id === activeTab && isInternalUrl(t.url)));
   const dragging = useTabDrag((s) => s.dragging);
   const crash = useBrowser((s) => (activeTab ? s.crashedTabs[activeTab] : undefined));
   const navError = useBrowser((s) => (activeTab ? s.navError[activeTab] : undefined));
@@ -57,9 +60,9 @@ export function Content() {
   // a pane that will never come back.
   useEffect(() => {
     if (!split || !workspace) return;
-    const live = new Set(tabs.map((t) => t.id));
+    const live = new Set(tabIds);
     for (const t of split.tabs) if (!live.has(t) || detached.includes(t)) remove(workspace, t);
-  }, [split, workspace, tabs, detached, remove]);
+  }, [split, workspace, tabIds, detached, remove]);
 
   return (
     // The picker is a column beside the page, never over it: the native view

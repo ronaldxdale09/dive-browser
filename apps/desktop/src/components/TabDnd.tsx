@@ -145,10 +145,11 @@ function pointerAt(e: DragEndEvent): { x: number; y: number } | null {
 export function TabDnd({ children }: { children: ReactNode }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const dragging = useTabDrag((s) => s.dragging);
-  const tabs = useBrowser((s) => s.tabs);
+  // Only the dragged tab: this wraps the whole chrome, and following every
+  // tab re-rendered the drag context on each title or favicon change.
+  const ghost = useBrowser((s) => (dragging ? s.tabs.find((t) => t.id === dragging) : undefined));
   // Raise chrome so drop targets and the drag ghost remain above native pages.
   useCoversContent(dragging !== null);
-  const ghost = dragging ? tabs.find((t) => t.id === dragging) : undefined;
 
   const onDragStart = (e: DragStartEvent) => useTabDrag.setState({ dragging: tabOf(e.active.id) });
 
