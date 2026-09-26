@@ -282,13 +282,20 @@ async fn discard_one(app: &AppHandle<Runtime>, tab: Tab) -> dive_core::Result<bo
     if !started {
         return Ok(false);
     }
+    // CEF acknowledges the close to the runtime, not to the app, so the
+    // receipt is still polled -- but backing off. A close usually lands
+    // within a few tens of milliseconds; one that does not is a busy
+    // renderer, and asking every 50 ms for five seconds put a hundred hops
+    // on the main thread while it was already struggling.
     let receipt = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut pause = Duration::from_millis(20);
         loop {
             let native = native.clone();
             if on_main(app, move |_| Ok(native.is_valid() == 0)).await? {
                 return Ok::<_, dive_core::CoreError>(());
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::time::sleep(pause).await;
+            pause = next_receipt_pause(pause);
         }
     })
     .await;
@@ -308,6 +315,13 @@ async fn discard_one(app: &AppHandle<Runtime>, tab: Tab) -> dive_core::Result<bo
         finish_discard(state, &tab, &ticket, scroll, &view)
     })
     .await
+}
+
+/// The wait before asking again whether a discarded browser has closed:
+/// doubling, up to half a second.
+#[cfg(feature = "cef")]
+fn next_receipt_pause(pause: Duration) -> Duration {
+    (pause * 2).min(Duration::from_millis(500))
 }
 
 /// Finalize only after native receipt, always unregistering the old label.
@@ -539,6 +553,21 @@ mod tests {
 
     fn tab(url: &str) -> Tab {
         Tab::new(WorkspaceId::new(), url, 0)
+    }
+
+    #[cfg(feature = "cef")]
+    #[test]
+    fn a_slow_close_is_asked_about_less_and_less_often() {
+        let mut pause = Duration::from_millis(20);
+        let mut waited = Duration::ZERO;
+        let mut asked = 0;
+        while waited < Duration::from_secs(5) {
+            asked += 1;
+            waited += pause;
+            pause = next_receipt_pause(pause);
+        }
+        assert_eq!(pause, Duration::from_millis(500), "the pause is capped");
+        assert!(asked <= 16, "{asked} hops in five seconds, not a hundred");
     }
 
     #[test]
