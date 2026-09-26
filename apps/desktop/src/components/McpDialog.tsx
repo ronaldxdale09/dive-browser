@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Copy, Plug, ShieldCheck, Terminal } from "lucide-react";
 import type { AppInfo } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
-import { copyText } from "../lib/clipboard";
+import { copySecret } from "../lib/clipboard";
 import { Icon } from "./Icon";
 import { ClaudeMark, CodexMark, CursorMark, WindsurfMark, ZedMark } from "./agent/AgentMarks";
 import { useCoversContent } from "../lib/overlay";
@@ -85,7 +85,9 @@ export function McpDialog({ onClose }: { onClose: () => void }) {
     if (!ready || !info || !token || copyState === "copying") return;
     setCopyState("copying");
     try {
-      await copyText(instruction(url, info.mcp_token_path, token));
+      // The setup carries the token, so it goes the way every secret does:
+      // kept out of clipboard history and cleared again after 30 seconds.
+      await copySecret(instruction(url, info.mcp_token_path, token));
       if (alive.current) setCopyState("copied");
     } catch {
       if (alive.current) setCopyState("failed");
@@ -129,7 +131,11 @@ export function McpDialog({ onClose }: { onClose: () => void }) {
           <p className="mt-4 mb-2 text-xs text-ink-2">Paste this setup into your agent.</p>
           {loading && <p role="status" className="text-xs text-ink-3">Loading connection details…</p>}
           {failed && <p role="alert" className="text-xs text-danger">Dive could not read its own MCP details. Check Settings › Developer.</p>}
-          {!failed && !url && info && <p role="status" className="text-xs text-ink-3">The MCP server is off in this window. It runs in normal windows, not private ones.</p>}
+          {!failed && !url && info && (
+            <p role="status" className="text-xs text-ink-3">
+              The MCP server is not running in this window. It runs in normal windows, not private ones. If another program is holding its port, quit that program, or start Dive with DIVE_MCP_PORT set to a free port.
+            </p>
+          )}
           {missingToken && <p role="alert" className="text-xs text-danger">The MCP token is unavailable. Check Settings › Developer.</p>}
           {ready && (
             <div className="overflow-hidden rounded-xl border border-line bg-surface-2">
@@ -146,7 +152,7 @@ export function McpDialog({ onClose }: { onClose: () => void }) {
                 </button>
               </div>
               <pre aria-labelledby="mcp-setup-label" tabIndex={0} className="max-h-[280px] overflow-auto p-3 font-mono text-11 leading-relaxed break-words whitespace-pre-wrap text-ink select-text focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-highlight"><code>{shown}</code></pre>
-              {copyState === "copied" && <span role="status" className="sr-only">Setup copied to the clipboard</span>}
+              {copyState === "copied" && <p role="status" className="border-t border-line px-3 py-2 text-11 text-ink-3">Copied. It holds your token, so the clipboard is cleared in 30 seconds.</p>}
               {copyState === "failed" && <p role="alert" className="border-t border-line px-3 py-2 text-xs text-danger">Could not copy the setup. Try again.</p>}
             </div>
           )}
@@ -154,7 +160,7 @@ export function McpDialog({ onClose }: { onClose: () => void }) {
 
         <div className="flex shrink-0 items-center gap-2 border-t border-line bg-surface-2/60 px-5 py-3">
           <Icon icon={ShieldCheck} size={13} className="shrink-0 text-ink-3" />
-          <p className="min-w-0 flex-1 text-11 leading-relaxed text-ink-3">Local connection. Token required. Agent JavaScript is off by default.</p>
+          <p className="min-w-0 flex-1 text-11 leading-relaxed text-ink-3">Local connection. Token required. Sending a file or reading cookies asks you first, and agent JavaScript is off by default.</p>
           <button type="button" onClick={close} className="shrink-0 rounded-full border border-line-2 px-4 py-1.5 text-xs text-ink hover:bg-surface-3">
             Done
           </button>
