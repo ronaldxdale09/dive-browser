@@ -333,12 +333,24 @@ pub(crate) type AfterWindowCreationCallback = Box<dyn for<'a> Fn(RawWindow<'a>) 
 #[cfg(any(target_os = "macos", windows))]
 const CLOSE_ACK_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
 
+/// How long an application exit waits for every browser to acknowledge its
+/// close before the event loop ends anyway.
+///
+/// Quitting waits for CEF to confirm each browser closed, and a renderer that
+/// never answers used to keep Dive on screen, unresponsive to a second Quit,
+/// for as long as the person was willing to wait -- which ended in a force
+/// quit that lost more than the one page. Past this, the stuck webviews are
+/// named in the log and the exit completes without them.
+const EXIT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Native-loop timers carry only identities, never browser/window ownership.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) enum NativeDeadline {
     Creation(u32),
     #[cfg(any(target_os = "macos", windows))]
     CloseAcknowledgement(u32),
+    /// The whole application's exit; see [`EXIT_DEADLINE`].
+    Exit,
 }
 
 pub(crate) enum Message<T: UserEvent> {
@@ -488,6 +500,14 @@ pub(crate) struct AppState<T: UserEvent> {
     closing_windows: HashSet<WindowId>,
     exit_code: Arc<AtomicI32>,
     pub(crate) exiting: bool,
+    /// `RunEvent::Exit` went out and the event loop was told to stop. Both
+    /// the last acknowledgement and the exit deadline can get there, and only
+    /// the first may.
+    exit_dispatched: bool,
+    /// The exit went ahead with browsers CEF never confirmed closed, so
+    /// `cef::shutdown` must not run: it expects every browser gone and can
+    /// block or crash on one that is not.
+    forced_exit: Arc<AtomicBool>,
 }
 
 impl<T: UserEvent> AppState<T> {
@@ -524,6 +544,8 @@ impl<T: UserEvent> WinitCefApp<T> {
                 closing_windows: HashSet::new(),
                 exit_code: Arc::new(AtomicI32::new(0)),
                 exiting: false,
+                exit_dispatched: false,
+                forced_exit: Arc::new(AtomicBool::new(false)),
             },
             scheme_registry,
         }
@@ -682,6 +704,13 @@ impl<T: UserEvent> WinitCefApp<T> {
             Message::RequestExit(code) => {
                 if self.request_exit(Some(code)) {
                     self.close_all_browsers();
+                    // After `close_all_browsers`, which clears every timer.
+                    if !self.state.native_deadlines.schedule(
+                        NativeDeadline::Exit,
+                        std::time::Instant::now() + EXIT_DEADLINE,
+                    ) {
+                        log::warn!(target: "dive_native_close", "exit deadline could not be scheduled; exit waits for every close acknowledgement");
+                    }
                     self.exit_if_done(event_loop);
                 }
             }
@@ -1084,9 +1113,40 @@ impl<T: UserEvent> WinitCefApp<T> {
         }
 
         if self.state.exiting || (self.state.windows.is_empty() && self.request_exit(None)) {
-            self.run_callback(RunEvent::Exit);
-            event_loop.exit();
+            self.dispatch_exit(event_loop);
         }
+    }
+
+    /// Send `RunEvent::Exit` and stop the event loop, once.
+    fn dispatch_exit(&mut self, event_loop: &dyn ActiveEventLoop) {
+        if std::mem::replace(&mut self.state.exit_dispatched, true) {
+            return;
+        }
+        self.state.native_deadlines.cancel(&NativeDeadline::Exit);
+        self.run_callback(RunEvent::Exit);
+        event_loop.exit();
+    }
+
+    /// The exit deadline passed with browsers still unacknowledged: say which,
+    /// then finish the exit without them.
+    fn force_exit(&mut self, event_loop: &dyn ActiveEventLoop) {
+        if self.state.exit_dispatched {
+            return;
+        }
+        let stuck: Vec<u32> = self
+            .state
+            .windows
+            .values()
+            .flat_map(|window| window.children.iter().map(|child| child.webview_id))
+            .chain(self.state.pending_browsers.keys().copied())
+            .collect();
+        log::warn!(
+            target: "dive_native_close",
+            "stage=exit_deadline live_browsers={} stuck_webviews={stuck:?}: exiting without their close acknowledgement after {EXIT_DEADLINE:?}",
+            self.state.live_browsers
+        );
+        self.state.forced_exit.store(true, Ordering::SeqCst);
+        self.dispatch_exit(event_loop);
     }
 
     fn service_native_deadlines(&mut self, event_loop: &dyn ActiveEventLoop) {
@@ -1114,6 +1174,10 @@ impl<T: UserEvent> WinitCefApp<T> {
                     {
                         log::warn!(target: "dive_native_close", "stage=unacknowledged webview={id}: CEF did not confirm close within {CLOSE_ACK_GRACE:?}; retaining native ownership until acknowledgement");
                     }
+                }
+                NativeDeadline::Exit => {
+                    self.force_exit(event_loop);
+                    return;
                 }
             }
         }
@@ -1957,8 +2021,18 @@ impl<T: UserEvent> Runtime<T> for CefRuntime<T> {
             self.scheme_registry,
         );
         let exit_code = app.state.exit_code.clone();
+        let forced_exit = app.state.forced_exit.clone();
         let result = self.event_loop.run_app(app);
-        cef::shutdown();
+        if forced_exit.load(Ordering::SeqCst) {
+            // A browser that never acknowledged its close is still registered
+            // with CEF, and shutting CEF down around it can hang the very exit
+            // the deadline just rescued. The process is ending: its helper
+            // processes follow it, and the profile's own files were flushed by
+            // the browsers that did close.
+            log::warn!(target: "dive_native_close", "skipping CEF shutdown after a forced exit");
+        } else {
+            cef::shutdown();
+        }
         if let Err(error) = result {
             log::error!("CEF event loop failed: {error}");
             return 1;
@@ -1999,6 +2073,26 @@ mod native_deadline_tests {
         assert!(creation.pins_parent());
         assert!(creation.retire());
         assert!(!creation.pins_parent());
+    }
+
+    #[test]
+    fn the_exit_deadline_expires_after_browser_timers_and_can_be_withdrawn() {
+        let now = Instant::now();
+        let mut timers = Deadlines::new(4);
+        assert!(timers.schedule(NativeDeadline::Exit, now + super::EXIT_DEADLINE));
+        assert!(timers.schedule(NativeDeadline::Creation(3), now));
+        assert_eq!(timers.pop_due(now), Some(NativeDeadline::Creation(3)));
+        // Every browser acknowledged in time: the normal exit withdraws it.
+        assert!(timers.cancel(&NativeDeadline::Exit));
+        assert_eq!(timers.pop_due(now + super::EXIT_DEADLINE), None);
+        // Otherwise it fires once, at the deadline and not before.
+        assert!(timers.schedule(NativeDeadline::Exit, now + super::EXIT_DEADLINE));
+        assert_eq!(timers.pop_due(now), None);
+        assert_eq!(
+            timers.pop_due(now + super::EXIT_DEADLINE),
+            Some(NativeDeadline::Exit)
+        );
+        assert_eq!(timers.next(), None);
     }
 
     #[test]
