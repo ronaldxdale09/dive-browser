@@ -64,11 +64,30 @@ struct Inner {
     /// `broadcast` hands each its own copy of the value. A deep clone of the
     /// parsed JSON per subscriber per event is what that used to cost.
     events: broadcast::Sender<Arc<CdpEvent>>,
+    /// Subscribers that asked for some methods only, each on a channel of
+    /// its own. A subscriber on the shared bus is woken for every event the
+    /// tab produces: a busy page's network chatter woke a crash watcher, a
+    /// favicon listener and a permission monitor that each want one or two
+    /// methods out of thousands. These are sent only what they match.
+    filtered: Mutex<Vec<FilteredSender>>,
     /// Set once the browser behind the transport is going away. A call made
     /// after that fails here instead of reaching the transport: the feeds
     /// answer events on their own schedule, and a message handed to a
     /// browser mid-teardown is how the engine's message loop trips a CHECK.
     closed: watch::Sender<bool>,
+}
+
+/// One filtered subscription: the method prefixes it matches and the channel
+/// its matches go to.
+struct FilteredSender {
+    prefixes: &'static [&'static str],
+    sender: broadcast::Sender<Arc<CdpEvent>>,
+}
+
+/// Whether `method` starts with any of `prefixes`. An empty list matches
+/// nothing: that subscription only waits for the session to end.
+fn matches_any(prefixes: &[&str], method: &str) -> bool {
+    prefixes.iter().any(|prefix| method.starts_with(prefix))
 }
 
 /// A session event subscription that ends when the session is explicitly closed,
@@ -260,6 +279,7 @@ impl CdpSession {
                 main_frame: Mutex::new(None),
                 pending: Mutex::new(HashMap::new()),
                 events,
+                filtered: Mutex::new(Vec::new()),
                 closed,
             }),
         }
@@ -325,6 +345,47 @@ impl CdpSession {
             events: self.inner.events.subscribe(),
             closed: self.inner.closed.subscribe(),
         }
+    }
+
+    /// Subscribe to the events whose method starts with one of `prefixes`:
+    /// a domain (`"Network."`) or a single method (`"Page.frameNavigated"`).
+    /// The receiver behaves like one from [`subscribe`](Self::subscribe), lag
+    /// and closure included, but is woken only for what it matches. An empty
+    /// list matches nothing, and the receiver just waits for the session to
+    /// close.
+    pub fn subscribe_to(&self, prefixes: &'static [&'static str]) -> CdpEventReceiver {
+        let (sender, events) = broadcast::channel(EVENT_BUFFER);
+        self.inner
+            .filtered
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(FilteredSender { prefixes, sender });
+        CdpEventReceiver {
+            events,
+            closed: self.inner.closed.subscribe(),
+        }
+    }
+
+    /// Hand `event` to the shared bus and to each filtered subscriber that
+    /// matches it, forgetting filtered subscribers that have gone away.
+    fn publish(&self, event: CdpEvent) {
+        let event = Arc::new(event);
+        let mut filtered = self
+            .inner
+            .filtered
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        filtered.retain(|sub| {
+            if sub.sender.receiver_count() == 0 {
+                return false;
+            }
+            if matches_any(sub.prefixes, &event.method) {
+                let _ = sub.sender.send(Arc::clone(&event));
+            }
+            true
+        });
+        drop(filtered);
+        let _ = self.inner.events.send(event);
     }
 
     /// Feed one raw message received from the browser.
@@ -400,11 +461,11 @@ impl CdpSession {
                 {
                     self.inner.navigation_epoch.fetch_add(1, Ordering::AcqRel);
                 }
-                let _ = self.inner.events.send(Arc::new(CdpEvent {
+                self.publish(CdpEvent {
                     navigation_epoch: self.navigation_epoch(),
                     method,
                     params,
-                }));
+                });
             }
             (None, None) => tracing::debug!("cdp message with neither id nor method"),
         }
@@ -686,6 +747,66 @@ mod tests {
         let event = rx.recv().await.unwrap();
         assert_eq!(event.method, "Page.loadEventFired");
         assert_eq!(event.params["timestamp"], 1.5);
+    }
+
+    #[tokio::test]
+    async fn filtered_subscribers_only_receive_what_they_match() {
+        let session = CdpSession::new(FakeTransport::default());
+        let mut network = session.subscribe_to(&["Network.", "Page.frameNavigated"]);
+        let mut everything = session.subscribe();
+        for method in [
+            "Network.requestWillBeSent",
+            "Page.loadEventFired",
+            "Page.frameNavigated",
+            "Runtime.consoleAPICalled",
+        ] {
+            session
+                .handle_incoming(&json!({ "method": method }).to_string())
+                .unwrap();
+        }
+        assert_eq!(
+            network.recv().await.unwrap().method,
+            "Network.requestWillBeSent"
+        );
+        assert_eq!(network.recv().await.unwrap().method, "Page.frameNavigated");
+        assert!(matches!(
+            network.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+        let mut seen = 0;
+        while everything.try_recv().is_ok() {
+            seen += 1;
+        }
+        assert_eq!(seen, 4, "the shared bus still carries everything");
+    }
+
+    #[tokio::test]
+    async fn an_empty_filter_only_waits_for_closure() {
+        let session = CdpSession::new(FakeTransport::default());
+        let mut idle = session.subscribe_to(&[]);
+        session
+            .handle_incoming(r#"{"method":"Page.loadEventFired"}"#)
+            .unwrap();
+        assert!(matches!(
+            idle.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+        session.close();
+        assert!(matches!(
+            idle.recv().await,
+            Err(broadcast::error::RecvError::Closed)
+        ));
+    }
+
+    #[test]
+    fn dropped_filtered_subscribers_are_forgotten() {
+        let session = CdpSession::new(FakeTransport::default());
+        drop(session.subscribe_to(&["Page."]));
+        let _kept = session.subscribe_to(&["Network."]);
+        session
+            .handle_incoming(r#"{"method":"Page.loadEventFired"}"#)
+            .unwrap();
+        assert_eq!(session.inner.filtered.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]
