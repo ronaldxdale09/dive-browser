@@ -267,6 +267,40 @@ function forgetClosedTab(id: string) {
   }
 }
 
+/**
+ * The whole rail after part of it was reordered: the reordered workspaces
+ * first, then every other one as it was, numbered the way the engine
+ * numbers them. The rail only shows the active profile's workspaces, and
+ * taking its order for the whole list dropped every other profile's.
+ */
+export function mergeWorkspaceOrder(all: readonly Workspace[], ordered: readonly string[]): Workspace[] {
+  const listed = ordered.map((id) => all.find((w) => w.id === id)).filter((w) => w !== undefined);
+  const rest = all.filter((w) => !ordered.includes(w.id));
+  return [...listed, ...rest].map((w, position) => (w.position === position ? w : { ...w, position }));
+}
+
+/**
+ * What each workspace's strip last showed, so switching back draws its tabs
+ * and address at once instead of a blank strip until the engine's snapshot
+ * arrives. The snapshot still replaces it a moment later.
+ */
+type WorkspaceView = { tabs: Tab[]; activeTab: string | null };
+const workspaceViews = new Map<string, WorkspaceView>();
+
+/** Forget every remembered strip; for tests. */
+export function forgetWorkspaceViews() {
+  workspaceViews.clear();
+}
+
+/** The strip to show for `workspace` right away: its remembered tabs beside the essentials in view now. */
+export function cachedStrip(view: WorkspaceView | undefined, current: readonly Tab[], detached: readonly string[]): WorkspaceView | null {
+  if (!view) return null;
+  const essentials = current.filter((t) => t.tier === "essential");
+  const tabs = [...essentials, ...view.tabs.filter((t) => t.tier !== "essential")];
+  const activeTab = view.activeTab && tabs.some((t) => t.id === view.activeTab) && !detached.includes(view.activeTab) ? view.activeTab : null;
+  return { tabs, activeTab };
+}
+
 /** The first tab already on `url`'s host, so a shortcut can switch instead of piling up duplicates. */
 export function sameSiteTab(tabs: readonly Tab[], url: string): Tab | undefined {
   let host = "";
@@ -1129,13 +1163,17 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     const prev = get().activeWorkspace;
     if (prev === id) return;
     supersedeSnapshots();
-    set({ activeWorkspace: id });
+    // Kept for coming back, and drawn from what was kept when there is some.
+    if (prev) workspaceViews.set(prev, { tabs: get().tabs.filter((t) => t.workspace_id === prev && t.tier !== "essential"), activeTab: get().activeTab });
+    const cached = cachedStrip(workspaceViews.get(id), get().tabs, get().detached);
+    const before = { tabs: get().tabs, activeTab: get().activeTab };
+    set(cached ? { activeWorkspace: id, ...cached } : { activeWorkspace: id });
     requestedWorkspace = id;
     try {
       await ipc.workspaceActivate(id);
     } catch (e) {
       requestedWorkspace = null;
-      set((s) => ({ activeWorkspace: s.activeWorkspace === id ? prev : s.activeWorkspace, error: errorMessage(e) }));
+      set((s) => (s.activeWorkspace === id ? { activeWorkspace: prev, ...(cached ? before : {}), error: errorMessage(e) } : { error: errorMessage(e) }));
       return;
     }
     await run(set, () => applyLatestSnapshot(set));
@@ -1152,7 +1190,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   reorderWorkspaces: async (ordered) => {
     const prevWorkspaces = get().workspaces;
     // Optimistic, like tab reordering: the engine confirms with upsert events.
-    set((s) => ({ workspaces: ordered.map((id) => s.workspaces.find((w) => w.id === id)).filter((w) => w !== undefined) }));
+    set((s) => ({ workspaces: mergeWorkspaceOrder(s.workspaces, ordered) }));
     try {
       await ipc.workspaceReorder(ordered);
       set({ error: null });
@@ -1203,6 +1241,9 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     if (event.type === "tab_closed") {
       const id = event.data;
       unmarkClosing(id);
+      for (const view of workspaceViews.values()) {
+        if (view.tabs.some((t) => t.id === id)) view.tabs = view.tabs.filter((t) => t.id !== id);
+      }
       const scroll = scrollOfClosing.get(id);
       scrollOfClosing.delete(id);
       set((s) => ({ closedTabs: rememberClosed(s.closedTabs, gone, goneIndex, scroll) }));

@@ -1347,17 +1347,21 @@ pub(crate) fn workspace_activate(
     state: State<'_, AppState>,
     id: WorkspaceId,
 ) -> AppResult<()> {
-    let last = {
+    // Host before store, and released before it: the main thread takes them
+    // in that order.
+    let detached = lock(&state.host)
+        .as_ref()
+        .map_or_else(Vec::new, crate::engine::TabHost::detached);
+    let next = {
         let store = lock(&state.store);
         let w = store.workspace(id)?;
         store.set_setting(crate::state::ACTIVE_WORKSPACE, &id.to_string())?;
         // Remembered per profile, so switching back to a profile lands on
         // the workspace it was last in.
         store.set_setting(&profile_workspace_key(w.profile_id), &id.to_string())?;
-        store.last_active_tab(id)?
+        workspace_tab_to_show(&store, id, &detached)?
     };
     *lock(&state.active_workspace) = Some(id);
-    let next = last.map(|tab| tab.id);
     // Hiding the old workspace's views is native view work too, so it makes
     // the same hop as showing the new one; off the main thread it raced the
     // engine's own view changes.
@@ -1624,6 +1628,40 @@ pub(crate) fn forget_tab_state(app: &AppHandle<Runtime>, state: &AppState, id: T
 /// Setting key remembering the last workspace of a profile.
 fn profile_workspace_key(profile: dive_core::ProfileId) -> String {
     format!("profile_workspace:{profile}")
+}
+
+/// Setting key remembering the tab last shown in a workspace. Recency alone
+/// cannot say it: an essential belongs to every workspace, so one looked at
+/// in another workspace since would be the "most recent" everywhere.
+fn workspace_tab_key(workspace: WorkspaceId) -> String {
+    format!("workspace_tab:{workspace}")
+}
+
+/// The tab to show on switching to `workspace`: the one it was showing when
+/// it was left -- an essential included -- if that is still open in the
+/// main window, else its most recently used tab that is. Tabs in a window
+/// of their own are passed over: activating one raises that window and left
+/// the main window blank.
+fn workspace_tab_to_show(
+    store: &dive_core::Store,
+    workspace: WorkspaceId,
+    detached: &[TabId],
+) -> AppResult<Option<TabId>> {
+    let remembered = store
+        .setting(&workspace_tab_key(workspace))?
+        .and_then(|value| value.parse::<TabId>().ok())
+        .and_then(|id| store.tab(id).ok())
+        .filter(|tab| {
+            !detached.contains(&tab.id)
+                && (tab.workspace_id == Some(workspace)
+                    || tab.tier == dive_core::TabTier::Essential)
+        });
+    if let Some(tab) = remembered {
+        return Ok(Some(tab.id));
+    }
+    Ok(store
+        .last_active_tab(workspace, detached)?
+        .map(|tab| tab.id))
 }
 
 /// The profile of the active workspace, else the first profile.
@@ -2073,9 +2111,13 @@ pub fn close_tab(
     // Picked in its own statement so the store guard is released before
     // `activate_tab` takes the store again. Inside an `if let` chain the
     // guard lives through the body, and the second lock never returns:
-    // closing the active tab froze the main thread.
+    // closing the active tab froze the main thread. A tab in a window of its
+    // own cannot take the main window's place.
+    let detached = lock(&state.host)
+        .as_ref()
+        .map_or_else(Vec::new, crate::engine::TabHost::detached);
     let next = match workspace {
-        Some(ws) if was_active => lock(&state.store).last_active_tab(ws)?,
+        Some(ws) if was_active => lock(&state.store).last_active_tab(ws, &detached)?,
         _ => None,
     };
     if let Some(next) = next {
@@ -2359,6 +2401,16 @@ pub fn activate_tab(
             let store = lock(&state.store);
             store.upsert_tab(&tab)?;
             store.set_setting(crate::state::ACTIVE_TAB, &id.to_string())?;
+            // Remembered for the workspace it is shown in, so switching back
+            // lands here -- an essential in the workspace it was opened from.
+            let shown_in = if tab.tier == dive_core::TabTier::Essential {
+                *lock(&state.active_workspace)
+            } else {
+                tab.workspace_id
+            };
+            if let Some(workspace) = shown_in {
+                store.set_setting(&workspace_tab_key(workspace), &id.to_string())?;
+            }
         }
         woke.then_some(tab)
     };
@@ -5073,6 +5125,57 @@ mod tests {
         assert_eq!(
             other_workspace_tabs(&store, Some(here.id)).unwrap(),
             vec![away]
+        );
+    }
+
+    #[test]
+    fn a_workspace_comes_back_to_the_tab_it_showed_essentials_included() {
+        let store = dive_core::Store::in_memory().unwrap();
+        let profile = store.ensure_default_profile().unwrap();
+        let work = Workspace::new("Work", profile.container_id, profile.id, 0);
+        let play = Workspace::new("Play", profile.container_id, profile.id, 1);
+        store.upsert_workspace(&work).unwrap();
+        store.upsert_workspace(&play).unwrap();
+        let now = dive_core::Timestamp::now();
+        let mut older = Tab::new(work.id, "https://older.test", 0);
+        older.last_active_at = dive_core::Timestamp(now.0 - time::Duration::hours(2));
+        let mut torn_off = Tab::new(work.id, "https://torn-off.test", 1);
+        torn_off.last_active_at = now;
+        let mut essential = Tab::new(play.id, "https://mail.test", 0);
+        essential.tier = dive_core::TabTier::Essential;
+        for tab in [&older, &torn_off, &essential] {
+            store.upsert_tab(tab).unwrap();
+        }
+        // Nothing remembered: the most recent tab the main window can show.
+        assert_eq!(
+            workspace_tab_to_show(&store, work.id, &[torn_off.id]).unwrap(),
+            Some(older.id)
+        );
+        // The essential it was left on, though it belongs to another workspace.
+        store
+            .set_setting(&workspace_tab_key(work.id), &essential.id.to_string())
+            .unwrap();
+        assert_eq!(
+            workspace_tab_to_show(&store, work.id, &[torn_off.id]).unwrap(),
+            Some(essential.id)
+        );
+        // A remembered tab that went to a window of its own is passed over.
+        store
+            .set_setting(&workspace_tab_key(work.id), &torn_off.id.to_string())
+            .unwrap();
+        assert_eq!(
+            workspace_tab_to_show(&store, work.id, &[torn_off.id]).unwrap(),
+            Some(older.id)
+        );
+        // Another workspace's ordinary tab is never shown here.
+        let foreign = Tab::new(play.id, "https://foreign.test", 1);
+        store.upsert_tab(&foreign).unwrap();
+        store
+            .set_setting(&workspace_tab_key(work.id), &foreign.id.to_string())
+            .unwrap();
+        assert_eq!(
+            workspace_tab_to_show(&store, work.id, &[]).unwrap(),
+            Some(torn_off.id)
         );
     }
 

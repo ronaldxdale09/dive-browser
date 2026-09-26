@@ -1074,7 +1074,8 @@ fn restore_session(app: &tauri::App<Runtime>) {
             .and_then(|s| s.parse::<dive_core::TabId>().ok())
             .and_then(|id| store.tab(id).ok())
             .filter(|t| t.workspace_id == Some(workspace));
-        remembered.or_else(|| store.last_active_tab(workspace).ok().flatten())
+        // Nothing is in a window of its own yet at startup.
+        remembered.or_else(|| store.last_active_tab(workspace, &[]).ok().flatten())
     };
     if let (Some(tab), Some(main)) = (candidate, engine::MainThread::here()) {
         match commands::activate_tab(&main, app.handle(), &state, tab.id) {

@@ -2771,20 +2771,24 @@ impl Store {
         Ok(())
     }
 
-    /// The most recently active open tab of `workspace`, if any.
+    /// The most recently active open tab of `workspace`, if any, passing
+    /// over the tabs in `skip` -- those living in a window of their own,
+    /// which the main window cannot show.
     /// Discarded tabs remain open and recreate their renderer when activated.
-    pub fn last_active_tab(&self, workspace: WorkspaceId) -> Result<Option<Tab>> {
-        let mut tab = self
-            .conn
-            .query_row(
-                &format!(
-                    "{TAB_SELECT} WHERE workspace_id = ?1
-                     ORDER BY last_active_at DESC LIMIT 1"
-                ),
-                [workspace.to_string()],
-                tab_from_row,
-            )
-            .optional()?;
+    pub fn last_active_tab(&self, workspace: WorkspaceId, skip: &[TabId]) -> Result<Option<Tab>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "{TAB_SELECT} WHERE workspace_id = ?1
+             ORDER BY last_active_at DESC"
+        ))?;
+        let mut rows = stmt.query_map([workspace.to_string()], tab_from_row)?;
+        let mut tab = None;
+        for row in rows.by_ref() {
+            let candidate = row?;
+            if !skip.contains(&candidate.id) {
+                tab = Some(candidate);
+                break;
+            }
+        }
         if let Some(t) = tab.as_mut() {
             self.fill_favicon(t);
         }
@@ -4049,7 +4053,7 @@ mod tests {
     #[test]
     fn last_active_tab_uses_recency_across_renderer_states_within_workspace() {
         let (store, w) = seeded();
-        assert!(store.last_active_tab(w.id).unwrap().is_none());
+        assert!(store.last_active_tab(w.id, &[]).unwrap().is_none());
         let now = Timestamp::parse("2026-09-05T12:00:00Z").unwrap();
         let mut older = Tab::new(w.id, "https://older", 0);
         older.last_active_at = now - time::Duration::hours(2);
@@ -4066,9 +4070,12 @@ mod tests {
         for t in [&older, &discarded, &newer, &foreign] {
             store.upsert_tab(t).unwrap();
         }
-        assert_eq!(store.last_active_tab(w.id).unwrap().unwrap(), discarded);
         assert_eq!(
-            store.last_active_tab(other.id).unwrap().unwrap().id,
+            store.last_active_tab(w.id, &[]).unwrap().unwrap(),
+            discarded
+        );
+        assert_eq!(
+            store.last_active_tab(other.id, &[]).unwrap().unwrap().id,
             foreign.id
         );
     }
@@ -4084,15 +4091,41 @@ mod tests {
         beta.state = TabState::Discarded;
         store.upsert_tab(&alpha).unwrap();
         store.upsert_tab(&beta).unwrap();
-        assert_eq!(store.last_active_tab(w.id).unwrap().unwrap().id, alpha.id);
+        assert_eq!(
+            store.last_active_tab(w.id, &[]).unwrap().unwrap().id,
+            alpha.id
+        );
 
         store.remove_tab(alpha.id).unwrap();
         // Closing a tab removes its row; discarding only releases its renderer.
         // Replacement selection must retain the identity and persisted URL to wake.
-        assert_eq!(store.last_active_tab(w.id).unwrap().unwrap(), beta);
+        assert_eq!(store.last_active_tab(w.id, &[]).unwrap().unwrap(), beta);
 
         store.remove_tab(beta.id).unwrap();
-        assert!(store.last_active_tab(w.id).unwrap().is_none());
+        assert!(store.last_active_tab(w.id, &[]).unwrap().is_none());
+    }
+
+    #[test]
+    fn last_active_tab_passes_over_tabs_in_their_own_window() {
+        let (store, w) = seeded();
+        let now = Timestamp::parse("2026-09-05T12:00:00Z").unwrap();
+        let mut torn_off = Tab::new(w.id, "https://fixture.test/torn-off", 0);
+        torn_off.last_active_at = now;
+        let mut here = Tab::new(w.id, "https://fixture.test/here", 1);
+        here.last_active_at = now - time::Duration::hours(1);
+        store.upsert_tab(&torn_off).unwrap();
+        store.upsert_tab(&here).unwrap();
+        let next = store
+            .last_active_tab(w.id, &[torn_off.id])
+            .unwrap()
+            .unwrap();
+        assert_eq!(next.id, here.id);
+        assert!(
+            store
+                .last_active_tab(w.id, &[torn_off.id, here.id])
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

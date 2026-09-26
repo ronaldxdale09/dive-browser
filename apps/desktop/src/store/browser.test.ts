@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@tauri-apps/api/event";
-import { CLOSED_TABS_LIMIT, countsChanged, onTabClosed, orderWithAt, reduceCrash, sameSiteTab, togglePanel, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, tabInThisWindow, useBrowser, withoutRequest, isClosing, nextCloseTarget, pageAnsweredClose, pagePromptedOnClose, parseClosedTabs } from "./browser";
+import { CLOSED_TABS_LIMIT, countsChanged, onTabClosed, orderWithAt, reduceCrash, sameSiteTab, togglePanel, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, tabInThisWindow, useBrowser, withoutRequest, isClosing, nextCloseTarget, pageAnsweredClose, pagePromptedOnClose, parseClosedTabs, forgetWorkspaceViews, mergeWorkspaceOrder } from "./browser";
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
 import type { PermissionAsked, PermissionDismissed, Snapshot, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
@@ -300,6 +300,31 @@ describe("optimistic switching", () => {
     expect(useBrowser.getState().activeTab).toBe("z");
   });
 
+  it("draws a workspace switched back to from what it last showed while the snapshot is on its way", async () => {
+    vi.spyOn(ipc, "workspaceActivate").mockResolvedValue(null);
+    vi.spyOn(ipc, "workspaceTabCounts").mockResolvedValue([]);
+    const pending: Array<(snapshot: Snapshot) => void> = [];
+    vi.spyOn(ipc, "snapshot").mockImplementation(() => new Promise<Snapshot>((resolve) => pending.push(resolve)));
+    const essential = { ...tab("e"), tier: "essential" as const, workspace_id: null };
+    const home = (id: string) => ({ ...tab(id), workspace_id: "home" });
+    useBrowser.setState({ activeWorkspace: "home", tabs: [essential, home("h1"), home("h2")], activeTab: "h2", detached: [] });
+    const away = useBrowser.getState().activateWorkspace("away");
+    // Never seen: nothing to draw until the engine says.
+    expect(useBrowser.getState().tabs.map((t) => t.id)).toEqual(["e", "h1", "h2"]);
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    pending[0]!({ workspaces: [], active_workspace: "away", tabs: [essential, { ...tab("a1"), workspace_id: "away" }], active_tab: "a1", detached: [], profiles: [], active_profile: null });
+    await away;
+    const back = useBrowser.getState().activateWorkspace("home");
+    // Back home, its strip and its page are there before the engine answers.
+    expect(useBrowser.getState().tabs.map((t) => t.id)).toEqual(["e", "h1", "h2"]);
+    expect(useBrowser.getState().activeTab).toBe("h2");
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    pending[1]!({ workspaces: [], active_workspace: "home", tabs: [essential, home("h1")], active_tab: "h1", detached: [], profiles: [], active_profile: null });
+    await back;
+    expect(useBrowser.getState().tabs.map((t) => t.id)).toEqual(["e", "h1"]);
+    forgetWorkspaceViews();
+  });
+
   it("fetches the snapshot when the engine switches workspace on its own, not when this chrome asked", async () => {
     const snapshot = vi.spyOn(ipc, "snapshot").mockResolvedValue({ workspaces: [], active_workspace: "w9", tabs: [tab("z")], active_tab: "z", detached: [], profiles: [], active_profile: null });
     vi.spyOn(ipc, "workspaceTabCounts").mockResolvedValue([]);
@@ -466,6 +491,16 @@ describe("optimistic switching", () => {
     await useBrowser.getState().reorderTabs(["t2", "t1"]);
     expect(useBrowser.getState().tabs).toEqual([t1, t2]);
     expect(useBrowser.getState().error).toBe("reorder failed");
+  });
+
+  it("reorders one profile's workspaces without dropping the other profiles'", async () => {
+    vi.spyOn(ipc, "workspaceReorder").mockResolvedValue(null);
+    const mine = [ws("m1", "Work", 0), ws("m2", "Home", 2)];
+    const theirs = { ...ws("t1", "Theirs", 1), profile_id: "p2" };
+    useBrowser.setState({ workspaces: [mine[0]!, theirs, mine[1]!] });
+    await useBrowser.getState().reorderWorkspaces(["m2", "m1"]);
+    expect(useBrowser.getState().workspaces.map((w) => [w.id, w.position])).toEqual([["m2", 0], ["m1", 1], ["t1", 2]]);
+    expect(mergeWorkspaceOrder([mine[0]!], ["gone", "m1"]).map((w) => w.id)).toEqual(["m1"]);
   });
 
   it("optimistically reorders workspaces and rolls back if the engine refuses", async () => {
