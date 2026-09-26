@@ -30,4 +30,17 @@ pub enum CoreError {
     /// Invalid input.
     #[error("invalid: {0}")]
     Invalid(String),
+    /// The database was last written by a newer build, whose schema this
+    /// one does not know. Kept apart from [`CoreError::Invalid`] so the app
+    /// can tell the person to update rather than offer to start over.
+    #[error(
+        "database schema is version {found}, newer than the {known} this build knows; \
+         open it with a newer Dive"
+    )]
+    NewerSchema {
+        /// The schema version the file carries.
+        found: usize,
+        /// The newest schema version this build can migrate to.
+        known: usize,
+    },
 }

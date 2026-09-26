@@ -302,16 +302,23 @@ fn backup_before_migrating(path: &Path) -> Result<Option<std::path::PathBuf>> {
     let live = Connection::open(path)?;
     live.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
     drop(live);
-    std::fs::copy(path, &backup).map_err(|e| {
-        CoreError::Db(rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_IOERR),
-            Some(format!(
-                "copying {} to {}: {e}",
-                path.display(),
-                backup.display()
-            )),
-        ))
-    })?;
+    // The copy is a precaution, not a precondition. A full disk or a folder
+    // that refuses a new file used to stop Dive opening at all, at every
+    // launch; the migration itself runs in a transaction and is safe to go
+    // ahead without it. A half-written copy is removed so it can never be
+    // mistaken for a good one when restoring.
+    if let Err(error) = std::fs::copy(path, &backup) {
+        tracing::warn!(
+            backup = %backup.display(),
+            "could not copy the database aside before migrating it; migrating without a copy: {error}"
+        );
+        if let Err(error) = std::fs::remove_file(&backup)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(backup = %backup.display(), "could not remove a partial copy: {error}");
+        }
+        return Ok(None);
+    }
     remove_older_backups(path, &backup);
     Ok(Some(backup))
 }
@@ -859,6 +866,41 @@ impl Store {
         Ok(usize::try_from(version).unwrap_or(0))
     }
 
+    /// Whether SQLite's structural check finds the database intact.
+    ///
+    /// `PRAGMA quick_check` reads every page, so this is for after something
+    /// went wrong (an unclean exit), not for every launch. A database too
+    /// damaged to run the check at all reports an error, which callers
+    /// treat the same as a failed check.
+    pub fn quick_check(&self) -> Result<bool> {
+        let verdict: String = self
+            .conn
+            .query_row("PRAGMA quick_check(1)", [], |r| r.get(0))?;
+        Ok(verdict == "ok")
+    }
+
+    /// The pre-migration copies beside `path`, newest schema first. The
+    /// first is what "restore the last copy" goes back to.
+    pub fn migration_backups(path: &Path) -> Vec<std::path::PathBuf> {
+        let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+            return Vec::new();
+        };
+        let prefix = format!("{}.before-v", name.to_string_lossy());
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut found: Vec<(usize, std::path::PathBuf)> = entries
+            .flatten()
+            .filter_map(|entry| {
+                let file = entry.file_name();
+                let version = file.to_string_lossy().strip_prefix(&prefix)?.parse().ok()?;
+                entry.path().is_file().then(|| (version, entry.path()))
+            })
+            .collect();
+        found.sort_by_key(|(version, _)| std::cmp::Reverse(*version));
+        found.into_iter().map(|(_, path)| path).collect()
+    }
+
     fn migrate(&self) -> Result<()> {
         self.migrate_to(MIGRATIONS.len())
     }
@@ -871,11 +913,10 @@ impl Store {
             .query_row("PRAGMA user_version", [], |r| r.get(0))?;
         let version = usize::try_from(version).unwrap_or(0);
         if version > MIGRATIONS.len() {
-            return Err(CoreError::Invalid(format!(
-                "database schema is version {version}, newer than the {} this build knows; \
-                 open it with a newer Dive",
-                MIGRATIONS.len()
-            )));
+            return Err(CoreError::NewerSchema {
+                found: version,
+                known: MIGRATIONS.len(),
+            });
         }
         for (i, sql) in MIGRATIONS.iter().enumerate().take(target).skip(version) {
             let next = i + 1;
@@ -934,8 +975,7 @@ impl Store {
             .conn
             .prepare(&format!("{CONTAINER_SELECT} ORDER BY name"))?;
         let rows = stmt.query_map([], container_from_row)?;
-        rows.collect::<std::result::Result<_, _>>()
-            .map_err(Into::into)
+        readable_rows(rows, "containers")
     }
 
     // ----- workspaces -----
@@ -984,8 +1024,7 @@ impl Store {
             .conn
             .prepare(&format!("{WORKSPACE_SELECT} ORDER BY position, created_at"))?;
         let rows = stmt.query_map([], workspace_from_row)?;
-        rows.collect::<std::result::Result<_, _>>()
-            .map_err(Into::into)
+        readable_rows(rows, "workspaces")
     }
 
     /// The workspaces of one profile, in rail order.
@@ -994,8 +1033,7 @@ impl Store {
             "{WORKSPACE_SELECT} WHERE profile_id = ?1 ORDER BY position, created_at"
         ))?;
         let rows = stmt.query_map([profile.to_string()], workspace_from_row)?;
-        rows.collect::<std::result::Result<_, _>>()
-            .map_err(Into::into)
+        readable_rows(rows, "workspaces")
     }
 
     // ----- profiles -----
@@ -1044,8 +1082,7 @@ impl Store {
             .conn
             .prepare(&format!("{PROFILE_SELECT} ORDER BY position, created_at"))?;
         let rows = stmt.query_map([], profile_from_row)?;
-        rows.collect::<std::result::Result<_, _>>()
-            .map_err(Into::into)
+        readable_rows(rows, "profiles")
     }
 
     /// Remove a profile. Its workspaces must have been removed first.
@@ -1275,7 +1312,7 @@ impl Store {
              ORDER BY CASE tier WHEN 'essential' THEN 0 WHEN 'pinned' THEN 1 ELSE 2 END, position"
         ))?;
         let rows = stmt.query_map([id.to_string()], tab_from_row)?;
-        let mut tabs: Vec<Tab> = rows.collect::<std::result::Result<_, _>>()?;
+        let mut tabs: Vec<Tab> = readable_rows(rows, "tabs")?;
         for tab in &mut tabs {
             self.fill_favicon(tab);
         }
@@ -1588,7 +1625,7 @@ impl Store {
                       username COLLATE NOCASE, username",
         )?;
         let rows = stmt.query_map([profile.to_string()], credential_row)?;
-        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+        readable_rows(rows, "credentials")
     }
 
     /// Saved logins for one site in `profile`, most used first.
@@ -1598,7 +1635,7 @@ impl Store {
              FROM credentials WHERE profile_id = ?1 AND origin = ?2 ORDER BY uses DESC, username",
         )?;
         let rows = stmt.query_map(params![profile.to_string(), origin], credential_row)?;
-        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+        readable_rows(rows, "credentials")
     }
 
     /// Record a login (the secret is the caller's to keep). Saving the same
@@ -1667,8 +1704,7 @@ impl Store {
              FROM addresses WHERE profile_id = ?1 ORDER BY uses DESC, created_at DESC",
         )?;
         let rows = stmt.query_map(params![profile.to_string()], address_from_row)?;
-        rows.collect::<std::result::Result<_, _>>()
-            .map_err(Into::into)
+        readable_rows(rows, "addresses")
     }
 
     /// Save an address, replacing the one with the same id.
@@ -1729,8 +1765,7 @@ impl Store {
              FROM cards WHERE profile_id = ?1 ORDER BY uses DESC, created_at DESC",
         )?;
         let rows = stmt.query_map(params![profile.to_string()], card_from_row)?;
-        rows.collect::<std::result::Result<_, _>>()
-            .map_err(Into::into)
+        readable_rows(rows, "cards")
     }
 
     /// Save a card's listing row. The number belongs in the keychain.
@@ -1786,7 +1821,7 @@ impl Store {
              WHERE profile_id = ?1 ORDER BY field, uses DESC, value",
         )?;
         let rows = stmt.query_map([profile.to_string()], form_entry_row)?;
-        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+        readable_rows(rows, "form entries")
     }
 
     /// Entries for one field whose value starts with `prefix` (case-folded),
@@ -1817,7 +1852,7 @@ impl Store {
             ],
             form_entry_row,
         )?;
-        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+        readable_rows(rows, "form entries")
     }
 
     /// Remember that `value` was submitted in `field`; a repeat counts a use.
@@ -1946,8 +1981,7 @@ impl Store {
                 favicon: None,
             })
         })?;
-        rows.collect::<std::result::Result<_, _>>()
-            .map_err(Into::into)
+        readable_rows(rows, "bookmarks")
     }
 
     /// Every page in the active profile's history, one row per address,
@@ -1969,8 +2003,7 @@ impl Store {
                 })
             },
         )?;
-        rows.collect::<std::result::Result<_, _>>()
-            .map_err(Into::into)
+        readable_rows(rows, "history")
     }
 
     /// Bookmarks whose address or title contains `query`, newest first.
@@ -1996,7 +2029,7 @@ impl Store {
                 })
             },
         )?;
-        let mut found: Vec<Bookmark> = rows.collect::<std::result::Result<_, _>>()?;
+        let mut found: Vec<Bookmark> = readable_rows(rows, "bookmarks")?;
         for b in &mut found {
             b.favicon = self.site_favicon(&b.url);
         }
@@ -2046,8 +2079,7 @@ impl Store {
              ORDER BY COALESCE(last_opened_at, created_at) DESC, name",
         )?;
         let rows = stmt.query_map(params![self.scope()?], web_app_row)?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(Into::into)
+        readable_rows(rows, "web apps")
     }
 
     /// One installed web app, by manifest id.
@@ -2265,8 +2297,7 @@ impl Store {
                 r.get::<_, i64>(1)?.try_into().unwrap_or(u32::MAX),
             ))
         })?;
-        rows.collect::<std::result::Result<_, _>>()
-            .map_err(Into::into)
+        readable_rows(rows, "tab counts")
     }
 
     /// Forget every visit to `url` and to its twins -- the addresses shown as
@@ -2637,8 +2668,7 @@ impl Store {
                 })
             },
         )?;
-        rows.collect::<std::result::Result<_, _>>()
-            .map_err(Into::into)
+        readable_rows(rows, "downloads")
     }
 
     /// Forget one download row; the file itself is left alone.
@@ -2783,7 +2813,14 @@ impl Store {
         let mut rows = stmt.query_map([workspace.to_string()], tab_from_row)?;
         let mut tab = None;
         for row in rows.by_ref() {
-            let candidate = row?;
+            let candidate = match row {
+                Ok(candidate) => candidate,
+                Err(error) if is_unreadable_row(&error) => {
+                    tracing::warn!(%error, "skipping a tab this build cannot read");
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            };
             if !skip.contains(&candidate.id) {
                 tab = Some(candidate);
                 break;
@@ -2814,7 +2851,7 @@ impl Store {
              ORDER BY last_active_at"
         ))?;
         let rows = stmt.query_map([&cutoff], tab_from_row)?;
-        let mut tabs: Vec<Tab> = rows.collect::<std::result::Result<_, _>>()?;
+        let mut tabs: Vec<Tab> = readable_rows(rows, "tabs")?;
         for tab in &mut tabs {
             self.fill_favicon(tab);
         }
@@ -2931,6 +2968,43 @@ fn parse_time(s: &str) -> rusqlite::Result<Timestamp> {
 
 fn parse_id<T: std::str::FromStr<Err = uuid::Error>>(s: &str) -> rusqlite::Result<T> {
     s.parse().map_err(conversion)
+}
+
+/// Whether `error` is about one row's contents rather than the database: a
+/// value that does not parse (a damaged id, a tier or timestamp this build
+/// does not know), as opposed to I/O, locking or corruption.
+fn is_unreadable_row(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::FromSqlConversionFailure(..)
+            | rusqlite::Error::InvalidColumnType(..)
+            | rusqlite::Error::IntegralValueOutOfRange(..)
+            | rusqlite::Error::Utf8Error(..)
+    )
+}
+
+/// Collect a listing, leaving out the rows this build cannot read.
+///
+/// One tab with a damaged id or a workspace written by a newer build used to
+/// fail the whole query, which emptied the tab strip or, for the workspace
+/// list read at launch, stopped Dive starting at all. A row that cannot be
+/// read is logged and skipped; anything wrong with the database itself still
+/// fails the listing.
+fn readable_rows<T>(
+    rows: impl Iterator<Item = rusqlite::Result<T>>,
+    what: &'static str,
+) -> Result<Vec<T>> {
+    let mut out = Vec::new();
+    for row in rows {
+        match row {
+            Ok(value) => out.push(value),
+            Err(error) if is_unreadable_row(&error) => {
+                tracing::warn!(what, %error, "skipping a row this build cannot read");
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(out)
 }
 
 fn invalid(what: &str) -> rusqlite::Error {
@@ -3930,8 +4004,8 @@ mod tests {
             )
             .unwrap();
         assert!(
-            store.workspaces().is_err(),
-            "an empty profile id is unreadable"
+            store.workspaces().unwrap().is_empty(),
+            "an empty profile id is unreadable, so the row is left out"
         );
         // Reopening the same connection is what `Store::init` does after
         // migrating; run the repair path exactly as it would.
@@ -3978,8 +4052,94 @@ mod tests {
             )
             .unwrap();
         let err = store.migrate().unwrap_err();
-        assert!(matches!(err, CoreError::Invalid(_)), "{err}");
+        assert!(matches!(err, CoreError::NewerSchema { .. }), "{err}");
         assert!(err.to_string().contains("newer"), "{err}");
+    }
+
+    #[test]
+    fn one_unreadable_row_does_not_hide_the_rest_of_a_list() {
+        let (store, w) = seeded();
+        let good = Tab::new(w.id, "https://good", 0);
+        store.upsert_tab(&good).unwrap();
+        let broken = Tab::new(w.id, "https://broken", 1);
+        store.upsert_tab(&broken).unwrap();
+        store
+            .conn
+            .execute(
+                "UPDATE tabs SET tier = 'from-the-future' WHERE id = ?1",
+                [broken.id.to_string()],
+            )
+            .unwrap();
+        let tabs = store.tabs_for_workspace(w.id).unwrap();
+        assert_eq!(tabs.iter().map(|t| t.id).collect::<Vec<_>>(), [good.id]);
+        assert_eq!(
+            store.last_active_tab(w.id, &[]).unwrap().map(|t| t.id),
+            Some(good.id)
+        );
+        // A workspace row with a damaged id leaves the others listed, which
+        // is what launch reads first.
+        store
+            .conn
+            .execute(
+                "INSERT INTO workspaces (id, name, color, icon, container_id, position, created_at, profile_id)
+                 SELECT 'not-a-uuid', name, color, icon, container_id, 9, created_at, profile_id
+                 FROM workspaces WHERE id = ?1",
+                [w.id.to_string()],
+            )
+            .unwrap();
+        let listed = store.workspaces().unwrap();
+        assert_eq!(listed.iter().map(|x| x.id).collect::<Vec<_>>(), [w.id]);
+    }
+
+    #[test]
+    fn quick_check_passes_an_intact_database() {
+        let (store, _) = seeded();
+        assert!(store.quick_check().unwrap());
+    }
+
+    #[test]
+    fn a_copy_that_cannot_be_written_does_not_stop_the_migration() {
+        let dir = tempfile_dir();
+        let path = dir.join("dive.db");
+        drop(Store::open(&path).unwrap());
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.pragma_update(None, "user_version", 3).unwrap();
+        }
+        // Something in the way where the copy would go: copying onto a
+        // directory fails, as a full disk would.
+        let blocked = path.with_file_name(format!("dive.db.before-v{}", MIGRATIONS.len()));
+        std::fs::create_dir_all(&blocked).unwrap();
+        assert_eq!(backup_before_migrating(&path).unwrap(), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn migration_backups_are_listed_newest_first() {
+        let dir = tempfile_dir();
+        let path = dir.join("dive.db");
+        for name in [
+            "dive.db.before-v9",
+            "dive.db.before-v12",
+            "dive.db.before-vx",
+            "other.db.before-v20",
+        ] {
+            std::fs::write(dir.join(name), b"").unwrap();
+        }
+        assert_eq!(
+            Store::migration_backups(&path),
+            [
+                dir.join("dive.db.before-v12"),
+                dir.join("dive.db.before-v9")
+            ]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn tempfile_dir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("dive-store-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     #[test]
