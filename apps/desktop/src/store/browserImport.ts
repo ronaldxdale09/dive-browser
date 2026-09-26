@@ -21,6 +21,12 @@ interface BrowserImportState {
   importing: boolean;
   outcome: ImportOutcome | null;
   error: string | null;
+  /**
+   * Why the last look for browsers failed. Kept apart from `error`: an empty
+   * list after a failure is not "no other browsers", and looking again when
+   * the window regains focus must not wipe what an import reported.
+   */
+  loadError: string | null;
   /** The browser the dialog should start on, set by whoever opens it. */
   preferBrowser: string | null;
   setPreferBrowser: (browser: string | null) => void;
@@ -83,10 +89,11 @@ export const useBrowserImport = create<BrowserImportState>((set, get) => ({
   importing: false,
   outcome: null,
   error: null,
+  loadError: null,
   preferBrowser: null,
   setPreferBrowser: (preferBrowser) => set({ preferBrowser }),
   load: async (prefer) => {
-    set({ loading: true, error: null });
+    set({ loading: true, loadError: null });
     try {
       const sources = await ipc.browserImportSources();
       // Whoever opened the panel with a browser in mind wins over a row
@@ -96,7 +103,8 @@ export const useBrowserImport = create<BrowserImportState>((set, get) => ({
       const selected = !wanted && current && sources.some((s) => s.id === current) ? current : pickSource(sources, prefer);
       set({ sources, selected, loading: false });
     } catch (e) {
-      set({ sources: [], loading: false, error: errorMessage(e) });
+      // A list found earlier stays up; a first look that failed shows why.
+      set((s) => ({ sources: s.sources ?? [], loading: false, loadError: errorMessage(e) }));
     }
   },
   select: (selected) => set({ selected, outcome: null, error: null }),

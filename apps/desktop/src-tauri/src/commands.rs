@@ -1864,6 +1864,8 @@ pub(crate) async fn browser_import_run(
         })?;
     let known = crate::passwords::list(&state, profile)?;
     let mut added_passwords = 0u32;
+    let mut unsaved = 0usize;
+    let mut first_refusal = None;
     for login in &harvest.passwords {
         if known
             .iter()
@@ -1871,23 +1873,33 @@ pub(crate) async fn browser_import_run(
         {
             continue;
         }
-        if crate::passwords::save(
+        match crate::passwords::save(
             &state,
             profile,
             &login.origin,
             &login.username,
             &login.password,
-        )
-        .is_ok()
-        {
-            added_passwords += 1;
+        ) {
+            Ok(_) => added_passwords += 1,
+            Err(e) => {
+                unsaved += 1;
+                first_refusal.get_or_insert(e.message);
+            }
         }
+    }
+    let mut warnings = harvest.warnings;
+    // Counted and said: these used to vanish, and the summary read as if
+    // the browser simply had fewer logins.
+    if let Some(reason) = first_refusal {
+        let logins = if unsaved == 1 { "login" } else { "logins" };
+        warnings.push(format!("{unsaved} {logins} could not be saved: {reason}"));
     }
     Ok(crate::browser_import::ImportSummary {
         bookmarks: u32::try_from(added_bookmarks).unwrap_or(u32::MAX),
         history: u32::try_from(added_history).unwrap_or(u32::MAX),
         passwords: added_passwords,
         forms: u32::try_from(added_forms).unwrap_or(u32::MAX),
+        warnings,
     })
 }
 

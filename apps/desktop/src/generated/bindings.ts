@@ -144,8 +144,12 @@ export const commands = {
 	/**  Switch to a profile: its last workspace, or its first. */
 	profileActivate: (id: ProfileId) => typedError<null, AppError>(__TAURI_INVOKE("profile_activate", { id })),
 	/**
-	 *  Delete a profile with all its workspaces and tabs. Refuses to delete
-	 *  the last profile; if the active one goes, another takes over.
+	 *  Delete a profile with everything in it: its workspaces and tabs, its
+	 *  logins and cards (keychain secrets included), its history, bookmarks and
+	 *  form entries, and the cookies and site storage of any container nothing
+	 *  else uses. Those folders are removed at the next launch, once the engine
+	 *  no longer has them open. Refuses to delete the last profile; if the
+	 *  active one goes, another takes over.
 	 */
 	profileDelete: (id: ProfileId) => typedError<null, AppError>(__TAURI_INVOKE("profile_delete", { id })),
 	workspaceCreate: (draft: WorkspaceDraft, separateContainer: boolean) => typedError<Workspace, AppError>(__TAURI_INVOKE("workspace_create", { draft, separateContainer })),
@@ -1636,6 +1640,12 @@ export type ImportSummary = {
 	history: number,
 	passwords: number,
 	forms: number,
+	/**
+	 *  What could not be brought over, one sentence per kind, while the
+	 *  rest came in: a refused keychain prompt costs the passwords, not the
+	 *  bookmarks and history read before it.
+	 */
+	warnings: string[],
 };
 
 /**  Insets in CSS pixels. */

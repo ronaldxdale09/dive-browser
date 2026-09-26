@@ -76,12 +76,16 @@ pub struct ImportChoice {
 }
 
 /// What an import brought in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
 pub struct ImportSummary {
     pub bookmarks: u32,
     pub history: u32,
     pub passwords: u32,
     pub forms: u32,
+    /// What could not be brought over, one sentence per kind, while the
+    /// rest came in: a refused keychain prompt costs the passwords, not the
+    /// bookmarks and history read before it.
+    pub warnings: Vec<String>,
 }
 
 /// A saved login read from another browser, decrypted.
@@ -100,6 +104,30 @@ pub struct Harvest {
     pub history: Vec<ImportedEntry>,
     pub passwords: Vec<ImportedLogin>,
     pub forms: Vec<ImportedFormEntry>,
+    /// Kinds that were asked for and could not be read, as sentences.
+    pub warnings: Vec<String>,
+}
+
+/// Reads each kind asked for on its own, so one that fails is reported
+/// rather than throwing away the kinds already read.
+#[derive(Default)]
+struct Gather {
+    attempted: usize,
+    warnings: Vec<String>,
+}
+
+impl Gather {
+    fn read<T>(&mut self, what: &str, read: impl FnOnce() -> AppResult<Vec<T>>) -> Vec<T> {
+        self.attempted += 1;
+        match read() {
+            Ok(rows) => rows,
+            Err(e) => {
+                self.warnings
+                    .push(format!("{what} were not imported: {}", e.message));
+                Vec::new()
+            }
+        }
+    }
 }
 
 /// Visits beyond this are left behind; nobody scrolls that far back.
@@ -434,55 +462,121 @@ pub fn harvest(source: &ImportSource, choice: ImportChoice) -> AppResult<Harvest
     } = choice;
     let dir = Path::new(&source.dir);
     let temp = tempfile::tempdir()?;
+    let temp = temp.path();
     let mut out = Harvest::default();
+    let mut gather = Gather::default();
     match source.family {
         Family::Chromium => {
-            if bookmarks && let Some(text) = read_optional(&dir.join("Bookmarks"))? {
-                out.bookmarks = chromium_bookmarks(&text)?;
+            if bookmarks {
+                out.bookmarks = gather.read("Bookmarks", || {
+                    read_optional(&dir.join("Bookmarks"))?
+                        .map_or(Ok(Vec::new()), |text| chromium_bookmarks(&text))
+                });
             }
-            if history && let Some(db) = copied(dir, "History", temp.path())? {
-                out.history = chromium_history(&db)?;
+            if history {
+                out.history = gather.read("History", || {
+                    copied(dir, "History", temp)?.map_or(Ok(Vec::new()), |db| chromium_history(&db))
+                });
             }
-            if passwords && let Some(db) = copied(dir, "Login Data", temp.path())? {
-                let key = chromium_key(&source.browser, &source.name)?;
-                out.passwords = chromium_logins(&db, &key)?;
+            if passwords {
+                out.passwords = gather.read("Passwords", || {
+                    let Some(db) = copied(dir, "Login Data", temp)? else {
+                        return Ok(Vec::new());
+                    };
+                    let key = chromium_key(&source.browser, &source.name)?;
+                    chromium_logins(&db, &key)
+                });
             }
-            if forms && let Some(db) = copied(dir, "Web Data", temp.path())? {
-                out.forms = chromium_forms(&db)?;
-            }
-        }
-        Family::Firefox => {
-            if let Some(db) = copied(dir, "places.sqlite", temp.path())? {
-                let _ = copied(dir, "places.sqlite-wal", temp.path());
-                if bookmarks {
-                    out.bookmarks = firefox_bookmarks(&db)?;
-                }
-                if history {
-                    out.history = firefox_history(&db)?;
-                }
-            }
-            if passwords
-                && let Some(key_db) = copied(dir, "key4.db", temp.path())?
-                && let Some(logins) = read_optional(&dir.join("logins.json"))?
-            {
-                let key = firefox_key(&key_db)?;
-                out.passwords = firefox_logins(&logins, &key)?;
-            }
-            if forms && let Some(db) = copied(dir, "formhistory.sqlite", temp.path())? {
-                out.forms = firefox_forms(&db)?;
+            if forms {
+                out.forms = gather.read("Form entries", || {
+                    copied(dir, "Web Data", temp)?.map_or(Ok(Vec::new()), |db| chromium_forms(&db))
+                });
             }
         }
+        Family::Firefox => harvest_firefox(dir, temp, choice, &mut out, &mut gather),
         Family::Safari => {
-            if bookmarks && dir.join("Bookmarks.plist").exists() {
-                out.bookmarks = safari_bookmarks(&dir.join("Bookmarks.plist"))?;
+            if bookmarks {
+                out.bookmarks = gather.read("Bookmarks", || {
+                    let path = dir.join("Bookmarks.plist");
+                    if path.exists() {
+                        safari_bookmarks(&path)
+                    } else {
+                        Ok(Vec::new())
+                    }
+                });
             }
-            if history && let Some(db) = copied(dir, "History.db", temp.path())? {
-                let _ = copied(dir, "History.db-wal", temp.path());
-                out.history = safari_history(&db)?;
+            if history {
+                out.history = gather.read("History", || {
+                    let Some(db) = copied(dir, "History.db", temp)? else {
+                        return Ok(Vec::new());
+                    };
+                    let _ = copied(dir, "History.db-wal", temp);
+                    safari_history(&db)
+                });
             }
         }
     }
+    // Nothing came in at all: that is a failed import, not one with notes.
+    if gather.attempted > 0 && gather.warnings.len() == gather.attempted {
+        return Err(AppError::new(gather.warnings.join(" ")));
+    }
+    out.warnings = gather.warnings;
     Ok(out)
+}
+
+/// Firefox keeps bookmarks and history in one database, so one copy of it
+/// serves both kinds.
+fn harvest_firefox(
+    dir: &Path,
+    temp: &Path,
+    choice: ImportChoice,
+    out: &mut Harvest,
+    gather: &mut Gather,
+) {
+    let ImportChoice {
+        bookmarks,
+        history,
+        passwords,
+        forms,
+    } = choice;
+    if bookmarks || history {
+        // A failure to copy it is each kind's failure, reported for each.
+        let places = copied(dir, "places.sqlite", temp);
+        if places.as_ref().is_ok_and(Option::is_some) {
+            let _ = copied(dir, "places.sqlite-wal", temp);
+        }
+        let places = || match &places {
+            Ok(db) => Ok(db.clone()),
+            Err(e) => Err(AppError::new(&e.message)),
+        };
+        if bookmarks {
+            out.bookmarks = gather.read("Bookmarks", || {
+                places()?.map_or(Ok(Vec::new()), |db| firefox_bookmarks(&db))
+            });
+        }
+        if history {
+            out.history = gather.read("History", || {
+                places()?.map_or(Ok(Vec::new()), |db| firefox_history(&db))
+            });
+        }
+    }
+    if passwords {
+        out.passwords = gather.read("Passwords", || {
+            let (Some(key_db), Some(logins)) = (
+                copied(dir, "key4.db", temp)?,
+                read_optional(&dir.join("logins.json"))?,
+            ) else {
+                return Ok(Vec::new());
+            };
+            let key = firefox_key(&key_db)?;
+            firefox_logins(&logins, &key)
+        });
+    }
+    if forms {
+        out.forms = gather.read("Form entries", || {
+            copied(dir, "formhistory.sqlite", temp)?.map_or(Ok(Vec::new()), |db| firefox_forms(&db))
+        });
+    }
 }
 
 /// The keychain item each Chromium browser keeps its password key in.
@@ -1319,6 +1413,51 @@ mod tests {
         drop(conn);
         let err = super::firefox_key(&db).unwrap_err();
         assert!(err.to_string().contains("primary password"), "{err}");
+    }
+
+    #[test]
+    fn a_refused_password_key_costs_the_passwords_and_nothing_else() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Bookmarks"),
+            r#"{"roots":{"bookmark_bar":{"type":"folder","children":[{"type":"url","name":"Docs","url":"https://docs.test/","date_added":"13390000000000000"}]}}}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("Login Data"), b"").unwrap();
+        // A browser with no Safe Storage item fails where a refused keychain
+        // prompt would, without asking the keychain anything.
+        let source = super::ImportSource {
+            id: "nowhere:Default".into(),
+            browser: "nowhere".into(),
+            name: "Nowhere".into(),
+            family: super::Family::Chromium,
+            profile: None,
+            dir: dir.path().display().to_string(),
+            access: super::Access::Ok,
+            passwords: true,
+            forms: false,
+            icon: None,
+        };
+        let both = super::ImportChoice {
+            bookmarks: true,
+            passwords: true,
+            ..Default::default()
+        };
+        let harvest = super::harvest(&source, both).unwrap();
+        assert_eq!(harvest.bookmarks.len(), 1);
+        assert!(harvest.passwords.is_empty());
+        assert_eq!(harvest.warnings.len(), 1);
+        assert!(
+            harvest.warnings[0].starts_with("Passwords were not imported"),
+            "{:?}",
+            harvest.warnings
+        );
+        // Asked for nothing but the passwords, the import has failed.
+        let only = super::ImportChoice {
+            passwords: true,
+            ..Default::default()
+        };
+        assert!(super::harvest(&source, only).is_err());
     }
 
     #[test]

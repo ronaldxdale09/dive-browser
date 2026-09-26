@@ -26,7 +26,7 @@ describe("ImportPanel", () => {
 
   it("lists profiles by name, imports from the chosen one and reports the outcome", async () => {
     vi.spyOn(ipc, "browserImportSources").mockResolvedValue([brave, chrome]);
-    const run = vi.spyOn(ipc, "browserImportRun").mockResolvedValue({ bookmarks: 1, history: 2500, passwords: 0, forms: 0 });
+    const run = vi.spyOn(ipc, "browserImportRun").mockResolvedValue({ bookmarks: 1, history: 2500, passwords: 0, forms: 0, warnings: [] });
     render(<ImportPanel />);
     const chromeRow = await screen.findByRole("radio", { name: "Chrome · Work" });
     // The readable browser is chosen first, even though Brave is listed first.
@@ -51,9 +51,29 @@ describe("ImportPanel", () => {
     expect(screen.queryByText(/keeps Brave’s files private/)).toBeNull();
   });
 
+  it("keeps what came in and says what did not when the keychain is refused", async () => {
+    vi.spyOn(ipc, "browserImportSources").mockResolvedValue([chrome]);
+    vi.spyOn(ipc, "browserImportRun").mockResolvedValue({ bookmarks: 3, history: 10, passwords: 0, forms: 0, warnings: ["Passwords were not imported: macOS did not hand over Chrome's password key."] });
+    render(<ImportPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "Import from Chrome" }));
+    expect((await screen.findByRole("status")).textContent).toContain("Brought in 3 bookmarks");
+    expect(screen.getByRole("alert", { name: "Not imported" }).textContent).toContain("Passwords were not imported");
+  });
+
+  it("tells a failed look for browsers from finding none, and looks again", async () => {
+    const sources = vi.spyOn(ipc, "browserImportSources").mockRejectedValue(new Error("no home folder"));
+    render(<ImportPanel />);
+    expect(await screen.findByText("Dive could not look for other browsers")).toBeTruthy();
+    expect(screen.getByText("no home folder")).toBeTruthy();
+    expect(screen.queryByText("No other browsers with data were found")).toBeNull();
+    sources.mockResolvedValue([chrome]);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("radio", { name: "Chrome · Work" })).toBeTruthy();
+  });
+
   it("says when a second import finds nothing new", async () => {
     vi.spyOn(ipc, "browserImportSources").mockResolvedValue([chrome]);
-    vi.spyOn(ipc, "browserImportRun").mockResolvedValue({ bookmarks: 0, history: 0, passwords: 0, forms: 0 });
+    vi.spyOn(ipc, "browserImportRun").mockResolvedValue({ bookmarks: 0, history: 0, passwords: 0, forms: 0, warnings: [] });
     render(<ImportPanel />);
     fireEvent.click(await screen.findByRole("button", { name: "Import from Chrome" }));
     expect((await screen.findByRole("status")).textContent).toContain("Nothing new from Chrome");
