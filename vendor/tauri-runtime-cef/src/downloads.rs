@@ -39,6 +39,18 @@ pub struct DownloadProgress {
     pub speed: u64,
     /// Whether the download is paused.
     pub paused: bool,
+    /// Why the download stopped, when the engine interrupted it: Chromium's
+    /// reason name without its prefix, such as `FILE_NO_SPACE` or
+    /// `NETWORK_FAILED`. An interrupted download is over as far as the
+    /// person can tell, even though the engine keeps it around to resume.
+    pub interrupted: Option<String>,
+}
+
+/// Whether a download stopped for `reason` can be picked up where it left
+/// off. Only the network going away qualifies: a full disk or a refused file
+/// fails the same way again, and a server that answered badly would too.
+pub fn resumable(reason: &str) -> bool {
+    reason.starts_with("NETWORK_")
 }
 
 /// What to do to a download in flight.
@@ -51,9 +63,34 @@ pub enum Control {
 
 type Sink = Box<dyn Fn(DownloadProgress) + Send + Sync>;
 
+/// The engine's handle on one download, kept between updates.
+pub(crate) struct Held(pub(crate) cef::DownloadItemCallback);
+
+// SAFETY: CEF's download item callback is reference counted with atomic
+// counts, and its cancel, pause and resume post to CEF's UI thread when
+// called from any other.
+unsafe impl Send for Held {}
+
+impl Held {
+    fn apply(&self, action: Control) {
+        use cef::ImplDownloadItemCallback;
+        match action {
+            Control::Cancel => self.0.cancel(),
+            Control::Pause => self.0.pause(),
+            Control::Resume => self.0.resume(),
+        }
+    }
+}
+
 static SINK: OnceLock<Sink> = OnceLock::new();
 static PENDING: Mutex<Option<HashMap<u32, Control>>> = Mutex::new(None);
 static LAST_REPORT: Mutex<Option<HashMap<u32, Instant>>> = Mutex::new(None);
+/// The callback each unfinished download last lent, so a cancel applies at
+/// once. An interrupted download sends no further updates, so a cancel or a
+/// resume queued for the next one would never be applied.
+static HELD: Mutex<Option<HashMap<u32, Held>>> = Mutex::new(None);
+/// Downloads whose current interruption has been reported.
+static INTERRUPTED: Mutex<Option<std::collections::HashSet<u32>>> = Mutex::new(None);
 
 /// Hear about downloads in flight. The first caller wins; later ones are
 /// ignored, which keeps the application in charge of its own reporting.
@@ -63,14 +100,59 @@ pub fn on_download_progress(sink: impl Fn(DownloadProgress) + Send + Sync + 'sta
 
 /// Ask CEF to cancel, pause or resume a download.
 ///
-/// Queued rather than applied: the callback that can do it is only lent to the
-/// handler for the length of one update, so the request waits for the next one.
-/// CEF updates an active download several times a second, so the wait is not
-/// perceptible; a download that has already finished never picks it up, which
-/// is the right answer for a cancel that lost the race.
+/// Applied at once through the callback the download's last update lent,
+/// when there is one; otherwise queued for the next update. A download that
+/// has already finished never picks a queued request up, which is the right
+/// answer for a cancel that lost the race.
 pub fn control(id: u32, action: Control) {
+    // Cloned out of the lock: on the UI thread the engine can report the
+    // change from inside the call, and that report takes the lock again.
+    let held = lock(&HELD)
+        .as_ref()
+        .and_then(|held| held.get(&id))
+        .map(|held| Held(held.0.clone()));
+    if let Some(callback) = held {
+        callback.apply(action);
+        return;
+    }
     let mut pending = lock(&PENDING);
     pending.get_or_insert_with(HashMap::new).insert(id, action);
+}
+
+/// Keep the callback `id`'s update lent, for [`control`] to use later.
+pub(crate) fn hold(id: u32, callback: cef::DownloadItemCallback) {
+    lock(&HELD)
+        .get_or_insert_with(HashMap::new)
+        .insert(id, Held(callback));
+}
+
+/// Let go of `id`'s callback: the download is over for good.
+pub(crate) fn release(id: u32) {
+    // Taken out before dropping: releasing the engine's reference must not
+    // happen with the lock held, for the same reentrancy as in `control`.
+    let held = lock(&HELD).as_mut().and_then(|held| held.remove(&id));
+    drop(held);
+    if let Some(pending) = lock(&PENDING).as_mut() {
+        pending.remove(&id);
+    }
+    if let Some(interrupted) = lock(&INTERRUPTED).as_mut() {
+        interrupted.remove(&id);
+    }
+}
+
+/// Note that `id` was interrupted; true the first time, so one interruption
+/// is reported once however often the engine repeats its update.
+pub(crate) fn mark_interrupted(id: u32) -> bool {
+    lock(&INTERRUPTED)
+        .get_or_insert_with(std::collections::HashSet::new)
+        .insert(id)
+}
+
+/// `id` is moving again (resumed), so a later interruption is news.
+pub(crate) fn clear_interrupted(id: u32) {
+    if let Some(interrupted) = lock(&INTERRUPTED).as_mut() {
+        interrupted.remove(&id);
+    }
 }
 
 /// Take the request waiting for `id`, if any.
@@ -129,6 +211,33 @@ mod tests {
         );
         assert_eq!(take_control(7), Some(Control::Cancel));
         assert_eq!(take_control(7), None, "the request is spent once applied");
+    }
+
+    #[test]
+    fn an_interruption_is_reported_once_until_the_download_moves_again() {
+        assert!(mark_interrupted(21));
+        assert!(!mark_interrupted(21), "a repeated update is the same failure");
+        clear_interrupted(21);
+        assert!(mark_interrupted(21), "resumed and interrupted again is news");
+        release(21);
+        assert!(mark_interrupted(21), "a finished download forgets it");
+        release(21);
+    }
+
+    #[test]
+    fn only_a_network_interruption_is_worth_resuming() {
+        assert!(resumable("NETWORK_FAILED"));
+        assert!(resumable("NETWORK_DISCONNECTED"));
+        assert!(!resumable("FILE_NO_SPACE"));
+        assert!(!resumable("FILE_ACCESS_DENIED"));
+        assert!(!resumable("SERVER_FORBIDDEN"));
+    }
+
+    #[test]
+    fn a_released_download_drops_a_request_it_never_picked_up() {
+        control(31, Control::Pause);
+        release(31);
+        assert_eq!(take_control(31), None);
     }
 
     #[test]

@@ -84,27 +84,53 @@ wrap_download_handler! {
         return;
       };
 
-      // Cancelling, pausing and resuming are only possible through the
-      // callback CEF lends for the length of this call, so a request made
-      // while nothing was in flight is applied on the next update.
-      let id = download_item.id();
-      if let Some(callback) = callback
-        && let Some(action) = crate::downloads::take_control(id)
-      {
-        match action {
-          crate::downloads::Control::Cancel => callback.cancel(),
-          crate::downloads::Control::Pause => callback.pause(),
-          crate::downloads::Control::Resume => callback.resume(),
-        }
-      }
-
       // Check download state - CEF returns i32 where 0 is false, non-zero is true.
       let is_complete = download_item.is_complete() != 0;
       let is_canceled = download_item.is_canceled() != 0;
+      // An interrupted download (a full disk, a refused file, the network
+      // gone) is neither complete nor cancelled, and the engine sends no
+      // further updates for it. Reporting only the other two left it in the
+      // list as in flight forever, with a Cancel that did nothing.
+      let interrupted = (download_item.is_interrupted() != 0 && !is_complete && !is_canceled)
+        .then(|| interrupt_reason(download_item));
       let success = is_complete && !is_canceled;
+      let over = is_complete || is_canceled;
+
+      // Cancelling, pausing and resuming go through the callback CEF lends
+      // with each update. It is kept until the download is over for good, so
+      // a cancel applies at once and an interrupted download can still be
+      // resumed or cancelled; a request made before the first update waits
+      // for it.
+      let id = download_item.id();
+      if let Some(callback) = callback {
+        if over {
+          crate::downloads::release(id);
+        } else {
+          crate::downloads::hold(id, callback.clone());
+        }
+        if let Some(action) = crate::downloads::take_control(id) {
+          match action {
+            crate::downloads::Control::Cancel => callback.cancel(),
+            crate::downloads::Control::Pause => callback.pause(),
+            crate::downloads::Control::Resume => callback.resume(),
+          }
+        }
+      } else if over {
+        crate::downloads::release(id);
+      }
+      // Reported once per interruption: the engine may repeat the update,
+      // and each repeat would otherwise read as a second failure.
+      let newly_interrupted = match &interrupted {
+        Some(_) => crate::downloads::mark_interrupted(id),
+        None => {
+          crate::downloads::clear_interrupted(id);
+          false
+        }
+      };
+      let finished = over || newly_interrupted;
 
       // Get full path if available - full_path() returns CefStringUserfreeUtf16.
-      let full_path = if is_complete || is_canceled {
+      let full_path = if finished {
         let path_cef = download_item.full_path();
         let path_str = CefString::from(&path_cef).to_string();
         if !path_str.is_empty() {
@@ -137,12 +163,17 @@ wrap_download_handler! {
           #[allow(clippy::cast_sign_loss)]
           speed: download_item.current_speed().max(0) as u64,
           paused: download_item.is_paused() != 0,
+          interrupted: interrupted.clone(),
         },
-        is_complete || is_canceled,
+        finished,
       );
+      if interrupted.is_some() && !newly_interrupted {
+        return;
+      }
 
-      // Only call handler when download is finished (complete or canceled).
-      if is_complete || is_canceled {
+      // Only call handler when download is finished (complete, canceled, or
+      // interrupted, which is a failure until someone resumes it).
+      if finished {
         // Call handler with Finished event.
         (self.download_handler)(tauri_runtime::webview::DownloadEvent::Finished {
           url,
@@ -152,4 +183,15 @@ wrap_download_handler! {
       }
     }
   }
+}
+
+/// Chromium's name for why `item` was interrupted, without its prefix.
+fn interrupt_reason(item: &DownloadItem) -> String {
+    let reason = item.interrupt_reason();
+    let reason: &cef::sys::cef_download_interrupt_reason_t = reason.as_ref();
+    // The generated enum's debug form is the C name; the prefix says nothing.
+    let name = format!("{reason:?}");
+    name.strip_prefix("CEF_DOWNLOAD_INTERRUPT_REASON_")
+        .unwrap_or(&name)
+        .to_owned()
 }

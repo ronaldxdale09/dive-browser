@@ -34,8 +34,9 @@ use crate::window::AppWindow;
 pub use crate::reserved_shortcut_native::NativeNewTabTarget;
 pub use browser_client::permission::{NativePermissionRequest, PermissionContext};
 pub use browser_client::{
-    ContextMenuAction, ContextMenuCommand, ContextMenuOptions, FindUpdate, JsDialogKind,
-    JsDialogRequest,
+    CertificateDecision, CertificateError, ContextMenuAction, ContextMenuCommand,
+    ContextMenuOptions, FindUpdate, JsDialogKind, JsDialogRequest, RendererEvent, RendererExit,
+    UnresponsiveRenderer,
 };
 
 // Weak ownership: the context is released with the last live webview, before
@@ -134,6 +135,26 @@ impl Webview {
     /// Receive the engine's find in page reports, on the UI thread.
     pub fn set_find_handler(&self, handler: impl Fn(FindUpdate) + Send + Sync + 'static) {
         self.page_events.install_find(Arc::new(handler));
+    }
+
+    /// Hear when this page's renderer dies (with the reason), stops
+    /// responding, or responds again, on the UI thread and inside CEF's own
+    /// callback. Work that touches the runtime must be handed on. While a
+    /// handler is installed the engine shows no hang prompt of its own; the
+    /// [`UnresponsiveRenderer`] it passes decides between waiting and ending
+    /// the page.
+    pub fn set_renderer_handler(&self, handler: impl Fn(RendererEvent) + Send + Sync + 'static) {
+        self.page_events.install_renderer(Arc::new(handler));
+    }
+
+    /// Hear about certificate errors on this page's own address, on the UI
+    /// thread. A decision, when there is one, may be answered later from any
+    /// thread; without a decision the request is already refused.
+    pub fn set_certificate_error_handler(
+        &self,
+        handler: impl Fn(CertificateError, Option<CertificateDecision>) + Send + Sync + 'static,
+    ) {
+        self.page_events.install_certificate(Arc::new(handler));
     }
 
     /// Search the page with the engine's own find: every match is

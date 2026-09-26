@@ -42,7 +42,10 @@ use keyboard::TauriCefKeyboardHandler;
 use life_span::TauriCefChildLifeSpanHandler;
 use load::TauriCefLoadHandler;
 use page_events::TauriCefFindHandler;
-pub use page_events::{FindUpdate, PageEvents};
+pub use page_events::{
+    CertificateDecision, CertificateError, FindUpdate, PageEvents, RendererEvent, RendererExit,
+    UnresponsiveRenderer,
+};
 use permission::TauriCefPermissionHandler;
 pub(crate) use process::TauriCefBrowserProcessHandler;
 
@@ -121,6 +124,7 @@ wrap_client! {
         self.handlers.web_content_process_terminate_handler.clone(),
         self.handlers.permissions.clone(),
         self.handlers.context_menu.clone(),
+        self.handlers.page_events.clone(),
       ))
     }
 

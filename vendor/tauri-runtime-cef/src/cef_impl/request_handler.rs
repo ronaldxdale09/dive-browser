@@ -131,6 +131,7 @@ wrap_request_handler! {
     web_content_process_terminate_handler: Option<Arc<dyn Fn() + Send>>,
     permissions: Arc<crate::cef_impl::client::permission::PermissionBridge>,
     page_actions: Arc<crate::cef_impl::client::ContextMenuBridge>,
+    page_events: Arc<crate::cef_impl::client::PageEvents>,
   }
 
   impl RequestHandler {
@@ -167,13 +168,59 @@ wrap_request_handler! {
     fn on_render_process_terminated(
       &self,
       _browser: Option<&mut Browser>,
-      _status: TerminationStatus,
-      _error_code: ::std::os::raw::c_int,
+      status: TerminationStatus,
+      error_code: ::std::os::raw::c_int,
       _error_string: Option<&CefString>,
     ) {
+      // Tauri's hook carries no status and exists only on macOS; the page
+      // events carry why, on every platform, for whoever decides whether a
+      // reload is worth it.
+      self.page_events.renderer_terminated(&status, error_code);
       if let Some(handler) = &self.web_content_process_terminate_handler {
         handler();
       }
+    }
+
+    fn on_render_process_unresponsive(
+      &self,
+      _browser: Option<&mut Browser>,
+      callback: Option<&mut UnresponsiveProcessCallback>,
+    ) -> ::std::os::raw::c_int {
+      // Returning 1 with the callback held suppresses the engine's own
+      // prompt and waits for the application to decide; 0 leaves the
+      // engine's default, an indefinite wait nobody is told about.
+      let Some(callback) = callback else {
+        return 0;
+      };
+      i32::from(self.page_events.renderer_unresponsive(callback.clone()))
+    }
+
+    fn on_render_process_responsive(&self, _browser: Option<&mut Browser>) {
+      self.page_events.renderer_responsive();
+    }
+
+    fn on_certificate_error(
+      &self,
+      _browser: Option<&mut Browser>,
+      cert_error: Errorcode,
+      request_url: Option<&CefString>,
+      ssl_info: Option<&mut Sslinfo>,
+      callback: Option<&mut Callback>,
+    ) -> ::std::os::raw::c_int {
+      let error: &cef::sys::cef_errorcode_t = cert_error.as_ref();
+      let error = crate::cef_impl::client::CertificateError {
+        url: request_url.map(ToString::to_string).unwrap_or_default(),
+        // The generated enum's debug form is Chromium's own name for it.
+        error: format!("{error:?}"),
+        fingerprint: ssl_info.and_then(|info| certificate_fingerprint(info)),
+      };
+      // Without a callback (HSTS, a pinned key) the error cannot be
+      // overridden; the listener still hears it, and the request is refused.
+      i32::from(
+        self
+          .page_events
+          .certificate_error(error, callback.map(|callback| callback.clone())),
+      )
     }
 
     fn on_before_browse(
@@ -561,6 +608,22 @@ wrap_scheme_handler_factory! {
       ))
     }
   }
+}
+
+/// SHA-256 of the server's leaf certificate, hex encoded.
+fn certificate_fingerprint(info: &mut Sslinfo) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let certificate = info.x509_certificate()?;
+    let der = certificate.derencoded()?;
+    let size = der.size();
+    if size == 0 {
+        return None;
+    }
+    let mut bytes = vec![0u8; size];
+    let copied = der.data(Some(&mut bytes), 0);
+    bytes.truncate(copied);
+    let digest = Sha256::digest(&bytes);
+    Some(digest.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 struct ThreadSafe<T>(T);
