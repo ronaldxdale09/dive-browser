@@ -111,12 +111,174 @@ async fn probe_tab(state: &AppState, id: TabId) -> AppResult<WebAppProbe> {
     let session = cdp_for(state, id)?;
     let script = crate::pagescript::build("webapp.js", &[("__MIN_ICON__", MIN_ICON.to_string())]);
     let value = evaluate(&session, script).await?;
-    let mut probe: WebAppProbe = serde_json::from_value(value)
+    let probe: WebAppProbe = serde_json::from_value(value)
         .map_err(|e| AppError::new(format!("manifest probe returned an odd shape: {e}")))?;
+    // Judged against the address the browser has for the tab, not the one
+    // the page reports: the report is the page's word.
+    let tab_url = lock(&state.store).tab(id)?.url;
+    let mut probe = checked(probe, &tab_url);
     if let Some(app_id) = probe.id.as_deref() {
         probe.installed = lock(&state.store).web_app(app_id)?;
     }
     Ok(probe)
+}
+
+/// Display modes a manifest may ask for; anything else is a standalone app.
+const DISPLAY_MODES: &[&str] = &[
+    "fullscreen",
+    "standalone",
+    "minimal-ui",
+    "browser",
+    "window-controls-overlay",
+    "tabbed",
+];
+/// Longest app name kept. A name is shown in a title bar and written into a
+/// launcher's file name, and neither has room for a paragraph.
+const NAME_CAP: usize = 100;
+
+/// The page's report, held to what an install may write.
+///
+/// The probe runs in the page, so everything in it is what the page chose
+/// to say. An install writes a launcher that opens `start_url`, keeps the
+/// app's window within `scope`, and names the app by `id` -- so a page that
+/// could report a `file:` or `dive:` start URL, or another site's, would
+/// get an icon in the Dock that opens whatever it liked under a name it
+/// picked. The addresses have to be web addresses (https, or http on this
+/// machine), of the tab's own site, with the start URL inside the scope and
+/// the id on the start URL's origin, as the manifest spec has them. A report
+/// that fails is returned as not installable, with the reason.
+fn checked(mut probe: WebAppProbe, tab_url: &str) -> WebAppProbe {
+    if !probe.installable {
+        return probe;
+    }
+    match check_addresses(&probe, tab_url) {
+        Ok((id, start_url, scope, manifest_url, icon_url)) => {
+            probe.id = Some(id);
+            probe.start_url = Some(start_url);
+            probe.scope = Some(scope);
+            probe.manifest_url = Some(manifest_url);
+            probe.icon_url = Some(icon_url);
+        }
+        Err(reason) => {
+            probe.installable = false;
+            probe.reason = Some(reason);
+            return probe;
+        }
+    }
+    probe.name = probe.name.as_deref().and_then(|n| plain_text(n, NAME_CAP));
+    probe.short_name = probe
+        .short_name
+        .as_deref()
+        .and_then(|n| plain_text(n, NAME_CAP));
+    probe.description = probe
+        .description
+        .as_deref()
+        .and_then(|d| plain_text(d, 500));
+    probe.display = Some(
+        probe
+            .display
+            .filter(|d| DISPLAY_MODES.contains(&d.as_str()))
+            .unwrap_or_else(|| "standalone".into()),
+    );
+    probe.theme_color = probe.theme_color.filter(|c| css_color(c));
+    probe.background_color = probe.background_color.filter(|c| css_color(c));
+    if probe.name.is_none() {
+        probe.installable = false;
+        probe.reason = Some("the manifest has no usable name".into());
+    }
+    probe
+}
+
+/// An address an app may live at: https anywhere, http only on this
+/// machine, where dev servers run without certificates.
+fn app_address(value: Option<&str>, what: &str) -> Result<url::Url, String> {
+    let value = value.ok_or_else(|| format!("the manifest has no {what}"))?;
+    let url =
+        url::Url::parse(value).map_err(|_| format!("the manifest's {what} is not an address"))?;
+    let local = url.scheme() == "http" && crate::netfetch::names_local_host(&url);
+    if url.scheme() != "https" && !local {
+        return Err(format!(
+            "the manifest's {what} is not an https address, so it cannot be installed"
+        ));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(format!("the manifest's {what} carries a password"));
+    }
+    Ok(url)
+}
+
+/// The id, start URL, scope, manifest and icon addresses, checked.
+fn check_addresses(
+    probe: &WebAppProbe,
+    tab_url: &str,
+) -> Result<(String, String, String, String, String), String> {
+    let tab = app_address(Some(tab_url), "page address").map_err(|_| {
+        "only a page served over https (or from this machine) can be installed".to_owned()
+    })?;
+    let site = crate::site::of_url(&tab);
+    let start = app_address(probe.start_url.as_deref(), "start_url")?;
+    let scope = app_address(probe.scope.as_deref(), "scope")?;
+    for (url, what) in [(&start, "start_url"), (&scope, "scope")] {
+        if crate::site::of_url(url) != site {
+            return Err(format!(
+                "the manifest's {what} is on another site than the page, so it cannot be installed from here"
+            ));
+        }
+    }
+    if !start.as_str().starts_with(scope.as_str()) {
+        return Err("the manifest's start_url is outside its scope".into());
+    }
+    // The spec resolves an id against the start URL and requires the same
+    // origin; an id elsewhere would let one site claim another's app.
+    let id = match probe.id.as_deref() {
+        Some(id) => {
+            url::Url::parse(id).map_err(|_| "the manifest's id is not an address".to_owned())?
+        }
+        None => start.clone(),
+    };
+    if id.origin() != start.origin() {
+        return Err("the manifest's id is on another origin than its start_url".into());
+    }
+    let manifest = app_address(probe.manifest_url.as_deref(), "manifest address")?;
+    let icon = probe
+        .icon_url
+        .as_deref()
+        .ok_or_else(|| "the manifest has no icon".to_owned())?;
+    let icon_ok = icon.starts_with("data:image/") || app_address(Some(icon), "icon").is_ok();
+    if !icon_ok {
+        return Err("the manifest's icon is not an https address or an image".into());
+    }
+    Ok((
+        id.into(),
+        start.into(),
+        scope.into(),
+        manifest.into(),
+        icon.to_owned(),
+    ))
+}
+
+/// `value` with control characters gone and runs of space collapsed, cut to
+/// `cap` characters, or `None` when nothing is left.
+fn plain_text(value: &str, cap: usize) -> Option<String> {
+    let flat = value
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let cut: String = flat.chars().take(cap).collect();
+    (!cut.is_empty()).then_some(cut)
+}
+
+/// Whether `value` reads as one CSS colour and nothing more.
+fn css_color(value: &str) -> bool {
+    value.len() <= 64
+        && !value.is_empty()
+        && value.chars().all(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(c, '#' | '(' | ')' | ',' | '.' | '%' | ' ' | '/' | '-')
+        })
 }
 
 /// Whether the page in `id` can be installed, and as what.
@@ -368,6 +530,10 @@ pub(crate) fn open_by_id(
         }
         return Ok(tab);
     }
+    // Checked again on the way out: a record written before installs were
+    // checked could hold any address, and opening one is a navigation Dive
+    // makes on the app's behalf.
+    app_address(Some(&record.start_url), "start_url").map_err(AppError::new)?;
     let installed_in = record
         .workspace_id
         .filter(|workspace| lock(&state.store).workspace(*workspace).is_ok());
@@ -446,16 +612,45 @@ pub(crate) fn remember_app_window(window: &tauri::Window<Runtime>, tab: TabId) {
 mod launcher {
     use super::{DefaultHasher, Hash, Hasher, Path, PathBuf, WebApp};
 
-    /// A filename for the app: its name with path separators and control
-    /// characters removed, or its short name, or the id's host.
+    /// Characters a launcher's file name may keep besides letters and digits.
+    const NAME_PUNCTUATION: &[char] = &[' ', '-', '_', '.', '(', ')', '&', '+', ',', '!'];
+    /// Names Windows gives to devices, which no file may take.
+    const RESERVED: &[&str] = &[
+        "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
+        "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+    ];
+
+    /// `value` as a file name every system accepts and no shell reads as
+    /// anything but a name.
+    ///
+    /// Kept to letters, digits and a little punctuation rather than stripped
+    /// of what is known to be dangerous: the name comes from a web page, and
+    /// PowerShell alone treats five different characters as a single quote.
+    pub(super) fn safe_name(value: &str) -> String {
+        let kept: String = value
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || NAME_PUNCTUATION.contains(&c) {
+                    c
+                } else {
+                    ' '
+                }
+            })
+            .collect();
+        let flat = kept.split_whitespace().collect::<Vec<_>>().join(" ");
+        let cut: String = flat.trim_matches(['.', ' ']).chars().take(64).collect();
+        let cut = cut.trim_end_matches(['.', ' ']).to_owned();
+        let stem = cut.split('.').next().unwrap_or_default();
+        if RESERVED.iter().any(|r| stem.eq_ignore_ascii_case(r)) {
+            return format!("{cut} App");
+        }
+        cut
+    }
+
+    /// A filename for the app: its name made safe, or its short name, or
+    /// the id's host.
     fn bundle_name(app: &WebApp) -> String {
-        let clean = |s: &str| {
-            s.chars()
-                .filter(|c| !matches!(c, '/' | ':' | '\\' | '\0') && !c.is_control())
-                .collect::<String>()
-                .trim()
-                .to_owned()
-        };
+        let clean = safe_name;
         let name = clean(&app.name);
         if !name.is_empty() {
             return name;
@@ -466,7 +661,8 @@ mod launcher {
         }
         url::Url::parse(&app.id)
             .ok()
-            .and_then(|u| u.host_str().map(str::to_owned))
+            .and_then(|u| u.host_str().map(safe_name))
+            .filter(|h| !h.is_empty())
             .unwrap_or_else(|| "Web App".into())
     }
 
@@ -627,10 +823,43 @@ mod launcher {
         Some(ico)
     }
 
-    /// Quote a string for a single-quoted PowerShell literal.
+    /// The script that makes a Start Menu shortcut.
+    ///
+    /// Fixed text. The name, the paths and the app's id come from a web page
+    /// or a folder the person named, and quoting them into the script meant
+    /// getting PowerShell's quoting right -- which treats ' and the curly
+    /// and low quotes as the same character, so doubling only the plain one
+    /// left four ways to end the literal and run code. Every value arrives in
+    /// an environment variable instead, which PowerShell reads as a string
+    /// and never parses.
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    fn ps_quote(value: &str) -> String {
-        format!("'{}'", value.replace('\'', "''"))
+    pub(super) const SHORTCUT_SCRIPT: &str = "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:DIVE_SHORTCUT_PATH); $s.TargetPath = $env:DIVE_SHORTCUT_TARGET; $s.Arguments = $env:DIVE_SHORTCUT_ARGUMENTS; $s.IconLocation = $env:DIVE_SHORTCUT_ICON; $s.Description = $env:DIVE_SHORTCUT_DESCRIPTION; $s.Save()";
+
+    /// The values [`SHORTCUT_SCRIPT`] reads, by variable.
+    ///
+    /// The id goes on Dive's command line as one quoted argument; a quote in
+    /// it would split that argument in two, so it is escaped the way a URL
+    /// escapes one.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(super) fn shortcut_env(
+        link: &Path,
+        target: &Path,
+        app: &WebApp,
+        icon: &str,
+    ) -> Vec<(&'static str, String)> {
+        vec![
+            ("DIVE_SHORTCUT_PATH", link.display().to_string()),
+            ("DIVE_SHORTCUT_TARGET", target.display().to_string()),
+            (
+                "DIVE_SHORTCUT_ARGUMENTS",
+                format!("\"--app={}\"", app.id.replace('"', "%22")),
+            ),
+            ("DIVE_SHORTCUT_ICON", icon.to_owned()),
+            (
+                "DIVE_SHORTCUT_DESCRIPTION",
+                format!("{} in Dive", bundle_name(app)),
+            ),
+        ]
     }
 
     #[cfg(target_os = "windows")]
@@ -659,21 +888,9 @@ mod launcher {
 
         // A .lnk is a COM object's business. Rather than bind IShellLink for
         // one call, ask the shell scripting host that has always made them.
-        let script = format!(
-            "$s = (New-Object -ComObject WScript.Shell).CreateShortcut({link});\
-             $s.TargetPath = {target};\
-             $s.Arguments = {args};\
-             $s.IconLocation = {icon};\
-             $s.Description = {description};\
-             $s.Save()",
-            link = ps_quote(&link.display().to_string()),
-            target = ps_quote(&dive.display().to_string()),
-            args = ps_quote(&format!("--app={}", app.id)),
-            icon = ps_quote(&icon),
-            description = ps_quote(&format!("{} in Dive", bundle_name(app))),
-        );
         let status = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .args(["-NoProfile", "-NonInteractive", "-Command", SHORTCUT_SCRIPT])
+            .envs(shortcut_env(&link, &dive, app, &icon))
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
@@ -778,12 +995,54 @@ mod launcher {
         }
 
         #[test]
-        fn a_quote_in_a_path_cannot_end_the_powershell_literal() {
-            assert_eq!(
-                ps_quote(r"C:\Users\o'brien\App.lnk"),
-                r"'C:\Users\o''brien\App.lnk'"
+        fn the_shortcut_script_carries_no_value_of_its_own() {
+            // Every value reaches PowerShell through the environment, so the
+            // script is the same text whatever the page called itself.
+            assert!(!SHORTCUT_SCRIPT.contains('\''));
+            assert!(!SHORTCUT_SCRIPT.contains('"'));
+            let hostile = app(
+                "x'); Start-Process calc; ('\u{2019}); calc; (\u{2018}\u{201a}\u{201b}",
+                "https://x/?q=\"--load-extension=C:\\evil\"",
             );
-            assert_eq!(ps_quote("plain"), "'plain'");
+            let env = shortcut_env(
+                Path::new(r"C:\Users\o'brien\Dive Apps\x.lnk"),
+                Path::new(r"C:\Program Files\Dive\dive.exe"),
+                &hostile,
+                "icon.ico",
+            );
+            let names: Vec<&str> = env.iter().map(|(name, _)| *name).collect();
+            for name in &names {
+                assert!(SHORTCUT_SCRIPT.contains(&format!("$env:{name}")), "{name}");
+            }
+            let arguments = &env
+                .iter()
+                .find(|(n, _)| *n == "DIVE_SHORTCUT_ARGUMENTS")
+                .unwrap()
+                .1;
+            // One argument, whose quotes cannot be closed from inside.
+            assert_eq!(arguments.matches('"').count(), 2, "{arguments}");
+            assert!(arguments.starts_with("\"--app=") && arguments.ends_with('"'));
+        }
+
+        #[test]
+        fn a_name_keeps_no_quote_of_any_kind() {
+            let named =
+                safe_name("Tom's \u{2018}Mail\u{2019} \u{201a}x\u{201b} \"y\" `z` $(calc); <a>|b");
+            for c in [
+                '\'', '\u{2018}', '\u{2019}', '\u{201a}', '\u{201b}', '"', '`', '$', ';', '<', '>',
+                '|',
+            ] {
+                assert!(!named.contains(c), "{c:?} survived in {named:?}");
+            }
+            assert_eq!(named, "Tom s Mail x y z (calc) a b");
+            // Names Windows keeps for devices, and names that are all dots,
+            // do not become files.
+            assert_eq!(safe_name("CON"), "CON App");
+            assert_eq!(safe_name("nul.txt"), "nul.txt App");
+            assert_eq!(safe_name(".."), "");
+            assert_eq!(safe_name(&"a".repeat(200)).len(), 64);
+            // Letters other than English ones are names like any other.
+            assert_eq!(safe_name("メール"), "メール");
         }
 
         fn app(name: &str, id: &str) -> WebApp {
@@ -809,7 +1068,7 @@ mod launcher {
         fn bundle_name_is_a_safe_filename() {
             assert_eq!(
                 bundle_name(&app("Mail / Work: v2", "https://x/")),
-                "Mail  Work v2"
+                "Mail Work v2"
             );
             assert_eq!(bundle_name(&app("   ", "https://mail.example/app")), "S");
             let mut a = app("", "https://mail.example/app");
@@ -831,7 +1090,8 @@ mod launcher {
         fn plist_escapes_the_name_and_is_stable_per_id() {
             let a = app("Tom & <Jerry>", "https://x/");
             let plist = info_plist(&a);
-            assert!(plist.contains("<string>Tom &amp; &lt;Jerry&gt;</string>"));
+            // The brackets never reach the name; the ampersand is escaped.
+            assert!(plist.contains("<string>Tom &amp; Jerry</string>"));
             assert!(plist.contains("<key>CFBundleExecutable</key><string>launch</string>"));
             assert_eq!(bundle_id(&a), bundle_id(&app("Renamed", "https://x/")));
             assert_ne!(
@@ -854,6 +1114,105 @@ mod tests {
         assert!(!probe.installable);
         assert_eq!(probe.reason.as_deref(), Some("no manifest"));
         assert!(probe.name.is_none());
+    }
+
+    fn installable(start: &str, scope: &str) -> WebAppProbe {
+        WebAppProbe {
+            installable: true,
+            reason: None,
+            id: Some(start.into()),
+            name: Some("Mail".into()),
+            short_name: Some("Mail".into()),
+            start_url: Some(start.into()),
+            scope: Some(scope.into()),
+            display: Some("standalone".into()),
+            theme_color: Some("#112233".into()),
+            background_color: Some("rgb(1, 2, 3)".into()),
+            icon_url: Some("https://cdn.example.net/icon.png".into()),
+            icon_size: Some(512),
+            manifest_url: Some("https://mail.example.com/manifest.json".into()),
+            description: None,
+            installed: None,
+        }
+    }
+
+    #[test]
+    fn an_app_of_the_tab_s_own_site_installs() {
+        let probe = checked(
+            installable("https://mail.example.com/app/", "https://mail.example.com/"),
+            "https://mail.example.com/inbox",
+        );
+        assert!(probe.installable, "{:?}", probe.reason);
+        // A subdomain is the same site.
+        let probe = checked(
+            installable("https://app.example.com/", "https://app.example.com/"),
+            "https://example.com/",
+        );
+        assert!(probe.installable, "{:?}", probe.reason);
+        // A dev server on this machine may be plain http.
+        let probe = checked(
+            installable("http://localhost:5173/", "http://localhost:5173/"),
+            "http://localhost:5173/",
+        );
+        assert!(probe.installable, "{:?}", probe.reason);
+    }
+
+    #[test]
+    fn a_page_cannot_install_an_app_that_opens_somewhere_else() {
+        let tab = "https://mail.example.com/inbox";
+        for (start, scope) in [
+            ("file:///etc/passwd", "file:///"),
+            ("dive://settings", "dive://"),
+            ("data:text/html,hi", "data:text/html,"),
+            ("https://bank.example.org/", "https://bank.example.org/"),
+            ("http://mail.example.com/", "http://mail.example.com/"),
+            (
+                "https://user:pw@mail.example.com/",
+                "https://user:pw@mail.example.com/",
+            ),
+        ] {
+            let probe = checked(installable(start, scope), tab);
+            assert!(!probe.installable, "{start} was installable");
+            assert!(probe.reason.is_some());
+        }
+        // A start URL outside its scope, and an id on another origin.
+        let probe = checked(
+            installable(
+                "https://mail.example.com/app/",
+                "https://mail.example.com/other/",
+            ),
+            tab,
+        );
+        assert!(!probe.installable);
+        let mut foreign_id = installable("https://mail.example.com/", "https://mail.example.com/");
+        foreign_id.id = Some("https://other.example.com/".into());
+        assert!(!checked(foreign_id, tab).installable);
+        // An icon that is not a web address or an image.
+        let mut icon = installable("https://mail.example.com/", "https://mail.example.com/");
+        icon.icon_url = Some("file:///Users/me/.ssh/id_ed25519".into());
+        assert!(!checked(icon, tab).installable);
+        // A page that is not on the web cannot install anything.
+        assert!(
+            !checked(
+                installable("https://mail.example.com/", "https://mail.example.com/"),
+                "file:///tmp/x.html"
+            )
+            .installable
+        );
+    }
+
+    #[test]
+    fn the_rest_of_the_report_is_held_to_plain_values() {
+        let mut probe = installable("https://mail.example.com/", "https://mail.example.com/");
+        probe.name = Some("Mail\n\u{0007}  for  you".into());
+        probe.display = Some("javascript".into());
+        probe.theme_color = Some("red; background: url(https://evil/)".into());
+        let probe = checked(probe, "https://mail.example.com/");
+        assert!(probe.installable);
+        assert_eq!(probe.name.as_deref(), Some("Mail for you"));
+        assert_eq!(probe.display.as_deref(), Some("standalone"));
+        assert_eq!(probe.theme_color, None);
+        assert_eq!(probe.background_color.as_deref(), Some("rgb(1, 2, 3)"));
     }
 
     #[test]
