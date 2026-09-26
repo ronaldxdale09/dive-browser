@@ -24,6 +24,24 @@ afterEach(() => {
 });
 
 describe("Palette", () => {
+  it("hands another app's link over from the tab on screen instead of opening an empty tab", async () => {
+    vi.spyOn(ipc, "commandsList").mockResolvedValue([]);
+    vi.spyOn(ipc, "devServersWatch").mockResolvedValue([]);
+    vi.spyOn(events.devServersChanged, "listen").mockResolvedValue(() => undefined);
+    vi.spyOn(ipc, "bookmarksSearch").mockResolvedValue([]);
+    vi.spyOn(ipc, "historySearch").mockResolvedValue([]);
+    const navigate = vi.fn().mockResolvedValue(true);
+    const openTab = vi.fn().mockResolvedValue(undefined);
+    useBrowser.setState({ navigate, openTab });
+    render(<Palette />);
+    const input = screen.getByPlaceholderText("Search, enter a URL, or run a command");
+    fireEvent.change(input, { target: { value: "mailto:dale@example.com" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("mailto:dale@example.com"));
+    expect(openTab).not.toHaveBeenCalled();
+  });
+
+
   it("offers rows that contain what was typed, not scattered-letter matches", () => {
     expect(paletteFilter("Developer dock dock.toggle", "verge")).toBe(0);
     expect(paletteFilter("The Verge https://www.theverge.com/", "verge")).toBe(1);

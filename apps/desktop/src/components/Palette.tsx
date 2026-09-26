@@ -11,7 +11,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { tracePaletteLifecycle } from "../lib/inputTimingProbe";
-import { leadsTo, looksLikeUrl, titleOf } from "../lib/omnibox";
+import { leadsTo, looksLikeUrl, opensInAnotherApp, titleOf } from "../lib/omnibox";
 
 /**
  * How many history rows the palette offers. It is a launcher, not a history
@@ -143,9 +143,14 @@ export function Palette() {
   }, []);
 
   const { close, className } = useFadeClose(() => toggle("palette", false));
+  const navigate = useBrowser((s) => s.navigate);
   const go = async (url: string) => {
     close();
-    await openTab(url);
+    // Another app's link loads nothing here: handed over from the tab on
+    // screen, it asks "open in another app?" without leaving an empty tab
+    // behind, as a new tab opened for it did.
+    if (opensInAnotherApp(url)) await navigate(url);
+    else await openTab(url);
   };
   // The same judgement Enter gets from the backend, so the label never says
   // Open for what then becomes a search, and dive://, file:// and about:
