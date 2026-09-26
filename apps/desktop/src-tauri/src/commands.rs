@@ -4207,8 +4207,13 @@ pub(crate) fn layout_set_panes(app: AppHandle<Runtime>, panes: Vec<PaneBounds>) 
         };
         {
             let store = lock(&state.store);
+            // One pane that cannot wake must not leave every other pane of
+            // the split unplaced; its rectangle is kept and its page goes
+            // there once a view for it exists.
             for pane in &panes {
-                ensure_view(main, app, state, host, &store, pane.tab)?;
+                if let Err(e) = ensure_view(main, app, state, host, &store, pane.tab) {
+                    tracing::warn!(tab = %pane.tab, "split pane could not be woken: {e}");
+                }
             }
         }
         host.set_panes(panes)?;
