@@ -153,6 +153,22 @@ describe("Dock console panel", () => {
     expect(scrollTo).toHaveBeenCalled();
   });
 
+  it("keeps following output once the log is full and every new line evicts an old one", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => frames.push(cb));
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => { frames.splice(id - 1, 1, () => undefined); });
+    const runFrames = () => act(() => { frames.splice(0).forEach((cb) => cb(0)); });
+    push(Array.from({ length: 500 }, (_, i) => entry(i)));
+    render(<Dock />);
+    runFrames();
+    const scrollTo = HTMLElement.prototype.scrollTo as unknown as ReturnType<typeof vi.fn>;
+    scrollTo.mockClear();
+    push([entry(500)]);
+    expect(useConsole.getState().byTab["tab-1"]).toHaveLength(500);
+    runFrames();
+    expect(scrollTo).toHaveBeenCalled();
+  });
+
   it("hands back the same row objects for runs that have not changed", () => {
     const rows = [entry(1, "a"), entry(2, "b"), entry(3, "b"), entry(4, "c")].map((e, id) => ({ ...e, id }));
     const before = coalesce(rows);

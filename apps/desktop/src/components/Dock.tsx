@@ -215,11 +215,15 @@ function ConsolePanel() {
   });
   // A burst of output lands as several flushes; the scroll waits for the
   // next frame so the burst costs one, and only while the user is at the end.
+  // Keyed on the newest row, not the count: once the log is at its cap every
+  // new line evicts an old one, the count stays put, and the view stopped
+  // following.
+  const newest = shown.at(-1)?.id;
   useEffect(() => {
-    if (!atBottom.current || shown.length === 0) return;
+    if (!atBottom.current || newest === undefined) return;
     const frame = requestAnimationFrame(() => virtualizer.scrollToEnd());
     return () => cancelAnimationFrame(frame);
-  }, [shown.length, virtualizer]);
+  }, [newest, virtualizer]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
