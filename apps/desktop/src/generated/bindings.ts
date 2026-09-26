@@ -479,6 +479,15 @@ export const commands = {
 	 *  otherwise the tabs stay listed and asleep.
 	 */
 	sessionRecoveryResolve: (restore: boolean) => typedError<null, AppError>(__TAURI_INVOKE("session_recovery_resolve", { restore })),
+	/**
+	 *  Gather the log, panic records and heartbeat into one folder in the
+	 *  downloads folder and show it, ready to attach to a report. Returns its
+	 *  path. A folder rather than an archive: no archive format is built into
+	 *  this binary, and a folder is as easy to drag onto a report.
+	 */
+	diagnosticsExport: () => typedError<string, AppError>(__TAURI_INVOKE("diagnostics_export")),
+	/**  Show the log folder in the file manager. */
+	diagnosticsRevealLogs: () => typedError<null, AppError>(__TAURI_INVOKE("diagnostics_reveal_logs")),
 	/**  Whether Dive is the system's default browser. */
 	defaultBrowserStatus: () => __TAURI_INVOKE<DefaultBrowserStatus>("default_browser_status"),
 	/**  Ask the system to make Dive the default browser. */

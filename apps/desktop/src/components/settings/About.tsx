@@ -1,5 +1,7 @@
-import { ArrowDownToLine, Check as CheckIcon, RotateCcw } from "lucide-react";
+import { ArrowDownToLine, Check as CheckIcon, FileArchive, RotateCcw } from "lucide-react";
 import { useState } from "react";
+import { errorMessage } from "../../lib/errors";
+import { ipc } from "../../lib/ipc";
 import type { AppInfo } from "../../lib/ipc";
 import { isPrivateWindow } from "../../lib/privateMode";
 import { useBrowser } from "../../store/browser";
@@ -47,8 +49,50 @@ export function About({ info }: { info: AppInfo | null }) {
         />
       </Group>
       <Updates channel={info?.build.channel ?? null} updater={info?.updater ?? true} />
+      {!isPrivateWindow() && <Diagnostics />}
       <StartOver />
     </>
+  );
+}
+
+/**
+ * The log and crash records, for a bug report. Export gathers them into one
+ * folder in Downloads and shows it, so the person can drag it onto a report
+ * without knowing where Dive keeps its data.
+ */
+function Diagnostics() {
+  const notify = useBrowser((s) => s.notify);
+  const [busy, setBusy] = useState(false);
+  const run = async (action: () => Promise<unknown>, done?: (result: unknown) => string) => {
+    setBusy(true);
+    try {
+      const result = await action();
+      if (done) notify(done(result), 5000);
+    } catch (e) {
+      notify(errorMessage(e), 6000);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Group title="Diagnostics">
+      <Row
+        label="Report a problem"
+        hint="Logs and crash records stay on this computer. Export gathers the recent ones into a folder in Downloads to attach to a report; they may contain the addresses of pages you visited."
+        control={
+          <span className="flex items-center gap-2">
+            <Button variant="quiet" disabled={busy} onClick={() => void run(() => ipc.diagnosticsRevealLogs())}>
+              Reveal logs
+            </Button>
+            <Button variant="quiet" disabled={busy} onClick={() => void run(() => ipc.diagnosticsExport(), () => "Diagnostics exported to Downloads")}>
+              <span className="inline-flex items-center gap-1.5">
+                <Icon icon={FileArchive} size={12} /> Export diagnostics
+              </span>
+            </Button>
+          </span>
+        }
+      />
+    </Group>
   );
 }
 

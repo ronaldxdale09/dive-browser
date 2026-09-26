@@ -29,6 +29,7 @@ mod credential_fill;
 mod db_recovery;
 mod default_browser;
 mod devservers;
+mod diagnostics;
 mod downloads;
 mod emulate;
 mod engine;
@@ -258,6 +259,7 @@ pub fn run() {
     install_panic_hook();
     if !private_session::is_private() {
         recovery::begin(&state::data_root());
+        private_session::sweep_stale();
     }
 
     if let Err(error) = prefs::finish_pending_clear() {
@@ -850,7 +852,8 @@ fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
     });
     let (file_layer, guard) = match file {
         Some(appender) => {
-            let (writer, guard) = tracing_appender::non_blocking(appender);
+            let (writer, guard) =
+                tracing_appender::non_blocking(diagnostics::CappedLog::new(appender, &logs));
             let layer = tracing_subscriber::fmt::layer()
                 .with_ansi(false)
                 .with_writer(writer)
@@ -867,29 +870,15 @@ fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
 }
 
 /// Write every panic in the browser process to `crashes/` in the data
-/// directory with the build version, then carry on to the default hook.
+/// directory with the build version and a backtrace, then carry on to the
+/// default hook.
 fn install_panic_hook() {
     if private_session::is_private() {
         return;
     }
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let dir = state::data_root().join("crashes");
-        if std::fs::create_dir_all(&dir).is_ok() {
-            let stamp = time::OffsetDateTime::now_utc()
-                .format(&time::format_description::well_known::Rfc3339)
-                .unwrap_or_default()
-                .replace(':', "-");
-            let body = format!(
-                "dive {} ({})\n{}\nthread: {}\n{}\n",
-                env!("CARGO_PKG_VERSION"),
-                std::env::consts::OS,
-                stamp,
-                std::thread::current().name().unwrap_or("?"),
-                info
-            );
-            let _ = std::fs::write(dir.join(format!("panic-{stamp}.txt")), body);
-        }
+        diagnostics::record_panic(&state::data_root().join("crashes"), info);
         tracing::error!("{info}");
         previous(info);
     }));

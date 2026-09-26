@@ -777,7 +777,7 @@ pub(crate) fn download_start(app: AppHandle<Runtime>, id: TabId, url: String) ->
 }
 
 /// Open `path` in the platform file manager, selecting it when it is a file.
-fn reveal(path: &std::path::Path) -> AppResult<()> {
+pub(crate) fn reveal(path: &std::path::Path) -> AppResult<()> {
     #[cfg(target_os = "macos")]
     let status = {
         let mut cmd = std::process::Command::new("open");
@@ -934,6 +934,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::updater::update_cancel,
             crate::recovery::session_recovery_status,
             crate::recovery::session_recovery_resolve,
+            crate::diagnostics::diagnostics_export,
+            crate::diagnostics::diagnostics_reveal_logs,
             default_browser_status,
             default_browser_set,
             subtitle_models,

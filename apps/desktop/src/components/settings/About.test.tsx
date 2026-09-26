@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ipc } from "../../lib/ipc";
 import type { AppInfo } from "../../lib/ipc";
 import { useUpdates } from "../../store/updates";
 import { About, engineLabel } from "./About";
@@ -18,6 +19,23 @@ describe("About header", () => {
     expect(screen.getByText("Dive")).toBeTruthy();
     expect(screen.getByTestId("about-summary").textContent).toContain("Version 0.1.16");
     expect(screen.getByTestId("about-summary").textContent).toContain(engineLabel());
+  });
+});
+
+describe("About diagnostics", () => {
+  it("exports the logs and crash records for a report", async () => {
+    const exported = vi.spyOn(ipc, "diagnosticsExport").mockResolvedValue("/Users/x/Downloads/Dive Diagnostics T");
+    const reveal = vi.spyOn(ipc, "diagnosticsRevealLogs").mockResolvedValue(null);
+    render(<About info={info("release")} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Export diagnostics/ }));
+    });
+    expect(exported).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Reveal logs" }));
+    });
+    expect(reveal).toHaveBeenCalledTimes(1);
+    vi.restoreAllMocks();
   });
 });
 

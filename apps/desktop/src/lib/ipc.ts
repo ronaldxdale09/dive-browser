@@ -325,6 +325,9 @@ export const ipc = {
   /** What startup held back after repeated unclean exits, if it held anything back. */
   sessionRecoveryStatus: () => commands.sessionRecoveryStatus(),
   sessionRecoveryResolve: async (restore: boolean) => unwrap(await commands.sessionRecoveryResolve(restore)),
+  /** Gather logs, crash records and the heartbeat into a folder in Downloads and show it; returns the folder. */
+  diagnosticsExport: async () => unwrap(await commands.diagnosticsExport()),
+  diagnosticsRevealLogs: async () => unwrap(await commands.diagnosticsRevealLogs()),
   historySearch: async (query: string, limit = 20) => unwrap(await commands.historySearch(query, limit)),
   historyRemove: async (url: string) => unwrap(await commands.historyRemove(url)),
   shareUrl: async (url: string) => unwrap(await commands.shareUrl(url)),

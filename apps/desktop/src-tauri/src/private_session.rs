@@ -36,7 +36,7 @@ pub fn data_root() -> PathBuf {
                 std::env::var("DIVE_PRIVATE_LAUNCH_TOKEN").unwrap_or_default()
             ))
             .tempdir();
-        match built {
+        let root = match built {
             Ok(dir) => {
                 let path = dir.path().to_owned();
                 let _ = TEMP_ROOT.set(dir);
@@ -57,9 +57,89 @@ pub fn data_root() -> PathBuf {
                 }
                 path
             }
-        }
+        };
+        hold_session_lock(&root);
+        root
     })
     .clone()
+}
+
+/// The lock a private session holds on its folder while it runs.
+const SESSION_LOCK: &str = "session.lock";
+
+/// Held for the life of the process: the lock is released only when the
+/// process ends, however it ends, which is what tells a later sweep that
+/// the folder is no longer anyone's.
+static SESSION_LOCK_FILE: OnceLock<std::fs::File> = OnceLock::new();
+
+fn hold_session_lock(root: &std::path::Path) {
+    let held = std::fs::File::create(root.join(SESSION_LOCK)).and_then(|file| {
+        file.try_lock().map_err(std::io::Error::other)?;
+        Ok(file)
+    });
+    match held {
+        Ok(file) => {
+            let _ = SESSION_LOCK_FILE.set(file);
+        }
+        Err(e) => tracing::warn!("could not lock the private session folder: {e}"),
+    }
+}
+
+/// Whether a leftover private folder can go: nobody holds its lock, or, for
+/// a folder from before the lock existed, it has not changed for a day.
+fn abandoned(dir: &std::path::Path) -> bool {
+    let lock = dir.join(SESSION_LOCK);
+    if lock.exists() {
+        return std::fs::File::open(&lock).is_ok_and(|file| file.try_lock().is_ok());
+    }
+    std::fs::metadata(dir)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|at| at.elapsed().ok())
+        .is_some_and(|age| age > std::time::Duration::from_hours(24))
+}
+
+/// Remove private-session folders left behind by sessions that crashed.
+///
+/// A private session deletes its folder on the way out, and the normal
+/// process deletes it when the child dies while it watches. A crash of both,
+/// or a force quit, left the folder -- cookies and cache of a session that
+/// was meant to leave nothing -- in the temporary directory for good. The
+/// normal process sweeps them at startup, skipping any a live session holds.
+pub fn sweep_stale() {
+    if is_private() {
+        return;
+    }
+    let places = [
+        (std::env::temp_dir(), "dive-private-"),
+        (crate::state::default_data_root(), "private-"),
+    ];
+    std::thread::spawn(move || {
+        for (dir, prefix) in places {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let is_dir = entry
+                    .file_type()
+                    .is_ok_and(|t| t.is_dir() && !t.is_symlink());
+                if !is_dir || !entry.file_name().to_string_lossy().starts_with(prefix) {
+                    continue;
+                }
+                let path = entry.path();
+                if abandoned(&path) {
+                    match std::fs::remove_dir_all(&path) {
+                        Ok(()) => {
+                            tracing::info!(path = %path.display(), "removed a stale private session folder");
+                        }
+                        Err(e) => {
+                            tracing::warn!(path = %path.display(), "could not remove a stale private session folder: {e}");
+                        }
+                    }
+                }
+            }
+        }
+    });
 }
 
 pub fn cleanup() {
@@ -321,5 +401,18 @@ mod tests {
         ] {
             assert!(allows_command(command), "{command}");
         }
+    }
+
+    #[test]
+    fn a_folder_is_abandoned_once_no_session_holds_its_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock = std::fs::File::create(dir.path().join(SESSION_LOCK)).unwrap();
+        lock.try_lock().unwrap();
+        assert!(!abandoned(dir.path()), "a live session's folder stays");
+        drop(lock);
+        assert!(abandoned(dir.path()));
+        // A folder from before the lock existed goes only once it is old.
+        let legacy = tempfile::tempdir().unwrap();
+        assert!(!abandoned(legacy.path()));
     }
 }
