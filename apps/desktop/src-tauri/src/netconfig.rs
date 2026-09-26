@@ -74,12 +74,55 @@ pub fn load() -> NetworkConfig {
 
 /// Mirror the configuration for the next launch.
 pub fn save(config: &NetworkConfig) -> AppResult<()> {
-    let path = path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(AppError::new)?;
-    }
+    save_to(&path(), config)
+}
+
+/// Written beside the target and renamed over it, after the bytes reach the
+/// disk: a crash or power loss mid-write used to leave a truncated file,
+/// which the next launch read as "no settings" and started without the
+/// person's proxy or DNS.
+fn save_to(path: &std::path::Path, config: &NetworkConfig) -> AppResult<()> {
+    use std::io::Write as _;
+    let dir = path
+        .parent()
+        .ok_or_else(|| AppError::new("the network settings have no folder"))?;
+    std::fs::create_dir_all(dir).map_err(AppError::new)?;
     let json = serde_json::to_vec_pretty(config).map_err(AppError::new)?;
-    std::fs::write(path, json).map_err(AppError::new)
+    let mut file = tempfile::NamedTempFile::new_in(dir).map_err(AppError::new)?;
+    file.write_all(&json).map_err(AppError::new)?;
+    file.as_file().sync_all().map_err(AppError::new)?;
+    file.persist(path).map_err(AppError::new)?;
+    Ok(())
+}
+
+/// Make the startup mirror match the stored preferences.
+///
+/// The database is the record; the file is only a copy the engine can read
+/// before the database opens. A copy that is missing, damaged, or behind --
+/// the last save was interrupted between the two writes -- is rewritten, so
+/// the next launch starts the engine as Settings describes it. This launch
+/// keeps what it started with, and Settings offers the restart as usual.
+pub fn reconcile(stored: &NetworkConfig) {
+    reconcile_at(&path(), stored);
+}
+
+fn reconcile_at(path: &std::path::Path, stored: &NetworkConfig) {
+    let on_disk = std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<NetworkConfig>(&bytes).ok());
+    // No file and nothing chosen is the normal state of a new profile.
+    if on_disk.as_ref() == Some(stored) || (on_disk.is_none() && *stored == stored_default()) {
+        return;
+    }
+    tracing::warn!("the network settings file did not match the stored preferences; rewriting it");
+    if let Err(error) = save_to(path, stored) {
+        tracing::warn!(%error, "could not rewrite the network settings file");
+    }
+}
+
+/// What a profile that never touched the network settings stores.
+fn stored_default() -> NetworkConfig {
+    crate::prefs::Prefs::default().network()
 }
 
 /// The configuration this process was started with. Chromium read it once at
@@ -214,6 +257,31 @@ fn http_pac(value: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_damaged_or_stale_mirror_is_rebuilt_from_the_stored_preferences() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("network.json");
+        let stored = NetworkConfig {
+            proxy_mode: "manual".into(),
+            proxy_server: "10.0.0.1:8080".into(),
+            ..stored_default()
+        };
+        let read =
+            || serde_json::from_slice::<NetworkConfig>(&std::fs::read(&path).unwrap()).unwrap();
+        // Truncated by a crash mid-write.
+        std::fs::write(&path, b"{\"proxy_mo").unwrap();
+        reconcile_at(&path, &stored);
+        assert_eq!(read(), stored);
+        // Behind the database: the last save stopped between the two writes.
+        save_to(&path, &stored_default()).unwrap();
+        reconcile_at(&path, &stored);
+        assert_eq!(read(), stored);
+        // A new profile has no file and needs none.
+        let fresh = dir.path().join("fresh.json");
+        reconcile_at(&fresh, &stored_default());
+        assert!(!fresh.exists());
+    }
 
     fn config(pairs: &[(&str, &str)]) -> NetworkConfig {
         let mut c = NetworkConfig {

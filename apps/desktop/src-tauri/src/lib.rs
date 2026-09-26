@@ -439,6 +439,11 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move { handle.exit(1) });
                 return Ok(());
             }
+            if !private_session::is_private() {
+                use tauri::Manager as _;
+                let state = app.state::<state::AppState>();
+                netconfig::reconcile(&state.prefs.get(&state).network());
+            }
             let monitor_app = app.handle().clone();
             *state::lock(&setup_responsiveness) = responsiveness::start(
                 private_session::is_private(), state::data_root,

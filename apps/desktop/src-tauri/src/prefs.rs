@@ -778,16 +778,18 @@ impl Registry {
     /// Persist `prefs` and return them as stored (clamped).
     pub fn set(&self, state: &AppState, prefs: Prefs) -> AppResult<Prefs> {
         let prefs = prefs.clamp();
+        crate::https_only::apply_settings(prefs.https_only, &prefs.https_only_allowed);
+        let json = serde_json::to_string(&prefs).map_err(AppError::new)?;
+        crate::state::lock(&state.store).set_setting(KEY, &json)?;
         // The engine reads its switches once at launch, before the database
         // is open, so the network settings are mirrored beside the profile as
-        // they are saved. A mirror that fails to write is worth a line in the
-        // log, not a refused preference change.
-        crate::https_only::apply_settings(prefs.https_only, &prefs.https_only_allowed);
+        // they are saved -- after the database, which is the record: a save
+        // the database refused must not reach the next launch through the
+        // mirror. A mirror that fails to write is worth a line in the log,
+        // not a refused preference change; launch rebuilds it from the store.
         if let Err(error) = crate::netconfig::save(&prefs.network()) {
             tracing::warn!(%error, "could not mirror the network settings for the next launch");
         }
-        let json = serde_json::to_string(&prefs).map_err(AppError::new)?;
-        crate::state::lock(&state.store).set_setting(KEY, &json)?;
         *crate::state::lock(&self.cached) = Some(Arc::new(prefs.clone()));
         Ok(prefs)
     }
@@ -1118,23 +1120,85 @@ fn component_targets(profile: &std::path::Path, what: ClearRequest) -> Vec<std::
 /// window back for as long as that took. The trash is emptied in the
 /// background once the store is open.
 pub fn finish_pending_clear() -> AppResult<()> {
-    let pending_path = pending_clear_path();
+    finish_pending_clear_at(
+        &pending_clear_path(),
+        &crate::state::profiles_root(),
+        &crate::state::trash_root(),
+    )
+}
+
+/// [`finish_pending_clear`] with its locations passed in, for tests.
+///
+/// A file that cannot be read as a cleanup is moved aside rather than left
+/// to fail every launch. A profile whose parts could not all be moved stays
+/// queued, alone, for the next launch; the ones that finished are not
+/// repeated.
+fn finish_pending_clear_at(
+    pending_path: &std::path::Path,
+    root: &std::path::Path,
+    trash: &std::path::Path,
+) -> AppResult<()> {
     if !pending_path.exists() {
         return Ok(());
     }
-    let pending: PendingClear = serde_json::from_slice(
-        &std::fs::read(&pending_path).map_err(AppError::new)?,
-    )
-    .map_err(|error| AppError::new(format!("invalid pending browser-data cleanup: {error}")))?;
-    let root = crate::state::profiles_root();
-    let trash = crate::state::trash_root();
+    let bytes = std::fs::read(pending_path).map_err(AppError::new)?;
+    let pending: PendingClear = match serde_json::from_slice(&bytes) {
+        Ok(pending) => pending,
+        Err(error) => {
+            let aside = pending_path.with_extension("json.unreadable");
+            tracing::warn!(%error, aside = %aside.display(), "setting aside an unreadable browser-data cleanup");
+            std::fs::rename(pending_path, &aside).map_err(AppError::new)?;
+            return Err(AppError::new(format!(
+                "invalid pending browser-data cleanup, set aside as {}: {error}",
+                aside.display()
+            )));
+        }
+    };
+    let mut failed = Vec::new();
+    let mut first_error = None;
     for name in &pending.profiles {
-        let profile = safe_profile(&root, name)?;
-        for target in component_targets(&profile, pending.what) {
-            crate::state::discard_path(&target, &trash).map_err(AppError::new)?;
+        let result = safe_profile(root, name).and_then(|profile| {
+            for target in component_targets(&profile, pending.what) {
+                crate::state::discard_path(&target, trash).map_err(AppError::new)?;
+            }
+            Ok(())
+        });
+        if let Err(error) = result {
+            tracing::warn!(profile = name, %error, "could not finish clearing a profile");
+            // An unsafe name can never succeed; keeping it would only fail
+            // again at every launch.
+            if safe_profile(root, name).is_ok() {
+                failed.push(name.clone());
+            }
+            first_error.get_or_insert(error);
         }
     }
-    std::fs::remove_file(pending_path).map_err(AppError::new)
+    if failed.is_empty() {
+        std::fs::remove_file(pending_path).map_err(AppError::new)?;
+    } else {
+        write_pending_clear(
+            pending_path,
+            &PendingClear {
+                profiles: failed,
+                what: pending.what,
+            },
+        )?;
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
+/// Write the pending cleanup beside its path and rename it into place once
+/// it is on disk, so a crash leaves the old file or the new one, never half
+/// of either.
+fn write_pending_clear(path: &std::path::Path, pending: &PendingClear) -> AppResult<()> {
+    use std::io::Write as _;
+    let tmp = path.with_extension("json.tmp");
+    let mut file = std::fs::File::create(&tmp).map_err(AppError::new)?;
+    file.write_all(&serde_json::to_vec_pretty(pending).map_err(AppError::new)?)
+        .map_err(AppError::new)?;
+    file.sync_all().map_err(AppError::new)?;
+    drop(file);
+    std::fs::rename(tmp, path).map_err(AppError::new)
 }
 
 fn queue_profile_clear(profiles: &[String], what: ClearRequest) -> AppResult<()> {
@@ -1152,14 +1216,7 @@ fn queue_profile_clear(profiles: &[String], what: ClearRequest) -> AppResult<()>
     profiles.sort();
     profiles.dedup();
     let what = existing.map_or(what, |pending| merge_clear(pending.what, what));
-    let pending = PendingClear { profiles, what };
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(
-        &tmp,
-        serde_json::to_vec_pretty(&pending).map_err(AppError::new)?,
-    )
-    .map_err(AppError::new)?;
-    std::fs::rename(tmp, path).map_err(AppError::new)
+    write_pending_clear(&path, &PendingClear { profiles, what })
 }
 
 /// Delete the requested browsing data and describe what went.
@@ -1466,6 +1523,46 @@ mod tests {
         );
         assert!(targets.iter().any(|path| path.ends_with("Network/Cookies")));
         assert!(!targets.iter().any(|path| path.ends_with("IndexedDB")));
+    }
+
+    #[test]
+    fn a_pending_clear_finishes_and_an_unreadable_one_is_set_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("profiles");
+        let trash = dir.path().join("trash");
+        let pending = dir.path().join("pending-browser-data-clear.json");
+        std::fs::create_dir_all(root.join("a/Cache")).unwrap();
+        let what = ClearRequest {
+            history: false,
+            cookies: false,
+            cache: true,
+            site_data: false,
+            forms: false,
+            since_hours: None,
+        };
+        write_pending_clear(
+            &pending,
+            &PendingClear {
+                // A name that can never be a profile folder is dropped
+                // rather than retried at every launch.
+                profiles: vec!["a".into(), "../escape".into()],
+                what,
+            },
+        )
+        .unwrap();
+        assert!(finish_pending_clear_at(&pending, &root, &trash).is_err());
+        assert!(
+            !root.join("a/Cache").exists(),
+            "the cache went to the trash"
+        );
+        assert!(!pending.exists(), "nothing retryable was left queued");
+
+        std::fs::write(&pending, b"{\"profiles\": [").unwrap();
+        assert!(finish_pending_clear_at(&pending, &root, &trash).is_err());
+        assert!(!pending.exists());
+        assert!(pending.with_extension("json.unreadable").is_file());
+        // The next launch is not held up by it again.
+        assert!(finish_pending_clear_at(&pending, &root, &trash).is_ok());
     }
 
     #[test]
