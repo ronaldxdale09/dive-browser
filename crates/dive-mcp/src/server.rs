@@ -467,7 +467,7 @@ impl<B: Browser> DiveServer<B> {
     /// Attach files.
     #[tool(
         name = "page_upload",
-        description = "Attach files to an <input type=\"file\">, as choosing them in the picker would, firing the change event the page listens for. paths are absolute paths on this machine; an empty list clears the input. A file picker opened by a click cannot be driven, so upload through the input itself.",
+        description = "Attach files to an <input type=\"file\">, as choosing them in the picker would, firing the change event the page listens for. paths are absolute paths to files in Downloads, Desktop, Documents or the download folder, and the person is asked in Dive before they are attached; an empty list clears the input. A file picker opened by a click cannot be driven, so upload through the input itself.",
         annotations(
             title = "Page upload",
             read_only_hint = false,

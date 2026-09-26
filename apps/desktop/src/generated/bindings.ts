@@ -3270,13 +3270,22 @@ export type ToolStep = {
 	input: string,
 	/**  Whether the tool changes the page. */
 	action: boolean,
-	/**  Playwright-style locator for the target, when the tool used a ref. */
+	/**
+	 *  Playwright-style locator for the target, when the tool used a ref;
+	 *  otherwise what the host found at its coordinate or with focus, when
+	 *  it looked.
+	 */
 	locator: string | null,
 	/**
 	 *  Why this step is being shown before it runs, when it is. `None` for a
 	 *  step that was allowed to run on its own.
 	 */
 	caution: string | null,
+	/**
+	 *  Asked whatever the approval setting, "allow all this session"
+	 *  included, so the chrome does not offer to skip the question next time.
+	 */
+	always: boolean,
 };
 
 /**  What a tab could be translated from, and whether it already has been. */

@@ -112,17 +112,23 @@ function StepRow({ step }: { step: Step }) {
             <button type="button" onClick={() => void approve(step.id, false)} className="h-6 rounded-full border border-line px-3 text-11 text-ink-2 hover:bg-surface-2 hover:text-ink">
               Deny
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setSessionAutoApprove(true);
-                void approve(step.id, true);
-              }}
-              className="h-6 rounded-full px-2 text-11 text-ink-3 hover:text-ink"
-              title="Approve every action until the panel is closed or you turn it off"
-            >
-              Allow all this session
-            </button>
+            {/* Offering to skip a question that is asked every time would be a
+                promise the host does not keep. */}
+            {step.always ? (
+              <span className="px-1 text-11 text-ink-3">Asked every time</span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setSessionAutoApprove(true);
+                  void approve(step.id, true);
+                }}
+                className="h-6 rounded-full px-2 text-11 text-ink-3 hover:text-ink"
+                title="Approve every action until the panel is closed or you turn it off. Sending files, reading a site's stored data and a few other steps still ask."
+              >
+                Allow all this session
+              </button>
+            )}
           </div>
         </div>
       )}

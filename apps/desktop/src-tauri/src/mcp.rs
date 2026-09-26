@@ -397,6 +397,115 @@ impl AppBrowser {
     }
 }
 
+/// How long the host spends finding out what a step is aimed at before it
+/// gives up and judges the step without knowing.
+const DESCRIBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+impl AppBrowser {
+    /// The element at viewport point (`x`, `y`), as `role "name"`, for
+    /// judging a click that named no element.
+    ///
+    /// Asked of the engine's hit test and accessibility tree rather than of
+    /// a script in the page, so the page cannot answer on the element's
+    /// behalf. `None` when there is no answer in time.
+    pub async fn describe_point(&self, tab: TabId, x: f64, y: f64) -> Option<String> {
+        let found = async {
+            let session = self.session_for(tab).await.ok()?;
+            #[allow(clippy::cast_possible_truncation)]
+            let (x, y) = (x.round() as i64, y.round() as i64);
+            let hit = session
+                .call(
+                    "DOM.getNodeForLocation",
+                    json!({"x": x, "y": y, "includeUserAgentShadowDOM": false, "ignorePointerEventsNone": true}),
+                )
+                .await
+                .ok()?;
+            let backend = hit["backendNodeId"].as_i64()?;
+            describe_node(&session, backend).await
+        };
+        tokio::time::timeout(DESCRIBE_TIMEOUT, found)
+            .await
+            .ok()
+            .flatten()
+    }
+
+    /// The element that has focus, as `role "name"`: where a key press or
+    /// typed text with no target lands.
+    pub async fn describe_focused(&self, tab: TabId) -> Option<String> {
+        let found = async {
+            let session = self.session_for(tab).await.ok()?;
+            let focused = session
+                .call(
+                    "Runtime.evaluate",
+                    json!({"expression": "document.activeElement", "returnByValue": false}),
+                )
+                .await
+                .ok()?;
+            let object = focused["result"]["objectId"].as_str()?.to_owned();
+            let node = session
+                .call("DOM.describeNode", json!({"objectId": object}))
+                .await
+                .ok();
+            let _ = session
+                .call("Runtime.releaseObject", json!({"objectId": object}))
+                .await;
+            let backend = node?["node"]["backendNodeId"].as_i64()?;
+            describe_node(&session, backend).await
+        };
+        tokio::time::timeout(DESCRIBE_TIMEOUT, found)
+            .await
+            .ok()
+            .flatten()
+    }
+}
+
+/// The accessible description of a DOM node and what it sits inside.
+async fn describe_node(session: &CdpSession, backend: i64) -> Option<String> {
+    let tree = session
+        .call(
+            "Accessibility.getPartialAXTree",
+            json!({"backendNodeId": backend, "fetchRelatives": true}),
+        )
+        .await
+        .ok()?;
+    describe_from_ax(&tree, backend)
+}
+
+/// What a person would call the node `backend`: the nearest control it is
+/// part of (a span inside a button is the button), or failing that the
+/// nearest thing with a name.
+fn describe_from_ax(tree: &Value, backend: i64) -> Option<String> {
+    let nodes = tree["nodes"].as_array()?;
+    let by_id: std::collections::HashMap<&str, &Value> = nodes
+        .iter()
+        .filter_map(|n| n["nodeId"].as_str().map(|id| (id, n)))
+        .collect();
+    let mut node = nodes
+        .iter()
+        .find(|n| n["backendDOMNodeId"].as_i64() == Some(backend))?;
+    let mut named: Option<String> = None;
+    for _ in 0..12 {
+        let role = node["role"]["value"].as_str().unwrap_or_default();
+        let name = node["name"]["value"].as_str().unwrap_or_default().trim();
+        let label = if name.is_empty() {
+            role.to_owned()
+        } else {
+            format!("{role} {name:?}")
+        };
+        if crate::ax::INTERACTIVE.contains(&role) {
+            return Some(label);
+        }
+        if named.is_none() && !name.is_empty() && !node["ignored"].as_bool().unwrap_or(false) {
+            named = Some(label);
+        }
+        let Some(parent) = node["parentId"].as_str().and_then(|id| by_id.get(id)) else {
+            break;
+        };
+        node = parent;
+    }
+    named
+}
+
 impl From<locator::Failure> for BrowserError {
     fn from(f: locator::Failure) -> Self {
         match f {
@@ -1430,13 +1539,15 @@ fn confirm_text(step: &dive_mcp::Sensitive, url: &str) -> (String, String) {
             let more = paths.len().saturating_sub(listed.len());
             let mut files = listed.join("\n");
             if more > 0 {
-                files.push_str(&format!("\nand {more} more"));
+                use std::fmt::Write as _;
+                let _ = write!(files, "\nand {more} more");
             }
+            let count = paths.len();
+            let noun = plural(count, "file");
             (
                 "Send files to a page?".to_owned(),
                 format!(
-                    "An agent connected over MCP wants to attach {} from your computer to {site}:\n\n{files}\n\nThe page can send them anywhere once they are attached.",
-                    format!("{} {}", paths.len(), plural(paths.len(), "file"))
+                    "An agent connected over MCP wants to attach {count} {noun} from your computer to {site}:\n\n{files}\n\nThe page can send them anywhere once they are attached."
                 ),
             )
         }
@@ -3726,6 +3837,31 @@ mod tool_session_tests {
                 BrowserError::NotAllowed { .. }
             ));
         }
+    }
+
+    #[test]
+    fn a_point_is_described_by_the_control_it_is_part_of() {
+        let tree = json!({"nodes": [
+            {"nodeId": "1", "role": {"value": "RootWebArea"}, "name": {"value": "Account"}},
+            {"nodeId": "2", "parentId": "1", "backendDOMNodeId": 20, "role": {"value": "button"}, "name": {"value": "Delete account"}},
+            {"nodeId": "3", "parentId": "2", "backendDOMNodeId": 30, "role": {"value": "generic"}, "name": {"value": ""}, "ignored": true},
+            {"nodeId": "4", "parentId": "1", "backendDOMNodeId": 40, "role": {"value": "paragraph"}, "name": {"value": ""}},
+        ]});
+        // A span inside the button is the button.
+        assert_eq!(
+            describe_from_ax(&tree, 30).as_deref(),
+            Some("button \"Delete account\"")
+        );
+        assert_eq!(
+            describe_from_ax(&tree, 20).as_deref(),
+            Some("button \"Delete account\"")
+        );
+        // Outside any control, the nearest named thing.
+        assert_eq!(
+            describe_from_ax(&tree, 40).as_deref(),
+            Some("RootWebArea \"Account\"")
+        );
+        assert_eq!(describe_from_ax(&tree, 99), None);
     }
 
     #[test]

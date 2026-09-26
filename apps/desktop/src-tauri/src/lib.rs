@@ -90,6 +90,7 @@ mod save_page;
 mod screen;
 mod screencast;
 mod search_suggest;
+mod site;
 mod site_zoom;
 mod snapshot;
 mod sourcemaps;

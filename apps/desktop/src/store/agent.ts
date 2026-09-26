@@ -14,6 +14,8 @@ export interface Step {
   locator?: string | null;
   /** Why the step was put to the person before it ran, when it was. */
   caution?: string | null;
+  /** Asked whatever the approval setting; "Allow all" does not cover it. */
+  always?: boolean;
   summary?: string;
   error?: boolean;
   /** Waiting for the user's Allow / Deny. */
@@ -156,7 +158,10 @@ export function applyDelta(messages: Message[], delta: ChatDeltaOut): Message[] 
       patch = { steps: [...(last.steps ?? []), { ...delta.data }] };
       break;
     case "needs_approval":
-      patch = { steps: (last.steps ?? []).map((s) => (s.id === delta.data.id ? { ...s, awaiting: true } : s)) };
+      // The question can know more than the row did when the call streamed
+      // in -- what a coordinate landed on, that the run has read something
+      // private -- so its reason replaces the row's.
+      patch = { steps: (last.steps ?? []).map((s) => (s.id === delta.data.id ? { ...s, caution: delta.data.caution, always: delta.data.always, locator: delta.data.locator ?? s.locator ?? null, awaiting: true } : s)) };
       break;
     case "tool_done":
       patch = { steps: (last.steps ?? []).map((s) => (s.id === delta.data.id ? { ...s, summary: delta.data.summary, error: delta.data.error, awaiting: false } : s)) };
