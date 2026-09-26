@@ -318,7 +318,10 @@ export const ipc = {
   formsDelete: async (id: string) => unwrap(await commands.formsDelete(id)),
   formsClear: async () => unwrap(await commands.formsClear()),
   browserImportOpenPrivacy: async () => unwrap(await commands.browserImportOpenPrivacy()),
-  updateInstall: async () => unwrap(await commands.updateInstall()),
+  /** Install the release a check offered, by its version: never whatever a fresh check would find. */
+  updateInstall: async (version: string) => unwrap(await commands.updateInstall(version)),
+  /** Stop the update download in flight; its install then rejects with "Update cancelled." */
+  updateCancel: () => commands.updateCancel(),
   /** What startup held back after repeated unclean exits, if it held anything back. */
   sessionRecoveryStatus: () => commands.sessionRecoveryStatus(),
   sessionRecoveryResolve: async (restore: boolean) => unwrap(await commands.sessionRecoveryResolve(restore)),

@@ -295,7 +295,28 @@ describe("a conversation that belongs to a tab", () => {
     // Tab one's conversation was written back under tab one, and the new
     // question is kept under tab two.
     expect(save).toHaveBeenCalledWith("tab-1", "about tab one", expect.any(String));
-    expect(save).toHaveBeenLastCalledWith("tab-2", "earlier", expect.stringContaining("explain this request"));
+    // Saves go one at a time, so the last one lands a moment after the run.
+    await vi.waitFor(() => expect(save).toHaveBeenLastCalledWith("tab-2", "earlier", expect.stringContaining("explain this request")));
+  });
+
+  it("keeps the question and each finished step while the reply is still running", async () => {
+    const save = vi.spyOn(ipc, "agentThreadSave").mockResolvedValue(null);
+    let emit!: (delta: ChatDeltaOut) => void;
+    let finish!: () => void;
+    vi.spyOn(ipc, "agentSend").mockImplementation((_run, _turns, _tab, _options, onDelta) => {
+      emit = onDelta;
+      return new Promise<void>((resolve) => { finish = resolve; });
+    });
+    useAgent.setState({ tabId: "tab-1", messages: [] });
+    const sending = useAgent.getState().send("book the table", "tab-1");
+    await vi.waitFor(() => expect(save).toHaveBeenCalledWith("tab-1", "book the table", expect.stringContaining("book the table")));
+    const saves = save.mock.calls.length;
+    emit({ type: "tool_call", data: { id: "s1", name: "click", input: "{}" } } as ChatDeltaOut);
+    emit({ type: "tool_done", data: { id: "s1", summary: "Clicked Reserve", error: null } } as ChatDeltaOut);
+    await vi.waitFor(() => expect(save.mock.calls.length).toBeGreaterThan(saves));
+    expect(save.mock.calls.at(-1)?.[2]).toContain("Clicked Reserve");
+    finish();
+    await sending;
   });
 
   it("asks a failed question again without the reply that failed", async () => {

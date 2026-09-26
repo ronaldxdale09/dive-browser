@@ -108,6 +108,8 @@ function Updates({ channel, updater }: { channel: string | null; updater: boolea
   const installing = useUpdates((s) => s.installing);
   const check = useUpdates((s) => s.check);
   const install = useUpdates((s) => s.install);
+  const cancel = useUpdates((s) => s.cancel);
+  const applying = useUpdates((s) => s.applying);
   return (
     <Group title="Updates">
       <Row
@@ -132,9 +134,18 @@ function Updates({ channel, updater }: { channel: string | null; updater: boolea
         }
         control={
           status === "available" ? (
-            <Button variant="primary" disabled={installing} onClick={() => void install()}>
-              {installing ? "Installing…" : "Install and restart"}
-            </Button>
+            installing ? (
+              <span className="flex items-center gap-2">
+                <span className="text-11 text-ink-2">{applying ? "Installing…" : "Downloading…"}</span>
+                <Button variant="quiet" disabled={applying} onClick={() => void cancel()}>
+                  Cancel
+                </Button>
+              </span>
+            ) : (
+              <Button variant="primary" onClick={() => void install()}>
+                Install and restart
+              </Button>
+            )
           ) : silent ? null : (
             <Button variant="quiet" disabled={status === "checking"} onClick={() => void check()}>
               {status === "checking" ? "Checking…" : status === "none" ? "Check again" : status === "error" ? "Try again" : "Check for updates"}

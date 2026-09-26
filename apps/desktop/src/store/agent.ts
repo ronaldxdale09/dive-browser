@@ -308,12 +308,26 @@ function persist(state: { tabId: string | null; messages: Message[] }): void {
   const keep = settledForStorage(messages);
   if (keep.length === 0) return;
   markPersisted(tabId, messages);
-  void ipc.agentThreadSave(tabId, threadTitle(keep), JSON.stringify(keep)).catch((e: unknown) => {
-    // Not saved after all, so the next chance tries again.
-    if (persisted?.messages === messages) persisted = null;
-    useBrowser.getState().notify(`The agent conversation could not be saved: ${errorMessage(e)}`, 6000);
+  const title = threadTitle(keep);
+  const body = JSON.stringify(keep);
+  // One save at a time, in order. A run now saves as it goes, and the host
+  // answers each command on a thread of its own, so two saves sent together
+  // could land in either order and leave the older conversation stored.
+  const save = () =>
+    ipc.agentThreadSave(tabId, title, body).catch((e: unknown) => {
+      // Not saved after all, so the next chance tries again.
+      if (persisted?.messages === messages) persisted = null;
+      useBrowser.getState().notify(`The agent conversation could not be saved: ${errorMessage(e)}`, 6000);
+    });
+  const queued: Promise<unknown> = saving ? saving.then(save) : save();
+  saving = queued;
+  void queued.finally(() => {
+    if (saving === queued) saving = null;
   });
 }
+
+/** The last save queued, while one is; each waits for the one before it. */
+let saving: Promise<unknown> | null = null;
 
 /**
  * The turns the model is sent: what was said, minus replies that failed and
@@ -410,6 +424,10 @@ export const useAgent = create<AgentState>((set, get) => ({
     const reply: Message = { id: nextId(), role: "assistant", content: "", pending: true };
     const runId = newRunId();
     set({ messages: [...history, user, reply], busy: true, runId, tabId });
+    // Saved before the reply starts, and again after each step, so a crash
+    // or quit mid-run keeps the question and the work done so far: the
+    // conversation used to be saved only once the whole reply was over.
+    persist(get());
     const turns = turnsFor([...history, user]);
     const prefs = usePrefs.getState().prefs;
     const cleanSession = get().cleanSession;
@@ -419,7 +437,10 @@ export const useAgent = create<AgentState>((set, get) => ({
       auto_approve: get().sessionAutoApprove,
       clean_session: cleanSession,
     };
-    const stream = batchDeltas((deltas) => set((s) => ({ messages: deltas.reduce(applyDelta, s.messages) })));
+    const stream = batchDeltas((deltas) => {
+      set((s) => ({ messages: deltas.reduce(applyDelta, s.messages) }));
+      if (deltas.some((d) => d.type === "tool_done")) persist(get());
+    });
     try {
       await ipc.agentSend(runId, turns, tabId, options, stream.push);
     } catch (e) {

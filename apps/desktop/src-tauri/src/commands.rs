@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use specta::Type;
 use tauri::{AppHandle, State};
-use tauri_plugin_updater::UpdaterExt as _;
 use tauri_specta::{Event, collect_commands, collect_events};
 
 use crate::Runtime;
@@ -930,8 +929,9 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::extensions::extension_set_enabled,
             crate::extensions::extension_remove,
             crate::extensions::app_restart,
-            update_check,
-            update_install,
+            crate::updater::update_check,
+            crate::updater::update_install,
+            crate::updater::update_cancel,
             crate::recovery::session_recovery_status,
             crate::recovery::session_recovery_resolve,
             default_browser_status,
@@ -3968,79 +3968,6 @@ pub struct UpdateInfo {
 /// the plugin state was never managed, so every command must guard the call.
 pub(crate) fn updater_configured(public_key: Option<&str>) -> bool {
     public_key.is_some_and(|key| !key.trim().is_empty())
-}
-
-/// Ask the release channel for a newer build. `None` when this build has
-/// no updater (development) or is current.
-#[tauri::command]
-#[specta::specta]
-pub(crate) async fn update_check(app: AppHandle<Runtime>) -> AppResult<Option<UpdateInfo>> {
-    if !updater_configured(option_env!("DIVE_UPDATER_PUBKEY")) {
-        return Ok(None);
-    }
-    let Ok(updater) = app.updater() else {
-        return Ok(None);
-    };
-    let found = updater
-        .check()
-        .await
-        .map_err(|e| AppError::new(e.to_string()))?;
-    Ok(found.map(|u| UpdateInfo {
-        version: u.version.clone(),
-        notes: u.body.clone(),
-    }))
-}
-
-/// Download and install the offered update; the app restarts when done.
-#[tauri::command]
-#[specta::specta]
-pub(crate) async fn update_install(app: AppHandle<Runtime>) -> AppResult<()> {
-    if !updater_configured(option_env!("DIVE_UPDATER_PUBKEY")) {
-        return Err(AppError::new("this build has no updater"));
-    }
-    let updater = app
-        .updater()
-        .map_err(|_| AppError::new("this build has no updater"))?;
-    let app_for_finish = app.clone();
-    let Some(update) = updater
-        .check()
-        .await
-        .map_err(|e| AppError::new(e.to_string()))?
-    else {
-        return Err(AppError::new("already up to date"));
-    };
-    // The two closures are the whole of the updater's progress reporting, and
-    // discarding them left the dialog saying "Installing..." for however long
-    // a hundred-megabyte download takes, with nothing to show for it.
-    let downloaded = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let progress_app = app.clone();
-    let counter = std::sync::Arc::clone(&downloaded);
-    update
-        .download_and_install(
-            move |chunk, total| {
-                let received = counter
-                    .fetch_add(chunk as u64, std::sync::atomic::Ordering::Relaxed)
-                    + chunk as u64;
-                #[allow(clippy::cast_precision_loss)] // exact to 2^53 bytes.
-                let _ = crate::engine::UpdateProgress {
-                    received: received as f64,
-                    total: total.map(|t| t as f64),
-                    done: false,
-                }
-                .emit(&progress_app);
-            },
-            move || {
-                let _ = crate::engine::UpdateProgress {
-                    received: 0.0,
-                    total: None,
-                    done: true,
-                }
-                .emit(&app_for_finish);
-            },
-        )
-        .await
-        .map_err(|e| AppError::new(e.to_string()))?;
-    app.restart();
 }
 
 /// Screenshot a tab (viewport, or the whole document when `full_page`) to a

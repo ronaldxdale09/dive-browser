@@ -97,6 +97,11 @@ pub(crate) enum ExitAction {
 }
 
 impl Registry {
+    /// Whether an export is uploading or running right now.
+    pub fn busy(&self) -> bool {
+        self.lifecycle.active.load(Ordering::SeqCst) > 0
+    }
+
     /// Main-thread admission is atomics only, never a file/job mutex.
     pub fn prepare_exit(&self) -> ExitAction {
         loop {

@@ -35,10 +35,36 @@ describe("useUpdates", () => {
   });
 
   it("installs once and reports a failure", async () => {
+    useUpdates.setState({ status: "available", update: { version: "0.2.0", notes: null } });
     const install = vi.spyOn(ipc, "updateInstall").mockRejectedValue(new Error("signature"));
     await useUpdates.getState().install();
     expect(install).toHaveBeenCalledTimes(1);
-    expect(useUpdates.getState()).toMatchObject({ installing: false, error: "signature" });
+    // The release that was offered, by version: not whatever a fresh check finds.
+    expect(install).toHaveBeenCalledWith("0.2.0");
+    expect(useUpdates.getState()).toMatchObject({ installing: false, error: "signature", status: "available", update: { version: "0.2.0" } });
+  });
+
+  it("keeps an offered update when a later check fails, and does not count the failure as a check", async () => {
+    vi.spyOn(ipc, "updateCheck").mockResolvedValue({ version: "0.2.0", notes: null });
+    await useUpdates.getState().check();
+    vi.spyOn(ipc, "updateCheck").mockRejectedValue(new Error("timed out"));
+    await useUpdates.getState().check();
+    expect(useUpdates.getState()).toMatchObject({ status: "available", update: { version: "0.2.0" } });
+  });
+
+  it("cancels a download without calling it a failure", async () => {
+    useUpdates.setState({ status: "available", update: { version: "0.2.0", notes: null } });
+    let reject: (e: Error) => void = () => undefined;
+    vi.spyOn(ipc, "updateInstall").mockReturnValue(new Promise((_, r) => (reject = r)));
+    const cancel = vi.spyOn(ipc, "updateCancel").mockImplementation(async () => {
+      reject(new Error("Update cancelled."));
+    });
+    const installing = useUpdates.getState().install();
+    expect(useUpdates.getState().installing).toBe(true);
+    await useUpdates.getState().cancel();
+    await installing;
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(useUpdates.getState()).toMatchObject({ installing: false, error: null, status: "available" });
   });
 });
 
@@ -121,6 +147,26 @@ describe("startUpdateWatch", () => {
     check.mockResolvedValue({ version: "0.3.0", notes: "Newer." });
     await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS);
     expect(useUpdates.getState()).toMatchObject({ update: { version: "0.3.0" }, dismissed: false });
+  });
+
+  it("does not check again while the notice for an update is on screen", async () => {
+    const check = vi.spyOn(ipc, "updateCheck").mockResolvedValue({ version: "0.2.0", notes: null });
+    startUpdateWatch();
+    await vi.advanceTimersByTimeAsync(BOOT_CHECK_DELAY_MS);
+    expect(check).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS * 2);
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+
+  it("tries again soon after a check that failed", async () => {
+    const check = vi.spyOn(ipc, "updateCheck").mockRejectedValue(new Error("offline"));
+    startUpdateWatch();
+    await vi.advanceTimersByTimeAsync(BOOT_CHECK_DELAY_MS);
+    expect(check).toHaveBeenCalledTimes(1);
+    // Back online right away: the failed check did not start the gap.
+    window.dispatchEvent(new Event("online"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(check).toHaveBeenCalledTimes(2);
   });
 
   it("leaves an install alone", async () => {

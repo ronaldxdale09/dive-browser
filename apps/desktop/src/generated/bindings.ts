@@ -457,8 +457,16 @@ export const commands = {
 	/**  Release notes, if the manifest carried any. */
 	notes: string | null,
 } | null, AppError>(__TAURI_INVOKE("update_check")),
-	/**  Download and install the offered update; the app restarts when done. */
-	updateInstall: () => typedError<null, AppError>(__TAURI_INVOKE("update_install")),
+	/**
+	 *  Download and install `version`, the release the last check offered, then
+	 *  quit through the ordinary exit and start the new build.
+	 */
+	updateInstall: (version: string) => typedError<null, AppError>(__TAURI_INVOKE("update_install", { version })),
+	/**
+	 *  Stop the update download in flight. Too late once the install has begun;
+	 *  that step is short and must not be interrupted halfway.
+	 */
+	updateCancel: () => __TAURI_INVOKE<void>("update_cancel"),
 	/**  The pending question, if startup held the session back. */
 	sessionRecoveryStatus: () => __TAURI_INVOKE<{
 	/**  How many runs in a row ended without a clean quit. */

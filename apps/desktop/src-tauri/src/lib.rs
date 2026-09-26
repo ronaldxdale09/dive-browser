@@ -77,6 +77,7 @@ pub mod privacy;
 #[cfg(feature = "cef")]
 mod private_probe;
 mod private_session;
+mod quit;
 mod reader;
 mod recorder;
 mod recovery;
@@ -102,6 +103,7 @@ mod titlebar;
 mod translate;
 #[cfg(feature = "cef")]
 mod ui_probe;
+mod updater;
 mod user_presence;
 mod vitals;
 mod webapp;
@@ -243,26 +245,9 @@ pub fn run() {
     let normal_broker = if private_session::is_private() {
         None
     } else {
-        let root = state::data_root();
-        match normal_window::claim(&root) {
-            Ok(Some(broker)) => Some(broker),
-            Ok(None) => {
-                let urls = startup_urls(
-                    std::env::args().skip(1),
-                    &std::env::var("DIVE_OPEN_URL").unwrap_or_default(),
-                );
-                let id = dive_core::TabId::new().to_string();
-                if let Err(error) = normal_window::request(&root, &id, &urls) {
-                    eprintln!(
-                        "Dive is already running but did not accept this window request: {error}"
-                    );
-                }
-                return;
-            }
-            Err(error) => {
-                eprintln!("Could not claim the normal Dive profile: {error}");
-                return;
-            }
+        match claim_normal_profile(&state::data_root()) {
+            Some(broker) => Some(broker),
+            None => return,
         }
     };
     let normal_broker = std::sync::Arc::new(normal_broker);
@@ -522,6 +507,12 @@ pub fn run() {
             std::process::exit(1);
         }
     };
+    // Captured while the app exists: an update restarts Dive after
+    // `run_return` has consumed it.
+    let restart_env = {
+        use tauri::Manager as _;
+        app.env()
+    };
     let exit_responsiveness = responsiveness.clone();
     let exit_code = app.run_return(move |app, event| match event {
         // Setup stopped before any state existed; only the exit remains.
@@ -540,6 +531,12 @@ pub fn run() {
         tauri::RunEvent::ExitRequested { code, api, .. } => {
             use tauri::Manager as _;
             tracing::info!(?code, "exit requested");
+            // Before anything is saved or stopped: the person may still
+            // choose to stay.
+            if !quit::may_exit(app, code) {
+                api.prevent_exit();
+                return;
+            }
             // Quitting from the menu or Cmd+Q never sends the window a close
             // request, so the frame is saved here as well.
             if let Some(window) = app.get_window(MAIN_WINDOW) {
@@ -619,6 +616,21 @@ pub fn run() {
     // Dropping joins even with an unacknowledged UI callback. Late callbacks
     // own only an inert atomic token, never monitor state or filesystem paths.
     drop(state::lock(&responsiveness).take());
+    // The profile lock goes with the broker, for the build an update is
+    // about to start.
+    drop(normal_broker);
+    if quit::restart_after_update() {
+        tracing::info!("starting the updated build");
+        drop(log_guard);
+        let mut env = restart_env;
+        // Only the program: the arguments this run started with were links
+        // it has already opened. The marker tells the new process that the
+        // profile lock it finds held is this process on its way out.
+        env.args_os.truncate(1);
+        env.args_os
+            .push(format!("{RESTART_FROM_FLAG}{}", std::process::id()).into());
+        tauri::process::restart(&env);
+    }
     // Flush the asynchronous file logger after CEF and the app have drained,
     // then preserve the exit status for launchers and runtime probes.
     drop(log_guard);
@@ -631,6 +643,91 @@ pub fn run() {
 /// Setup could not open the store and has asked for an exit; the run loop
 /// has no state to consult from then on.
 static STARTUP_ABORTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Passed to the build an update restarts into, with this process's id.
+const RESTART_FROM_FLAG: &str = "--dive-restart-from=";
+
+/// The process this one was restarted from after an update, if it was.
+fn restarted_from(mut args: impl Iterator<Item = String>) -> Option<u32> {
+    args.find_map(|arg| {
+        arg.strip_prefix(RESTART_FROM_FLAG)
+            .and_then(|pid| pid.parse().ok())
+    })
+}
+
+/// Tell the person why this launch goes no further, when there is no window
+/// to say it in.
+fn launch_failed(title: &str, description: String) {
+    eprintln!("{title}: {description}");
+    let _ = rfd::MessageDialog::new()
+        .set_title(title)
+        .set_description(description)
+        .set_level(rfd::MessageLevel::Error)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
+}
+
+/// Claim the normal profile, or hand this launch's links to the Dive that
+/// has it. `None` means this process has nothing more to do.
+///
+/// Two moments made this fail. A restart after an update starts while the
+/// old process is still finishing its exit, so it found the profile taken,
+/// handed its request to a process that was going away, and quit -- leaving
+/// no Dive at all. And a second launch in the instant the first was starting
+/// found the lock held but no endpoint yet, and gave up with a line on
+/// stderr nobody sees. The first now waits for the lock to come free; the
+/// second retries the handoff; and a handoff that still fails says so.
+fn claim_normal_profile(root: &std::path::Path) -> Option<normal_window::Broker> {
+    use std::time::{Duration, Instant};
+    let restarting = restarted_from(std::env::args().skip(1)).is_some()
+        || std::env::var_os("DIVE_RESTART_FROM").is_some();
+    let lock_deadline = Instant::now()
+        + if restarting {
+            Duration::from_secs(10)
+        } else {
+            Duration::ZERO
+        };
+    loop {
+        match normal_window::claim(root) {
+            Ok(Some(broker)) => return Some(broker),
+            Ok(None) if Instant::now() < lock_deadline => {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Ok(None) => break,
+            Err(error) => {
+                launch_failed(
+                    "Dive could not open its profile",
+                    format!("{error}\n\nThe folder is {}.", root.display()),
+                );
+                return None;
+            }
+        }
+    }
+    let urls = startup_urls(
+        std::env::args().skip(1),
+        &std::env::var("DIVE_OPEN_URL").unwrap_or_default(),
+    );
+    // One id for every attempt: the running Dive opens a request once, so a
+    // retry after a lost reply cannot open the links twice.
+    let id = dive_core::TabId::new().to_string();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match normal_window::request(root, &id, &urls) {
+            Ok(()) => return None,
+            Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(200)),
+            Err(error) => {
+                launch_failed(
+                    "Dive is not responding",
+                    format!(
+                        "Dive is already running but did not answer ({error}).\n\nQuit it -- \
+                         from the Dock, or with Force Quit if it will not -- and open Dive again."
+                    ),
+                );
+                return None;
+            }
+        }
+    }
+}
 
 fn startup_urls(mut args: impl Iterator<Item = String>, from_env: &str) -> Vec<String> {
     let mut urls = Vec::new();
@@ -1272,6 +1369,35 @@ mod tests {
         );
     }
     use super::{Startup, startup_plan, startup_urls};
+
+    #[test]
+    fn an_open_home_page_is_found_across_redirect_differences() {
+        use super::same_page;
+        assert!(same_page("https://www.example.com/", "http://example.com"));
+        assert!(same_page(
+            "https://example.com/start/",
+            "https://example.com/start"
+        ));
+        assert!(!same_page("https://example.com/a", "https://example.com/b"));
+        assert!(!same_page(
+            "https://example.com/?q=1",
+            "https://example.com/?q=2"
+        ));
+        assert!(same_page("about:blank", "about:blank"));
+    }
+
+    #[test]
+    fn an_update_restart_names_the_process_it_replaces() {
+        use super::restarted_from;
+        let args = ["--dive-restart-from=4242", "https://x.test"].map(String::from);
+        assert_eq!(restarted_from(args.into_iter()), Some(4242));
+        assert_eq!(
+            restarted_from(std::iter::once("https://x.test".to_owned())),
+            None
+        );
+        // The flag is not a link to open.
+        assert!(startup_urls(std::iter::once("--dive-restart-from=1".to_owned()), "").is_empty());
+    }
 
     #[test]
     fn a_home_start_with_no_home_page_lands_on_the_welcome_screen() {

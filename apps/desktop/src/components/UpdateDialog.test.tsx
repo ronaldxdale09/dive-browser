@@ -152,10 +152,20 @@ describe("while the update downloads", () => {
     expect(screen.getByRole("progressbar", { name: "Update download" }).getAttribute("aria-valuenow")).toBeNull();
   });
 
+  it("can be cancelled while it downloads", () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    useUpdates.setState({ ...available, installing: true, received: 1_000, total: 120_000_000, applying: false, cancel });
+    render(<UpdateDialog />);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   it("turns to Installing once the bytes are down and the installer runs", () => {
     useUpdates.setState({ ...available, installing: true, received: 120_000_000, total: 120_000_000, applying: true });
     render(<UpdateDialog />);
     expect(screen.getByText("Installing…")).toBeTruthy();
+    // Too late to stop halfway through replacing the app.
+    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
     // The bar is for the download; the install itself reports nothing.
     expect(screen.queryByRole("progressbar", { name: "Update download" })).toBeNull();
   });

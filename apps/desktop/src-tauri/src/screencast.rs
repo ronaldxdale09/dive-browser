@@ -719,6 +719,11 @@ impl Registry {
         lock(&self.active)
     }
 
+    /// Whether any tab has a recording, running, saving, or waiting to be saved.
+    pub fn any(&self) -> bool {
+        !self.active().is_empty()
+    }
+
     /// Whether `tab` has a recording, running, saving, or waiting to be saved.
     pub fn is_recording(&self, tab: TabId) -> bool {
         self.active().contains_key(&tab)

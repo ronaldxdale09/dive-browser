@@ -24,6 +24,8 @@ interface UpdatesState {
   dismissed: boolean;
   check: () => Promise<void>;
   install: () => Promise<void>;
+  /** Stop the download in flight. Nothing to stop once it is installing. */
+  cancel: () => Promise<void>;
   dismiss: () => void;
   reopen: () => void;
 }
@@ -39,10 +41,16 @@ export const useUpdates = create<UpdatesState>((set, get) => ({
   dismissed: false,
   check: async () => {
     if (get().status === "checking") return;
-    lastCheckAt = Date.now();
+    // What was on offer before this check, so a check that fails does not
+    // take back an update the person could still install.
+    const before = get().status === "available" ? get().update : null;
     set({ status: "checking", error: null });
     try {
       const update = await ipc.updateCheck();
+      // Stamped only once the channel has answered: a check that failed
+      // (offline, a server that timed out) must not hold off the next try
+      // for the whole gap.
+      lastCheckAt = Date.now();
       if (!update) {
         set({ status: "none", update: null, dismissed: false });
         return;
@@ -52,19 +60,31 @@ export const useUpdates = create<UpdatesState>((set, get) => ({
       const sameAsDismissed = get().dismissed && get().update?.version === update.version;
       set({ status: "available", update, dismissed: sameAsDismissed });
     } catch (e) {
-      set({ status: "error", error: errorMessage(e) });
+      if (before) set({ status: "available", update: before });
+      else set({ status: "error", error: errorMessage(e) });
     }
   },
   install: async () => {
-    if (get().installing) return;
+    const { installing, update } = get();
+    if (installing || !update) return;
+    cancelled = false;
     set({ installing: true, error: null, received: 0, total: null, applying: false });
     try {
-      await ipc.updateInstall();
+      // The very release the person read about, not whatever a new check
+      // would find by now.
+      await ipc.updateInstall(update.version);
     } catch (e) {
       // Back on screen with the reason: an install started from Settings, or
       // from a card waved away earlier, otherwise failed where no one looked.
-      set({ installing: false, error: errorMessage(e), dismissed: false });
+      // A cancel the person asked for needs no explaining.
+      set({ status: "available", update, installing: false, applying: false, error: cancelled ? null : errorMessage(e), dismissed: false });
     }
+  },
+  cancel: async () => {
+    const { installing, applying } = get();
+    if (!installing || applying) return;
+    cancelled = true;
+    await ipc.updateCancel();
   },
   dismiss: () => {
     if (get().installing) return;
@@ -72,6 +92,9 @@ export const useUpdates = create<UpdatesState>((set, get) => ({
   },
   reopen: () => set({ dismissed: false }),
 }));
+
+/** The person pressed Cancel on the download in flight. */
+let cancelled = false;
 
 let listening = false;
 
@@ -136,12 +159,15 @@ let onWake: (() => void) | null = null;
 
 /**
  * Check when it is worth checking: not while one is in flight, not while an
- * update is being installed, and never twice inside [`MIN_CHECK_GAP_MS`].
- * Exported for tests.
+ * update is being installed, not while the notice for one is on screen (it
+ * already says what there is), and never twice inside [`MIN_CHECK_GAP_MS`].
+ * A notice waved away keeps the checks going, so a newer release still
+ * gets through. Exported for tests.
  */
 export function maybeCheck() {
-  const { status, installing } = useUpdates.getState();
+  const { status, installing, dismissed } = useUpdates.getState();
   if (status === "checking" || installing) return;
+  if (status === "available" && !dismissed) return;
   if (lastCheckAt && Date.now() - lastCheckAt < MIN_CHECK_GAP_MS) return;
   void useUpdates.getState().check();
 }
@@ -190,6 +216,7 @@ function stopUpdateWatch() {
 export function resetBootCheck() {
   stopUpdateWatch();
   lastCheckAt = 0;
+  cancelled = false;
   if (progressTimer) clearTimeout(progressTimer);
   progressTimer = null;
   progressPending = null;

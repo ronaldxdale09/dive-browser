@@ -26,6 +26,7 @@ export function UpdateDialog() {
   const dismissed = useUpdates((s) => s.dismissed);
   const dismiss = useUpdates((s) => s.dismiss);
   const install = useUpdates((s) => s.install);
+  const cancel = useUpdates((s) => s.cancel);
   const openTab = useBrowser((s) => s.openTab);
 
   const [exiting, setExiting] = useState(false);
@@ -119,14 +120,22 @@ export function UpdateDialog() {
           <Icon icon={ExternalLink} size={11} />
         </button>
         <span className="flex-1" />
-        <button
-          type="button"
-          onClick={handleDismiss}
-          disabled={installing}
-          className="pressable h-8 rounded-full px-3 text-xs text-ink-2 hover:bg-surface-2 disabled:opacity-50"
-        >
-          Later
-        </button>
+        {installing ? (
+          // A download that stalls or is not wanted after all can be
+          // stopped; the install itself, once begun, is short and is not.
+          <button
+            type="button"
+            onClick={() => void cancel()}
+            disabled={applying}
+            className="pressable h-8 rounded-full px-3 text-xs text-ink-2 hover:bg-surface-2 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        ) : (
+          <button type="button" onClick={handleDismiss} className="pressable h-8 rounded-full px-3 text-xs text-ink-2 hover:bg-surface-2">
+            Later
+          </button>
+        )}
         <button
           type="button"
           onClick={() => void install()}
