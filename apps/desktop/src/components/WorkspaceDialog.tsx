@@ -9,6 +9,7 @@ import { Icon } from "./Icon";
 import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
+import { rovingRadio } from "../lib/useRovingRadio";
 
 const SWATCHES = ["#7FD8C8", "#F0B35E", "#E58C8C", "#8FB8F0", "#B79CF0", "#9ED67B", "#E9E9E9"];
 
@@ -51,6 +52,8 @@ export function WorkspaceDialog() {
   const named = seedFromName(name);
   const lead = [...new Set([...(existing?.icon ? [existing.icon] : []), named])];
   const seeds = [...lead, ...AVATAR_SEEDS.filter((s) => !lead.includes(s))].slice(0, 14);
+  const colorRadio = rovingRadio(swatches, color, setColor);
+  const markRadio = rovingRadio(seeds, icon, setSeed);
   // The store closes the dialog once the engine has done it; a failure
   // leaves it open with everything typed, and says why.
   const attempt = async (action: () => Promise<boolean>) => {
@@ -112,12 +115,13 @@ export function WorkspaceDialog() {
         </label>
         <div className="mt-3 text-xs text-ink-2">Color</div>
         <div className="mt-1 flex gap-2" role="radiogroup" aria-label="Color">
-          {swatches.map((c) => (
+          {swatches.map((c, i) => (
             <button
               key={c}
               type="button"
               role="radio"
               aria-checked={c === color}
+              {...colorRadio(i)}
               aria-label={SWATCHES.includes(c) ? colorName(c) : "Current colour"}
               title={SWATCHES.includes(c) ? colorName(c) : "Current colour"}
               onClick={() => setColor(c)}
@@ -128,12 +132,13 @@ export function WorkspaceDialog() {
         </div>
         <div className="mt-4 text-xs text-ink-2">Mark</div>
         <div className="mt-1.5 grid grid-cols-7 gap-1.5" role="radiogroup" aria-label="Mark">
-          {seeds.map((s) => (
+          {seeds.map((s, i) => (
             <button
               key={s}
               type="button"
               role="radio"
               aria-checked={s === icon}
+              {...markRadio(i)}
               aria-label={s === named && s !== existing?.icon ? "Mark from the name" : s.replace(/-/g, " ")}
               title={s === named && s !== existing?.icon ? "Mark from the name" : s.replace(/-/g, " ")}
               onClick={() => setSeed(s)}

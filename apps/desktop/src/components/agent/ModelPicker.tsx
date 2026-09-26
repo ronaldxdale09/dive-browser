@@ -5,6 +5,7 @@ import type { ModelInfo, Provider } from "../../lib/ipc";
 import { useCoversContent } from "../../lib/overlay";
 import { useDismiss } from "../../lib/useDismiss";
 import { useFocusTrap } from "../../lib/useFocusTrap";
+import { rovingRadio } from "../../lib/useRovingRadio";
 import { isReady, useAgent } from "../../store/agent";
 import { usePrefs } from "../../store/prefs";
 import { Icon } from "../Icon";
@@ -57,6 +58,11 @@ export function ModelPicker({ onAddProvider, onOpenChange }: { onAddProvider: ()
   const list = useMemo(() => listed ?? [], [listed]);
   const current = list.find((m) => m.id === prefs.agent_model);
   const usable = providers.filter((p) => isReady(p, keyed));
+  const effortRadio = rovingRadio(
+    EFFORTS.map((o) => o.value),
+    prefs.agent_reasoning,
+    (value) => void update({ agent_reasoning: value }),
+  );
 
   useEffect(() => {
     if (open && provider?.lists_models) void loadModels(provider.id);
@@ -144,8 +150,8 @@ export function ModelPicker({ onAddProvider, onOpenChange }: { onAddProvider: ()
           <div className="mt-1.5 flex items-center gap-2 border-t border-line px-1 pt-1.5 pb-0.5">
             <span className="text-[11px] text-ink-3">Thinking</span>
             <div role="radiogroup" aria-label="Reasoning effort" className="ml-auto inline-flex rounded-lg border border-line bg-surface-2 p-0.5">
-              {EFFORTS.map((o) => (
-                <button key={o.value} type="button" role="radio" aria-checked={prefs.agent_reasoning === o.value} onClick={() => void update({ agent_reasoning: o.value })} className="h-6 rounded-[6px] px-2 text-[11px] text-ink-2 hover:text-ink aria-checked:bg-surface-3 aria-checked:text-ink">
+              {EFFORTS.map((o, i) => (
+                <button key={o.value} type="button" role="radio" aria-checked={prefs.agent_reasoning === o.value} {...effortRadio(i)} onClick={() => void update({ agent_reasoning: o.value })} className="h-6 rounded-[6px] px-2 text-[11px] text-ink-2 hover:text-ink aria-checked:bg-surface-3 aria-checked:text-ink">
                   {o.label}
                 </button>
               ))}

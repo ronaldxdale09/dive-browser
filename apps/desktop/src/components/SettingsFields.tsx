@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { FieldHint, useDescribedBy } from "../lib/fieldHint";
+import { useRovingRadio } from "../lib/useRovingRadio";
 export { Select } from "./Select";
 
 /**
@@ -39,15 +41,22 @@ export function Row({
   htmlFor?: string;
   stacked?: boolean;
 }) {
+  const hintId = useId();
   return (
     <div data-settings-row className={`flex gap-2 border-b border-line py-3 last:border-b-0 ${stacked ? "flex-col" : "flex-col @min-[560px]:flex-row @min-[560px]:items-center @min-[560px]:gap-4"}`}>
       <div className="min-w-0 flex-1">
         <label htmlFor={htmlFor} className="text-xs font-medium text-ink">
           {label}
         </label>
-        {hint && <p className="mt-0.5 text-[11px] leading-relaxed text-ink-3">{hint}</p>}
+        {hint && (
+          <p id={hintId} className="mt-0.5 text-[11px] leading-relaxed text-ink-3">
+            {hint}
+          </p>
+        )}
       </div>
-      <div className={stacked ? "w-full" : "max-w-full min-w-0 shrink-0"}>{control}</div>
+      <div className={stacked ? "w-full" : "max-w-full min-w-0 shrink-0"}>
+        <FieldHint.Provider value={hint ? hintId : undefined}>{control}</FieldHint.Provider>
+      </div>
     </div>
   );
 }
@@ -58,18 +67,22 @@ export function Switch({
   onChange,
   label,
   disabled = false,
+  describedBy,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label: string;
   disabled?: boolean;
+  describedBy?: string;
 }) {
+  const described = useDescribedBy(describedBy);
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      aria-describedby={described}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className="relative h-[22px] w-[38px] shrink-0 rounded-full border border-line-2 bg-surface-3 transition-colors aria-checked:border-highlight aria-checked:bg-highlight disabled:opacity-40"
@@ -88,20 +101,29 @@ export function Segmented<T extends string>({
   onChange,
   options,
   label,
+  describedBy,
 }: {
   value: T;
   onChange: (v: T) => void;
   options: readonly { value: T; label: string }[];
   label: string;
+  describedBy?: string | undefined;
 }) {
+  const radio = useRovingRadio(
+    options.map((o) => o.value),
+    value,
+    onChange,
+  );
+  const described = useDescribedBy(describedBy);
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex rounded-lg border border-line bg-surface-2 p-0.5">
-      {options.map((o) => (
+    <div role="radiogroup" aria-label={label} aria-describedby={described} className="inline-flex rounded-lg border border-line bg-surface-2 p-0.5">
+      {options.map((o, i) => (
         <button
           key={o.value}
           type="button"
           role="radio"
           aria-checked={o.value === value}
+          {...radio(i)}
           onClick={() => onChange(o.value)}
           className="h-7 rounded-[7px] px-2.5 text-xs text-ink-2 hover:text-ink aria-checked:bg-surface-3 aria-checked:text-ink"
         >
@@ -160,12 +182,13 @@ export function TextInput({
   describedBy?: string;
 }) {
   const { draft, setDraft, commit, revert } = useCommittedText(value, onCommit);
+  const described = useDescribedBy(describedBy);
   return (
     <input
       id={id}
       aria-label={label}
       aria-invalid={invalid || undefined}
-      aria-describedby={describedBy}
+      aria-describedby={described}
       value={draft}
       placeholder={placeholder}
       spellCheck={false}
@@ -202,9 +225,11 @@ export function TextArea({
   rows?: number;
 }) {
   const { draft, setDraft, commit, revert } = useCommittedText(value, onCommit);
+  const described = useDescribedBy();
   return (
     <textarea
       aria-label={label}
+      aria-describedby={described}
       value={draft}
       rows={rows}
       placeholder={placeholder}
@@ -250,6 +275,7 @@ export function Button({
   /** A fuller name than the visible text, where several buttons read the same ("Remove"). */
   ariaLabel?: string;
 }) {
+  const described = useDescribedBy();
   const tone =
     variant === "primary"
       ? "bg-accent text-accent-ink hover:opacity-90"
@@ -257,7 +283,7 @@ export function Button({
         ? "border border-line text-danger hover:bg-surface-3"
         : "border border-line text-ink-2 hover:bg-surface-3 hover:text-ink";
   return (
-    <button type="button" onClick={onClick} disabled={disabled} aria-label={ariaLabel} className={`h-8 shrink-0 rounded-full px-3.5 text-xs disabled:opacity-40 ${tone}`}>
+    <button type="button" onClick={onClick} disabled={disabled} aria-label={ariaLabel} aria-describedby={described} className={`h-8 shrink-0 rounded-full px-3.5 text-xs disabled:opacity-40 ${tone}`}>
       {children}
     </button>
   );

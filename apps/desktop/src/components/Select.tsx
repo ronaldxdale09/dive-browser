@@ -3,6 +3,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useCoversContent } from "../lib/overlay";
+import { useDescribedBy } from "../lib/fieldHint";
 import { Icon } from "./Icon";
 
 export interface SelectProps<T extends string> {
@@ -13,12 +14,15 @@ export interface SelectProps<T extends string> {
   id?: string | undefined;
   disabled?: boolean | undefined;
   className?: string | undefined;
+  /** Ids of text that explains the choice; a settings row's hint is added on its own. */
+  describedBy?: string | undefined;
 }
 
 /** App-owned choices must stay in the DOM: native select menus enter a nested
  * macOS menu loop that can stall CEF protocol work until the menu closes. */
-export function Select<T extends string>({ value, onChange, options, label, id, disabled = false, className }: SelectProps<T>) {
+export function Select<T extends string>({ value, onChange, options, label, id, disabled = false, className, describedBy }: SelectProps<T>) {
   const listId = useId();
+  const described = useDescribedBy(describedBy);
   const trigger = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -193,7 +197,7 @@ export function Select<T extends string>({ value, onChange, options, label, id, 
   };
 
   return <>
-    <button ref={trigger} id={id} type="button" role="combobox" aria-label={label} aria-expanded={open} aria-haspopup="listbox" aria-controls={open ? listId : undefined} aria-activedescendant={open ? `${listId}-${active}` : undefined} disabled={disabled || options.length === 0}
+    <button ref={trigger} id={id} type="button" role="combobox" aria-label={label} aria-describedby={described} aria-expanded={open} aria-haspopup="listbox" aria-controls={open ? listId : undefined} aria-activedescendant={open ? `${listId}-${active}` : undefined} disabled={disabled || options.length === 0}
       onClick={() => open ? setExpanded(false) : show()} onKeyDownCapture={onKey} onBlur={() => setExpanded(false)}
       className={`inline-flex min-w-0 items-center justify-between gap-2 text-left ${className ?? "h-8 rounded-lg border border-line bg-surface-2 py-0 pr-2 pl-2.5 text-xs text-ink outline-none hover:border-line-2 focus:border-highlight/60 disabled:opacity-40"}`}>
       {/* Every label sits in the same grid cell, only the chosen one visible,

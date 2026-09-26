@@ -10,6 +10,8 @@ import type { Prefs } from "../../store/prefs";
 import { CUSTOM_PRESET_ID, PRESETS, contrastRatio, exportTheme, findPreset, importTheme, isHex, presetSeeds, resolveScheme } from "../../lib/theme";
 import type { Preset, Scheme, Seeds } from "../../lib/theme";
 import { copyText } from "../../lib/clipboard";
+import { rovingRadio } from "../../lib/useRovingRadio";
+import type { RovingRadioProps } from "../../lib/useRovingRadio";
 
 const ACCENTS = ["#7FD8C8", "#8FB8F0", "#B79CF0", "#F0B35E", "#E58C8C", "#9ED67B", "#E9E9E9"];
 
@@ -34,6 +36,11 @@ export function Appearance() {
   const custom = prefs.appearance_preset === CUSTOM_PRESET_ID;
   const fixed = preset !== undefined && preset.scheme !== "auto";
   const scheme = resolveScheme(prefs);
+  const templateIds = [...PRESETS.map((p) => p.id), CUSTOM_PRESET_ID];
+  const templateRadio = rovingRadio(templateIds, prefs.appearance_preset, (id) => set({ appearance_preset: id }));
+  // The saved accent may differ in case from the swatch that shows it.
+  const accent = ACCENTS.find((c) => c.toUpperCase() === prefs.accent.toUpperCase()) ?? prefs.accent;
+  const accentRadio = rovingRadio(ACCENTS, accent, (c) => set({ accent: c }));
 
   return (
     <>
@@ -41,8 +48,8 @@ export function Appearance() {
 
       <Group title="Templates" description="A template is three colours; the rest of the chrome is mixed from them.">
         <div role="radiogroup" aria-label="Template" className="grid grid-cols-2 gap-2 py-3 sm:grid-cols-3">
-          {PRESETS.map((p) => (
-            <TemplateCard key={p.id} preset={p} scheme={scheme} selected={prefs.appearance_preset === p.id} onSelect={() => set({ appearance_preset: p.id })} />
+          {PRESETS.map((p, i) => (
+            <TemplateCard key={p.id} preset={p} scheme={scheme} selected={prefs.appearance_preset === p.id} onSelect={() => set({ appearance_preset: p.id })} radio={templateRadio(i)} />
           ))}
           <TemplateCard
             preset={{ id: CUSTOM_PRESET_ID, name: "Custom", description: "Your own three colours.", scheme: "auto" }}
@@ -50,6 +57,7 @@ export function Appearance() {
             scheme={scheme}
             selected={custom}
             onSelect={() => set({ appearance_preset: CUSTOM_PRESET_ID })}
+            radio={templateRadio(PRESETS.length)}
           />
         </div>
       </Group>
@@ -82,12 +90,13 @@ export function Appearance() {
           control={
             <div className="flex items-center gap-2">
               <div className="flex gap-2" role="radiogroup" aria-label="Accent">
-                {ACCENTS.map((c) => (
+                {ACCENTS.map((c, i) => (
                   <button
                     key={c}
                     type="button"
                     role="radio"
                     aria-checked={c.toUpperCase() === prefs.accent.toUpperCase()}
+                    {...accentRadio(i)}
                     aria-label={c === DEFAULT_PREFS.accent ? "Template accent" : colorName(c)}
                     title={c === DEFAULT_PREFS.accent ? "Template accent" : colorName(c)}
                     onClick={() => set({ accent: c })}
@@ -267,13 +276,14 @@ function Preview({ scheme, note }: { scheme: "dark" | "light"; note?: string | u
   );
 }
 
-function TemplateCard({ preset, seeds, scheme, selected, onSelect }: { preset: Preset; seeds?: Seeds; scheme: Scheme; selected: boolean; onSelect: () => void }) {
+function TemplateCard({ preset, seeds, scheme, selected, onSelect, radio }: { preset: Preset; seeds?: Seeds; scheme: Scheme; selected: boolean; onSelect: () => void; radio: RovingRadioProps }) {
   const dots = seeds ?? presetSeeds(preset, scheme) ?? preset.dark ?? preset.light!;
   return (
     <button
       type="button"
       role="radio"
       aria-checked={selected}
+      {...radio}
       aria-label={preset.name}
       onClick={onSelect}
       className="flex flex-col gap-1.5 rounded-lg border border-line bg-surface p-2.5 text-left transition-colors hover:border-line-2 aria-checked:border-highlight aria-checked:ring-1 aria-checked:ring-highlight"
