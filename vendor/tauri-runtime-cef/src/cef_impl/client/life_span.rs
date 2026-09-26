@@ -24,6 +24,7 @@ wrap_life_span_handler! {
     new_window_handler: Option<Arc<tauri_runtime::webview::NewWindowHandler<T, CefRuntime<T>>>>,
     creation_delivered: Arc<crate::pending_creation::CompletionToken>,
     permissions: Arc<super::permission::PermissionBridge>,
+    page_events: Arc<super::page_events::PageEvents>,
   }
 
   impl LifeSpanHandler {
@@ -122,17 +123,25 @@ wrap_life_span_handler! {
       }
       log::debug!(target: "dive_native_close", "stage=do_close webview={}", self.webview_id);
 
+      // The engine is committed to closing now: a graceful close got past
+      // the page's `beforeunload`, or the close was forced. The application
+      // hears it after the host view's removal is queued, so its own forced
+      // close of the view, which follows, finds the close already under way.
       #[cfg(any(target_os = "macos", windows))]
       {
         let _ = self
           .sender
           .send(Message::DestroyWebviewHostWindow(self.webview_id));
+        self.page_events.closing();
         self.proxy.wake_up();
         return 1;
       }
 
       #[cfg(not(any(target_os = "macos", windows)))]
-      0
+      {
+        self.page_events.closing();
+        0
+      }
     }
 
     fn on_before_close(&self, browser: Option<&mut Browser>) {

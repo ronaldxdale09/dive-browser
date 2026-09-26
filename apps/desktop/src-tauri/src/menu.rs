@@ -64,7 +64,7 @@ pub(crate) fn main_window_command(command: &str) -> bool {
 /// Anything else sent there was dropped on the floor -- after the keyboard
 /// had already been taken from the page for it.
 #[cfg(not(target_os = "windows"))]
-const POPOUT_COMMANDS: [&str; 12] = [
+const POPOUT_COMMANDS: [&str; 14] = [
     "tab.close",
     "tab.reload",
     "tab.reloadHard",
@@ -76,6 +76,8 @@ const POPOUT_COMMANDS: [&str; 12] = [
     "zoom.reset",
     "page.save",
     "find.open",
+    "find.next",
+    "find.prev",
     // A torn-off tab has an address bar; an app window does not.
     "address.focus",
 ];
@@ -200,6 +202,13 @@ fn file_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
             "CmdOrCtrl+K",
         )?)
         .item(&item(app, "find.open", "Find in Page…", "CmdOrCtrl+F")?)
+        .item(&item(app, "find.next", "Find Next", "CmdOrCtrl+G")?)
+        .item(&item(
+            app,
+            "find.prev",
+            "Find Previous",
+            "CmdOrCtrl+Shift+G",
+        )?)
         .item(&item(
             app,
             "bookmark.toggle",

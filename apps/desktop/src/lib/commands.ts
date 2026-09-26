@@ -1,6 +1,6 @@
 import { isPrivateWindow } from "./privateMode";
 import { ipc } from "./ipc";
-import { tabInThisWindow, useBrowser } from "../store/browser";
+import { isClosing, nextCloseTarget, tabInThisWindow, useBrowser } from "../store/browser";
 import { useLayout } from "../store/layout";
 import { usePrefs } from "../store/prefs";
 import { useRecording } from "../store/recording";
@@ -28,9 +28,14 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "private.exit": () => ipc.windowExitPrivate().then(() => undefined).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) })),
   "window.private": () => ipc.windowPrivate().then(() => undefined).catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) })),
   "tab.close": () => {
-    const { activeTab, detached, closeTab } = useBrowser.getState();
+    const { tabs, activeTab, detached, closeTab } = useBrowser.getState();
     const here = tabInThisWindow(activeTab, detached);
-    return here ? closeTab(here) : (isPrivateWindow() ? ipc.windowClose().then(() => undefined) : undefined);
+    if (!here) return isPrivateWindow() ? ipc.windowClose().then(() => undefined) : undefined;
+    // A page still deciding whether to close keeps the active spot; the
+    // chord moves on to its neighbour rather than asking it again.
+    const strip = orderTabs(tabs).filter((t) => !detached.includes(t.id)).map((t) => t.id);
+    const target = nextCloseTarget(strip, here, isClosing);
+    return target ? closeTab(target) : undefined;
   },
   "tab.reopen": () => useBrowser.getState().reopenClosedTab(),
   "tab.pin": () => {
@@ -110,6 +115,8 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
     // keyboard back and select its query: ⌘F again means "find something else".
     window.dispatchEvent(new CustomEvent(FOCUS_FIND));
   },
+  "find.next": () => findStep(true),
+  "find.prev": () => findStep(false),
   "library.open": () => useBrowser.getState().toggle("library", true),
   "bookmarks.open": () => useBrowser.getState().openLibrary("bookmarks"),
   "history.open": () => useBrowser.getState().openLibrary("history"),
@@ -185,10 +192,26 @@ function jumpToWorkspace(index: number) {
   return target && target.id !== activeWorkspace ? activateWorkspace(target.id) : undefined;
 }
 
+/**
+ * ⌘G and ⇧⌘G: the next or previous match of the find bar's search. With the
+ * bar closed it opens on the last search, which is searched afresh.
+ */
+function findStep(forward: boolean) {
+  const { activeTab, detached, open, toggle } = useBrowser.getState();
+  if (!tabInThisWindow(activeTab, detached)) return;
+  if (!open.find) {
+    toggle("find", true);
+    return;
+  }
+  window.dispatchEvent(new CustomEvent(FIND_STEP, { detail: { forward } }));
+}
+
 /** Asks the toolbar to select its address field; the Toolbar listens for it. */
 export const FOCUS_ADDRESS = "dive:focus-address";
 /** Asks an open find bar to focus and select its query; the FindBar listens for it. */
 export const FOCUS_FIND = "dive:focus-find";
+/** Asks an open find bar for its next (`detail.forward`) or previous match; the FindBar listens for it. */
+export const FIND_STEP = "dive:find-step";
 /** Open the star's popover on the active page's bookmark (the notice's Edit action). */
 export const EDIT_BOOKMARK = "dive:edit-bookmark";
 /** Opens the share popover (QR code and LAN address) for the current page. */
@@ -267,6 +290,8 @@ export const SHORTCUTS: Record<string, string> = {
   "shift+escape": "tasks.open",
   "mod+shift+i": "page.reader",
   "mod+f": "find.open",
+  "mod+g": "find.next",
+  "mod+shift+g": "find.prev",
   "mod+d": "bookmark.toggle",
   "mod+y": "history.open",
   "mod+alt+b": "bookmarks.open",
@@ -337,6 +362,8 @@ export const COMMAND_TITLES: Record<string, string> = {
   "page.reader": "Reader view",
   "page.translate": "Translate this page",
   "find.open": "Find in page",
+  "find.next": "Find next",
+  "find.prev": "Find previous",
   "address.focus": "Focus the address bar",
   "library.open": "Library: bookmarks and history",
   "bookmarks.open": "Bookmarks",
@@ -395,6 +422,8 @@ const NEEDS_THIS_WINDOW = new Set([
   "page.reader",
   "page.translate",
   "find.open",
+  "find.next",
+  "find.prev",
   "bookmark.toggle",
   "tab.print",
   "video.pip",
@@ -474,6 +503,9 @@ const CHORDS_IN_FIELDS = new Set([
   "mod+shift+]",
   "ctrl+tab",
   "ctrl+shift+tab",
+  // Stepping through matches works from the find field itself.
+  "mod+g",
+  "mod+shift+g",
   // Zoom is about the page, never the field, so it applies while the menu,
   // the palette or the find bar holds focus, as it does in Chrome.
   "mod+=",

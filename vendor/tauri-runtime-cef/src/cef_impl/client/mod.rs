@@ -21,6 +21,7 @@ pub(crate) mod js_dialog;
 mod keyboard;
 mod life_span;
 mod load;
+pub(crate) mod page_events;
 pub(crate) mod permission;
 mod process;
 
@@ -40,6 +41,8 @@ pub use js_dialog::{JsDialogBridge, JsDialogKind, JsDialogRequest};
 use keyboard::TauriCefKeyboardHandler;
 use life_span::TauriCefChildLifeSpanHandler;
 use load::TauriCefLoadHandler;
+use page_events::TauriCefFindHandler;
+pub use page_events::{FindUpdate, PageEvents};
 use permission::TauriCefPermissionHandler;
 pub(crate) use process::TauriCefBrowserProcessHandler;
 
@@ -47,6 +50,7 @@ pub(crate) struct TauriCefBrowserClientHandlers<T: UserEvent> {
     pub(crate) permissions: Arc<permission::PermissionBridge>,
     pub(crate) context_menu: Arc<ContextMenuBridge>,
     pub(crate) js_dialog: Arc<JsDialogBridge>,
+    pub(crate) page_events: Arc<PageEvents>,
     pub(crate) shortcut_binding: Arc<crate::reserved_shortcut_native::NativeShortcutBinding>,
     pub(crate) ipc_handler: Option<Arc<ipc::IpcHandler<T>>>,
     pub(crate) on_page_load_handler: Option<Arc<tauri_runtime::webview::OnPageLoadHandler>>,
@@ -66,6 +70,7 @@ impl<T: UserEvent> Clone for TauriCefBrowserClientHandlers<T> {
             permissions: self.permissions.clone(),
             context_menu: self.context_menu.clone(),
             js_dialog: self.js_dialog.clone(),
+            page_events: self.page_events.clone(),
             shortcut_binding: self.shortcut_binding.clone(),
             ipc_handler: self.ipc_handler.clone(),
             on_page_load_handler: self.on_page_load_handler.clone(),
@@ -129,6 +134,7 @@ wrap_client! {
         self.handlers.new_window_handler.clone(),
         self.creation_delivered.clone(),
         self.handlers.permissions.clone(),
+        self.handlers.page_events.clone(),
       ))
     }
 
@@ -164,6 +170,10 @@ wrap_client! {
 
     fn jsdialog_handler(&self) -> Option<JsdialogHandler> {
       Some(TauriCefJsDialogHandler::new(self.handlers.js_dialog.clone()))
+    }
+
+    fn find_handler(&self) -> Option<FindHandler> {
+      Some(TauriCefFindHandler::new(self.handlers.page_events.clone()))
     }
 
     fn permission_handler(&self) -> Option<PermissionHandler> {

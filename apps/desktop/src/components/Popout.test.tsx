@@ -192,7 +192,7 @@ describe("detached window shortcuts", () => {
     act(() => menuEvent("find.open"));
     const field = await screen.findByLabelText("Find in page");
     fireEvent.change(field, { target: { value: "hello" } });
-    await waitFor(() => expect(find).toHaveBeenCalledWith("a", "hello", 1));
+    await waitFor(() => expect(find).toHaveBeenCalledWith("a", "hello", true, false));
   });
 
   it("zooms and saves its own page from the menu", async () => {

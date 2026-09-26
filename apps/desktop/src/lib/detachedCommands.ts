@@ -1,4 +1,4 @@
-import { FOCUS_FIND } from "./commands";
+import { FIND_STEP, FOCUS_FIND } from "./commands";
 import { ipc } from "./ipc";
 import { errorMessage } from "./errors";
 import { useBrowser } from "../store/browser";
@@ -36,6 +36,12 @@ export function runDetachedCommand(command: string, tabId: string, focusAddress?
       browser.toggle("find", true);
       // An open bar does not remount; ⌘F again asks it for the keyboard.
       window.dispatchEvent(new CustomEvent(FOCUS_FIND));
+      return true;
+    case "find.next":
+    case "find.prev":
+      // Closed, the bar opens on the last search; open, it steps.
+      if (!browser.open.find) browser.toggle("find", true);
+      else window.dispatchEvent(new CustomEvent(FIND_STEP, { detail: { forward: command === "find.next" } }));
       return true;
     case "address.focus":
       if (!focusAddress) return false;

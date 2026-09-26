@@ -614,8 +614,12 @@ export const commands = {
 	tabA11y: (id: TabId, axeSource: string) => typedError<A11yReport, AppError>(__TAURI_INVOKE("tab_a11y", { id, axeSource })),
 	/**  Scroll to the first element matching `selector` and flash it. */
 	tabA11yReveal: (id: TabId, selector: string) => typedError<boolean, AppError>(__TAURI_INVOKE("tab_a11y_reveal", { id, selector })),
-	/**  Find in page: select match `index` (1-based, wraps) of `query`; empty query clears. */
-	tabFind: (id: TabId, query: string, index: number) => typedError<FindResult, AppError>(__TAURI_INVOKE("tab_find", { id, query, index })),
+	/**
+	 *  Find in page with the engine's own find. `find_next` steps to the next
+	 *  match (the previous one when `forward` is false) instead of starting the
+	 *  search over; an empty query ends the search and clears its highlights.
+	 */
+	tabFind: (id: TabId, query: string, forward: boolean, findNext: boolean) => typedError<FindResult, AppError>(__TAURI_INVOKE("tab_find", { id, query, forward, findNext })),
 	/**  Web Vitals from buffered performance entries. */
 	tabVitals: (id: TabId) => typedError<Vitals, AppError>(__TAURI_INVOKE("tab_vitals", { id })),
 	/**  Map a script location to its original source through source maps. */

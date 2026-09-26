@@ -456,6 +456,34 @@ pub struct TabHost {
     /// Tabs whose page is one of Dive's own (`dive://…`), drawn by the chrome
     /// in the content area: they have no native view at all.
     internal: std::collections::HashSet<TabId>,
+    /// Tabs whose page was asked to close and can still refuse.
+    closing: CloseRequests,
+}
+
+/// Tabs whose page was asked to close the way a person closes a tab, by the
+/// label of the view that was asked. The tab stays until that very view says
+/// it is going: a view rebuilt meanwhile, or closed by force for another
+/// reason, answers for a different page and must not take the tab with it.
+#[derive(Debug, Default)]
+struct CloseRequests(HashMap<TabId, String>);
+
+impl CloseRequests {
+    fn ask(&mut self, tab: TabId, label: &str) {
+        self.0.insert(tab, label.to_owned());
+    }
+
+    /// Whether `label`'s close was the one asked for; forgets it when it was.
+    fn take(&mut self, tab: TabId, label: &str) -> bool {
+        if self.0.get(&tab).is_some_and(|asked| asked == label) {
+            self.0.remove(&tab);
+            return true;
+        }
+        false
+    }
+
+    fn cancel(&mut self, tab: TabId) {
+        self.0.remove(&tab);
+    }
 }
 
 /// Scheme of Dive's built-in pages.
@@ -602,6 +630,28 @@ pub fn popout_tab(label: &str) -> Option<TabId> {
     id.parse().ok()
 }
 
+/// Hear when `view`'s page lets go of a close it was asked for. CEF reports
+/// it from inside its own close callback on the main thread, where
+/// `run_on_main_thread` would call straight through and re-enter the
+/// runtime, so the tab is let go from a task that hops back.
+#[cfg(feature = "cef")]
+fn attach_close_listener(app: &AppHandle<Runtime>, tab_id: TabId, view: &Webview<Runtime>) {
+    let app = app.clone();
+    let label = view.label().to_owned();
+    let _ = view.with_webview(move |native| {
+        native.set_close_handler(move || {
+            let app = app.clone();
+            let label = label.clone();
+            tauri::async_runtime::spawn(async move {
+                let hop = app.clone();
+                let _ = hop.run_on_main_thread(move || {
+                    crate::commands::page_agreed_to_close(&app, tab_id, &label);
+                });
+            });
+        });
+    });
+}
+
 impl TabHost {
     fn new(window: Window<Runtime>, profiles_root: PathBuf, bounds: Bounds) -> Self {
         Self {
@@ -620,6 +670,7 @@ impl TabHost {
             popouts: HashMap::new(),
             app_windows: HashMap::new(),
             internal: std::collections::HashSet::new(),
+            closing: CloseRequests::default(),
         }
     }
 
@@ -994,6 +1045,10 @@ impl TabHost {
         crate::page_menu::attach(app, tab_id, &view, self.popouts.contains_key(&tab_id));
         #[cfg(feature = "cef")]
         crate::js_dialog::attach(app, tab_id, &view);
+        #[cfg(feature = "cef")]
+        attach_close_listener(app, tab_id, &view);
+        #[cfg(feature = "cef")]
+        crate::find::attach(tab_id, &view);
         self.views.insert(tab_id, view);
         // A pane whose page was asleep kept its place in the split. Its new
         // view starts over the whole content area and hidden, so it is moved
@@ -1059,6 +1114,7 @@ impl TabHost {
             view.close()?;
         }
         self.views.remove(&tab.id);
+        self.closing.cancel(tab.id);
         self.open(main, app, tab, container)?;
         if self.popouts.contains_key(&tab.id)
             && let Some(view) = self.views.get(&tab.id)
@@ -1833,8 +1889,46 @@ impl TabHost {
         Ok(())
     }
 
-    /// Destroy the view for `id`, if any.
+    /// Ask `id`'s page to close the way closing a tab in a browser does:
+    /// its `beforeunload` handler runs, and a page holding unsaved work asks
+    /// the person (as a dialog card) whether to leave. Returns whether the
+    /// page was asked; the tab is then kept until the page agrees, which
+    /// `take_close_request` hears. A tab with no live page to ask -- asleep,
+    /// or one of Dive's own -- returns false and is closed at once.
+    #[cfg(feature = "cef")]
+    pub fn request_close(&mut self, id: TabId) -> bool {
+        let Some(view) = self.views.get(&id) else {
+            return false;
+        };
+        let asked = view
+            .with_webview(|native| native.close_gracefully())
+            .is_ok();
+        if asked {
+            self.closing.ask(id, view.label());
+        }
+        asked
+    }
+
+    /// Without CEF there is no page to ask; every close is immediate.
+    #[cfg(not(feature = "cef"))]
+    pub fn request_close(&mut self, _id: TabId) -> bool {
+        false
+    }
+
+    /// Whether the view `label` closing is the page agreeing to a close
+    /// `request_close` asked for, rather than one forced for another reason.
+    pub fn take_close_request(&mut self, id: TabId, label: &str) -> bool {
+        self.closing.take(id, label)
+    }
+
+    /// The person chose to stay on the page; the tab is theirs again.
+    pub fn cancel_close_request(&mut self, id: TabId) {
+        self.closing.cancel(id);
+    }
+
+    /// Destroy the view for `id`, if any. Forced: the page is not asked.
     pub fn close(&mut self, id: TabId) -> tauri::Result<()> {
+        self.closing.cancel(id);
         if let Some(view) = self.views.get(&id) {
             view.close()?;
         }
@@ -1844,6 +1938,7 @@ impl TabHost {
         state.agent_presence.forget(id);
         state.js_dialogs.forget_tab(id);
         crate::tab_audio::forget(id);
+        crate::find::forget(id);
         Ok(())
     }
 
@@ -2711,6 +2806,34 @@ fn private_chrome(builder: WebviewBuilder<Runtime>) -> WebviewBuilder<Runtime> {
         builder
             .incognito(true)
             .data_directory(crate::state::profiles_root().join("chrome-ui"))
+    }
+}
+
+#[cfg(test)]
+mod close_request_tests {
+    use super::CloseRequests;
+    use dive_core::TabId;
+
+    #[test]
+    fn only_the_view_asked_can_close_the_tab() {
+        let tab = TabId::new();
+        let mut requests = CloseRequests::default();
+        requests.ask(tab, "tab-a");
+        // A view rebuilt after the request is a different page.
+        assert!(!requests.take(tab, "tab-b"));
+        assert!(requests.take(tab, "tab-a"));
+        // Heard once: CEF may report the same close again.
+        assert!(!requests.take(tab, "tab-a"));
+    }
+
+    #[test]
+    fn staying_on_the_page_forgets_the_request() {
+        let tab = TabId::new();
+        let mut requests = CloseRequests::default();
+        requests.ask(tab, "tab-a");
+        requests.cancel(tab);
+        // A later forced close (sleep, discard) must not delete the tab.
+        assert!(!requests.take(tab, "tab-a"));
     }
 }
 

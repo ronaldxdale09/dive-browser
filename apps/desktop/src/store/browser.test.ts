@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@tauri-apps/api/event";
-import { CLOSED_TABS_LIMIT, countsChanged, onTabClosed, orderWithAt, reduceCrash, sameSiteTab, togglePanel, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, tabInThisWindow, useBrowser, withoutRequest } from "./browser";
+import { CLOSED_TABS_LIMIT, countsChanged, onTabClosed, orderWithAt, reduceCrash, sameSiteTab, togglePanel, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, tabInThisWindow, useBrowser, withoutRequest, isClosing, nextCloseTarget, pageAnsweredClose, pagePromptedOnClose } from "./browser";
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
 import type { PermissionAsked, PermissionDismissed, Snapshot, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
@@ -933,5 +933,53 @@ describe("translatePage", () => {
     await useBrowser.getState().translatePage();
     expect(translate).not.toHaveBeenCalled();
     expect(useBrowser.getState().notice).toBeNull();
+  });
+});
+
+describe("closing a tab", () => {
+  const initial = useBrowser.getState();
+  afterEach(() => {
+    useBrowser.setState(initial, true);
+    vi.restoreAllMocks();
+  });
+
+  it("walks to the neighbour while the active tab is still deciding to close", () => {
+    const closing = new Set(["b"]);
+    const closingNow = (id: string) => closing.has(id);
+    expect(nextCloseTarget(["a", "b", "c"], "a", closingNow)).toBe("a");
+    expect(nextCloseTarget(["a", "b", "c"], "b", closingNow)).toBe("c");
+    closing.add("c");
+    expect(nextCloseTarget(["a", "b", "c"], "b", closingNow)).toBe("a");
+    closing.add("a");
+    expect(nextCloseTarget(["a", "b", "c"], "b", closingNow)).toBeNull();
+    expect(nextCloseTarget(["a"], null, closingNow)).toBeNull();
+  });
+
+  it("asks a page to close once however often the close is pressed, and again after a refusal", async () => {
+    vi.spyOn(ipc, "tabScrollPosition").mockResolvedValue(null);
+    const close = vi.spyOn(ipc, "tabClose").mockRejectedValueOnce(new Error("engine not ready")).mockResolvedValue(null as never);
+    useBrowser.setState({ tabs: [tab("q1"), tab("q2")], activeTab: "q1", activeWorkspace: "w" });
+    await useBrowser.getState().closeTab("q1");
+    expect(isClosing("q1")).toBe(false);
+    await Promise.all([useBrowser.getState().closeTab("q1"), useBrowser.getState().closeTab("q1")]);
+    expect(close).toHaveBeenCalledTimes(2);
+    expect(isClosing("q1")).toBe(true);
+    useBrowser.getState().applyEvent({ type: "tab_closed", data: "q1" });
+    expect(isClosing("q1")).toBe(false);
+  });
+
+  it("brings a background tab forward to ask its question, and lets it be closed again after Stay", async () => {
+    vi.spyOn(ipc, "tabScrollPosition").mockResolvedValue(null);
+    vi.spyOn(ipc, "tabClose").mockResolvedValue(null as never);
+    const activate = vi.spyOn(ipc, "tabActivate").mockResolvedValue(null as never);
+    useBrowser.setState({ tabs: [tab("r1"), tab("r2")], activeTab: "r1", activeWorkspace: "w", detached: [] });
+    // A question from a page nobody asked to close is not ours to move.
+    pagePromptedOnClose("r2");
+    expect(activate).not.toHaveBeenCalled();
+    await useBrowser.getState().closeTab("r2");
+    pagePromptedOnClose("r2");
+    expect(activate).toHaveBeenCalledWith("r2");
+    pageAnsweredClose("r2");
+    expect(isClosing("r2")).toBe(false);
   });
 });

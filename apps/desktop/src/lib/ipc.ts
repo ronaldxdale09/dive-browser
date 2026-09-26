@@ -163,7 +163,8 @@ export const ipc = {
   tabMeta: async (id: string) => unwrap(await commands.tabMeta(id)),
   resolveFrame: async (tabId: string, url: string, line: number, column: number | null) => unwrap(await commands.resolveFrame(tabId, url, line, column)),
   tabVitals: async (id: string) => unwrap(await commands.tabVitals(id)),
-  tabFind: async (id: string, query: string, index: number) => unwrap(await commands.tabFind(id, query, index)),
+  /** Find in page: `findNext` steps from the current match (backwards unless `forward`); an empty query clears. */
+  tabFind: async (id: string, query: string, forward: boolean, findNext: boolean) => unwrap(await commands.tabFind(id, query, forward, findNext)),
   tabA11y: async (id: string, axeSource: string) => unwrap(await commands.tabA11y(id, axeSource)),
   tabA11yReveal: async (id: string, selector: string) => unwrap(await commands.tabA11yReveal(id, selector)),
   /** `reload` only when the user agent changed; rotating or zooming keeps the page's state. */

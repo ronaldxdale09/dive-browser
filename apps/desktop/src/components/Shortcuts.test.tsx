@@ -13,7 +13,7 @@ beforeEach(() => {
   vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
   vi.spyOn(ipc, "commandsList").mockResolvedValue([
     { id: "tab.new", title: "New tab", keybinding: "mod+t", scope: "workspace" },
-    { id: "host.only", title: "Host-only thing", keybinding: "mod+shift+g", scope: "global" },
+    { id: "host.only", title: "Host-only thing", keybinding: "mod+shift+k", scope: "global" },
   ]);
 });
 
@@ -47,8 +47,8 @@ describe("groupShortcuts", () => {
   });
 
   it("adds a host command with a keybinding the chrome map lacks", () => {
-    const rows = groupShortcuts({}, [{ id: "host.only", title: "Host-only thing", keybinding: "mod+shift+g", scope: "global" }]).flatMap((a) => a.rows);
-    expect(rows).toEqual([{ id: "host.only", title: "Host-only thing", chords: ["mod+shift+g"] }]);
+    const rows = groupShortcuts({}, [{ id: "host.only", title: "Host-only thing", keybinding: "mod+shift+k", scope: "global" }]).flatMap((a) => a.rows);
+    expect(rows).toEqual([{ id: "host.only", title: "Host-only thing", chords: ["mod+shift+k"] }]);
   });
 });
 
@@ -64,7 +64,7 @@ describe("Shortcuts dialog", () => {
     expect(screen.getByText("⌘⇧S")).toBeTruthy();
     expect(screen.getByText("⌘1 … ⌘9")).toBeTruthy();
     await waitFor(() => expect(screen.getByText("Host-only thing")).toBeTruthy());
-    expect(screen.getByText("⌘⇧G")).toBeTruthy();
+    expect(screen.getByText("⌘⇧K")).toBeTruthy();
   });
 
   it("closes on Escape", async () => {

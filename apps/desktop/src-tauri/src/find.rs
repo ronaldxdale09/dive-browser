@@ -1,15 +1,27 @@
-//! Find in page. The runtime has no native find API, so a small script walks
-//! text nodes, counts matches, and selects the requested one.
+//! Find in page, with the engine's own find.
+//!
+//! Chromium's find highlights every match, finds text that runs across
+//! elements and into frames, counts what the reader can actually see, and
+//! never touches the page's selection. The engine reports its results through
+//! a per-view handler, as a stream: counts can grow while a long page is
+//! searched, and only the last report of a search is final. Each tab keeps
+//! its latest report in a watch channel, and a find call waits for the report
+//! of the search it started.
 
-use dive_cdp::CdpSession;
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+use std::time::Duration;
+
+use dive_core::TabId;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use specta::Type;
+use tokio::sync::watch;
 
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
+use crate::state::AppState;
 
 /// Result of a find step.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct FindResult {
     /// Total matches in the document.
     pub total: u32,
@@ -17,65 +29,181 @@ pub struct FindResult {
     pub current: u32,
 }
 
-const SCRIPT: &str = r"(function(query, index){
-  const sel = window.getSelection();
-  if (!query) { sel && sel.removeAllRanges(); return {total:0,current:0}; }
-  const needle = query.toLowerCase();
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-    acceptNode(n){
-      const p = n.parentElement; if (!p) return NodeFilter.FILTER_REJECT;
-      const tag = p.tagName; if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return NodeFilter.FILTER_REJECT;
-      const cs = getComputedStyle(p); if (cs.display === 'none' || cs.visibility === 'hidden') return NodeFilter.FILTER_REJECT;
-      return NodeFilter.FILTER_ACCEPT;
-    }});
-  const ranges = [];
-  let node;
-  while ((node = walker.nextNode())) {
-    const text = node.nodeValue.toLowerCase(); let from = 0;
-    while (true) { const i = text.indexOf(needle, from); if (i === -1) break;
-      const r = document.createRange(); r.setStart(node, i); r.setEnd(node, i + needle.length); ranges.push(r); from = i + needle.length; }
-  }
-  const total = ranges.length;
-  if (!total) { sel && sel.removeAllRanges(); return {total:0,current:0}; }
-  const cur = ((index - 1) % total + total) % total;
-  const r = ranges[cur];
-  sel.removeAllRanges(); sel.addRange(r);
-  const el = r.startContainer.parentElement; if (el && el.scrollIntoView) el.scrollIntoView({block:'center', inline:'nearest'});
-  return {total, current: cur + 1};
-})";
+/// The latest report the engine made for a tab's search.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Report {
+    /// Which search it belongs to. The engine numbers every request, a step
+    /// to the next match included, so a new number means a new answer.
+    identifier: i32,
+    result: FindResult,
+    final_update: bool,
+}
 
-/// Select match number `index` (1-based, wraps) of `query`.
-pub async fn find(session: &CdpSession, query: &str, index: i32) -> AppResult<FindResult> {
-    let expression = format!(
-        "JSON.stringify({SCRIPT}({}, {index}))",
-        serde_json::to_string(query).unwrap_or_default()
-    );
-    let result = session
-        .call(
-            "Runtime.evaluate",
-            json!({"expression": expression, "returnByValue": true}),
-        )
-        .await
-        .map_err(AppError::new)?;
-    let raw = result["result"]["value"].as_str().unwrap_or("{}");
-    Ok(serde_json::from_str(raw).unwrap_or_default())
+/// How long a find waits for the engine to finish counting. A huge page can
+/// take longer; the bar then shows the count so far, and the report that
+/// completes it is simply not waited for.
+const FIND_BUDGET: Duration = Duration::from_millis(1500);
+
+static REPORTS: LazyLock<Mutex<HashMap<TabId, watch::Sender<Report>>>> =
+    LazyLock::new(Default::default);
+
+fn channel(tab: TabId) -> watch::Sender<Report> {
+    REPORTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry(tab)
+        .or_insert_with(|| watch::channel(Report::default()).0)
+        .clone()
+}
+
+/// Receive `view`'s find results. Called for every view a tab gets, so a
+/// page woken from sleep reports into the same channel as before.
+#[cfg(feature = "cef")]
+pub fn attach(tab: TabId, view: &tauri::Webview<crate::Runtime>) {
+    let reports = channel(tab);
+    let _ = view.with_webview(move |native| {
+        native.set_find_handler(move |update: tauri_runtime_cef::FindUpdate| {
+            reports.send_replace(report_of(update));
+        });
+    });
+}
+
+#[cfg(feature = "cef")]
+fn report_of(update: tauri_runtime_cef::FindUpdate) -> Report {
+    Report {
+        identifier: update.identifier,
+        result: FindResult {
+            total: u32::try_from(update.count).unwrap_or(0),
+            current: u32::try_from(update.active_match_ordinal).unwrap_or(0),
+        },
+        final_update: update.final_update,
+    }
+}
+
+/// The tab is gone; so is its channel.
+pub fn forget(tab: TabId) {
+    REPORTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .remove(&tab);
+}
+
+/// Search `tab` for `query`. `find_next` steps from the current match,
+/// backwards when `forward` is false; otherwise the search starts over, from
+/// the top. An empty query ends the search and takes its highlights away.
+/// A tab without a live page (asleep) has nothing to find.
+pub async fn find(
+    state: &AppState,
+    tab: TabId,
+    query: &str,
+    forward: bool,
+    find_next: bool,
+) -> AppResult<FindResult> {
+    if query.is_empty() {
+        stop(state, tab);
+        return Ok(FindResult::default());
+    }
+    let mut reports = channel(tab).subscribe();
+    let before = reports.borrow_and_update().identifier;
+    let text = query.to_owned();
+    let started = crate::commands::with_view(state, tab, move |view| {
+        view.with_webview(move |native| native.find(&text, forward, false, find_next))
+    });
+    if started.is_err() {
+        return Ok(FindResult::default());
+    }
+    Ok(wait_for_answer(&mut reports, before, FIND_BUDGET).await)
+}
+
+/// The final report of the first search numbered after `before`, or the
+/// latest report of it when the budget runs out first.
+async fn wait_for_answer(
+    reports: &mut watch::Receiver<Report>,
+    before: i32,
+    budget: Duration,
+) -> FindResult {
+    let mut latest = None;
+    let _ = tokio::time::timeout(budget, async {
+        while reports.changed().await.is_ok() {
+            let report = *reports.borrow_and_update();
+            if report.identifier == before {
+                continue;
+            }
+            latest = Some(report.result);
+            if report.final_update {
+                break;
+            }
+        }
+    })
+    .await;
+    latest.unwrap_or_default()
+}
+
+/// End `tab`'s search and clear its highlights, leaving the page's own
+/// selection as the person left it.
+pub fn stop(state: &AppState, tab: TabId) {
+    // A sleeping tab has no page and no highlights to clear.
+    let _ = crate::commands::with_view(state, tab, |view| {
+        view.with_webview(|native| native.stop_finding(true))
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn query_is_json_escaped_into_the_expression() {
-        let q = serde_json::to_string("a \"quoted\" </script>").unwrap();
-        assert!(q.starts_with('"') && q.contains("\\\""));
-        let r: FindResult = serde_json::from_str(r#"{"total":3,"current":2}"#).unwrap();
+    fn report(identifier: i32, total: u32, current: u32, final_update: bool) -> Report {
+        Report {
+            identifier,
+            result: FindResult { total, current },
+            final_update,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_find_answers_with_the_final_count_of_its_own_search() {
+        let (tx, mut rx) = watch::channel(report(4, 9, 9, true));
+        let before = rx.borrow_and_update().identifier;
+        let sender = tokio::spawn(async move {
+            // A stale report of the previous search changes nothing.
+            tx.send_replace(report(4, 9, 9, true));
+            tokio::task::yield_now().await;
+            tx.send_replace(report(5, 2, 1, false));
+            tokio::task::yield_now().await;
+            tx.send_replace(report(5, 3, 1, true));
+            tx
+        });
+        let found = wait_for_answer(&mut rx, before, FIND_BUDGET).await;
+        drop(sender.await);
         assert_eq!(
-            r,
+            found,
             FindResult {
                 total: 3,
-                current: 2
+                current: 1
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_search_still_counting_answers_with_what_it_has() {
+        let (tx, mut rx) = watch::channel(Report::default());
+        tx.send_replace(report(1, 40, 1, false));
+        let found = wait_for_answer(&mut rx, 0, Duration::from_millis(50)).await;
+        assert_eq!(
+            found,
+            FindResult {
+                total: 40,
+                current: 1
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn no_answer_is_no_match() {
+        let (_tx, mut rx) = watch::channel(Report::default());
+        assert_eq!(
+            wait_for_answer(&mut rx, 0, Duration::from_millis(50)).await,
+            FindResult::default()
         );
     }
 }

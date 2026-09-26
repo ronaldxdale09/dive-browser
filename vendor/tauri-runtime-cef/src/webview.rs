@@ -34,7 +34,8 @@ use crate::window::AppWindow;
 pub use crate::reserved_shortcut_native::NativeNewTabTarget;
 pub use browser_client::permission::{NativePermissionRequest, PermissionContext};
 pub use browser_client::{
-    ContextMenuAction, ContextMenuCommand, ContextMenuOptions, JsDialogKind, JsDialogRequest,
+    ContextMenuAction, ContextMenuCommand, ContextMenuOptions, FindUpdate, JsDialogKind,
+    JsDialogRequest,
 };
 
 // Weak ownership: the context is released with the last live webview, before
@@ -54,6 +55,7 @@ pub struct Webview {
     permissions: Arc<browser_client::permission::PermissionBridge>,
     context_menu: Arc<browser_client::ContextMenuBridge>,
     js_dialog: Arc<browser_client::JsDialogBridge>,
+    page_events: Arc<browser_client::PageEvents>,
     shortcut_target: std::sync::Weak<crate::reserved_shortcut_native::NewTabTarget>,
     shortcut_binding: Arc<crate::reserved_shortcut_native::NativeShortcutBinding>,
 }
@@ -64,6 +66,7 @@ impl Webview {
         permissions: Arc<browser_client::permission::PermissionBridge>,
         context_menu: Arc<browser_client::ContextMenuBridge>,
         js_dialog: Arc<browser_client::JsDialogBridge>,
+        page_events: Arc<browser_client::PageEvents>,
         shortcut_target: std::sync::Weak<crate::reserved_shortcut_native::NewTabTarget>,
         shortcut_binding: Arc<crate::reserved_shortcut_native::NativeShortcutBinding>,
     ) -> Self {
@@ -72,6 +75,7 @@ impl Webview {
             permissions,
             context_menu,
             js_dialog,
+            page_events,
             shortcut_target,
             shortcut_binding,
         }
@@ -106,6 +110,53 @@ impl Webview {
     /// Answer a dialog from `set_js_dialog_handler`; false when it is gone.
     pub fn answer_js_dialog(&self, id: u64, accept: bool, text: Option<String>) -> bool {
         self.js_dialog.answer(id, accept, text)
+    }
+
+    /// Ask the page to close the way closing its tab in a browser does: its
+    /// `beforeunload` handler runs, and may ask the person (through the
+    /// dialog handler) whether to leave. If they stay, nothing more happens;
+    /// if the page lets go, the close handler hears it and the close goes on
+    /// as though it had been forced. Must be called on the UI thread, which
+    /// `with_webview` is.
+    pub fn close_gracefully(&self) {
+        if let Some(host) = self.browser.host() {
+            host.close_browser(0);
+        }
+    }
+
+    /// `handler` hears, on the UI thread and inside CEF's own close callback,
+    /// that the engine is committed to closing this page. It must hand any
+    /// work that touches the runtime on to another thread.
+    pub fn set_close_handler(&self, handler: impl Fn() + Send + Sync + 'static) {
+        self.page_events.install_close(Arc::new(handler));
+    }
+
+    /// Receive the engine's find in page reports, on the UI thread.
+    pub fn set_find_handler(&self, handler: impl Fn(FindUpdate) + Send + Sync + 'static) {
+        self.page_events.install_find(Arc::new(handler));
+    }
+
+    /// Search the page with the engine's own find: every match is
+    /// highlighted, frames and text split across elements included, and the
+    /// page's selection is left alone. `find_next` steps from the current
+    /// match instead of starting over; an empty `text` stops the search.
+    pub fn find(&self, text: &str, forward: bool, match_case: bool, find_next: bool) {
+        if let Some(host) = self.browser.host() {
+            host.find(
+                Some(&CefString::from(text)),
+                i32::from(forward),
+                i32::from(match_case),
+                i32::from(find_next),
+            );
+        }
+    }
+
+    /// End the search and take its highlights off the page. With
+    /// `clear_selection` the active match is not left selected either.
+    pub fn stop_finding(&self, clear_selection: bool) {
+        if let Some(host) = self.browser.host() {
+            host.stop_finding(i32::from(clear_selection));
+        }
     }
 
     /// A weak target handle: valid only while this exact native view remains alive.
@@ -385,6 +436,7 @@ pub(crate) struct AppWebview {
     pub(crate) permissions: Arc<browser_client::permission::PermissionBridge>,
     pub(crate) context_menu: Arc<browser_client::ContextMenuBridge>,
     pub(crate) js_dialog: Arc<browser_client::JsDialogBridge>,
+    pub(crate) page_events: Arc<browser_client::PageEvents>,
     pub(crate) webview_id: u32,
     pub(crate) label: String,
     pub(crate) browser: cef::Browser,
@@ -423,8 +475,13 @@ impl AppWebview {
     }
 
     /// Remove the browser's host view exactly once; `do_close` may repeat.
+    ///
+    /// The close counts as requested from here on: a graceful close the page
+    /// allowed reaches this without `request_close`, and the embedder's
+    /// forced close that follows it must not hand CEF a second close.
     pub(crate) fn destroy_host_window_once(&self) -> bool {
         use std::sync::atomic::Ordering;
+        self.closing.store(true, Ordering::Release);
         if self.host_destroyed.swap(true, Ordering::AcqRel) {
             return false;
         }
@@ -688,12 +745,14 @@ impl<T: UserEvent> WinitCefApp<T> {
         let permissions = Arc::new(browser_client::permission::PermissionBridge::default());
         let context_menu = Arc::new(browser_client::ContextMenuBridge::default());
         let js_dialog = Arc::new(browser_client::JsDialogBridge::default());
+        let page_events = Arc::new(browser_client::PageEvents::default());
         let shortcut_binding =
             Arc::new(crate::reserved_shortcut_native::NativeShortcutBinding::default());
         let handlers = browser_client::TauriCefBrowserClientHandlers {
             permissions: permissions.clone(),
             context_menu: context_menu.clone(),
             js_dialog: js_dialog.clone(),
+            page_events: page_events.clone(),
             shortcut_binding: shortcut_binding.clone(),
             ipc_handler: pending.ipc_handler.map(Arc::from),
             on_page_load_handler,
@@ -886,6 +945,7 @@ impl<T: UserEvent> WinitCefApp<T> {
                     permissions,
                     context_menu,
                     js_dialog,
+                    page_events,
                     webview_id,
                     label,
                     browser,
@@ -1520,6 +1580,7 @@ impl<T: UserEvent> WinitCefApp<T> {
                 child.permissions.clone(),
                 child.context_menu.clone(),
                 child.js_dialog.clone(),
+                child.page_events.clone(),
                 Arc::downgrade(&child.shortcut_target),
                 child.shortcut_binding.clone(),
             )),

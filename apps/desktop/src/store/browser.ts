@@ -157,6 +157,72 @@ export const CLOSED_TABS_LIMIT = 25;
 const scrollOfClosing = new Map<string, [number, number]>();
 
 /**
+ * Tabs this chrome asked the engine to close that are still open. A page is
+ * asked before it goes (its "Leave site?" question), so a close takes a
+ * moment, or never happens when the person stays. Until then a second ⌘W, a
+ * held one or a double click must not ask the same page again: it moves on
+ * to the neighbour instead.
+ */
+const closingTabs = new Map<string, ReturnType<typeof setTimeout> | null>();
+/**
+ * How long a close may go unanswered before the tab counts as open again.
+ * A page with no question closes within a frame; one that asks keeps the
+ * mark until the question is answered, which `pageAnsweredClose` hears.
+ */
+const CLOSE_PENDING_MS = 8000;
+
+/** Whether this chrome has asked for `id` to close and is waiting for it to go. */
+export function isClosing(id: string): boolean {
+  return closingTabs.has(id);
+}
+
+function markClosing(id: string) {
+  const previous = closingTabs.get(id);
+  if (previous) clearTimeout(previous);
+  closingTabs.set(id, setTimeout(() => closingTabs.delete(id), CLOSE_PENDING_MS));
+}
+
+function unmarkClosing(id: string) {
+  const timer = closingTabs.get(id);
+  if (timer) clearTimeout(timer);
+  closingTabs.delete(id);
+}
+
+/**
+ * The tab ⌘W should close: the active one, unless it is already closing, in
+ * which case the next tab along that is not (then the one before). Holding
+ * ⌘W walks the strip instead of asking one page over and over.
+ */
+export function nextCloseTarget(ordered: readonly string[], active: string | null, closing: (id: string) => boolean): string | null {
+  if (active && !closing(active)) return active;
+  const at = active ? ordered.indexOf(active) : -1;
+  if (at === -1) return null;
+  for (let i = at + 1; i < ordered.length; i++) if (!closing(ordered[i]!)) return ordered[i]!;
+  for (let i = at - 1; i >= 0; i--) if (!closing(ordered[i]!)) return ordered[i]!;
+  return null;
+}
+
+/**
+ * A page being closed asked whether to leave. Its question is only shown
+ * over its own page, so a tab closed from the strip while another was in
+ * front comes forward to ask it.
+ */
+export function pagePromptedOnClose(tabId: string) {
+  if (!closingTabs.has(tabId)) return;
+  const { activeTab, detached, activateTab } = useBrowser.getState();
+  // Keeps waiting for the answer, however long the person takes.
+  const timer = closingTabs.get(tabId);
+  if (timer) clearTimeout(timer);
+  closingTabs.set(tabId, null);
+  if (activeTab !== tabId && !detached.includes(tabId)) void activateTab(tabId);
+}
+
+/** The question was answered: staying keeps the tab, leaving closes it at once. */
+export function pageAnsweredClose(tabId: string) {
+  unmarkClosing(tabId);
+}
+
+/**
  * Per-tab state other stores keep (device emulation, audio), released when
  * the engine closes the tab. Those stores register here rather than being
  * imported by this one: they import this store, so that would be a cycle.
@@ -733,11 +799,14 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     });
   },
   closeTab: async (id) => {
+    if (closingTabs.has(id)) return;
+    markClosing(id);
     // Where the page was scrolled, so reopening it lands in the same place.
     // Asked before the close; the answer is picked up by the tab_closed event.
     const scroll = await ipc.tabScrollPosition(id).catch(() => null);
     if (scroll) scrollOfClosing.set(id, scroll);
-    await run(set, () => ipc.tabClose(id));
+    const asked = await succeeded(set, () => ipc.tabClose(id));
+    if (!asked) unmarkClosing(id);
     // Its console, requests and counts go with the tab_closed event, which
     // also covers tabs closed by the engine, an agent or a popout.
   },
@@ -1036,6 +1105,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     }
     if (event.type === "tab_closed") {
       const id = event.data;
+      unmarkClosing(id);
       const scroll = scrollOfClosing.get(id);
       scrollOfClosing.delete(id);
       set((s) => ({ closedTabs: rememberClosed(s.closedTabs, gone, goneIndex, scroll) }));

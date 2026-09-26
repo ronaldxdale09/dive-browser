@@ -1960,30 +1960,83 @@ pub fn open_tab_with(
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn tab_close(app: AppHandle<Runtime>, id: TabId) -> AppResult<()> {
-    use tauri::Manager as _;
     on_main(&app, move |main, app, state| {
-        let was_detached = lock(&state.host)
-            .as_ref()
-            .is_some_and(|host| host.is_detached(id));
-        close_tab(main, app, state, id)?;
-        if crate::private_session::is_private() && !was_detached {
-            let detached = lock(&state.host)
-                .as_ref()
-                .map_or_else(Vec::new, crate::engine::TabHost::detached);
-            let has_attached = {
-                let store = lock(&state.store);
-                store.workspaces()?.iter().any(|workspace| {
-                    store
-                        .tabs_for_workspace(workspace.id)
-                        .is_ok_and(|tabs| tabs.iter().any(|tab| !detached.contains(&tab.id)))
-                })
-            };
-            if !has_attached && let Some(window) = app.get_window(crate::MAIN_WINDOW) {
-                window.close()?;
-            }
-        }
-        Ok(())
+        request_tab_close(main, app, state, id)
     })
+}
+
+/// Close `id` because the person asked to (⌘W, the tab's X, a middle click,
+/// Close other tabs, a detached window's close button). The page is asked
+/// first, the way every browser asks it: one holding unsaved work shows its
+/// "Leave site?" question, and the tab only goes once the page lets go --
+/// `page_agreed_to_close` finishes the job then. Staying keeps the tab.
+/// Closes the engine makes on its own (sleep, discard, deleting a workspace
+/// or a profile, quitting) stay forced and go through `close_tab`.
+pub(crate) fn request_tab_close(
+    main: &MainThread,
+    app: &AppHandle<Runtime>,
+    state: &AppState,
+    id: TabId,
+) -> AppResult<()> {
+    let asked = lock(&state.host)
+        .as_mut()
+        .is_some_and(|host| host.request_close(id));
+    if asked {
+        return Ok(());
+    }
+    close_tab_as_asked(main, app, state, id)
+}
+
+/// The page in view `label` agreed to close (or was closed by force). Only a
+/// close `request_tab_close` asked for, from that very view, takes the tab.
+pub(crate) fn page_agreed_to_close(app: &AppHandle<Runtime>, id: TabId, label: &str) {
+    use tauri::Manager as _;
+    let Some(main) = MainThread::here() else {
+        tracing::warn!(%id, "a page's close arrived off the main thread");
+        return;
+    };
+    let state = app.state::<AppState>();
+    let asked = lock(&state.host)
+        .as_mut()
+        .is_some_and(|host| host.take_close_request(id, label));
+    if !asked {
+        return;
+    }
+    if let Err(e) = close_tab_as_asked(&main, app, &state, id) {
+        tracing::warn!(%id, "closing a tab its page let go of failed: {e}");
+    }
+}
+
+/// Close a tab the person asked to close, and in a private window close the
+/// window once no tab is left in it.
+fn close_tab_as_asked(
+    main: &MainThread,
+    app: &AppHandle<Runtime>,
+    state: &AppState,
+    id: TabId,
+) -> AppResult<()> {
+    use tauri::Manager as _;
+    let was_detached = lock(&state.host)
+        .as_ref()
+        .is_some_and(|host| host.is_detached(id));
+    close_tab(main, app, state, id)?;
+    if crate::private_session::is_private() && !was_detached {
+        let detached = lock(&state.host)
+            .as_ref()
+            .map_or_else(Vec::new, crate::engine::TabHost::detached);
+        let has_attached = {
+            let store = lock(&state.store);
+            store.workspaces()?.iter().any(|workspace| {
+                store
+                    .tabs_for_workspace(workspace.id)
+                    .is_ok_and(|tabs| tabs.iter().any(|tab| !detached.contains(&tab.id)))
+            })
+        };
+        if !has_attached && let Some(window) = app.get_window(crate::MAIN_WINDOW) {
+            window.close()?;
+        }
+    }
+    Ok(())
 }
 
 /// Close `id`: destroy its view (and its window, if it had one of its own),
@@ -4203,17 +4256,19 @@ pub(crate) async fn tab_storage_delete(
     .await
 }
 
-/// Find in page: select match `index` (1-based, wraps) of `query`; empty query clears.
+/// Find in page with the engine's own find. `find_next` steps to the next
+/// match (the previous one when `forward` is false) instead of starting the
+/// search over; an empty query ends the search and clears its highlights.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn tab_find(
     state: State<'_, AppState>,
     id: TabId,
     query: String,
-    index: i32,
+    forward: bool,
+    find_next: bool,
 ) -> AppResult<crate::find::FindResult> {
-    let session = cdp_for(&state, id)?;
-    crate::find::find(&session, &query, index).await
+    crate::find::find(&state, id, &query, forward, find_next).await
 }
 
 /// Web Vitals from buffered performance entries.

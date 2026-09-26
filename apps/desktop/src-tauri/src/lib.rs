@@ -415,7 +415,9 @@ pub fn run() {
                         tracing::debug!(%tab, "popout window closing after reattach; tab stays");
                         return;
                     }
-                    if let Err(e) = commands::close_tab(&main, &app, &state, tab) {
+                    // The window's close button is the person closing the
+                    // tab: its page may ask first, and staying keeps both.
+                    if let Err(e) = commands::request_tab_close(&main, &app, &state, tab) {
                         tracing::warn!(%tab, "closing popout failed: {e}");
                     }
                 });

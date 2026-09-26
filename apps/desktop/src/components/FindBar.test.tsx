@@ -5,7 +5,7 @@ import { ipc } from "../lib/ipc";
 import { contentCoverDepth } from "../lib/overlay";
 import { useBrowser } from "../store/browser";
 import { UI_COMMANDS } from "../lib/commands";
-import { FindBar } from "./FindBar";
+import { FindBar, resetFindQuery } from "./FindBar";
 
 const tab = { id: "t1", workspace_id: "w1", url: "https://a.test/", title: "A", favicon: null, tier: "today", position: 0, state: "active", last_active_at: "" } as unknown as Tab;
 const initial = useBrowser.getState();
@@ -17,6 +17,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetFindQuery();
   cleanup();
   useBrowser.setState(initial, true);
   vi.restoreAllMocks();
@@ -37,24 +38,70 @@ describe("FindBar", () => {
   it("does not keep a detached tab's match count as this window's", async () => {
     render(<FindBar />);
     fireEvent.change(screen.getByLabelText("Find in page"), { target: { value: "hello" } });
-    expect(await screen.findByLabelText("Match 1 of 3")).toBeTruthy();
+    expect(await screen.findByText("Match 1 of 3")).toBeTruthy();
     const calls = vi.mocked(ipc.tabFind).mock.calls.length;
     act(() => useBrowser.setState({ detached: ["t1"] }));
-    await waitFor(() => expect(screen.queryByLabelText("Match 1 of 3")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Match 1 of 3")).toBeNull());
     expect(screen.queryByText("1/3")).toBeNull();
     expect(screen.queryByText("0/0")).toBeNull();
-    expect(screen.queryByLabelText("No matches")).toBeNull();
+    expect(screen.queryByText("No matches")).toBeNull();
     expect(vi.mocked(ipc.tabFind).mock.calls.slice(calls).every((c) => c[0] !== "t1" || c[1] === "")).toBe(true);
   });
 
   it("does not keep the last match count when this tab is sleeping", async () => {
     render(<FindBar />);
     fireEvent.change(screen.getByLabelText("Find in page"), { target: { value: "hello" } });
-    expect(await screen.findByLabelText("Match 1 of 3")).toBeTruthy();
+    expect(await screen.findByText("Match 1 of 3")).toBeTruthy();
     act(() => useBrowser.setState({ tabs: [{ ...tab, state: "discarded" }], activeTab: "t1" }));
-    await waitFor(() => expect(screen.queryByLabelText("Match 1 of 3")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Match 1 of 3")).toBeNull());
     expect(screen.queryByText("1/3")).toBeNull();
   });
+  it("steps at once on every Enter, backwards with Shift, and not while an input method is composing", async () => {
+    render(<FindBar />);
+    const field = screen.getByLabelText("Find in page");
+    fireEvent.change(field, { target: { value: "hello" } });
+    await waitFor(() => expect(ipc.tabFind).toHaveBeenCalledWith("t1", "hello", true, false));
+    vi.mocked(ipc.tabFind).mockClear();
+    fireEvent.keyDown(field, { key: "Enter" });
+    fireEvent.keyDown(field, { key: "Enter", repeat: true });
+    fireEvent.keyDown(field, { key: "Enter", shiftKey: true });
+    expect(vi.mocked(ipc.tabFind).mock.calls).toEqual([
+      ["t1", "hello", true, true],
+      ["t1", "hello", true, true],
+      ["t1", "hello", false, true],
+    ]);
+    vi.mocked(ipc.tabFind).mockClear();
+    fireEvent.keyDown(field, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(field, { key: "Enter", keyCode: 229 });
+    expect(ipc.tabFind).not.toHaveBeenCalled();
+  });
+
+  it("steps from the menu's Find Next and Find Previous", async () => {
+    useBrowser.setState({ open: { ...initial.open, find: true } });
+    render(<FindBar />);
+    fireEvent.change(screen.getByLabelText("Find in page"), { target: { value: "hello" } });
+    await waitFor(() => expect(ipc.tabFind).toHaveBeenCalledWith("t1", "hello", true, false));
+    UI_COMMANDS["find.next"]!();
+    UI_COMMANDS["find.prev"]!();
+    expect(ipc.tabFind).toHaveBeenCalledWith("t1", "hello", true, true);
+    expect(ipc.tabFind).toHaveBeenCalledWith("t1", "hello", false, true);
+  });
+
+  it("clears the highlights of the tab it leaves, and searches the new page once it has loaded", async () => {
+    const other = { ...tab, id: "t2", url: "https://b.test/" } as Tab;
+    useBrowser.setState({ tabs: [tab, other] });
+    render(<FindBar />);
+    fireEvent.change(screen.getByLabelText("Find in page"), { target: { value: "hello" } });
+    await waitFor(() => expect(ipc.tabFind).toHaveBeenCalledWith("t1", "hello", true, false));
+    act(() => useBrowser.setState({ activeTab: "t2" }));
+    expect(ipc.tabFind).toHaveBeenCalledWith("t1", "", true, false);
+    await waitFor(() => expect(ipc.tabFind).toHaveBeenCalledWith("t2", "hello", true, false));
+    vi.mocked(ipc.tabFind).mockClear();
+    act(() => useBrowser.setState({ tabs: [tab, { ...other, url: "https://b.test/next" }], loading: { t2: true } }));
+    act(() => useBrowser.setState({ loading: {} }));
+    await waitFor(() => expect(ipc.tabFind).toHaveBeenCalledWith("t2", "hello", true, false));
+  });
+
   it("asks the native mask to let it through, and gives that up when it closes", () => {
     // The page paints above the chrome. Without a cover registered the panel
     // is drawn behind the page and simply cannot be seen -- which is exactly

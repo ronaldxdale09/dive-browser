@@ -176,6 +176,14 @@ pub fn answer(
     })?;
     let answered = answered.load(std::sync::atomic::Ordering::SeqCst);
     state.js_dialogs.remove(tab_id, dialog_id);
+    // Staying on a page that was asked to close keeps its tab for good: a
+    // later forced close (sleep, discard) must not be taken for its answer.
+    if dialog.kind == "beforeunload"
+        && !accept
+        && let Some(host) = crate::state::lock(&state.host).as_mut()
+    {
+        host.cancel_close_request(tab_id);
+    }
     let _ = JsDialogClosed {
         tab_id,
         dialog_id: dialog_id.to_owned(),

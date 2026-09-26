@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { JsDialogAsked } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
-import { useBrowser } from "./browser";
+import { pageAnsweredClose, pagePromptedOnClose, useBrowser } from "./browser";
 
 /**
  * JavaScript dialogs pages have open (`alert`, `confirm`, `prompt` and the
@@ -42,6 +42,7 @@ export const useJsDialog = create<JsDialogStore>((set, get) => {
           stops.push(await events.jsDialogClosed.listen((e) => {
             const { tab_id, dialog_id } = e.payload;
             changed(tab_id, dialog_id);
+            pageAnsweredClose(tab_id);
             set((s) => {
               const rest = without(s.byTab[tab_id], dialog_id);
               const byTab = { ...s.byTab };
@@ -53,6 +54,7 @@ export const useJsDialog = create<JsDialogStore>((set, get) => {
           stops.push(await events.jsDialogAsked.listen((e) => {
             const d = e.payload;
             changed(d.tab_id, d.dialog_id);
+            if (d.kind === "beforeunload") pagePromptedOnClose(d.tab_id);
             set((s) => {
               const current = s.byTab[d.tab_id] ?? [];
               // Recovery may deliver this ID before its asked event. Update
@@ -103,6 +105,7 @@ export const useJsDialog = create<JsDialogStore>((set, get) => {
     },
     answer: async (dialog, accept, text) => {
       changed(dialog.tab_id, dialog.dialog_id);
+      pageAnsweredClose(dialog.tab_id);
       set((s) => {
         const rest = without(s.byTab[dialog.tab_id], dialog.dialog_id);
         const byTab = { ...s.byTab };
