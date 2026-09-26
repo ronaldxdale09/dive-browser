@@ -156,12 +156,59 @@ async function push(tabId: string, sel: DeviceSelection | undefined, scale: numb
   const last = pushed.get(tabId);
   if (last && last.key === key) return;
   const reload = needsReload(last?.input ?? null, input);
-  pushed.set(tabId, { input, key });
+  const entry = { input, key };
+  pushed.set(tabId, entry);
   try {
     await ipc.tabEmulate(tabId, input, reload);
   } catch (e) {
+    // The engine never took it, so it must not count as sent: otherwise the
+    // same device chosen again was skipped as a repeat and never applied.
+    // A newer push that went out meanwhile is left alone.
+    if (pushed.get(tabId) === entry) {
+      if (last) pushed.set(tabId, last);
+      else pushed.delete(tabId);
+    }
     useBrowser.setState({ error: errorMessage(e) });
   }
+}
+
+/** Marks a tab whose device metrics are lifted while its stage is not showing. */
+const SUSPENDED = "suspended";
+
+/**
+ * Lift a device's metrics off a tab that is on screen without its stage: a
+ * pane beside the active one in a split, or a page torn off into its own
+ * window. The metrics were scaled for the stage, so the page painted a
+ * shrunken phone in the corner of the pane or window.
+ *
+ * The selection stays, and so does the memory of what was sent, keyed so the
+ * stage's next push goes through again without a reload: the user agent is
+ * lifted with the metrics but not reloaded for, and coming back to the same
+ * device is not a new one. Leaving the simulator from here still reloads.
+ */
+export async function suspendDevice(tabId: string) {
+  const last = pushed.get(tabId);
+  if (!last?.input || last.key === SUSPENDED) return;
+  const entry = { input: last.input, key: SUSPENDED };
+  pushed.set(tabId, entry);
+  try {
+    await ipc.tabEmulate(tabId, null, false);
+  } catch (e) {
+    if (pushed.get(tabId) === entry) pushed.set(tabId, last);
+    useBrowser.setState({ error: errorMessage(e) });
+  }
+}
+
+/** Largest viewport the engine emulates; mirrors MAX_VIEWPORT_AREA in emulate.rs. */
+export const MAX_VIEWPORT_AREA = 8_294_400;
+
+/** Why a custom size cannot be shown, or null when it can. */
+export function customSizeProblem(width: number, height: number): string | null {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return "Enter a width and a height.";
+  if (width * height > MAX_VIEWPORT_AREA) {
+    return `${width}×${height} is too large to emulate. Keep the width times the height under ${MAX_VIEWPORT_AREA.toLocaleString("en-US")} pixels — 3840×2160 at most.`;
+  }
+  return null;
 }
 
 /** Reset the dedupe memory; tests only. */
@@ -254,6 +301,13 @@ export const useEmulation = create<EmulationState>((set, get) => ({
     });
   },
   setCustomSize: async (tabId, width, height) => {
+    // The engine refuses these too, but only after the stage has been drawn
+    // for a size that will never show.
+    const problem = customSizeProblem(width, height);
+    if (problem) {
+      useBrowser.setState({ error: problem });
+      return;
+    }
     const current = get().byTab[tabId];
     const sel: DeviceSelection = { deviceId: "custom", landscape: false, ui: "none", zoom: current?.zoom ?? "fit", custom: { width, height } };
     set({ byTab: { ...get().byTab, [tabId]: sel } });
@@ -321,6 +375,13 @@ export const useEmulation = create<EmulationState>((set, get) => ({
 
 // A closed tab's device, media and throttling choices can never apply again.
 onTabClosed((tabId) => useEmulation.getState().drop(tabId));
+
+// A torn-off page fills its own window, where there is no stage to draw the
+// device or to scale it for.
+useBrowser.subscribe((state, previous) => {
+  if (state.detached === previous.detached) return;
+  for (const tabId of state.detached) if (!previous.detached.includes(tabId)) void suspendDevice(tabId);
+});
 
 export const selectMedia = (tabId: string | null) => (s: EmulationState) => (tabId ? (s.media[tabId] ?? DEFAULT_MEDIA) : DEFAULT_MEDIA);
 export const selectThrottle = (tabId: string | null) => (s: EmulationState) => (tabId ? (s.throttle[tabId] ?? null) : null);

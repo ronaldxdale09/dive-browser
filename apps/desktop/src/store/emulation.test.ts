@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { needsReload, presetFor, resetPushed, toEnvironmentInput, toInput, toMediaInput, useEmulation } from "./emulation";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { customSizeProblem, needsReload, presetFor, resetPushed, suspendDevice, toEnvironmentInput, toInput, toMediaInput, useEmulation } from "./emulation";
+import { ipc } from "../lib/ipc";
 import type { DeviceSelection } from "./emulation";
 import { deviceById } from "../data/devices";
 
@@ -130,5 +131,55 @@ describe("adopting what an agent emulated", () => {
     expect(() => sel.adopt({ ...base, preset: "iphone-15" })).not.toThrow();
     // `adopt` is synchronous precisely because it talks to nobody.
     expect(sel.adopt({ ...base, preset: "iphone-15" })).toBeUndefined();
+  });
+});
+
+describe("pushing to the engine", () => {
+  beforeEach(() => {
+    useEmulation.setState({ byTab: {}, scale: {}, recent: [] });
+    resetPushed();
+    vi.restoreAllMocks();
+  });
+
+  it("sends a device again after the engine refused it", async () => {
+    const emulate = vi.spyOn(ipc, "tabEmulate").mockRejectedValueOnce(new Error("no view")).mockResolvedValue(null as never);
+    useEmulation.setState({ byTab: { t: iphone } });
+    await useEmulation.getState().setScale("t", 0.5);
+    await useEmulation.getState().setScale("t", 0.5);
+    expect(emulate).toHaveBeenCalledTimes(2);
+  });
+
+  it("lifts a device off a pane or popout and puts it back without a reload", async () => {
+    const emulate = vi.spyOn(ipc, "tabEmulate").mockResolvedValue(null as never);
+    useEmulation.setState({ byTab: { t: iphone } });
+    await useEmulation.getState().setScale("t", 0.5);
+    await suspendDevice("t");
+    expect(emulate).toHaveBeenLastCalledWith("t", null, false);
+    // A second lift sends nothing: the metrics are already off.
+    await suspendDevice("t");
+    expect(emulate).toHaveBeenCalledTimes(2);
+    await useEmulation.getState().setScale("t", 0.5);
+    expect(emulate).toHaveBeenLastCalledWith("t", expect.objectContaining({ width: 393 }), false);
+    // Leaving the simulator while lifted still reloads for the desktop agent.
+    await suspendDevice("t");
+    await useEmulation.getState().setDevice("t", null);
+    expect(emulate).toHaveBeenLastCalledWith("t", null, true);
+  });
+
+  it("never lifts a tab that was not being simulated", async () => {
+    const emulate = vi.spyOn(ipc, "tabEmulate").mockResolvedValue(null as never);
+    await suspendDevice("plain");
+    expect(emulate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a custom size past the engine's limit with a reason", async () => {
+    const emulate = vi.spyOn(ipc, "tabEmulate").mockResolvedValue(null as never);
+    expect(customSizeProblem(1920, 1080)).toBeNull();
+    expect(customSizeProblem(3840, 2160)).toBeNull();
+    expect(customSizeProblem(4096, 4096)).toContain("too large");
+    expect(customSizeProblem(Number.NaN, 700)).toBe("Enter a width and a height.");
+    await useEmulation.getState().setCustomSize("t", 4096, 4096);
+    expect(useEmulation.getState().byTab.t).toBeUndefined();
+    expect(emulate).not.toHaveBeenCalled();
   });
 });
