@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import type { NavigationHistory } from "../lib/ipc";
@@ -56,9 +56,11 @@ describe("NavigationButtons history menu", () => {
   it("closes on a click outside and on Escape", async () => {
     await openBackHistory();
     fireEvent.mouseDown(document.body);
-    expect(screen.queryByRole("menu")).toBeNull();
+    // The history under the menu is read when it opens; under a loaded test
+    // run that read can still be settling when the press lands.
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     fireEvent.contextMenu(screen.getByRole("button", { name: "Back" }));
     fireEvent.keyDown((await screen.findAllByRole("menuitem"))[0]!, { key: "Escape" });
-    expect(screen.queryByRole("menu")).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
   });
 });
