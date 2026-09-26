@@ -96,6 +96,12 @@ impl From<&RequestSummary> for RequestListing {
 #[derive(Default)]
 struct TabBuffers {
     console: VecDeque<ConsoleEntry>,
+    /// Console entries ever pushed for this tab, so a mark survives the
+    /// ring dropping its oldest lines.
+    console_pushed: u64,
+    /// `console_pushed` when the page last started over: a main-frame
+    /// navigation or `console.clear()`. What came before is the old page's.
+    console_mark: u64,
     requests: VecDeque<RequestSummary>,
     /// `ref` id -> backend DOM node id from the last `page_state` snapshot.
     ax_refs: HashMap<String, RefTarget>,
@@ -303,11 +309,12 @@ impl Buffers {
     /// Record a console entry.
     pub fn push_console(&self, entry: ConsoleEntry) {
         self.with(|m| {
-            let buf = &mut m.entry(entry.tab_id).or_default().console;
-            if buf.len() == CONSOLE_CAP {
-                buf.pop_front();
+            let tab = m.entry(entry.tab_id).or_default();
+            if tab.console.len() == CONSOLE_CAP {
+                tab.console.pop_front();
             }
-            buf.push_back(entry);
+            tab.console.push_back(entry);
+            tab.console_pushed += 1;
         });
     }
 
@@ -334,6 +341,60 @@ impl Buffers {
             } => (*tab_id, request_id),
         };
         self.with(|m| m.entry(tab_id).or_default().fold_network(event, request_id));
+    }
+
+    /// Note that the page started over -- a main-frame navigation, or
+    /// `console.clear()` -- so a later clear can drop only what came before.
+    pub fn mark_console(&self, tab: TabId) {
+        self.with(|m| {
+            let buf = m.entry(tab).or_default();
+            buf.console_mark = buf.console_pushed;
+        });
+    }
+
+    /// Forget a tab's console output: all of it, or only what came before
+    /// the page last started over.
+    ///
+    /// The chrome decides when, because "Preserve log" is its setting. It
+    /// asks after the fact, by which time the new page may already have
+    /// logged; the mark is what keeps those lines.
+    pub fn clear_console(&self, tab: TabId, before_mark_only: bool) {
+        self.with(|m| {
+            let Some(buf) = m.get_mut(&tab) else {
+                return;
+            };
+            let since =
+                usize::try_from(buf.console_pushed - buf.console_mark).unwrap_or(usize::MAX);
+            let keep = if before_mark_only {
+                since.min(buf.console.len())
+            } else {
+                0
+            };
+            let drop = buf.console.len() - keep;
+            buf.console.drain(..drop);
+        });
+    }
+
+    /// Forget a tab's requests: all of them, or those before `keep_from`,
+    /// the request that started the page now showing. Frames, bodies and rule
+    /// effects go with their requests.
+    pub fn clear_network(&self, tab: TabId, keep_from: Option<&str>) {
+        self.with(|m| {
+            let Some(buf) = m.get_mut(&tab) else {
+                return;
+            };
+            let first_kept = keep_from
+                .and_then(|id| buf.requests.iter().position(|r| r.id == id))
+                .unwrap_or(if keep_from.is_some() {
+                    0
+                } else {
+                    buf.requests.len()
+                });
+            for gone in buf.requests.drain(..first_kept) {
+                buf.frames.remove(&gone.id);
+                buf.rewrites.retain(|(id, _)| *id != gone.id);
+            }
+        });
     }
 
     /// Newest `limit` console entries, oldest first.
@@ -769,6 +830,55 @@ mod tests {
             buffers.rewrites_for(tab, "r1").is_empty(),
             "old effects fall off the end"
         );
+    }
+
+    #[test]
+    fn clearing_the_console_can_keep_what_the_new_page_logged() {
+        let b = Buffers::default();
+        let tab = TabId::new();
+        b.push_console(entry(tab, "old 1"));
+        b.push_console(entry(tab, "old 2"));
+        b.mark_console(tab);
+        b.push_console(entry(tab, "new"));
+        b.clear_console(tab, true);
+        let texts: Vec<_> = b
+            .console_tail(tab, 10)
+            .into_iter()
+            .map(|e| e.text)
+            .collect();
+        assert_eq!(texts, ["new"]);
+        b.clear_console(tab, false);
+        assert!(b.console_tail(tab, 10).is_empty());
+        // Clearing a tab with nothing recorded is not an error.
+        b.clear_console(TabId::new(), false);
+    }
+
+    #[test]
+    fn clearing_requests_keeps_the_page_now_showing() {
+        let b = Buffers::default();
+        let tab = TabId::new();
+        for id in ["old", "doc", "after"] {
+            b.push_network(&NetworkEvent::Sent {
+                tab_id: tab,
+                request_id: id.into(),
+                url: format!("https://a.dev/{id}"),
+                method: "GET".into(),
+                resource_type: "Document".into(),
+                headers: std::collections::BTreeMap::new(),
+                post_data: None,
+                timestamp: 1.0,
+                wall_time: 1.0,
+            });
+        }
+        b.clear_network(tab, Some("doc"));
+        let ids: Vec<_> = b.requests(tab, 10).into_iter().map(|r| r.id).collect();
+        assert_eq!(ids, ["doc", "after"]);
+        // A request that is not there any more keeps everything rather than
+        // guessing what belongs to which page.
+        b.clear_network(tab, Some("gone"));
+        assert_eq!(b.requests(tab, 10).len(), 2);
+        b.clear_network(tab, None);
+        assert!(b.requests(tab, 10).is_empty());
     }
 
     #[test]

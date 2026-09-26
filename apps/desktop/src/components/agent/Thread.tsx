@@ -1,4 +1,4 @@
-import { ArrowUp, Brain, ChevronDown, ChevronRight, ChevronUp, EyeOff, FlaskConical, Globe, ShieldAlert, ShieldOff, Square } from "lucide-react";
+import { ArrowUp, Brain, ChevronDown, ChevronRight, ChevronUp, EyeOff, FlaskConical, Globe, RotateCcw, ShieldAlert, ShieldOff, Square } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { compactNumber, formatCost } from "../../lib/agentSteps";
 import { replayableSteps, toPlaywrightSpec } from "../../lib/playwright";
@@ -10,6 +10,7 @@ import { usePrefs } from "../../store/prefs";
 import { Favicon } from "../Favicon";
 import { Icon } from "../Icon";
 import { SpecModal } from "../SpecModal";
+import { Tooltip } from "../Tooltip";
 import { ModelPicker } from "./ModelPicker";
 import { StepList } from "./StepList";
 
@@ -55,6 +56,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
   const messages = useAgent((s) => s.messages);
   const busy = useAgent((s) => s.busy);
   const send = useAgent((s) => s.send);
+  const retry = useAgent((s) => s.retry);
   const stop = useAgent((s) => s.stop);
   const clear = useAgent((s) => s.clear);
   const sessionAutoApprove = useAgent((s) => s.sessionAutoApprove);
@@ -71,7 +73,10 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
     return id ? s.tabs.find((t) => t.id === id) : undefined;
   });
   const openTab = useBrowser((s) => s.openTab);
-  const [draft, setDraft] = useState("");
+  // In the store, not here: Escape closes the panel, and what was being
+  // typed should still be there when it opens again.
+  const draft = useAgent((s) => s.draft);
+  const setDraft = useAgent((s) => s.setDraft);
   // The transcript out of the way without losing it. The composer stays: the
   // point of minimising is to see the page, not to leave the conversation.
   const [minimized, setMinimized] = useState(false);
@@ -95,6 +100,16 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
     return () => cancelAnimationFrame(frame);
   }, [messages]);
 
+  // Showing a minimised conversation again opens at its newest turn. The
+  // transcript was unmounted, so it came back scrolled to the top -- the
+  // oldest message -- however far the conversation had gone since.
+  useEffect(() => {
+    if (minimized) return;
+    atBottom.current = true;
+    const frame = requestAnimationFrame(() => endRef.current?.scrollIntoView({ block: "end" }));
+    return () => cancelAnimationFrame(frame);
+  }, [minimized]);
+
   // Opened with ⌘J or the toolbar: the person came here to type.
   useEffect(() => {
     textRef.current?.focus();
@@ -107,6 +122,9 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
     textRef.current?.focus();
   };
   const onLink = useCallback((href: string) => void openTab(href), [openTab]);
+  const onRetry = useCallback(() => {
+    void retry(tabInThisWindow(useBrowser.getState().activeTab, useBrowser.getState().detached));
+  }, [retry]);
 
   return (
     <>
@@ -143,7 +161,9 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
                 // What was asked names the exported test, and where the tab
                 // is now is where a replay of it would start.
                 askedFor={messages[i - 1]?.role === "user" ? messages[i - 1]?.content : undefined}
-                startUrl={current?.url}
+                // Only the newest reply can be asked again, and not while
+                // another is being written.
+                onRetry={i === messages.length - 1 && !busy ? onRetry : undefined}
               />
             ),
           )}
@@ -194,23 +214,20 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
           {/* Signed out of everything, in a context that goes when the run
               does. The page chip disappears with it: there is no page of the
               person's in a clean run. */}
-          <button
-            type="button"
-            onClick={() => setCleanSession(!cleanSession)}
-            aria-pressed={cleanSession}
-            aria-label="Clean session"
-            title={
-              cleanSession
-                ? "Working signed out, in tabs of its own, thrown away when the run ends. Click to work in your session again."
-                : "Work in your session, signed in as you. Click to run signed out instead."
-            }
-            className={`flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] transition-colors ${
-              cleanSession ? "bg-highlight-soft text-highlight" : "text-ink-3 hover:bg-surface-2 hover:text-ink-2"
-            }`}
-          >
-            <Icon icon={EyeOff} size={11} />
-            {cleanSession ? "Clean session" : ""}
-          </button>
+          <Tooltip label={cleanSession ? "Signed out, in tabs of its own. Click to use your session." : "Signed in as you. Click to run signed out."}>
+            <button
+              type="button"
+              onClick={() => setCleanSession(!cleanSession)}
+              aria-pressed={cleanSession}
+              aria-label="Clean session"
+              className={`flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] transition-colors ${
+                cleanSession ? "bg-highlight-soft text-highlight" : "text-ink-3 hover:bg-surface-2 hover:text-ink-2"
+              }`}
+            >
+              <Icon icon={EyeOff} size={11} />
+              {cleanSession ? "Clean session" : ""}
+            </button>
+          </Tooltip>
 
           {!cleanSession && current && (
             <button
@@ -296,7 +313,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
 // re-rendering the whole transcript on every delta.
 const UserBubble = memo(function UserBubble({ message }: { message: Message }) {
   return (
-    <div className="max-w-[85%] self-end rounded-2xl rounded-br-md bg-surface-3 border border-line px-3 py-2 text-xs whitespace-pre-wrap text-ink shadow-2xs">
+    <div className="max-w-[85%] self-end rounded-2xl rounded-br-md bg-surface-3 border border-line px-3 py-2 text-xs whitespace-pre-wrap [overflow-wrap:anywhere] text-ink shadow-2xs">
       {message.content}
     </div>
   );
@@ -306,21 +323,32 @@ const AssistantMessage = memo(function AssistantMessage({
   message: m,
   onLink,
   askedFor,
-  startUrl,
+  onRetry,
 }: {
   message: Message;
   onLink: (href: string) => void;
   askedFor?: string | undefined;
-  startUrl?: string | undefined;
+  onRetry?: (() => void) | undefined;
 }) {
   const waiting = m.pending && !m.content && !m.reasoning && !(m.steps && m.steps.length > 0);
   // A run that changed the page is a flow somebody may want to keep. The
   // agent already addressed every element by locator, so the test writes
   // itself -- no recording pass, no selectors invented after the fact.
   const replayable = replayableSteps(m.steps ?? []);
-  const [exporting, setExporting] = useState(false);
+  // Where the tab is when the test is written is where a replay of it would
+  // start. Read then rather than passed in: a prop that changed on every
+  // navigation re-rendered every reply in the conversation.
+  const [exporting, setExporting] = useState<{ startUrl: string | undefined } | null>(null);
+  const exportTest = () => {
+    const s = useBrowser.getState();
+    const id = tabInThisWindow(s.activeTab, s.detached);
+    setExporting({ startUrl: id ? s.tabs.find((t) => t.id === id)?.url : undefined });
+  };
+  // A missing key or a model the provider does not know is fixed in
+  // Settings; anything else is more likely fixed by asking again.
+  const settingsCanFix = m.errorKind === "auth" || m.errorKind === "model";
   return (
-    <div className="max-w-full text-xs leading-relaxed text-ink animate-agent-slide-up">
+    <div className="max-w-full min-w-0 text-xs leading-relaxed [overflow-wrap:anywhere] text-ink animate-agent-slide-up">
       {m.reasoning && <Reasoning text={m.reasoning} live={Boolean(m.pending && !m.content)} />}
       {m.steps && <StepList steps={m.steps} live={Boolean(m.pending)} />}
       {m.content && <Markdown text={m.content} onLink={onLink} />}
@@ -333,8 +361,13 @@ const AssistantMessage = memo(function AssistantMessage({
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-highlight opacity-75 motion-reduce:hidden" />
             <span className="relative inline-flex rounded-full size-2 bg-highlight" />
           </span>
-          Thinking…
+          {m.status ?? "Thinking…"}
         </span>
+      )}
+      {m.status && !waiting && (
+        <p role="status" className="py-1 text-[11px] text-ink-3 italic">
+          {m.status}
+        </p>
       )}
       {/* A page that addressed the agent is the person's to judge: they are
           the one who can decide the site is not to be trusted. The agent was
@@ -350,13 +383,24 @@ const AssistantMessage = memo(function AssistantMessage({
       {m.error && (
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-danger/40 bg-danger/10 px-3 py-2 text-[11px] text-danger">
           <span className="min-w-0 flex-1">{m.error}</span>
-          <button
-            type="button"
-            onClick={() => useBrowser.getState().openSettings("agent")}
-            className="shrink-0 rounded-full border border-danger/40 px-2 py-0.5 text-[10.5px] font-medium text-ink hover:bg-danger/15"
-          >
-            Change model or key
-          </button>
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="flex shrink-0 items-center gap-1 rounded-full border border-danger/40 px-2 py-0.5 text-[10.5px] font-medium text-ink hover:bg-danger/15"
+            >
+              <Icon icon={RotateCcw} size={10} /> Retry
+            </button>
+          )}
+          {settingsCanFix && (
+            <button
+              type="button"
+              onClick={() => useBrowser.getState().openSettings("agent")}
+              className="shrink-0 rounded-full border border-danger/40 px-2 py-0.5 text-[10.5px] font-medium text-ink hover:bg-danger/15"
+            >
+              {m.errorKind === "auth" ? "Check the key" : "Change model"}
+            </button>
+          )}
         </div>
       )}
       {(m.stopped || replayable.length > 0 || (m.usage && !m.pending)) && (
@@ -377,7 +421,7 @@ const AssistantMessage = memo(function AssistantMessage({
           {replayable.length > 0 && !m.pending && (
             <button
               type="button"
-              onClick={() => setExporting(true)}
+              onClick={exportTest}
               title="Write these steps as a Playwright test"
               className="flex items-center gap-1 rounded-full px-1.5 py-px text-ink-3 hover:bg-surface-2 hover:text-ink"
             >
@@ -391,9 +435,9 @@ const AssistantMessage = memo(function AssistantMessage({
         <SpecModal
           title="Playwright Test From This Run"
           subtitle={`${replayable.length} step${replayable.length === 1 ? "" : "s"} the agent took`}
-          spec={toPlaywrightSpec(replayable, startUrl, testTitle(askedFor))}
+          spec={toPlaywrightSpec(replayable, exporting.startUrl, testTitle(askedFor))}
           filename="agent-run.spec.ts"
-          onClose={() => setExporting(false)}
+          onClose={() => setExporting(null)}
         />
       )}
     </div>

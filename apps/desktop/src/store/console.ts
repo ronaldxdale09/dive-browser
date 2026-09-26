@@ -1,9 +1,22 @@
 import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
-import { events } from "../lib/ipc";
+import { events, ipc } from "../lib/ipc";
 import type { ConsoleEntry } from "../lib/ipc";
 
 const CAP = 500;
+
+/** The source of the line `console.clear()` leaves (see `console.rs`). */
+export const CLEARED_SOURCE = "clear";
+
+/**
+ * Forget a tab's output in the host as well. The host keeps its own copy for
+ * the agent and bug reports, and a Clear that left it there meant the agent
+ * went on reading errors the person had just cleared away. With
+ * `beforeNavigation`, what the new page has already logged stays.
+ */
+function clearHost(tabId: string, beforeNavigation: boolean) {
+  void ipc.tabConsoleClear(tabId, beforeNavigation).catch(() => undefined);
+}
 
 /** A console entry as kept here: the wire entry plus a key that survives eviction, so a windowed list can reuse rows. */
 export interface ConsoleRow extends ConsoleEntry {
@@ -45,9 +58,13 @@ export const useConsole = create<ConsoleState>((set, get) => ({
   byTab: {},
   push: (entry) => {
     get().flush();
-    set((s) => ({ byTab: { ...s.byTab, [entry.tab_id]: append(s.byTab[entry.tab_id], entry) } }));
+    const restart = startsOver(entry, get().preserve);
+    set((s) => ({ byTab: { ...s.byTab, [entry.tab_id]: append(restart ? [] : s.byTab[entry.tab_id], entry) } }));
   },
   enqueue: (entry) => {
+    // The page cleared its console: what it logged before goes, unless the
+    // log is being preserved, and the note that it happened stays.
+    if (startsOver(entry, get().preserve)) pending.set(entry.tab_id, []);
     let rows = pending.get(entry.tab_id);
     if (!rows) { rows = [...(get().byTab[entry.tab_id] ?? [])]; pending.set(entry.tab_id, rows); }
     rows.push({ ...entry, id: ++seq });
@@ -65,6 +82,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
   clear: (tabId) => {
     cancelPending(tabId);
     set((s) => ({ byTab: { ...s.byTab, [tabId]: [] } }));
+    clearHost(tabId, false);
   },
   drop: (tabId) => {
     cancelPending(tabId);
@@ -79,10 +97,21 @@ export const useConsole = create<ConsoleState>((set, get) => ({
   setPreserve: (preserve) => set({ preserve }),
   navigated: (tabId) => {
     if (get().preserve) return;
+    // The host is told even when the panel had nothing: it hears the page
+    // before the panel does, so it may be holding lines the panel never saw.
+    clearHost(tabId, true);
     if ((get().byTab[tabId]?.length ?? 0) === 0 && !pending.has(tabId)) return;
-    get().clear(tabId);
+    cancelPending(tabId);
+    set((s) => ({ byTab: { ...s.byTab, [tabId]: [] } }));
   },
 }));
+
+/** Whether `entry` is the page clearing its console, and the panel should follow. */
+function startsOver(entry: ConsoleEntry, preserve: boolean): boolean {
+  if (entry.source !== CLEARED_SOURCE || preserve) return false;
+  clearHost(entry.tab_id, true);
+  return true;
+}
 
 let listening: Promise<() => void> | null = null;
 let nativeBatchActive = false;

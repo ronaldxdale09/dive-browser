@@ -103,6 +103,46 @@ describe("NetworkPanel", () => {
     expect(tr.getAttribute("aria-selected")).toBe("true");
   });
 
+  it("walks the rows with the arrow keys and closes the detail on Escape", async () => {
+    vi.spyOn(ipc, "requestDetail").mockResolvedValue({ method: "GET", url: "", status: 200, mime_type: "", request_headers: {}, request_body: null, response_headers: {}, response_body: null, response_body_note: null, rewrites: [] });
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+      cb(0);
+      return 0;
+    });
+    useNetwork.setState({ byTab: { "tab-1": rows(3) } });
+    render(<NetworkPanel />);
+    const first = screen.getByText("item-0").closest("tr")!;
+    fireEvent.keyDown(first, { key: "Enter" });
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    const second = screen.getByText("item-1").closest("tr")!;
+    expect(second.getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(second);
+    fireEvent.keyDown(second, { key: "ArrowUp" });
+    expect(first.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(first, { key: "Escape" });
+    expect(first.getAttribute("aria-selected")).toBe("false");
+    expect(screen.queryByRole("button", { name: /Replay/ })).toBeNull();
+  });
+
+  it("offers no Replay for a socket, which is a conversation rather than a request", () => {
+    useNetwork.setState({ byTab: { "tab-1": [{ ...row(0), resourceType: "WebSocket", status: 101, mimeType: "websocket" }] } });
+    vi.spyOn(ipc, "requestDetail").mockResolvedValue({ method: "GET", url: "", status: 101, mime_type: "", request_headers: {}, request_body: null, response_headers: {}, response_body: null, response_body_note: null, rewrites: [] });
+    render(<NetworkPanel />);
+    fireEvent.click(screen.getByText("item-0"));
+    expect(screen.getByText("101")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Replay/ })).toBeNull();
+  });
+
+  it("reads the detail again once the request has an answer", async () => {
+    useNetwork.setState({ byTab: { "tab-1": [{ ...row(0), status: null, durationMs: null }] } });
+    const read = vi.spyOn(ipc, "requestDetail").mockResolvedValue({ method: "GET", url: "", status: null, mime_type: "", request_headers: {}, request_body: null, response_headers: {}, response_body: null, response_body_note: null, rewrites: [] });
+    render(<NetworkPanel />);
+    fireEvent.click(screen.getByText("item-0"));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+    useNetwork.setState({ byTab: { "tab-1": [{ ...row(0), status: 200, durationMs: null }] } });
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+  });
+
   it("shows what the selected request sent and what came back", async () => {
     useNetwork.setState({ byTab: { "tab-1": rows(2) } });
     vi.spyOn(ipc, "requestDetail").mockResolvedValue({

@@ -1,9 +1,12 @@
-import { memo, useMemo } from "react";
+import { Check, Copy } from "lucide-react";
+import { memo, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { Icon } from "../components/Icon";
+import { copyText } from "./clipboard";
 
 /**
  * A small Markdown renderer for agent replies: fenced code, inline code,
- * headings, lists, quotes, emphasis and links. No raw HTML ever reaches the
+ * headings, lists, quotes, simple tables, emphasis and links. No raw HTML ever reaches the
  * DOM -- everything is built from React nodes -- and links are handed to a
  * callback rather than rendered as anchors, so the chrome decides what
  * opening one means (a new tab in the browser, not the chrome webview).
@@ -18,7 +21,17 @@ type Block =
   | { kind: "heading"; level: number; text: string }
   | { kind: "list"; ordered: boolean; items: string[] }
   | { kind: "quote"; text: string }
+  | { kind: "table"; header: string[]; rows: string[][] }
   | { kind: "paragraph"; text: string };
+
+/** `| --- | :---: |`: the line under a table's header. */
+const TABLE_RULE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
+
+/** A table row's cells, without the outer pipes. `\|` is a literal pipe. */
+export function tableCells(line: string): string[] {
+  const inner = line.trim().replace(/^\|/, "").replace(/(?<!\\)\|$/, "");
+  return inner.split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/\\\|/g, "|"));
+}
 
 /** Split Markdown into block-level pieces. Exported for tests. */
 export function parseBlocks(src: string): Block[] {
@@ -42,6 +55,22 @@ export function parseBlocks(src: string): Block[] {
       while (i < lines.length && !/^\s*```\s*$/.test(lines[i]!)) body.push(lines[i++]!);
       i++; // closing fence, or end of input for an unterminated block
       blocks.push({ kind: "code", lang, text: body.join("\n") });
+      continue;
+    }
+    // A GitHub table: a row of cells, then the rule under it. The rule is
+    // what makes it a table -- a line with a pipe in it alone is prose.
+    const rule = lines[i + 1];
+    if (line.includes("|") && rule !== undefined && TABLE_RULE.test(rule) && rule.includes("|")) {
+      flush();
+      const header = tableCells(line);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && lines[i]!.includes("|") && lines[i]!.trim() !== "") {
+        const cells = tableCells(lines[i++]!);
+        // Rows are as wide as the header, as GitHub renders them.
+        rows.push(header.map((_, c) => cells[c] ?? ""));
+      }
+      blocks.push({ kind: "table", header, rows });
       continue;
     }
     const heading = /^(#{1,4})\s+(.*)$/.exec(line);
@@ -123,7 +152,7 @@ const Inlines = memo(function Inlines({ text, onLink }: { text: string; onLink?:
         switch (piece.kind) {
           case "code":
             return (
-              <code key={i} className="rounded-[5px] bg-surface-3 px-1 py-px font-mono text-[11px] text-ink">
+              <code key={i} className="rounded-[5px] bg-surface-3 px-1 py-px font-mono text-[11px] [overflow-wrap:anywhere] text-ink">
                 {piece.text}
               </code>
             );
@@ -149,6 +178,78 @@ const Inlines = memo(function Inlines({ text, onLink }: { text: string; onLink?:
   );
 });
 
+/** How long a copy button says it copied. */
+const COPIED_MS = 1500;
+
+/**
+ * A fenced block with its own copy button. Code in a reply is usually there
+ * to be pasted somewhere, and selecting it by hand in a dock this small
+ * tended to catch the language label or miss the last line.
+ */
+function CodeBlock({ lang, text }: { lang: string; text: string }) {
+  const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(null), COPIED_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const label = copied === "yes" ? "Copied" : copied === "failed" ? "Could not copy" : "Copy code";
+  return (
+    <div className="group/code relative">
+      <pre className="overflow-x-auto rounded-lg border border-line bg-ground p-2.5 font-mono text-[11px] leading-relaxed text-ink select-text">
+        {lang && <span className="mb-1.5 block text-[10px] tracking-wider text-ink-3 uppercase">{lang}</span>}
+        <code>{text}</code>
+      </pre>
+      <button
+        type="button"
+        aria-label={label}
+        title={label}
+        onClick={() => {
+          copyText(text).then(
+            () => setCopied("yes"),
+            () => setCopied("failed"),
+          );
+        }}
+        className={`absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-md border border-line bg-surface text-ink-3 transition-opacity hover:text-ink focus-visible:opacity-100 ${
+          copied ? "opacity-100" : "opacity-0 group-hover/code:opacity-100"
+        }`}
+      >
+        <Icon icon={copied === "yes" ? Check : Copy} size={12} className={copied === "yes" ? "text-highlight" : copied === "failed" ? "text-danger" : undefined} />
+      </button>
+    </div>
+  );
+}
+
+/** A GitHub table, scrolling sideways rather than squeezing its columns. */
+function Table({ header, rows, onLink }: { header: string[]; rows: string[][]; onLink?: ((href: string) => void) | undefined }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-line">
+      <table className="w-full border-collapse text-left text-[11px]">
+        <thead className="bg-surface-2 text-ink">
+          <tr>
+            {header.map((cell, c) => (
+              <th key={c} className="border-b border-line px-2 py-1 font-semibold">
+                <Inlines text={cell} onLink={onLink} />
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, r) => (
+            <tr key={r} className="border-b border-line/60 last:border-b-0">
+              {row.map((cell, c) => (
+                <td key={c} className="px-2 py-1 align-top text-ink-2">
+                  <Inlines text={cell} onLink={onLink} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** Render Markdown as chrome-styled React. */
 export function Markdown({ text, onLink }: { text: string; onLink?: ((href: string) => void) | undefined }): ReactNode {
   const blocks = useMemo(() => parseBlocks(text), [text]);
@@ -157,12 +258,7 @@ export function Markdown({ text, onLink }: { text: string; onLink?: ((href: stri
       {blocks.map((b, i) => {
         switch (b.kind) {
           case "code":
-            return (
-              <pre key={i} className="overflow-x-auto rounded-lg border border-line bg-ground p-2.5 font-mono text-[11px] leading-relaxed text-ink select-text">
-                {b.lang && <span className="mb-1.5 block text-[10px] tracking-wider text-ink-3 uppercase">{b.lang}</span>}
-                <code>{b.text}</code>
-              </pre>
-            );
+            return <CodeBlock key={i} lang={b.lang} text={b.text} />;
           case "heading":
             return (
               <div key={i} className={`font-semibold text-ink ${b.level <= 2 ? "text-[13px]" : "text-xs"}`}>
@@ -193,9 +289,13 @@ export function Markdown({ text, onLink }: { text: string; onLink?: ((href: stri
                 <Inlines text={b.text} onLink={onLink} />
               </blockquote>
             );
+          case "table":
+            return <Table key={i} header={b.header} rows={b.rows} onLink={onLink} />;
           default:
             return (
-              <p key={i} className="whitespace-pre-wrap">
+              // A URL or a hash with no spaces is one word as far as the
+              // browser is concerned; without this it ran out of the bubble.
+              <p key={i} className="whitespace-pre-wrap [overflow-wrap:anywhere]">
                 <Inlines text={b.text} onLink={onLink} />
               </p>
             );

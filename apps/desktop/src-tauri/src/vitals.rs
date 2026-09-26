@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use specta::Type;
 
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, page_json};
 
 /// Core metrics in milliseconds (CLS is unitless).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
@@ -41,7 +41,9 @@ const SCRIPT: &str = r"(function(){
   const shifts = buffered('layout-shift').filter(s => !s.hadRecentInput);
   const cls = shifts.reduce((a, s) => a + s.value, 0);
   const events = buffered('event', {durationThreshold: 16}); const inp = events.length ? Math.max(...events.map(e => e.duration)) : null;
-  const desc = el => el ? (el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).slice(0,2).join('.') : '')) : null;
+  const esc = s => (window.CSS && CSS.escape) ? CSS.escape(s) : s;
+  const classes = el => el.className && typeof el.className === 'string' ? el.className.trim().split(/\s+/).filter(Boolean).slice(0,2) : [];
+  const desc = el => el ? (el.tagName.toLowerCase() + (el.id ? '#' + esc(el.id) : '') + classes(el).map(c => '.' + esc(c)).join('')) : null;
   return JSON.stringify({
     ttfb: nav ? nav.responseStart : null,
     fcp: fcp ? fcp.startTime : null,
@@ -64,8 +66,7 @@ pub async fn read(session: &CdpSession) -> AppResult<Vitals> {
         )
         .await
         .map_err(AppError::new)?;
-    let raw = result["result"]["value"].as_str().unwrap_or("{}");
-    Ok(parse(&serde_json::from_str(raw).unwrap_or_default()))
+    Ok(parse(&page_json(&result, "the vitals")?))
 }
 
 /// Map the script's JSON to the struct, treating non-numbers as unknown.

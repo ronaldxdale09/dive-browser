@@ -585,9 +585,25 @@ export const commands = {
 	 *  `OpenAPI` 3.1 JSON inferred from the tab's captured traffic; also saved
 	 *  under captures and copied to the clipboard.
 	 */
-	tabOpenapi: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_openapi", { id })),
+	tabOpenapi: (id: TabId) => typedError<OpenapiExport, AppError>(__TAURI_INVOKE("tab_openapi", { id })),
 	/**  Export the captured requests of a tab as a HAR 1.2 file; returns its path. */
 	tabHar: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_har", { id })),
+	/**
+	 *  Forget a tab's console output in the host too, so the agent's view of the
+	 *  page and a bug report agree with the cleared panel. `before_navigation`
+	 *  keeps what the page has logged since it last started over.
+	 */
+	tabConsoleClear: (id: TabId, beforeNavigation: boolean) => __TAURI_INVOKE<void>("tab_console_clear", { id, beforeNavigation }),
+	/**
+	 *  Forget a tab's requests in the host too: all of them, or those before
+	 *  `keep_from`, the document request of the page now showing.
+	 */
+	tabNetworkClear: (id: TabId, keepFrom: string | null) => __TAURI_INVOKE<void>("tab_network_clear", { id, keepFrom }),
+	/**
+	 *  One storage value in full, for copying. The panel lists values cut short
+	 *  (see [`crate::storage::VALUE_SHOWN`]); this is how the rest is reached.
+	 */
+	tabStorageValue: (id: TabId, section: string, key: string, domain: string | null, path: string | null) => typedError<string | null, AppError>(__TAURI_INVOKE("tab_storage_value", { id, section, key, domain, path })),
 	/**
 	 *  Compose a Markdown bug report for a tab (viewport screenshot, console
 	 *  errors, failed requests), copy it to the clipboard and save it; returns
@@ -827,6 +843,7 @@ export const events = {
 	privacyEvent: makeEvent<PrivacyEvent>("privacy-event"),
 	recorderEvent: makeEvent<RecorderEvent>("recorder-event"),
 	recordingEvent: makeEvent<RecordingEvent>("recording-event"),
+	rulesChanged: makeEvent<RulesChanged>("rules-changed"),
 	stateChanged: makeEvent<StateChanged>("state-changed"),
 	subtitleCue: makeEvent<SubtitleCue>("subtitle-cue"),
 	subtitleModelProgress: makeEvent<SubtitleModelProgress>("subtitle-model-progress"),
@@ -1103,10 +1120,22 @@ export type ChatDelta =
  *  person: what it tried, and the line it tried it on.
  */
 { type: "flagged"; data: string } |
+/**
+ *  What the run is doing that is not part of the reply -- waiting out a
+ *  busy provider, leaving out the oldest turns. Shown while it is true and
+ *  never kept as text, so it cannot end up in the transcript the model is
+ *  sent next time.
+ */
+{ type: "status"; data: string } |
 /**  Finished with a stop reason (`end_turn`, `max_tokens`, `refusal`, `stopped`). */
 { type: "done"; data: string } |
 /**  Failed. */
-{ type: "error"; data: string };
+{ type: "error"; data: {
+	/**  What went wrong, for the person. */
+	message: string,
+	/**  Which kind of failure, so the chrome offers the fix that fits. */
+	kind: FailureKind,
+} };
 
 /**  One message in the conversation, as the chrome stores it. */
 export type ChatTurn = {
@@ -1210,8 +1239,10 @@ export type ContentPreview = {
 export type Cookie = {
 	/**  Name. */
 	name: string,
-	/**  Value. */
+	/**  Value, cut to [`VALUE_SHOWN`] bytes. */
 	value: string,
+	/**  Length of the whole value in bytes. */
+	size: number,
 	/**  Domain. */
 	domain: string,
 	/**  Path. */
@@ -1533,6 +1564,15 @@ export type ExternalLinkClosed = {
 	tab_id: TabId,
 	token: string,
 };
+
+/**  Why a run failed, as far as what the person can do about it goes. */
+export type FailureKind =
+/**  The key is missing or the provider refused it: Settings can fix it. */
+"auth" |
+/**  The model or endpoint is wrong for this provider: pick another. */
+"model" |
+/**  Anything else. Asking again is the likely remedy. */
+"other";
 
 /**  Which family a browser belongs to, which decides the files and formats. */
 export type Family = "chromium" | "firefox" | "safari";
@@ -1963,6 +2003,17 @@ export type NetworkEvent =
 
 /**  Network condition presets, matching Chrome's `DevTools` throttling menu. */
 export type NetworkProfile = "offline" | "slow3g" | "fast3g";
+
+/**
+ *  Where an `OpenAPI` export was written, and whether it also reached the
+ *  clipboard. The notice used to say "copied" whether or not it had been.
+ */
+export type OpenapiExport = {
+	/**  The saved file. */
+	path: string,
+	/**  The clipboard took it too. */
+	copied: boolean,
+};
 
 /**  An original location. */
 export type Original = {
@@ -2590,6 +2641,16 @@ export type RuleAction =
 /**  Add or replace one request header. */
 { kind: "header"; name: string; value: string };
 
+/**
+ *  A workspace's rules were replaced by something other than the Rules
+ *  panel -- the agent or an MCP client. The panel reads them again, so the
+ *  next edit there does not write its stale copy over what they set.
+ */
+export type RulesChanged = {
+	/**  The workspace whose rules changed. */
+	workspace: WorkspaceId,
+};
+
 export type Scope = {
 	profile_id: ProfileId,
 	container_id: ContainerId,
@@ -2679,14 +2740,24 @@ export type StackReport = {
 /**  Emitted whenever core state changes; carries the change itself. */
 export type StateChanged = CoreEvent;
 
+/**  One `localStorage` or `sessionStorage` entry. */
+export type StorageItem = {
+	/**  Key. */
+	key: string,
+	/**  Value, cut to [`VALUE_SHOWN`] bytes. */
+	value: string,
+	/**  Length of the whole value in bytes. */
+	size: number,
+};
+
 /**  Everything the Storage panel shows. */
 export type StorageSnapshot = {
 	/**  Cookies visible to the page's URL. */
 	cookies: Cookie[],
-	/**  `localStorage` entries as `[key, value]`. */
-	local: ([string, string])[],
-	/**  `sessionStorage` entries as `[key, value]`. */
-	session: ([string, string])[],
+	/**  `localStorage` entries. */
+	local: StorageItem[],
+	/**  `sessionStorage` entries. */
+	session: StorageItem[],
 };
 
 /**  A style the person changed on the picked element. */

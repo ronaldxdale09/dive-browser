@@ -811,6 +811,9 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             request_replay,
             tab_openapi,
             tab_har,
+            tab_console_clear,
+            tab_network_clear,
+            tab_storage_value,
             tab_bug_report,
             tab_inspect_start,
             tab_inspect_cancel,
@@ -877,6 +880,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::agent_presence::AgentPresence,
             crate::crash::TabCrashed,
             crate::devservers::DevServersChanged,
+            crate::rules::RulesChanged,
             crate::inspect::InspectEvent,
             crate::recorder::RecorderEvent,
             crate::screencast::RecordingEvent,
@@ -3900,17 +3904,72 @@ pub(crate) async fn request_replay(
 /// under captures and copied to the clipboard.
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn tab_openapi(state: State<'_, AppState>, id: TabId) -> AppResult<String> {
+pub(crate) fn tab_openapi(state: State<'_, AppState>, id: TabId) -> AppResult<OpenapiExport> {
     let page_url = lock(&state.store).tab(id)?.url;
     let requests = state.buffers.requests(id, 1000);
     let spec = crate::openapi::from_requests(&page_url, &requests);
     let text = serde_json::to_string_pretty(&spec).map_err(AppError::new)?;
     let path = stamped_capture(&page_url, "openapi", "json")?;
     std::fs::write(&path, &text)?;
-    if let Ok(mut cb) = arboard::Clipboard::new() {
-        let _ = cb.set_text(text);
-    }
-    Ok(path.to_string_lossy().into_owned())
+    let copied = arboard::Clipboard::new()
+        .and_then(|mut cb| cb.set_text(text))
+        .is_ok();
+    Ok(OpenapiExport {
+        path: path.to_string_lossy().into_owned(),
+        copied,
+    })
+}
+
+/// Where an `OpenAPI` export was written, and whether it also reached the
+/// clipboard. The notice used to say "copied" whether or not it had been.
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+pub(crate) struct OpenapiExport {
+    /// The saved file.
+    pub path: String,
+    /// The clipboard took it too.
+    pub copied: bool,
+}
+
+/// Forget a tab's console output in the host too, so the agent's view of the
+/// page and a bug report agree with the cleared panel. `before_navigation`
+/// keeps what the page has logged since it last started over.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_console_clear(state: State<'_, AppState>, id: TabId, before_navigation: bool) {
+    state.buffers.clear_console(id, before_navigation);
+}
+
+/// Forget a tab's requests in the host too: all of them, or those before
+/// `keep_from`, the document request of the page now showing.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_network_clear(state: State<'_, AppState>, id: TabId, keep_from: Option<String>) {
+    state.buffers.clear_network(id, keep_from.as_deref());
+}
+
+/// One storage value in full, for copying. The panel lists values cut short
+/// (see [`crate::storage::VALUE_SHOWN`]); this is how the rest is reached.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_storage_value(
+    state: State<'_, AppState>,
+    id: TabId,
+    section: String,
+    key: String,
+    domain: Option<String>,
+    path: Option<String>,
+) -> AppResult<Option<String>> {
+    let url = lock(&state.store).tab(id)?.url;
+    let session = cdp_for(&state, id)?;
+    crate::storage::value(
+        &session,
+        &url,
+        &section,
+        &key,
+        domain.as_deref(),
+        path.as_deref(),
+    )
+    .await
 }
 
 /// Export the captured requests of a tab as a HAR 1.2 file; returns its path.

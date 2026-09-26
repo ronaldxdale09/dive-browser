@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use specta::Type;
 
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, page_json};
 
 /// Parsed head metadata.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
@@ -45,8 +45,7 @@ pub async fn snapshot(session: &CdpSession) -> AppResult<MetaSnapshot> {
         )
         .await
         .map_err(AppError::new)?;
-    let raw = result["result"]["value"].as_str().unwrap_or("{}");
-    let v: serde_json::Value = serde_json::from_str(raw).unwrap_or_default();
+    let v = page_json(&result, "the head")?;
     let mut snap = parse_head(v["head"].as_str().unwrap_or_default());
     snap.lang = v["lang"]
         .as_str()

@@ -76,12 +76,14 @@ fn emit_navigation_reset(
 }
 
 /// Enable `domains` on `session`, then map every event with `map`; each hit
-/// is recorded through `record` and emitted to the chrome.
+/// is recorded through `record` and emitted to the chrome. `navigated` runs
+/// when the main frame commits a new document, before the chrome is told.
 ///
 /// The returned receiver resolves once every domain has been enabled (or has
 /// failed to), so callers can hold the first navigation until the feed is
 /// listening.
-pub fn attach<T, M, R>(
+#[allow(clippy::too_many_arguments)] // Each hook is one feed-specific step; a struct of them would only rename the list.
+pub fn attach<T, M, R, N>(
     app: AppHandle<Runtime>,
     tab_id: TabId,
     session: CdpSession,
@@ -89,11 +91,13 @@ pub fn attach<T, M, R>(
     batch_event: &'static str,
     map: M,
     record: R,
+    navigated: N,
 ) -> Ready
 where
     T: serde::Serialize + Clone + Send + 'static,
     M: Fn(TabId, &CdpEvent) -> Option<T> + Send + 'static,
     R: Fn(&AppState, &T) + Send + 'static,
+    N: Fn(&AppState, TabId) + Send + 'static,
 {
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
     tauri::async_runtime::spawn(async move {
@@ -124,6 +128,7 @@ where
                         && event.params["frame"]["parentId"].is_null()
                     {
                         emit_batch(&app, &session, batch_event, &mut batch, tab_id);
+                        navigated(&app.state::<AppState>(), tab_id);
                         emit_navigation_reset(&app, &session, batch_event, tab_id);
                     }
                     if let Some(item) = map(tab_id, &event) {

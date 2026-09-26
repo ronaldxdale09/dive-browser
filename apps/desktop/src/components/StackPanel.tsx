@@ -1,9 +1,8 @@
 import { Boxes, Info, RefreshCw } from "lucide-react";
-import { useCallback, useState } from "react";
 import { ipc } from "../lib/ipc";
 import type { Category, Detection, StackReport } from "../lib/ipc";
 import { tabInThisWindow, useBrowser } from "../store/browser";
-import { errorMessage } from "../lib/errors";
+import { usePanelRead } from "../store/dockPanels";
 import { Icon } from "./Icon";
 import { Tooltip } from "./Tooltip";
 import { InternalPageNote, isInternalPage } from "./InternalPageNote";
@@ -32,26 +31,9 @@ export function StackPanel() {
     return id ? (s.tabs.find((t) => t.id === id)?.url ?? "") : "";
   });
   // Keyed by tab *and* URL: a reading belongs to the page it was taken on,
-  // so navigating away drops it without an effect that clears state.
-  const [reports, setReports] = useState<Record<string, StackReport>>({});
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const key = `${activeTab ?? ""}\u0000${url}`;
-  const report = reports[key];
-
-  const scan = useCallback(async () => {
-    if (!activeTab) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const found = await ipc.tabStack(activeTab);
-      setReports((r) => ({ ...r, [key]: found }));
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  }, [activeTab, key]);
+  // so navigating away drops it, and it outlives a trip to another panel.
+  const { data: report, busy, error, run } = usePanelRead<StackReport>("stack", activeTab, url);
+  const scan = () => run(ipc.tabStack);
 
   if (isInternalPage(url)) return <InternalPageNote what="A stack" />;
 
@@ -73,8 +55,10 @@ export function StackPanel() {
             {report.server_rendered && " · server-rendered"}
           </span>
         )}
+        {/* Focusable, so the explanation is reachable from the keyboard: the
+            tooltip also shows while its trigger has focus. */}
         <Tooltip label="Detected from response headers, cookies, request paths and the page's own version properties. Nothing leaves this machine." side="bottom">
-          <span className="ml-auto grid size-6 place-items-center text-ink-3"><Icon icon={Info} size={12} /></span>
+          <span tabIndex={0} role="img" aria-label="How the stack is detected" className="ml-auto grid size-6 place-items-center rounded text-ink-3 outline-none focus-visible:ring-2 focus-visible:ring-highlight"><Icon icon={Info} size={12} /></span>
         </Tooltip>
       </div>
 
@@ -133,7 +117,7 @@ export function StackPanel() {
 function Row({ tech }: { tech: Detection }) {
   return (
     <Tooltip label={tech.evidence.join(" · ") || "no evidence recorded"} side="bottom" align="start">
-      <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface-2">
+      <div tabIndex={0} className="flex items-center gap-2 rounded-lg px-2 py-1.5 outline-none hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-highlight/60">
         <Icon icon={Boxes} size={12} className="shrink-0 text-ink-3" />
         <span className="truncate text-ink">{tech.name}</span>
         {tech.version && (

@@ -64,16 +64,21 @@ export function VitalsPanel() {
     return Boolean(id && s.loading[id]);
   });
   const internal = isInternalPage(url);
-  const { data, error, refresh } = useTabData(internal || sleeping ? null : activeTab, url, ipc.tabVitals, 600, loading);
-  const [lcpGone, setLcpGone] = useState(false);
+  const { data, error, loading: reading, refresh } = useTabData(internal || sleeping ? null : activeTab, url, ipc.tabVitals, 600, loading);
+  // Which element was found missing, on which tab and page. Kept as the
+  // place it was looked for rather than a flag, so another tab or a new page
+  // does not inherit "not on the page now" from the last one.
+  const lcpKey = `${activeTab ?? ""}\u0000${url ?? ""}\u0000${data?.lcp_element ?? ""}`;
+  const [goneAt, setGoneAt] = useState<string | null>(null);
+  const lcpGone = goneAt === lcpKey;
 
   // Scroll the page to the LCP element and flash it, the way A11y findings do.
   const showLcp = async () => {
     if (!activeTab || !data?.lcp_element) return;
     try {
-      setLcpGone(!(await ipc.tabA11yReveal(activeTab, data.lcp_element)));
+      setGoneAt((await ipc.tabA11yReveal(activeTab, data.lcp_element)) ? null : lcpKey);
     } catch {
-      setLcpGone(true);
+      setGoneAt(lcpKey);
     }
   };
 
@@ -85,6 +90,8 @@ export function VitalsPanel() {
       <div className="flex items-center gap-2 px-2 pb-1 text-[11px] text-ink-3">
         {loading ? (
           <span>Measuring while the page loads…</span>
+        ) : reading ? (
+          <span>Reading…</span>
         ) : data?.lcp_element ? (
           <button
             type="button"

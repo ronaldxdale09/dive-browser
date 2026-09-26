@@ -38,6 +38,9 @@ export function AgentDock({ inset = 0 }: { inset?: number }) {
   useCoversContent(true);
 
   useEffect(() => void init(), [init]);
+  // "Allow all this session" promises to last until the panel is closed, and
+  // closing it is this unmounting -- by the toolbar, ⌘J or Escape alike.
+  useEffect(() => () => useAgent.getState().setSessionAutoApprove(false), []);
   // Each tab keeps its own conversation, so moving between tabs brings the
   // one that belongs to the page in front of you -- and the one you left is
   // written back rather than lost.

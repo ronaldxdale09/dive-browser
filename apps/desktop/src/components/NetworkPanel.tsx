@@ -19,16 +19,27 @@ import { copyText } from "../lib/clipboard";
 export function NetworkTools() {
   const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
   const clear = useNetwork((s) => s.clear);
-  const exportWith = (run: (tab: string) => Promise<string>, label: string) => () => {
+  const saved = (path: string) => path.split("/").pop() ?? path;
+  const exportHar = () => {
     if (!activeTab) return;
-    run(activeTab)
-      .then((path) => useBrowser.getState().notify(`${label} · saved ${path.split("/").pop() ?? path}`, 4000))
+    ipc
+      .tabHar(activeTab)
+      .then((path) => useBrowser.getState().notify(`HAR exported · saved ${saved(path)}`, 4000))
+      .catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
+  };
+  // The spec is saved either way; the notice says "copied" only when the
+  // clipboard really took it.
+  const exportOpenapi = () => {
+    if (!activeTab) return;
+    ipc
+      .tabOpenapi(activeTab)
+      .then(({ path, copied }) => useBrowser.getState().notify(`${copied ? "OpenAPI copied" : "OpenAPI exported, not copied"} · saved ${saved(path)}`, 4000))
       .catch((e: unknown) => useBrowser.setState({ error: errorMessage(e) }));
   };
   return (
     <>
-      <IconButton icon={FileDown} label="Export HAR" size={13} disabled={!activeTab} onClick={exportWith(ipc.tabHar, "HAR exported")} />
-      <IconButton icon={FileJson} label="Export OpenAPI from captured traffic" size={13} disabled={!activeTab} onClick={exportWith(ipc.tabOpenapi, "OpenAPI copied")} />
+      <IconButton icon={FileDown} label="Export HAR" size={13} disabled={!activeTab} onClick={exportHar} />
+      <IconButton icon={FileJson} label="Export OpenAPI from captured traffic" size={13} disabled={!activeTab} onClick={exportOpenapi} />
       <IconButton icon={Ban} label="Clear requests" size={13} disabled={!activeTab} onClick={() => activeTab && clear(activeTab)} />
     </>
   );
@@ -77,12 +88,14 @@ const NetworkRow = memo(function NetworkRow({
   index,
   selected,
   onSelect,
+  onStep,
   measure,
 }: {
   row: RequestRow;
   index: number;
   selected: boolean;
   onSelect: (id: string) => void;
+  onStep: (from: number, by: number) => void;
   measure: (node: HTMLTableRowElement | null) => void;
 }) {
   return (
@@ -92,10 +105,14 @@ const NetworkRow = memo(function NetworkRow({
       tabIndex={0}
       onClick={() => onSelect(r.id)}
       onKeyDown={(e) => {
-        // Rows are reachable with Tab; Enter or Space opens the detail like a click.
+        // Rows are reachable with Tab; Enter or Space opens the detail like a
+        // click, and the arrow keys walk the list the way DevTools' does.
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onSelect(r.id);
+        } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          onStep(index, e.key === "ArrowDown" ? 1 : -1);
         }
       }}
       aria-selected={selected}
@@ -133,6 +150,12 @@ export function NetworkPanel() {
   const keyPresent = isReady(providers.find((p) => p.id === providerId), keyed);
   const askAgent = (r: RequestRow) => {
     useBrowser.getState().toggle("sidecar", true);
+    // One run at a time. Sending now would be dropped without a word, and
+    // the person would wait for an answer that was never asked for.
+    if (useAgent.getState().busy) {
+      useBrowser.getState().notify("The agent is still working. Ask again when it has finished, or stop it first.", 5000);
+      return;
+    }
     const outcome = r.error ?? (r.status === null ? "no response yet" : `HTTP ${r.status}`);
     void send(
       `Explain this request from the current page and whether it looks right:\n\n${r.method} ${r.url}\nResult: ${outcome}${r.mimeType ? ` (${r.mimeType})` : ""}${r.size !== null ? `, ${r.size} bytes` : ""}${r.durationMs !== null ? `, ${r.durationMs} ms` : ""}\n\nRequest id ${r.id}: call network_body for its JSON body, or console_tail for related errors. If it failed, say why and how to fix it.`,
@@ -154,6 +177,9 @@ export function NetworkPanel() {
   const detail = selected ? byId.get(selected) : undefined;
   const frames = useNetwork(selectFrames(activeTab, selected));
   const select = useCallback((id: string) => setSelected((cur) => (cur === id ? null : id)), []);
+  // The rows a key press moves through, read at the moment of the press: a
+  // handler rebuilt for every flush would re-render every row with it.
+  const shownRef = useRef<RequestRow[]>([]);
   // The editor holds method, URL, headers, body, Send and a response; at the
   // default dock height only the first line shows, so the dock grows to fit.
   const openReplay = useCallback((id: string) => {
@@ -173,12 +199,39 @@ export function NetworkPanel() {
     getItemKey: (i) => shown[i]?.id ?? i,
   });
   const items = virtualizer.getVirtualItems();
+  useEffect(() => {
+    shownRef.current = shown;
+  }, [shown]);
+  // Arrow keys move the selection and the focus together. The next row may
+  // be outside the window of mounted rows, so it is scrolled in first and
+  // focused once it exists.
+  const step = useCallback(
+    (from: number, by: number) => {
+      const to = from + by;
+      const next = shownRef.current[to];
+      if (!next) return;
+      setSelected(next.id);
+      virtualizer.scrollToIndex(to, { align: "auto" });
+      requestAnimationFrame(() => scrollRef.current?.querySelector<HTMLElement>(`tr[data-index="${to}"]`)?.focus());
+    },
+    [virtualizer],
+  );
   // The table keeps its own layout; spacer rows stand in for everything scrolled out of view.
   const above = items[0]?.start ?? 0;
   const below = items.length > 0 ? virtualizer.getTotalSize() - items[items.length - 1]!.end : 0;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      onKeyDown={(e) => {
+        // Escape closes the detail, as it closes every other inspector pane,
+        // and leaves the dock open.
+        if (e.key === "Escape" && selected && replaying !== selected) {
+          e.stopPropagation();
+          setSelected(null);
+        }
+      }}
+    >
       <div className="flex items-center gap-3 px-2 pb-1 text-[11px] text-ink-3">
         <input
           aria-label="Filter requests"
@@ -215,14 +268,18 @@ export function NetworkPanel() {
             {above > 0 && <tr aria-hidden style={{ height: above }} />}
             {items.map((v) => {
               const r = shown[v.index]!;
-              return <NetworkRow key={r.id} row={r} index={v.index} selected={r.id === selected} onSelect={select} measure={virtualizer.measureElement} />;
+              return <NetworkRow key={r.id} row={r} index={v.index} selected={r.id === selected} onSelect={select} onStep={step} measure={virtualizer.measureElement} />;
             })}
             {below > 0 && <tr aria-hidden style={{ height: below }} />}
           </tbody>
         </table>
       </div>
       {detail && frames.length > 0 && <FrameList key={detail.id} frames={frames} />}
-      {detail && replaying !== detail.id && activeTab && frames.length === 0 && <DetailPane tabId={activeTab} requestId={detail.id} />}
+      {detail && replaying !== detail.id && activeTab && frames.length === 0 && (
+        // Keyed on the request: switching rows starts clean instead of
+        // showing the last one's headers, or its error, until the read lands.
+        <DetailPane key={detail.id} tabId={activeTab} requestId={detail.id} status={detail.status} finished={detail.durationMs !== null} />
+      )}
       {detail && replaying !== detail.id && (
         <div className="flex items-center gap-3 border-t border-line bg-surface-2 px-3 py-1.5 font-mono text-[11px] text-ink-2 select-text">
           <span className="min-w-0 flex-1 truncate">
@@ -230,9 +287,12 @@ export function NetworkPanel() {
             {detail.mimeType && <span className="ml-3 text-ink-3">{detail.mimeType}</span>}
             {detail.error && <span className="ml-3 text-danger">{detail.error}</span>}
           </span>
-          <button type="button" onClick={() => { openReplay(detail.id); }} className="flex h-6 shrink-0 items-center gap-1 rounded-full border border-line px-2 font-sans text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
-            <Icon icon={Repeat} size={11} /> Replay
-          </button>
+          {/* A socket is a conversation, not a request that can be sent again. */}
+          {detail.resourceType !== "WebSocket" && (
+            <button type="button" onClick={() => { openReplay(detail.id); }} className="flex h-6 shrink-0 items-center gap-1 rounded-full border border-line px-2 font-sans text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
+              <Icon icon={Repeat} size={11} /> Replay
+            </button>
+          )}
           <button
             type="button"
             disabled={!keyPresent}
@@ -283,23 +343,41 @@ function FrameList({ frames }: { frames: readonly FrameRow[] }) {
   );
 }
 
+/** How long after a request finishes its body is looked for again, while the engine is still handing it over. */
+const BODY_RETRY_MS = 600;
+
 /**
  * What the selected request sent and what came back: both header sets and
  * the bodies the engine kept. Read-only; Replay opens the editor.
+ *
+ * Read again when the request moves on -- its response arrives, it finishes
+ * -- since a detail read while it was in flight has no response headers, and
+ * once more shortly after it finishes when the body is not there yet: the
+ * body is fetched from the engine after the request completes, so the first
+ * read can land before it.
  */
-function DetailPane({ tabId, requestId }: { tabId: string; requestId: string }) {
+function DetailPane({ tabId, requestId, status, finished }: { tabId: string; requestId: string; status: number | null; finished: boolean }) {
   const [detail, setDetail] = useState<RequestDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
-    ipc
-      .requestDetail(tabId, requestId)
-      .then((d) => alive && setDetail(d))
-      .catch((e: unknown) => alive && setError(errorMessage(e)));
+    let again: ReturnType<typeof setTimeout> | undefined;
+    const read = (retry: boolean) =>
+      ipc
+        .requestDetail(tabId, requestId)
+        .then((d) => {
+          if (!alive) return;
+          setDetail(d);
+          setError(null);
+          if (retry && finished && d.response_body === null && d.response_body_note === null) again = setTimeout(() => read(false), BODY_RETRY_MS);
+        })
+        .catch((e: unknown) => alive && setError(errorMessage(e)));
+    void read(true);
     return () => {
       alive = false;
+      if (again) clearTimeout(again);
     };
-  }, [tabId, requestId]);
+  }, [tabId, requestId, status, finished]);
   const notify = useBrowser((s) => s.notify);
   // A JSON body reads as JSON: laid out, not one long line. Laid out once;
   // a re-render for a notice must not re-parse a body at the buffer budget.
@@ -314,7 +392,7 @@ function DetailPane({ tabId, requestId }: { tabId: string; requestId: string }) 
     }
   };
   if (error) return <div className="border-t border-line px-3 py-2 font-mono text-[11px] text-ink-3">{error}</div>;
-  if (!detail) return null;
+  if (!detail) return <div className="border-t border-line px-3 py-2 font-mono text-[11px] text-ink-3">Reading…</div>;
   const body = pretty ?? detail.response_body_note ?? (detail.status === null ? "No response yet." : "Body not kept: only JSON responses within the buffer budget are.");
   const chip = "flex h-5 items-center gap-1 rounded-full border border-line px-1.5 font-sans text-[10px] text-ink-2 hover:bg-surface-3 hover:text-ink";
   return (

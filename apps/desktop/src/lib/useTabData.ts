@@ -24,9 +24,11 @@ const RETRY_MS = 700;
  * whose change should re-read too, such as the tab finishing a load.
  */
 export function useTabData<T>(tabId: string | null, url: string | undefined, fetcher: (tabId: string) => Promise<T>, delayMs = 0, revision: unknown = null) {
-  // Answers remember which tab they belong to, so a tab that has gone (the
-  // welcome screen) shows nothing rather than the last page's numbers.
-  const [answer, setAnswer] = useState<{ tabId: string; data: T | null; error: string | null }>({ tabId: "", data: null, error: null });
+  // Answers remember which tab and which page they belong to, so a tab that
+  // has gone (the welcome screen) shows nothing rather than the last page's
+  // numbers, and a tab that navigated does not show the page it left while
+  // the new one is read.
+  const [answer, setAnswer] = useState<{ tabId: string; url: string | undefined; data: T | null; error: string | null }>({ tabId: "", url: undefined, data: null, error: null });
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!tabId) return;
@@ -34,7 +36,7 @@ export function useTabData<T>(tabId: string | null, url: string | undefined, fet
     let retry: ReturnType<typeof setTimeout> | undefined;
     const read = (again: boolean) =>
       fetcher(tabId)
-        .then((d) => alive && setAnswer({ tabId, data: d, error: null }))
+        .then((d) => alive && setAnswer({ tabId, url, data: d, error: null }))
         .catch((e: unknown) => {
           if (!alive) return;
           const message = errorMessage(e);
@@ -42,7 +44,7 @@ export function useTabData<T>(tabId: string | null, url: string | undefined, fet
             retry = setTimeout(() => read(false), RETRY_MS);
             return;
           }
-          setAnswer((old) => ({ tabId, data: old.tabId === tabId ? old.data : null, error: readErrorText(message) }));
+          setAnswer((old) => ({ tabId, url, data: old.tabId === tabId && old.url === url ? old.data : null, error: readErrorText(message) }));
         });
     const t = setTimeout(() => read(true), delayMs);
     return () => {
@@ -53,6 +55,13 @@ export function useTabData<T>(tabId: string | null, url: string | undefined, fet
     // fetcher is expected to be a stable module-level function.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId, url, tick, delayMs, revision]);
-  const current = tabId !== null && answer.tabId === tabId;
-  return { data: current ? answer.data : null, error: current ? answer.error : null, refresh: () => setTick((n) => n + 1) };
+  const current = tabId !== null && answer.tabId === tabId && answer.url === url;
+  return {
+    data: current ? answer.data : null,
+    error: current ? answer.error : null,
+    // Nothing read yet for this page. The panels say so, rather than show an
+    // empty result that reads as "there is nothing here".
+    loading: tabId !== null && !current,
+    refresh: () => setTick((n) => n + 1),
+  };
 }

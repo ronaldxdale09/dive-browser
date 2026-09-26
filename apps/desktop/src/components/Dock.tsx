@@ -5,7 +5,7 @@ import { useLayout } from "../store/layout";
 import type { Level } from "../lib/ipc";
 import { jumpToSource, editorLabel } from "../lib/editor";
 import { tabInThisWindow, useBrowser } from "../store/browser";
-import { selectEntries, useConsole } from "../store/console";
+import { CLEARED_SOURCE, selectEntries, useConsole } from "../store/console";
 import type { ConsoleRow } from "../store/console";
 import { usePrefs } from "../store/prefs";
 import { Icon, IconButton } from "./Icon";
@@ -224,6 +224,14 @@ function ConsolePanel() {
     const frame = requestAnimationFrame(() => virtualizer.scrollToEnd());
     return () => cancelAnimationFrame(frame);
   }, [newest, virtualizer]);
+  // Another tab's console opens at its newest line and follows it. The
+  // scroll box is shared, so the offset read in the last tab -- scrolled up
+  // to some old error -- otherwise carried over to a list it meant nothing in.
+  useEffect(() => {
+    atBottom.current = true;
+    const frame = requestAnimationFrame(() => virtualizer.scrollToEnd());
+    return () => cancelAnimationFrame(frame);
+  }, [activeTab, virtualizer]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -295,6 +303,8 @@ const Row = memo(function Row({
   const preferredEditor = usePrefs((s) => s.prefs.preferred_editor || "vscode");
   const loc = entry.url ? `${sourceName(entry.url)}${entry.line ? `:${entry.line}` : ""}` : "";
   const [jumping, setJumping] = useState(false);
+  // The page clearing its console leaves a quiet note, as DevTools does.
+  const cleared = entry.source === CLEARED_SOURCE;
 
   const handleClick = async () => {
     if (!entry.url || jumping) return;
@@ -312,9 +322,13 @@ const Row = memo(function Row({
       ref={measure}
       data-index={index}
       style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${start}px)` }}
-      className={`flex gap-3 border-b border-line/60 px-3 py-0.5 ${LEVEL_STYLE[entry.level]}`}
+      className={`flex gap-3 border-b border-line/60 px-3 py-0.5 ${cleared ? "text-ink-3 italic" : LEVEL_STYLE[entry.level]}`}
     >
-      <span className="w-14 shrink-0 text-ink-3">{entry.source}</span>
+      {/* Sources run from "console" to "deprecation" and "intervention";
+          the long ones are cut rather than running into the message. */}
+      <span className="w-20 shrink-0 truncate text-ink-3" title={entry.source}>
+        {cleared ? "" : entry.source}
+      </span>
       {/* Colour alone must not carry the level: a warning and an error say so. */}
       {(entry.level === "warn" || entry.level === "error") && <span className="shrink-0 self-start rounded bg-current/10 px-1 text-[10px] uppercase">{entry.level}</span>}
       {entry.repeats > 1 && (

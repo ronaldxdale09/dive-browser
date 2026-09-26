@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { beginsAwaitedPage, enqueueNetworkBatch, fold, isMocked, resetNavigationWaits, rowsSinceNavigation, selectFrames, selectRequests, useNetwork } from "./network";
 import type { NetworkEvent } from "../lib/ipc";
+import { ipc } from "../lib/ipc";
 
 type SentEvent = Extract<NetworkEvent, { type: "sent" }>;
 
@@ -246,5 +247,26 @@ describe("navigation", () => {
     // A redirect lands on another address: the time window stands in, and it lapses.
     s.navigated("t", "https://a.dev/moved");
     expect(beginsAwaitedPage("t", doc("6", "https://a.dev/final", 6), Date.now() + 5000)).toBe(false);
+  });
+
+  it("clears the host's copy with the panel, keeping the page now showing", () => {
+    resetNavigationWaits();
+    const host = vi.spyOn(ipc, "tabNetworkClear").mockResolvedValue(undefined as never);
+    useNetwork.setState({ byTab: {}, frames: {}, preserve: false });
+    const s = useNetwork.getState();
+    s.apply(doc("1", "https://a.dev/", 1));
+    s.apply(doc("3", "https://a.dev/next", 3));
+    s.navigated("t", "https://a.dev/next");
+    expect(host).toHaveBeenLastCalledWith("t", "3");
+    // The load start came first: the host keeps its copy until the document
+    // request shows which of its rows begin the new page.
+    host.mockClear();
+    s.navigated("t", "https://a.dev/later");
+    expect(host).not.toHaveBeenCalled();
+    s.apply(doc("7", "https://a.dev/later", 7));
+    expect(host).toHaveBeenLastCalledWith("t", "7");
+    s.clear("t");
+    expect(host).toHaveBeenLastCalledWith("t", null);
+    host.mockRestore();
   });
 });
