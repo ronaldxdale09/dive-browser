@@ -579,11 +579,15 @@ impl Prefs {
     }
 
     /// Where downloads are written.
+    ///
+    /// A folder saved before Settings checked them may still read
+    /// `~/Downloads/dive` or be relative; the first is expanded here, and the
+    /// second falls back to the default rather than writing wherever the
+    /// process happens to have been started.
     pub fn download_dir(&self) -> std::path::PathBuf {
-        if self.download_dir.is_empty() {
-            crate::engine::downloads_dir()
-        } else {
-            std::path::PathBuf::from(&self.download_dir)
+        match expand_home(&self.download_dir) {
+            Some(path) if path.is_absolute() => path,
+            _ => crate::engine::downloads_dir(),
         }
     }
 
@@ -857,13 +861,36 @@ pub(crate) fn parse_stored(json: &str) -> Prefs {
     prefs.clamp_ranges()
 }
 
+/// What a tab should hear about the colour scheme from [`calls_for`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageScheme {
+    /// Tell it the chrome's scheme when the preference asks for that.
+    Follow,
+    /// "Tell pages the theme" was just turned off: take back what was said,
+    /// or every open tab keeps the forced scheme until it is closed.
+    Withdraw,
+    /// The tab has media overrides from the device menu, which win over the
+    /// preference; say nothing, in either direction, so they are kept.
+    Leave,
+}
+
+/// [`calls_for`] for a tab with no overrides of its own.
+#[cfg(test)]
+fn calls(prefs: &Prefs, chrome_scheme: Option<&str>) -> Vec<(&'static str, Value)> {
+    calls_for(prefs, chrome_scheme, PageScheme::Follow)
+}
+
 /// The `DevTools` calls that put `prefs` into force on one tab.
 ///
 /// The emulated color scheme is only sent when the user asked for it, so a
 /// preference write never clobbers a per-tab override from the device menu.
 /// `chrome_scheme` is what the chrome is actually drawn in; without it the
 /// explicit mode is the best guess and System says nothing.
-pub fn calls(prefs: &Prefs, chrome_scheme: Option<&str>) -> Vec<(&'static str, Value)> {
+pub fn calls_for(
+    prefs: &Prefs,
+    chrome_scheme: Option<&str>,
+    page: PageScheme,
+) -> Vec<(&'static str, Value)> {
     let headers = if prefs.do_not_track {
         json!({"DNT": "1", "Sec-GPC": "1"})
     } else {
@@ -882,13 +909,26 @@ pub fn calls(prefs: &Prefs, chrome_scheme: Option<&str>) -> Vec<(&'static str, V
     ];
     let scheme =
         chrome_scheme.or_else(|| (prefs.theme != "system").then_some(prefs.theme.as_str()));
-    if prefs.tell_pages_theme
-        && let Some(scheme) = scheme
-    {
-        calls.push((
-            "Emulation.setEmulatedMedia",
-            json!({"features": [{"name": "prefers-color-scheme", "value": scheme}]}),
-        ));
+    match page {
+        PageScheme::Follow => {
+            if prefs.tell_pages_theme
+                && let Some(scheme) = scheme
+            {
+                calls.push((
+                    "Emulation.setEmulatedMedia",
+                    json!({"features": [{"name": "prefers-color-scheme", "value": scheme}]}),
+                ));
+            }
+        }
+        // Only when the preference really is off now: a withdrawal that
+        // raced a newer "on" must not blank the scheme it asked for.
+        PageScheme::Withdraw if !prefs.tell_pages_theme => {
+            calls.push((
+                "Emulation.setEmulatedMedia",
+                json!({"media": "", "features": []}),
+            ));
+        }
+        PageScheme::Withdraw | PageScheme::Leave => {}
     }
     calls
 }
@@ -900,14 +940,54 @@ pub fn calls(prefs: &Prefs, chrome_scheme: Option<&str>) -> Vec<(&'static str, V
 /// are awaited together: a new tab waits on these before its first
 /// navigation, and one round trip after another added up.
 pub async fn apply(session: &CdpSession, prefs: &Prefs, chrome_scheme: Option<&str>) {
-    let sent = calls(prefs, chrome_scheme)
-        .into_iter()
-        .map(|(method, params)| async move {
-            if let Err(e) = session.call(method, params).await {
-                tracing::debug!("{method} failed: {e}");
-            }
-        });
+    apply_for(session, prefs, chrome_scheme, PageScheme::Follow).await;
+}
+
+/// [`apply`], with the tab's colour-scheme situation spelled out.
+pub async fn apply_for(
+    session: &CdpSession,
+    prefs: &Prefs,
+    chrome_scheme: Option<&str>,
+    page: PageScheme,
+) {
+    let sent =
+        calls_for(prefs, chrome_scheme, page)
+            .into_iter()
+            .map(|(method, params)| async move {
+                if let Err(e) = session.call(method, params).await {
+                    tracing::debug!("{method} failed: {e}");
+                }
+            });
     futures_util::future::join_all(sent).await;
+}
+
+/// Whether `next` differs from `previous` only in fields the chrome draws
+/// itself -- colours, type, layout, motion. None of those reach a page, so a
+/// write that changes nothing else skips the per-tab `DevTools` round trips,
+/// the interception rebuild and the history prune: dragging a colour or the
+/// size slider used to pay for all of it on every step.
+pub fn chrome_only_change(previous: &Prefs, next: &Prefs) -> bool {
+    let mut masked = next.clone();
+    masked.accent.clone_from(&previous.accent);
+    masked
+        .appearance_preset
+        .clone_from(&previous.appearance_preset);
+    masked.custom_ground.clone_from(&previous.custom_ground);
+    masked.custom_ink.clone_from(&previous.custom_ink);
+    masked
+        .custom_highlight
+        .clone_from(&previous.custom_highlight);
+    masked.ui_font.clone_from(&previous.ui_font);
+    masked.ui_scale = previous.ui_scale;
+    masked.density.clone_from(&previous.density);
+    masked.corner_radius.clone_from(&previous.corner_radius);
+    masked.tab_style.clone_from(&previous.tab_style);
+    masked.motion.clone_from(&previous.motion);
+    masked
+        .welcome_background
+        .clone_from(&previous.welcome_background);
+    masked.rail_expanded = previous.rail_expanded;
+    masked == *previous
 }
 
 /// What [`clear`] should delete.
@@ -926,6 +1006,25 @@ pub struct ClearRequest {
     /// Form entries remembered in the active profile.
     #[serde(default)]
     pub forms: bool,
+    /// Only what happened in the last this many hours; `None` is all time.
+    /// Applies to history, downloads and form entries. Chromium offers no
+    /// time range for cookies, the cache or site data, so those are always
+    /// cleared in full and Settings says so.
+    #[serde(default)]
+    pub since_hours: Option<u32>,
+}
+
+/// What [`clear`] managed, and what it could not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct ClearOutcome {
+    /// One sentence on what went.
+    pub summary: String,
+    /// What failed, one line each. Everything else was still cleared: a
+    /// cache that would not clear no longer hides that history did.
+    pub failures: Vec<String>,
+    /// Cookies, cache or site data were cleared, and the profiles that are
+    /// not open finish on the next launch.
+    pub restart_needed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -945,6 +1044,9 @@ fn merge_clear(left: ClearRequest, right: ClearRequest) -> ClearRequest {
         cache: left.cache || right.cache,
         site_data: left.site_data || right.site_data,
         forms: left.forms || right.forms,
+        // Only cookies, cache and site data wait for a restart, and those
+        // are cleared in full.
+        since_hours: None,
     }
 }
 
@@ -1063,75 +1165,42 @@ fn queue_profile_clear(profiles: &[String], what: ClearRequest) -> AppResult<()>
 ///
 /// Open profiles clear immediately through Chromium; a component cleanup is
 /// also queued for the next launch before CEF locks persistent profile files.
-pub async fn clear(state: &AppState, what: ClearRequest) -> AppResult<String> {
-    let mut done: Vec<String> = Vec::new();
-    if what.history {
-        let store = crate::state::lock(&state.store);
-        let n = store.clear_history()?;
-        store.clear_favicons()?;
-        drop(store);
-        done.push(counted(n, "history entry", "history entries"));
-    }
-    if what.forms {
-        let store = crate::state::lock(&state.store);
-        let active = *crate::state::lock(&state.active_workspace);
-        let profile = active
-            .and_then(|id| store.workspace(id).ok())
-            .map(|w| w.profile_id)
-            .or_else(|| store.profiles().ok()?.into_iter().next().map(|p| p.id));
-        if let Some(profile) = profile {
-            let n = store.clear_form_entries(profile)?;
-            done.push(counted(n, "form entry", "form entries"));
-        }
-    }
-    let sessions: Vec<(String, CdpSession)> = {
-        let host = crate::state::lock(&state.host);
-        let store = crate::state::lock(&state.store);
-        host.as_ref().map_or_else(Vec::new, |host| {
-            let mut profiles = std::collections::HashMap::new();
-            for (id, session) in host.sessions() {
-                let Ok(tab) = store.tab(id) else { continue };
-                let Some(workspace) = tab
-                    .workspace_id
-                    .and_then(|workspace| store.workspace(workspace).ok())
-                else {
-                    continue;
-                };
-                profiles
-                    .entry(workspace.container_id)
-                    .or_insert((tab.url, session));
-            }
-            profiles.into_values().collect()
-        })
-    };
-    let mut first_error = None;
-    for (url, session) in &sessions {
+/// A part that fails is reported and the rest still goes ahead.
+pub async fn clear(state: &AppState, what: ClearRequest) -> AppResult<ClearOutcome> {
+    let since = what.since_hours.and_then(|hours| {
+        dive_core::Timestamp::now()
+            .0
+            .checked_sub(time::Duration::hours(i64::from(hours)))
+            .map(dive_core::Timestamp)
+    });
+    let (mut done, mut failures) = clear_records(state, what, since);
+    let containers = open_containers(state);
+    for (session, origins) in containers.values() {
         if what.cookies
             && let Err(error) = session.call0("Network.clearBrowserCookies").await
         {
-            first_error.get_or_insert(error);
+            failures.push(format!("Cookies: {error}"));
         }
         if what.cache
             && let Err(error) = session.call0("Network.clearBrowserCache").await
         {
-            first_error.get_or_insert(error);
+            failures.push(format!("Cache: {error}"));
         }
-        if what.site_data
-            && let Some(origin) = origin_of(url)
-            && let Err(error) = session
-                .call(
-                    "Storage.clearDataForOrigin",
-                    json!({"origin": origin, "storageTypes": "all"}),
-                )
-                .await
-        {
-            first_error.get_or_insert(error);
+        // Every site open in the container, not only the first tab's: the
+        // storage partition is the container's, so one session reaches all.
+        if what.site_data {
+            for origin in origins {
+                if let Err(error) = session
+                    .call(
+                        "Storage.clearDataForOrigin",
+                        json!({"origin": origin, "storageTypes": "all"}),
+                    )
+                    .await
+                {
+                    failures.push(format!("Site data for {origin}: {error}"));
+                }
+            }
         }
-    }
-    if let Some(error) = first_error {
-        return Err(AppError::new(format!(
-            "Chromium could not clear browser data: {error}"
-        )));
     }
     if what.cookies {
         done.push("cookies".into());
@@ -1142,20 +1211,111 @@ pub async fn clear(state: &AppState, what: ClearRequest) -> AppResult<String> {
     if what.site_data {
         done.push("site data".into());
     }
-    if what.cookies || what.cache || what.site_data {
-        let profiles: Vec<String> = lock(&state.store)
-            .containers()?
-            .into_iter()
-            .map(|container| container.cache_dir)
-            .collect();
-        queue_profile_clear(&profiles, what)?;
-        Ok(format!(
-            "{} Restart Dive to finish the profiles that were not open.",
-            summary(&done)
-        ))
-    } else {
-        Ok(summary(&done))
+    let restart_needed = what.cookies || what.cache || what.site_data;
+    if restart_needed {
+        let queued = lock(&state.store).containers().map(|containers| {
+            containers
+                .into_iter()
+                .map(|container| container.cache_dir)
+                .collect::<Vec<String>>()
+        });
+        match queued
+            .map_err(AppError::from)
+            .and_then(|profiles| queue_profile_clear(&profiles, what))
+        {
+            Ok(()) => {}
+            Err(error) => failures.push(format!("Closed profiles: {error}")),
+        }
     }
+    let mut summary = summary(&done);
+    if restart_needed {
+        summary.push_str(" Restart Dive to finish the profiles that were not open.");
+    }
+    Ok(ClearOutcome {
+        summary,
+        failures,
+        restart_needed,
+    })
+}
+
+/// Clear what Dive keeps itself -- history, download records, form entries
+/// -- and say what went and what could not.
+fn clear_records(
+    state: &AppState,
+    what: ClearRequest,
+    since: Option<dive_core::Timestamp>,
+) -> (Vec<String>, Vec<String>) {
+    let mut done: Vec<String> = Vec::new();
+    let mut failures: Vec<String> = Vec::new();
+    if what.history {
+        let store = crate::state::lock(&state.store);
+        let cleared = store.clear_history_since(since).and_then(|n| {
+            // Icons record which sites were visited, but not when; they go
+            // with the whole of history, not with the last hour of it.
+            if since.is_none() {
+                store.clear_favicons()?;
+            }
+            let downloads = store.clear_downloads_since(since)?;
+            Ok((n, downloads))
+        });
+        drop(store);
+        match cleared {
+            Ok((n, downloads)) => {
+                done.push(counted(n, "history entry", "history entries"));
+                if downloads > 0 {
+                    done.push(counted(downloads, "download record", "download records"));
+                }
+            }
+            Err(error) => failures.push(format!("History: {error}")),
+        }
+    }
+    if what.forms {
+        let store = crate::state::lock(&state.store);
+        let active = *crate::state::lock(&state.active_workspace);
+        let profile = active
+            .and_then(|id| store.workspace(id).ok())
+            .map(|w| w.profile_id)
+            .or_else(|| store.profiles().ok()?.into_iter().next().map(|p| p.id));
+        if let Some(profile) = profile {
+            match store.clear_form_entries_since(profile, since) {
+                Ok(n) => done.push(counted(n, "form entry", "form entries")),
+                Err(error) => failures.push(format!("Form entries: {error}")),
+            }
+        }
+    }
+    (done, failures)
+}
+
+/// One live session per container with an open tab, and the origin of every
+/// page open in that container.
+fn open_containers(
+    state: &AppState,
+) -> std::collections::HashMap<
+    dive_core::ContainerId,
+    (CdpSession, std::collections::BTreeSet<String>),
+> {
+    let host = crate::state::lock(&state.host);
+    let store = crate::state::lock(&state.store);
+    let mut containers = std::collections::HashMap::new();
+    let Some(host) = host.as_ref() else {
+        return containers;
+    };
+    for (id, session) in host.sessions() {
+        let Ok(tab) = store.tab(id) else { continue };
+        let Some(workspace) = tab
+            .workspace_id
+            .and_then(|workspace| store.workspace(workspace).ok())
+        else {
+            continue;
+        };
+        let (_, origins) = containers
+            .entry(workspace.container_id)
+            .or_insert_with(|| (session, std::collections::BTreeSet::new()));
+        if let Some(origin) = origin_of(&tab.url) {
+            origins.insert(origin);
+        }
+    }
+    containers
 }
 
 fn origin_of(url: &str) -> Option<String> {
@@ -1178,23 +1338,105 @@ fn summary(done: &[String]) -> String {
     }
 }
 
-/// Drop visits older than the retention window, in every profile; no-op
-/// when history is kept forever. Returns how many rows went.
-pub fn prune_history(state: &AppState) -> AppResult<usize> {
-    let days = state.prefs.snapshot(state).history_days;
+/// The oldest visit a retention window of `days` keeps; `None` when history
+/// is kept forever.
+fn retention_cutoff(days: i32) -> Option<dive_core::Timestamp> {
     if days <= 0 {
-        return Ok(0);
+        return None;
     }
     // Clamped on the way in, and checked here as well: a window reaching
     // past the calendar's first year panics in a plain subtraction.
     let days = i64::from(days.min(MAX_HISTORY_DAYS));
-    let Some(cutoff) = dive_core::Timestamp::now()
+    dive_core::Timestamp::now()
         .0
         .checked_sub(time::Duration::days(days))
-    else {
+        .map(dive_core::Timestamp)
+}
+
+/// `path` with a leading `~` replaced by the home folder; `None` for an
+/// empty path, or a `~` when the home folder is unknown.
+fn expand_home(path: &str) -> Option<std::path::PathBuf> {
+    let path = path.trim();
+    if path.is_empty() {
+        return None;
+    }
+    let home = || {
+        std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(std::path::PathBuf::from)
+    };
+    if path == "~" {
+        return home();
+    }
+    if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        return home().map(|home| home.join(rest));
+    }
+    Some(std::path::PathBuf::from(path))
+}
+
+/// Check a download folder typed or picked in Settings and return it as it
+/// should be stored: `~` expanded, and only a full path to a folder files can
+/// be written into. Empty means the default and is always fine.
+///
+/// A folder typed as `~/Downloads/dive` used to be stored as written and
+/// handed to the engine, which took it as a folder named `~` wherever the
+/// process ran, and every download failed.
+pub fn check_download_dir(typed: &str) -> AppResult<String> {
+    let typed = typed.trim();
+    if typed.is_empty() {
+        return Ok(String::new());
+    }
+    let path = expand_home(typed)
+        .ok_or_else(|| AppError::new("could not find your home folder to expand ~"))?;
+    if !path.is_absolute() {
+        return Err(AppError::new(format!(
+            "“{typed}” is not a full folder path. Choose a folder, or type one that starts with {}",
+            if cfg!(windows) {
+                "a drive letter"
+            } else {
+                "/ or ~"
+            }
+        )));
+    }
+    std::fs::create_dir_all(&path).map_err(|error| {
+        AppError::new(format!(
+            "could not use {} for downloads: {error}",
+            path.display()
+        ))
+    })?;
+    if !path.is_dir() {
+        return Err(AppError::new(format!("{} is not a folder", path.display())));
+    }
+    // Writable is only known by writing. The probe is removed at once.
+    let probe = path.join(format!(".dive-write-check-{}", std::process::id()));
+    std::fs::write(&probe, b"")
+        .and_then(|()| std::fs::remove_file(&probe))
+        .map_err(|error| {
+            AppError::new(format!(
+                "Dive cannot save files in {}: {error}",
+                path.display()
+            ))
+        })?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Drop visits older than the retention window, in every profile; no-op
+/// when history is kept forever. Returns how many rows went.
+pub fn prune_history(state: &AppState) -> AppResult<usize> {
+    let Some(cutoff) = retention_cutoff(state.prefs.snapshot(state).history_days) else {
         return Ok(0);
     };
-    Ok(crate::state::lock(&state.store).prune_history(dive_core::Timestamp(cutoff))?)
+    Ok(crate::state::lock(&state.store).prune_history(cutoff)?)
+}
+
+/// How many visits a retention window of `days` would drop, in every
+/// profile as [`prune_history`] does, so shortening it can ask first.
+/// Nothing is deleted here.
+pub fn count_prunable(state: &AppState, days: i32) -> AppResult<usize> {
+    let Some(cutoff) = retention_cutoff(days) else {
+        return Ok(0);
+    };
+    Ok(crate::state::lock(&state.store).count_history_before(cutoff)?)
 }
 
 #[cfg(test)]
@@ -1218,6 +1460,7 @@ mod tests {
                 cache: false,
                 site_data: false,
                 forms: false,
+                since_hours: None,
             },
         );
         assert!(targets.iter().any(|path| path.ends_with("Network/Cookies")));
@@ -1232,6 +1475,7 @@ mod tests {
             cache: true,
             site_data: false,
             forms: false,
+            since_hours: None,
         };
         let second = ClearRequest {
             history: false,
@@ -1239,6 +1483,7 @@ mod tests {
             cache: false,
             site_data: true,
             forms: false,
+            since_hours: None,
         };
         assert_eq!(
             merge_clear(first, second),
@@ -1248,8 +1493,40 @@ mod tests {
                 cache: true,
                 site_data: true,
                 forms: false,
+                since_hours: None,
             }
         );
+    }
+
+    #[test]
+    fn a_download_folder_is_expanded_checked_and_never_relative() {
+        let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+        assert_eq!(
+            expand_home("~/Downloads/dive"),
+            Some(home.join("Downloads/dive"))
+        );
+        assert_eq!(expand_home("  "), None);
+        assert!(check_download_dir("Downloads/dive").is_err());
+        assert_eq!(check_download_dir("  ").unwrap(), "");
+        let dir = std::env::temp_dir().join(format!(
+            "dive-dl-{}-{}",
+            std::process::id(),
+            dive_core::Timestamp::now().to_rfc3339().replace(':', "-")
+        ));
+        let stored = check_download_dir(&dir.to_string_lossy()).unwrap();
+        assert!(std::path::Path::new(&stored).is_dir(), "created on the way");
+        let _ = std::fs::remove_dir_all(&dir);
+        // A folder saved before this check keeps downloads working anyway.
+        let old = Prefs {
+            download_dir: "relative/place".into(),
+            ..Prefs::default()
+        };
+        assert_eq!(old.download_dir(), crate::engine::downloads_dir());
+        let tilde = Prefs {
+            download_dir: "~/Downloads/dive".into(),
+            ..Prefs::default()
+        };
+        assert_eq!(tilde.download_dir(), home.join("Downloads/dive"));
     }
 
     #[test]
@@ -1560,6 +1837,48 @@ mod tests {
         );
         // Nobody asked: nothing is sent even when the chrome has reported.
         assert_eq!(calls(&Prefs::default(), Some("light")).len(), 3);
+    }
+
+    #[test]
+    fn turning_the_theme_off_takes_it_back_except_where_the_device_menu_rules() {
+        let off = Prefs::default();
+        let withdrawn = calls_for(&off, Some("dark"), PageScheme::Withdraw);
+        assert_eq!(withdrawn.len(), 4);
+        assert_eq!(withdrawn[3].0, "Emulation.setEmulatedMedia");
+        assert_eq!(withdrawn[3].1["features"], json!([]));
+        // A tab with its own media overrides keeps them either way.
+        assert_eq!(calls_for(&off, Some("dark"), PageScheme::Leave).len(), 3);
+        let on = Prefs {
+            tell_pages_theme: true,
+            ..Prefs::default()
+        };
+        assert_eq!(calls_for(&on, Some("dark"), PageScheme::Leave).len(), 3);
+        // A withdrawal that lost a race with turning it back on says nothing.
+        assert_eq!(calls_for(&on, Some("dark"), PageScheme::Withdraw).len(), 3);
+    }
+
+    #[test]
+    fn an_appearance_change_is_told_apart_from_one_pages_see() {
+        let before = Prefs::default();
+        let dragged = Prefs {
+            custom_ground: "#223344".into(),
+            ui_scale: 1.15,
+            accent: "#8FB8F0".into(),
+            ..before.clone()
+        };
+        assert!(chrome_only_change(&before, &dragged));
+        assert!(chrome_only_change(&before, &before));
+        let javascript = Prefs {
+            javascript: false,
+            ..dragged.clone()
+        };
+        assert!(!chrome_only_change(&before, &javascript));
+        // The mode can reach pages through "Tell pages the theme".
+        let theme = Prefs {
+            theme: "light".into(),
+            ..before.clone()
+        };
+        assert!(!chrome_only_change(&before, &theme));
     }
 
     #[test]

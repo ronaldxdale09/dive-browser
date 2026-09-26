@@ -1,10 +1,12 @@
-import { Button, Group, Row, Segmented, Select, Switch, TextInput } from "../SettingsFields";
+import { useState } from "react";
+import { Button, Check, Group, Row, Segmented, Select, Switch, TextInput } from "../SettingsFields";
 import { useBrowser } from "../../store/browser";
 import { useDefaultBrowser } from "../../store/defaultBrowser";
 import { prettyBundleId } from "../DefaultBrowserDialog";
 import { isPrivateWindow } from "../../lib/privateMode";
 import { KeepSitesActive } from "./KeepSitesActive";
 import { usePref } from "./usePref";
+import { usePrefs } from "../../store/prefs";
 import { ipc } from "../../lib/ipc";
 import { errorMessage } from "../../lib/errors";
 import { chordsByCommand, credentialStoreName, defaultDownloadsHint, defaultDownloadsPlaceholder, formatChord, importSourcesHint } from "../../lib/commands";
@@ -21,6 +23,30 @@ const ENGINES = [
 
 const ZOOMS = [50, 67, 75, 90, 100, 110, 125, 150, 175, 200].map((z) => ({ value: String(z), label: `${z}%` }));
 
+/**
+ * The zoom choices, with the one in force added when it is not a listed
+ * step (a stored 80%, or one clamped by the host): without it the control
+ * read "Choose…" as if nothing were set.
+ */
+export function zoomOptions(percent: number): { value: string; label: string }[] {
+  if (ZOOMS.some((z) => z.value === String(percent))) return ZOOMS;
+  return [...ZOOMS, { value: String(percent), label: `Custom (${percent}%)` }].sort((a, b) => Number(a.value) - Number(b.value));
+}
+
+/** What a restore added, as the notice says it. */
+export function restoreNotice(summary: { bookmarks: number; history: number; form_entries: number; workspaces: number; tabs: number; preferences: boolean }): string {
+  const parts = [
+    summary.bookmarks && `${summary.bookmarks} ${summary.bookmarks === 1 ? "bookmark" : "bookmarks"}`,
+    summary.history && `${summary.history} ${summary.history === 1 ? "visit" : "visits"} of history`,
+    summary.form_entries && `${summary.form_entries} ${summary.form_entries === 1 ? "form entry" : "form entries"}`,
+    summary.workspaces && `${summary.workspaces} ${summary.workspaces === 1 ? "workspace" : "workspaces"}`,
+    summary.tabs && `${summary.tabs} ${summary.tabs === 1 ? "tab" : "tabs"}`,
+  ].filter(Boolean);
+  const prefs = summary.preferences ? " Preferences were restored too." : "";
+  if (parts.length === 0) return summary.preferences ? "Restored the preferences; everything else in that backup was here already." : "That backup held nothing this profile did not have already.";
+  return `Restored ${parts.join(", ")}.${prefs}`;
+}
+
 /** Settings › General: startup, search and page defaults. */
 export function General() {
   const [prefs, set] = usePref();
@@ -33,22 +59,40 @@ export function General() {
       useBrowser.setState({ error: errorMessage(error) });
     }
   };
+  // Off by default: a backup's preferences replace every setting here,
+  // which is more than "merge my bookmarks back" usually means.
+  const [restorePrefs, setRestorePrefs] = useState(false);
+  const loadPrefs = usePrefs((s) => s.load);
   const restoreBackup = async () => {
     try {
-      const summary = await ipc.backupRestore(false);
+      const summary = await ipc.backupRestore(restorePrefs);
       // No summary means the dialog was dismissed, which needs no notice.
       if (summary) {
-        const parts = [
-          summary.bookmarks && `${summary.bookmarks} bookmarks`,
-          summary.history && `${summary.history} pages of history`,
-          summary.form_entries && `${summary.form_entries} form entries`,
-          summary.workspaces && `${summary.workspaces} workspaces`,
-          summary.tabs && `${summary.tabs} tabs`,
-        ].filter(Boolean);
-        notify(parts.length ? `Restored ${parts.join(", ")}.` : "That backup held nothing this profile did not have already.", 6000);
+        // The host applied them; the screen has to read them back to show them.
+        if (summary.preferences) await loadPrefs();
+        notify(restoreNotice(summary), 6000);
       }
     } catch (error) {
       useBrowser.setState({ error: errorMessage(error) });
+    }
+  };
+  const [folderError, setFolderError] = useState<string | null>(null);
+  // The host checks the folder -- expands ~, refuses a relative path, makes
+  // sure files can be written there -- and a refusal is said on the row.
+  const saveFolder = async (download_dir: string) => {
+    setFolderError(null);
+    try {
+      await usePrefs.getState().update({ download_dir }, { rejectOnError: true });
+    } catch (error) {
+      setFolderError(errorMessage(error));
+    }
+  };
+  const chooseFolder = async () => {
+    try {
+      const picked = await ipc.downloadDirPick();
+      if (picked) await saveFolder(picked);
+    } catch (error) {
+      setFolderError(errorMessage(error));
     }
   };
   const toggle = useBrowser((s) => s.toggle);
@@ -159,7 +203,12 @@ export function General() {
         <Row
           label="Restore from a backup"
           hint="Merged into this profile: nothing here is removed, and anything already saved is left alone, so restoring the same file twice changes nothing the second time. Restored tabs arrive asleep."
-          control={<Button onClick={() => void restoreBackup()}>Restore…</Button>}
+          control={
+            <span className="flex flex-wrap items-center gap-3">
+              <Check label="Include preferences" checked={restorePrefs} onChange={setRestorePrefs} />
+              <Button onClick={() => void restoreBackup()}>Restore…</Button>
+            </span>
+          }
         />
       </Group>
       )}
@@ -167,17 +216,30 @@ export function General() {
         <Row
           label="Save files to"
           htmlFor="pref-downloads"
-          hint={defaultDownloadsHint()}
+          hint={
+            folderError ? (
+              <span id="pref-downloads-problem" role="alert" className="text-danger">
+                {folderError}
+              </span>
+            ) : (
+              defaultDownloadsHint()
+            )
+          }
           control={
-            <TextInput
-              id="pref-downloads"
-              label="Save files to"
-              mono
-              width="w-[300px]"
-              value={prefs.download_dir}
-              placeholder={defaultDownloadsPlaceholder()}
-              onCommit={(download_dir) => set({ download_dir })}
-            />
+            <span className="flex max-w-full items-center gap-2">
+              <TextInput
+                id="pref-downloads"
+                label="Save files to"
+                mono
+                width="w-[240px]"
+                value={prefs.download_dir}
+                placeholder={defaultDownloadsPlaceholder()}
+                invalid={folderError !== null}
+                {...(folderError ? { describedBy: "pref-downloads-problem" } : {})}
+                onCommit={saveFolder}
+              />
+              <Button onClick={() => void chooseFolder()}>Choose…</Button>
+            </span>
           }
         />
       </Group>
@@ -193,7 +255,7 @@ export function General() {
               label="Default zoom"
               value={String(Math.round(prefs.default_zoom * 100))}
               onChange={(z) => set({ default_zoom: Number(z) / 100 })}
-              options={ZOOMS}
+              options={zoomOptions(Math.round(prefs.default_zoom * 100))}
             />
           }
         />

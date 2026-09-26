@@ -624,7 +624,11 @@ export const useBrowser = create<BrowserState>((set, get) => ({
               ? { label: "Open", run: () => void get().openTab(fileUrl(d.path)) }
               : { label: showInFileManagerLabel(), run: () => void ipc.downloadsReveal(d.path).catch((err: unknown) => set({ error: errorMessage(err) })) }
             : undefined;
-          get().notify(d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : `Download failed: ${name}`, show ? 8000 : 5000, show);
+          get().notify(
+            d.status === "started" ? `Downloading ${name}` : d.status === "finished" ? `Saved ${name}` : d.status === "cancelled" ? `Download cancelled: ${name}` : `Download failed: ${name}`,
+            show ? 8000 : 5000,
+            show,
+          );
           // Closed once the file is on disk, not when it starts: the engine
           // reports a download's end through the page it came from, so a
           // page closed mid-download never says "Saved".

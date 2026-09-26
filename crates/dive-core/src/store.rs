@@ -254,6 +254,21 @@ const MIGRATIONS: &[&str] = &[
         source TEXT NOT NULL DEFAULT '',
         updated_at TEXT NOT NULL
     );",
+    // v19: downloads, kept past the session so the Library can list what
+    // was saved last week, not only what arrived since launch. One row per
+    // download; `path` is empty for one that failed before it had a
+    // destination.
+    "CREATE TABLE downloads (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        url TEXT NOT NULL,
+        path TEXT NOT NULL,
+        status TEXT NOT NULL,
+        bytes INTEGER,
+        started_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX downloads_profile ON downloads(profile_id, started_at);",
 ];
 
 /// Migrations whose data moves run in Rust, after their SQL and inside the
@@ -706,6 +721,25 @@ pub struct ImportedFormEntry {
     pub uses: u32,
     /// When it was last used there.
     pub last_used_at: Option<Timestamp>,
+}
+
+/// One download, as the Library lists it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct DownloadRecord {
+    /// Row id, for removing it from the list.
+    pub id: String,
+    /// Where it came from.
+    pub url: String,
+    /// Where the file was written; empty when it never got a destination.
+    pub path: String,
+    /// `started` | `finished` | `failed` | `cancelled`.
+    pub status: String,
+    /// Size on disk once it finished.
+    pub bytes: Option<f64>,
+    /// RFC 3339 time it began.
+    pub started_at: String,
+    /// RFC 3339 time of its last change of state.
+    pub updated_at: String,
 }
 
 /// One page in history, aggregated by URL.
@@ -1856,6 +1890,23 @@ impl Store {
         )?)
     }
 
+    /// Forget the entries in `profile` last used at or after `since`, or all
+    /// of them when `since` is `None`; returns how many went. An entry that
+    /// was never stamped with a use counts as old.
+    pub fn clear_form_entries_since(
+        &self,
+        profile: ProfileId,
+        since: Option<Timestamp>,
+    ) -> Result<usize> {
+        match since {
+            None => self.clear_form_entries(profile),
+            Some(since) => Ok(self.conn.execute(
+                "DELETE FROM form_entries WHERE profile_id = ?1 AND last_used_at >= ?2",
+                params![profile.to_string(), since.to_rfc3339()],
+            )?),
+        }
+    }
+
     /// Remove a bookmark; returns whether one existed.
     pub fn remove_bookmark(&self, url: &str) -> Result<bool> {
         Ok(self.conn.execute(
@@ -2324,6 +2375,74 @@ impl Store {
         Ok(gone)
     }
 
+    /// How many visits are older than `cutoff`, in every profile: what
+    /// [`Store::prune_history`] would delete, so a shorter retention window
+    /// can say so before it runs.
+    pub fn count_history_before(&self, cutoff: Timestamp) -> Result<usize> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM history WHERE visited_at < ?1",
+            [cutoff.to_rfc3339()],
+            |r| r.get(0),
+        )?;
+        Ok(usize::try_from(n).unwrap_or(0))
+    }
+
+    /// Delete this profile's visits made at or after `since`, or every visit
+    /// when `since` is `None`; returns how many rows went. Clearing "the last
+    /// hour" must not take last year's history with it, and a page visited
+    /// both before and after keeps its row, counted and dated by the visits
+    /// that are left.
+    pub fn clear_history_since(&self, since: Option<Timestamp>) -> Result<usize> {
+        let Some(since) = since else {
+            return self.clear_history();
+        };
+        let since = since.to_rfc3339();
+        let scope = self.scope()?;
+        let tx = self.conn.unchecked_transaction()?;
+        let touched: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT DISTINCT url FROM history WHERE +profile_id = ?1 AND visited_at >= ?2",
+            )?;
+            let rows = stmt.query_map(params![scope, since], |r| r.get(0))?;
+            rows.collect::<std::result::Result<_, _>>()?
+        };
+        let gone = tx.execute(
+            "DELETE FROM history WHERE profile_id = ?1 AND visited_at >= ?2",
+            params![scope, since],
+        )?;
+        {
+            let mut left = tx.prepare(
+                "SELECT COUNT(*), MAX(visited_at), (SELECT title FROM history
+                     WHERE url = ?2 AND +profile_id = ?1 AND title != ''
+                     ORDER BY visited_at DESC LIMIT 1)
+                 FROM history WHERE url = ?2 AND +profile_id = ?1",
+            )?;
+            let mut forget = tx
+                .prepare("DELETE FROM urls WHERE profile_id = ?1 AND url_hash = ?3 AND url = ?2")?;
+            // The title goes back to one a remaining visit had: the one the
+            // cleared hour gave it is part of what was cleared.
+            let mut recount = tx.prepare(
+                "UPDATE urls SET visit_count = ?4, last_visit = ?5, title = COALESCE(?6, '')
+                 WHERE profile_id = ?1 AND url_hash = ?3 AND url = ?2",
+            )?;
+            for url in &touched {
+                let (count, last, title): (i64, Option<String>, Option<String>) = left
+                    .query_row(params![scope, url], |r| {
+                        Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                    })?;
+                let hash = url_hash(url);
+                match last {
+                    Some(last) if count > 0 => {
+                        recount.execute(params![scope, url, hash, count, last, title])?
+                    }
+                    _ => forget.execute(params![scope, url, hash])?,
+                };
+            }
+        }
+        tx.commit()?;
+        Ok(gone)
+    }
+
     /// Pages in history matching `query` (a substring of the address or the
     /// title), best first, one row per page.
     ///
@@ -2350,10 +2469,14 @@ impl Store {
         // With a query every match is a candidate for the ranking, up to a
         // bound that keeps a one-letter query cheap. Without one the order
         // is the table's own, and a little headroom covers collapsed twins.
+        // The bound grows with the page asked for: the Library pages further
+        // in as it scrolls, past what a ranking needs (and a lower bound
+        // than `limit` would make the clamp panic).
+        let bound = HISTORY_CANDIDATES.max(limit);
         let fetch = if query.is_empty() {
-            limit.saturating_mul(4).clamp(limit, HISTORY_CANDIDATES)
+            limit.saturating_mul(4).clamp(limit, bound)
         } else {
-            HISTORY_CANDIDATES
+            bound
         };
         let rows = stmt.query_map(
             params![
@@ -2415,6 +2538,131 @@ impl Store {
             page.favicon = self.site_favicon(&page.url);
         }
         Ok(pages)
+    }
+
+    // ----- downloads -----
+
+    /// Record a download notice in the active profile.
+    ///
+    /// A start adds a row, unless that file already has a running one. Any
+    /// other status settles the newest row for the same file -- or, for a
+    /// failure that never had a destination, the newest running row for the
+    /// same address -- so one download is one row however many notices it
+    /// sends; with nothing to settle it is added as a row of its own.
+    pub fn record_download(
+        &self,
+        url: &str,
+        path: &str,
+        status: &str,
+        bytes: Option<u64>,
+        at: Timestamp,
+    ) -> Result<()> {
+        let scope = self.scope()?;
+        let at = at.to_rfc3339();
+        let bytes = bytes.and_then(|b| i64::try_from(b).ok());
+        let (sql, key) = match (status == "started", path.is_empty()) {
+            (true, true) => (None, url),
+            (true, false) => (
+                Some(
+                    "SELECT id FROM downloads WHERE profile_id = ?1 AND path = ?2 AND status = 'started'
+                     ORDER BY started_at DESC LIMIT 1",
+                ),
+                path,
+            ),
+            (false, true) => (
+                Some(
+                    "SELECT id FROM downloads WHERE profile_id = ?1 AND url = ?2 AND status = 'started'
+                     ORDER BY started_at DESC LIMIT 1",
+                ),
+                url,
+            ),
+            (false, false) => (
+                Some(
+                    "SELECT id FROM downloads WHERE profile_id = ?1 AND path = ?2
+                     ORDER BY started_at DESC LIMIT 1",
+                ),
+                path,
+            ),
+        };
+        let existing: Option<String> = match sql {
+            Some(sql) => self
+                .conn
+                .query_row(sql, params![scope, key], |r| r.get(0))
+                .optional()?,
+            None => None,
+        };
+        if let Some(id) = existing {
+            self.conn.execute(
+                "UPDATE downloads SET status = ?2, bytes = COALESCE(?3, bytes), updated_at = ?4,
+                     path = CASE WHEN ?5 != '' THEN ?5 ELSE path END
+                 WHERE id = ?1",
+                params![id, status, bytes, at, path],
+            )?;
+            return Ok(());
+        }
+        self.conn.execute(
+            "INSERT INTO downloads (id, profile_id, url, path, status, bytes, started_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+            params![
+                uuid::Uuid::now_v7().to_string(),
+                scope,
+                url,
+                path,
+                status,
+                bytes,
+                at
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The active profile's downloads, newest first, up to `limit`.
+    pub fn downloads(&self, limit: usize) -> Result<Vec<DownloadRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, url, path, status, bytes, started_at, updated_at FROM downloads
+             WHERE profile_id = ?1 ORDER BY started_at DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(
+            params![self.scope()?, i64::try_from(limit).unwrap_or(i64::MAX)],
+            |r| {
+                Ok(DownloadRecord {
+                    id: r.get(0)?,
+                    url: r.get(1)?,
+                    path: r.get(2)?,
+                    status: r.get(3)?,
+                    #[allow(clippy::cast_precision_loss)] // exact to 2^53 bytes.
+                    bytes: r.get::<_, Option<i64>>(4)?.map(|b| b as f64),
+                    started_at: r.get(5)?,
+                    updated_at: r.get(6)?,
+                })
+            },
+        )?;
+        rows.collect::<std::result::Result<_, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Forget one download row; the file itself is left alone.
+    pub fn remove_download(&self, id: &str) -> Result<bool> {
+        Ok(self.conn.execute(
+            "DELETE FROM downloads WHERE id = ?1 AND profile_id = ?2",
+            params![id, self.scope()?],
+        )? > 0)
+    }
+
+    /// Forget the active profile's downloads that began at or after `since`,
+    /// or all of them when `since` is `None`; returns how many rows went.
+    /// Only the list: every file stays where it was saved.
+    pub fn clear_downloads_since(&self, since: Option<Timestamp>) -> Result<usize> {
+        let scope = self.scope()?;
+        Ok(match since {
+            None => self
+                .conn
+                .execute("DELETE FROM downloads WHERE profile_id = ?1", [scope])?,
+            Some(since) => self.conn.execute(
+                "DELETE FROM downloads WHERE profile_id = ?1 AND started_at >= ?2",
+                params![scope, since.to_rfc3339()],
+            )?,
+        })
     }
 
     /// The key of the icon remembered for `url`'s origin, if any.
@@ -4117,6 +4365,111 @@ mod tests {
     }
 
     #[test]
+    fn a_shorter_window_is_counted_before_it_prunes() {
+        let store = Store::in_memory().unwrap();
+        let now = Timestamp::now();
+        store
+            .record_visit("https://new.dev/", "New", now - time::Duration::days(2))
+            .unwrap();
+        store
+            .record_visit("https://old.dev/", "Old", now - time::Duration::days(40))
+            .unwrap();
+        store
+            .record_visit(
+                "https://older.dev/",
+                "Older",
+                now - time::Duration::days(90),
+            )
+            .unwrap();
+        let cutoff = now - time::Duration::days(30);
+        assert_eq!(store.count_history_before(cutoff).unwrap(), 2);
+        // Counting deletes nothing.
+        assert_eq!(store.search_history("", 10).unwrap().len(), 3);
+        assert_eq!(store.prune_history(cutoff).unwrap(), 2);
+        assert_eq!(store.count_history_before(cutoff).unwrap(), 0);
+    }
+
+    #[test]
+    fn clearing_the_last_hour_keeps_what_came_before() {
+        let store = Store::in_memory().unwrap();
+        let profile = store.ensure_default_profile().unwrap().id;
+        let now = Timestamp::now();
+        store.record_visit("https://recent.dev/", "", now).unwrap();
+        store
+            .record_visit("https://yesterday.dev/", "", now - time::Duration::days(1))
+            .unwrap();
+        store
+            .record_form_entry(profile, "email", "new@a.test", now)
+            .unwrap();
+        store
+            .record_form_entry(
+                profile,
+                "email",
+                "old@a.test",
+                now - time::Duration::days(3),
+            )
+            .unwrap();
+        let hour_ago = Some(now - time::Duration::hours(1));
+        assert_eq!(store.clear_history_since(hour_ago).unwrap(), 1);
+        assert_eq!(
+            store.search_history("", 10).unwrap()[0].url,
+            "https://yesterday.dev/"
+        );
+        assert_eq!(
+            store.clear_form_entries_since(profile, hour_ago).unwrap(),
+            1
+        );
+        assert_eq!(store.form_entries(profile).unwrap().len(), 1);
+        assert_eq!(store.clear_history_since(None).unwrap(), 1);
+        assert_eq!(store.clear_form_entries_since(profile, None).unwrap(), 1);
+    }
+
+    #[test]
+    fn a_download_is_one_row_from_start_to_finish() {
+        let store = Store::in_memory().unwrap();
+        let now = Timestamp::now();
+        store
+            .record_download("https://a.dev/f.zip", "/tmp/f.zip", "started", None, now)
+            .unwrap();
+        store
+            .record_download("https://a.dev/f.zip", "/tmp/f.zip", "started", None, now)
+            .unwrap();
+        store
+            .record_download(
+                "https://a.dev/f.zip",
+                "/tmp/f.zip",
+                "finished",
+                Some(42),
+                now,
+            )
+            .unwrap();
+        // The engine repeats a finish; it settles the same row again.
+        store
+            .record_download("https://a.dev/f.zip", "/tmp/f.zip", "finished", None, now)
+            .unwrap();
+        let rows = store.downloads(10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "finished");
+        assert_eq!(rows[0].bytes, Some(42.0));
+        // A failure with no destination settles the running row for its URL,
+        // and a second one with nothing running stands on its own.
+        store
+            .record_download("https://b.dev/g", "", "started", None, now)
+            .unwrap();
+        store
+            .record_download("https://b.dev/g", "", "failed", None, now)
+            .unwrap();
+        store
+            .record_download("https://b.dev/g", "", "failed", None, now)
+            .unwrap();
+        let rows = store.downloads(10).unwrap();
+        assert_eq!(rows.len(), 3);
+        assert!(store.remove_download(&rows[0].id).unwrap());
+        assert_eq!(store.clear_downloads_since(None).unwrap(), 2);
+        assert!(store.downloads(10).unwrap().is_empty());
+    }
+
+    #[test]
     fn archive_idle_only_touches_today_tabs() {
         let (store, w) = seeded();
         let now = Timestamp::now();
@@ -4302,6 +4655,7 @@ mod tests {
             0xb383_f674_f622_412e,
             0x9762_4673_813a_bd0d,
             0xa00b_35bd_dbcb_9176,
+            0x8a65_c444_ca82_336e,
         ];
         assert!(
             MIGRATIONS.len() >= SHIPPED.len(),

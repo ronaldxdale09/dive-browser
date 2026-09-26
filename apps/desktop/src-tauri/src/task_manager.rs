@@ -51,22 +51,33 @@ pub fn metric(metrics: &Value, name: &str) -> Option<f64> {
         .as_f64()
 }
 
-/// Measure every tab that has a live renderer, and list the sleeping ones
-/// alongside so the table accounts for every tab.
+/// Longest wait for one tab's numbers. A renderer busy enough to be worth
+/// finding here can take seconds to answer; waiting on it held up every other
+/// row, and the table froze on the very tab it was meant to catch.
+const MEASURE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Measure every tab of the active profile that has a live renderer, and
+/// list its sleeping ones alongside so the table accounts for every tab.
+///
+/// Rows come back in the profile's tab order, not sorted: a table that
+/// re-sorted itself on every sample moved the row under the pointer. The
+/// chrome sorts when a column header is clicked.
 pub async fn list(state: &AppState) -> AppResult<Vec<TaskRow>> {
     let sessions: Vec<(TabId, dive_cdp::CdpSession)> = {
         let host = lock(&state.host);
         host.as_ref()
             .map_or_else(Vec::new, crate::engine::TabHost::sessions)
     };
-    // Every tab in every workspace, essentials included. `tabs_for_workspace`
-    // returns the essentials alongside each workspace's own, so a tab that
-    // lives in all of them is listed once.
+    // Every tab in the active profile's workspaces, essentials included.
+    // `tabs_for_workspace` returns the essentials alongside each workspace's
+    // own, so a tab that lives in all of them is listed once. Another
+    // profile's tabs are its own business; the header says "this profile".
     let tabs = {
         let store = lock(&state.store);
+        let profile = crate::commands::active_profile(&store, *lock(&state.active_workspace))?.id;
         let mut seen = std::collections::HashSet::new();
         let mut tabs = Vec::new();
-        for workspace in store.workspaces()? {
+        for workspace in store.workspaces_for_profile(profile)? {
             for tab in store.tabs_for_workspace(workspace.id)? {
                 if seen.insert(tab.id) {
                     tabs.push(tab);
@@ -75,51 +86,52 @@ pub async fn list(state: &AppState) -> AppResult<Vec<TaskRow>> {
         }
         tabs
     };
-    let mut rows = Vec::with_capacity(tabs.len());
-    for tab in tabs {
+    let rows = tabs.into_iter().map(|tab| {
         let session = sessions
             .iter()
             .find_map(|(id, session)| (*id == tab.id).then(|| session.clone()));
-        let title = if tab.title.trim().is_empty() {
-            tab.url.clone()
-        } else {
-            tab.title.clone()
-        };
-        let mut row = TaskRow {
-            tab_id: tab.id,
-            title,
-            url: tab.url.clone(),
-            memory_bytes: None,
-            cpu_seconds: None,
-            nodes: None,
-            documents: None,
-            listeners: None,
-            sleeping: session.is_none(),
-            audible: crate::tab_audio::is_audible(tab.id),
-        };
-        if let Some(session) = session {
-            // Enabling is idempotent and cheap; a tab measured once stays
-            // enabled, and a fresh renderer needs it again.
-            let _ = session.call("Performance.enable", json!({})).await;
-            if let Ok(result) = session.call("Performance.getMetrics", json!({})).await {
-                let metrics = &result["metrics"];
-                row.memory_bytes = metric(metrics, "JSHeapUsedSize");
-                row.cpu_seconds = metric(metrics, "TaskDuration");
-                row.nodes = metric(metrics, "Nodes");
-                row.documents = metric(metrics, "Documents");
-                row.listeners = metric(metrics, "JSEventListeners");
+        async move {
+            let title = if tab.title.trim().is_empty() {
+                tab.url.clone()
+            } else {
+                tab.title.clone()
+            };
+            let mut row = TaskRow {
+                tab_id: tab.id,
+                title,
+                url: tab.url.clone(),
+                memory_bytes: None,
+                cpu_seconds: None,
+                nodes: None,
+                documents: None,
+                listeners: None,
+                sleeping: session.is_none(),
+                audible: crate::tab_audio::is_audible(tab.id),
+            };
+            if let Some(session) = session {
+                // Enabling is idempotent and cheap; a tab measured once stays
+                // enabled, and a fresh renderer needs it again.
+                let _ = session
+                    .call_with_timeout("Performance.enable", json!({}), MEASURE_TIMEOUT)
+                    .await;
+                if let Ok(result) = session
+                    .call_with_timeout("Performance.getMetrics", json!({}), MEASURE_TIMEOUT)
+                    .await
+                {
+                    let metrics = &result["metrics"];
+                    row.memory_bytes = metric(metrics, "JSHeapUsedSize");
+                    row.cpu_seconds = metric(metrics, "TaskDuration");
+                    row.nodes = metric(metrics, "Nodes");
+                    row.documents = metric(metrics, "Documents");
+                    row.listeners = metric(metrics, "JSEventListeners");
+                }
             }
+            row
         }
-        rows.push(row);
-    }
-    // Heaviest first: the reason anyone opens this is to find that tab.
-    rows.sort_by(|a, b| {
-        b.memory_bytes
-            .unwrap_or(-1.0)
-            .partial_cmp(&a.memory_bytes.unwrap_or(-1.0))
-            .unwrap_or(std::cmp::Ordering::Equal)
     });
-    Ok(rows)
+    // Every tab at once: one slow renderer costs its own row a second, not
+    // every row after it.
+    Ok(futures_util::future::join_all(rows).await)
 }
 
 #[cfg(test)]

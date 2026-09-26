@@ -5,7 +5,7 @@ import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { useBrowser } from "../store/browser";
 import { useDefaultBrowser } from "../store/defaultBrowser";
 import { usePrivacy } from "../store/privacy";
-import { SettingsDialog, resolveSection, visibleSections } from "./SettingsDialog";
+import { SettingsDialog, escapeBelongsToField, resolveSection, visibleSections } from "./SettingsDialog";
 import { groupPermissions } from "./settings/Privacy";
 import { useUpdates } from "../store/updates";
 
@@ -272,6 +272,47 @@ describe("SettingsDialog", () => {
     // Closing fades first, so give a close the time it would take.
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(useBrowser.getState().open.settings).toBe(true);
+  });
+
+  it("leaves Escape to a plain field with text in it, and closes from an empty one", async () => {
+    const field = (value: string, attrs: Record<string, string> = {}) => {
+      const input = document.createElement("input");
+      input.value = value;
+      for (const [k, v] of Object.entries(attrs)) input.setAttribute(k, v);
+      return input;
+    };
+    expect(escapeBelongsToField({ target: field("sk-half-pasted"), defaultPrevented: false })).toBe(true);
+    expect(escapeBelongsToField({ target: field(""), defaultPrevented: false })).toBe(false);
+    // Settings' own fields decide for themselves.
+    expect(escapeBelongsToField({ target: field("https://kept", { "data-settings-field": "" }), defaultPrevented: false })).toBe(false);
+    expect(escapeBelongsToField({ target: field("x", { type: "checkbox" }), defaultPrevented: false })).toBe(false);
+    expect(escapeBelongsToField({ target: document.createElement("button"), defaultPrevented: true })).toBe(true);
+
+    vi.spyOn(ipc, "keepSitesList").mockResolvedValue([]);
+    useBrowser.setState({ activeProfile: "p1", open: { ...useBrowser.getState().open, settings: true } });
+    render(<SettingsDialog />);
+    const site = (await screen.findByLabelText("Site to keep active")) as HTMLInputElement;
+    fireEvent.change(site, { target: { value: "example.co" } });
+    fireEvent.keyDown(site, { key: "Escape" });
+    expect(site.value).toBe("");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(useBrowser.getState().open.settings).toBe(true);
+    fireEvent.keyDown(site, { key: "Escape" });
+    await waitFor(() => expect(useBrowser.getState().open.settings).toBe(false));
+  });
+
+  it("shows the host's value once a commit settles, not what was typed", async () => {
+    // The host refuses a relative download folder; the field must not keep
+    // showing it as if it were saved.
+    vi.spyOn(ipc, "prefsSet").mockRejectedValue(new Error("“Downloads/dive” is not a full folder path."));
+    useBrowser.setState({ open: { ...useBrowser.getState().open, settings: true } });
+    render(<SettingsDialog />);
+    const folder = screen.getByLabelText("Save files to") as HTMLInputElement;
+    fireEvent.change(folder, { target: { value: "Downloads/dive" } });
+    fireEvent.blur(folder);
+    expect(await screen.findByText(/is not a full folder path/)).toBeTruthy();
+    await waitFor(() => expect(folder.value).toBe(""));
+    expect(folder.getAttribute("aria-invalid")).toBe("true");
   });
 
   it("moves focus with the selection when the arrow keys change section", () => {

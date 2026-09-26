@@ -27,7 +27,7 @@ pub struct Download {
     pub path: String,
     /// Where it came from.
     pub url: String,
-    /// `started`, `finished` or `failed`.
+    /// `started`, `finished`, `failed` or `cancelled`.
     pub status: String,
     /// The tab that asked for it, when a page did.
     pub tab_id: Option<String>,
@@ -47,6 +47,15 @@ pub struct Registry {
     /// saw an increase, and told the caller nothing had finished when
     /// something had. A counter that only goes up cannot do that.
     finished: std::sync::atomic::AtomicUsize,
+    /// Downloads in flight by the engine's id, with their address and
+    /// destination as the last progress report gave them. The finish the
+    /// engine sends names only the address and path, so this is how a cancel
+    /// made by id is recognised when it lands.
+    live: Mutex<std::collections::HashMap<u32, (String, String)>>,
+    /// Ids someone asked to cancel. The engine reports a cancelled download
+    /// the way it reports a failed one; without this a person who pressed
+    /// Cancel was told the download had failed.
+    cancelled: Mutex<std::collections::HashSet<u32>>,
 }
 
 impl Registry {
@@ -80,6 +89,36 @@ impl Registry {
         while seen.len() > KEEP {
             seen.pop_front();
         }
+    }
+
+    /// Note where a download in flight is going; called for every progress
+    /// report, which is where the engine's id first appears.
+    pub fn track(&self, id: u32, url: &str, path: &str) {
+        lock(&self.live).insert(id, (url.to_owned(), path.to_owned()));
+    }
+
+    /// Remember that the person asked for this download to stop.
+    pub fn mark_cancelled(&self, id: u32) {
+        lock(&self.cancelled).insert(id);
+    }
+
+    /// Whether the download that just ended at `path` (or, with no path yet,
+    /// from `url`) was one the person cancelled. Forgets it either way: it is
+    /// over, and ids are the engine's to reuse.
+    pub fn take_cancelled(&self, url: &str, path: &str) -> bool {
+        let mut live = lock(&self.live);
+        let ended: Vec<u32> = live
+            .iter()
+            .filter(|(_, (u, p))| if path.is_empty() { u == url } else { p == path })
+            .map(|(id, _)| *id)
+            .collect();
+        let mut cancelled = lock(&self.cancelled);
+        let mut was = false;
+        for id in ended {
+            live.remove(&id);
+            was |= cancelled.remove(&id);
+        }
+        was
     }
 
     /// Forget everything. The chrome's list and this one are the same list as
@@ -176,6 +215,23 @@ mod tests {
         registry.record(&notice("/tmp/a.csv", "finished"));
         registry.clear();
         assert!(registry.recent(10).is_empty());
+    }
+
+    #[test]
+    fn a_cancel_is_told_apart_from_a_failure() {
+        let registry = Registry::default();
+        registry.track(3, "https://a.test/f.zip", "/tmp/f.zip");
+        registry.track(4, "https://a.test/g.zip", "/tmp/g.zip");
+        registry.mark_cancelled(3);
+        assert!(registry.take_cancelled("https://a.test/f.zip", "/tmp/f.zip"));
+        // Spent once it has been reported.
+        assert!(!registry.take_cancelled("https://a.test/f.zip", "/tmp/f.zip"));
+        // The other download failed on its own.
+        assert!(!registry.take_cancelled("https://a.test/g.zip", "/tmp/g.zip"));
+        // A download with no destination yet is matched by its address.
+        registry.track(5, "https://a.test/h", "");
+        registry.mark_cancelled(5);
+        assert!(registry.take_cancelled("https://a.test/h", ""));
     }
 
     #[test]

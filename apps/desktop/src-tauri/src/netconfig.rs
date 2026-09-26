@@ -82,6 +82,26 @@ pub fn save(config: &NetworkConfig) -> AppResult<()> {
     std::fs::write(path, json).map_err(AppError::new)
 }
 
+/// The configuration this process was started with. Chromium read it once at
+/// launch, so it is what is in force until the next one, whatever Settings
+/// has saved since.
+static RUNNING: std::sync::OnceLock<NetworkConfig> = std::sync::OnceLock::new();
+
+/// Remember the configuration the engine is being started with.
+pub fn record_running(config: &NetworkConfig) {
+    let _ = RUNNING.set(config.clone());
+}
+
+/// Whether `saved` would start the engine differently from how it is
+/// running now, so Settings can offer the restart that puts it into force.
+/// Compared by the switches it produces: an edit that changes nothing the
+/// engine sees (a bypass list on a proxy that is off) needs no restart.
+pub fn restart_needed(saved: &NetworkConfig) -> bool {
+    RUNNING
+        .get()
+        .is_some_and(|running| flags(running) != flags(saved))
+}
+
 /// The `DoH` template this configuration resolves to, if any.
 pub fn template_of(config: &NetworkConfig) -> Option<String> {
     if config.dns_provider == "custom" {
@@ -120,9 +140,21 @@ fn bypass_list(value: &str) -> Option<String> {
     let cleaned: Vec<&str> = value
         .split(',')
         .map(str::trim)
-        .filter(|entry| !entry.is_empty() && proxy_authority(entry).is_some())
+        .filter(|entry| bypass_entry(entry))
         .collect();
     (!cleaned.is_empty()).then(|| cleaned.join(","))
+}
+
+/// One bypass entry: an address, a host under a leading `*.` wildcard, or
+/// Chromium's `<local>`. Settings suggests `*.internal`, and the wildcard
+/// used to be dropped without a word. Neither form can carry a space or a
+/// quote, so neither can become another switch.
+fn bypass_entry(entry: &str) -> bool {
+    if entry == "<local>" {
+        return true;
+    }
+    let host = entry.strip_prefix("*.").unwrap_or(entry);
+    !host.is_empty() && proxy_authority(host).is_some()
 }
 
 /// The Chromium switches this configuration asks for.
@@ -315,7 +347,7 @@ mod tests {
             .find(|(name, _)| name == "proxy-bypass-list")
             .and_then(|(_, value)| value.clone())
             .unwrap();
-        assert_eq!(bypass, "localhost,127.0.0.1");
+        assert_eq!(bypass, "localhost,127.0.0.1,*.internal");
     }
 
     #[test]
@@ -328,5 +360,18 @@ mod tests {
             vec!["proxy-pac-url"]
         );
         assert!(names(&config(&[("proxy_mode", "pac"), ("proxy_pac_url", "wpad")])).is_empty());
+    }
+
+    #[test]
+    fn a_restart_is_offered_only_for_a_change_the_engine_would_see() {
+        record_running(&config(&[]));
+        assert!(!restart_needed(&config(&[])));
+        assert!(restart_needed(&config(&[("dns_mode", "secure")])));
+        // A manual proxy with no usable address starts the engine exactly
+        // as before, so restarting for it would change nothing.
+        assert!(!restart_needed(&config(&[
+            ("proxy_mode", "manual"),
+            ("proxy_server", "not a host")
+        ])));
     }
 }

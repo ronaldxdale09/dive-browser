@@ -24,6 +24,17 @@ const APPROVALS = [
 
 const STEP_LIMITS = ["10", "25", "50", "100", "200"] as const;
 
+/**
+ * The step limits offered, with the one in force added when it is not a
+ * listed one (set in an older build, or restored from a backup): without it
+ * the control read "Choose…" as if nothing were set.
+ */
+export function stepOptions(steps: number): { value: string; label: string }[] {
+  const listed = STEP_LIMITS.map((v) => ({ value: v, label: v }));
+  if (listed.some((o) => o.value === String(steps))) return listed;
+  return [...listed, { value: String(steps), label: `Custom (${steps})` }].sort((a, b) => Number(a.value) - Number(b.value));
+}
+
 /** Settings › Agent: provider, model, behaviour and API keys. */
 export function Agent() {
   const [prefs, set] = usePref();
@@ -123,7 +134,7 @@ export function Agent() {
           label="Step limit"
           htmlFor="pref-agent-steps"
           hint="Most tool calls one message may make before the run is stopped."
-          control={<Select id="pref-agent-steps" label="Step limit" value={String(prefs.agent_max_steps)} onChange={(v) => set({ agent_max_steps: Number(v) })} options={STEP_LIMITS.map((v) => ({ value: v, label: v }))} />}
+          control={<Select id="pref-agent-steps" label="Step limit" value={String(prefs.agent_max_steps)} onChange={(v) => set({ agent_max_steps: Number(v) })} options={stepOptions(prefs.agent_max_steps)} />}
         />
       </Group>
 
@@ -144,24 +155,31 @@ function KeyRow({ provider, saved }: { provider: ProviderInfo; saved: boolean })
   const [editing, setEditing] = useState(false);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  const [status, setStatus] = useState<{ tone: "ok" | "warn" | "error"; message: string } | null>(null);
   const submit = async () => {
     setBusy(true);
     try {
       const verdict = await verifyKey(provider.id, key.trim());
-      setStatus(verdict);
-      if (verdict.ok) {
-        await saveKey(provider.id, key.trim());
-        setKey("");
-        setEditing(false);
+      // Only the provider refusing the key stops it being saved. A provider
+      // that could not be reached -- offline, down, behind a proxy -- says
+      // nothing about the key, and refusing it made a working key
+      // impossible to enter until the network came back.
+      if (!verdict.ok && verdict.rejected) {
+        setStatus({ tone: "error", message: verdict.message });
+        return;
       }
+      await saveKey(provider.id, key.trim());
+      setKey("");
+      setEditing(false);
+      setStatus(verdict.ok ? { tone: "ok", message: verdict.message } : { tone: "warn", message: `Saved; couldn't verify it. ${verdict.message}` });
     } catch (e) {
-      setStatus({ ok: false, message: errorMessage(e) });
+      setStatus({ tone: "error", message: errorMessage(e) });
     } finally {
       setBusy(false);
     }
   };
-  const hint = status ? <span className={status.ok ? "text-highlight" : "text-danger"}>{status.message}</span> : saved ? `Saved in ${credentialStoreName()}.` : provider.note;
+  const tone = { ok: "text-highlight", warn: "text-warn", error: "text-danger" } as const;
+  const hint = status ? <span className={tone[status.tone]}>{status.message}</span> : saved ? `Saved in ${credentialStoreName()}.` : provider.note;
   return (
     <Row
       label={provider.name}
@@ -190,7 +208,16 @@ function KeyRow({ provider, saved }: { provider: ProviderInfo; saved: boolean })
                 type="password"
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && key.trim() && void submit()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && key.trim()) void submit();
+                  // Escape clears a half-pasted key first; the next one
+                  // closes Settings. It used to close Settings with the key
+                  // still in the field, unsaved and gone.
+                  if (e.key === "Escape" && key) {
+                    e.stopPropagation();
+                    setKey("");
+                  }
+                }}
                 placeholder={provider.key_hint || "API key"}
                 autoComplete="off"
                 spellCheck={false}

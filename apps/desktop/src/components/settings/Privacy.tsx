@@ -1,7 +1,8 @@
 import { X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ipc } from "../../lib/ipc";
-import type { Decision, PermissionList, SitePermission } from "../../lib/ipc";
+import type { ClearOutcome, Decision, PermissionList, SitePermission } from "../../lib/ipc";
+import { dnsTemplateProblem, ignoredBypass, pacProblem, proxyServerProblem } from "../../lib/netconfig";
 import { errorMessage } from "../../lib/errors";
 import { systemProxyHint } from "../../lib/navError";
 import { useBrowser } from "../../store/browser";
@@ -17,6 +18,26 @@ const RETENTION = [
   { value: "7", label: "7 days" },
 ];
 
+/**
+ * The retention choices, with the one in force added when it is not a
+ * listed one (set in an older build or by a restored backup): without it the
+ * control read "Choose…" as if nothing were set.
+ */
+export function retentionOptions(days: number): { value: string; label: string }[] {
+  if (RETENTION.some((o) => o.value === String(days))) return RETENTION;
+  return [...RETENTION, { value: String(days), label: `Custom (${days} ${days === 1 ? "day" : "days"})` }];
+}
+
+/** "Delete 1,204 visits older than 30 days?" */
+export function pruneQuestion(count: number, days: number): string {
+  return `Delete ${count.toLocaleString()} ${count === 1 ? "visit" : "visits"} older than ${days} ${days === 1 ? "day" : "days"}?`;
+}
+
+/** Whether moving the window from `from` to `to` days drops anything kept now. */
+export function shortensRetention(from: number, to: number): boolean {
+  return to > 0 && (from <= 0 || to < from);
+}
+
 /** Settings › Privacy: DivePrivacy, request policy, history, clearing and site permissions. */
 /** "Personal · Client work", or just "Personal" when the container carries the profile's own name. */
 export function scopeLabel(profile: string, container: string): string {
@@ -26,6 +47,19 @@ export function scopeLabel(profile: string, container: string): string {
 export function Privacy() {
   const [prefs, set] = usePref();
   const privacyInfo = usePrivacy((s) => s.info);
+  // Whether the network settings on screen are the ones the engine runs
+  // with. Asked after each save lands, since only then does the host have
+  // the new ones to compare.
+  const [restartNeeded, setRestartNeeded] = useState(false);
+  const checkNetwork = useCallback(() => {
+    void ipc.networkRestartNeeded().then(setRestartNeeded, () => undefined);
+  }, []);
+  useEffect(checkNetwork, [checkNetwork]);
+  const setNetwork = (patch: Parameters<typeof set>[0]) => set(patch).finally(checkNetwork);
+  const dnsProblem = prefs.dns_mode !== "system" && prefs.dns_provider === "custom" ? dnsTemplateProblem(prefs.dns_template) : null;
+  const proxyProblem = prefs.proxy_mode === "manual" ? proxyServerProblem(prefs.proxy_server) : null;
+  const bypassDropped = prefs.proxy_mode === "manual" ? ignoredBypass(prefs.proxy_bypass) : [];
+  const pacIssue = prefs.proxy_mode === "pac" ? pacProblem(prefs.proxy_pac_url) : null;
   return (
     <>
       <Group
@@ -163,6 +197,12 @@ export function Privacy() {
         title="Network"
         description="Chromium reads these once when it starts, so a change takes effect the next time Dive opens."
       >
+        {restartNeeded && (
+          <div role="status" className="flex items-center gap-3 border-b border-line py-3 text-xs text-warn">
+            <span className="min-w-0 flex-1">These settings are saved but not in force yet. Dive is still using the ones it started with.</span>
+            <Button onClick={() => void ipc.appRestart()}>Restart now</Button>
+          </div>
+        )}
         <Row
           label="Secure DNS"
           htmlFor="pref-dns-mode"
@@ -172,7 +212,7 @@ export function Privacy() {
               id="pref-dns-mode"
               label="Secure DNS"
               value={prefs.dns_mode}
-              onChange={(dns_mode) => set({ dns_mode })}
+              onChange={(dns_mode) => setNetwork({ dns_mode })}
               options={[
                 { value: "system", label: "Use the system resolver" },
                 { value: "automatic", label: "Automatic" },
@@ -191,7 +231,7 @@ export function Privacy() {
                 id="pref-dns-provider"
                 label="Resolver"
                 value={prefs.dns_provider}
-                onChange={(dns_provider) => set({ dns_provider })}
+                onChange={(dns_provider) => setNetwork({ dns_provider })}
                 options={[
                   { value: "cloudflare", label: "Cloudflare" },
                   { value: "google", label: "Google" },
@@ -207,7 +247,13 @@ export function Privacy() {
             stacked
             label="Resolver address"
             htmlFor="pref-dns-template"
-            hint="The DoH template, over https. An address that is not encrypted is ignored rather than used — that would be the opposite of this setting."
+            hint={
+              dnsProblem ? (
+                <span id="pref-dns-template-problem" className="text-warn">{dnsProblem}</span>
+              ) : (
+                "The DoH template, over https. An address that is not encrypted is ignored rather than used — that would be the opposite of this setting."
+              )
+            }
             control={
               <TextInput
                 id="pref-dns-template"
@@ -215,7 +261,9 @@ export function Privacy() {
                 label="Resolver address"
                 value={prefs.dns_template}
                 placeholder="https://dns.example.com/dns-query"
-                onCommit={(dns_template) => set({ dns_template })}
+                invalid={dnsProblem !== null}
+                {...(dnsProblem ? { describedBy: "pref-dns-template-problem" } : {})}
+                onCommit={(dns_template) => setNetwork({ dns_template })}
               />
             }
           />
@@ -230,7 +278,7 @@ export function Privacy() {
               id="pref-proxy-mode"
               label="Proxy"
               value={prefs.proxy_mode}
-              onChange={(proxy_mode) => set({ proxy_mode })}
+              onChange={(proxy_mode) => setNetwork({ proxy_mode })}
               options={[
                 { value: "system", label: "Use system settings" },
                 { value: "direct", label: "No proxy" },
@@ -245,7 +293,13 @@ export function Privacy() {
             stacked
             label="Proxy address"
             htmlFor="pref-proxy-server"
-            hint="host:port, or a scheme and address such as socks5://10.0.0.2:1080."
+            hint={
+              proxyProblem ? (
+                <span id="pref-proxy-server-problem" className="text-warn">{proxyProblem}</span>
+              ) : (
+                "host:port, or a scheme and address such as socks5://10.0.0.2:1080."
+              )
+            }
             control={
               <TextInput
                 id="pref-proxy-server"
@@ -253,7 +307,9 @@ export function Privacy() {
                 label="Proxy address"
                 value={prefs.proxy_server}
                 placeholder="10.0.0.2:8080"
-                onCommit={(proxy_server) => set({ proxy_server })}
+                invalid={proxyProblem !== null}
+                {...(proxyProblem ? { describedBy: "pref-proxy-server-problem" } : {})}
+                onCommit={(proxy_server) => setNetwork({ proxy_server })}
               />
             }
           />
@@ -263,7 +319,15 @@ export function Privacy() {
             stacked
             label="Skip the proxy for"
             htmlFor="pref-proxy-bypass"
-            hint="Comma separated. Your local servers belong here."
+            hint={
+              bypassDropped.length > 0 ? (
+                <span id="pref-proxy-bypass-problem" className="text-warn">
+                  Ignored, since they are not host names or addresses: {bypassDropped.join(", ")}
+                </span>
+              ) : (
+                "Comma separated. Your local servers belong here."
+              )
+            }
             control={
               <TextInput
                 id="pref-proxy-bypass"
@@ -271,7 +335,9 @@ export function Privacy() {
                 label="Skip the proxy for"
                 value={prefs.proxy_bypass}
                 placeholder="localhost, 127.0.0.1, *.internal"
-                onCommit={(proxy_bypass) => set({ proxy_bypass })}
+                invalid={bypassDropped.length > 0}
+                {...(bypassDropped.length > 0 ? { describedBy: "pref-proxy-bypass-problem" } : {})}
+                onCommit={(proxy_bypass) => setNetwork({ proxy_bypass })}
               />
             }
           />
@@ -281,7 +347,13 @@ export function Privacy() {
             stacked
             label="PAC script"
             htmlFor="pref-proxy-pac"
-            hint="The address of the script that decides which proxy to use."
+            hint={
+              pacIssue ? (
+                <span id="pref-proxy-pac-problem" className="text-warn">{pacIssue}</span>
+              ) : (
+                "The address of the script that decides which proxy to use."
+              )
+            }
             control={
               <TextInput
                 id="pref-proxy-pac"
@@ -289,29 +361,16 @@ export function Privacy() {
                 label="PAC script"
                 value={prefs.proxy_pac_url}
                 placeholder="http://wpad/proxy.pac"
-                onCommit={(proxy_pac_url) => set({ proxy_pac_url })}
+                invalid={pacIssue !== null}
+                {...(pacIssue ? { describedBy: "pref-proxy-pac-problem" } : {})}
+                onCommit={(proxy_pac_url) => setNetwork({ proxy_pac_url })}
               />
             }
           />
         )}
       </Group>
 
-      <Group title="History">
-        <Row
-          label="Keep history for"
-          htmlFor="pref-history"
-          hint="Older visits are dropped from history, the address bar and the palette."
-          control={
-            <Select
-              id="pref-history"
-              label="Keep history for"
-              value={String(prefs.history_days)}
-              onChange={(days) => set({ history_days: Number(days) })}
-              options={RETENTION}
-            />
-          }
-        />
-      </Group>
+      <HistoryRetention days={prefs.history_days} onChange={(history_days) => void set({ history_days })} />
 
       <ClearData />
 
@@ -455,37 +514,185 @@ function ScopedSitePermissions() {
   );
 }
 
+/**
+ * How long history is kept. Shortening the window deletes what falls outside
+ * it the moment it is saved, so a shorter choice first says how many visits
+ * that is and waits for a yes.
+ */
+function HistoryRetention({ days, onChange }: { days: number; onChange: (days: number) => void }) {
+  const [pending, setPending] = useState<{ days: number; count: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const choose = async (next: number) => {
+    setError(null);
+    setPending(null);
+    if (!shortensRetention(days, next)) {
+      onChange(next);
+      return;
+    }
+    try {
+      const count = await ipc.historyPruneCount(next);
+      if (count === 0) onChange(next);
+      else setPending({ days: next, count });
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  };
+  return (
+    <Group title="History">
+      <Row
+        label="Keep history for"
+        htmlFor="pref-history"
+        hint="Older visits are dropped from history, the address bar and the palette."
+        control={
+          <Select
+            id="pref-history"
+            label="Keep history for"
+            value={String(pending?.days ?? days)}
+            onChange={(next) => void choose(Number(next))}
+            options={retentionOptions(pending?.days ?? days)}
+          />
+        }
+      />
+      {pending && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 border-t border-line py-3 text-xs">
+          <span className="min-w-0 flex-1 text-ink">{pruneQuestion(pending.count, pending.days)} This cannot be undone.</span>
+          <Button onClick={() => setPending(null)}>Keep them</Button>
+          <Button
+            variant="danger"
+            onClick={() => {
+              onChange(pending.days);
+              setPending(null);
+            }}
+          >
+            Delete
+          </Button>
+        </div>
+      )}
+      {error && (
+        <p role="alert" className="border-t border-line py-3 text-xs text-danger">
+          {error}
+        </p>
+      )}
+    </Group>
+  );
+}
+
+/** The time ranges Clear browsing data offers, in hours; "all" is everything. */
+export const CLEAR_RANGES = [
+  { value: "1", label: "The last hour" },
+  { value: "24", label: "The last day" },
+  { value: "168", label: "The last week" },
+  { value: "672", label: "The last four weeks" },
+  { value: "all", label: "All time" },
+] as const;
+
+type ClearWhat = { history: boolean; cookies: boolean; cache: boolean; site_data: boolean; forms: boolean };
+
+/** "history, cookies and cache" -- what is about to go, for the confirmation. */
+export function clearList(what: ClearWhat): string {
+  const names = [
+    what.history && "browsing and download history",
+    what.cookies && "cookies",
+    what.cache && "cached files",
+    what.site_data && "site data",
+    what.forms && "form entries",
+  ].filter((n): n is string => Boolean(n));
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
 function ClearData() {
-  const [what, setWhat] = useState({ history: true, cookies: false, cache: false, site_data: false, forms: false });
-  const [result, setResult] = useState<string | null>(null);
+  const [what, setWhat] = useState<ClearWhat>({ history: true, cookies: false, cache: false, site_data: false, forms: false });
+  const [range, setRange] = useState<(typeof CLEAR_RANGES)[number]["value"]>("all");
+  const [confirming, setConfirming] = useState(false);
+  const [result, setResult] = useState<ClearOutcome | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const nothing = !what.history && !what.cookies && !what.cache && !what.site_data && !what.forms;
+  const ranged = what.history || what.forms;
+  const whole = what.cookies || what.cache || what.site_data;
+  const rangeLabel = CLEAR_RANGES.find((r) => r.value === range)?.label.toLowerCase() ?? "all time";
+  const pick = (patch: Partial<ClearWhat>) => {
+    setWhat({ ...what, ...patch });
+    setConfirming(false);
+  };
   const clear = () => {
     setBusy(true);
     setResult(null);
+    setError(null);
+    setConfirming(false);
     void ipc
-      .browsingDataClear(what)
+      .browsingDataClear({ ...what, since_hours: range === "all" ? null : Number(range) })
       .then(setResult)
-      .catch((e: unknown) => setResult(errorMessage(e)))
+      .catch((e: unknown) => setError(errorMessage(e)))
       .finally(() => setBusy(false));
   };
   return (
-    <Group id="clear-browsing-data" title="Clear browsing data" description="Open profiles clear immediately. Restart Dive after clearing cookies, cache, or site data to finish closed profiles and every stored origin.">
+    <Group
+      id="clear-browsing-data"
+      title="Clear browsing data"
+      description="Open profiles clear immediately. Cookies, cache and site data in profiles that are not open go when Dive next starts."
+    >
       <div className="flex flex-col gap-2 py-3">
-        <Check label="Browsing history in this profile" checked={what.history} onChange={(history) => setWhat({ ...what, history })} />
-        <Check label="Cookies and signed-in sessions" checked={what.cookies} onChange={(cookies) => setWhat({ ...what, cookies })} />
-        <Check label="Cached files" checked={what.cache} onChange={(cache) => setWhat({ ...what, cache })} />
-        <Check label="Site data (local storage, IndexedDB)" checked={what.site_data} onChange={(site_data) => setWhat({ ...what, site_data })} />
-        <Check label="Form entries in this profile" checked={what.forms} onChange={(forms) => setWhat({ ...what, forms })} />
-        <p className="text-[10.5px] text-ink-3">Saved passwords are not touched here; manage them under Passwords &amp; forms.</p>
-        <div className="mt-1 flex items-center gap-3">
-          <Button variant="danger" onClick={clear} disabled={busy || nothing}>
-            {busy ? "Clearing…" : "Clear now"}
-          </Button>
-          {result && (
-            <><span role="status" className="text-[11px] text-ink-2">{result}</span>{/restart dive/i.test(result) && <Button onClick={() => ipc.appRestart()}>Restart now</Button>}</>
-          )}
-        </div>
+        <label className="flex flex-wrap items-center gap-2 text-xs text-ink-2">
+          Time range
+          <Select
+            label="Time range"
+            value={range}
+            onChange={(next) => {
+              setRange(next);
+              setConfirming(false);
+            }}
+            options={CLEAR_RANGES}
+          />
+        </label>
+        <Check label="Browsing and download history in this profile" checked={what.history} onChange={(history) => pick({ history })} />
+        <Check label="Cookies and signed-in sessions" checked={what.cookies} onChange={(cookies) => pick({ cookies })} />
+        <Check label="Cached files" checked={what.cache} onChange={(cache) => pick({ cache })} />
+        <Check label="Site data (local storage, IndexedDB) — sites open now at once, the rest when Dive restarts" checked={what.site_data} onChange={(site_data) => pick({ site_data })} />
+        <Check label="Form entries in this profile" checked={what.forms} onChange={(forms) => pick({ forms })} />
+        <p className="text-[10.5px] text-ink-3">
+          The time range applies to history, downloads and form entries. Cookies, cached files and site data have no dates Chromium can clear by, so they are always cleared in full. Saved passwords are not touched here; manage them under Passwords &amp; forms.
+        </p>
+        {confirming ? (
+          <div role="alert" className="mt-1 flex flex-wrap items-center gap-3">
+            <span className="min-w-0 flex-1 text-xs text-ink">
+              Clear {clearList(what)}
+              {ranged ? ` from ${rangeLabel}` : ""}
+              {ranged && whole && range !== "all" ? " (cookies, cache and site data: all time)" : ""}? This cannot be undone.
+            </span>
+            <Button onClick={() => setConfirming(false)}>Cancel</Button>
+            <Button variant="danger" onClick={clear}>
+              Clear
+            </Button>
+          </div>
+        ) : (
+          <div className="mt-1 flex flex-wrap items-center gap-3">
+            <Button variant="danger" onClick={() => setConfirming(true)} disabled={busy || nothing}>
+              {busy ? "Clearing…" : "Clear now…"}
+            </Button>
+            {result && (
+              <>
+                <span role="status" className="text-[11px] text-ink-2">
+                  {result.summary}
+                </span>
+                {result.restart_needed && <Button onClick={() => void ipc.appRestart()}>Restart now</Button>}
+              </>
+            )}
+          </div>
+        )}
+        {result && result.failures.length > 0 && (
+          <ul role="alert" className="flex flex-col gap-0.5 text-[11px] text-danger">
+            {result.failures.map((failure) => (
+              <li key={failure}>Not cleared — {failure}</li>
+            ))}
+          </ul>
+        )}
+        {error && (
+          <p role="alert" className="text-[11px] text-danger">
+            {error}
+          </p>
+        )}
       </div>
     </Group>
   );

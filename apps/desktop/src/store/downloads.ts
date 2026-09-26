@@ -2,7 +2,26 @@ import { create } from "zustand";
 import type { DownloadNotice, DownloadProgress } from "../lib/ipc";
 import { fileNameOr } from "../lib/paths";
 
-export type DownloadStatus = "started" | "finished" | "failed";
+export type DownloadStatus = "started" | "finished" | "failed" | "cancelled";
+
+/** A status from the engine, with anything unknown read as a failure. */
+export function downloadStatus(status: string): DownloadStatus {
+  return status === "started" || status === "finished" || status === "cancelled" ? status : "failed";
+}
+
+/** What a row says about a download's state. */
+export function downloadStatusLabel(status: DownloadStatus): string {
+  switch (status) {
+    case "started":
+      return "Downloading…";
+    case "finished":
+      return "Saved";
+    case "cancelled":
+      return "Cancelled";
+    default:
+      return "Failed";
+  }
+}
 
 export interface Download {
   url: string;
@@ -40,7 +59,7 @@ const CAP = 50;
 
 /** Fold a notice into the list: a start adds a row, its finish or failure updates it. Pure for tests. */
 export function fold(items: Download[], notice: DownloadNotice, at = Date.now()): Download[] {
-  const status: DownloadStatus = notice.status === "started" || notice.status === "finished" ? notice.status : "failed";
+  const status = downloadStatus(notice.status);
   // With a path, match the file whatever state its row is in: a second
   // `finished` for the same download -- which the engine emits on every update
   // once it is complete -- otherwise fell through and added a duplicate row

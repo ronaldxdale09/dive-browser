@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { ipc } from "../lib/ipc";
 import { useShallow } from "zustand/react/shallow";
 import { useBrowser } from "../store/browser";
-import { selectActiveInWindow, useDownloads } from "../store/downloads";
+import { downloadStatusLabel, selectActiveInWindow, useDownloads } from "../store/downloads";
 import type { Download as Item } from "../store/downloads";
 import { usePrefs } from "../store/prefs";
 import { EmptyState } from "./EmptyState";
@@ -151,7 +151,7 @@ function Row({ item, onReveal, onOpen, onCancel }: { item: Item; onReveal: () =>
   return (
     <li className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface-2">
       <span
-        className={`size-2 shrink-0 rounded-full ${running ? "animate-pulse bg-highlight motion-reduce:animate-none" : item.status === "finished" ? "bg-highlight" : "bg-danger"}`}
+        className={`size-2 shrink-0 rounded-full ${running ? "animate-pulse bg-highlight motion-reduce:animate-none" : item.status === "finished" ? "bg-highlight" : item.status === "cancelled" ? "bg-ink-3" : "bg-danger"}`}
         aria-hidden
       />
       <span className="min-w-0 flex-1">
@@ -190,7 +190,7 @@ function Row({ item, onReveal, onOpen, onCancel }: { item: Item; onReveal: () =>
               : `${pct === null ? formatBytes(received) : `${pct}%`}${total ? ` of ${formatBytes(total)}` : ""}${item.speed ? ` · ${formatBytes(item.speed)}/s` : ""}`
             : item.status === "finished"
               ? `Saved${total ? ` · ${formatBytes(total)}` : ""}`
-              : "Failed"}
+              : downloadStatusLabel(item.status)}
           {host && ` · ${host}`} · {ago(item.at)}
         </span>
       </span>

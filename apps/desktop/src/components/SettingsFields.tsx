@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 export { Select } from "./Select";
 
@@ -19,7 +19,13 @@ export function Group({ title, description, children, id }: { title: string; des
   );
 }
 
-/** One setting: text on the left, control on the right. */
+/**
+ * One setting: text on the left, control on the right. When the panel is
+ * narrower than about 560px -- the window at its minimum width -- the control
+ * goes under its label instead of squeezing the label into a column a few
+ * words wide. The panel is a size container (SettingsDialog), so this follows
+ * the panel, not the window.
+ */
 export function Row({
   label,
   hint,
@@ -34,14 +40,14 @@ export function Row({
   stacked?: boolean;
 }) {
   return (
-    <div className={`flex gap-4 border-b border-line py-3 last:border-b-0 ${stacked ? "flex-col" : "items-center"}`}>
+    <div data-settings-row className={`flex gap-2 border-b border-line py-3 last:border-b-0 ${stacked ? "flex-col" : "flex-col @min-[560px]:flex-row @min-[560px]:items-center @min-[560px]:gap-4"}`}>
       <div className="min-w-0 flex-1">
         <label htmlFor={htmlFor} className="text-xs font-medium text-ink">
           {label}
         </label>
         {hint && <p className="mt-0.5 text-[11px] leading-relaxed text-ink-3">{hint}</p>}
       </div>
-      <div className={stacked ? "w-full" : "shrink-0"}>{control}</div>
+      <div className={stacked ? "w-full" : "max-w-full min-w-0 shrink-0"}>{control}</div>
     </div>
   );
 }
@@ -106,6 +112,30 @@ export function Segmented<T extends string>({
   );
 }
 
+/**
+ * What a text field shows: the host's value, or the edit being typed. Once a
+ * commit settles, the field shows what the host kept -- a value it refused or
+ * corrected (a folder it expanded, an address it trimmed) is not left on
+ * screen looking saved. Keyed on nothing, so focus survives the round trip.
+ */
+function useCommittedText(value: string, onCommit: (v: string) => void | Promise<unknown>) {
+  const [draft, setDraft] = useState(value);
+  const [shown, setShown] = useState(value);
+  if (shown !== value) {
+    setShown(value);
+    setDraft(value);
+  }
+  const latest = useRef(value);
+  useEffect(() => {
+    latest.current = value;
+  });
+  const commit = (text: string) => {
+    if (text === value) return;
+    void Promise.resolve(onCommit(text)).finally(() => setDraft(latest.current));
+  };
+  return { draft, setDraft, commit, revert: () => setDraft(value) };
+}
+
 /** Single-line text setting. Committed on blur or Enter, never per keystroke. */
 export function TextInput({
   value,
@@ -115,36 +145,44 @@ export function TextInput({
   id,
   mono = false,
   width = "w-[240px]",
+  invalid = false,
+  describedBy,
 }: {
   value: string;
-  onCommit: (v: string) => void;
+  onCommit: (v: string) => void | Promise<unknown>;
   placeholder?: string;
   label: string;
   id?: string;
   mono?: boolean;
   width?: string;
+  /** The saved value will be ignored; the row's hint says why. */
+  invalid?: boolean;
+  describedBy?: string;
 }) {
+  const { draft, setDraft, commit, revert } = useCommittedText(value, onCommit);
   return (
     <input
       id={id}
       aria-label={label}
-      defaultValue={value}
-      key={value}
+      aria-invalid={invalid || undefined}
+      aria-describedby={describedBy}
+      value={draft}
       placeholder={placeholder}
       spellCheck={false}
-      onBlur={(e) => e.target.value !== value && onCommit(e.target.value)}
+      data-settings-field
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={(e) => commit(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
         // Escape with an edit in the field takes the edit back and stops
         // there; it used to go on and close the whole of Settings with it.
         // In a field that was not changed, it closes Settings as usual.
-        if (e.key === "Escape" && e.currentTarget.value !== value) {
+        if (e.key === "Escape" && draft !== value) {
           e.stopPropagation();
-          e.currentTarget.value = value;
-          e.currentTarget.blur();
+          revert();
         }
       }}
-      className={`h-8 rounded-lg border border-line bg-surface-2 px-2.5 text-xs text-ink outline-none select-text placeholder:text-ink-3 hover:border-line-2 focus:border-highlight/60 ${mono ? "font-mono" : ""} ${width}`}
+      className={`h-8 max-w-full rounded-lg border bg-surface-2 px-2.5 text-xs text-ink outline-none select-text placeholder:text-ink-3 hover:border-line-2 focus:border-highlight/60 ${invalid ? "border-warn" : "border-line"} ${mono ? "font-mono" : ""} ${width}`}
     />
   );
 }
@@ -158,20 +196,29 @@ export function TextArea({
   rows = 4,
 }: {
   value: string;
-  onCommit: (v: string) => void;
+  onCommit: (v: string) => void | Promise<unknown>;
   placeholder?: string;
   label: string;
   rows?: number;
 }) {
+  const { draft, setDraft, commit, revert } = useCommittedText(value, onCommit);
   return (
     <textarea
       aria-label={label}
-      defaultValue={value}
-      key={value}
+      value={draft}
       rows={rows}
       placeholder={placeholder}
       spellCheck={false}
-      onBlur={(e) => e.target.value !== value && onCommit(e.target.value)}
+      data-settings-field
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={(e) => commit(e.target.value)}
+      onKeyDown={(e) => {
+        // As in TextInput: Escape takes back an edit before it closes anything.
+        if (e.key === "Escape" && draft !== value) {
+          e.stopPropagation();
+          revert();
+        }
+      }}
       className="w-full resize-none rounded-lg border border-line bg-surface-2 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-ink outline-none select-text placeholder:text-ink-3 hover:border-line-2 focus:border-highlight/60"
     />
   );
@@ -194,11 +241,14 @@ export function Button({
   onClick,
   variant = "quiet",
   disabled = false,
+  ariaLabel,
 }: {
   children: ReactNode;
   onClick: () => void;
   variant?: "quiet" | "primary" | "danger";
   disabled?: boolean;
+  /** A fuller name than the visible text, where several buttons read the same ("Remove"). */
+  ariaLabel?: string;
 }) {
   const tone =
     variant === "primary"
@@ -207,7 +257,7 @@ export function Button({
         ? "border border-line text-danger hover:bg-surface-3"
         : "border border-line text-ink-2 hover:bg-surface-3 hover:text-ink";
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className={`h-8 shrink-0 rounded-full px-3.5 text-xs disabled:opacity-40 ${tone}`}>
+    <button type="button" onClick={onClick} disabled={disabled} aria-label={ariaLabel} className={`h-8 shrink-0 rounded-full px-3.5 text-xs disabled:opacity-40 ${tone}`}>
       {children}
     </button>
   );

@@ -1,4 +1,4 @@
-import { Check, Download } from "lucide-react";
+import { Check, Download, Trash2, X } from "lucide-react";
 import { useEffect } from "react";
 import { tabInThisWindow, useBrowser } from "../../store/browser";
 import { useSubtitles } from "../../store/subtitles";
@@ -56,6 +56,8 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
   const setTranslate = useSubtitles((s) => s.setTranslate);
   const loadModels = useSubtitles((s) => s.loadModels);
   const download = useSubtitles((s) => s.download);
+  const cancelDownload = useSubtitles((s) => s.cancelDownload);
+  const remove = useSubtitles((s) => s.remove);
   const start = useSubtitles((s) => s.start);
   const stop = useSubtitles((s) => s.stop);
 
@@ -105,13 +107,36 @@ export function SubtitlesControls({ onStarted, autoFocusPrimary }: { onStarted?:
                     <p className="line-clamp-2 text-[11px] text-ink-3">{m.detail}</p>
                   </button>
                   {m.downloaded ? (
-                    <button type="button" disabled={Boolean(progress)} onClick={() => void download(m.id)} title="Verify or repair this model" className="inline-flex shrink-0 items-center gap-1 text-[11px] text-ink-2">
-                      <Icon icon={Check} size={12} className="text-highlight" />
-                      {progress ? "Verifying…" : "Downloaded"}
-                    </button>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <button type="button" disabled={Boolean(progress)} onClick={() => void download(m.id)} title="Verify or repair this model" className="inline-flex items-center gap-1 text-[11px] text-ink-2">
+                        <Icon icon={Check} size={12} className="text-highlight" />
+                        {progress ? "Verifying…" : "Downloaded"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={Boolean(progress) || (active && selected)}
+                        onClick={() => void remove(m.id)}
+                        aria-label={`Delete ${m.label} model (${modelSize(m.size_mb)})`}
+                        title={active && selected ? "Stop subtitles to delete the model in use" : `Delete to free ${modelSize(m.size_mb)}`}
+                        className="grid size-6 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-danger disabled:opacity-40"
+                      >
+                        <Icon icon={Trash2} size={12} />
+                      </button>
+                    </span>
                   ) : progress ? (
-                    <span className="shrink-0 text-[11px] text-ink-3" role="status">
-                      {progress.total ? `${mb(progress.received)} / ${mb(progress.total)}` : `${mb(progress.received)}…`}
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      <span className="text-[11px] text-ink-3" role="status">
+                        {progress.total ? `${mb(progress.received)} / ${mb(progress.total)}` : `${mb(progress.received)}…`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => cancelDownload(m.id)}
+                        aria-label={`Cancel downloading ${m.label}`}
+                        title="Cancel download"
+                        className="grid size-6 place-items-center rounded-full border border-line text-ink-3 hover:bg-surface-3 hover:text-ink"
+                      >
+                        <Icon icon={X} size={11} />
+                      </button>
                     </span>
                   ) : (
                     <button

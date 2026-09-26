@@ -1,10 +1,10 @@
 import { Check as CheckIcon, ClipboardPaste, Copy, RotateCcw } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Icon } from "../Icon";
 import { Button, Group, Row, Segmented, Select, Switch } from "../SettingsFields";
-import { DEFAULT_APPEARANCE, DEFAULT_PREFS, systemTheme, usePrefs } from "../../store/prefs";
+import { DEFAULT_APPEARANCE, DEFAULT_PREFS, previewAppearance, systemTheme, usePrefs } from "../../store/prefs";
 import { colorName } from "../../lib/profileAvatar";
 import type { Prefs } from "../../store/prefs";
 import { CUSTOM_PRESET_ID, PRESETS, contrastRatio, exportTheme, findPreset, importTheme, isHex, presetSeeds, resolveScheme } from "../../lib/theme";
@@ -96,7 +96,7 @@ export function Appearance() {
                   />
                 ))}
               </div>
-              <ColourWell label="Custom accent" value={prefs.accent} onChange={(accent) => set({ accent })} />
+              <ColourWell label="Custom accent" value={prefs.accent} onPreview={(accent) => previewAppearance({ accent })} onChange={(accent) => set({ accent })} />
             </div>
           }
         />
@@ -313,9 +313,9 @@ function CustomColours({ prefs, set }: { prefs: Prefs; set: (patch: Partial<Pref
       }
       control={
         <div className="flex flex-wrap items-end gap-3">
-          <ColourField label="Background" value={prefs.custom_ground} onChange={(custom_ground) => set({ custom_ground })} />
-          <ColourField label="Text" value={prefs.custom_ink} onChange={(custom_ink) => set({ custom_ink })} />
-          <ColourField label="Highlight" value={prefs.custom_highlight} onChange={(custom_highlight) => set({ custom_highlight })} />
+          <ColourField label="Background" value={prefs.custom_ground} onPreview={(custom_ground) => previewAppearance({ custom_ground })} onChange={(custom_ground) => set({ custom_ground })} />
+          <ColourField label="Text" value={prefs.custom_ink} onPreview={(custom_ink) => previewAppearance({ custom_ink })} onChange={(custom_ink) => set({ custom_ink })} />
+          <ColourField label="Highlight" value={prefs.custom_highlight} onPreview={(custom_highlight) => previewAppearance({ custom_highlight })} onChange={(custom_highlight) => set({ custom_highlight })} />
           <div className="flex items-center gap-1.5">
             <Select label="Start from template" value={from} onChange={setFrom} options={PRESETS.map((p) => ({ value: p.id, label: p.name }))} />
             <Button
@@ -335,62 +335,140 @@ function CustomColours({ prefs, set }: { prefs: Prefs; set: (patch: Partial<Pref
 }
 
 /** A colour picker beside a hex field; either one commits a valid hex. */
-function ColourField({ label, value, onChange }: { label: string; value: string; onChange: (hex: string) => void }) {
+function ColourField({ label, value, onChange, onPreview }: { label: string; value: string; onChange: (hex: string) => void; onPreview: (hex: string) => void }) {
   const id = useId();
   return (
     <label htmlFor={id} className="flex flex-col gap-1 text-[11px] text-ink-3">
       {label}
       <span className="flex items-center gap-1.5">
-        <ColourWell label={`${label} colour`} value={value} onChange={onChange} />
+        <ColourWell label={`${label} colour`} value={value} onPreview={onPreview} onChange={onChange} />
         <HexInput id={id} label={`${label} hex`} value={value} onCommit={onChange} />
       </span>
     </label>
   );
 }
 
-function ColourWell({ label, value, onChange }: { label: string; value: string; onChange: (hex: string) => void }) {
+/**
+ * Commit an input's value on its native `change` event: for a colour well,
+ * when the picker is closed or a colour is chosen; for a slider, when it is
+ * let go (or stepped with a key). React's onChange fires on every `input`
+ * event of a drag, which is what the preview follows instead.
+ */
+function useNativeChange(onChange: (value: string) => void) {
+  const ref = useRef<HTMLInputElement>(null);
+  const handler = useRef(onChange);
+  useEffect(() => {
+    handler.current = onChange;
+  });
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const commit = () => handler.current(node.value);
+    node.addEventListener("change", commit);
+    return () => node.removeEventListener("change", commit);
+  }, []);
+  return ref;
+}
+
+function ColourWell({ label, value, onChange, onPreview }: { label: string; value: string; onChange: (hex: string) => void; onPreview: (hex: string) => void }) {
+  // What the drag has reached, until it is committed and the saved value
+  // takes over again.
+  const [draft, setDraft] = useState<string | null>(null);
+  const ref = useNativeChange((picked) => {
+    setDraft(null);
+    const hex = picked.toUpperCase();
+    if (hex !== value.toUpperCase()) onChange(hex);
+  });
+  const shown = draft ?? value;
   return (
     <input
+      ref={ref}
       type="color"
       aria-label={label}
-      value={isHex(value) ? value.toLowerCase() : "#000000"}
-      onChange={(e) => onChange(e.target.value.toUpperCase())}
+      value={isHex(shown) ? shown.toLowerCase() : "#000000"}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        onPreview(e.target.value.toUpperCase());
+      }}
       className="size-7 cursor-pointer rounded-md border border-line bg-surface-2 p-0.5"
     />
   );
 }
 
+/**
+ * A typed colour as the preferences store it: "#abc" and "abc" become
+ * "#AABBCC"; anything that is not three or six hex digits is null.
+ */
+export function normalizeHex(raw: string): string | null {
+  const body = raw.trim().replace(/^#/, "");
+  if (/^[0-9a-f]{3}$/i.test(body)) return `#${[...body].map((c) => c + c).join("")}`.toUpperCase();
+  if (/^[0-9a-f]{6}$/i.test(body)) return `#${body}`.toUpperCase();
+  return null;
+}
+
 function HexInput({ id, label, value, onCommit }: { id: string; label: string; value: string; onCommit: (hex: string) => void }) {
-  const commit = (raw: string) => {
-    const hex = raw.trim().startsWith("#") ? raw.trim() : `#${raw.trim()}`;
-    if (isHex(hex) && hex.toUpperCase() !== value.toUpperCase()) onCommit(hex.toUpperCase());
+  const [draft, setDraft] = useState(value.toUpperCase());
+  const [shown, setShown] = useState(value);
+  if (shown !== value) {
+    setShown(value);
+    setDraft(value.toUpperCase());
+  }
+  const problem = useId();
+  // Said while typing, not only after: a value that will not be taken
+  // should look it before focus leaves.
+  const invalid = draft.trim() !== "" && normalizeHex(draft) === null;
+  const commit = () => {
+    const hex = normalizeHex(draft);
+    // A value that is not a colour is not kept on screen as if it were:
+    // the field goes back to the colour in force.
+    if (!hex) {
+      setDraft(value.toUpperCase());
+      return;
+    }
+    setDraft(hex);
+    if (hex !== value.toUpperCase()) onCommit(hex);
   };
   return (
-    <input
-      id={id}
-      aria-label={label}
-      key={value}
-      defaultValue={value.toUpperCase()}
-      spellCheck={false}
-      maxLength={7}
-      onBlur={(e) => commit(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-        // An edit is taken back without closing Settings; see TextInput.
-        if (e.key === "Escape" && e.currentTarget.value !== value.toUpperCase()) {
-          e.stopPropagation();
-          e.currentTarget.value = value.toUpperCase();
-          e.currentTarget.blur();
-        }
-      }}
-      className="h-7 w-[84px] rounded-md border border-line bg-surface-2 px-2 font-mono text-[11px] text-ink outline-none select-text hover:border-line-2 focus:border-highlight/60"
-    />
+    <span className="flex flex-col gap-0.5">
+      <input
+        id={id}
+        aria-label={label}
+        aria-invalid={invalid || undefined}
+        aria-describedby={invalid ? problem : undefined}
+        value={draft}
+        spellCheck={false}
+        maxLength={7}
+        data-settings-field
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          // An edit is taken back without closing Settings; see TextInput.
+          if (e.key === "Escape" && draft !== value.toUpperCase()) {
+            e.stopPropagation();
+            setDraft(value.toUpperCase());
+          }
+        }}
+        className={`h-7 w-[84px] rounded-md border bg-surface-2 px-2 font-mono text-[11px] text-ink outline-none select-text hover:border-line-2 focus:border-highlight/60 ${invalid ? "border-warn" : "border-line"}`}
+      />
+      {invalid && (
+        <span id={problem} className="text-[10px] text-warn">
+          Use #RRGGBB
+        </span>
+      )}
+    </span>
   );
 }
 
 function ScaleRow({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   const id = useId();
-  const percent = Math.round(value * 100);
+  const [draft, setDraft] = useState<number | null>(null);
+  const ref = useNativeChange((released) => {
+    setDraft(null);
+    const next = Number(released) / 100;
+    if (next !== value) onChange(next);
+  });
+  const percent = Math.round((draft ?? value) * 100);
   return (
     <Row
       label="Interface size"
@@ -399,6 +477,7 @@ function ScaleRow({ value, onChange }: { value: number; onChange: (v: number) =>
       control={
         <div className="flex items-center gap-2">
           <input
+            ref={ref}
             id={id}
             type="range"
             min={80}
@@ -407,10 +486,16 @@ function ScaleRow({ value, onChange }: { value: number; onChange: (v: number) =>
             value={percent}
             aria-label="Interface size"
             aria-valuetext={`${percent}%`}
-            onChange={(e) => onChange(Number(e.target.value) / 100)}
-            className="w-36 accent-highlight"
+            onChange={(e) => {
+              const next = Number(e.target.value) / 100;
+              setDraft(next);
+              previewAppearance({ ui_scale: next });
+            }}
+            // Fixed in pixels: sized in rem, the slider grew and shrank under
+            // the pointer as it changed the size it is measured in.
+            className="w-[144px] accent-highlight"
           />
-          <span className="w-10 text-right font-mono text-[11px] text-ink-2" data-testid="scale-value">{percent}%</span>
+          <span className="w-[40px] text-right font-mono text-[11px] text-ink-2" data-testid="scale-value">{percent}%</span>
           <Button onClick={() => onChange(1)} disabled={value === 1}>Reset</Button>
         </div>
       }

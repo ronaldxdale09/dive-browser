@@ -8,8 +8,38 @@ import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
 import { errorMessage } from "../lib/errors";
 
-/** How often the table is measured while it is open. */
+/** The pause between one measurement finishing and the next starting. */
 export const SAMPLE_MS = 2000;
+
+export type SortKey = "title" | "memory" | "cpu" | "nodes";
+
+/**
+ * Keep the rows where they were: known tabs in their current places, new
+ * ones after them, closed ones gone. A table that re-sorted itself on every
+ * sample moved the row under the pointer just as it was clicked.
+ */
+export function stableOrder(previous: readonly string[], measured: readonly TaskRow[]): string[] {
+  const present = new Set(measured.map((row) => row.tab_id));
+  const kept = previous.filter((id) => present.has(id));
+  const known = new Set(kept);
+  return [...kept, ...measured.map((row) => row.tab_id).filter((id) => !known.has(id))];
+}
+
+/** The rows in `key` order, heaviest (or A first, for titles) at the top; unmeasured rows last. */
+export function sortedOrder(rows: readonly TaskRow[], cpu: Record<string, number | null>, key: SortKey): string[] {
+  const value = (row: TaskRow): number | null => (key === "memory" ? row.memory_bytes : key === "cpu" ? (cpu[row.tab_id] ?? null) : key === "nodes" ? row.nodes : null);
+  return [...rows]
+    .sort((a, b) => {
+      if (key === "title") return a.title.localeCompare(b.title);
+      const x = value(a);
+      const y = value(b);
+      if (x === null && y === null) return 0;
+      if (x === null) return 1;
+      if (y === null) return -1;
+      return y - x;
+    })
+    .map((row) => row.tab_id);
+}
 
 /** Bytes as a browser shows them: whole megabytes, which is the scale that matters here. */
 export function formatMemory(bytes: number | null): string {
@@ -49,6 +79,8 @@ export function TaskManager() {
   const activateTab = useBrowser((s) => s.activateTab);
   const closeTab = useBrowser((s) => s.closeTab);
   const [rows, setRows] = useState<TaskRow[]>([]);
+  const [order, setOrder] = useState<string[]>([]);
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [cpu, setCpu] = useState<Record<string, number | null>>({});
   // A failed read said "Measuring…" for ever. Whether a read has come back,
   // and why the last one did not, are kept apart so an empty table can say
@@ -67,35 +99,52 @@ export function TaskManager() {
       return;
     }
     let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const sample = async () => {
-      let measured: TaskRow[];
       try {
-        measured = await ipc.tasksList();
+        const measured = await ipc.tasksList();
+        if (!alive) return;
+        setFailure(null);
+        setMeasuredOnce(true);
+        const at = Date.now();
+        const rates: Record<string, number | null> = {};
+        for (const row of measured) {
+          rates[row.tab_id] = cpuPercent(previous.current[row.tab_id], row.cpu_seconds, at);
+          if (row.cpu_seconds !== null) previous.current[row.tab_id] = { seconds: row.cpu_seconds, at };
+        }
+        setRows(measured);
+        setOrder((prev) => stableOrder(prev, measured));
+        setCpu(rates);
       } catch (e) {
         if (alive) setFailure(errorMessage(e));
-        return;
+      } finally {
+        // The next sample is timed from this one's end, not on a fixed
+        // clock: a slow measurement used to have the next one queued behind
+        // it, and they piled up for as long as a tab kept stalling.
+        if (alive) timer = setTimeout(() => void sample(), SAMPLE_MS);
       }
-      if (!alive) return;
-      setFailure(null);
-      setMeasuredOnce(true);
-      const at = Date.now();
-      const rates: Record<string, number | null> = {};
-      for (const row of measured) {
-        rates[row.tab_id] = cpuPercent(previous.current[row.tab_id], row.cpu_seconds, at);
-        if (row.cpu_seconds !== null) previous.current[row.tab_id] = { seconds: row.cpu_seconds, at };
-      }
-      setRows(measured);
-      setCpu(rates);
     };
     void sample();
-    const timer = setInterval(() => void sample(), SAMPLE_MS);
     return () => {
       alive = false;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   }, [open, attempt]);
 
   if (!open) return null;
+  const byId = new Map(rows.map((row) => [row.tab_id, row]));
+  const shown = order.map((id) => byId.get(id)).filter((row): row is TaskRow => row !== undefined);
+  const sortBy = (key: SortKey) => {
+    setSortKey(key);
+    setOrder(sortedOrder(rows, cpu, key));
+  };
+  const header = (key: SortKey, label: string, className: string) => (
+    <th scope="col" className={className} aria-sort={sortKey === key ? (key === "title" ? "ascending" : "descending") : "none"}>
+      <button type="button" onClick={() => sortBy(key)} title={`Sort by ${label.toLowerCase()}`} className="hover:text-ink">
+        {label}
+      </button>
+    </th>
+  );
   const total = rows.reduce((sum, row) => sum + (row.memory_bytes ?? 0), 0);
   const holders = rows.filter((row) => row.memory_bytes != null).length;
   const cell = "px-3 py-2 text-left";
@@ -119,15 +168,15 @@ export function TaskManager() {
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-surface text-[11px] text-ink-3">
               <tr>
-                <th scope="col" className={cell}>Tab</th>
-                <th scope="col" className={`${cell} w-24 text-right`}>Memory</th>
-                <th scope="col" className={`${cell} w-20 text-right`}>CPU</th>
-                <th scope="col" className={`${cell} w-24 text-right`}>Nodes</th>
+                {header("title", "Tab", cell)}
+                {header("memory", "Memory", `${cell} w-24 text-right`)}
+                {header("cpu", "CPU", `${cell} w-20 text-right`)}
+                {header("nodes", "Nodes", `${cell} w-24 text-right`)}
                 <th scope="col" className={`${cell} w-16`}><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {shown.map((row) => (
                 <tr key={row.tab_id} className="border-t border-line align-middle hover:bg-surface-2">
                   <td className={cell}>
                     <button type="button" title={row.title} onClick={() => void activateTab(row.tab_id)} className="flex min-w-0 max-w-[320px] items-center gap-1.5 text-left hover:underline">
@@ -140,13 +189,13 @@ export function TaskManager() {
                   <td className={`${cell} text-right font-mono text-ink-2`}>{cpu[row.tab_id] === null || cpu[row.tab_id] === undefined ? "—" : `${cpu[row.tab_id]!.toFixed(1)}%`}</td>
                   <td className={`${cell} text-right font-mono text-ink-3`}>{row.nodes === null ? "—" : Math.round(row.nodes).toLocaleString()}</td>
                   <td className={`${cell} text-right`}>
-                    <button type="button" onClick={() => void closeTab(row.tab_id)} className="rounded-full px-2 py-1 text-[11px] text-ink-3 hover:bg-surface-3 hover:text-ink">
+                    <button type="button" aria-label={`Close ${row.title}`} onClick={() => void closeTab(row.tab_id)} className="rounded-full px-2 py-1 text-[11px] text-ink-3 hover:bg-surface-3 hover:text-ink">
                       Close
                     </button>
                   </td>
                 </tr>
               ))}
-              {rows.length === 0 && (
+              {shown.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-3 py-6 text-center text-ink-3">
                     {failure ? (

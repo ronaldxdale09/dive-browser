@@ -4,7 +4,7 @@ import { ipc } from "../lib/ipc";
 import type { TaskRow } from "../lib/ipc";
 import { resetContentCover } from "../lib/overlay";
 import { useBrowser } from "../store/browser";
-import { TaskManager, cpuPercent, formatMemory } from "./TaskManager";
+import { TaskManager, cpuPercent, formatMemory, sortedOrder, stableOrder } from "./TaskManager";
 
 const row = (over: Partial<TaskRow> = {}): TaskRow => ({
   tab_id: "t1",
@@ -103,6 +103,29 @@ describe("TaskManager", () => {
     render(<TaskManager />);
     const name = await screen.findByRole("button", { name: long });
     expect(name.getAttribute("title")).toBe(long);
+  });
+
+  it("keeps rows where they are between samples and sorts only when a header is clicked", () => {
+    const light = row({ tab_id: "light", title: "Light", memory_bytes: 1 });
+    const heavy = row({ tab_id: "heavy", title: "Heavy", memory_bytes: 99 });
+    // A tab that grew heavier does not jump to the top under the pointer.
+    expect(stableOrder(["light", "heavy"], [heavy, light])).toEqual(["light", "heavy"]);
+    // New tabs go after the known ones; closed ones leave.
+    expect(stableOrder(["gone", "light"], [row({ tab_id: "new" }), light])).toEqual(["light", "new"]);
+    expect(sortedOrder([light, heavy], {}, "memory")).toEqual(["heavy", "light"]);
+    expect(sortedOrder([heavy, light], {}, "title")).toEqual(["heavy", "light"]);
+    expect(sortedOrder([heavy, light], { light: 50, heavy: null }, "cpu")).toEqual(["light", "heavy"]);
+  });
+
+  it("names each Close by its tab and sorts by a clicked column", async () => {
+    vi.spyOn(ipc, "tasksList").mockResolvedValue([row({ tab_id: "a", title: "Small", memory_bytes: 1 }), row({ tab_id: "b", title: "Big", memory_bytes: 99 })]);
+    useBrowser.setState({ open: { ...initial.open, tasks: true } });
+    render(<TaskManager />);
+    expect(await screen.findByRole("button", { name: "Close Small" })).toBeTruthy();
+    const names = () => screen.getAllByRole("button", { name: /^Close (Small|Big)$/ }).map((b) => b.getAttribute("aria-label"));
+    expect(names()).toEqual(["Close Small", "Close Big"]);
+    fireEvent.click(screen.getByRole("button", { name: "Memory" }));
+    expect(names()).toEqual(["Close Big", "Close Small"]);
   });
 
   it("says why it could not measure instead of Measuring… for ever, and retries", async () => {

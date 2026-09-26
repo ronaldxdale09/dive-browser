@@ -36,6 +36,9 @@ use crate::state::AppState;
 const AUDIO_BINDING: &str = "__diveSubtitleAudio";
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 static MODEL_DOWNLOAD_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// Models whose download the person asked to stop. Checked between chunks,
+/// and once more after waiting for another model's download to finish.
+static MODEL_CANCELS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 /// How long a model download may take to connect.
 const MODEL_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 /// Longest silence tolerated between chunks of a model download.
@@ -210,15 +213,65 @@ pub struct SubtitleModelProgress {
     pub done: bool,
     /// A human message when the download failed.
     pub error: Option<String>,
+    /// Set when the download stopped because the person cancelled it; the
+    /// partial file is gone and the model is as it was before.
+    #[serde(default)]
+    pub cancelled: bool,
+}
+
+fn cancels() -> std::sync::MutexGuard<'static, Vec<String>> {
+    MODEL_CANCELS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Whether a cancel for `id` is waiting; takes it when it is.
+fn take_cancel(id: &str) -> bool {
+    let mut pending = cancels();
+    let before = pending.len();
+    pending.retain(|pending| pending != id);
+    pending.len() != before
+}
+
+/// Ask a running (or queued) download of `id` to stop. It stops at its next
+/// chunk, removes the partial file and reports itself cancelled.
+pub fn cancel_download(id: &str) {
+    let mut pending = cancels();
+    if !pending.iter().any(|pending| pending == id) {
+        pending.push(id.to_owned());
+    }
+}
+
+/// Remove a downloaded model from disk. Refused while a model download is in
+/// progress, since that is the one moment the file may be half-written or
+/// about to be renamed into place; a subtitle session already running keeps
+/// the copy it has loaded.
+pub async fn delete_model(id: &str) -> Result<(), String> {
+    let dest = model_file(id).ok_or_else(|| format!("unknown model {id}"))?;
+    let Ok(_download) = MODEL_DOWNLOAD_LOCK.try_lock() else {
+        return Err("A model is downloading. Cancel it or let it finish, then delete.".into());
+    };
+    match tokio::fs::remove_file(&dest).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("could not delete the model: {error}")),
+    }
 }
 
 /// Download `id` into the models directory, emitting progress. Skips work if
 /// the file is already present and non-empty.
 pub async fn download_model(app: &AppHandle<Runtime>, id: &str) -> Result<(), String> {
+    // A cancel left over from an earlier attempt must not stop this one.
+    take_cancel(id);
     let _download = MODEL_DOWNLOAD_LOCK.lock().await;
     let Some(dest) = model_file(id) else {
         return Err(format!("unknown model {id}"));
     };
+    // Cancelled while it waited behind another model's download.
+    if take_cancel(id) {
+        emit_cancelled(app, id);
+        return Ok(());
+    }
     let existing = dest.clone();
     let model_id = id.to_owned();
     if tokio::task::spawn_blocking(move || verify_model(&existing, &model_id))
@@ -231,6 +284,7 @@ pub async fn download_model(app: &AppHandle<Runtime>, id: &str) -> Result<(), St
             total: None,
             done: true,
             error: None,
+            cancelled: false,
         }
         .emit(app);
         return Ok(());
@@ -248,7 +302,44 @@ pub async fn download_model(app: &AppHandle<Runtime>, id: &str) -> Result<(), St
     if outcome.is_err() {
         let _ = tokio::fs::remove_file(&tmp).await;
     }
-    outcome
+    match outcome {
+        Err(Fetch::Cancelled) => {
+            emit_cancelled(app, id);
+            Ok(())
+        }
+        Err(Fetch::Failed(error)) => Err(error),
+        Ok(()) => Ok(()),
+    }
+}
+
+/// Why a model download stopped early.
+enum Fetch {
+    Cancelled,
+    Failed(String),
+}
+
+impl From<String> for Fetch {
+    fn from(error: String) -> Self {
+        Self::Failed(error)
+    }
+}
+
+impl From<&str> for Fetch {
+    fn from(error: &str) -> Self {
+        Self::Failed(error.to_owned())
+    }
+}
+
+fn emit_cancelled(app: &AppHandle<Runtime>, id: &str) {
+    let _ = SubtitleModelProgress {
+        id: id.to_owned(),
+        received: 0.0,
+        total: None,
+        done: false,
+        error: None,
+        cancelled: true,
+    }
+    .emit(app);
 }
 
 /// Stream `url` into `tmp`, verify it, and move it to `dest`. Progress is
@@ -259,7 +350,7 @@ async fn fetch_model_to(
     url: &str,
     tmp: &std::path::Path,
     dest: &std::path::Path,
-) -> Result<(), String> {
+) -> Result<(), Fetch> {
     use tokio::io::AsyncWriteExt as _;
 
     let client = reqwest::Client::builder()
@@ -283,6 +374,9 @@ async fn fetch_model_to(
     let mut last_emit = std::time::Instant::now();
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
+        if take_cancel(id) {
+            return Err(Fetch::Cancelled);
+        }
         let chunk = chunk.map_err(|e| format!("download interrupted: {e}"))?;
         file.write_all(&chunk).await.map_err(|e| e.to_string())?;
         hash.update(&chunk);
@@ -295,6 +389,7 @@ async fn fetch_model_to(
                 total,
                 done: false,
                 error: None,
+                cancelled: false,
             }
             .emit(app);
         }
@@ -319,6 +414,7 @@ async fn fetch_model_to(
         total,
         done: true,
         error: None,
+        cancelled: false,
     }
     .emit(app);
     Ok(())

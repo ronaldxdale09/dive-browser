@@ -240,8 +240,10 @@ pub(crate) fn bookmarks_search(
     query: String,
     limit: u32,
 ) -> AppResult<Vec<dive_core::Bookmark>> {
-    Ok(lock(&state.store)
-        .search_bookmarks(&query, usize::try_from(limit.min(200)).unwrap_or(50))?)
+    Ok(lock(&state.store).search_bookmarks(
+        &query,
+        usize::try_from(limit.min(LIBRARY_MAX)).unwrap_or(50),
+    )?)
 }
 
 /// Recent history matching `query`, newest first.
@@ -252,8 +254,16 @@ pub(crate) fn history_search(
     query: String,
     limit: u32,
 ) -> AppResult<Vec<dive_core::HistoryEntry>> {
-    Ok(lock(&state.store).search_history(&query, usize::try_from(limit.min(200)).unwrap_or(50))?)
+    Ok(lock(&state.store).search_history(
+        &query,
+        usize::try_from(limit.min(LIBRARY_MAX)).unwrap_or(50),
+    )?)
 }
+
+/// Most rows one bookmarks or history search returns. The Library asks for a
+/// page more as it scrolls, so this bounds how far one list can reach, not
+/// what a filter can find: the filter runs in the database.
+pub(crate) const LIBRARY_MAX: u32 = 5000;
 
 /// Forget every visit to `url`; true when there was one.
 #[tauri::command]
@@ -417,17 +427,29 @@ pub(crate) async fn pages_scheme(state: State<'_, AppState>, scheme: String) -> 
     }
     let sessions = {
         let host = lock(&state.host);
-        host.as_ref().map_or_else(Vec::new, |host| {
-            host.sessions()
-                .into_iter()
-                .map(|(_, session)| session)
-                .collect()
-        })
+        host.as_ref()
+            .map_or_else(Vec::new, crate::engine::TabHost::sessions)
     };
-    for session in &sessions {
-        crate::prefs::apply(session, &prefs, Some(&scheme)).await;
+    for (tab_id, session) in &sessions {
+        let page = page_scheme(&state, *tab_id, crate::prefs::PageScheme::Follow);
+        crate::prefs::apply_for(session, &prefs, Some(&scheme), page).await;
     }
     Ok(())
+}
+
+/// How a tab hears about the colour scheme: as asked, unless the device menu
+/// gave it media overrides of its own, which win over the preference and are
+/// left alone.
+fn page_scheme(
+    state: &AppState,
+    tab_id: TabId,
+    wanted: crate::prefs::PageScheme,
+) -> crate::prefs::PageScheme {
+    if state.buffers.media(tab_id) == crate::emulate::MediaOverrides::default() {
+        wanted
+    } else {
+        crate::prefs::PageScheme::Leave
+    }
 }
 
 /// Store preferences and put them into force on every open tab. Returns the
@@ -440,7 +462,22 @@ pub(crate) async fn prefs_set(
 ) -> AppResult<crate::prefs::Prefs> {
     let _update = state.prefs.begin_update().await;
     let previous = state.prefs.get(&state);
+    let mut prefs = prefs;
+    // Checked when it changes, not on every write: the check touches the
+    // disk, and a folder that was fine when chosen is the engine's to report
+    // if it goes away later.
+    if prefs.download_dir.trim() != previous.download_dir {
+        prefs.download_dir = crate::prefs::check_download_dir(&prefs.download_dir)?;
+    }
     let stored = state.prefs.set(&state, prefs)?;
+    if crate::prefs::chrome_only_change(&previous, &stored) {
+        return Ok(stored);
+    }
+    let scheme = if previous.tell_pages_theme && !stored.tell_pages_theme {
+        crate::prefs::PageScheme::Withdraw
+    } else {
+        crate::prefs::PageScheme::Follow
+    };
     let sessions = {
         let host = lock(&state.host);
         let store = lock(&state.store);
@@ -456,7 +493,8 @@ pub(crate) async fn prefs_set(
     };
     let chrome_scheme = state.prefs.chrome_scheme();
     for (tab_id, session, document_url) in &sessions {
-        crate::prefs::apply(session, &stored, chrome_scheme.as_deref()).await;
+        let page = page_scheme(&state, *tab_id, scheme);
+        crate::prefs::apply_for(session, &stored, chrome_scheme.as_deref(), page).await;
         crate::privacy::refresh_page_policy(&state, *tab_id, session, &stored).await;
         if privacy_site_state_changed(&previous, &stored, document_url)
             && let Err(error) = session.call0("Page.reload").await
@@ -465,12 +503,48 @@ pub(crate) async fn prefs_set(
         }
     }
     reapply_interception(&state, None).await;
-    match crate::prefs::prune_history(&state) {
-        Ok(0) => {}
-        Ok(n) => tracing::info!(n, "pruned history past the retention window"),
-        Err(e) => tracing::warn!("history prune failed: {e}"),
+    // Only when the window itself changed; housekeeping keeps an unchanged
+    // one trimmed. Settings asks before shortening it (see
+    // `history_prune_count`), so this runs on a window the person agreed to.
+    if previous.history_days != stored.history_days {
+        match crate::prefs::prune_history(&state) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(n, "pruned history past the retention window"),
+            Err(e) => tracing::warn!("history prune failed: {e}"),
+        }
     }
     Ok(stored)
+}
+
+/// Ask for a download folder. `None` when the dialog was dismissed; the
+/// chrome saves the answer through `prefs_set`, which checks it.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn download_dir_pick(state: State<'_, AppState>) -> AppResult<Option<String>> {
+    let start = state.prefs.snapshot(&state).download_dir();
+    let picked = rfd::AsyncFileDialog::new()
+        .set_title("Save downloads to")
+        .set_directory(start)
+        .pick_folder()
+        .await;
+    Ok(picked.map(|folder| folder.path().to_string_lossy().into_owned()))
+}
+
+/// Whether the saved DNS and proxy settings differ from the ones the engine
+/// was started with, which only a restart puts into force.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn network_restart_needed(state: State<'_, AppState>) -> bool {
+    crate::netconfig::restart_needed(&state.prefs.snapshot(&state).network())
+}
+
+/// How many visits keeping history for `days` would delete, so Settings can
+/// ask before a shorter window takes them. Deletes nothing.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn history_prune_count(state: State<'_, AppState>, days: i32) -> AppResult<u32> {
+    let n = crate::prefs::count_prunable(&state, days)?;
+    Ok(u32::try_from(n).unwrap_or(u32::MAX))
 }
 
 fn privacy_site_state_changed(
@@ -490,7 +564,7 @@ fn privacy_site_state_changed(
 pub(crate) async fn browsing_data_clear(
     state: State<'_, AppState>,
     what: crate::prefs::ClearRequest,
-) -> AppResult<String> {
+) -> AppResult<crate::prefs::ClearOutcome> {
     crate::prefs::clear(&state, what).await
 }
 
@@ -610,7 +684,8 @@ pub(crate) fn open_with_shell(target: &std::ffi::OsStr, what: &str) -> AppResult
 #[tauri::command]
 #[specta::specta]
 #[allow(clippy::unnecessary_wraps)] // The chrome's ipc layer unwraps a Result for every command.
-pub(crate) fn downloads_cancel(id: u32) -> AppResult<()> {
+pub(crate) fn downloads_cancel(state: State<'_, AppState>, id: u32) -> AppResult<()> {
+    state.downloads.mark_cancelled(id);
     #[cfg(feature = "cef")]
     tauri_runtime_cef::downloads::control(id, tauri_runtime_cef::DownloadControl::Cancel);
     #[cfg(not(feature = "cef"))]
@@ -628,6 +703,71 @@ pub(crate) fn downloads_cancel(id: u32) -> AppResult<()> {
 pub(crate) fn downloads_clear(state: State<'_, AppState>) -> AppResult<()> {
     state.downloads.clear();
     Ok(())
+}
+
+/// The downloads kept for this profile, newest first: what the Library
+/// lists, across restarts.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn downloads_history(
+    state: State<'_, AppState>,
+    limit: u32,
+) -> AppResult<Vec<dive_core::DownloadRecord>> {
+    let limit = usize::try_from(limit.min(2000)).unwrap_or(200);
+    Ok(lock(&state.store).downloads(limit)?)
+}
+
+/// Take one download off the Library's list. The file stays where it is.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn download_forget(state: State<'_, AppState>, id: String) -> AppResult<bool> {
+    Ok(lock(&state.store).remove_download(&id)?)
+}
+
+/// Empty the Library's list of downloads. Every file stays where it is.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn downloads_history_clear(state: State<'_, AppState>) -> AppResult<u32> {
+    let n = lock(&state.store).clear_downloads_since(None)?;
+    Ok(u32::try_from(n).unwrap_or(u32::MAX))
+}
+
+/// Which of `paths` are no longer on disk, so the Library can say a file was
+/// moved or deleted instead of offering to open it. Off the main thread: it
+/// asks the filesystem about each one.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn downloads_missing(paths: Vec<String>) -> AppResult<Vec<String>> {
+    tokio::task::spawn_blocking(move || {
+        paths
+            .into_iter()
+            .filter(|path| !path.is_empty() && !std::path::Path::new(path).is_file())
+            .collect()
+    })
+    .await
+    .map_err(AppError::new)
+}
+
+/// Download `url` again, through the tab `id`'s page so it goes out with that
+/// page's cookies and container, as the first attempt did.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn download_start(app: AppHandle<Runtime>, id: TabId, url: String) -> AppResult<()> {
+    let parsed = url::Url::parse(&url)?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(AppError::new("only a web address can be downloaded again"));
+    }
+    on_main(&app, move |_, _, state| {
+        with_view(state, id, move |view| {
+            view.with_webview(move |native| {
+                use cef::{ImplBrowser, ImplBrowserHost};
+                if let Some(host) = native.browser().host() {
+                    host.start_download(Some(&cef::CefString::from(url.as_str())));
+                }
+            })
+        })?;
+        Ok(())
+    })
 }
 
 /// Open `path` in the platform file manager, selecting it when it is a file.
@@ -768,6 +908,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             forms_delete,
             forms_clear,
             bookmark_rename,
+            bookmark_restore,
             permission_set,
             permission_reply,
             js_dialog_pending,
@@ -787,6 +928,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             default_browser_set,
             subtitle_models,
             subtitle_model_download,
+            subtitle_model_cancel,
+            subtitle_model_delete,
             subtitle_start,
             subtitle_stop,
             subtitle_running,
@@ -878,6 +1021,14 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             dev_servers,
             dev_servers_watch,
             history_search,
+            history_prune_count,
+            network_restart_needed,
+            download_dir_pick,
+            downloads_history,
+            download_forget,
+            downloads_history_clear,
+            downloads_missing,
+            download_start,
             history_remove,
             bookmark_toggle,
             bookmark_status,
@@ -3035,8 +3186,17 @@ pub(crate) async fn backup_restore(
     // Settings wrote the old ones back over the restore.
     if take_preferences && let Some(preferences) = &backup.preferences {
         use tauri::Manager as _;
-        let restored = crate::prefs::parse_stored(preferences);
-        prefs_set(app.state::<AppState>(), restored).await?;
+        let state = app.state::<AppState>();
+        let mut restored = crate::prefs::parse_stored(preferences);
+        // A backup from another machine names that machine's download
+        // folder. One this machine cannot use keeps the folder in use here,
+        // rather than failing the whole restore after its data went in.
+        if crate::prefs::check_download_dir(&restored.download_dir).is_err() {
+            restored
+                .download_dir
+                .clone_from(&state.prefs.snapshot(&state).download_dir);
+        }
+        prefs_set(state, restored).await?;
         summary.preferences = true;
     }
     // Restored workspaces and their tabs have to reach the chrome, which
@@ -3367,6 +3527,23 @@ pub(crate) fn bookmark_rename(
     Ok(())
 }
 
+/// Put back a bookmark that was just removed, with the title and creation
+/// time it had, so Undo leaves the list as it was rather than moving the
+/// bookmark to the top as a new one.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn bookmark_restore(
+    state: State<'_, AppState>,
+    url: String,
+    title: String,
+    created_at: String,
+) -> AppResult<()> {
+    let at =
+        dive_core::Timestamp::parse(&created_at).unwrap_or_else(|_| dive_core::Timestamp::now());
+    lock(&state.store).add_bookmark(&url, &title, at)?;
+    Ok(())
+}
+
 /// Remember or forget a permission in the selected profile and real container.
 #[tauri::command]
 #[specta::specta]
@@ -3492,6 +3669,23 @@ pub(crate) fn subtitle_models() -> Vec<crate::subtitles::SubtitleModel> {
 #[specta::specta]
 pub(crate) async fn subtitle_model_download(app: AppHandle<Runtime>, id: String) -> AppResult<()> {
     crate::subtitles::download_model(&app, &id)
+        .await
+        .map_err(AppError::new)
+}
+
+/// Stop a subtitle model download; it reports itself cancelled on
+/// `SubtitleModelProgress`.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn subtitle_model_cancel(id: String) {
+    crate::subtitles::cancel_download(&id);
+}
+
+/// Delete a downloaded subtitle model to free its space.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn subtitle_model_delete(id: String) -> AppResult<()> {
+    crate::subtitles::delete_model(&id)
         .await
         .map_err(AppError::new)
 }

@@ -119,7 +119,7 @@ pub struct DownloadNotice {
     pub url: String,
     /// Where the file is (or will be) written.
     pub path: String,
-    /// `started` | `finished` | `failed`.
+    /// `started` | `finished` | `failed` | `cancelled`.
     pub status: String,
 }
 
@@ -170,6 +170,9 @@ pub struct UpdateProgress {
 pub fn watch_download_progress(app: &AppHandle<Runtime>) {
     let app = app.clone();
     tauri_runtime_cef::downloads::on_download_progress(move |p| {
+        app.state::<AppState>()
+            .downloads
+            .track(p.id, &p.url, &p.path);
         #[allow(clippy::cast_precision_loss)] // exact to 2^53 bytes; files are smaller.
         let _ = DownloadProgress {
             id: p.id,
@@ -263,25 +266,63 @@ fn handle_download(
             }
         }
         DownloadEvent::Finished { url, path, success } => {
+            let state = app.state::<AppState>();
             if let Some((tab, nonce)) = source {
-                app.state::<AppState>()
-                    .activity
-                    .download(tab, nonce, url.as_str(), false);
+                state.activity.download(tab, nonce, url.as_str(), false);
             }
+            let path = path
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            // Asked for, not gone wrong: a download the person cancelled says
+            // so rather than claiming it failed.
+            let cancelled = !success && state.downloads.take_cancelled(url.as_str(), &path);
             DownloadNotice {
                 tab: source.map(|(tab, _)| tab),
                 url: url.to_string(),
-                path: path
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
-                status: if success { "finished" } else { "failed" }.into(),
+                path,
+                status: if success {
+                    "finished"
+                } else if cancelled {
+                    "cancelled"
+                } else {
+                    "failed"
+                }
+                .into(),
             }
         }
         _ => return true,
     };
     app.state::<AppState>().downloads.record(&notice);
+    persist_download(app, &notice);
     let _ = notice.emit(app);
     true
+}
+
+/// Keep a download in the profile's list, so the Library still shows it
+/// after a restart. Off the thread that reported it -- CEF calls from its UI
+/// thread, and this touches the database and, for a finished file, the disk.
+/// A private session keeps nothing.
+fn persist_download(app: &AppHandle<Runtime>, notice: &DownloadNotice) {
+    if crate::private_session::is_private() {
+        return;
+    }
+    let app = app.clone();
+    let notice = notice.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = (notice.status == "finished")
+            .then(|| std::fs::metadata(&notice.path).ok().map(|m| m.len()))
+            .flatten();
+        let state = app.state::<AppState>();
+        if let Err(error) = crate::state::lock(&state.store).record_download(
+            &notice.url,
+            &notice.path,
+            &notice.status,
+            bytes,
+            dive_core::Timestamp::now(),
+        ) {
+            tracing::warn!(%error, "could not keep the download in the Library");
+        }
+    });
 }
 
 fn download_destination(
