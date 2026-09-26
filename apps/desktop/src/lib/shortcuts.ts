@@ -16,6 +16,9 @@ import { tabInThisWindow, useBrowser } from "../store/browser";
 export function useShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // A key an input method is composing with is the text being chosen,
+      // not a command: Escape there cancels the candidate, not a page load.
+      if (e.isComposing || e.keyCode === 229) return;
       if (e.defaultPrevented || selectAllInChromeField(e, isMac())) return;
       const id = shortcutFor(e);
       if (!id) return;

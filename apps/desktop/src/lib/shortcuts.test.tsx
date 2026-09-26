@@ -43,4 +43,18 @@ describe("useShortcuts", () => {
     expect(event.defaultPrevented).toBe(false);
     expect(ipc.tabStop).not.toHaveBeenCalled();
   });
+
+  it("leaves a key alone while an input method is composing", () => {
+    useBrowser.setState({ tabs: [tab], activeTab: tab.id, detached: [], loading: { [tab.id]: true } });
+    render(<Harness />);
+    for (const init of [{ isComposing: true }, { keyCode: 229 }]) {
+      const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true, ...init });
+      window.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(ipc.tabStop).not.toHaveBeenCalled();
+    const plain = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    window.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(true);
+  });
 });
