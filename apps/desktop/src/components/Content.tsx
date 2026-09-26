@@ -286,7 +286,7 @@ export function NavErrorPanel({ url, error, onRetry }: { url: string; error: str
     if (!activeTab || !url.startsWith("https://")) return;
     let alive = true;
     void ipc
-      .httpsOnlyUpgraded(activeTab)
+      .httpsOnlyUpgraded(activeTab, url)
       .then((host) => {
         if (alive) setUpgraded(host);
       })

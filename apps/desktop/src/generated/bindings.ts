@@ -966,10 +966,11 @@ export const commands = {
 	tabPictureInPicture: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_picture_in_picture", { id })),
 	/**
 	 *  The host this tab was sent to https for, when the newest navigation was
-	 *  an upgrade. The error page asks, so a failure can offer a way out without
-	 *  the host having to push anything.
+	 *  an upgrade and `url` -- the address that failed -- is on that host. The
+	 *  error page asks, so a failure can offer a way out without the host having
+	 *  to push anything.
 	 */
-	httpsOnlyUpgraded: (id: TabId) => __TAURI_INVOKE<string | null>("https_only_upgraded", { id }),
+	httpsOnlyUpgraded: (id: TabId, url: string) => __TAURI_INVOKE<string | null>("https_only_upgraded", { id, url }),
 	/**
 	 *  Keep reaching `host` in the clear, and go back to the http address.
 	 *

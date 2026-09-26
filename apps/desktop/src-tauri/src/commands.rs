@@ -2480,12 +2480,14 @@ pub(crate) async fn tab_picture_in_picture(
 }
 
 /// The host this tab was sent to https for, when the newest navigation was
-/// an upgrade. The error page asks, so a failure can offer a way out without
-/// the host having to push anything.
+/// an upgrade and `url` -- the address that failed -- is on that host. The
+/// error page asks, so a failure can offer a way out without the host having
+/// to push anything.
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn https_only_upgraded(id: TabId) -> Option<String> {
-    crate::https_only::upgraded_host(id)
+#[allow(clippy::needless_pass_by_value)] // Tauri hands command arguments over by value.
+pub(crate) fn https_only_upgraded(id: TabId, url: String) -> Option<String> {
+    crate::https_only::upgraded_host_for(id, &url)
 }
 
 /// Keep reaching `host` in the clear, and go back to the http address.
@@ -2502,13 +2504,21 @@ pub(crate) fn https_only_allow(
 ) -> AppResult<()> {
     let parsed =
         url::Url::parse(&url).map_err(|e| AppError::new(format!("not an address: {e}")))?;
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| AppError::new("that address has no host"))?
-        .to_ascii_lowercase();
+    // Only the host this tab was upgraded for, and only for its own failed
+    // address: anything else would put a site the person never saw fail
+    // over https on the list of sites reached in the clear.
+    let host = crate::https_only::upgraded_host_for(id, &url).ok_or_else(|| {
+        AppError::new("this page was not upgraded to https, so there is nothing to allow")
+    })?;
     let mut prefs = state.prefs.get(&state);
-    prefs.https_only_allowed.push(host);
-    state.prefs.set(&state, prefs)?;
+    if !prefs
+        .https_only_allowed
+        .iter()
+        .any(|known| known.eq_ignore_ascii_case(&host))
+    {
+        prefs.https_only_allowed.push(host);
+        state.prefs.set(&state, prefs)?;
+    }
     crate::https_only::forget(id);
     let mut plain = parsed;
     plain

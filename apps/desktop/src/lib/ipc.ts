@@ -123,8 +123,8 @@ export const ipc = {
     unwrap(await commands.httpAuthAnswer(tabId, requestId, username, password)),
   /** Float this tab's video over everything else, or bring it back. */
   tabPictureInPicture: async (id: string) => unwrap(await commands.tabPictureInPicture(id)),
-  /** The host this tab was upgraded to https for, when the last navigation was one. */
-  httpsOnlyUpgraded: (id: string) => commands.httpsOnlyUpgraded(id),
+  /** The host this tab was upgraded to https for, when the last navigation was one and `url` (the failed address) is on it. */
+  httpsOnlyUpgraded: (id: string, url: string) => commands.httpsOnlyUpgraded(id, url),
   /** Keep reaching this host in the clear, and go back to its http address. */
   httpsOnlyAllow: async (id: string, url: string) => unwrap(await commands.httpsOnlyAllow(id, url)),
   tabFillVideo: async (id: string) => unwrap(await commands.tabFillVideo(id)),

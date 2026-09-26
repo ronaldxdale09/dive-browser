@@ -780,6 +780,9 @@ pub fn attach(
                         )
                     };
                     reset_interception(&session, &rules, &prefs).await;
+                    // Disabling Fetch released every paused request, the
+                    // ones waiting on a sign-in card among them.
+                    crate::http_auth::abandon_tab(&app, tab_id);
                     continue;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -818,6 +821,8 @@ pub fn attach(
             };
             let Some(request_id) = request_id_or_reset(&session, tab_id, p, &rules, &prefs).await
             else {
+                // Interception was reset, releasing the sign-ins with it.
+                crate::http_auth::abandon_tab(&app, tab_id);
                 continue;
             };
             let url = p["request"]["url"].as_str().unwrap_or_default();

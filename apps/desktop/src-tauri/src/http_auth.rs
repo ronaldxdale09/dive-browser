@@ -97,6 +97,30 @@ impl Registry {
     pub fn forget_tab(&self, tab_id: TabId) {
         lock(&self.open).retain(|(tab, _), _| *tab != tab_id);
     }
+
+    /// Drop a tab's challenges and say which they were.
+    pub fn take_tab(&self, tab_id: TabId) -> Vec<String> {
+        let mut open = lock(&self.open);
+        let gone: Vec<String> = open
+            .keys()
+            .filter(|(tab, _)| *tab == tab_id)
+            .map(|(_, request)| request.clone())
+            .collect();
+        for request in &gone {
+            open.remove(&(tab_id, request.clone()));
+        }
+        gone
+    }
+}
+
+/// The requests behind `tab_id`'s sign-in cards are gone: its page moved on
+/// to another document, or interception was reset, which releases every
+/// paused request. A card left up would answer a request nothing waits for,
+/// and "that sign-in is no longer waiting" is all the person would get.
+pub fn abandon_tab(app: &AppHandle<Runtime>, tab_id: TabId) {
+    for request_id in app.state::<AppState>().http_auth.take_tab(tab_id) {
+        let _ = HttpAuthClosed { tab_id, request_id }.emit(app);
+    }
 }
 
 /// How the host is named on the card: the port only when it is a surprise.
@@ -283,5 +307,20 @@ mod tests {
         registry.add(asked_from(tab, &challenge("Server", "https://a.example", "")).unwrap());
         registry.forget_tab(tab);
         assert!(registry.for_tab(tab).is_empty());
+    }
+
+    #[test]
+    fn a_tab_moving_on_takes_only_its_own_cards_with_it() {
+        let registry = Registry::default();
+        let (tab, other) = (TabId::new(), TabId::new());
+        registry.add(asked_from(tab, &challenge("Server", "https://a.example", "")).unwrap());
+        registry.add(asked_from(other, &challenge("Server", "https://b.example", "")).unwrap());
+        assert_eq!(
+            registry.take_tab(tab),
+            vec!["interception-job-1.0".to_owned()]
+        );
+        assert!(registry.for_tab(tab).is_empty());
+        assert_eq!(registry.for_tab(other).len(), 1, "another tab's card stays");
+        assert!(registry.take_tab(tab).is_empty());
     }
 }

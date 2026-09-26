@@ -120,9 +120,17 @@ pub fn upgrade(url: &str, enabled: bool, allowed: &[String]) -> Option<String> {
         return None;
     }
     // A port that was spelled out for http means nothing over https, and
-    // carrying it across would ask for https on the http port.
-    if parsed.port() == Some(80) {
-        let _ = parsed.set_port(None);
+    // carrying it across would ask for https on the http port. Any other
+    // port is where a particular server listens -- an admin console, a dev
+    // box on a public name -- and it almost never speaks TLS on the same
+    // port, so asking it for https there only turns a working page into a
+    // protocol error. Those are left as they were asked for.
+    match parsed.port() {
+        Some(80) => {
+            let _ = parsed.set_port(None);
+        }
+        Some(_) => return None,
+        None => {}
     }
     parsed.set_scheme("https").ok()?;
     Some(parsed.to_string())
@@ -136,6 +144,30 @@ pub fn note(tab: TabId, host: &str) {
 /// The host this tab was upgraded to, if the newest navigation was one.
 pub fn upgraded_host(tab: TabId) -> Option<String> {
     lock().get(&tab).cloned()
+}
+
+/// The upgraded host, but only when `failed_url` is on it. The note outlives
+/// the upgrade that made it until the next page commits, so a failure on any
+/// other host in between -- a link followed from an error page, an address
+/// typed with https already -- would otherwise have been offered, and
+/// granted, a way into the clear for the upgraded site instead.
+pub fn upgraded_host_for(tab: TabId, failed_url: &str) -> Option<String> {
+    let noted = upgraded_host(tab)?;
+    let failed = url::Url::parse(failed_url).ok()?;
+    (failed.scheme() == "https"
+        && failed
+            .host_str()
+            .is_some_and(|host| host.eq_ignore_ascii_case(&noted)))
+    .then_some(noted)
+}
+
+/// A main-frame document committed. A real page means the upgrade (if any)
+/// worked or was left behind, so the note goes; an error page is the
+/// failure the note is kept for.
+pub fn committed(tab: TabId, error_page: bool) {
+    if !error_page {
+        forget(tab);
+    }
 }
 
 /// Forget the tab: it reached somewhere, or it closed.
@@ -177,11 +209,10 @@ mod tests {
             upgrade("http://example.com:80/x", true, &[]).as_deref(),
             Some("https://example.com/x")
         );
-        // A port that was chosen is kept: it is where the server is.
-        assert_eq!(
-            upgrade("http://example.com:8080/x", true, &[]).as_deref(),
-            Some("https://example.com:8080/x")
-        );
+        // A port that was chosen is where a particular server listens, and it
+        // almost never speaks TLS there: it is left alone.
+        assert_eq!(upgrade("http://example.com:8080/x", true, &[]), None);
+        assert_eq!(upgrade("http://example.com:443/x", true, &[]), None);
     }
 
     #[test]
@@ -260,6 +291,34 @@ mod tests {
         note(tab, "Example.COM");
         assert_eq!(upgraded_host(tab).as_deref(), Some("example.com"));
         forget(tab);
+        assert_eq!(upgraded_host(tab), None);
+    }
+
+    #[test]
+    fn the_way_into_the_clear_is_offered_only_for_the_host_that_was_upgraded() {
+        let tab = TabId::new();
+        note(tab, "old.example.com");
+        assert_eq!(
+            upgraded_host_for(tab, "https://old.example.com/page").as_deref(),
+            Some("old.example.com")
+        );
+        // Another site failing while the note is still there must not be
+        // offered, or granted, the upgraded host's exception.
+        assert_eq!(upgraded_host_for(tab, "https://bank.example/"), None);
+        assert_eq!(upgraded_host_for(tab, "http://old.example.com/"), None);
+        assert_eq!(upgraded_host_for(tab, "not a url"), None);
+    }
+
+    #[test]
+    fn a_real_page_committing_forgets_the_upgrade_and_an_error_page_keeps_it() {
+        let tab = TabId::new();
+        note(tab, "old.example.com");
+        committed(tab, true);
+        assert!(
+            upgraded_host(tab).is_some(),
+            "the error page is what it is kept for"
+        );
+        committed(tab, false);
         assert_eq!(upgraded_host(tab), None);
     }
 

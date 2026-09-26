@@ -112,6 +112,34 @@ impl MainFrame {
     }
 }
 
+/// A new document committed in the top frame: `Some(true)` for an error page,
+/// `Some(false)` for a real one, `None` for any other event.
+fn main_commit(event: &CdpEvent) -> Option<bool> {
+    if event.method != "Page.frameNavigated" {
+        return None;
+    }
+    let frame = event.params.get("frame")?;
+    if frame
+        .get("parentId")
+        .is_some_and(|parent| !parent.is_null())
+    {
+        return None;
+    }
+    Some(
+        frame
+            .get("unreachableUrl")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|url| !url.is_empty()),
+    )
+}
+
+/// What belonged to the page a tab just left. A sign-in card or an https
+/// upgrade note from the old document must not be offered on the new one.
+fn committed(app: &AppHandle<Runtime>, tab_id: TabId, error_page: bool) {
+    crate::https_only::committed(tab_id, error_page);
+    crate::http_auth::abandon_tab(app, tab_id);
+}
+
 /// Map one `DevTools` event to a main-frame load-state change. Only the latest
 /// proven main document request can produce a navigation error.
 pub fn map_event(tab_id: TabId, event: &CdpEvent, main: &MainFrame) -> Option<TabLoad> {
@@ -271,6 +299,9 @@ pub fn attach(
         loop {
             match events.recv().await {
                 Ok(event) => {
+                    if let Some(error_page) = main_commit(&event) {
+                        committed(&app, tab_id, error_page);
+                    }
                     if let Some(load) = map_event(tab_id, &event, &main)
                         && let Err(error) = load.emit(&app)
                     {
@@ -297,6 +328,35 @@ pub fn attach(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn only_a_top_frame_commit_counts_and_an_error_page_says_so() {
+        assert_eq!(
+            main_commit(&ev(
+                "Page.frameNavigated",
+                json!({"frame":{"id":"root","url":"https://example.com/"}})
+            )),
+            Some(false)
+        );
+        assert_eq!(
+            main_commit(&ev(
+                "Page.frameNavigated",
+                json!({"frame":{"id":"root","url":"chrome-error://chromewebdata/","unreachableUrl":"https://down.example/"}})
+            )),
+            Some(true)
+        );
+        assert_eq!(
+            main_commit(&ev(
+                "Page.frameNavigated",
+                json!({"frame":{"id":"child","parentId":"root","url":"https://ads.example/"}})
+            )),
+            None
+        );
+        assert_eq!(
+            main_commit(&ev("Page.frameStartedLoading", json!({"frameId":"root"}))),
+            None
+        );
+    }
 
     #[test]
     fn history_refreshes_include_same_url_push_state_but_not_subframes() {
