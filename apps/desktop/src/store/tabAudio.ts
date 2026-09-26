@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { events, ipc } from "../lib/ipc";
 import type { TabAudio } from "../lib/ipc";
+import { onTabClosed } from "./browser";
 
 /**
  * Which tabs are making a sound, and which have been silenced.
@@ -61,3 +62,7 @@ export const useTabAudio = create<TabAudioStore>((set, get) => ({
       return { byTab: rest };
     }),
 }));
+
+// The host sends nothing more for a tab once it is closed, so a tab that was
+// playing or muted would otherwise stay in the map for the whole session.
+onTabClosed((tabId) => useTabAudio.getState().forget(tabId));

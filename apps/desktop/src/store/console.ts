@@ -69,6 +69,7 @@ export const useConsole = create<ConsoleState>((set, get) => ({
   drop: (tabId) => {
     cancelPending(tabId);
     set((s) => {
+      if (!(tabId in s.byTab)) return s;
       const byTab = { ...s.byTab };
       delete byTab[tabId];
       return { byTab };

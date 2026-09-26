@@ -6,7 +6,7 @@ import type { UiMode, Zoom } from "../components/simulator/geometry";
 import { ipc } from "../lib/ipc";
 import type { DeviceEmulated, DeviceInput, EnvironmentInput, MediaInput, NetworkProfile } from "../lib/ipc";
 import { events } from "../lib/ipc";
-import { useBrowser } from "./browser";
+import { onTabClosed, useBrowser } from "./browser";
 import { errorMessage } from "../lib/errors";
 
 export interface Media {
@@ -305,15 +305,22 @@ export const useEmulation = create<EmulationState>((set, get) => ({
     }
   },
   drop: (tabId) => {
+    pushed.delete(tabId);
+    // Called for every closed tab; most never had a device, and a fresh set
+    // of records would wake every subscriber for nothing.
+    const { byTab, scale, media, throttle, environment } = get();
+    if (![byTab, scale, media, throttle, environment].some((record) => tabId in record)) return;
     const strip = <T>(record: Record<string, T>) => {
       const next = { ...record };
       delete next[tabId];
       return next;
     };
-    pushed.delete(tabId);
     set({ byTab: strip(get().byTab), scale: strip(get().scale), media: strip(get().media), throttle: strip(get().throttle), environment: strip(get().environment) });
   },
 }));
+
+// A closed tab's device, media and throttling choices can never apply again.
+onTabClosed((tabId) => useEmulation.getState().drop(tabId));
 
 export const selectMedia = (tabId: string | null) => (s: EmulationState) => (tabId ? (s.media[tabId] ?? DEFAULT_MEDIA) : DEFAULT_MEDIA);
 export const selectThrottle = (tabId: string | null) => (s: EmulationState) => (tabId ? (s.throttle[tabId] ?? null) : null);

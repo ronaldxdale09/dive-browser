@@ -228,7 +228,9 @@ export const useNetwork = create<NetworkState>((set, get) => ({
   },
   drop: (tabId) => {
     cancelPending(tabId);
+    awaitingDocument.delete(tabId);
     set((s) => {
+      if (!(tabId in s.byTab) && !Object.keys(s.frames).some((key) => key.startsWith(`${tabId}:`))) return s;
       const byTab = { ...s.byTab };
       delete byTab[tabId];
       return { byTab, frames: withoutTab(s.frames, tabId) };

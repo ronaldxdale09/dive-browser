@@ -145,6 +145,29 @@ export const CLOSED_TABS_LIMIT = 25;
 /** Scroll offsets of tabs the chrome is closing, keyed by tab id, until their tab_closed arrives. */
 const scrollOfClosing = new Map<string, [number, number]>();
 
+/**
+ * Per-tab state other stores keep (device emulation, audio), released when
+ * the engine closes the tab. Those stores register here rather than being
+ * imported by this one: they import this store, so that would be a cycle.
+ */
+const tabClosedHandlers = new Set<(tabId: string) => void>();
+
+/** Run `handler` with the id of every tab the engine closes; returns the unsubscribe. */
+export function onTabClosed(handler: (tabId: string) => void): () => void {
+  tabClosedHandlers.add(handler);
+  return () => tabClosedHandlers.delete(handler);
+}
+
+function forgetClosedTab(id: string) {
+  for (const handler of tabClosedHandlers) {
+    try {
+      handler(id);
+    } catch {
+      // One store failing to let go must not keep the others holding on.
+    }
+  }
+}
+
 /** The first tab already on `url`'s host, so a shortcut can switch instead of piling up duplicates. */
 export function sameSiteTab(tabs: readonly Tab[], url: string): Tab | undefined {
   let host = "";
@@ -360,6 +383,10 @@ type SnapshotDeltaInput =
   | { kind: "window"; tab: string; detached: boolean };
 let snapshotDeltas: SnapshotDelta[] = [];
 const SNAPSHOT_DELTA_LIMIT = 1024;
+/** Snapshot reads waiting on the engine. Deltas are only worth keeping while there is one. */
+let snapshotsInFlight = 0;
+/** Bumped when the replay log overflows, so a read that lost its replay base retries. */
+let deltaEpoch = 0;
 
 function supersedeSnapshots() {
   intentRevision += 1;
@@ -367,10 +394,15 @@ function supersedeSnapshots() {
 }
 
 function recordSnapshotDelta(delta: SnapshotDeltaInput) {
+  // With no read in flight nothing can replay this: the next read is taken
+  // after it and already reflects it. Recording anyway filled the log with
+  // every event of an idle session.
+  if (snapshotsInFlight === 0) return;
   if (snapshotDeltas.length >= SNAPSHOT_DELTA_LIMIT) {
     // Bound replay memory. An in-flight snapshot that lost its replay base
-    // must retry; the next request starts against the retained suffix.
-    supersedeSnapshots();
+    // must retry. That is not new intent, so it must not supersede a
+    // workspace or profile being created, whose dialog closes on commit.
+    deltaEpoch += 1;
     snapshotDeltas = [];
   }
   snapshotDeltas.push({ ...delta, revision: ++eventRevision } as SnapshotDelta);
@@ -380,13 +412,23 @@ async function snapshotCandidate() {
   const sequence = ++snapshotSequence;
   const intent = intentRevision;
   const events = eventRevision;
-  const snapshot = await ipc.snapshot();
+  const epoch = deltaEpoch;
+  snapshotsInFlight += 1;
+  let snapshot: Snapshot;
+  try {
+    snapshot = await ipc.snapshot();
+  } catch (e) {
+    // The last read failed and none will replay what was recorded for it.
+    if (--snapshotsInFlight === 0) snapshotDeltas = [];
+    throw e;
+  }
+  snapshotsInFlight -= 1;
   return {
     snapshot,
     intent,
     events,
     isLatest: () => sequence === snapshotSequence,
-    isCurrent: () => sequence === snapshotSequence && intent === intentRevision,
+    isCurrent: () => sequence === snapshotSequence && intent === intentRevision && epoch === deltaEpoch,
   };
 }
 
@@ -594,8 +636,10 @@ export const useBrowser = create<BrowserState>((set, get) => ({
           }), (off) => { unlistenZoom = off; }),
         ]);
         const [, , , candidate] = await Promise.all([listenConsole(), listenNetwork(), listenPrivacy(), snapshotCandidate(), usePrivacy.getState().loadInfo()]);
-        if (candidate.isCurrent()) set(replaySnapshot(candidate.snapshot, candidate.events));
-        else await applyLatestSnapshot(set);
+        if (candidate.isCurrent()) {
+          set(replaySnapshot(candidate.snapshot, candidate.events));
+          snapshotDeltas = [];
+        } else await applyLatestSnapshot(set);
         set({ ready: true, error: null });
         void get().refreshCounts();
       } catch (e) {
@@ -663,9 +707,8 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     const scroll = await ipc.tabScrollPosition(id).catch(() => null);
     if (scroll) scrollOfClosing.set(id, scroll);
     await run(set, () => ipc.tabClose(id));
-    useConsole.getState().drop(id);
-    useNetwork.getState().drop(id);
-    usePrivacy.getState().drop(id);
+    // Its console, requests and counts go with the tab_closed event, which
+    // also covers tabs closed by the engine, an agent or a popout.
   },
   activateTab: async (id) => {
     if (get().detached.includes(id)) {
@@ -961,8 +1004,15 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       const scroll = scrollOfClosing.get(id);
       scrollOfClosing.delete(id);
       set((s) => ({ closedTabs: rememberClosed(s.closedTabs, gone, goneIndex, scroll) }));
-      set((s) => ({ loading: without(s.loading, id), navError: without(s.navError, id), crashedTabs: without(s.crashedTabs, id), permissionRequests: without(s.permissionRequests, id) }));
+      set((s) => ({ loading: without(s.loading, id), navError: without(s.navError, id), crashedTabs: without(s.crashedTabs, id), permissionRequests: without(s.permissionRequests, id), zoom: without(s.zoom, id) }));
+      zoomWanted.delete(id);
+      // Dropped here rather than in closeTab: a tab the engine, an agent or a
+      // popout closed never passes through it, and each kept up to 500
+      // console lines and 1000 requests for the rest of the session.
+      useConsole.getState().drop(id);
+      useNetwork.getState().drop(id);
       usePrivacy.getState().drop(id);
+      forgetClosedTab(id);
     }
     // Foreign-workspace tab events refresh badges without entering this strip.
     // Coalesced: a page load can emit several tab updates.

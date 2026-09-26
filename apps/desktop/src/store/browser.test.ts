@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@tauri-apps/api/event";
-import { CLOSED_TABS_LIMIT, orderWithAt, reduceCrash, sameSiteTab, togglePanel, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, tabInThisWindow, useBrowser, withoutRequest } from "./browser";
+import { CLOSED_TABS_LIMIT, onTabClosed, orderWithAt, reduceCrash, sameSiteTab, togglePanel, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, tabInThisWindow, useBrowser, withoutRequest } from "./browser";
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
 import type { PermissionAsked, PermissionDismissed, Snapshot, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
 import { usePrivacy } from "./privacy";
+import { useConsole } from "./console";
+import { useNetwork } from "./network";
+import { useTabAudio } from "./tabAudio";
+import { useEmulation } from "./emulation";
 
 const tab = (id: string, url = "https://x"): Tab => ({
   id, workspace_id: "w", tier: "today", url, title: "", position: 0, state: "active", last_active_at: "2026-01-01T00:00:00Z", favicon: null,
@@ -135,6 +139,25 @@ describe("reduceLoad", () => {
     useBrowser.getState().applyEvent({ type: "tab_closed", data: "a" });
     const s = useBrowser.getState();
     expect([s.loading, s.navError, s.crashedTabs]).toEqual([{}, {}, {}]);
+  });
+
+  it("lets go of everything kept for a tab the engine closed on its own", () => {
+    // No closeTab: an agent, a popout or the engine itself closed it.
+    useBrowser.setState({ tabs: [tab("a"), tab("b")], zoom: { a: 1.5, b: 2 } });
+    useConsole.setState({ byTab: { a: [{ tab_id: "a", level: "log", source: "console-api", text: "hi", url: null, line: null, timestamp: null, id: 1 }] } });
+    useNetwork.getState().apply({ type: "sent", data: { tab_id: "a", request_id: "r1", url: "https://x/", method: "GET", resource_type: "Document", timestamp: 1, wall_time: 1 } });
+    useTabAudio.setState({ byTab: { a: { tab_id: "a", audible: true, muted: false } } });
+    useEmulation.setState({ scale: { a: 0.5 } });
+    const forgotten = vi.fn();
+    const off = onTabClosed(forgotten);
+    useBrowser.getState().applyEvent({ type: "tab_closed", data: "a" });
+    off();
+    expect(forgotten).toHaveBeenCalledWith("a");
+    expect(useConsole.getState().byTab.a).toBeUndefined();
+    expect(useNetwork.getState().byTab.a).toBeUndefined();
+    expect(useTabAudio.getState().byTab.a).toBeUndefined();
+    expect(useEmulation.getState().scale.a).toBeUndefined();
+    expect(useBrowser.getState().zoom).toEqual({ b: 2 });
   });
 
   it("clears privacy results at the next main-frame start and drops them on close", () => {
@@ -344,6 +367,47 @@ describe("optimistic switching", () => {
     expect(useBrowser.getState().activeWorkspace).toBe("hydrated");
     expect(useBrowser.getState().profiles).toHaveLength(1);
     expect(useBrowser.getState().editingProfile).toEqual({ id: "new-dialog" });
+  });
+
+  it("keeps no replay log while no snapshot is in flight, so an idle session cannot void a creation", async () => {
+    const pending: Array<(snapshot: Snapshot) => void> = [];
+    const profile = { id: "p", name: "P", color: "#fff", avatar: "seed", note: "", container_id: "c", position: 0, created_at: "2026-01-01T00:00:00Z" };
+    vi.spyOn(ipc, "profileCreate").mockResolvedValue(profile);
+    vi.spyOn(ipc, "snapshot").mockImplementation(() => new Promise<Snapshot>((resolve) => pending.push(resolve)));
+    vi.spyOn(ipc, "workspaceTabCounts").mockResolvedValue([]);
+    useBrowser.setState({ workspaces: [], profiles: [], editingProfile: { id: null } });
+    // An idle session's events, none of which any read will replay.
+    for (let i = 0; i < 1000; i += 1) useBrowser.getState().applyEvent({ type: "profile_activated", data: "p" });
+
+    const creating = useBrowser.getState().createProfile({ name: "Created", color: "#fff", avatar: "seed", note: "" });
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    for (let i = 0; i < 100; i += 1) useBrowser.getState().applyEvent({ type: "profile_activated", data: "p" });
+    pending[0]!({ workspaces: [], active_workspace: null, tabs: [], active_tab: null, detached: [], profiles: [profile], active_profile: null });
+    await creating;
+
+    expect(ipc.snapshot).toHaveBeenCalledOnce();
+    expect(useBrowser.getState().editingProfile).toBeNull();
+    expect(useBrowser.getState().activeProfile).toBe("p");
+  });
+
+  it("retries a read whose replay log overflowed without dropping the dialog it closes", async () => {
+    const pending: Array<(snapshot: Snapshot) => void> = [];
+    const created = ws("created", "Created", 0);
+    vi.spyOn(ipc, "workspaceCreate").mockResolvedValue(created);
+    vi.spyOn(ipc, "snapshot").mockImplementation(() => new Promise<Snapshot>((resolve) => pending.push(resolve)));
+    vi.spyOn(ipc, "workspaceTabCounts").mockResolvedValue([]);
+    useBrowser.setState({ workspaces: [], editing: { id: null } });
+
+    const creating = useBrowser.getState().createWorkspace({ name: "Created", color: "#fff", icon: "home" }, false);
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    for (let i = 0; i < 1100; i += 1) useBrowser.getState().applyEvent({ type: "profile_activated", data: "p" });
+    pending[0]!({ workspaces: [], active_workspace: null, tabs: [], active_tab: null, detached: [], profiles: [], active_profile: null });
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    pending[1]!({ workspaces: [created], active_workspace: "created", tabs: [], active_tab: null, detached: [], profiles: [], active_profile: null });
+    await creating;
+
+    expect(useBrowser.getState().workspaces).toEqual([created]);
+    expect(useBrowser.getState().editing).toBeNull();
   });
 
   it("rolls the workspace back when the engine refuses, without a snapshot", async () => {
