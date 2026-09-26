@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { append, enqueueConsoleBatch, isNoise, selectEntries, useConsole } from "./console";
+import { append, CLEARED_SOURCE, enqueueConsoleBatch, isNoise, selectEntries, useConsole } from "./console";
+import { ipc } from "../lib/ipc";
 import type { ConsoleRow } from "./console";
 import type { ConsoleEntry } from "../lib/ipc";
 
@@ -116,5 +117,38 @@ describe("console UI batches", () => {
     state.drop("t");
     state.flush();
     expect(useConsole.getState().byTab.t).toBeUndefined();
+  });
+});
+
+describe("clearing", () => {
+  it("clears the host's copy too, and keeps what the new page logged on navigation", () => {
+    const host = vi.spyOn(ipc, "tabConsoleClear").mockResolvedValue(undefined as never);
+    useConsole.setState({ byTab: {}, preserve: false });
+    useConsole.getState().push(entry(1));
+    useConsole.getState().clear("t");
+    expect(host).toHaveBeenLastCalledWith("t", false);
+    useConsole.getState().push(entry(2));
+    useConsole.getState().navigated("t");
+    expect(host).toHaveBeenLastCalledWith("t", true);
+    expect(useConsole.getState().byTab.t).toEqual([]);
+    host.mockRestore();
+  });
+
+  it("follows console.clear() unless the log is preserved, leaving the note that it happened", () => {
+    const host = vi.spyOn(ipc, "tabConsoleClear").mockResolvedValue(undefined as never);
+    const cleared: ConsoleEntry = { ...entry(9), source: CLEARED_SOURCE, text: "Console was cleared" };
+    useConsole.setState({ byTab: {}, preserve: false });
+    useConsole.getState().push(entry(1));
+    useConsole.getState().enqueue(entry(2));
+    useConsole.getState().enqueue(cleared);
+    useConsole.getState().enqueue(entry(3));
+    useConsole.getState().flush();
+    expect(useConsole.getState().byTab.t!.map((e) => e.text)).toEqual(["Console was cleared", "3"]);
+    expect(host).toHaveBeenCalledWith("t", true);
+    useConsole.setState({ preserve: true });
+    useConsole.getState().push(cleared);
+    expect(useConsole.getState().byTab.t!.map((e) => e.text)).toEqual(["Console was cleared", "3", "Console was cleared"]);
+    useConsole.setState({ preserve: false });
+    host.mockRestore();
   });
 });

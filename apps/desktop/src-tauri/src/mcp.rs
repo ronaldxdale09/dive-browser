@@ -2312,6 +2312,12 @@ impl Browser for AppBrowser {
             .rules
             .set(&state, ws, rules)
             .map_err(|e| other(e.message))?;
+        {
+            use tauri_specta::Event as _;
+            if let Err(error) = (crate::rules::RulesChanged { workspace: ws }).emit(&self.app) {
+                tracing::warn!(%error, "could not tell the chrome the rules changed");
+            }
+        }
         crate::commands::reapply_rules(&state, ws)
             .await
             .map_err(|e| other(e.message))

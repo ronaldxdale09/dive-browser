@@ -1,7 +1,17 @@
 import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
-import { events } from "../lib/ipc";
+import { events, ipc } from "../lib/ipc";
 import type { NetworkEvent } from "../lib/ipc";
+
+/**
+ * Forget a tab's requests in the host as well: all of them, or those before
+ * `keepFrom`, the document request of the page now showing. The host keeps
+ * its own copy for the agent, HAR and OpenAPI exports and bug reports, and
+ * clearing only the panel left all of those describing a page that was gone.
+ */
+function clearHost(tabId: string, keepFrom: string | null) {
+  void ipc.tabNetworkClear(tabId, keepFrom).catch(() => undefined);
+}
 
 const CAP = 1000;
 
@@ -174,7 +184,8 @@ export const useNetwork = create<NetworkState>((set, get) => ({
     const tabId = event.data.tab_id;
     if (beginsAwaitedPage(tabId, event)) {
       awaitingDocument.delete(tabId);
-      get().clear(tabId);
+      forget(tabId);
+      clearHost(tabId, event.data.request_id);
     }
     const batch = pending.get(tabId) ?? new NetworkBatch(get().byTab[tabId], get().frames, tabId);
     if (!batch.apply(event)) return;
@@ -201,7 +212,8 @@ export const useNetwork = create<NetworkState>((set, get) => ({
     get().flush();
     if (beginsAwaitedPage(event.data.tab_id, event)) {
       awaitingDocument.delete(event.data.tab_id);
-      get().clear(event.data.tab_id);
+      forget(event.data.tab_id);
+      clearHost(event.data.tab_id, event.data.request_id);
     }
     set((s) => {
       if (event.type === "frame") {
@@ -223,8 +235,8 @@ export const useNetwork = create<NetworkState>((set, get) => ({
     });
   },
   clear: (tabId) => {
-    cancelPending(tabId);
-    set((s) => ({ byTab: { ...s.byTab, [tabId]: [] }, frames: withoutTab(s.frames, tabId) }));
+    forget(tabId);
+    clearHost(tabId, null);
   },
   drop: (tabId) => {
     cancelPending(tabId);
@@ -250,14 +262,24 @@ export const useNetwork = create<NetworkState>((set, get) => ({
     const arrived = newest !== undefined && newest.resourceType.toLowerCase() === "document" && (url === null || newest.url === url) && Date.now() / 1000 - newest.sentAt < RECENT_DOCUMENT_S;
     if (arrived) {
       awaitingDocument.delete(tabId);
+      clearHost(tabId, newest.id);
       if (kept.length === rows.length) return;
       set((s) => ({ byTab: { ...s.byTab, [tabId]: kept }, frames: keepFrames(s.frames, tabId, kept) }));
       return;
     }
     awaitingDocument.set(tabId, { url, at: Date.now() });
-    if (rows.length > 0) get().clear(tabId);
+    // The host is left alone until the document request arrives: it hears
+    // the page first, so it may already hold the request the panel is
+    // waiting for, and clearing it now would lose the new page's first row.
+    if (rows.length > 0) forget(tabId);
   },
 }));
+
+/** Empty the panel's rows for a tab, without touching the host. */
+function forget(tabId: string) {
+  cancelPending(tabId);
+  useNetwork.setState((s) => ({ byTab: { ...s.byTab, [tabId]: [] }, frames: withoutTab(s.frames, tabId) }));
+}
 
 function keepFrames(frames: Record<string, FrameRow[]>, tabId: string, kept: readonly RequestRow[]): Record<string, FrameRow[]> {
   const live = new Set(kept.map((row) => row.id));

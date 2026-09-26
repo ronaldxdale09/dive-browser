@@ -31,6 +31,15 @@ pub struct Rule {
     pub action: RuleAction,
 }
 
+/// A workspace's rules were replaced by something other than the Rules
+/// panel -- the agent or an MCP client. The panel reads them again, so the
+/// next edit there does not write its stale copy over what they set.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct RulesChanged {
+    /// The workspace whose rules changed.
+    pub workspace: WorkspaceId,
+}
+
 /// What happens to a matching request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "snake_case")]

@@ -472,6 +472,17 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<NetworkEvent> {
             encoded_length: p["encodedDataLength"].as_f64().unwrap_or_default(),
             timestamp,
         }),
+        // A socket gets no responseReceived; its handshake is its response.
+        // Without this the row said "…" for as long as the socket was open.
+        "Network.webSocketHandshakeResponseReceived" => Some(NetworkEvent::Response {
+            tab_id,
+            request_id,
+            status: u16::try_from(p["response"]["status"].as_u64().unwrap_or(101)).unwrap_or(101),
+            mime_type: "websocket".into(),
+            from_cache: false,
+            headers: headers_of(&p["response"]["headers"]),
+            timestamp,
+        }),
         "Network.webSocketCreated" => Some(NetworkEvent::Socket {
             tab_id,
             request_id,
@@ -776,6 +787,18 @@ mod tests {
         assert!(
             matches!(frame, NetworkEvent::Frame { ref direction, ref payload, .. } if direction == "received" && payload == "hi")
         );
+        let handshake = map_event(
+            tab,
+            &ev(
+                "Network.webSocketHandshakeResponseReceived",
+                json!({"requestId": "s", "timestamp": 1.5, "response": {"status": 101, "headers": {"Upgrade": "websocket"}}}),
+            ),
+        )
+        .unwrap();
+        assert!(matches!(
+            handshake,
+            NetworkEvent::Response { status: 101, .. }
+        ));
         let bin = map_event(tab, &ev("Network.webSocketFrameSent", json!({"requestId": "s", "timestamp": 2.0, "response": {"opcode": 2, "payloadData": "AAAA"}}))).unwrap();
         assert!(
             matches!(bin, NetworkEvent::Frame { ref payload, .. } if payload.starts_with("<binary"))

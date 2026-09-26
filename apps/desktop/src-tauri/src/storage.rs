@@ -7,13 +7,35 @@ use specta::Type;
 
 use crate::error::{AppError, AppResult};
 
+/// Bytes of a value the panel is sent. A page can keep megabytes under one
+/// key -- a serialised store, a cached response -- and sending all of it to
+/// show one truncated line froze the dock. The rest is a copy away (see
+/// [`value`]).
+pub const VALUE_SHOWN: usize = 2048;
+
+/// `value` cut to [`VALUE_SHOWN`] bytes on a character boundary, and how
+/// long it was.
+fn shown(value: &str) -> (String, u32) {
+    let size = u32::try_from(value.len()).unwrap_or(u32::MAX);
+    if value.len() <= VALUE_SHOWN {
+        return (value.to_owned(), size);
+    }
+    let mut cut = VALUE_SHOWN;
+    while !value.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    (value[..cut].to_owned(), size)
+}
+
 /// One cookie.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct Cookie {
     /// Name.
     pub name: String,
-    /// Value.
+    /// Value, cut to [`VALUE_SHOWN`] bytes.
     pub value: String,
+    /// Length of the whole value in bytes.
+    pub size: u32,
     /// Domain.
     pub domain: String,
     /// Path.
@@ -28,15 +50,26 @@ pub struct Cookie {
     pub same_site: Option<String>,
 }
 
+/// One `localStorage` or `sessionStorage` entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct StorageItem {
+    /// Key.
+    pub key: String,
+    /// Value, cut to [`VALUE_SHOWN`] bytes.
+    pub value: String,
+    /// Length of the whole value in bytes.
+    pub size: u32,
+}
+
 /// Everything the Storage panel shows.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
 pub struct StorageSnapshot {
     /// Cookies visible to the page's URL.
     pub cookies: Vec<Cookie>,
-    /// `localStorage` entries as `[key, value]`.
-    pub local: Vec<[String; 2]>,
-    /// `sessionStorage` entries as `[key, value]`.
-    pub session: Vec<[String; 2]>,
+    /// `localStorage` entries.
+    pub local: Vec<StorageItem>,
+    /// `sessionStorage` entries.
+    pub session: Vec<StorageItem>,
 }
 
 /// Read cookies and both storages for `url`.
@@ -66,18 +99,71 @@ async fn storage_items(
     session: &CdpSession,
     origin: &str,
     is_local: bool,
-) -> AppResult<Vec<[String; 2]>> {
+) -> AppResult<Vec<StorageItem>> {
+    Ok(parse_items(&raw_items(session, origin, is_local).await?))
+}
+
+async fn raw_items(session: &CdpSession, origin: &str, is_local: bool) -> AppResult<Value> {
     if origin.is_empty() || origin == "null" {
-        return Ok(Vec::new());
+        return Ok(Value::Null);
     }
-    let result = session
+    session
         .call(
             "DOMStorage.getDOMStorageItems",
             json!({"storageId": {"securityOrigin": origin, "isLocalStorage": is_local}}),
         )
         .await
-        .map_err(AppError::new)?;
-    Ok(parse_items(&result))
+        .map_err(AppError::new)
+}
+
+fn origin_of(url: &str) -> String {
+    url::Url::parse(url)
+        .ok()
+        .map(|u| u.origin().ascii_serialization())
+        .unwrap_or_default()
+}
+
+/// One value in full: a cookie by name, domain and path, or a web-storage
+/// key. `None` when it has gone since the panel read it.
+pub async fn value(
+    session: &CdpSession,
+    url: &str,
+    section: &str,
+    key: &str,
+    domain: Option<&str>,
+    path: Option<&str>,
+) -> AppResult<Option<String>> {
+    match section {
+        "cookies" => {
+            let result = session
+                .call("Network.getCookies", json!({"urls": [url]}))
+                .await
+                .map_err(AppError::new)?;
+            Ok(result["cookies"].as_array().and_then(|list| {
+                list.iter()
+                    .find(|c| {
+                        c["name"].as_str() == Some(key)
+                            && domain.is_none_or(|d| c["domain"].as_str() == Some(d))
+                            && path.is_none_or(|p| c["path"].as_str() == Some(p))
+                    })
+                    .and_then(|c| c["value"].as_str().map(str::to_owned))
+            }))
+        }
+        "local" | "session" => {
+            let raw = raw_items(session, &origin_of(url), section == "local").await?;
+            Ok(raw["entries"].as_array().and_then(|list| {
+                list.iter()
+                    .find(|e| e.get(0).and_then(Value::as_str) == Some(key))
+                    .map(|e| {
+                        e.get(1)
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned()
+                    })
+            }))
+        }
+        other => Err(AppError::new(format!("unknown storage section: {other}"))),
+    }
 }
 
 /// Remove one entry: a cookie by name, domain and path, or a web-storage
@@ -134,31 +220,35 @@ pub fn parse_cookies(result: &Value) -> Vec<Cookie> {
         .as_array()
         .map(|list| {
             list.iter()
-                .map(|c| Cookie {
-                    name: c["name"].as_str().unwrap_or_default().to_owned(),
-                    value: c["value"].as_str().unwrap_or_default().to_owned(),
-                    domain: c["domain"].as_str().unwrap_or_default().to_owned(),
-                    path: c["path"].as_str().unwrap_or_default().to_owned(),
-                    expires: c["expires"].as_f64().unwrap_or(-1.0),
-                    http_only: c["httpOnly"].as_bool().unwrap_or(false),
-                    secure: c["secure"].as_bool().unwrap_or(false),
-                    same_site: c["sameSite"].as_str().map(str::to_owned),
+                .map(|c| {
+                    let (value, size) = shown(c["value"].as_str().unwrap_or_default());
+                    Cookie {
+                        name: c["name"].as_str().unwrap_or_default().to_owned(),
+                        value,
+                        size,
+                        domain: c["domain"].as_str().unwrap_or_default().to_owned(),
+                        path: c["path"].as_str().unwrap_or_default().to_owned(),
+                        expires: c["expires"].as_f64().unwrap_or(-1.0),
+                        http_only: c["httpOnly"].as_bool().unwrap_or(false),
+                        secure: c["secure"].as_bool().unwrap_or(false),
+                        same_site: c["sameSite"].as_str().map(str::to_owned),
+                    }
                 })
                 .collect()
         })
         .unwrap_or_default()
 }
 
-/// `DOMStorage.getDOMStorageItems` result to `[key, value]` rows.
-pub fn parse_items(result: &Value) -> Vec<[String; 2]> {
+/// `DOMStorage.getDOMStorageItems` result to rows.
+pub fn parse_items(result: &Value) -> Vec<StorageItem> {
     result["entries"]
         .as_array()
         .map(|list| {
             list.iter()
                 .filter_map(|e| {
-                    let k = e.get(0)?.as_str()?;
-                    let v = e.get(1)?.as_str().unwrap_or_default();
-                    Some([k.to_owned(), v.to_owned()])
+                    let key = e.get(0)?.as_str()?.to_owned();
+                    let (value, size) = shown(e.get(1)?.as_str().unwrap_or_default());
+                    Some(StorageItem { key, value, size })
                 })
                 .collect()
         })
@@ -181,13 +271,25 @@ mod tests {
         assert_eq!(cookies[1].same_site, None);
 
         let items = parse_items(&json!({"entries": [["a", "1"], ["b", "2"], ["bad"]]}));
-        assert_eq!(
-            items,
-            vec![
-                ["a".to_owned(), "1".to_owned()],
-                ["b".to_owned(), "2".to_owned()]
-            ]
-        );
+        let keys: Vec<_> = items
+            .iter()
+            .map(|i| (i.key.as_str(), i.value.as_str(), i.size))
+            .collect();
+        assert_eq!(keys, [("a", "1", 1), ("b", "2", 1)]);
         assert!(parse_items(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn large_values_are_cut_short_and_say_how_long_they_were() {
+        let big = "é".repeat(VALUE_SHOWN);
+        let items = parse_items(&json!({"entries": [["blob", big]]}));
+        assert!(items[0].value.len() <= VALUE_SHOWN);
+        assert!(big.starts_with(&items[0].value));
+        assert_eq!(items[0].size as usize, big.len());
+        let cookies = parse_cookies(
+            &json!({"cookies": [{"name": "c", "value": "v".repeat(VALUE_SHOWN + 1)}]}),
+        );
+        assert_eq!(cookies[0].value.len(), VALUE_SHOWN);
+        assert_eq!(cookies[0].size as usize, VALUE_SHOWN + 1);
     }
 }

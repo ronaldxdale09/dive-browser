@@ -14,6 +14,10 @@ use crate::Runtime;
 const MAX_TEXT: usize = 16 * 1024;
 const MAX_URL: usize = 8 * 1024;
 
+/// The `source` of the line `console.clear()` leaves behind. The chrome
+/// clears the panel when it sees one, unless "Preserve log" is on.
+pub const CLEARED_SOURCE: &str = "clear";
+
 /// Severity of a console entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]
@@ -63,8 +67,14 @@ pub fn attach(
         "console-entry-batch",
         map_event,
         |state, entry| {
+            // The page clearing its console starts it over, as a navigation
+            // does; the marker line itself belongs to what comes after.
+            if entry.source == CLEARED_SOURCE {
+                state.buffers.mark_console(entry.tab_id);
+            }
             state.buffers.push_console(entry.clone());
         },
+        |state, tab_id| state.buffers.mark_console(tab_id),
     )
 }
 
@@ -123,7 +133,29 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<ConsoleEntry> {
     let p = &event.params;
     match event.method.as_str() {
         "Runtime.consoleAPICalled" => {
-            let level = match p["type"].as_str().unwrap_or("log") {
+            let kind = p["type"].as_str().unwrap_or("log");
+            // The end of a group has nothing to say: the engine sends the
+            // literal "console.groupEnd" as its text, which read as a line
+            // the page had logged.
+            if kind == "endGroup" {
+                return None;
+            }
+            // `console.clear()` also arrives as "console.clear". What the
+            // person needs is DevTools' note that it happened, on a line the
+            // chrome recognises so it can clear the panel.
+            if kind == "clear" {
+                return Some(ConsoleEntry {
+                    tab_id,
+                    level: Level::Info,
+                    text: "Console was cleared".into(),
+                    source: CLEARED_SOURCE.into(),
+                    url: None,
+                    line: None,
+                    timestamp: p["timestamp"].as_f64().unwrap_or_default(),
+                    column: None,
+                });
+            }
+            let level = match kind {
                 "debug" | "trace" => Level::Debug,
                 "warning" => Level::Warn,
                 "error" | "assert" => Level::Error,
@@ -334,6 +366,30 @@ mod tests {
         assert_eq!(entry.text, "count: 3 Object");
         assert_eq!(entry.url.as_deref(), Some("http://x/app.js"));
         assert_eq!(entry.line, Some(10));
+    }
+
+    #[test]
+    fn a_cleared_console_and_a_closed_group_read_as_devtools_shows_them() {
+        let call = |kind: &str| {
+            ev(
+                "Runtime.consoleAPICalled",
+                json!({"type": kind, "timestamp": 3.0,
+                       "args": [{"type": "string", "value": format!("console.{kind}")}]}),
+            )
+        };
+        assert!(map_event(TabId::new(), &call("endGroup")).is_none());
+        let cleared = map_event(TabId::new(), &call("clear")).unwrap();
+        assert_eq!(cleared.source, CLEARED_SOURCE);
+        assert_eq!(cleared.text, "Console was cleared");
+        let group = map_event(
+            TabId::new(),
+            &ev(
+                "Runtime.consoleAPICalled",
+                json!({"type": "startGroup", "args": [{"type": "string", "value": "Loading"}]}),
+            ),
+        )
+        .unwrap();
+        assert_eq!(group.text, "Loading");
     }
 
     #[test]
