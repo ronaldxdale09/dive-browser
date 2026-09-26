@@ -32,10 +32,10 @@ export function PageActions() {
   // Keyed by tab and address: a page that navigated is neither in reader view
   // nor translated any more, and a fresh pair of buttons is exactly that.
   if (!tabId || !/^https?:/i.test(url)) return null;
-  return <Actions key={`${tabId}|${url}`} tabId={tabId} />;
+  return <Actions key={`${tabId}|${url}`} tabId={tabId} url={url} />;
 }
 
-function Actions({ tabId }: { tabId: string }) {
+function Actions({ tabId, url }: { tabId: string; url: string }) {
   const notify = useBrowser((s) => s.notify);
   const setPageMode = useBrowser((s) => s.setPageMode);
   // Kept per tab in the store, so reader view or a translation started from
@@ -128,7 +128,7 @@ function Actions({ tabId }: { tabId: string }) {
   const button = "grid size-6 place-items-center rounded-full text-ink-3 hover:bg-surface-3 hover:text-ink";
   return (
     <div ref={root} className="relative flex items-center gap-0.5">
-      <WalletButton tabId={tabId} className={button} />
+      <WalletButton tabId={tabId} url={url} className={button} />
       <Tooltip label={reading ? "Leave reader view" : "Reader view"}>
         <button type="button" aria-label={reading ? "Leave reader view" : "Reader view"} aria-pressed={reading} onClick={() => void toggleReader()} className={`${button} ${reading ? "text-highlight" : ""}`}>
           <Icon icon={readerBusy ? Loader2 : BookOpen} size={13} className={readerBusy ? "motion-safe:animate-spin" : undefined} />
@@ -163,9 +163,11 @@ function Actions({ tabId }: { tabId: string }) {
  *
  * It only appears once something is saved, so a browser nobody has filled in
  * shows nothing, and filling is always this click -- the host reads a card
- * number for exactly this one fill and never at any other time.
+ * number for exactly this one fill and never at any other time. The address
+ * shown when the click was made goes with it, so a page that moved to
+ * another site in the meantime is not filled.
  */
-function WalletButton({ tabId, className }: { tabId: string; className: string }) {
+function WalletButton({ tabId, url, className }: { tabId: string; url: string; className: string }) {
   const addresses = useWallet((s) => s.addresses);
   const cards = useWallet((s) => s.cards);
   const loaded = useWallet((s) => s.loaded);
@@ -199,7 +201,7 @@ function WalletButton({ tabId, className }: { tabId: string; className: string }
               role="menuitem"
               onClick={() => {
                 setOpen(false);
-                void fillAddress(tabId, address.id);
+                void fillAddress(tabId, address.id, url);
               }}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-ink hover:bg-surface-2"
             >
@@ -214,7 +216,7 @@ function WalletButton({ tabId, className }: { tabId: string; className: string }
               role="menuitem"
               onClick={() => {
                 setOpen(false);
-                void fillCard(tabId, card.id);
+                void fillCard(tabId, card.id, url);
               }}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-ink hover:bg-surface-2"
             >

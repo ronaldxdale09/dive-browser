@@ -54,11 +54,11 @@ describe("useWallet", () => {
   });
 
   it("fills and says how it went", async () => {
-    await useWallet.getState().fillAddress("t1", "a1");
-    expect(ipc.addressFill).toHaveBeenCalledWith("t1", "a1");
+    await useWallet.getState().fillAddress("t1", "a1", "https://shop.test/checkout");
+    expect(ipc.addressFill).toHaveBeenCalledWith("t1", "a1", "https://shop.test/checkout");
     expect(useBrowser.getState().notice).toBe("Filled 6 fields.");
-    await useWallet.getState().fillCard("t1", "c1");
-    expect(ipc.cardFill).toHaveBeenCalledWith("t1", "c1");
+    await useWallet.getState().fillCard("t1", "c1", "https://shop.test/checkout");
+    expect(ipc.cardFill).toHaveBeenCalledWith("t1", "c1", "https://shop.test/checkout");
   });
 
   it("keeps a refused card out of the list and hands the reason to the form", async () => {

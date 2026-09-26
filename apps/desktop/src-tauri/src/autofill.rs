@@ -173,8 +173,14 @@ pub fn save_card(state: &AppState, profile: ProfileId, draft: &CardDraft) -> App
     Ok(card)
 }
 
-/// The card's details, number included, for one fill the person asked for.
-pub fn card_fill(state: &AppState, profile: ProfileId, id: &str) -> AppResult<CardFill> {
+/// The card's details for one fill the person asked for. The number is read
+/// from the keychain only when the page has a field for it.
+pub fn card_fill(
+    state: &AppState,
+    profile: ProfileId,
+    id: &str,
+    with_number: bool,
+) -> AppResult<CardFill> {
     let card = {
         let store = lock(&state.store);
         store
@@ -183,9 +189,13 @@ pub fn card_fill(state: &AppState, profile: ProfileId, id: &str) -> AppResult<Ca
             .find(|card| card.id == id)
             .ok_or_else(|| AppError::new("no such card"))?
     };
-    let number = entry(id)?
-        .get_password()
-        .map_err(|error| AppError::new(format!("the card number could not be read: {error}")))?;
+    let number = if with_number {
+        entry(id)?
+            .get_password()
+            .map_err(|error| AppError::new(format!("the card number could not be read: {error}")))?
+    } else {
+        String::new()
+    };
     lock(&state.store).card_used(id, Timestamp::now())?;
     Ok(CardFill {
         cardholder: card.cardholder,
@@ -225,14 +235,76 @@ pub fn delete_card_secret(id: &str) -> AppResult<()> {
     }
 }
 
+/// The kinds of field an address fills, and the address field each takes.
+/// The names are the page script's (`MATCHERS` in autofill.js).
+const ADDRESS_KINDS: &[(&str, &str)] = &[
+    ("name", "name"),
+    ("given-name", "name"),
+    ("family-name", "name"),
+    ("organization", "organization"),
+    ("address-line1", "street"),
+    ("address-line2", "street"),
+    ("address-level2", "city"),
+    ("address-level1", "region"),
+    ("postal-code", "postal_code"),
+    ("country", "country"),
+    ("tel", "phone"),
+    ("email", "email"),
+];
+
+/// The kinds of field a card fills, and the card field each takes.
+const CARD_KINDS: &[(&str, &str)] = &[
+    ("cc-name", "cardholder"),
+    ("cc-number", "number"),
+    ("cc-exp-month", "expiry_month"),
+    ("cc-exp-year", "expiry_year"),
+    ("cc-exp", "expiry_month"),
+    ("cc-exp", "expiry_year"),
+];
+
+/// What the person picked to fill.
+pub enum Wallet<'a> {
+    Address(&'a dive_core::Address),
+    /// A card, by id: its details are read only once the page has shown it
+    /// has fields for them.
+    Card(&'a str),
+}
+
+/// Only the fields of `full` that a kind present on the page takes. A
+/// checkout that asks for a postcode and a card number is sent those, not
+/// the phone number and the street it never asked for.
+pub fn fields_for_page(
+    full: &serde_json::Value,
+    table: &[(&str, &str)],
+    present: &[String],
+) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
+    for (kind, field) in table {
+        if present.iter().any(|p| p == kind)
+            && let Some(value) = full.get(*field)
+        {
+            out.insert((*field).to_owned(), value.clone());
+        }
+    }
+    serde_json::Value::Object(out)
+}
+
 /// Put a saved address, or a card, into the tab's form. Returns how many
 /// fields were filled -- zero means nothing on the page looked like one.
+///
+/// `page_url` is the page the person saw when they picked: the fill goes to
+/// a document of that origin or nowhere, checked when the page is asked what
+/// it has and again in the evaluation that fills. Everything runs in Dive's
+/// isolated world, where the page cannot stand in for the fill function.
 pub async fn fill_into(
     state: &AppState,
     tab_id: dive_core::TabId,
-    what: &str,
-    value: &serde_json::Value,
+    profile: ProfileId,
+    page_url: &str,
+    what: Wallet<'_>,
 ) -> AppResult<u32> {
+    let origin = crate::passwords::origin_of(page_url)
+        .map_err(|_| AppError::new("this page cannot be filled"))?;
     let session = {
         let host = lock(&state.host);
         host.as_ref()
@@ -243,22 +315,76 @@ pub async fn fill_into(
             })
             .ok_or_else(|| AppError::new("this tab is not loaded"))?
     };
+    let failed = |error: dive_cdp::CdpError| {
+        AppError::new(format!("this form could not be filled: {error}"))
+    };
+    let context = crate::page_world::context(&session).await.map_err(failed)?;
     let source = crate::pagescript::build("autofill.js", &[]);
-    let _ = session
-        .call(
-            "Runtime.evaluate",
-            serde_json::json!({"expression": source}),
-        )
-        .await;
-    let expression = format!("window.__diveFill{what}({value})");
-    let result = session
-        .call(
-            "Runtime.evaluate",
-            serde_json::json!({"expression": expression, "returnByValue": true}),
-        )
+    crate::page_world::evaluate_in(&session, context, serde_json::json!({"expression": source}))
         .await
-        .map_err(|error| AppError::new(format!("this form could not be filled: {error}")))?;
-    Ok(result["result"]["value"]["filled"]
+        .map_err(failed)?;
+    let (table, function) = match what {
+        Wallet::Address(_) => (ADDRESS_KINDS, "__diveFillAddress"),
+        Wallet::Card(_) => (CARD_KINDS, "__diveFillCard"),
+    };
+    let kinds: Vec<&str> = table.iter().map(|(kind, _)| *kind).collect();
+    let probe = crate::page_world::evaluate_in(
+        &session,
+        context,
+        serde_json::json!({
+            "expression": format!(
+                "({{origin: location.origin, kinds: window.__diveAutofillKinds({})}})",
+                serde_json::to_string(&kinds).unwrap_or_else(|_| "[]".into())
+            ),
+            "returnByValue": true,
+        }),
+    )
+    .await
+    .map_err(failed)?;
+    let probe = &probe["result"]["value"];
+    if probe["origin"].as_str() != Some(origin.as_str()) {
+        return Err(AppError::new(
+            "the page changed before it could be filled; pick again",
+        ));
+    }
+    let present: Vec<String> = probe["kinds"]
+        .as_array()
+        .map(|kinds| {
+            kinds
+                .iter()
+                .filter_map(|kind| kind.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    if present.is_empty() {
+        return Ok(0);
+    }
+    let full = match what {
+        Wallet::Address(address) => serde_json::to_value(address).map_err(AppError::new)?,
+        Wallet::Card(id) => {
+            let fill = card_fill(state, profile, id, present.iter().any(|k| k == "cc-number"))?;
+            serde_json::to_value(&fill).map_err(AppError::new)?
+        }
+    };
+    let value = fields_for_page(&full, table, &present);
+    let expression = format!(
+        "location.origin === {} ? window.{function}({value}) : {{filled: 0, moved: true}}",
+        serde_json::to_string(&origin).unwrap_or_default()
+    );
+    let result = crate::page_world::evaluate_in(
+        &session,
+        context,
+        serde_json::json!({"expression": expression, "returnByValue": true}),
+    )
+    .await
+    .map_err(failed)?;
+    let answer = &result["result"]["value"];
+    if answer["moved"] == true {
+        return Err(AppError::new(
+            "the page changed before it could be filled; pick again",
+        ));
+    }
+    Ok(answer["filled"]
         .as_u64()
         .unwrap_or(0)
         .try_into()
@@ -342,6 +468,48 @@ mod tests {
                 .unwrap_err()
                 .contains("01/2025")
         );
+    }
+
+    #[test]
+    fn a_page_is_sent_only_what_its_fields_take() {
+        let card = serde_json::json!({
+            "cardholder": "Dale", "number": "4242424242424242",
+            "expiry_month": 9, "expiry_year": 2030
+        });
+        // An expiry field and a name, but nowhere for the number.
+        let sent = fields_for_page(&card, CARD_KINDS, &["cc-exp".into(), "cc-name".into()]);
+        assert_eq!(
+            sent,
+            serde_json::json!({"cardholder": "Dale", "expiry_month": 9, "expiry_year": 2030})
+        );
+        let address = serde_json::json!({
+            "id": "a1", "label": "Home", "name": "Dale", "street": "1 Road",
+            "postal_code": "6000", "phone": "123", "email": "d@a.test"
+        });
+        assert_eq!(
+            fields_for_page(
+                &address,
+                ADDRESS_KINDS,
+                &["postal-code".into(), "given-name".into()]
+            ),
+            serde_json::json!({"name": "Dale", "postal_code": "6000"})
+        );
+        assert_eq!(
+            fields_for_page(&address, ADDRESS_KINDS, &[]),
+            serde_json::json!({})
+        );
+    }
+
+    #[test]
+    fn the_kinds_asked_about_are_the_ones_the_page_script_knows() {
+        let script = crate::pagescript::build("autofill.js", &[]);
+        for (kind, _) in ADDRESS_KINDS.iter().chain(CARD_KINDS) {
+            assert!(
+                script.contains(&format!("\"{kind}\": ["))
+                    || script.contains(&format!("{kind}: [")),
+                "autofill.js has no matcher for {kind}"
+            );
+        }
     }
 
     #[test]

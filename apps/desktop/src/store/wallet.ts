@@ -27,9 +27,12 @@ interface WalletStore {
   /** Save a card; resolves to why it failed, or null once saved. */
   saveCard: (draft: CardDraft) => Promise<string | null>;
   deleteCard: (id: string) => Promise<void>;
-  /** Fill a form on `tabId`, and say how it went. */
-  fillAddress: (tabId: string, id: string) => Promise<void>;
-  fillCard: (tabId: string, id: string) => Promise<void>;
+  /**
+   * Fill a form on `tabId`, and say how it went. `url` is the page the
+   * person picked on: the host fills a document of that site or nothing.
+   */
+  fillAddress: (tabId: string, id: string, url: string) => Promise<void>;
+  fillCard: (tabId: string, id: string, url: string) => Promise<void>;
 }
 
 /** An empty address, for the "add" form. */
@@ -119,16 +122,16 @@ export const useWallet = create<WalletStore>((set, get) => ({
       set({ error: errorMessage(error) });
     }
   },
-  fillAddress: async (tabId, id) => {
+  fillAddress: async (tabId, id, url) => {
     try {
-      useBrowser.getState().notify(fillMessage(await ipc.addressFill(tabId, id), "address"), 3000);
+      useBrowser.getState().notify(fillMessage(await ipc.addressFill(tabId, id, url), "address"), 3000);
     } catch (error) {
       useBrowser.setState({ error: errorMessage(error) });
     }
   },
-  fillCard: async (tabId, id) => {
+  fillCard: async (tabId, id, url) => {
     try {
-      useBrowser.getState().notify(fillMessage(await ipc.cardFill(tabId, id), "payment"), 3000);
+      useBrowser.getState().notify(fillMessage(await ipc.cardFill(tabId, id, url), "payment"), 3000);
     } catch (error) {
       useBrowser.setState({ error: errorMessage(error) });
     }

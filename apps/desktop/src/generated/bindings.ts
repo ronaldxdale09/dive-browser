@@ -308,8 +308,13 @@ export const commands = {
 	addressSave: (address: Address) => typedError<Address, AppError>(__TAURI_INVOKE("address_save", { address })),
 	/**  Forget an address. */
 	addressDelete: (id: string) => typedError<boolean, AppError>(__TAURI_INVOKE("address_delete", { id })),
-	/**  Put a saved address into the tab's form. */
-	addressFill: (tabId: TabId, id: string) => typedError<number, AppError>(__TAURI_INVOKE("address_fill", { tabId, id })),
+	/**
+	 *  Put a saved address into the tab's form. `url` is the page the person
+	 *  picked it on: a tab that has moved to another site since is not filled.
+	 *  The address comes from the profile the tab belongs to, which is not
+	 *  always the active one.
+	 */
+	addressFill: (tabId: TabId, id: string, url: string) => typedError<number, AppError>(__TAURI_INVOKE("address_fill", { tabId, id, url })),
 	/**  Saved cards in the active profile. Numbers are never included. */
 	cardsList: () => typedError<Card[], AppError>(__TAURI_INVOKE("cards_list")),
 	/**  Save a card: its listing here, its number in the keychain. */
@@ -318,9 +323,11 @@ export const commands = {
 	cardDelete: (id: string) => typedError<boolean, AppError>(__TAURI_INVOKE("card_delete", { id })),
 	/**
 	 *  Put a saved card into the tab's form. This is the only path that reads a
-	 *  card number, and only for the fill the person just asked for.
+	 *  card number, and only for the fill the person just asked for, on a page
+	 *  with a field for it. `url` is the page the person picked it on, and the
+	 *  card comes from the tab's own profile, as for an address.
 	 */
-	cardFill: (tabId: TabId, id: string) => typedError<number, AppError>(__TAURI_INVOKE("card_fill", { tabId, id })),
+	cardFill: (tabId: TabId, id: string, url: string) => typedError<number, AppError>(__TAURI_INVOKE("card_fill", { tabId, id, url })),
 	/**
 	 *  Write everything this profile knows to a file the person chooses.
 	 *  Returns where it went, or `None` when the dialog was dismissed.

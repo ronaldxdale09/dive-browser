@@ -3253,27 +3253,35 @@ pub(crate) fn address_delete(state: State<'_, AppState>, id: String) -> AppResul
     Ok(store.remove_address(profile.id, &id)?)
 }
 
-/// Put a saved address into the tab's form.
+/// Put a saved address into the tab's form. `url` is the page the person
+/// picked it on: a tab that has moved to another site since is not filled.
+/// The address comes from the profile the tab belongs to, which is not
+/// always the active one.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn address_fill(
     app: AppHandle<Runtime>,
     tab_id: TabId,
     id: String,
+    url: String,
 ) -> AppResult<u32> {
     use tauri::Manager as _;
     let state = app.state::<AppState>();
-    let address = {
-        let store = lock(&state.store);
-        let profile = active_profile(&store, *lock(&state.active_workspace))?;
-        store
-            .addresses(profile.id)?
-            .into_iter()
-            .find(|address| address.id == id)
-            .ok_or_else(|| AppError::new("no such address"))?
-    };
-    let value = serde_json::to_value(&address).map_err(AppError::new)?;
-    let filled = crate::autofill::fill_into(&state, tab_id, "Address", &value).await?;
+    let profile = crate::credential_fill::profile_of_tab(&app, tab_id)
+        .ok_or_else(|| AppError::new("that tab has no profile"))?;
+    let address = lock(&state.store)
+        .addresses(profile)?
+        .into_iter()
+        .find(|address| address.id == id)
+        .ok_or_else(|| AppError::new("no such address"))?;
+    let filled = crate::autofill::fill_into(
+        &state,
+        tab_id,
+        profile,
+        &url,
+        crate::autofill::Wallet::Address(&address),
+    )
+    .await?;
     lock(&state.store).address_used(&id, dive_core::Timestamp::now())?;
     Ok(filled)
 }
@@ -3313,23 +3321,29 @@ pub(crate) async fn card_delete(app: AppHandle<Runtime>, id: String) -> AppResul
 }
 
 /// Put a saved card into the tab's form. This is the only path that reads a
-/// card number, and only for the fill the person just asked for.
+/// card number, and only for the fill the person just asked for, on a page
+/// with a field for it. `url` is the page the person picked it on, and the
+/// card comes from the tab's own profile, as for an address.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn card_fill(
     app: AppHandle<Runtime>,
     tab_id: TabId,
     id: String,
+    url: String,
 ) -> AppResult<u32> {
     use tauri::Manager as _;
     let state = app.state::<AppState>();
-    let profile = {
-        let store = lock(&state.store);
-        active_profile(&store, *lock(&state.active_workspace))?
-    };
-    let fill = crate::autofill::card_fill(&state, profile.id, &id)?;
-    let value = serde_json::to_value(&fill).map_err(AppError::new)?;
-    crate::autofill::fill_into(&state, tab_id, "Card", &value).await
+    let profile = crate::credential_fill::profile_of_tab(&app, tab_id)
+        .ok_or_else(|| AppError::new("that tab has no profile"))?;
+    crate::autofill::fill_into(
+        &state,
+        tab_id,
+        profile,
+        &url,
+        crate::autofill::Wallet::Card(&id),
+    )
+    .await
 }
 
 /// Write everything this profile knows to a file the person chooses.
