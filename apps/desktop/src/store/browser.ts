@@ -6,6 +6,7 @@ import { listenNetwork, useNetwork } from "./network";
 import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
 import { useDownloads } from "./downloads";
 import { useLayout } from "./layout";
+import { canGoBack } from "../lib/useTabHistory";
 import type { DownloadNotice, CoreEvent, Decision, Duration, NavigationHistory, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
 import { fileNameOr, fileUrl, opensInTab} from "../lib/paths";
@@ -960,7 +961,12 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   },
   back: async () => {
     const id = tabInThisWindow(get().activeTab, get().detached);
-    if (id) await run(set, () => ipc.tabBack(id));
+    if (!id) return;
+    // ⌘[ on a brand-new tab would go back to the blank page its view was
+    // created on; the button is disabled there, and so is the chord.
+    const history = await ipc.tabHistory(id).catch(() => null);
+    if (history && !canGoBack(history)) return;
+    await run(set, () => ipc.tabBack(id));
   },
   forward: async () => {
     const id = tabInThisWindow(get().activeTab, get().detached);

@@ -3126,7 +3126,10 @@ export type TabCrashed = {
  */
 export type TabHistoryChanged = {
 	tab_id: TabId,
-	/**  Whether there is an entry before the current one. */
+	/**
+	 *  Whether there is a page before the current one: the blank page a new
+	 *  tab's view is created on does not count.
+	 */
 	can_go_back: boolean,
 	/**  Whether there is an entry after the current one. */
 	can_go_forward: boolean,

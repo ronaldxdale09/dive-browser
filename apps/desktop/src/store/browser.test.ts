@@ -919,6 +919,19 @@ describe("back", () => {
     await useBrowser.getState().back();
     expect(back).not.toHaveBeenCalled();
   });
+
+  it("does not go back from a new tab's first page to the blank page it started on", async () => {
+    const back = vi.spyOn(ipc, "tabBack").mockResolvedValue(null);
+    const blankFirst = { generation: "g", current_index: 1, entries: [{ id: 1, url: "about:blank", title: "" }, { id: 2, url: "https://a.test/", title: "A" }] };
+    const read = vi.spyOn(ipc, "tabHistory").mockResolvedValue(blankFirst);
+    useBrowser.setState({ activeTab: "h2", detached: [], tabs: [tab("h2")] });
+    await useBrowser.getState().back();
+    expect(back).not.toHaveBeenCalled();
+    read.mockResolvedValue({ ...blankFirst, current_index: 2, entries: [...blankFirst.entries, { id: 3, url: "https://a.test/b", title: "B" }] });
+    await useBrowser.getState().back();
+    expect(back).toHaveBeenCalledWith("h2");
+    vi.restoreAllMocks();
+  });
 });
 
 describe("forward", () => {

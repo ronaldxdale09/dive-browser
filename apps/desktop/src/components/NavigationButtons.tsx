@@ -5,7 +5,7 @@ import { ipc } from "../lib/ipc";
 import { useCoversContent } from "../lib/overlay";
 import { useDismiss } from "../lib/useDismiss";
 import { useFocusTrap } from "../lib/useFocusTrap";
-import { useTabHistory } from "../lib/useTabHistory";
+import { firstBackIndex, useTabHistory } from "../lib/useTabHistory";
 import { useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
 import { errorMessage } from "../lib/errors";
@@ -41,7 +41,7 @@ function HistoryButton({ direction, tabId, loadHistory, disabled, navigate }: {
   useCoversContent(visible);
   useFocusTrap(panel, { active: visible, menu: true, onEscape: close });
   useDismiss(root, visible, close);
-  const entries = history ? direction === "back" ? history.entries.slice(0, history.current_index).reverse() : history.entries.slice(history.current_index + 1) : [];
+  const entries = history ? direction === "back" ? history.entries.slice(firstBackIndex(history), history.current_index).reverse() : history.entries.slice(history.current_index + 1) : [];
   const show = () => {
     if (disabled) return;
     root.current?.querySelector("button")?.focus();

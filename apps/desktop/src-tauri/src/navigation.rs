@@ -30,10 +30,19 @@ pub struct NavigationHistory {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type, Event)]
 pub struct TabHistoryChanged {
     pub tab_id: TabId,
-    /// Whether there is an entry before the current one.
+    /// Whether there is a page before the current one: the blank page a new
+    /// tab's view is created on does not count.
     pub can_go_back: bool,
     /// Whether there is an entry after the current one.
     pub can_go_forward: bool,
+}
+
+/// The first entry Back can reach. A tab's view is created on about:blank
+/// and then sent to its first page, so a new tab's history starts with a
+/// blank entry that is nobody's page; going back to it left an empty tab.
+/// Mirrors `firstBackIndex` in the chrome.
+fn first_back_index(history: &NavigationHistory) -> i32 {
+    i32::from(history.entries.len() > 1 && history.entries[0].url == "about:blank")
 }
 
 impl TabHistoryChanged {
@@ -41,7 +50,7 @@ impl TabHistoryChanged {
         let last = i32::try_from(history.entries.len()).unwrap_or(i32::MAX) - 1;
         Self {
             tab_id,
-            can_go_back: history.current_index > 0,
+            can_go_back: history.current_index > first_back_index(history),
             can_go_forward: history.current_index >= 0 && history.current_index < last,
         }
     }
@@ -208,6 +217,26 @@ mod tests {
             parse_history(json!({"currentIndex": -1, "entries": []}), String::new()).unwrap();
         let nowhere = TabHistoryChanged::of(tab, &empty);
         assert!(!nowhere.can_go_back && !nowhere.can_go_forward);
+    }
+
+    #[test]
+    fn a_new_tab_cannot_go_back_to_the_blank_page_it_started_on() {
+        let tab = TabId::new();
+        let history = |index: i32, first: &str| {
+            parse_history(
+                json!({"currentIndex": index, "entries": [
+                    {"id": 1, "url": first, "title": ""},
+                    {"id": 2, "url": "https://example.com/", "title": "Example"},
+                    {"id": 3, "url": "https://example.com/next", "title": "Next"},
+                ]}),
+                String::new(),
+            )
+            .unwrap()
+        };
+        assert!(!TabHistoryChanged::of(tab, &history(1, "about:blank")).can_go_back);
+        assert!(TabHistoryChanged::of(tab, &history(2, "about:blank")).can_go_back);
+        // A real first page is somewhere to go back to.
+        assert!(TabHistoryChanged::of(tab, &history(1, "https://start.test/")).can_go_back);
     }
 
     #[test]

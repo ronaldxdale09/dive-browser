@@ -4,9 +4,24 @@ import type { NavigationHistory } from "./ipc";
 
 type Availability = { tabId: string; canBack: boolean; canForward: boolean };
 
+/**
+ * The first entry Back can reach. A tab's view is created on about:blank
+ * and then sent to its first page, so a brand-new tab's stack starts with a
+ * blank entry that is nobody's page: Back there led to an empty tab. The
+ * host's history announcements make the same exception.
+ */
+export function firstBackIndex(history: NavigationHistory): number {
+  return history.entries.length > 1 && history.entries[0]?.url === "about:blank" ? 1 : 0;
+}
+
+/** Whether Back has a page to go to. */
+export function canGoBack(history: NavigationHistory | null): boolean {
+  return history !== null && history.current_index > firstBackIndex(history);
+}
+
 const availability = (tabId: string, history: NavigationHistory): Availability => ({
   tabId,
-  canBack: history.current_index > 0,
+  canBack: canGoBack(history),
   canForward: history.current_index >= 0 && history.current_index < history.entries.length - 1,
 });
 

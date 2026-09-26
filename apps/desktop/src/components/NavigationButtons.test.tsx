@@ -14,8 +14,11 @@ const history: NavigationHistory = {
   ],
 };
 
-vi.mock("../lib/useTabHistory", () => ({
-  useTabHistory: () => ({ canBack: true, canForward: false, loadHistory: () => Promise.resolve(history) }),
+let shown: NavigationHistory = history;
+
+vi.mock("../lib/useTabHistory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/useTabHistory")>()),
+  useTabHistory: () => ({ canBack: true, canForward: false, loadHistory: () => Promise.resolve(shown) }),
 }));
 
 beforeEach(() => {
@@ -24,6 +27,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  shown = history;
   vi.restoreAllMocks();
 });
 
@@ -34,6 +38,12 @@ async function openBackHistory() {
 }
 
 describe("NavigationButtons history menu", () => {
+  it("leaves out the blank page a new tab's view started on", async () => {
+    shown = { ...history, entries: [{ id: 0, url: "about:blank", title: "" }, ...history.entries], current_index: 3 };
+    await openBackHistory();
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Twohttps://two.example/", "Onehttps://one.example/"]);
+  });
+
   it("lists the entries behind the current page, nearest first", async () => {
     await openBackHistory();
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Twohttps://two.example/", "Onehttps://one.example/"]);

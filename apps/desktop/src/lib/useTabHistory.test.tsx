@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { events, ipc } from "./ipc";
-import { useTabHistory } from "./useTabHistory";
+import { canGoBack, firstBackIndex, useTabHistory } from "./useTabHistory";
 
 vi.mock("./ipc", () => ({
   ipc: { tabHistory: vi.fn() },
@@ -89,4 +89,20 @@ it("cleans up a subscription that finishes registering after unmount", async () 
   unmount();
   await act(async () => subscribed(unlisten));
   expect(unlisten).toHaveBeenCalledOnce();
+});
+
+it("does not offer Back to the blank page a new tab's view starts on", () => {
+  const fresh = (index: number) => ({ generation: "view-1", current_index: index, entries: [
+    { id: 1, url: "about:blank", title: "" },
+    { id: 2, url: "https://example.com/one", title: "One" },
+    { id: 3, url: "https://example.com/two", title: "Two" },
+  ] });
+  expect(firstBackIndex(fresh(1))).toBe(1);
+  expect(canGoBack(fresh(1))).toBe(false);
+  expect(canGoBack(fresh(2))).toBe(true);
+  // A tab that is on about:blank itself has nothing before it either way.
+  expect(canGoBack({ generation: "g", current_index: 0, entries: [{ id: 1, url: "about:blank", title: "" }] })).toBe(false);
+  // A blank page the person went to later is a page like any other.
+  expect(firstBackIndex({ generation: "g", current_index: 1, entries: [{ id: 1, url: "https://a.test/", title: "" }, { id: 2, url: "about:blank", title: "" }] })).toBe(0);
+  expect(canGoBack(null)).toBe(false);
 });
