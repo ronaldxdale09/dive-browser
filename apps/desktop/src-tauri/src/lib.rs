@@ -26,6 +26,7 @@ mod crash;
 #[cfg(feature = "cef")]
 mod crash_probe;
 mod credential_fill;
+mod db_recovery;
 mod default_browser;
 mod devservers;
 mod downloads;
@@ -78,6 +79,7 @@ mod private_probe;
 mod private_session;
 mod reader;
 mod recorder;
+mod recovery;
 mod replay;
 mod report;
 mod responsiveness;
@@ -269,6 +271,9 @@ pub fn run() {
 
     let log_guard = init_logging();
     install_panic_hook();
+    if !private_session::is_private() {
+        recovery::begin(&state::data_root());
+    }
 
     if let Err(error) = prefs::finish_pending_clear() {
         tracing::error!(%error, "deferred browser-data cleanup failed");
@@ -429,7 +434,26 @@ pub fn run() {
             if private_session::is_private() && cef::crash_reporting_enabled() != 0 {
                 return Err("Private Mode requires native crash reporting to be disabled".into());
             }
-            state::init(app)?;
+            if let Err(error) = state::init(app) {
+                // Tauri turns a setup error into a panic with no message, so
+                // the reason is shown here and the exit is an ordinary one.
+                if !error.is::<db_recovery::Aborted>() {
+                    tracing::error!("could not start: {error:#}");
+                    let _ = rfd::MessageDialog::new()
+                        .set_title("Dive could not start")
+                        .set_description(format!("{error}"))
+                        .set_level(rfd::MessageLevel::Error)
+                        .set_buttons(rfd::MessageButtons::OkCustom("Quit".into()))
+                        .show();
+                }
+                STARTUP_ABORTED.store(true, std::sync::atomic::Ordering::SeqCst);
+                // Queued rather than called here: an exit requested on the
+                // main thread is handled at once, re-entering the event loop
+                // callback that is running this setup.
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move { handle.exit(1) });
+                return Ok(());
+            }
             let monitor_app = app.handle().clone();
             *state::lock(&setup_responsiveness) = responsiveness::start(
                 private_session::is_private(), state::data_root,
@@ -469,6 +493,9 @@ pub fn run() {
             smoke_test(app.handle().clone());
             stress_test(app.handle().clone());
             cdp_bench(app.handle().clone());
+            if !private_session::is_private() {
+                recovery::settle(state::data_root());
+            }
             startup::record_milestone("setup_complete");
             startup::on_setup_completed(app.handle().clone());
             lifecycle_probe::start(app.handle().clone());
@@ -489,11 +516,25 @@ pub fn run() {
             drop(state::lock(&responsiveness).take());
             drop(log_guard);
             private_session::cleanup();
+            if !private_session::is_private() {
+                recovery::end(&state::data_root());
+            }
             std::process::exit(1);
         }
     };
     let exit_responsiveness = responsiveness.clone();
     let exit_code = app.run_return(move |app, event| match event {
+        // Setup stopped before any state existed; only the exit remains.
+        _ if STARTUP_ABORTED.load(std::sync::atomic::Ordering::SeqCst) => {
+            if matches!(event, tauri::RunEvent::Exit) {
+                if let Some(monitor) = state::lock(&exit_responsiveness).as_ref() {
+                    monitor.request_stop();
+                }
+                if !private_session::is_private() {
+                    recovery::end(&state::data_root());
+                }
+            }
+        }
         // Why the process is going away is the first question after an
         // unexpected exit; say so in the log.
         tauri::RunEvent::ExitRequested { code, api, .. } => {
@@ -547,6 +588,10 @@ pub fn run() {
                 use tauri::Manager as _;
                 app.state::<state::AppState>().screencast.abandon_all();
             }
+            // The exit got this far on its own: the next launch is a normal one.
+            if !private_session::is_private() {
+                recovery::end(&state::data_root());
+            }
             tracing::info!("event loop exited");
         }
         // Links the system hands us once Dive is the default browser (or a
@@ -582,6 +627,10 @@ pub fn run() {
         std::process::exit(exit_code);
     }
 }
+
+/// Setup could not open the store and has asked for an exit; the run loop
+/// has no state to consult from then on.
+static STARTUP_ABORTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn startup_urls(mut args: impl Iterator<Item = String>, from_env: &str) -> Vec<String> {
     let mut urls = Vec::new();
@@ -1044,6 +1093,51 @@ fn startup_plan<'a>(startup: &str, homepage: &'a str) -> Startup<'a> {
     }
 }
 
+/// Whether two addresses are the same page for the purpose of finding a
+/// home page that is already open: the scheme, a leading `www.` and a
+/// trailing slash do not count, since a home page commonly redirects across
+/// exactly those.
+fn same_page(a: &str, b: &str) -> bool {
+    fn key(raw: &str) -> Option<(String, String, Option<String>)> {
+        let url = url::Url::parse(raw).ok()?;
+        let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
+        let host = host.strip_prefix("www.").unwrap_or(&host).to_owned();
+        let path = url.path().trim_end_matches('/').to_owned();
+        Some((host, path, url.query().map(str::to_owned)))
+    }
+    match (key(a), key(b)) {
+        (Some(a), Some(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+/// Show the home page: the tab already on it when there is one, else a new
+/// tab. A Home start used to add another home-page tab at every launch,
+/// since the tabs of the last session stay listed.
+pub(crate) fn open_home(
+    main: &engine::MainThread,
+    app: &tauri::AppHandle<Runtime>,
+    state: &state::AppState,
+    url: &str,
+) -> Result<(), AppError> {
+    let workspace = (*state::lock(&state.active_workspace))
+        .ok_or_else(|| AppError::new("no active workspace"))?;
+    let wanted = commands::normalize_url_with(url, state.prefs.get(state).search_template())
+        .map_or_else(|_| url.to_owned(), |u| u.to_string());
+    let existing = state::lock(&state.store)
+        .tabs_for_workspace(workspace)
+        .ok()
+        .and_then(|tabs| tabs.into_iter().find(|t| same_page(&t.url, &wanted)));
+    if let Some(tab) = existing {
+        commands::activate_tab(main, app, state, tab.id)?;
+        tracing::info!(%tab.id, url = tab.url, "returned to the open home page");
+    } else {
+        let tab = commands::open_tab(main, app, state, workspace, url)?;
+        tracing::info!(%tab.id, url = tab.url, "opened home page");
+    }
+    Ok(())
+}
+
 fn restore_session(app: &tauri::App<Runtime>) {
     use tauri::Manager;
     let state = app.state::<state::AppState>();
@@ -1051,15 +1145,24 @@ fn restore_session(app: &tauri::App<Runtime>) {
         return;
     };
     let prefs = state.prefs.get(&state);
+    let safe = recovery::safe_start();
     match startup_plan(&prefs.startup, &prefs.homepage) {
-        Startup::Welcome => return,
+        Startup::Welcome => {
+            if safe {
+                recovery::defer(recovery::Deferred::Nothing);
+            }
+            return;
+        }
         Startup::Home(url) => {
+            if safe {
+                recovery::defer(recovery::Deferred::Home(url.to_owned()));
+                return;
+            }
             let Some(main) = engine::MainThread::here() else {
                 return;
             };
-            match commands::open_tab(&main, app.handle(), &state, workspace, url) {
-                Ok(tab) => tracing::info!(%tab.id, url = tab.url, "opened home page"),
-                Err(e) => tracing::warn!("failed to open home page: {e}"),
+            if let Err(e) = open_home(&main, app.handle(), &state, url) {
+                tracing::warn!("failed to open home page: {e}");
             }
             return;
         }
@@ -1077,6 +1180,14 @@ fn restore_session(app: &tauri::App<Runtime>) {
         // Nothing is in a window of its own yet at startup.
         remembered.or_else(|| store.last_active_tab(workspace, &[]).ok().flatten())
     };
+    // After repeated unclean exits the tab the session ended on is the prime
+    // suspect: it stays listed, asleep, until the person asks for it back.
+    if safe {
+        recovery::defer(candidate.map_or(recovery::Deferred::Nothing, |tab| {
+            recovery::Deferred::Tab(tab.id)
+        }));
+        return;
+    }
     if let (Some(tab), Some(main)) = (candidate, engine::MainThread::here()) {
         match commands::activate_tab(&main, app.handle(), &state, tab.id) {
             Ok(()) => tracing::info!(%tab.id, url = tab.url, "restored session tab"),

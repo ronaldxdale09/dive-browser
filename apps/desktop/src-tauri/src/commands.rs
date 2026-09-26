@@ -932,6 +932,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::extensions::app_restart,
             update_check,
             update_install,
+            crate::recovery::session_recovery_status,
+            crate::recovery::session_recovery_resolve,
             default_browser_status,
             default_browser_set,
             subtitle_models,

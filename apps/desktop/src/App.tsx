@@ -16,6 +16,7 @@ import { FindBar } from "./components/FindBar";
 import { Splash } from "./components/Splash";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { IsolatedPanel } from "./components/IsolatedPanel";
+import { SessionRecoveryCard } from "./components/SessionRecoveryCard";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { clampSize, dockLimitsFor } from "./lib/resize";
 import { useBrowser } from "./store/browser";
@@ -291,6 +292,7 @@ export function App() {
       {!isPrivateWindow() && <AgentAnnouncer />}
       <BrowserToasts />
       <UpdateDialog />
+      <SessionRecoveryCard />
       <TaskManager />
       <Suspense fallback={null}>
         <Onboarding />

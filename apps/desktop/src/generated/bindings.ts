@@ -459,6 +459,18 @@ export const commands = {
 } | null, AppError>(__TAURI_INVOKE("update_check")),
 	/**  Download and install the offered update; the app restarts when done. */
 	updateInstall: () => typedError<null, AppError>(__TAURI_INVOKE("update_install")),
+	/**  The pending question, if startup held the session back. */
+	sessionRecoveryStatus: () => __TAURI_INVOKE<{
+	/**  How many runs in a row ended without a clean quit. */
+	crashes: number,
+	/**  Whether there is a tab or page to bring back. */
+	can_restore: boolean,
+} | null>("session_recovery_status"),
+	/**
+	 *  Answer the question: `restore` brings back what startup held back;
+	 *  otherwise the tabs stay listed and asleep.
+	 */
+	sessionRecoveryResolve: (restore: boolean) => typedError<null, AppError>(__TAURI_INVOKE("session_recovery_resolve", { restore })),
 	/**  Whether Dive is the system's default browser. */
 	defaultBrowserStatus: () => __TAURI_INVOKE<DefaultBrowserStatus>("default_browser_status"),
 	/**  Ask the system to make Dive the default browser. */
@@ -2887,6 +2899,14 @@ export type SendOptions = {
 	 *  and the person's tab left alone -- thrown away when the run ends.
 	 */
 	clean_session: boolean,
+};
+
+/**  What the chrome shows after repeated unclean exits. */
+export type SessionRecovery = {
+	/**  How many runs in a row ended without a clean quit. */
+	crashes: number,
+	/**  Whether there is a tab or page to bring back. */
+	can_restore: boolean,
 };
 
 /**  LAN address plus a QR code for it. */

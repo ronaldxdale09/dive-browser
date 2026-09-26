@@ -116,12 +116,21 @@ pub(crate) fn default_data_root() -> PathBuf {
 /// Open the store, seed defaults, and register state with the app.
 pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
     let root = data_root();
-    let store = if crate::private_session::is_private() {
-        Store::in_memory()?
+    let (store, active) = if crate::private_session::is_private() {
+        let store = Store::in_memory()?;
+        let active = seed_defaults(&store)?;
+        (store, active)
     } else {
-        Store::open(root.join("dive.db"))?
+        // A damaged, locked or unreadable database is explained to the
+        // person here rather than failing setup, which Tauri turns into a
+        // panic with no message. The quick check reads the whole file, so
+        // it runs only when the last run did not quit cleanly.
+        crate::db_recovery::open(
+            &root.join("dive.db"),
+            crate::recovery::previous_exit_unclean(),
+            seed_defaults,
+        )?
     };
-    let active = seed_defaults(&store)?;
     if !crate::private_session::is_private() {
         sweep_container_deletions(&store, &profiles_root(), &trash_root());
     }

@@ -256,7 +256,7 @@ fn spec_for(app: &WebApp) -> AppWindowSpec {
     AppWindowSpec {
         id: app.id.clone(),
         name: app.name.clone(),
-        bounds: WindowBounds::parse(&app.bounds),
+        bounds: WindowBounds::parse_app(&app.bounds),
     }
 }
 
