@@ -178,8 +178,13 @@ fn apply_proxy(request_context: &RequestContext, proxy_url: &url::Url) {
     value.set_dictionary(Some(&mut dict));
 
     let mut value = value;
-    if request_context.set_preference(Some(&pref_name.into()), Some(&mut value), None) != 1 {
-        log::error!("failed to apply the proxy preference to the CEF request context");
+    // A null error pointer makes CEF refuse the write; see
+    // `disable_builtin_autofill`.
+    let mut error = CefString::from("");
+    if request_context.set_preference(Some(&pref_name.into()), Some(&mut value), Some(&mut error))
+        != 1
+    {
+        log::error!("failed to apply the proxy preference to the CEF request context: {error}");
     }
 }
 
@@ -199,8 +204,13 @@ fn disable_builtin_autofill(request_context: &RequestContext) {
             return;
         };
         value.set_bool(0);
-        if request_context.set_preference(Some(&name.into()), Some(&mut value), None) != 1 {
-            log::warn!("could not turn off the {name} preference");
+        // The error is a required out-parameter: a null string pointer makes
+        // CEF refuse the write outright.
+        let mut error = CefString::from("");
+        if request_context.set_preference(Some(&name.into()), Some(&mut value), Some(&mut error))
+            != 1
+        {
+            log::warn!("could not turn off the {name} preference: {error}");
         }
     }
 }
