@@ -1213,17 +1213,25 @@ impl Store {
 
     /// Fetch one tab.
     pub fn tab(&self, id: TabId) -> Result<Tab> {
-        let mut tab = self
-            .conn
+        let mut tab = self.tab_as_stored(id)?;
+        self.fill_favicon(&mut tab);
+        Ok(tab)
+    }
+
+    /// The tab's row exactly as written, without the site icon [`tab`]
+    /// lends it. Deciding whether a change happened has to compare against
+    /// this: the lent icon makes a freshly resolved one look already known.
+    ///
+    /// [`tab`]: Self::tab
+    pub fn tab_as_stored(&self, id: TabId) -> Result<Tab> {
+        self.conn
             .prepare_cached(&format!("{TAB_SELECT} WHERE id = ?1"))?
             .query_row([id.to_string()], tab_from_row)
             .optional()?
             .ok_or_else(|| CoreError::NotFound {
                 kind: "tab",
                 id: id.to_string(),
-            })?;
-        self.fill_favicon(&mut tab);
-        Ok(tab)
+            })
     }
 
     /// Tabs of one workspace plus essentials, ordered by tier then position.
@@ -3601,6 +3609,9 @@ mod tests {
         assert_eq!(store.tab(a.id).unwrap().favicon.as_deref(), icon);
         assert_eq!(store.tab(b.id).unwrap().favicon.as_deref(), icon);
         assert_eq!(store.tab(other.id).unwrap().favicon, None);
+        // The row itself holds nothing yet: a newly resolved icon has to be
+        // judged against this, or it looks like no change and is never sent.
+        assert_eq!(store.tab_as_stored(a.id).unwrap().favicon, None);
 
         // A tab's own icon outranks the site's.
         let mut own = b.clone();

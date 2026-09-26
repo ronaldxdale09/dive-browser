@@ -2098,14 +2098,19 @@ fn update_session_tab(app: &AppHandle<Runtime>, id: TabId, nonce: &str, f: impl 
 pub fn update_tab(app: &AppHandle<Runtime>, id: TabId, f: impl FnOnce(&mut Tab)) {
     let state = app.state::<AppState>();
     let store = lock(&state.store);
+    let Ok(before) = store.tab_as_stored(id) else {
+        return;
+    };
     let Ok(mut tab) = store.tab(id) else { return };
     let was = tab.url.clone();
-    let before = tab.clone();
     f(&mut tab);
     // A page that animates its own title -- a chat tab counting unread, a
     // clock -- calls this every second. Writing the row, recording a visit and
     // republishing the tab for a change that did not happen cost a SQLite
-    // write and a re-render of the whole chrome each time.
+    // write and a re-render of the whole chrome each time. `before` is the
+    // row as stored: `tab` was lent its site's cached icon on read, and
+    // comparing against that copy made a newly resolved icon look like no
+    // change, so it was never saved or sent and the tab kept a globe.
     if tab == before {
         return;
     }
