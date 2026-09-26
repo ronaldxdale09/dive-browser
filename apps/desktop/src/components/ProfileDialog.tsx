@@ -105,7 +105,7 @@ function ProfileForm({ id }: { id: string | null }) {
           {existing && confirming && (
             <>
               <span className="text-xs text-ink-2">Delete {existing.name} and its {spaces} {spaces === 1 ? "workspace" : "workspaces"}?</span>
-              <button type="button" onClick={() => void remove(existing.id)} className="h-8 rounded-lg bg-danger px-3 text-xs font-medium text-white">
+              <button type="button" onClick={() => void remove(existing.id)} className="h-8 rounded-lg bg-danger px-3 text-xs font-medium text-danger-ink">
                 Delete
               </button>
             </>

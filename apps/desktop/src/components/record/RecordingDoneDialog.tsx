@@ -114,7 +114,7 @@ export function RecordingDoneDialog() {
                     .then(() => notify("Recording deleted"))
                     .catch(fail);
                 }}
-                className="h-8 rounded-lg bg-danger px-3 text-xs font-medium text-white hover:brightness-110"
+                className="h-8 rounded-lg bg-danger px-3 text-xs font-medium text-danger-ink hover:brightness-110"
               >
                 Delete
               </button>

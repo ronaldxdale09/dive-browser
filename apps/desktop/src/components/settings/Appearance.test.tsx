@@ -96,7 +96,7 @@ describe("Appearance", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start from Graphite" }));
     await waitFor(() => expect(prefs().custom_ground).toBe("#f3f3f1"));
     expect(prefs().custom_ink).toBe("#161616");
-    expect(prefs().custom_highlight).toBe("#0f8f7e");
+    expect(prefs().custom_highlight).toBe("#0b7568");
   });
 
   it("keeps the accent swatches and adds a custom well", async () => {

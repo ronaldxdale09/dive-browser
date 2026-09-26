@@ -460,7 +460,7 @@ function Recordings({ query, onOpened }: { query: string; onOpened: () => void }
               <button type="button" onClick={() => setConfirming(null)} className="h-7 shrink-0 rounded-full px-2.5 text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink">
                 Keep
               </button>
-              <button type="button" aria-label={`Delete ${r.name} for good`} onClick={() => remove(r.path)} className="h-7 shrink-0 rounded-full bg-danger px-2.5 text-[11px] font-medium text-white hover:brightness-110">
+              <button type="button" aria-label={`Delete ${r.name} for good`} onClick={() => remove(r.path)} className="h-7 shrink-0 rounded-full bg-danger px-2.5 text-[11px] font-medium text-danger-ink hover:brightness-110">
                 Delete
               </button>
             </>

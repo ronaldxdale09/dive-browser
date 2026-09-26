@@ -171,7 +171,7 @@ export function RecordDialog() {
           <button type="button" disabled={starting} onClick={close} className="h-8 rounded-lg px-3 text-xs text-ink-2 hover:bg-surface-2 hover:text-ink disabled:opacity-40">
             Cancel
           </button>
-          <button ref={primary} type="submit" disabled={!chosen || starting} className="flex h-8 min-w-32 items-center justify-center gap-1.5 rounded-lg bg-danger px-3.5 text-xs font-medium text-white hover:brightness-110 disabled:opacity-60">
+          <button ref={primary} type="submit" disabled={!chosen || starting} className="flex h-8 min-w-32 items-center justify-center gap-1.5 rounded-lg bg-danger px-3.5 text-xs font-medium text-danger-ink hover:brightness-110 disabled:opacity-60">
             {starting ? <Icon icon={Loader2} size={13} className="motion-safe:animate-spin" /> : <span className="size-2 rounded-full bg-white" aria-hidden />}
             {starting ? "Preparing…" : "Start recording"}
             {!starting && <kbd className="ml-1 font-mono text-[10px] opacity-70">⏎</kbd>}

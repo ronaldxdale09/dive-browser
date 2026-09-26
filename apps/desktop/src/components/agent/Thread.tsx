@@ -271,7 +271,7 @@ export function Thread({ onAddProvider }: { onAddProvider: () => void }) {
               aria-label="Stop"
               onClick={() => void stop()}
               title="Stop"
-              className="grid size-8 shrink-0 place-items-center rounded-full bg-danger text-white transition-transform active:scale-95"
+              className="grid size-8 shrink-0 place-items-center rounded-full bg-danger text-danger-ink transition-transform active:scale-95"
             >
               <Icon icon={Square} size={12} />
             </button>

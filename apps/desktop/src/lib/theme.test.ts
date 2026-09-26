@@ -26,7 +26,7 @@ function distance(a: string, b: string): number {
 }
 
 const GRAPHITE_DARK = { surface: "#181818", surface2: "#1f1f1f", surface3: "#262626", line: "#262626", line2: "#333333", ink2: "#a8a8a8", ink3: "#8c8c8c", accent: "#e9e9e9" };
-const GRAPHITE_LIGHT = { surface2: "#ececea", surface3: "#e2e2df", line: "#e1e1de", line2: "#cfcfcb", ink2: "#5b5b5b", ink3: "#696969", accent: "#161616" };
+const GRAPHITE_LIGHT = { surface2: "#ececea", surface3: "#e2e2df", line: "#e1e1de", line2: "#cfcfcb", ink2: "#4a4a4a", ink3: "#696969", accent: "#161616" };
 
 describe("derivePalette", () => {
   it("mixes Graphite's dark surfaces to within a few steps of the stylesheet literals", () => {
@@ -44,14 +44,14 @@ describe("derivePalette", () => {
   });
 
   it("mixes Graphite's light surfaces to within a few steps of the stylesheet literals", () => {
-    const palette = derivePalette({ ground: "#f3f3f1", ink: "#161616", highlight: "#0f8f7e" }, "light");
+    const palette = derivePalette({ ground: "#f3f3f1", ink: "#161616", highlight: "#0b7568" }, "light");
     for (const [key, expected] of Object.entries(GRAPHITE_LIGHT)) {
       const actual = toHex(palette[key as keyof typeof GRAPHITE_LIGHT]);
       expect(distance(actual, expected), `${key}: ${actual} vs ${expected}`).toBeLessThanOrEqual(4);
     }
     expect(distance(toHex(palette.surface), "#ffffff")).toBeLessThanOrEqual(6);
     expect(palette.accentInk).toBe("#FFFFFF");
-    expect(palette.highlightInk).toBe(accentInk("#0f8f7e"));
+    expect(palette.highlightInk).toBe(accentInk("#0b7568"));
   });
 
   it("writes every non-seed token as an oklab mix of the seeds", () => {
@@ -78,7 +78,7 @@ describe("resolvePalette", () => {
     expect(dark.highlightSoft).toBe("#163430");
     const light = resolvePalette(DEFAULT_PREFS, "light");
     expect(light.surface).toBe("#ffffff");
-    expect(light.highlight).toBe("#0f8f7e");
+    expect(light.highlight).toBe("#0b7568");
   });
 
   it("lets a chosen accent replace the template's highlight", () => {

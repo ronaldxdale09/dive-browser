@@ -28,7 +28,7 @@ export const PRESETS: readonly Preset[] = [
     description: "Neutral dark with a cool mint highlight; light when the OS asks for it.",
     scheme: "auto",
     dark: { ground: "#111111", ink: "#ececec", highlight: "#7fd8c8" },
-    light: { ground: "#f3f3f1", ink: "#161616", highlight: "#0f8f7e" },
+    light: { ground: "#f3f3f1", ink: "#161616", highlight: "#0b7568" },
   },
   {
     id: "midnight",
@@ -108,11 +108,13 @@ export type Palette = {
  */
 export const MIX = {
   dark: { surface: 4, surface2: 8, surface3: 12, line: 12, line2: 19, ink2: 72, ink3: 60, accent: 98, soft: 22 },
-  light: { surface2: 3, surface3: 7, line: 7, line2: 14, ink2: 65, ink3: 58, accent: 100, soft: 22 },
+  light: { surface2: 3, surface3: 7, line: 7, line2: 14, ink2: 72, ink3: 58, accent: 100, soft: 22 },
 } as const;
 
 /** Errors read on both grounds: a coral on dark, a deeper red on light. */
 const DANGER: Record<Scheme, string> = { dark: "#f0715e", light: "#c2361f" };
+/** Text on a danger fill: near-black on the coral (6.5:1), white on the deep red (5.5:1). */
+const DANGER_INK: Record<Scheme, string> = { dark: "#111111", light: "#ffffff" };
 
 /** Graphite's stylesheet literals, kept exact rather than derived. */
 const GRAPHITE: Record<Scheme, Palette> = {
@@ -132,7 +134,7 @@ const GRAPHITE: Record<Scheme, Palette> = {
     highlightInk: "#111111",
     highlightSoft: "#163430",
     danger: DANGER.dark,
-    dangerInk: "#111111",
+    dangerInk: DANGER_INK.dark,
   },
   light: {
     ground: "#f3f3f1",
@@ -140,17 +142,17 @@ const GRAPHITE: Record<Scheme, Palette> = {
     surface2: "#ececea",
     surface3: "#e2e2df",
     ink: "#161616",
-    ink2: "#5b5b5b",
+    ink2: "#4a4a4a",
     ink3: "#696969",
     line: "#e1e1de",
     line2: "#cfcfcb",
     accent: "#161616",
     accentInk: "#ffffff",
-    highlight: "#0f8f7e",
+    highlight: "#0b7568",
     highlightInk: "#ffffff",
     highlightSoft: "#d8f1ec",
     danger: DANGER.light,
-    dangerInk: "#111111",
+    dangerInk: DANGER_INK.light,
   },
 };
 
@@ -177,7 +179,7 @@ export function derivePalette(seeds: Seeds, scheme: Scheme): Palette {
     highlightInk: accentInk(highlight),
     highlightSoft: mix(highlight, m.soft, ground),
     danger: DANGER[scheme],
-    dangerInk: "#111111",
+    dangerInk: DANGER_INK[scheme],
   };
   const surface = scheme === "dark" ? mix(ground, 100 - MIX.dark.surface, ink) : mix(ground, 20, "#ffffff");
   return { ...base, surface };

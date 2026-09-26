@@ -51,20 +51,26 @@
   --color-surface-2: #ececea;
   --color-surface-3: #e2e2df;
   --color-ink: #161616;
-  --color-ink-2: #5b5b5b;
+  /* ink-2 sits well apart from ink-3 (8.9:1 against 5.5:1 on white), so
+     secondary text and captions read as two levels, not one grey. ink-3
+     stays where it is: any lighter and it drops below AA on surface-2. */
+  --color-ink-2: #4a4a4a;
   --color-ink-3: #696969;
   --color-line: #e1e1de;
   --color-line-2: #cfcfcb;
   --color-accent: #161616;
   --color-accent-ink: #ffffff;
-  --color-highlight: #0f8f7e;
+  /* White on it reaches 5.6:1 and it reads at 4.7:1 as text on surface-2;
+     the brighter #0f8f7e managed 4.0:1 and 3.4:1. */
+  --color-highlight: #0b7568;
   --color-highlight-ink: #ffffff;
   --color-highlight-soft: #d8f1ec;
   --color-link: #1a0dab;
   --color-danger: #c2361f;
   --color-good: #1b7f4f;
   --color-warn: #9a5b00;
-  --color-danger-ink: #111111;
+  /* White on the light red is 5.5:1; near-black was 3.5:1. */
+  --color-danger-ink: #ffffff;
 }
 
 @media (prefers-color-scheme: light) {
@@ -74,20 +80,20 @@
     --color-surface-2: #ececea;
     --color-surface-3: #e2e2df;
     --color-ink: #161616;
-    --color-ink-2: #5b5b5b;
+    --color-ink-2: #4a4a4a;
     --color-ink-3: #696969;
     --color-line: #e1e1de;
     --color-line-2: #cfcfcb;
     --color-accent: #161616;
     --color-accent-ink: #ffffff;
-    --color-highlight: #0f8f7e;
+    --color-highlight: #0b7568;
     --color-highlight-ink: #ffffff;
     --color-highlight-soft: #d8f1ec;
-  --color-link: #1a0dab;
-  --color-danger: #c2361f;
-  --color-good: #1b7f4f;
-  --color-warn: #9a5b00;
-    --color-danger-ink: #111111;
+    --color-link: #1a0dab;
+    --color-danger: #c2361f;
+    --color-good: #1b7f4f;
+    --color-warn: #9a5b00;
+    --color-danger-ink: #ffffff;
   }
 }
 
