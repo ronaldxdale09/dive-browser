@@ -7,7 +7,7 @@ import { useBrowser } from "../store/browser";
 import { useDownloads } from "../store/downloads";
 import { useWebApps } from "../store/webapps";
 import { screenUrl } from "./internal/InternalPage";
-import { Library, dayLabel, groupByDay, matches, timeLabel } from "./Library";
+import { Library, countLabel, dayLabel, groupByDay, matches, mergeDownloads, timeLabel } from "./Library";
 
 const initial = useBrowser.getState();
 const initialWebApps = useWebApps.getState();
@@ -22,15 +22,20 @@ beforeEach(() => {
   vi.spyOn(ipc, "tabNavigate").mockResolvedValue(null);
   vi.spyOn(ipc, "tabOpen").mockResolvedValue({ id: "t2", workspace_id: "w1", tier: "today", url: "https://docs.example.com/", title: "", favicon: null, position: 1, state: "active", last_active_at: "2026-09-04T00:00:00Z" });
   vi.spyOn(ipc, "bookmarkRemove").mockResolvedValue(true);
-  vi.spyOn(ipc, "bookmarksSearch").mockResolvedValue([
+  // The host does the filtering now; these stand in for its LIKE match.
+  const bookmarks = [
     { url: "https://docs.example.com/", title: "Example docs", created_at: "2026-09-01T00:00:00Z", favicon: null },
     { url: "https://github.com/dive", title: "dive on GitHub", created_at: "2026-09-02T00:00:00Z", favicon: null },
-  ]);
+  ];
+  vi.spyOn(ipc, "bookmarksSearch").mockImplementation(async (query: string) => bookmarks.filter((b) => matches(query, b.title, b.url)));
   vi.spyOn(ipc, "historyRemove").mockResolvedValue(true);
-  vi.spyOn(ipc, "historySearch").mockResolvedValue([
+  const history = [
     { url: "https://a.test/", title: "A", last_visited_at: new Date().toISOString(), visits: 2, favicon: null },
     { url: "https://b.test/", title: "B", last_visited_at: new Date(Date.now() - 86_400_000).toISOString(), visits: 1, favicon: null },
-  ]);
+  ];
+  vi.spyOn(ipc, "historySearch").mockImplementation(async (query: string) => history.filter((h) => matches(query, h.title, h.url)));
+  vi.spyOn(ipc, "downloadsHistory").mockResolvedValue([]);
+  vi.spyOn(ipc, "downloadsMissing").mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -130,7 +135,9 @@ describe("Library dialog", () => {
     await waitFor(() => expect(screen.getByText("Example docs")).toBeTruthy());
 
     fireEvent.change(screen.getByLabelText("Filter bookmarks"), { target: { value: "github" } });
-    expect(screen.queryByText("Example docs")).toBeNull();
+    // Asked of the host, so a bookmark far past the first page is found too.
+    await waitFor(() => expect(ipc.bookmarksSearch).toHaveBeenCalledWith("github", 200));
+    await waitFor(() => expect(screen.queryByText("Example docs")).toBeNull());
     expect(screen.getByText("dive on GitHub")).toBeTruthy();
 
     fireEvent.click(screen.getByText("dive on GitHub"));
@@ -185,11 +192,11 @@ describe("Library dialog", () => {
     expect(screen.getByRole("region", { name: "Yesterday" })).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText("Filter history"), { target: { value: "b.test" } });
-    expect(screen.queryByText("A")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("A")).toBeNull());
     expect(screen.getByText("B")).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText("Filter history"), { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: "Remove A from history" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove A from history" }));
     expect(ipc.historyRemove).toHaveBeenCalledWith("https://a.test/");
     expect(screen.queryByText("A")).toBeNull();
     expect(screen.getByText("B")).toBeTruthy();
@@ -255,15 +262,91 @@ describe("Library dialog", () => {
     expect(screen.getByText("Failed")).toBeTruthy();
     expect(screen.queryByText("finished")).toBeNull();
     fireEvent.click(screen.getByText("report.json"));
-    expect(open).toHaveBeenCalledWith("/tmp/report.json");
+    // Checked for first, then opened.
+    await waitFor(() => expect(open).toHaveBeenCalledWith("/tmp/report.json"));
+    expect(ipc.downloadsMissing).toHaveBeenCalledWith(["/tmp/report.json"]);
     expect(reveal).not.toHaveBeenCalled();
     expect((screen.getByText("gone.zip").closest("button") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("renames a bookmark in place without closing the Library on Escape", async () => {
+    const rename = vi.spyOn(ipc, "bookmarkRename").mockResolvedValue(null);
+    render(<Library />);
+    fireEvent.click(await screen.findByRole("button", { name: "Rename bookmark Example docs" }));
+    const field = screen.getByLabelText("New name for Example docs");
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(useBrowser.getState().open.library).toBe(true);
+    expect(screen.getByText("Example docs")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Rename bookmark Example docs" }));
+    fireEvent.change(screen.getByLabelText("New name for Example docs"), { target: { value: "Docs" } });
+    fireEvent.submit(screen.getByLabelText("New name for Example docs").closest("form")!);
+    await waitFor(() => expect(rename).toHaveBeenCalledWith("https://docs.example.com/", "Docs"));
+    expect(await screen.findByText("Docs")).toBeTruthy();
+  });
+
+  it("offers a removed bookmark back, with the time it was made", async () => {
+    const restore = vi.spyOn(ipc, "bookmarkRestore").mockResolvedValue(null);
+    render(<Library />);
+    fireEvent.click(await screen.findByRole("button", { name: "Remove bookmark Example docs" }));
+    await waitFor(() => expect(useBrowser.getState().noticeAction?.label).toBe("Undo"));
+    useBrowser.getState().noticeAction?.run();
+    await waitFor(() => expect(restore).toHaveBeenCalledWith("https://docs.example.com/", "Example docs", "2026-09-01T00:00:00Z"));
+    expect(await screen.findByText("Example docs")).toBeTruthy();
+  });
+
+  it("lists downloads kept from earlier sessions, with Cancelled, a way to try again, and files that are gone", async () => {
+    vi.spyOn(ipc, "downloadsHistory").mockResolvedValue([
+      { id: "r1", url: "https://a.dev/old.zip", path: "/tmp/old.zip", status: "finished", bytes: 10, started_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:01:00Z" },
+      { id: "r2", url: "https://a.dev/stop.iso", path: "/tmp/stop.iso", status: "cancelled", bytes: null, started_at: "2026-09-02T00:00:00Z", updated_at: "2026-09-02T00:01:00Z" },
+    ]);
+    vi.spyOn(ipc, "downloadsMissing").mockResolvedValue(["/tmp/old.zip"]);
+    const again = vi.spyOn(ipc, "downloadStart").mockResolvedValue(null);
+    render(<Library />);
+    fireEvent.click(screen.getByRole("tab", { name: "Downloads" }));
+    expect(await screen.findByText("old.zip")).toBeTruthy();
+    expect(screen.getByText("Cancelled")).toBeTruthy();
+    expect(await screen.findByText("Moved or deleted")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Download stop.iso again" }));
+    expect(again).toHaveBeenCalledWith("t1", "https://a.dev/stop.iso");
   });
 
   it("closes on Escape and releases the page", async () => {
     render(<Library />);
     fireEvent.keyDown(screen.getByLabelText("Filter bookmarks"), { key: "Escape" });
     await waitFor(() => expect(useBrowser.getState().open.library).toBe(false));
+  });
+});
+
+describe("Library paging", () => {
+  it("says a full page may have more, and a capped list says where it stops", () => {
+    expect(countLabel(200, "page", "pages", { more: true, capped: false, filtered: false })).toBe("200+ pages");
+    expect(countLabel(12, "page", "pages", { more: false, capped: false, filtered: true })).toBe("12 pages matching");
+    expect(countLabel(5000, "bookmark", "bookmarks", { more: false, capped: true, filtered: false })).toMatch(/^Newest 5,000 bookmarks — filter/);
+  });
+
+  it("asks for the next page from the end of the list", async () => {
+    const page = Array.from({ length: 200 }, (_, i) => ({ url: `https://s${i}.test/`, title: `Site ${i}`, last_visited_at: new Date().toISOString(), visits: 1, favicon: null }));
+    const search = vi.spyOn(ipc, "historySearch").mockResolvedValue(page);
+    render(<Library />);
+    fireEvent.click(screen.getByRole("tab", { name: "History" }));
+    expect(await screen.findByText("200+ pages")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+    await waitFor(() => expect(search).toHaveBeenCalledWith("", 400));
+  });
+
+  it("puts this session's rows over the kept ones for the same file", () => {
+    const merged = mergeDownloads(
+      [{ url: "https://a.dev/f", path: "/tmp/f", name: "f", status: "started", at: 5, startedAt: 5 }],
+      [
+        { id: "r1", url: "https://a.dev/f", path: "/tmp/f", status: "started", bytes: null, started_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z" },
+        { id: "r2", url: "https://a.dev/g", path: "/tmp/g", status: "started", bytes: null, started_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z" },
+      ],
+    );
+    // The kept "started" row with no live one behind it was cut off by a quit.
+    expect(merged.map((d) => [d.name, d.status])).toEqual([
+      ["g", "failed"],
+      ["f", "started"],
+    ]);
   });
 });
 

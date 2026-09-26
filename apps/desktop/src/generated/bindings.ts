@@ -406,6 +406,12 @@ export const commands = {
 	 *  title is refused rather than erasing the one on record.
 	 */
 	bookmarkRename: (url: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("bookmark_rename", { url, title })),
+	/**
+	 *  Put back a bookmark that was just removed, with the title and creation
+	 *  time it had, so Undo leaves the list as it was rather than moving the
+	 *  bookmark to the top as a new one.
+	 */
+	bookmarkRestore: (url: string, title: string, createdAt: string) => typedError<null, AppError>(__TAURI_INVOKE("bookmark_restore", { url, title, createdAt })),
 	/**  Remember or forget a permission in the selected profile and real container. */
 	permissionSet: (scope: Scope, origin: string, kind: string, decision: Decision) => typedError<null, AppError>(__TAURI_INVOKE("permission_set", { scope, origin, kind, decision })),
 	/**  Resolve the original native request; its opaque ID carries trusted provenance. */
@@ -455,6 +461,13 @@ export const commands = {
 	subtitleModels: () => __TAURI_INVOKE<SubtitleModel[]>("subtitle_models"),
 	/**  Download a subtitle model; progress arrives on `SubtitleModelProgress`. */
 	subtitleModelDownload: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("subtitle_model_download", { id })),
+	/**
+	 *  Stop a subtitle model download; it reports itself cancelled on
+	 *  `SubtitleModelProgress`.
+	 */
+	subtitleModelCancel: (id: string) => __TAURI_INVOKE<void>("subtitle_model_cancel", { id }),
+	/**  Delete a downloaded subtitle model to free its space. */
+	subtitleModelDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("subtitle_model_delete", { id })),
 	/**
 	 *  Start live subtitles on a tab. `language` is an ISO code or "auto";
 	 *  `translate` renders an English translation instead of the source text.
@@ -787,6 +800,41 @@ export const commands = {
 	devServersWatch: (on: boolean) => typedError<DevServer[], AppError>(__TAURI_INVOKE("dev_servers_watch", { on })),
 	/**  Recent history matching `query`, newest first. */
 	historySearch: (query: string, limit: number) => typedError<HistoryEntry[], AppError>(__TAURI_INVOKE("history_search", { query, limit })),
+	/**
+	 *  How many visits keeping history for `days` would delete, so Settings can
+	 *  ask before a shorter window takes them. Deletes nothing.
+	 */
+	historyPruneCount: (days: number) => typedError<number, AppError>(__TAURI_INVOKE("history_prune_count", { days })),
+	/**
+	 *  Whether the saved DNS and proxy settings differ from the ones the engine
+	 *  was started with, which only a restart puts into force.
+	 */
+	networkRestartNeeded: () => __TAURI_INVOKE<boolean>("network_restart_needed"),
+	/**
+	 *  Ask for a download folder. `None` when the dialog was dismissed; the
+	 *  chrome saves the answer through `prefs_set`, which checks it.
+	 */
+	downloadDirPick: () => typedError<string | null, AppError>(__TAURI_INVOKE("download_dir_pick")),
+	/**
+	 *  The downloads kept for this profile, newest first: what the Library
+	 *  lists, across restarts.
+	 */
+	downloadsHistory: (limit: number) => typedError<DownloadRecord[], AppError>(__TAURI_INVOKE("downloads_history", { limit })),
+	/**  Take one download off the Library's list. The file stays where it is. */
+	downloadForget: (id: string) => typedError<boolean, AppError>(__TAURI_INVOKE("download_forget", { id })),
+	/**  Empty the Library's list of downloads. Every file stays where it is. */
+	downloadsHistoryClear: () => typedError<number, AppError>(__TAURI_INVOKE("downloads_history_clear")),
+	/**
+	 *  Which of `paths` are no longer on disk, so the Library can say a file was
+	 *  moved or deleted instead of offering to open it. Off the main thread: it
+	 *  asks the filesystem about each one.
+	 */
+	downloadsMissing: (paths: string[]) => typedError<string[], AppError>(__TAURI_INVOKE("downloads_missing", { paths })),
+	/**
+	 *  Download `url` again, through the tab `id`'s page so it goes out with that
+	 *  page's cookies and container, as the first attempt did.
+	 */
+	downloadStart: (id: TabId, url: string) => typedError<null, AppError>(__TAURI_INVOKE("download_start", { id, url })),
 	/**  Forget every visit to `url`; true when there was one. */
 	historyRemove: (url: string) => typedError<boolean, AppError>(__TAURI_INVOKE("history_remove", { url })),
 	/**  Toggle the bookmark for a tab's current URL; returns the new state. */
@@ -1213,6 +1261,22 @@ export type ChatTurn = {
 	content: string,
 };
 
+/**  What [`clear`] managed, and what it could not. */
+export type ClearOutcome = {
+	/**  One sentence on what went. */
+	summary: string,
+	/**
+	 *  What failed, one line each. Everything else was still cleared: a
+	 *  cache that would not clear no longer hides that history did.
+	 */
+	failures: string[],
+	/**
+	 *  Cookies, cache or site data were cleared, and the profiles that are
+	 *  not open finish on the next launch.
+	 */
+	restart_needed: boolean,
+};
+
 /**  What [`clear`] should delete. */
 export type ClearRequest = {
 	/**  Visited pages. */
@@ -1228,6 +1292,13 @@ export type ClearRequest = {
 	site_data: boolean,
 	/**  Form entries remembered in the active profile. */
 	forms?: boolean,
+	/**
+	 *  Only what happened in the last this many hours; `None` is all time.
+	 *  Applies to history, downloads and form entries. Chromium offers no
+	 *  time range for cookies, the cache or site data, so those are always
+	 *  cleared in full and Settings says so.
+	 */
+	since_hours?: number | null,
 };
 
 /**  A colour in every notation a developer pastes. */
@@ -1532,7 +1603,7 @@ export type DownloadNotice = {
 	url: string,
 	/**  Where the file is (or will be) written. */
 	path: string,
-	/**  `started` | `finished` | `failed`. */
+	/**  `started` | `finished` | `failed` | `cancelled`. */
 	status: string,
 };
 
@@ -1561,6 +1632,24 @@ export type DownloadProgress = {
 	speed: number | null,
 	/**  Whether it is paused. */
 	paused: boolean,
+};
+
+/**  One download, as the Library lists it. */
+export type DownloadRecord = {
+	/**  Row id, for removing it from the list. */
+	id: string,
+	/**  Where it came from. */
+	url: string,
+	/**  Where the file was written; empty when it never got a destination. */
+	path: string,
+	/**  `started` | `finished` | `failed` | `cancelled`. */
+	status: string,
+	/**  Size on disk once it finished. */
+	bytes: number | null,
+	/**  RFC 3339 time it began. */
+	started_at: string,
+	/**  RFC 3339 time of its last change of state. */
+	updated_at: string,
 };
 
 export type Duration = "page" | "remember";
@@ -1884,6 +1973,14 @@ export type KeptSegment = {
 export type KeyCheck = {
 	/**  The provider accepted it. */
 	ok: boolean,
+	/**
+	 *  The key is known to be unusable: the provider refused it (401 or
+	 *  403), or there was nothing to try. Anything else that stops a check
+	 *  -- the provider down, no network, a proxy in the way -- says nothing
+	 *  about the key, and the chrome saves it anyway rather than making a
+	 *  working key impossible to enter while offline.
+	 */
+	rejected?: boolean,
 	/**  What happened, for the person. */
 	message: string,
 };
@@ -2953,6 +3050,11 @@ export type SubtitleModelProgress = {
 	done: boolean,
 	/**  A human message when the download failed. */
 	error: string | null,
+	/**
+	 *  Set when the download stopped because the person cancelled it; the
+	 *  partial file is gone and the model is as it was before.
+	 */
+	cancelled?: boolean,
 };
 
 /**  Whether subtitles are running on a tab, with any error. */

@@ -240,8 +240,10 @@ pub(crate) fn bookmarks_search(
     query: String,
     limit: u32,
 ) -> AppResult<Vec<dive_core::Bookmark>> {
-    Ok(lock(&state.store)
-        .search_bookmarks(&query, usize::try_from(limit.min(200)).unwrap_or(50))?)
+    Ok(lock(&state.store).search_bookmarks(
+        &query,
+        usize::try_from(limit.min(LIBRARY_MAX)).unwrap_or(50),
+    )?)
 }
 
 /// Recent history matching `query`, newest first.
@@ -252,8 +254,16 @@ pub(crate) fn history_search(
     query: String,
     limit: u32,
 ) -> AppResult<Vec<dive_core::HistoryEntry>> {
-    Ok(lock(&state.store).search_history(&query, usize::try_from(limit.min(200)).unwrap_or(50))?)
+    Ok(lock(&state.store).search_history(
+        &query,
+        usize::try_from(limit.min(LIBRARY_MAX)).unwrap_or(50),
+    )?)
 }
+
+/// Most rows one bookmarks or history search returns. The Library asks for a
+/// page more as it scrolls, so this bounds how far one list can reach, not
+/// what a filter can find: the filter runs in the database.
+pub(crate) const LIBRARY_MAX: u32 = 5000;
 
 /// Forget every visit to `url`; true when there was one.
 #[tauri::command]
@@ -610,7 +620,8 @@ pub(crate) fn open_with_shell(target: &std::ffi::OsStr, what: &str) -> AppResult
 #[tauri::command]
 #[specta::specta]
 #[allow(clippy::unnecessary_wraps)] // The chrome's ipc layer unwraps a Result for every command.
-pub(crate) fn downloads_cancel(id: u32) -> AppResult<()> {
+pub(crate) fn downloads_cancel(state: State<'_, AppState>, id: u32) -> AppResult<()> {
+    state.downloads.mark_cancelled(id);
     #[cfg(feature = "cef")]
     tauri_runtime_cef::downloads::control(id, tauri_runtime_cef::DownloadControl::Cancel);
     #[cfg(not(feature = "cef"))]
@@ -628,6 +639,71 @@ pub(crate) fn downloads_cancel(id: u32) -> AppResult<()> {
 pub(crate) fn downloads_clear(state: State<'_, AppState>) -> AppResult<()> {
     state.downloads.clear();
     Ok(())
+}
+
+/// The downloads kept for this profile, newest first: what the Library
+/// lists, across restarts.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn downloads_history(
+    state: State<'_, AppState>,
+    limit: u32,
+) -> AppResult<Vec<dive_core::DownloadRecord>> {
+    let limit = usize::try_from(limit.min(2000)).unwrap_or(200);
+    Ok(lock(&state.store).downloads(limit)?)
+}
+
+/// Take one download off the Library's list. The file stays where it is.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn download_forget(state: State<'_, AppState>, id: String) -> AppResult<bool> {
+    Ok(lock(&state.store).remove_download(&id)?)
+}
+
+/// Empty the Library's list of downloads. Every file stays where it is.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn downloads_history_clear(state: State<'_, AppState>) -> AppResult<u32> {
+    let n = lock(&state.store).clear_downloads_since(None)?;
+    Ok(u32::try_from(n).unwrap_or(u32::MAX))
+}
+
+/// Which of `paths` are no longer on disk, so the Library can say a file was
+/// moved or deleted instead of offering to open it. Off the main thread: it
+/// asks the filesystem about each one.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn downloads_missing(paths: Vec<String>) -> AppResult<Vec<String>> {
+    tokio::task::spawn_blocking(move || {
+        paths
+            .into_iter()
+            .filter(|path| !path.is_empty() && !std::path::Path::new(path).is_file())
+            .collect()
+    })
+    .await
+    .map_err(AppError::new)
+}
+
+/// Download `url` again, through the tab `id`'s page so it goes out with that
+/// page's cookies and container, as the first attempt did.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn download_start(app: AppHandle<Runtime>, id: TabId, url: String) -> AppResult<()> {
+    let parsed = url::Url::parse(&url)?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(AppError::new("only a web address can be downloaded again"));
+    }
+    on_main(&app, move |_, _, state| {
+        with_view(state, id, move |view| {
+            view.with_webview(move |native| {
+                use cef::{ImplBrowser, ImplBrowserHost};
+                if let Some(host) = native.browser().host() {
+                    host.start_download(Some(&cef::CefString::from(url.as_str())));
+                }
+            })
+        })?;
+        Ok(())
+    })
 }
 
 /// Open `path` in the platform file manager, selecting it when it is a file.
@@ -768,6 +844,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             forms_delete,
             forms_clear,
             bookmark_rename,
+            bookmark_restore,
             permission_set,
             permission_reply,
             js_dialog_pending,
@@ -878,6 +955,11 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             dev_servers,
             dev_servers_watch,
             history_search,
+            downloads_history,
+            download_forget,
+            downloads_history_clear,
+            downloads_missing,
+            download_start,
             history_remove,
             bookmark_toggle,
             bookmark_status,
@@ -3364,6 +3446,23 @@ pub(crate) fn bookmark_rename(
         return Err(AppError::new("a bookmark needs a title"));
     }
     lock(&state.store).add_bookmark(&url, title, dive_core::Timestamp::now())?;
+    Ok(())
+}
+
+/// Put back a bookmark that was just removed, with the title and creation
+/// time it had, so Undo leaves the list as it was rather than moving the
+/// bookmark to the top as a new one.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn bookmark_restore(
+    state: State<'_, AppState>,
+    url: String,
+    title: String,
+    created_at: String,
+) -> AppResult<()> {
+    let at =
+        dive_core::Timestamp::parse(&created_at).unwrap_or_else(|_| dive_core::Timestamp::now());
+    lock(&state.store).add_bookmark(&url, &title, at)?;
     Ok(())
 }
 

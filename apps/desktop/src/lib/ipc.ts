@@ -22,7 +22,7 @@ export const events = {
     once: (callback: EventCallback<string>) => generatedEvents.menuCommand(getCurrentWebview()).once(callback),
   },
 };
-export type { ExternalLinkAsked, TabAudio, TaskRow, Address, Card, CardDraft, RestoreSummary } from "../generated/bindings";
+export type { ExternalLinkAsked, TabAudio, TaskRow, Address, Card, CardDraft, RestoreSummary, ClearOutcome, DownloadRecord } from "../generated/bindings";
 export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, CsvImportSummary, LoginSave, PasswordExport, FormEntry, HttpAuthAsked, HttpAuthClosed, JsDialogAsked, JsDialogClosed } from "../generated/bindings";
 export type { ExtensionInfo, ExtensionList };
 export type { WebApp, WebAppProbe } from "../generated/bindings";
@@ -203,6 +203,22 @@ export const ipc = {
   downloadsCancel: async (id: number) => unwrap(await commands.downloadsCancel(id)),
   /** Forget this session's downloads, in the engine as well as the chrome. */
   downloadsClear: async () => unwrap(await commands.downloadsClear()),
+  /** The downloads kept for this profile across restarts, newest first. */
+  downloadsHistory: async (limit: number) => unwrap(await commands.downloadsHistory(limit)),
+  /** Take one row off the Library's downloads list; the file stays. */
+  downloadForget: async (id: string) => unwrap(await commands.downloadForget(id)),
+  /** Empty the Library's downloads list; every file stays. */
+  downloadsHistoryClear: async () => unwrap(await commands.downloadsHistoryClear()),
+  /** Which of these files are no longer on disk. */
+  downloadsMissing: async (paths: string[]) => unwrap(await commands.downloadsMissing(paths)),
+  /** Download `url` again through tab `id`'s page. */
+  downloadStart: async (id: string, url: string) => unwrap(await commands.downloadStart(id, url)),
+  /** Ask for a download folder; null when the dialog was dismissed. */
+  downloadDirPick: async () => unwrap(await commands.downloadDirPick()),
+  /** How many visits a retention window of `days` would delete. Deletes nothing. */
+  historyPruneCount: async (days: number) => unwrap(await commands.historyPruneCount(days)),
+  /** Whether the saved DNS/proxy settings differ from the ones the engine is running with. */
+  networkRestartNeeded: () => commands.networkRestartNeeded(),
   tabFocus: async (id: string) => unwrap(await commands.tabFocus(id)),
   mcpToken: async () => unwrap(await commands.mcpToken()),
   tabStorageDelete: async (id: string, section: "cookies" | "local" | "session", key: string, domain: string | null, path: string | null) =>
@@ -233,6 +249,8 @@ export const ipc = {
   bookmarkStatus: async (url: string) => unwrap(await commands.bookmarkStatus(url)),
   bookmarkRemove: async (url: string) => unwrap(await commands.bookmarkRemove(url)),
   bookmarkRename: async (url: string, title: string) => unwrap(await commands.bookmarkRename(url, title)),
+  /** Put a removed bookmark back with its title and creation time (Undo). */
+  bookmarkRestore: async (url: string, title: string, createdAt: string) => unwrap(await commands.bookmarkRestore(url, title, createdAt)),
   bookmarksSearch: async (query: string, limit = 20) => unwrap(await commands.bookmarksSearch(query, limit)),
   passwordsList: async () => unwrap(await commands.passwordsList()),
   passwordsForUrl: async (url: string) => unwrap(await commands.passwordsForUrl(url)),
@@ -325,6 +343,10 @@ export const ipc = {
   subtitleModels: () => commands.subtitleModels(),
   /** Start downloading a model; progress arrives on `events.subtitleModelProgress`. */
   subtitleModelDownload: async (id: string) => unwrap(await commands.subtitleModelDownload(id)),
+  /** Stop a model download; progress then reports it cancelled. */
+  subtitleModelCancel: (id: string) => commands.subtitleModelCancel(id),
+  /** Delete a downloaded model from disk. */
+  subtitleModelDelete: async (id: string) => unwrap(await commands.subtitleModelDelete(id)),
   /** Start live subtitles on a tab. `language` is an ISO code or "auto"; `translate` renders English. */
   subtitleStart: async (id: string, model: string, language: string, translate: boolean) =>
     unwrap(await commands.subtitleStart(id, model, language, translate)),
