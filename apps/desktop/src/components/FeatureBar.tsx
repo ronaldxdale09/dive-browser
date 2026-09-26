@@ -8,6 +8,7 @@ import { useBrowser } from "../store/browser";
 import { useUpdates } from "../store/updates";
 import { elapsedSeconds, useRecording } from "../store/recording";
 import { recordingClock } from "../lib/recordingFormat";
+import { announce } from "../lib/announce";
 import { Icon, IconButton } from "./Icon";
 import { Tooltip } from "./Tooltip";
 import { AgentIcon } from "./agent/AgentIcon";
@@ -204,10 +205,43 @@ export function FeatureButton({
 /** While a recording runs, its controls sit here so they are always on screen. */
 function RecordingStatus({ compact }: { compact: boolean }) {
   const phase = useRecording((s) => s.phase);
+  const error = useRecording((s) => s.error);
+  // The recording's progress is said through the chrome's standing live
+  // regions. Each phase's controls replace the last, and a status region
+  // that arrives with its own words is one most screen readers never speak.
+  const previous = useRef(phase);
+  useEffect(() => {
+    const from = previous.current;
+    previous.current = phase;
+    if (from === phase) return;
+    const said = recordingAnnouncement(from, phase, useRecording.getState().countdown);
+    if (said) announce(said);
+  }, [phase]);
+  useEffect(() => {
+    if (phase === "failed") announce(`Recording not saved: ${error ?? "the recording could not be saved"}`, "assertive");
+  }, [phase, error]);
   if (phase === "starting" || phase === "countdown" || phase === "recording" || phase === "paused" || phase === "finishing" || phase === "failed") {
     return <RecordingHud compact={compact} />;
   }
   return null;
+}
+
+/** What a move between two recording phases says aloud, if anything; a failure is said on its own, assertively. */
+export function recordingAnnouncement(from: string, to: string, countdown: number): string | null {
+  switch (to) {
+    case "starting":
+      return "Preparing to record";
+    case "countdown":
+      return `Recording starts in ${countdown}`;
+    case "recording":
+      return from === "paused" ? "Recording resumed" : "Recording";
+    case "paused":
+      return "Recording paused";
+    case "finishing":
+      return "Saving the recording";
+    default:
+      return null;
+  }
 }
 
 /** The live controls of a recording in progress. */
@@ -226,7 +260,7 @@ function RecordingHud({ compact }: { compact: boolean }) {
 
   if (phase === "starting") {
     return (
-      <div role="status" aria-live="polite" className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 px-2.5 text-[11.5px] text-ink-2">
+      <div className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 px-2.5 text-[11.5px] text-ink-2">
         <Icon icon={Loader2} size={13} className="motion-safe:animate-spin" />
         {!compact && "Preparing…"}
       </div>
@@ -235,7 +269,7 @@ function RecordingHud({ compact }: { compact: boolean }) {
 
   if (phase === "countdown") {
     return (
-      <div role="status" aria-live="polite" className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 pr-1 pl-2.5 text-[11.5px] text-ink">
+      <div className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 pr-1 pl-2.5 text-[11.5px] text-ink">
         <span className="size-2 rounded-full bg-danger" aria-hidden />
         {compact ? countdown : `Recording in ${countdown}…`}
         <IconButton icon={X} label="Cancel recording" size={13} onClick={() => void cancel()} />
@@ -245,7 +279,7 @@ function RecordingHud({ compact }: { compact: boolean }) {
   if (phase === "finishing") {
     const percent = progress === null ? null : `${Math.round(progress * 100)}%`;
     return (
-      <div role="status" aria-live="polite" className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 pr-1 pl-2.5 text-[11.5px] text-ink-2">
+      <div className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 pr-1 pl-2.5 text-[11.5px] text-ink-2">
         <Icon icon={Loader2} size={13} className="motion-safe:animate-spin" />
         {compact ? percent : `Saving…${percent ? ` ${percent}` : ""}`}
         <IconButton icon={X} label="Stop saving" size={13} onClick={() => void stopSaving()} />
@@ -256,7 +290,7 @@ function RecordingHud({ compact }: { compact: boolean }) {
   // with the way out beside it; an icon's label alone reached nobody.
   if (phase === "failed") {
     return (
-      <div role="alert" className="flex h-7 items-center gap-1.5 rounded-lg bg-danger/15 pr-1 pl-2.5 text-[11.5px] text-ink">
+      <div className="flex h-7 items-center gap-1.5 rounded-lg bg-danger/15 pr-1 pl-2.5 text-[11.5px] text-ink">
         <Icon icon={AlertTriangle} size={13} className="shrink-0 text-danger" />
         <span className="max-w-72 truncate" title={error ?? undefined}>
           {compact ? "Not saved" : `Not saved: ${error ?? "the recording could not be saved"}`}

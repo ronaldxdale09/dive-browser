@@ -24,7 +24,7 @@ import { usePrefs, watchReducedMotion, watchSystemTheme } from "./store/prefs";
 import { useShortcuts } from "./lib/shortcuts";
 import { useCoversContent } from "./lib/overlay";
 import { useChromeLayout, useViewportSize } from "./lib/adaptiveLayout";
-import { DialogLoading, PanelSkeleton, ToastViewport } from "./components/ChromeFeedback";
+import { DialogLoading, LiveRegions, PanelSkeleton, ToastViewport } from "./components/ChromeFeedback";
 import { usePicker } from "./store/simulator";
 import { startUpdateWatch } from "./store/updates";
 import { useTabAudio } from "./store/tabAudio";
@@ -268,6 +268,7 @@ export function App() {
         {recordingPhase === "setup" && <RecordDialog />}
         {recordingPhase === "done" && <RecordingDoneDialog />}
       </Suspense>
+      <LiveRegions />
       <BrowserToasts />
       <UpdateDialog />
       <TaskManager />

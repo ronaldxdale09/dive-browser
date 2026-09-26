@@ -547,6 +547,48 @@ let booting: Promise<void> | null = null;
 let closedTabsKept = false;
 /** The one toast timer: a newer notice cancels the older one's clearing. */
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+/** How long the notice has left once it is let go, while something holds it. */
+let noticeLeft = 0;
+/** When the running timer clears the notice. */
+let noticeDeadline = 0;
+/** The pointer is over the notice or focus is in it: it waits. */
+let noticeHeld = false;
+/**
+ * A notice with a button lasts at least this long. Three seconds was gone
+ * before anyone reading it could reach the Undo, least of all by keyboard.
+ */
+export const NOTICE_ACTION_MS = 10_000;
+/** Let go of a held notice, it stays long enough to be read again before it goes. */
+const NOTICE_RELEASE_MS = 2_000;
+
+function clearNoticeIn(ms: number) {
+  if (noticeTimer) clearTimeout(noticeTimer);
+  noticeDeadline = Date.now() + ms;
+  noticeTimer = setTimeout(() => {
+    noticeTimer = null;
+    useBrowser.setState({ notice: null, noticeAction: null });
+  }, ms);
+}
+
+/**
+ * Hold the notice on screen while the pointer is over it or focus is in it,
+ * and start its clock again when both have left. A toast that vanished while
+ * being read, or while its button was being reached for, took the button
+ * with it.
+ */
+export function holdNotice(held: boolean) {
+  if (held === noticeHeld) return;
+  noticeHeld = held;
+  if (held) {
+    if (noticeTimer) {
+      clearTimeout(noticeTimer);
+      noticeTimer = null;
+      noticeLeft = Math.max(0, noticeDeadline - Date.now());
+    }
+    return;
+  }
+  if (useBrowser.getState().notice !== null) clearNoticeIn(Math.max(noticeLeft, NOTICE_RELEASE_MS));
+}
 /** Zoom commands on their way to the engine, one per tab, and the level to send next. */
 const zoomInFlight = new Map<string, Promise<void>>();
 const zoomWanted = new Map<string, number>();
@@ -743,12 +785,16 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   notice: null,
   noticeAction: null,
   notify: (text, ms = 3000, action) => {
-    if (noticeTimer) clearTimeout(noticeTimer);
+    const shown = action ? Math.max(ms, NOTICE_ACTION_MS) : ms;
     set({ notice: text, noticeAction: action ?? null });
-    noticeTimer = setTimeout(() => {
+    if (noticeHeld) {
+      // Arrived under the pointer: its clock starts when the pointer leaves.
+      if (noticeTimer) clearTimeout(noticeTimer);
       noticeTimer = null;
-      set({ notice: null, noticeAction: null });
-    }, ms);
+      noticeLeft = shown;
+      return;
+    }
+    clearNoticeIn(shown);
   },
   capturing: false,
   zoom: {},

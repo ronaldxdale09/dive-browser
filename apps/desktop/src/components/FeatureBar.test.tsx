@@ -5,7 +5,8 @@ import { ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { useEmulation } from "../store/emulation";
 import { useRecording } from "../store/recording";
-import { COLLAPSE_BELOW, FeatureBar } from "./FeatureBar";
+import { COLLAPSE_BELOW, FeatureBar, recordingAnnouncement } from "./FeatureBar";
+import { currentAnnouncements, resetAnnouncements } from "../lib/announce";
 import { usePicker } from "./simulator/DevicePicker";
 import { useUpdates } from "../store/updates";
 import { useConnectHint } from "../store/connectHint";
@@ -47,6 +48,18 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  resetAnnouncements();
+});
+
+describe("recordingAnnouncement", () => {
+  it("names each phase once, and tells a resume from a start", () => {
+    expect(recordingAnnouncement("setup", "starting", 3)).toBe("Preparing to record");
+    expect(recordingAnnouncement("starting", "countdown", 3)).toBe("Recording starts in 3");
+    expect(recordingAnnouncement("countdown", "recording", 0)).toBe("Recording");
+    expect(recordingAnnouncement("paused", "recording", 0)).toBe("Recording resumed");
+    expect(recordingAnnouncement("recording", "finishing", 0)).toBe("Saving the recording");
+    expect(recordingAnnouncement("finishing", "done", 0)).toBeNull();
+  });
 });
 
 describe("FeatureBar", () => {
@@ -89,9 +102,14 @@ describe("FeatureBar", () => {
     // The running clock is a timer, so assistive tech knows a recording is in progress.
     expect(screen.getByRole("timer").getAttribute("aria-label")).toMatch(/recorded$/);
 
+    // Said through the chrome's standing region, not by the controls that
+    // replace each other as the phase moves on.
+    expect(currentAnnouncements().polite?.text).toBe("Recording");
+
     await act(() => useRecording.getState().pause());
     expect(screen.getByRole("button", { name: "Resume recording" })).toBeTruthy();
     expect(ipc.tabScreencastPause).toHaveBeenCalledWith(tab.id, true);
+    expect(currentAnnouncements().polite?.text).toBe("Recording paused");
 
     fireEvent.click(screen.getByRole("button", { name: "Discard recording" }));
     await waitFor(() => expect(useRecording.getState().phase).toBe("idle"));
@@ -103,12 +121,13 @@ describe("FeatureBar", () => {
     const stop = vi.spyOn(ipc, "tabScreencastStop").mockRejectedValue(new Error("ffmpeg timed out"));
     useRecording.setState({ phase: "failed", tab: tab.id, error: "ffmpeg could not encode the recording" });
     render(<FeatureBar />);
-    expect(screen.getByRole("alert").textContent).toContain("Not saved: ffmpeg could not encode the recording");
+    expect(screen.getByText("Not saved: ffmpeg could not encode the recording")).toBeTruthy();
+    expect(currentAnnouncements().assertive?.text).toBe("Recording not saved: ffmpeg could not encode the recording");
     // Capture is over: nothing to pause.
     expect(screen.queryByRole("button", { name: "Pause recording" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(stop).toHaveBeenCalledWith(tab.id);
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("ffmpeg timed out"));
+    await waitFor(() => expect(currentAnnouncements().assertive?.text).toContain("ffmpeg timed out"));
     fireEvent.click(screen.getByRole("button", { name: "Discard recording" }));
     await waitFor(() => expect(useRecording.getState().phase).toBe("idle"));
   });
@@ -116,7 +135,7 @@ describe("FeatureBar", () => {
   it("shows how far a save has got, with a way to stop it", async () => {
     useRecording.setState({ phase: "finishing", tab: tab.id, progress: 0.42 });
     render(<FeatureBar />);
-    expect(screen.getByRole("status").textContent).toContain("Saving… 42%");
+    expect(screen.getByText("Saving… 42%")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Stop saving" }));
     await waitFor(() => expect(ipc.tabScreencastCancel).toHaveBeenCalledWith(tab.id));
   });
