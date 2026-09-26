@@ -181,13 +181,19 @@ function AddLink({ onAdd, onCancel }: { onAdd: (link: QuickLink) => void; onCanc
 }
 
 /**
- * Turn what was typed into a link: a bare host gets `https://`, a missing
- * name becomes the host without `www.`. Non-web schemes are refused.
+ * Turn what was typed into a link: a bare host gets `https://` (`http://`
+ * for this machine, as the address bar does), a missing name becomes the
+ * host without `www.`. Non-web schemes are refused.
  */
 export function parseQuickLink(rawUrl: string, rawName: string): QuickLink | { error: string } {
   const typed = rawUrl.trim();
   if (!typed) return { error: "Enter a web address." };
-  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(typed) ? typed : `https://${typed}`;
+  // "localhost:3000" reads as scheme "localhost" to a URL parser; a port
+  // after the colon makes it a host, the way the address bar takes it.
+  const hostAndPort = /^[^\s:/?#]+:\d+(?:[/?#]|$)/.test(typed);
+  const hasScheme = !hostAndPort && /^[a-z][a-z0-9+.-]*:/i.test(typed);
+  const local = /^(localhost|127\.|0\.0\.0\.0|\[::1\])/i.test(typed) || /^[^\s:/?#]+\.local(?:[:/?#]|$)/i.test(typed);
+  const withScheme = hasScheme ? typed : `${local ? "http" : "https"}://${typed}`;
   let parsed: URL;
   try {
     parsed = new URL(withScheme);

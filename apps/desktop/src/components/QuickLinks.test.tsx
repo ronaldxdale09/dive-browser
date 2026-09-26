@@ -50,4 +50,12 @@ describe("parseQuickLink", () => {
     expect(parseQuickLink("https://x.test", " My X ")).toEqual({ name: "My X", url: "https://x.test/" });
     expect(parseQuickLink("", "")).toEqual({ error: "Enter a web address." });
   });
+
+  it("takes a host and port as an address, over http for this machine", () => {
+    expect(parseQuickLink("localhost:3000", "")).toEqual({ name: "localhost", url: "http://localhost:3000/" });
+    expect(parseQuickLink("127.0.0.1:8080/app", "API")).toEqual({ name: "API", url: "http://127.0.0.1:8080/app" });
+    expect(parseQuickLink("staging.test:8443", "")).toEqual({ name: "staging.test", url: "https://staging.test:8443/" });
+    // A real scheme is still judged as written.
+    expect(parseQuickLink("mailto:me@x.test", "")).toEqual({ error: "Quick links open http or https addresses." });
+  });
 });
