@@ -213,7 +213,9 @@ export function Stage() {
   const outNow = outputTime(segments, useEditor.getState().playhead);
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col rounded-2xl border border-line bg-surface">
+    // Focusable, so a click on the preview gives the editor's shortcuts a
+    // home that is not a button (see editorOwnsKey).
+    <div data-editor-surface tabIndex={-1} role="group" aria-label="Stage" className="flex min-h-0 min-w-0 flex-1 flex-col rounded-2xl border border-line bg-surface outline-none">
       <div ref={wrap} className="relative grid min-h-0 flex-1 place-items-center overflow-hidden rounded-t-2xl">
         <div className="relative" style={{ width: size.w, height: size.h }}>
           <canvas ref={canvas} onPointerDown={onPointerDown} className={`h-full w-full rounded-xl ${selection?.kind === "zoom" || selection?.kind === "annotation" ? "cursor-crosshair" : ""}`} style={{ width: size.w, height: size.h }} aria-label="Preview" />

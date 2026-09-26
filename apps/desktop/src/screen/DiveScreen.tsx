@@ -153,6 +153,19 @@ function keyBelongsToControl(target: EventTarget | null): boolean {
   return target.closest('[role="combobox"], [role="listbox"]') !== null;
 }
 
+/**
+ * Whether a plain key (no ⌘ or Ctrl) is the editor's rather than the focused
+ * control's. Only with focus on nothing in particular, on the stage or the
+ * timeline themselves, or on a timeline item: on a button Space pressed it
+ * and played the video as well, on a switch or a radio the letters added
+ * zooms, and on a slider the arrows moved the playhead instead of the value.
+ */
+export function editorOwnsKey(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement) || target === document.body || target === document.documentElement) return true;
+  if (keyBelongsToControl(target)) return false;
+  return target.matches("[data-editor-surface], [data-timeline-item]");
+}
+
 /** Keyboard: Space plays, Z/T/S/A/B add, Delete removes, ⌘Z undoes, arrows step. */
 function useShortcuts(active: boolean) {
   useEffect(() => {
@@ -172,7 +185,7 @@ function useShortcuts(active: boolean) {
         void s.save();
         return;
       }
-      if (mod) return;
+      if (mod || !editorOwnsKey(e.target)) return;
       switch (e.key) {
         case " ":
           e.preventDefault();
@@ -199,9 +212,15 @@ function useShortcuts(active: boolean) {
           s.addAnnotation("blur");
           break;
         case "Delete":
-        case "Backspace":
+        case "Backspace": {
+          // An item deleted from the keyboard takes focus with it; the
+          // timeline keeps it, so the next key still reaches the editor.
+          const item = e.target instanceof HTMLElement && e.target.matches("[data-timeline-item]") ? e.target : null;
+          const lanes = item?.closest<HTMLElement>("[data-editor-surface]");
           s.deleteSelected();
+          if (item && lanes) requestAnimationFrame(() => !item.isConnected && lanes.focus());
           break;
+        }
         case "ArrowLeft":
           e.preventDefault();
           s.seek(s.playhead - (e.shiftKey ? 1000 : 1000 / 60));

@@ -62,8 +62,30 @@ export interface EditorState {
   addSpeed: (atMs?: number) => void;
   addAnnotation: (type: AnnotationType, atMs?: number) => void;
   deleteSelected: () => void;
+  /**
+   * Give a timeline item new times, from the keyboard or a typed value
+   * rather than a drag. False, and nothing changes, when the times fall off
+   * either end, leave less than `MIN_REGION_MS`, or overlap a neighbour in a
+   * lane that allows no overlap.
+   */
+  retime: (target: Exclude<Selection, null>, startMs: number, endMs: number) => boolean;
   autoZoom: () => void;
   save: () => Promise<void>;
+}
+
+/** The shortest a timeline item can be, as a drag by its edge allows. */
+export const MIN_REGION_MS = 100;
+
+type Timed = { id: string; startMs: number; endMs: number };
+
+/**
+ * Whether `id` can take the times `startMs`..`endMs` among `list`, inside a
+ * recording `total` ms long. Pure, so the rules are testable on their own.
+ */
+export function canRetime(list: readonly Timed[], id: string, startMs: number, endMs: number, total: number, exclusive: boolean): boolean {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return false;
+  if (startMs < 0 || endMs > total || endMs - startMs < MIN_REGION_MS) return false;
+  return !exclusive || !list.some((o) => o.id !== id && startMs < o.endMs && endMs > o.startMs);
 }
 
 const MAX_HISTORY = 80;
@@ -325,6 +347,31 @@ export const useEditor = create<EditorState>((set, get) => ({
       }
     });
     set({ selection: null });
+  },
+  retime: ({ kind, id }, startMs, endMs) => {
+    const { project } = get();
+    if (!project) return false;
+    const e = project.editor;
+    const list: readonly Timed[] = kind === "zoom" ? e.zooms : kind === "trim" ? e.trims : kind === "speed" ? e.speeds : e.annotations;
+    const s = Math.round(startMs);
+    const en = Math.round(endMs);
+    // Notes may stack; zooms, cuts and speed changes each own their stretch.
+    if (!list.some((i) => i.id === id) || !canRetime(list, id, s, en, project.media.durationMs, kind !== "annotation")) return false;
+    get().update((ed) => {
+      const patch = <T extends Timed>(arr: T[]) => arr.map((i) => (i.id === id ? { ...i, startMs: s, endMs: en } : i));
+      switch (kind) {
+        case "zoom":
+          // Moved by hand, as a drag marks it, so a new suggestion pass leaves it be.
+          return { ...ed, zooms: patch(ed.zooms).map((z) => (z.id === id ? { ...z, source: "manual" as const } : z)) };
+        case "trim":
+          return { ...ed, trims: patch(ed.trims) };
+        case "speed":
+          return { ...ed, speeds: patch(ed.speeds) };
+        default:
+          return { ...ed, annotations: patch(ed.annotations) };
+      }
+    });
+    return true;
   },
   autoZoom: () => {
     const { project, cursorRaw } = get();

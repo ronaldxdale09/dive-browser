@@ -8,7 +8,7 @@ import { recordingClock } from "../lib/recordingFormat";
 import { zoomScale } from "./math";
 import { ASPECT_RATIOS } from "./model";
 import type { Selection } from "./store";
-import { placeRegion, useEditor } from "./store";
+import { MIN_REGION_MS, placeRegion, useEditor } from "./store";
 
 /**
  * The timeline: a toolbar to add things, a fine ruler in source time, and
@@ -26,6 +26,9 @@ const LANES: { kind: Kind; icon: LucideIcon; pill: string; ring: string; text: s
   { kind: "speed", icon: Gauge, pill: "bg-orange-500/25 border-orange-500/70", ring: "ring-orange-400", text: "text-orange-50" },
 ];
 
+/** What each lane's items are called out loud. */
+const LANE_NAMES: Record<Kind, string> = { zoom: "Zoom", trim: "Cut", annotation: "Note", speed: "Speed" };
+
 const LANE_H = 40;
 const PAD = 14;
 
@@ -33,6 +36,7 @@ export function Timeline() {
   const project = useEditor((s) => s.project);
   const selection = useEditor((s) => s.selection);
   const select = useEditor((s) => s.select);
+  const retime = useEditor((s) => s.retime);
   const seek = useEditor((s) => s.seek);
   const update = useEditor((s) => s.update);
   const checkpoint = useEditor((s) => s.checkpoint);
@@ -48,6 +52,8 @@ export function Timeline() {
   const [view, setView] = useState({ start: 0, span: 0 });
   const [width, setWidth] = useState(800);
   const [draft, setDraft] = useState<{ kind: Kind; startMs: number; endMs: number } | null>(null);
+  // What the last keyboard move did, for a screen reader.
+  const [said, setSaid] = useState("");
   const total = project?.media.durationMs ?? 0;
   const span = view.span || total;
   const start = view.start;
@@ -235,6 +241,49 @@ export function Timeline() {
         : kind === "speed"
           ? e.speeds.map((s) => ({ id: s.id, startMs: s.startMs, endMs: s.endMs, label: `${s.speed}×` }))
           : e.annotations.map((a) => ({ id: a.id, startMs: a.startMs, endMs: a.endMs, label: a.type === "text" ? (a.text ?? "Text") : a.type === "blur" ? "Blur" : a.type === "arrow" ? "Arrow" : "Picture" }));
+  const visible = (it: { startMs: number; endMs: number }) => {
+    const x = toX(it.startMs);
+    return !(x + Math.max(8, (it.endMs - it.startMs) * pxPerMs) < PAD || x > width - PAD);
+  };
+  // Roving focus over the items in view: the selected one is the timeline's
+  // Tab stop, else the first, and the arrow keys do the rest.
+  const shownItems = LANES.flatMap((lane) => items(lane.kind).filter(visible).map((it) => `${lane.kind}:${it.id}`));
+  const picked = selection ? `${selection.kind}:${selection.id}` : null;
+  const tabStop = picked && shownItems.includes(picked) ? picked : (shownItems[0] ?? null);
+
+  /**
+   * The keyboard's version of dragging a pill: ← and → move it 100 ms (1 s
+   * with ⇧), and with ⌥ they move its end instead, trimming or extending it.
+   * ↑ and ↓ go to the item before or after. A move that would run off either
+   * end stops at it; one onto a neighbour in the same lane is refused, as a
+   * drag onto it is.
+   */
+  const itemKey = (kind: Kind, it: { id: string; startMs: number; endMs: number; label: string }) => (ev: React.KeyboardEvent<HTMLElement>) => {
+    if (ev.metaKey || ev.ctrlKey) return;
+    if (ev.key === "ArrowUp" || ev.key === "ArrowDown") {
+      const all = Array.from(lanesRef.current?.querySelectorAll<HTMLElement>("[data-timeline-item]") ?? []);
+      const next = all[all.indexOf(ev.currentTarget) + (ev.key === "ArrowDown" ? 1 : -1)];
+      ev.preventDefault();
+      ev.stopPropagation();
+      next?.focus();
+      return;
+    }
+    if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
+    // Stopped here, so the editor's own arrows do not move the playhead too.
+    ev.preventDefault();
+    ev.stopPropagation();
+    const by = (ev.key === "ArrowRight" ? 1 : -1) * (ev.shiftKey ? 1000 : 100);
+    const target = { kind, id: it.id };
+    const [s, en] = ev.altKey
+      ? [it.startMs, Math.min(total, Math.max(it.startMs + MIN_REGION_MS, it.endMs + by))]
+      : (() => {
+          const d = Math.min(Math.max(by, -it.startMs), total - it.endMs);
+          return [it.startMs + d, it.endMs + d];
+        })();
+    if (s === it.startMs && en === it.endMs) return;
+    if (retime(target, s, en)) setSaid(`${LANE_NAMES[kind]} ${stamp(s)} to ${stamp(en)}`);
+    else setSaid(`${LANE_NAMES[kind]} cannot overlap the next one`);
+  };
 
   return (
     <div ref={root} className="flex h-full min-w-0 flex-col rounded-2xl border border-line bg-surface select-none" onWheel={onWheel}>
@@ -259,7 +308,13 @@ export function Timeline() {
         </span>
       </div>
 
-      <div ref={lanesRef} className="relative min-h-0 flex-1">
+      {/* Focusable itself, so a click on the lanes gives the editor's letter
+          shortcuts a home (see editorOwnsKey); with nothing on it yet, it is
+          the Tab stop the items would otherwise be. */}
+      <div ref={lanesRef} data-editor-surface role="group" aria-label="Timeline" tabIndex={tabStop ? -1 : 0} className="relative min-h-0 flex-1 outline-none focus-visible:ring-1 focus-visible:ring-highlight/60">
+        <span role="status" className="sr-only">
+          {said}
+        </span>
         {/* Ruler */}
         <div className="relative h-8 cursor-ew-resize" onPointerDown={scrub}>
           {minor.map((t) => (
@@ -286,10 +341,17 @@ export function Timeline() {
                 <div
                   key={it.id}
                   role="button"
-                  tabIndex={-1}
-                  aria-label={`${lane.kind} ${it.label}`}
+                  data-timeline-item
+                  tabIndex={tabStop === `${lane.kind}:${it.id}` ? 0 : -1}
+                  aria-label={`${LANE_NAMES[lane.kind]} ${it.label}, ${stamp(it.startMs)} to ${stamp(it.endMs)}`}
+                  aria-pressed={picked}
+                  aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight Alt+ArrowLeft Alt+ArrowRight Delete"
+                  // Focus selects, so the settings panel follows the keyboard
+                  // as it follows a click.
+                  onFocus={() => !picked && select({ kind: lane.kind, id: it.id })}
+                  onKeyDown={itemKey(lane.kind, it)}
                   onPointerDown={dragItem(lane.kind, it.id, "move")}
-                  className={`absolute top-1.5 flex h-7 cursor-grab items-center justify-center gap-1.5 overflow-hidden rounded-lg border px-3 text-[11px] whitespace-nowrap ${lane.pill} ${lane.text} ${picked ? `ring-2 ${lane.ring}` : ""}`}
+                  className={`absolute top-1.5 flex h-7 cursor-grab items-center outline-none focus-visible:ring-2 focus-visible:ring-highlight justify-center gap-1.5 overflow-hidden rounded-lg border px-3 text-[11px] whitespace-nowrap ${lane.pill} ${lane.text} ${picked ? `ring-2 ${lane.ring}` : ""}`}
                   style={{ left: Math.max(PAD, x), width: Math.min(w, width - PAD - Math.max(PAD, x)) }}
                 >
                   <span aria-hidden onPointerDown={dragItem(lane.kind, it.id, "start")} className="absolute inset-y-0 left-0 w-2.5 cursor-ew-resize" />

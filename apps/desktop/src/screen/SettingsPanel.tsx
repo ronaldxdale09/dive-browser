@@ -7,6 +7,7 @@ import { Tooltip } from "../components/Tooltip";
 import { ASPECT_RATIOS, SOLID_COLORS, WALLPAPERS } from "./model";
 import type { AnnotationRegion, Project, TextAnimation, ZoomRegion } from "./model";
 import { useEditor } from "./store";
+import type { Selection } from "./store";
 
 /**
  * The right-hand panel: a rail of sections beside their controls. What is
@@ -76,6 +77,7 @@ export function SettingsPanel({ onExport }: { onExport: () => void }) {
           </span>
         </header>
         <div className="flex flex-col gap-4 px-5 pb-5 text-xs">
+          {contextual && selection && <TimesFields key={contextual.id} target={selection} startMs={contextual.startMs} endMs={contextual.endMs} />}
           {zoom ? <ZoomSettings zoom={zoom} project={project} /> : speed ? <SpeedSettings id={speed.id} speed={speed.speed} /> : trim ? <TrimSettings /> : note ? <NoteSettings note={note} /> : section === "background" ? <BackgroundSettings project={project} /> : section === "effects" ? <EffectsSettings project={project} /> : section === "layout" ? <LayoutSettings project={project} /> : <CursorSettings project={project} />}
         </div>
       </div>
@@ -132,6 +134,82 @@ function Choice<T extends string | number>({ value, options, onChange, cols = 3 
 
 function Label({ children }: { children: ReactNode }) {
   return <span className="text-[13px] text-ink">{children}</span>;
+}
+
+/** Seconds as a field shows them: tenths, without trailing noise. */
+export function secondsText(ms: number): string {
+  return String(Math.round(ms / 100) / 10);
+}
+
+/**
+ * Where the selected item starts and ends, typed in seconds: the way to place
+ * one exactly, and the way to place one at all without dragging it. A value
+ * the timeline cannot take (past either end, over a neighbour) is put back
+ * and the reason is said.
+ */
+function TimesFields({ target, startMs, endMs }: { target: Exclude<Selection, null>; startMs: number; endMs: number }) {
+  const retime = useEditor((s) => s.retime);
+  const [refused, setRefused] = useState(false);
+  const commit = (which: "start" | "end", text: string) => {
+    const seconds = Number(text);
+    const ms = Math.round(seconds * 1000);
+    if (text.trim() === "" || !Number.isFinite(seconds)) return false;
+    const [s, en] = which === "start" ? [ms, endMs] : [startMs, ms];
+    if (s === startMs && en === endMs) return true;
+    const ok = retime(target, s, en);
+    setRefused(!ok);
+    return ok;
+  };
+  return (
+    <Card>
+      <div className="flex gap-3">
+        <TimeField label="Start (seconds)" value={startMs} refused={refused} onCommit={(text) => commit("start", text)} />
+        <TimeField label="End (seconds)" value={endMs} refused={refused} onCommit={(text) => commit("end", text)} />
+      </div>
+      {refused && (
+        <p id="screen-times-refused" role="alert" className="mt-2 text-[11px] text-warn">
+          Those times run past the recording, are under a tenth of a second long, or overlap another item in the lane.
+        </p>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * One time, in seconds. Committed on Enter or on leaving the field; a value
+ * the timeline refused goes back to the one it kept, and a drag or an arrow
+ * key on the pill shows up here as it happens.
+ */
+function TimeField({ label, value, refused, onCommit }: { label: string; value: number; refused: boolean; onCommit: (text: string) => boolean }) {
+  const [draft, setDraft] = useState(secondsText(value));
+  const [shown, setShown] = useState(value);
+  if (shown !== value) {
+    setShown(value);
+    setDraft(secondsText(value));
+  }
+  const commit = () => {
+    if (!onCommit(draft)) setDraft(secondsText(value));
+  };
+  return (
+    <label className="flex flex-1 flex-col gap-1.5">
+      <span className="text-ink-2">{label}</span>
+      <input
+        type="number"
+        inputMode="decimal"
+        min={0}
+        step={0.1}
+        value={draft}
+        aria-describedby={refused ? "screen-times-refused" : undefined}
+        aria-invalid={refused || undefined}
+        onChange={(ev) => setDraft(ev.target.value)}
+        onBlur={commit}
+        onKeyDown={(ev) => {
+          if (ev.key === "Enter") commit();
+        }}
+        className="h-8 rounded-lg border border-line bg-surface px-2 font-mono text-xs text-ink outline-none focus:border-highlight/60"
+      />
+    </label>
+  );
 }
 
 function DeleteButton() {
