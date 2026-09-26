@@ -12,6 +12,7 @@ import { fileNameOr, fileUrl, opensInTab} from "../lib/paths";
 import { isPrivateWindow } from "../lib/privateMode";
 import { orderTabs } from "../lib/tabOrder";
 import { uiStorage } from "../lib/uiStorage";
+import { languageName, preferredLanguage, translationMessage } from "../lib/translate";
 
 export type UiPanel = "sidecar" | "dock" | "palette" | "find" | "settings" | "library" | "extensions" | "shortcuts" | "menu" | "defaultBrowser" | "subtitles" | "tasks" | "import" | "apps";
 /** The sections of the library dialog. */
@@ -106,8 +107,15 @@ interface BrowserState {
   savePage: () => Promise<void>;
   /** Show just the article on the active tab, or put the page back. */
   readerView: () => Promise<void>;
-  /** Translate the active tab into the browser's own language. */
+  /** Translate the active tab into the browser's own language, or put it back when it already is. */
   translatePage: () => Promise<void>;
+  /**
+   * Reader view and translation per tab, as last seen. The address bar's
+   * buttons and the palette's commands both read and write it, so either
+   * shows what the other did. A navigation or a closed tab clears it.
+   */
+  pageModes: Record<string, PageMode>;
+  setPageMode: (tabId: string, patch: Partial<PageMode>) => void;
   /** A user capture is traversing/encoding; blocks duplicate requests. */
   capturing: boolean;
   /** Zoom factor per tab; absent means the default new tabs open at. */
@@ -153,6 +161,8 @@ interface BrowserState {
 }
 
 export type NavError = { url: string; error: string };
+/** What reader view and translation have done to a tab's page. */
+export type PageMode = { reader: boolean; translated: string | null };
 export type NoticeAction = { label: string; run: () => void };
 export type ClosedTab = {
   url: string;
@@ -709,6 +719,8 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   recordingTab: null,
   applyLoad: (load) => {
     if (load.phase === "started") {
+      // A new document is neither in reader view nor translated.
+      if (get().pageModes[load.tab_id]) set((s) => ({ pageModes: without(s.pageModes, load.tab_id) }));
       clearPrivacy(load.tab_id);
       useNetwork.getState().navigated(load.tab_id, load.url);
       if (!usesNativeConsoleBatch()) useConsole.getState().navigated(load.tab_id);
@@ -1050,10 +1062,13 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     try {
       // Asking twice leaves reader view, so the command is a toggle wherever
       // it is invoked from -- the palette, the menu, the chord.
-      if (await ipc.pageReaderOpen(id)) await ipc.pageReaderLeave(id);
-      else {
+      if (await ipc.pageReaderOpen(id)) {
+        await ipc.pageReaderLeave(id);
+        get().setPageMode(id, { reader: false });
+      } else {
         const result = await ipc.pageReader(id);
-        if (!result.ok) get().notify(result.reason === "no-article" ? "There is no article on this page to read." : "This page could not be shown in reader view.", 4000);
+        if (result.ok) get().setPageMode(id, { reader: true });
+        else get().notify(result.reason === "no-article" ? "There is no article on this page to read." : "This page could not be shown in reader view.", 4000);
       }
       set({ error: null });
     } catch (cause) {
@@ -1063,15 +1078,34 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   translatePage: async () => {
     const id = tabInThisWindow(get().activeTab, get().detached);
     if (!id) return;
-    const target = navigator.language.slice(0, 2).toLowerCase() || "en";
+    const target = preferredLanguage();
     try {
+      // Already translated into the browser's language, the command puts the
+      // page back, the way reader view's does.
+      if (get().pageModes[id]?.translated === target) {
+        await ipc.pageTranslateRestore(id);
+        get().setPageMode(id, { translated: null });
+        set({ error: null });
+        return;
+      }
       const result = await ipc.pageTranslate(id, target);
-      if (!result.ok && result.reason !== "already") get().notify("This page could not be translated.", 4000);
+      if (result.ok) {
+        get().setPageMode(id, { translated: target });
+        get().notify(`Translated from ${languageName(result.from ?? "")} into ${languageName(target)}.`, 3000);
+      } else get().notify(translationMessage(result.reason, result.from, target), 4000);
       set({ error: null });
     } catch (cause) {
       set({ error: errorMessage(cause) });
     }
   },
+  pageModes: {},
+  setPageMode: (tabId, patch) =>
+    set((s) => {
+      const current = s.pageModes[tabId] ?? { reader: false, translated: null };
+      const next = { ...current, ...patch };
+      if (next.reader === current.reader && next.translated === current.translated && s.pageModes[tabId]) return s;
+      return { pageModes: { ...s.pageModes, [tabId]: next } };
+    }),
   reorderTabs: async (ordered) => {
     const ws = get().activeWorkspace;
     if (!ws) return;
@@ -1172,7 +1206,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       const scroll = scrollOfClosing.get(id);
       scrollOfClosing.delete(id);
       set((s) => ({ closedTabs: rememberClosed(s.closedTabs, gone, goneIndex, scroll) }));
-      set((s) => ({ loading: without(s.loading, id), navError: without(s.navError, id), crashedTabs: without(s.crashedTabs, id), permissionRequests: without(s.permissionRequests, id), zoom: without(s.zoom, id) }));
+      set((s) => ({ loading: without(s.loading, id), navError: without(s.navError, id), crashedTabs: without(s.crashedTabs, id), permissionRequests: without(s.permissionRequests, id), zoom: without(s.zoom, id), pageModes: without(s.pageModes, id) }));
       zoomWanted.delete(id);
       // Dropped here rather than in closeTab: a tab the engine, an agent or a
       // popout closed never passes through it, and each kept up to 500

@@ -35,15 +35,35 @@
     return nodes;
   };
 
+  // Regions and scripts that write Chinese in traditional characters.
+  const TRADITIONAL = new Set(["tw", "hk", "mo", "hant"]);
+
+  /**
+   * A tag as the translator is asked for it (mirrors `canonicalLanguage` in
+   * the chrome and `normalize_language` in the host): the primary language
+   * alone -- all three letters of "fil", not the "fi" of Finnish -- except
+   * Chinese, where the script decides what a reader can read.
+   */
+  const canonical = (tag) => {
+    const [primary = "", ...rest] = String(tag || "").trim().toLowerCase().split(/[-_]/);
+    if (!/^[a-z]{2,3}$/.test(primary)) return "";
+    if (primary === "zh") return rest.some((part) => TRADITIONAL.has(part)) ? "zh-TW" : "zh";
+    if (primary === "tl") return "fil";
+    return primary;
+  };
+
+  /** The language the page says it is. */
+  const declaredLanguage = () => canonical(document.documentElement.lang);
+
   /** The language the page says it is, else what the detector makes of it. */
   const pageLanguage = async (sample) => {
-    const declared = (document.documentElement.lang || "").trim().slice(0, 2).toLowerCase();
+    const declared = declaredLanguage();
     if (declared) return declared;
     if (typeof LanguageDetector !== "function") return "";
     try {
       const detector = await LanguageDetector.create();
       const [best] = await detector.detect(sample.slice(0, 2000));
-      return best && best.confidence > 0.5 ? best.detectedLanguage.slice(0, 2) : "";
+      return best && best.confidence > 0.5 ? canonical(best.detectedLanguage) : "";
     } catch {
       return "";
     }
@@ -51,12 +71,15 @@
 
   window.__diveTranslate = async (target) => {
     if (typeof Translator !== "function") return { ok: false, reason: "unsupported" };
+    // A page already translated is put back first: translating the
+    // translation named the wrong source language and garbled the text.
+    if (window.__diveTranslated) window.__diveTranslateRestore();
     const nodes = textNodes();
     if (nodes.length === 0) return { ok: false, reason: "empty" };
     const sample = nodes.slice(0, 40).map((n) => n.nodeValue).join(" ");
     const from = await pageLanguage(sample);
     if (!from) return { ok: false, reason: "unknown-language" };
-    if (from === target) return { ok: false, reason: "already", from };
+    if (from === canonical(target)) return { ok: false, reason: "already", from };
     let translator;
     try {
       translator = await Translator.create({ sourceLanguage: from, targetLanguage: target });
@@ -106,10 +129,12 @@
     return { ok: true, restored };
   };
 
+  // Asked every time the address bar's buttons appear, so it reads only what
+  // the page declares: running the detector here cost a model load per tab switch.
   window.__diveTranslateState = async () => ({
     translated: Boolean(window.__diveTranslated),
     target: window.__diveTranslated ? window.__diveTranslated.target : null,
-    language: await pageLanguage(document.body ? document.body.innerText.slice(0, 2000) : ""),
+    language: declaredLanguage(),
     supported: typeof Translator === "function",
   });
 })();

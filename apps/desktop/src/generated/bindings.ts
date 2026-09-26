@@ -3237,7 +3237,7 @@ export type ToolStep = {
 export type TranslateState = {
 	translated: boolean,
 	target: string | null,
-	/**  The page's own language, as it declares or reads. */
+	/**  The page's own language, as it declares it. */
 	language: string | null,
 	/**  Whether this build can translate at all. */
 	supported: boolean,

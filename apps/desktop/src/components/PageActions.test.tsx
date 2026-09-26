@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import { resetContentCover } from "../lib/overlay";
@@ -15,6 +15,8 @@ beforeEach(() => {
   vi.spyOn(ipc, "pageReaderLeave").mockResolvedValue(null);
   vi.spyOn(ipc, "pageTranslate").mockResolvedValue({ ok: true, reason: null, from: "es", target: "en", changed: 120 });
   vi.spyOn(ipc, "pageTranslateRestore").mockResolvedValue(null);
+  vi.spyOn(ipc, "pageReaderOpen").mockResolvedValue(false);
+  vi.spyOn(ipc, "pageTranslateState").mockResolvedValue({ translated: false, target: null, language: "es", supported: true });
   useBrowser.setState({ tabs: [tab] as never, activeTab: "t1" });
 });
 
@@ -31,11 +33,22 @@ describe("preferredLanguage", () => {
     expect(preferredLanguage("EN-GB")).toBe("en");
     expect(preferredLanguage("cy")).toBe("en");
   });
+
+  it("keeps the tags where the region or length is the language", () => {
+    expect(preferredLanguage("zh-TW")).toBe("zh-TW");
+    expect(preferredLanguage("zh-Hant-HK")).toBe("zh-TW");
+    expect(preferredLanguage("zh-CN")).toBe("zh");
+    expect(preferredLanguage("fil-PH")).toBe("fil");
+    expect(preferredLanguage("tl")).toBe("fil");
+    // Finnish is not Filipino.
+    expect(preferredLanguage("fi")).toBe("en");
+  });
 });
 
 describe("translationMessage", () => {
   it("says what actually went wrong", () => {
     expect(translationMessage("already", null)).toContain("already in that language");
+    expect(translationMessage("already", "en", "en")).toBe("This page is already in English.");
     expect(translationMessage("unsupported-pair", "es")).toContain("Spanish");
     expect(translationMessage("unavailable", null)).toContain("could not be downloaded");
     expect(translationMessage(null, null)).toContain("could not be translated");
@@ -89,6 +102,28 @@ describe("PageActions", () => {
     await screen.findByRole("button", { name: "Leave reader view" });
     useBrowser.setState({ tabs: [{ ...tab, url: "https://example.com/other" }] as never });
     rerender(<PageActions />);
+    expect(await screen.findByRole("button", { name: "Reader view" })).toBeTruthy();
+  });
+
+  it("shows what the page is in when it appears, and what the palette did to it", async () => {
+    vi.spyOn(ipc, "pageReaderOpen").mockResolvedValue(true);
+    vi.spyOn(ipc, "pageTranslateState").mockResolvedValue({ translated: true, target: "fr", language: "es", supported: true });
+    render(<PageActions />);
+    expect(await screen.findByRole("button", { name: "Leave reader view" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Translate this page" }).className).toContain("text-highlight");
+    // Reader view left from the palette shows here without a remount.
+    act(() => useBrowser.getState().setPageMode("t1", { reader: false }));
     expect(screen.getByRole("button", { name: "Reader view" })).toBeTruthy();
+  });
+
+  it("spins only the button whose work is running", async () => {
+    let finish: (value: never) => void = () => undefined;
+    vi.spyOn(ipc, "pageTranslate").mockReturnValue(new Promise((resolve) => (finish = resolve)) as never);
+    render(<PageActions />);
+    fireEvent.click(screen.getByRole("button", { name: "Translate this page" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "French" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Translate this page" }).getAttribute("aria-busy")).toBe("true"));
+    expect(screen.getByRole("button", { name: "Reader view" }).querySelector(".animate-spin, .motion-safe\\:animate-spin")).toBeNull();
+    await act(async () => finish({ ok: true, reason: null, from: "es", target: "fr", changed: 1 } as never));
   });
 });

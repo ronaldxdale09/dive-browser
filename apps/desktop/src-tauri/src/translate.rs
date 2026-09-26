@@ -41,22 +41,41 @@ pub struct Translation {
 pub struct TranslateState {
     pub translated: bool,
     pub target: Option<String>,
-    /// The page's own language, as it declares or reads.
+    /// The page's own language, as it declares it.
     pub language: Option<String>,
     /// Whether this build can translate at all.
     pub supported: bool,
 }
 
-/// A language tag Dive will pass to the engine: two letters, so nothing
-/// typed by a page or a stale preference reaches the API unchecked.
+/// A language tag Dive will pass to the engine: a primary language of two or
+/// three letters (Filipino is `fil`), so nothing typed by a page or a stale
+/// preference reaches the API unchecked. A region or script is dropped --
+/// the translator takes the base language -- except for Chinese, where it
+/// decides between simplified and traditional characters. Tagalog is asked
+/// for as Filipino, its standard form.
 pub fn normalize_language(tag: &str) -> Option<String> {
-    let base: String = tag
-        .trim()
-        .chars()
-        .take_while(char::is_ascii_alphabetic)
-        .collect::<String>()
-        .to_lowercase();
-    (base.len() == 2).then_some(base)
+    let mut parts = tag.trim().split(['-', '_']);
+    let primary = parts.next()?.to_ascii_lowercase();
+    if !(2..=3).contains(&primary.len()) || !primary.chars().all(|c| c.is_ascii_lowercase()) {
+        return None;
+    }
+    let rest: Vec<String> = parts.map(str::to_ascii_lowercase).collect();
+    if rest
+        .iter()
+        .any(|part| part.is_empty() || !part.chars().all(|c| c.is_ascii_alphanumeric()))
+    {
+        return None;
+    }
+    Some(match primary.as_str() {
+        "zh" if rest
+            .iter()
+            .any(|part| matches!(part.as_str(), "tw" | "hk" | "mo" | "hant")) =>
+        {
+            "zh-TW".to_owned()
+        }
+        "tl" => "fil".to_owned(),
+        _ => primary,
+    })
 }
 
 fn session_for(state: &AppState, tab_id: TabId) -> AppResult<CdpSession> {
@@ -153,10 +172,18 @@ mod tests {
         // A region or a script is dropped; the API takes the base language.
         assert_eq!(normalize_language("pt-BR"), Some("pt".into()));
         assert_eq!(normalize_language("zh_Hans"), Some("zh".into()));
+        // Except where it is the difference between two ways of writing.
+        assert_eq!(normalize_language("zh-TW"), Some("zh-TW".into()));
+        assert_eq!(normalize_language("zh-Hant-HK"), Some("zh-TW".into()));
+        // Three-letter languages are languages, not the first two letters of one.
+        assert_eq!(normalize_language("fil"), Some("fil".into()));
+        assert_eq!(normalize_language("fil-PH"), Some("fil".into()));
+        assert_eq!(normalize_language("tl"), Some("fil".into()));
         // Anything else is refused rather than passed through.
         assert_eq!(normalize_language(""), None);
         assert_eq!(normalize_language("english"), None);
         assert_eq!(normalize_language("e"), None);
+        assert_eq!(normalize_language("en-"), None);
         assert_eq!(normalize_language("'); alert(1); //"), None);
     }
 }

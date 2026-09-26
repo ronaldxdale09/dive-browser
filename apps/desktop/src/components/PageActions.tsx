@@ -5,62 +5,14 @@ import { errorMessage } from "../lib/errors";
 import { useCoversContent } from "../lib/overlay";
 import { useDismiss } from "../lib/useDismiss";
 import { useFocusTrap } from "../lib/useFocusTrap";
+import { languageName, LANGUAGES, translationMessage } from "../lib/translate";
 import { tabInThisWindow, useBrowser } from "../store/browser";
 import { describeCard, useWallet } from "../store/wallet";
 import { Icon } from "./Icon";
 import { Tooltip } from "./Tooltip";
 
-/** Languages offered, as the on-device translator names them. */
-export const LANGUAGES: readonly (readonly [string, string])[] = [
-  ["en", "English"],
-  ["es", "Spanish"],
-  ["fr", "French"],
-  ["de", "German"],
-  ["pt", "Portuguese"],
-  ["it", "Italian"],
-  ["nl", "Dutch"],
-  ["ja", "Japanese"],
-  ["ko", "Korean"],
-  ["zh", "Chinese"],
-  ["ru", "Russian"],
-  ["ar", "Arabic"],
-  ["hi", "Hindi"],
-  ["tr", "Turkish"],
-  ["vi", "Vietnamese"],
-  ["id", "Indonesian"],
-];
-
-/** What the browser is set to, as a language the translator understands. */
-export function preferredLanguage(tag = navigator.language): string {
-  const base = tag.slice(0, 2).toLowerCase();
-  return LANGUAGES.some(([code]) => code === base) ? base : "en";
-}
-
-/** Why a translation did not happen, in words worth showing someone. */
-export function translationMessage(reason: string | null, from: string | null): string {
-  switch (reason) {
-    case "already":
-      return "This page is already in that language.";
-    case "no-article":
-      return "There is no article on this page to read.";
-    case "unsupported":
-      return "This build cannot translate pages.";
-    case "unsupported-pair":
-      return from ? `Dive cannot translate ${nameOf(from)} into that language yet.` : "That pair of languages is not available.";
-    case "unavailable":
-      return "The language could not be downloaded. Check the connection and try again.";
-    case "unknown-language":
-      return "Dive could not tell what language this page is in.";
-    case "empty":
-      return "There is nothing on this page to translate.";
-    default:
-      return "This page could not be translated.";
-  }
-}
-
-function nameOf(code: string): string {
-  return LANGUAGES.find(([key]) => key === code)?.[1] ?? code;
-}
+// The language list and messages are shared with the palette's command.
+export { LANGUAGES, preferredLanguage, translationMessage } from "../lib/translate";
 
 /**
  * Reader view and translation for the page in the address bar.
@@ -85,9 +37,15 @@ export function PageActions() {
 
 function Actions({ tabId }: { tabId: string }) {
   const notify = useBrowser((s) => s.notify);
-  const [reading, setReading] = useState(false);
-  const [translated, setTranslated] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const setPageMode = useBrowser((s) => s.setPageMode);
+  // Kept per tab in the store, so reader view or a translation started from
+  // the palette shows here too, and a tab switched back to still says so.
+  const reading = useBrowser((s) => s.pageModes[tabId]?.reader ?? false);
+  const translated = useBrowser((s) => s.pageModes[tabId]?.translated ?? null);
+  // Each button spins for its own work: translating a long page is slow, and
+  // the reader button spinning meanwhile said the wrong thing was busy.
+  const [readerBusy, setReaderBusy] = useState(false);
+  const [translateBusy, setTranslateBusy] = useState(false);
   const [menu, setMenu] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -96,49 +54,72 @@ function Actions({ tabId }: { tabId: string }) {
   useCoversContent(menu);
   useFocusTrap(panel, { active: menu, menu: true, onEscape: dismiss });
 
+  // A click made while the page was still being asked wins over the answer.
+  const acted = useRef(false);
+
+  // What the page is in right now: the buttons mount fresh on every tab
+  // switch and address, and the page may have been changed from elsewhere.
+  useEffect(() => {
+    let alive = true;
+    void Promise.all([ipc.pageReaderOpen(tabId).catch(() => null), ipc.pageTranslateState(tabId).catch(() => null)]).then(([reader, translation]) => {
+      if (!alive || acted.current) return;
+      const patch: { reader?: boolean; translated?: string | null } = {};
+      if (reader !== null) patch.reader = reader;
+      if (translation) patch.translated = translation.translated ? (translation.target ?? null) : null;
+      if (Object.keys(patch).length > 0) setPageMode(tabId, patch);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [tabId, setPageMode]);
+
   const toggleReader = async () => {
-    setBusy(true);
+    acted.current = true;
+    setReaderBusy(true);
     try {
       if (reading) {
         await ipc.pageReaderLeave(tabId);
-        setReading(false);
+        setPageMode(tabId, { reader: false });
       } else {
         const result = await ipc.pageReader(tabId);
-        if (result.ok) setReading(true);
+        if (result.ok) setPageMode(tabId, { reader: true });
         else notify(translationMessage(result.reason, null), 4000);
       }
     } catch (error) {
       notify(errorMessage(error), 4000);
     } finally {
-      setBusy(false);
+      setReaderBusy(false);
     }
   };
 
   const translate = async (target: string) => {
     setMenu(false);
-    setBusy(true);
+    if (translated === target) return;
+    acted.current = true;
+    setTranslateBusy(true);
     // The first use of a language pair downloads a model, which is not quick.
-    notify(`Translating into ${nameOf(target)}…`, 2500);
+    notify(`Translating into ${languageName(target)}…`, 2500);
     try {
       const result = await ipc.pageTranslate(tabId, target);
       if (result.ok) {
-        setTranslated(target);
-        notify(`Translated from ${nameOf(result.from ?? "")} into ${nameOf(target)}.`, 3000);
+        setPageMode(tabId, { translated: target });
+        notify(`Translated from ${languageName(result.from ?? "")} into ${languageName(target)}.`, 3000);
       } else {
-        notify(translationMessage(result.reason, result.from), 5000);
+        notify(translationMessage(result.reason, result.from, target), 5000);
       }
     } catch (error) {
       notify(errorMessage(error), 4000);
     } finally {
-      setBusy(false);
+      setTranslateBusy(false);
     }
   };
 
   const showOriginal = async () => {
     setMenu(false);
+    acted.current = true;
     try {
       await ipc.pageTranslateRestore(tabId);
-      setTranslated(null);
+      setPageMode(tabId, { translated: null });
     } catch (error) {
       notify(errorMessage(error), 4000);
     }
@@ -150,12 +131,12 @@ function Actions({ tabId }: { tabId: string }) {
       <WalletButton tabId={tabId} className={button} />
       <Tooltip label={reading ? "Leave reader view" : "Reader view"}>
         <button type="button" aria-label={reading ? "Leave reader view" : "Reader view"} aria-pressed={reading} onClick={() => void toggleReader()} className={`${button} ${reading ? "text-highlight" : ""}`}>
-          <Icon icon={busy && !menu ? Loader2 : BookOpen} size={13} className={busy && !menu ? "motion-safe:animate-spin" : undefined} />
+          <Icon icon={readerBusy ? Loader2 : BookOpen} size={13} className={readerBusy ? "motion-safe:animate-spin" : undefined} />
         </button>
       </Tooltip>
-      <Tooltip label={translated ? `Translated into ${nameOf(translated)}` : "Translate this page"}>
-        <button type="button" aria-label="Translate this page" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((open) => !open)} className={`${button} ${translated ? "text-highlight" : ""}`}>
-          <Icon icon={Languages} size={13} />
+      <Tooltip label={translateBusy ? "Translating…" : translated ? `Translated into ${languageName(translated)}` : "Translate this page"}>
+        <button type="button" aria-label="Translate this page" aria-busy={translateBusy || undefined} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((open) => !open)} className={`${button} ${translated ? "text-highlight" : ""}`}>
+          <Icon icon={translateBusy ? Loader2 : Languages} size={13} className={translateBusy ? "motion-safe:animate-spin" : undefined} />
         </button>
       </Tooltip>
       {menu && (

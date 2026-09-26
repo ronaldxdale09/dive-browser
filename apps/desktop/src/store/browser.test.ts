@@ -967,6 +967,27 @@ describe("readerView", () => {
 });
 
 describe("translatePage", () => {
+  it("translates into the browser's language, says when the page already is in it, and puts it back when asked again", async () => {
+    const translate = vi.spyOn(ipc, "pageTranslate").mockResolvedValueOnce({ ok: false, reason: "already", from: "en", target: "en", changed: null });
+    const restore = vi.spyOn(ipc, "pageTranslateRestore").mockResolvedValue(null);
+    vi.spyOn(navigator, "language", "get").mockReturnValue("zh-TW");
+    useBrowser.setState({ activeTab: "tr", detached: [], tabs: [tab("tr")], notice: null, pageModes: {} });
+    await useBrowser.getState().translatePage();
+    expect(translate).toHaveBeenCalledWith("tr", "zh-TW");
+    expect(useBrowser.getState().notice).toBe("This page is already in Chinese (Traditional).");
+    translate.mockResolvedValueOnce({ ok: true, reason: null, from: "en", target: "zh-TW", changed: 3 });
+    await useBrowser.getState().translatePage();
+    expect(useBrowser.getState().pageModes["tr"]?.translated).toBe("zh-TW");
+    await useBrowser.getState().translatePage();
+    expect(restore).toHaveBeenCalledWith("tr");
+    expect(useBrowser.getState().pageModes["tr"]?.translated).toBeNull();
+    // A new document is neither translated nor in reader view.
+    useBrowser.getState().setPageMode("tr", { reader: true });
+    useBrowser.getState().applyLoad({ tab_id: "tr", phase: "started", url: "https://x/next", error: null } as never);
+    expect(useBrowser.getState().pageModes["tr"]).toBeUndefined();
+    vi.restoreAllMocks();
+  });
+
   it("does not translate a detached tab as this window's", async () => {
     const translate = vi.spyOn(ipc, "pageTranslate").mockResolvedValue({ ok: false, reason: "no-text" });
     useBrowser.setState({ activeTab: "t1", detached: ["t1"], tabs: [tab("t1")], notice: null });
