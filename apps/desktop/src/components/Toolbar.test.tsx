@@ -114,7 +114,7 @@ describe("Toolbar", () => {
     await waitFor(() => expect(back.disabled).toBe(false));
     act(() => back.focus());
     fireEvent.keyDown(back, { key: "ArrowDown" });
-    const menu = screen.getByRole("menu", { name: "Back history" });
+    const menu = await screen.findByRole("menu", { name: "Back history" });
     expect(menu.contains(document.activeElement)).toBe(true);
     await waitFor(() => expect(ipc.setContentCovered).toHaveBeenCalledWith(true));
     fireEvent.click(screen.getByRole("menuitem", { name: /Previous page/ }));
@@ -128,7 +128,7 @@ describe("Toolbar", () => {
     const forward = screen.getByRole("button", { name: "Forward" }) as HTMLButtonElement;
     await waitFor(() => expect(forward.disabled).toBe(false));
     fireEvent.contextMenu(forward);
-    expect(screen.getByRole("menuitem", { name: /Next page/ })).toBeTruthy();
+    expect(await screen.findByRole("menuitem", { name: /Next page/ })).toBeTruthy();
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
     expect(document.activeElement).toBe(forward);

@@ -895,12 +895,19 @@ pub fn calls(prefs: &Prefs, chrome_scheme: Option<&str>) -> Vec<(&'static str, V
 
 /// Apply `prefs` to one tab's session. Failures are logged, not fatal: a tab
 /// that has just closed must not fail a settings write.
+///
+/// The calls are independent of one another, so they go out together and
+/// are awaited together: a new tab waits on these before its first
+/// navigation, and one round trip after another added up.
 pub async fn apply(session: &CdpSession, prefs: &Prefs, chrome_scheme: Option<&str>) {
-    for (method, params) in calls(prefs, chrome_scheme) {
-        if let Err(e) = session.call(method, params).await {
-            tracing::debug!("{method} failed: {e}");
-        }
-    }
+    let sent = calls(prefs, chrome_scheme)
+        .into_iter()
+        .map(|(method, params)| async move {
+            if let Err(e) = session.call(method, params).await {
+                tracing::debug!("{method} failed: {e}");
+            }
+        });
+    futures_util::future::join_all(sent).await;
 }
 
 /// What [`clear`] should delete.

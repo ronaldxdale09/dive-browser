@@ -1,57 +1,65 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { events, ipc } from "./ipc";
 import type { NavigationHistory } from "./ipc";
 
-/** The engine's back/forward stack, never reconstructed from visited URLs. */
-export function useTabHistory(tabId: string | null, url: string, loading: boolean) {
-  const [snapshot, setSnapshot] = useState<{ tabId: string; url: string; loading: boolean; history: NavigationHistory | null } | null>(null);
-  // What the snapshot should report, without re-subscribing when it changes.
-  const latest = useRef({ url, loading });
-  // A navigation the engine does not announce (an SPA pushState) still moves
-  // the stack, so a url change asks for a fresh read -- a single IPC, not a
-  // teardown and rebuild of the subscription.
-  const refetch = useRef<(() => void) | null>(null);
+type Availability = { tabId: string; canBack: boolean; canForward: boolean };
+
+const availability = (tabId: string, history: NavigationHistory): Availability => ({
+  tabId,
+  canBack: history.current_index > 0,
+  canForward: history.current_index >= 0 && history.current_index < history.entries.length - 1,
+});
+
+/**
+ * Whether the tab can go back or forward, as the engine has it, and a way to
+ * read its whole back/forward stack when a history menu opens. Never
+ * reconstructed from visited URLs.
+ *
+ * The engine announces every move with the two answers the buttons need, so
+ * the stack itself is read once when the tab is first shown and otherwise
+ * only on demand. Reading it on every loading and address change as well as
+ * on each announcement was three to five reads per navigation.
+ */
+export function useTabHistory(tabId: string | null, url: string) {
+  const [state, setState] = useState<Availability | null>(null);
   useEffect(() => {
-    latest.current = { url, loading };
-    refetch.current?.();
-  }, [url, loading]);
-  useEffect(() => {
-    if (!tabId || latest.current.url.startsWith("dive://")) return;
+    if (!tabId) return;
     let alive = true;
-    let pending = false;
-    let dirty = false;
+    // An announcement is newer than whatever the first read returns.
+    let heard = false;
     let unlisten: (() => void) | undefined;
-    const refresh = async () => {
-      if (!alive) return;
-      if (pending) { dirty = true; return; }
-      pending = true;
-      do {
-        dirty = false;
-        let history: NavigationHistory | null = null;
-        try { history = await ipc.tabHistory(tabId); } catch { /* Closed or replaced views have no actionable history. */ }
-        if (alive && !dirty) setSnapshot({ tabId, url: latest.current.url, loading: latest.current.loading, history });
-      } while (alive && dirty);
-      pending = false;
+    const readOnce = () => {
+      ipc.tabHistory(tabId).then(
+        (history) => { if (alive && !heard) setState(availability(tabId, history)); },
+        // Closed or replaced views have no actionable history.
+        () => { if (alive && !heard) setState(null); },
+      );
     };
-    refetch.current = () => void refresh();
     // Subscribe first, then read: a navigation during setup cannot leave the
-    // first snapshot stale. Bursts coalesce into one follow-up while querying.
+    // first answer stale.
     void events.tabHistoryChanged.listen(({ payload }) => {
-      if (payload.tab_id === tabId) void refresh();
+      if (!alive || payload.tab_id !== tabId) return;
+      heard = true;
+      setState((current) =>
+        current?.tabId === tabId && current.canBack === payload.can_go_back && current.canForward === payload.can_go_forward
+          ? current
+          : { tabId, canBack: payload.can_go_back, canForward: payload.can_go_forward });
     }).then((off) => {
       if (!alive) { off(); return; }
       unlisten = off;
-      void refresh();
-    }).catch(() => { void refresh(); });
-    return () => { alive = false; refetch.current = null; unlisten?.(); };
-    // Keyed on the tab alone. `url` and `loading` are read through refs
-    // below: including them tore the listener down and rebuilt it three times
-    // per navigation, and once more for every SPA pushState.
+      readOnce();
+    }).catch(readOnce);
+    return () => { alive = false; unlisten?.(); };
   }, [tabId]);
-  const history = snapshot?.tabId === tabId && snapshot.url === url && !url.startsWith("dive://") ? snapshot.history : null;
+  const internal = url.startsWith("dive://");
+  const current = state?.tabId === tabId && !internal ? state : null;
+  const loadHistory = useCallback(async (): Promise<NavigationHistory | null> => {
+    if (!tabId || internal) return null;
+    try { return await ipc.tabHistory(tabId); } catch { return null; }
+  }, [tabId, internal]);
   return {
-    history,
-    canBack: history !== null && history.current_index > 0,
-    canForward: history !== null && history.current_index >= 0 && history.current_index < history.entries.length - 1,
+    canBack: current?.canBack ?? false,
+    canForward: current?.canForward ?? false,
+    loadHistory,
   };
 }

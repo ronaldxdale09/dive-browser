@@ -2584,28 +2584,69 @@ pub const ZOOM_STEPS: &[f64] = &[
 /// Set a tab's zoom factor (clamped to the step range).
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn tab_zoom(state: State<'_, AppState>, id: TabId, factor: f64) -> AppResult<()> {
+pub(crate) fn tab_zoom(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: TabId,
+    factor: f64,
+) -> AppResult<()> {
     let factor = factor.clamp(ZOOM_STEPS[0], ZOOM_STEPS[ZOOM_STEPS.len() - 1]);
     with_view(&state, id, |v| v.set_zoom(factor))?;
     // Zoom is a per-site preference, as in every browser: remember it for
     // the origin so the next visit opens at the same size.
-    let origin = lock(&state.store)
+    let url = lock(&state.store)
         .tab(id)
-        .ok()
-        .and_then(|t| dive_core::origin_of(&t.url));
-    if let Some(origin) = origin {
-        let key = format!("{}{origin}", crate::engine::SITE_ZOOM_PREFIX);
+        .map(|t| t.url)
+        .unwrap_or_default();
+    if let Some(origin) = dive_core::origin_of(&url) {
+        let key = format!("{}{origin}", crate::site_zoom::SITE_ZOOM_PREFIX);
         // Before the store guard: a cold preferences cache reads the store,
         // and that second lock on this thread would never return.
         let default_zoom = state.prefs.snapshot(&state).default_zoom;
         let store = lock(&state.store);
-        if (factor - default_zoom).abs() < f64::EPSILON {
+        let remembered = if (factor - default_zoom).abs() < f64::EPSILON {
             store.remove_setting(&key)?;
+            None
         } else {
             store.set_setting(&key, &factor.to_string())?;
+            Some(factor)
+        };
+        drop(store);
+        crate::site_zoom::cache().remember(&origin, remembered);
+    }
+    // The engine keeps zoom per host, so every open tab of this host just
+    // changed size too; each is set explicitly all the same, since a tab in
+    // another container does not share the engine's level. Every chrome is
+    // told, this tab's included: the one that asked already knows, but a
+    // popout or the main window showing a sibling did not, and kept a stale
+    // badge.
+    for tab_id in same_host_tabs(&state, id, &url) {
+        if tab_id != id && with_view(&state, tab_id, |v| v.set_zoom(factor)).is_err() {
+            continue;
         }
+        let _ = crate::engine::TabZoom { tab_id, factor }.emit(&app);
     }
     Ok(())
+}
+
+/// `id` and every other tab with a live view whose page is on `url`'s host.
+fn same_host_tabs(state: &AppState, id: TabId, url: &str) -> Vec<TabId> {
+    let Some(host) = crate::site_zoom::host_of(url) else {
+        return vec![id];
+    };
+    let live: Vec<TabId> = lock(&state.host)
+        .as_ref()
+        .map(|h| h.sessions().into_iter().map(|(tab, _)| tab).collect())
+        .unwrap_or_default();
+    let store = lock(&state.store);
+    let mut tabs = vec![id];
+    tabs.extend(live.into_iter().filter(|tab| {
+        *tab != id
+            && store
+                .tab(*tab)
+                .is_ok_and(|t| crate::site_zoom::host_of(&t.url).as_deref() == Some(host.as_str()))
+    }));
+    tabs
 }
 
 /// Stop the tab's current load.

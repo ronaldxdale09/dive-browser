@@ -60,3 +60,37 @@ it("repaints a static orb once for changed colors/size and live theme changes", 
   view.unmount();
   document.documentElement.style.removeProperty("--color-ink");
 });
+function animatedOrb() {
+  frames();
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  const paint = vi.fn();
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ setTransform() {}, clearRect: paint, beginPath() {}, arc() {}, fill() {} } as unknown as CanvasRenderingContext2D);
+  const step = (at: number) => act(() => { const work = [...pending.values()]; pending.clear(); for (const run of work) run(at); });
+  return { paint, step };
+}
+it("an orb capped at 30 fps paints every other frame of a 60 Hz display", () => {
+  vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }));
+  const { paint, step } = animatedOrb();
+  render(<OrbBurst animated pointer={{ drag: 0 }} width={100} maxFps={30} />);
+  for (let frame = 0; frame < 12; frame += 1) step(1000 + frame * (1000 / 60));
+  expect(paint).toHaveBeenCalledTimes(6);
+  expect(pending.size).toBe(1);
+});
+it("an idle orb holds its frame until the pointer moves", () => {
+  vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }));
+  let clock = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => clock);
+  const { paint, step } = animatedOrb();
+  render(<OrbBurst animated pointer={{ drag: 0 }} width={100} idleAfterMs={8000} />);
+  step(100);
+  expect(paint).toHaveBeenCalledTimes(1);
+  step(9000);
+  expect(paint).toHaveBeenCalledTimes(1);
+  expect(pending.size).toBe(0);
+  clock = 9100;
+  act(() => { window.dispatchEvent(new Event("pointermove")); });
+  expect(pending.size).toBe(1);
+  step(9120);
+  expect(paint).toHaveBeenCalledTimes(2);
+  expect(pending.size).toBe(1);
+});

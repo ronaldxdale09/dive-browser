@@ -27,11 +27,14 @@
   const players = new Set();
   const contexts = new Set();
   const seen = new WeakSet();
+  const MEDIA_EVENTS = ["play", "playing", "pause", "ended", "emptied", "volumechange"];
+  // Taken before any page script runs, like the constructors below.
+  const Media = window.HTMLMediaElement;
   const watch = (element) => {
     if (seen.has(element)) return;
     seen.add(element);
     players.add(new WeakRef(element));
-    for (const event of ["play", "playing", "pause", "ended", "emptied", "volumechange"]) {
+    for (const event of MEDIA_EVENTS) {
       element.addEventListener(event, schedule, { passive: true });
     }
   };
@@ -57,10 +60,21 @@
     }, 250);
   }
 
-  const scan = () => {
-    for (const element of document.querySelectorAll("video, audio")) watch(element);
+  // Every media event of the document passes through the window on the way
+  // down, bubbling or not, so a listener there learns of each player the
+  // first time it does anything. Registered at document start, it runs
+  // before any capture listener the page adds, which cannot hide a player
+  // from it. This replaced an observer that re-queried the whole document for
+  // players on every batch of changes to it. A player seen once is then
+  // watched directly, so it is still heard after it leaves the document.
+  const noticed = (event) => {
+    const target = event.target;
+    if (Media && target instanceof Media) watch(target);
     schedule();
   };
+  for (const event of MEDIA_EVENTS) {
+    addEventListener(event, noticed, { capture: true, passive: true });
+  }
 
   // Elements built in script and never inserted still play, so the
   // constructors are watched as well as the document.
@@ -86,18 +100,11 @@
       // tab looks tampered with and none is ever discarded.
       window.__diveActivityAdopt?.(window, name);
     } catch {
-      // A page that froze the global keeps its own constructor; the document
-      // scan below still covers everything it puts in the page.
+      // A page that froze the global keeps its own constructor; the
+      // document's media events still cover everything it puts in the page.
     }
   }
 
-  const observer = new MutationObserver(scan);
-  const start = () => {
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-    scan();
-  };
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
-  else start();
   // A page put in the back/forward cache stops making sound.
   addEventListener("pagehide", () => send(false));
   addEventListener("pageshow", schedule);

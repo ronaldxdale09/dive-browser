@@ -34,18 +34,25 @@ function hashG(i: number): number {
 }
 
 // Fibonacci sphere: even coverage with no poles and no seam.
-function fib(i: number, n: number): [number, number, number] {
+// Writes into `into`, which the loop shares, rather than returning a new point.
+function fib(i: number, n: number, into: [number, number, number]): [number, number, number] {
   const y = 1 - (i / Math.max(1, n - 1)) * 2;
   const r = Math.sqrt(Math.max(0, 1 - y * y));
   const th = 2.399963 * i;
-  return [Math.cos(th) * r, y, Math.sin(th) * r];
+  into[0] = Math.cos(th) * r;
+  into[1] = y;
+  into[2] = Math.sin(th) * r;
+  return into;
 }
+const FIB_POINT: [number, number, number] = [0, 0, 0];
 
 type Dot = [number, number, number, (number | undefined)?, (number | undefined)?, (string | undefined)?];
 
 // Yaw about the vertical axis, then pitch. Used both for a loop's own baked
-// tilt and for the viewer's Turn / Tilt.
-function spin(p: Dot, yaw: number, pitch: number): Dot {
+// tilt and for the viewer's Turn / Tilt. Writes into `into` (which may be `p`
+// itself) so a running loop reuses its dots instead of making hundreds of
+// small arrays a frame.
+function spin(p: Dot, yaw: number, pitch: number, into: Dot = [0, 0, 0]): Dot {
   const ca = Math.cos(yaw);
   const sa = Math.sin(yaw);
   const rx = p[0] * ca - p[2] * sa;
@@ -54,7 +61,13 @@ function spin(p: Dot, yaw: number, pitch: number): Dot {
   const so = Math.sin(pitch);
   const ry = p[1] * co - rz * so;
   rz = p[1] * so + rz * co;
-  return [rx, ry, rz, p[3], p[4], p[5]];
+  into[0] = rx;
+  into[1] = ry;
+  into[2] = rz;
+  into[3] = p[3];
+  into[4] = p[4];
+  into[5] = p[5];
+  return into;
 }
 
 type Params = {
@@ -69,6 +82,7 @@ type Params = {
   acc: string;
 };
 
+/** Fill `out` with this phase's dots, reusing the ones already in it. */
 function frame(t: number, P: Params, out: Dot[]) {
   const n = dotsN(120, P.n);
   for (let i = 0; i < n; i += 1) {
@@ -79,45 +93,52 @@ function frame(t: number, P: Params, out: Dot[]) {
     // Elastic: exponential decay times a cosine, so the dot overshoots the
     // shell and rings back rather than easing onto it.
     const r = 1 - Math.pow(2, -9 * e) * Math.cos(e * Math.PI * 4.5);
-    const q = fib(i, n);
+    const q = fib(i, n, FIB_POINT);
     const f = Math.pow(Math.sin(Math.PI * u), 0.5);
-    out.push(
-      spin(
-        [q[0] * r, q[1] * r, q[2] * r, 0.5 + 1.3 * (1 - u), f, u < 0.12 ? P.acc : P.dot],
-        TAU * t * 0.25,
-        0.35,
-      ),
-    );
+    const dot = out[i] ?? (out[i] = [0, 0, 0]);
+    dot[0] = q[0] * r;
+    dot[1] = q[1] * r;
+    dot[2] = q[2] * r;
+    dot[3] = 0.5 + 1.3 * (1 - u);
+    dot[4] = f;
+    dot[5] = u < 0.12 ? P.acc : P.dot;
+    spin(dot, TAU * t * 0.25, 0.35, dot);
   }
+  out.length = n;
 }
 
 type Emit = (x: number, y: number, r: number, a: number, col: string) => void;
 
+type Projected = [number, number, number, number, string, number];
+const byDepth = (a: Projected, b: Projected) => a[5] - b[5];
+const SPUN: Dot = [0, 0, 0];
+
 // Rotate, project, sort back to front, emit. The sort is not a nicety: painting
 // in depth order with source-over alpha is what makes the ball a volume.
-function project(pts: Dot[], size: number, P: Params, emit: Emit) {
+// `list` is the caller's to keep: a running loop passes the same one every
+// frame and its entries are reused.
+function project(pts: Dot[], size: number, P: Params, emit: Emit, list: Projected[] = []) {
   const c = size / 2;
   const R = size * BASE_SPREAD * P.sp;
   const pv = PERSPECTIVE;
   // Extra turns are counted PER LOOP rather than per second, so any whole
   // number of them leaves the loop exactly as seamless as it was.
   const yaw = P.yw + TAU * P.sn * P.t;
-  const list: Array<[number, number, number, number, string, number]> = [];
-  for (const p of pts) {
-    const q = spin(p, yaw, P.pc);
+  for (let i = 0; i < pts.length; i += 1) {
+    const q = spin(pts[i]!, yaw, P.pc, SPUN);
     const z = q[2];
     const s = pv / (pv - z);
     const f = clamp01((z + 1.1) / 2.2);
-    list.push([
-      c + q[0] * R * s,
-      c + q[1] * R * s,
-      P.ds * (0.4 + 1.6 * DEPTH_SIZE * f) * s * (q[3] === undefined ? 1 : q[3]),
-      (0.07 + 0.93 * Math.pow(f, 1.55 * DEPTH_FADE)) * (q[4] === undefined ? 1 : q[4]),
-      q[5] || P.dot,
-      z,
-    ]);
+    const d = list[i] ?? (list[i] = [0, 0, 0, 0, "", 0]);
+    d[0] = c + q[0] * R * s;
+    d[1] = c + q[1] * R * s;
+    d[2] = P.ds * (0.4 + 1.6 * DEPTH_SIZE * f) * s * (q[3] === undefined ? 1 : q[3]);
+    d[3] = (0.07 + 0.93 * Math.pow(f, 1.55 * DEPTH_FADE)) * (q[4] === undefined ? 1 : q[4]);
+    d[4] = q[5] || P.dot;
+    d[5] = z;
   }
-  list.sort((a, b) => a[5] - b[5]);
+  list.length = pts.length;
+  list.sort(byDepth);
   for (const d of list) emit(d[0], d[1], d[2], d[3], d[4]);
 }
 
@@ -233,6 +254,13 @@ export interface OrbBurstProps {
   spinTurns?: number;
   ball?: Ball;
   pointer?: Pointer;
+  /** Paint at most this many frames a second while focused. */
+  maxFps?: number;
+  /**
+   * Stop once the pointer has not moved anywhere in the window for this
+   * long, and start again when it does. Unset, the orb never idles.
+   */
+  idleAfterMs?: number;
 }
 
 export function OrbBurst(props: OrbBurstProps) {
@@ -278,6 +306,8 @@ export function OrbBurst(props: OrbBurstProps) {
     turn: (clampN(num(ball_.turn, 0), -180, 180) * Math.PI) / 180,
     tilt: (clampN(num(ball_.tilt, 0), -90, 90) * Math.PI) / 180,
     pause: props.pauseWhenBlurred ? 1 : 0,
+    frameMs: props.maxFps && props.maxFps > 0 ? 1000 / props.maxFps : 0,
+    idleMs: Math.max(0, num(props.idleAfterMs, 0)),
   };
 
   const sizeRef = useRef(size);
@@ -306,17 +336,42 @@ export function OrbBurst(props: OrbBurstProps) {
     let last = performance.now();
     let phase = 0;
     let lastDrawn = 0;
+    // When the pointer last moved in the window, and whether the loop has
+    // stopped for want of it.
+    let lastPointer = performance.now();
+    let idle = false;
+    // Kept across frames: the dots, their projections and the parameters are
+    // rewritten in place, where every frame used to make hundreds of arrays.
+    const dots: Dot[] = [];
+    const projected: Projected[] = [];
+    const P: Params = { n: 0, sp: 0, ds: 0, yw: 0, sn: 0, pc: 0, t: 0, dot: "", acc: "" };
+    // Resolved colours, redone only when the inputs or the theme change.
+    // Resolving a CSS variable reads computed style, and doing that twice a
+    // frame was a style read sixty times a second.
+    let themeVersion = 0;
+    const colors = { key: "", theme: -1, dot: "", acc: "" };
 
     const render = (now: number) => {
-      // Unfocused, the loop keeps its place but paints at a fraction of the
-      // rate; there is no one to see the difference and the CPU is someone
-      // else's. `dt` is still measured from the last paint, so the phase
-      // advances by real time rather than slowing down.
-      if (!reduced && !document.hasFocus()) {
+      if (!reduced) {
+        const focused = document.hasFocus();
         // Where the orb is decoration, as on the start page, a window in the
         // background stops it altogether; focus starts it again below.
-        if (vRef.current.pause) return;
-        if (now - lastDrawn < BLURRED_FRAME_MS) {
+        if (!focused && vRef.current.pause) return;
+        // Likewise nobody moving the pointer for a while: the ball holds its
+        // last frame until the pointer moves again.
+        const idleMs = vRef.current.idleMs as number;
+        if (idleMs > 0 && !drag.active && now - lastPointer > idleMs) {
+          idle = true;
+          return;
+        }
+        // Unfocused, the loop keeps its place but paints at a fraction of the
+        // rate; there is no one to see the difference and the CPU is someone
+        // else's. Focused, it paints at most at its own cap. `dt` is still
+        // measured from the last paint, so the phase advances by real time
+        // rather than slowing down. A few milliseconds of slack keep a cap of
+        // half the display rate from landing on every third frame instead.
+        const interval = focused ? (vRef.current.frameMs as number) : Math.max(BLURRED_FRAME_MS, vRef.current.frameMs as number);
+        if (interval > 0 && now - lastDrawn < interval - 4) {
           raf = requestAnimationFrame(render);
           return;
         }
@@ -348,8 +403,13 @@ export function OrbBurst(props: OrbBurstProps) {
       const bx = (cw - size) / 2;
       const by = (ch - size) / 2;
 
-      const dotCol = css(parseColor(v.dot as string, [236, 236, 236, 1]));
-      const accCol = css(parseColor(v.acc as string, [127, 216, 200, 1]));
+      const colorKey = (v.dot as string) + "\n" + (v.acc as string);
+      if (colors.key !== colorKey || colors.theme !== themeVersion) {
+        colors.key = colorKey;
+        colors.theme = themeVersion;
+        colors.dot = css(parseColor(v.dot as string, [236, 236, 236, 1]));
+        colors.acc = css(parseColor(v.acc as string, [127, 216, 200, 1]));
+      }
 
       // Once the pointer is off, the flick coasts and decays; higher damping
       // brings it to rest sooner.
@@ -365,25 +425,22 @@ export function OrbBurst(props: OrbBurstProps) {
       // poles and back out upside down.
       drag.pitch = clampN(drag.pitch, -Math.PI / 2 - restPitch, Math.PI / 2 - restPitch);
 
-      const P: Params = {
-        n: v.density as number,
-        sp: v.spread as number,
-        ds: dotScaleFor(size) * (v.dotSize as number),
-        yw: (v.turn as number) + drag.yaw,
-        sn: v.spinTurns as number,
-        pc: restPitch + drag.pitch,
-        t: phase,
-        dot: dotCol,
-        acc: accCol,
-      };
+      P.n = v.density as number;
+      P.sp = v.spread as number;
+      P.ds = dotScaleFor(size) * (v.dotSize as number);
+      P.yw = (v.turn as number) + drag.yaw;
+      P.sn = v.spinTurns as number;
+      P.pc = restPitch + drag.pitch;
+      P.t = phase;
+      P.dot = colors.dot;
+      P.acc = colors.acc;
 
       const fit = autoFit(size, P, v.turn as number, restPitch);
       const half = size / 2;
 
-      const out: Dot[] = [];
-      frame(phase, P, out);
+      frame(phase, P, dots);
       let drawn = 0;
-      project(out, size, P, (x, y, r, a, col) => {
+      project(dots, size, P, (x, y, r, a, col) => {
         if (drawn >= MAX_DOTS) return;
         // The fit scales positions about the ball's centre and radii by a
         // gentler factor.
@@ -406,7 +463,7 @@ export function OrbBurst(props: OrbBurstProps) {
         ctx.arc(cx, cy, dr, 0, TAU);
         ctx.fill();
         drawn += 1;
-      });
+      }, projected);
       ctx.globalAlpha = 1;
 
       // Reduced motion gets one still of the ball and no loop; a drag still
@@ -422,28 +479,53 @@ export function OrbBurst(props: OrbBurstProps) {
       raf = requestAnimationFrame(render);
     };
     redraw.current = invalidate;
-    const appearance = new MutationObserver(invalidate);
+    // A theme change re-resolves the colours on the next paint.
+    const onTheme = () => {
+      themeVersion += 1;
+      invalidate();
+    };
+    const appearance = new MutationObserver(onTheme);
     appearance.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "data-theme"] });
+    const scheme = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    scheme?.addEventListener("change", onTheme);
     const resize = new ResizeObserver(invalidate);
     resize.observe(canvas);
     window.addEventListener("resize", invalidate);
 
     // A hidden window paints nothing; when it comes back the clock resumes
-    // from now rather than jumping the whole time it was away.
+    // from now rather than jumping the whole time it was away. Coming back
+    // counts as the person being there.
     const onVisibility = () => {
       cancelAnimationFrame(raf);
       if (document.hidden) return;
       last = performance.now();
+      lastPointer = last;
+      idle = false;
       raf = requestAnimationFrame(render);
     };
 
     // A loop paused for a blurred window resumes on focus, from now.
     const onFocus = () => {
-      if (reduced || document.hidden || !vRef.current.pause) return;
+      lastPointer = performance.now();
+      if (reduced || document.hidden || (!vRef.current.pause && !idle)) return;
+      idle = false;
       cancelAnimationFrame(raf);
       last = performance.now();
       raf = requestAnimationFrame(render);
     };
+
+    // A loop stopped for want of a pointer starts again when it moves.
+    const onPointer = () => {
+      lastPointer = performance.now();
+      if (!idle || reduced || document.hidden) return;
+      if (vRef.current.pause && !document.hasFocus()) return;
+      idle = false;
+      cancelAnimationFrame(raf);
+      last = performance.now();
+      raf = requestAnimationFrame(render);
+    };
+    window.addEventListener("pointermove", onPointer, { passive: true });
+    window.addEventListener("pointerdown", onPointer, { passive: true });
 
     const onDown = (e: PointerEvent) => {
       if ((vRef.current.drag as number) <= 0) return;
@@ -500,6 +582,9 @@ export function OrbBurst(props: OrbBurstProps) {
       cancelAnimationFrame(raf);
       redraw.current = () => {};
       appearance.disconnect();
+      scheme?.removeEventListener("change", onTheme);
+      window.removeEventListener("pointermove", onPointer);
+      window.removeEventListener("pointerdown", onPointer);
       resize.disconnect();
       window.removeEventListener("resize", invalidate);
       document.removeEventListener("visibilitychange", onVisibility);

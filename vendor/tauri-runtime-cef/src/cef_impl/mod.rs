@@ -7,3 +7,4 @@ pub(crate) mod cookie;
 pub(crate) mod ipc;
 pub(crate) mod request_context;
 pub(crate) mod request_handler;
+pub(crate) mod scheme_workers;

@@ -150,25 +150,40 @@ struct PageEvent {
 /// untouched rather than preventing its navigation.
 pub async fn attach_page(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) {
     let binding = page_binding(tab_id);
-    let source = YOUTUBE_SCRIPT.replace("__DIVE_PRIVACY_BINDING__", &binding);
-    let mut events = session.subscribe();
+    let source = page_script(&binding);
+    let mut events = session.subscribe_to(&[
+        "Runtime.bindingCalled",
+        "Runtime.executionContext",
+        "Page.frameNavigated",
+        "Page.frameStartedLoading",
+        "Network.requestWillBeSent",
+        "Fetch.requestPaused",
+    ]);
 
-    for (method, params) in [
-        ("Runtime.enable", json!({})),
-        ("Runtime.addBinding", json!({"name": binding})),
-        ("Page.enable", json!({})),
-        (
+    // The domains are on already: the tab's setup enables them once. Both
+    // registrations go out together, the binding first.
+    let (bound, registered) = tokio::join!(
+        session.call("Runtime.addBinding", json!({"name": binding})),
+        session.call(
             "Page.addScriptToEvaluateOnNewDocument",
             json!({"source": &source}),
         ),
+    );
+    for (method, result) in [
+        ("Runtime.addBinding", bound),
+        ("Page.addScriptToEvaluateOnNewDocument", registered),
     ] {
-        if let Err(error) = session.call(method, params).await {
+        if let Err(error) = result {
             tracing::debug!(%tab_id, %method, "DivePrivacy page setup failed open: {error}");
         }
     }
     // Join the same transaction boundary as `prefs_set`: otherwise a tab
     // attaching with an older snapshot could register its policy after a
     // newer persisted update had already finished applying.
+    //
+    // Only documents to come are configured. The view is new and still on
+    // its blank document, which the first navigation replaces; bootstrapping
+    // and configuring that one as well was two round trips for nothing.
     {
         let state = app.state::<crate::state::AppState>();
         let _update = state.prefs.begin_update().await;
@@ -179,13 +194,6 @@ pub async fn attach_page(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSes
                 tracing::debug!(%tab_id, "DivePrivacy document policy registration failed open: {error}");
             }
         }
-        if let Err(error) = session
-            .call("Runtime.evaluate", json!({"expression": &source}))
-            .await
-        {
-            tracing::debug!(%tab_id, "DivePrivacy current-page bootstrap failed open: {error}");
-        }
-        apply_page(&session, &prefs).await;
     }
 
     tauri::async_runtime::spawn(async move {
@@ -234,6 +242,35 @@ pub async fn attach_page(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSes
             }
         }
     });
+}
+
+/// Hosts the page script can do anything on: `YouTube`'s, and those with
+/// cosmetic rules.
+fn page_script_hosts() -> Vec<String> {
+    let mut hosts: Vec<String> = ["www.youtube.com", "m.youtube.com"]
+        .into_iter()
+        .map(str::to_owned)
+        .chain(cosmetic_policy().into_keys())
+        .collect();
+    hosts.sort();
+    hosts.dedup();
+    hosts
+}
+
+/// The page script for a tab, set to leave every other site alone.
+///
+/// A script registered for a tab's new documents runs in all of them, and
+/// the engine offers no way to register one for some hosts only. So the
+/// check is the first thing the script does: everywhere else, all it costs
+/// is reading its source, not installing hooks around `fetch` and
+/// `XMLHttpRequest` on every page of every tab. Pages without it answer
+/// the document policy's `window.__divePrivacy?.` call with nothing.
+fn page_script(binding: &str) -> String {
+    let hosts = serde_json::to_string(&page_script_hosts()).unwrap_or_else(|_| "[]".into());
+    format!(
+        "(function () {{\n  const host = location.hostname.toLowerCase().replace(/\\.$/, \"\");\n  if (!{hosts}.includes(host)) return;\n{}\n}})();\n",
+        YOUTUBE_SCRIPT.replace("__DIVE_PRIVACY_BINDING__", binding)
+    )
 }
 
 fn document_policy(prefs: &crate::prefs::Prefs) -> DocumentPolicy {
@@ -904,6 +941,23 @@ mod tests {
 
         assert!(!youtube.enabled);
         assert!(youtube.cosmetic_css.is_empty());
+    }
+
+    #[test]
+    fn the_page_script_leaves_sites_without_rules_alone() {
+        let hosts = page_script_hosts();
+        for host in ["www.youtube.com", "m.youtube.com", "www.google.com"] {
+            assert!(hosts.iter().any(|h| h == host), "{host} is covered");
+        }
+        let script = page_script("__divePrivacy_test");
+        let gate = script.find(".includes(host)) return;").unwrap();
+        let body = script.find("window.__divePrivacy = {").unwrap();
+        assert!(
+            gate < body,
+            "the host check comes before anything is installed"
+        );
+        assert!(script.contains("\"__divePrivacy_test\""));
+        assert!(!script.contains("__DIVE_PRIVACY_BINDING__"));
     }
 
     #[test]

@@ -337,7 +337,7 @@ fn json_string(value: &str) -> String {
 /// be started and stopped many times over a tab's life, and the nonce check
 /// is what decides whether a message counts.
 pub fn watch(app: AppHandle<Runtime>, tab: TabId, session: &CdpSession) {
-    let mut events = session.subscribe();
+    let mut events = session.subscribe_to(&["Runtime.bindingCalled", "Page.frameNavigated"]);
     tauri::async_runtime::spawn(async move {
         loop {
             match events.recv().await {

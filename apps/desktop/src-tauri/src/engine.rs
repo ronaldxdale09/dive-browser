@@ -638,9 +638,10 @@ impl TabHost {
                 }
                 // Off the engine's stack: the store write and the event to
                 // the chrome must not re-enter CEF from inside its callback.
+                // On a blocking thread, since the write is SQLite.
                 let app = title_app.clone();
                 let nonce = title_nonce.clone();
-                tauri::async_runtime::spawn(async move {
+                tauri::async_runtime::spawn_blocking(move || {
                     update_session_tab(&app, tab_id, &nonce, |t| t.title = title);
                 });
             });
@@ -740,9 +741,10 @@ impl TabHost {
         {
             let nav_app = app.clone();
             let nav_nonce = activity_nonce.clone();
-            // Counts this view's address changes, so a deferred zoom that
+            // This view's zoom bookkeeping: which site it was last put at,
+            // and a count of its address changes, so a deferred zoom that
             // lands after a newer navigation's knows to stand aside.
-            let zoom_epoch = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let zoom = SiteZoomState::default();
             builder = builder.on_address_change(move |_, url| {
                 nav_app
                     .state::<AppState>()
@@ -761,21 +763,27 @@ impl TabHost {
                 // calls straight through, so the hop is made from a task,
                 // as the navigation handlers above do. Tasks may land out
                 // of order; only the newest address's zoom is applied.
-                let epoch = zoom_epoch.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                let zoom_epoch = zoom_epoch.clone();
-                let zoom_app = nav_app.clone();
-                let zoom_url = url.clone();
-                tauri::async_runtime::spawn(async move {
-                    let app = zoom_app.clone();
-                    let _ = app.run_on_main_thread(move || {
-                        if zoom_epoch.load(std::sync::atomic::Ordering::Relaxed) == epoch {
-                            apply_site_zoom(&zoom_app, tab_id, &zoom_url);
-                        }
-                    });
-                });
+                let epoch = zoom
+                    .epoch
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    + 1;
+                // A move within the site keeps the zoom the view already has
+                // -- the engine keeps it per host -- so a single-page app
+                // changing its address on every click costs nothing here.
+                let key = crate::site_zoom::key_of(&url);
+                if lock(&zoom.applied).as_deref() != Some(key.as_str()) {
+                    schedule_site_zoom(
+                        nav_app.clone(),
+                        tab_id,
+                        key,
+                        zoom.clone(),
+                        epoch,
+                        SITE_ZOOM_ATTEMPTS,
+                    );
+                }
                 let app = nav_app.clone();
                 let nonce = nav_nonce.clone();
-                tauri::async_runtime::spawn(async move {
+                tauri::async_runtime::spawn_blocking(move || {
                     update_session_tab(&app, tab_id, &nonce, |t| {
                         t.url = reported_url(&t.url, url);
                     });
@@ -815,88 +823,95 @@ impl TabHost {
             // `DIVE_DISABLE_FEEDS=1` leaves the DevTools session idle, to
             // tell an engine fault apart from one our own traffic provokes.
             let feeds = std::env::var_os("DIVE_DISABLE_FEEDS").is_none();
-            let (console_ready, network_ready, interception_ready, fill_ready, loading_ready) =
-                if feeds {
-                    let c = crate::console::attach(app.clone(), tab_id, session.clone());
-                    let n = crate::network::attach(
-                        app.clone(),
-                        tab_id,
-                        session.clone(),
-                        activity_nonce.clone(),
-                    );
-                    crate::favicon::attach(app.clone(), tab_id, session.clone());
-                    let loading = crate::loading::attach(app.clone(), tab_id, session.clone());
-                    let f = crate::filltab::attach(app.clone(), tab_id, session.clone());
-                    let r = crate::rules::attach(
-                        app.clone(),
-                        tab_id,
-                        tab.workspace_id,
-                        session.clone(),
-                    );
-                    crate::inspect::watch(app.clone(), tab_id, &session);
-                    crate::crash::watch(
-                        app.clone(),
-                        tab_id,
-                        view.label().to_owned(),
-                        session.clone(),
-                    );
-                    (c, n, r, f, loading)
-                } else {
-                    let (ct, cr) = tokio::sync::oneshot::channel();
-                    let (nt, nr) = tokio::sync::oneshot::channel();
-                    let (rt, rr) = tokio::sync::oneshot::channel();
-                    let (ft, fr) = tokio::sync::oneshot::channel();
-                    let (lt, lr) = tokio::sync::oneshot::channel();
-                    let _ = (
-                        ct.send(()),
-                        nt.send(()),
-                        rt.send(()),
-                        ft.send(()),
-                        lt.send(()),
-                    );
-                    (cr, nr, rr, fr, lr)
-                };
+            // Every feed subscribes before this returns and enables nothing
+            // itself; the domains are enabled once, below, for all of them.
+            let (limits_tx, limits_rx) = tokio::sync::oneshot::channel();
+            let (interception_ready, loading_ready) = if feeds {
+                crate::console::attach(app.clone(), tab_id, session.clone());
+                crate::network::attach(
+                    app.clone(),
+                    tab_id,
+                    session.clone(),
+                    activity_nonce.clone(),
+                    limits_rx,
+                );
+                crate::favicon::attach(app.clone(), tab_id, session.clone());
+                let loading = crate::loading::attach(app.clone(), tab_id, session.clone());
+                let r =
+                    crate::rules::attach(app.clone(), tab_id, tab.workspace_id, session.clone());
+                crate::inspect::watch(app.clone(), tab_id, &session);
+                crate::crash::watch(
+                    app.clone(),
+                    tab_id,
+                    view.label().to_owned(),
+                    session.clone(),
+                );
+                (r, loading)
+            } else {
+                let (rt, rr) = tokio::sync::oneshot::channel();
+                let (lt, lr) = tokio::sync::oneshot::channel();
+                let _ = (rt.send(()), lt.send(()));
+                (rr, lr)
+            };
             let session_for_prefs = session.clone();
             self.cdp.insert(tab_id, session);
             let nav = view.clone();
             let prefs_app = app.clone();
             tauri::async_runtime::spawn(async move {
-                let _ = console_ready.await;
-                let _ = network_ready.await;
-                let _ = interception_ready.await;
-                let _ = fill_ready.await;
-                let _ = loading_ready.await;
+                // One prelude per session: each domain enabled once, all of
+                // them together. This used to be some two dozen round trips
+                // made one after another, each through the main thread,
+                // before a new tab could start loading.
+                let limits =
+                    crate::cdp_feed::enable_domains(tab_id, &session_for_prefs, feeds).await;
+                let _ = limits_tx.send(limits);
                 // Privacy preferences have to be in force before the document
                 // request goes out, or the first load escapes them.
                 let (prefs, chrome_scheme) = {
                     let state = prefs_app.state::<AppState>();
                     (state.prefs.get(&state), state.prefs.chrome_scheme())
                 };
-                crate::privacy::attach_page(prefs_app.clone(), tab_id, session_for_prefs.clone())
-                    .await;
-                tracing::debug!(%tab_id, "privacy page setup complete before navigation");
-                crate::permissions::attach_page(
-                    prefs_app.clone(),
-                    tab_id,
-                    session_for_prefs.clone(),
-                    nav.clone(),
-                    permission_workspace,
-                    permission_container,
-                )
-                .await;
-                tracing::debug!(%tab_id, "permission page setup complete before navigation");
-                crate::activity::attach(&activity, tab_id, &activity_nonce, &session_for_prefs)
-                    .await;
-                crate::credential_fill::attach(
-                    prefs_app.clone(),
-                    tab_id,
-                    session_for_prefs.clone(),
-                )
-                .await;
-                crate::form_fill::attach(prefs_app.clone(), tab_id, session_for_prefs.clone())
-                    .await;
-                crate::tab_audio::attach(prefs_app.clone(), tab_id, session_for_prefs.clone())
-                    .await;
+                // Everything the first document needs registered, sent
+                // together. Each part issues its first call when first polled
+                // and `join!` polls them in this order, so the page scripts
+                // still register -- and so run at document start -- in the
+                // order they always did.
+                let s = &session_for_prefs;
+                tokio::join!(
+                    async {
+                        let _ = interception_ready.await;
+                    },
+                    async {
+                        let _ = loading_ready.await;
+                    },
+                    async {
+                        if feeds {
+                            crate::filltab::attach(prefs_app.clone(), tab_id, s.clone()).await;
+                        }
+                    },
+                    async {
+                        crate::privacy::attach_page(prefs_app.clone(), tab_id, s.clone()).await;
+                        tracing::debug!(%tab_id, "privacy page setup complete before navigation");
+                    },
+                    async {
+                        crate::permissions::attach_page(
+                            prefs_app.clone(),
+                            tab_id,
+                            s.clone(),
+                            nav.clone(),
+                            permission_workspace,
+                            permission_container,
+                        )
+                        .await;
+                        tracing::debug!(%tab_id, "permission page setup complete before navigation");
+                    },
+                    crate::activity::attach(&activity, tab_id, &activity_nonce, s),
+                    crate::credential_fill::attach(prefs_app.clone(), tab_id, s.clone()),
+                    crate::form_fill::attach(prefs_app.clone(), tab_id, s.clone()),
+                    crate::tab_audio::attach(prefs_app.clone(), tab_id, s.clone()),
+                    crate::prefs::apply(s, &prefs, chrome_scheme.as_deref()),
+                );
+                tracing::debug!(%tab_id, "page setup complete before navigation");
                 // A tab that was muted before it was discarded wakes up muted:
                 // the view is new, and native mute belongs to the view.
                 if crate::tab_audio::is_muted(tab_id) {
@@ -911,8 +926,6 @@ impl TabHost {
                         }
                     });
                 }
-                crate::prefs::apply(&session_for_prefs, &prefs, chrome_scheme.as_deref()).await;
-                tracing::debug!(%tab_id, "browser preferences complete before navigation");
                 if session_for_prefs.is_closed()
                     || !activity.session_current(tab_id, &activity_nonce)
                 {
@@ -2039,57 +2052,111 @@ pub struct TabZoom {
     pub factor: f64,
 }
 
-/// Settings key prefix for a site's remembered zoom factor.
-pub const SITE_ZOOM_PREFIX: &str = "zoom:";
+/// One view's zoom bookkeeping, shared with the hops that apply it.
+#[cfg(feature = "cef")]
+#[derive(Clone, Default)]
+struct SiteZoomState {
+    /// Bumped on every address change; a hop for an older one stands aside.
+    epoch: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// The [`crate::site_zoom::key_of`] the view was last put at.
+    applied: std::sync::Arc<Mutex<Option<String>>>,
+}
 
-/// Put the view at the zoom the person last chose for `url`'s origin, or
-/// the default. Skipped when the host is busy: a zoom that lands one
-/// navigation late is better than a stall inside an engine callback.
-fn apply_site_zoom(app: &AppHandle<Runtime>, tab_id: TabId, url: &str) {
+/// How many loop turns a site zoom waits for a busy host before giving up.
+#[cfg(feature = "cef")]
+const SITE_ZOOM_ATTEMPTS: u32 = 30;
+/// Pause between those turns, so waiting is not a spin of the main loop.
+#[cfg(feature = "cef")]
+const SITE_ZOOM_RETRY: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// Put `tab_id`'s view at `key`'s zoom on a later turn of the main loop,
+/// trying again on the next turns while the host is busy. The zoom used to be
+/// skipped then, and the page stayed at the last site's size with the badge
+/// saying so.
+#[cfg(feature = "cef")]
+fn schedule_site_zoom(
+    app: AppHandle<Runtime>,
+    tab_id: TabId,
+    key: String,
+    zoom: SiteZoomState,
+    epoch: u64,
+    attempts: u32,
+) {
+    tauri::async_runtime::spawn(async move {
+        if attempts < SITE_ZOOM_ATTEMPTS {
+            tokio::time::sleep(SITE_ZOOM_RETRY).await;
+        }
+        let hop = app.clone();
+        let _ = hop.run_on_main_thread(move || {
+            if zoom.epoch.load(std::sync::atomic::Ordering::Relaxed) != epoch {
+                return;
+            }
+            if apply_site_zoom(&app, tab_id, &key) {
+                *lock(&zoom.applied) = Some(key);
+            } else if let Some(left) = attempts.checked_sub(1) {
+                schedule_site_zoom(app, tab_id, key, zoom, epoch, left);
+            } else {
+                tracing::debug!(%tab_id, "site zoom not applied: the host stayed busy");
+            }
+        });
+    });
+}
+
+/// Put the view at the zoom the person last chose for the site `key` names,
+/// or the default -- which is also where a page without an origin (`file:`,
+/// `data:`) goes, rather than keeping the last site's zoom.
+///
+/// Returns `false` when the host or, the first time, the store is busy:
+/// this runs on the main thread, which must not wait on either, so the
+/// caller tries again on a later turn.
+#[cfg(feature = "cef")]
+fn apply_site_zoom(app: &AppHandle<Runtime>, tab_id: TabId, key: &str) -> bool {
     let state = app.state::<AppState>();
-    let Some(origin) = dive_core::origin_of(url) else {
-        return;
-    };
     // Read before the store is taken: on a cold cache the preferences load
     // from the store, and asking for them under its guard locked the same
     // mutex twice on one thread.
     let default_zoom = state.prefs.snapshot(&state).default_zoom;
-    let factor = {
-        let Ok(store) = state.store.try_lock() else {
-            return;
-        };
-        store
-            .setting(&format!("{SITE_ZOOM_PREFIX}{origin}"))
-            .ok()
-            .flatten()
-            .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(default_zoom)
-    };
-    if let Ok(host) = state.host.try_lock()
-        && let Some(host) = host.as_ref()
-    {
-        if let Err(e) = host.with_view(tab_id, |v| v.set_zoom(factor)) {
-            tracing::debug!(%tab_id, "site zoom not applied: {e}");
-            return;
+    let factor = if key.is_empty() {
+        default_zoom
+    } else {
+        let level = crate::site_zoom::cache().level(key, || {
+            let store = state.store.try_lock().ok()?;
+            crate::site_zoom::stored(&store)
+        });
+        match level {
+            Ok(level) => level.unwrap_or(default_zoom),
+            Err(crate::site_zoom::StoreBusy) => return false,
         }
-        let _ = TabZoom { tab_id, factor }.emit(app);
+    };
+    let Ok(host) = state.host.try_lock() else {
+        return false;
+    };
+    let Some(host) = host.as_ref() else {
+        return true;
+    };
+    if let Err(e) = host.with_view(tab_id, |v| v.set_zoom(factor)) {
+        // The view is gone; there is nothing to try again.
+        tracing::debug!(%tab_id, "site zoom not applied: {e}");
+        return true;
     }
+    let _ = TabZoom { tab_id, factor }.emit(app);
+    true
 }
 
 /// A late callback from a closing renderer must not overwrite its replacement.
+///
+/// Blocking: it writes the store. Callers on the async runtime hand it to
+/// `spawn_blocking`, since several SQLite statements per title or address
+/// change of every tab held up whatever else was queued on that worker.
 fn update_session_tab(app: &AppHandle<Runtime>, id: TabId, nonce: &str, f: impl FnOnce(&mut Tab)) {
     let state = app.state::<AppState>();
-    // Check under the host lock, then let it go before the row is written.
-    // Holding it across the SQLite writes in `update_tab` stalled every tab
-    // operation on the main thread for every title and address change of
-    // every tab. What that opens -- the view replaced between the check and
-    // the write -- is a window of microseconds, and the replacement's own
-    // callbacks follow with the right values.
-    let current = {
-        let _host = lock(&state.host);
-        state.activity.session_current(id, nonce)
-    };
-    if current {
+    // The activity registry answers from its own small lock. This used to
+    // take the host lock around the check as well, which guarded nothing the
+    // registry does not -- the view can be replaced between the check and
+    // the write either way, a window of microseconds that the replacement's
+    // own callbacks close -- and made every title and address change of
+    // every tab wait on the lock the main thread needs for tab operations.
+    if state.activity.session_current(id, nonce) {
         update_tab(app, id, f);
     }
 }

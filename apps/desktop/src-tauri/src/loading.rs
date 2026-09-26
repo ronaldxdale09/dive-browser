@@ -235,15 +235,37 @@ pub fn attach(
     session: CdpSession,
 ) -> crate::cdp_feed::Ready {
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    // `Page` and `Network` are enabled by the tab's setup, once. The frame
+    // tree answers without them, so the main frame's identity is asked for
+    // at once and is known before the first navigation either way.
+    let mut events = session.subscribe_to(&[
+        "Page.frameNavigated",
+        "Page.navigatedWithinDocument",
+        "Page.frameStartedLoading",
+        "Page.frameStoppedLoading",
+        "Network.requestWillBeSent",
+        "Network.loadingFinished",
+        "Network.loadingFailed",
+    ]);
+    // Where the page stands in its history is read once per change here, and
+    // only the two answers the buttons need go to the chrome. The chrome used
+    // to read the whole list itself, on every loading and address change as
+    // well as on each of these events: three to five reads per navigation.
+    // A burst of changes while one read is out costs one more read at most.
+    let (history, mut history_changes) = tokio::sync::mpsc::channel::<()>(1);
+    let history_app = app.clone();
+    let history_session = session.clone();
+    tauri::async_runtime::spawn(async move {
+        while history_changes.recv().await.is_some() {
+            if let Some(changed) =
+                crate::navigation::history_changed(tab_id, &history_session).await
+            {
+                let _ = changed.emit(&history_app);
+            }
+        }
+    });
     tauri::async_runtime::spawn(async move {
         let main = MainFrame::default();
-        let mut events = session.subscribe();
-        if let Err(error) = session.call0("Page.enable").await {
-            crate::cdp_feed::setup_failed(tab_id, "the page load feed", &error);
-        }
-        if let Err(error) = crate::network::enable(&session).await {
-            crate::cdp_feed::setup_failed(tab_id, "the network feed", &error);
-        }
         refresh_main(&session, &main).await;
         let _ = ready_tx.send(());
         loop {
@@ -255,14 +277,14 @@ pub fn attach(
                         tracing::warn!(%tab_id, %error, "loading event emit failed");
                     }
                     if main.history_changed(&event) {
-                        let _ = crate::navigation::TabHistoryChanged { tab_id }.emit(&app);
+                        let _ = history.try_send(());
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
                     tracing::warn!(%tab_id, missed, "loading feed lagged; resetting request correlation");
                     main.forget_request();
                     refresh_main(&session, &main).await;
-                    let _ = crate::navigation::TabHistoryChanged { tab_id }.emit(&app);
+                    let _ = history.try_send(());
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }

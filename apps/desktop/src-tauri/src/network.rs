@@ -101,6 +101,15 @@ pub enum NetworkEvent {
     },
 }
 
+/// What Chromium keeps of one tab's response bodies, all told.
+///
+/// Every tab kept this much, dock open or not, and it only ever has to hold
+/// a body until the capture worker has read it: bodies are read once, right
+/// after they finish, and nothing asks the engine for one later. Half a
+/// megabyte still holds eight bodies at the per-resource cap and dozens of
+/// ordinary ones, where two megabytes held four times that in every tab.
+const ENGINE_BODY_BUFFER: usize = 512 * 1024;
+
 /// Enable bounded inspector storage at every call site: Chromium resets
 /// omitted limits to defaults when Network.enable is called again.
 pub(crate) async fn enable(session: &CdpSession) -> Result<Value, dive_cdp::CdpError> {
@@ -108,7 +117,7 @@ pub(crate) async fn enable(session: &CdpSession) -> Result<Value, dive_cdp::CdpE
         .call(
             "Network.enable",
             serde_json::json!({
-                "maxTotalBufferSize": 2 * 1024 * 1024,
+                "maxTotalBufferSize": ENGINE_BODY_BUFFER,
                 "maxResourceBufferSize": MAX_BODY,
                 "maxPostDataSize": MAX_BODY,
             }),
@@ -117,24 +126,30 @@ pub(crate) async fn enable(session: &CdpSession) -> Result<Value, dive_cdp::CdpE
 }
 
 /// Forward metadata independently of the bounded response capture worker.
+///
+/// The domain is enabled by the tab's setup ([`crate::cdp_feed::enable_domains`]);
+/// `limits` says whether that call acknowledged the buffer limits, which body
+/// capture relies on. The subscription is taken before this returns, so no
+/// event can slip past between the domain being enabled and the task
+/// starting.
 #[allow(clippy::too_many_lines)] // one actor owns ordered metadata batching and bounded body capture
 pub fn attach(
     app: AppHandle<Runtime>,
     tab_id: TabId,
     session: CdpSession,
     nonce: String,
-) -> crate::cdp_feed::Ready {
+    limits: tokio::sync::oneshot::Receiver<bool>,
+) {
     use tauri::Manager;
-    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let mut events = session.subscribe_to(&[
+        "Network.",
+        "Page.frameStartedLoading",
+        "Page.frameNavigated",
+    ]);
     tauri::async_runtime::spawn(async move {
-        let mut events = session.subscribe();
-        let capture_enabled = match enable(&session).await {
-            Ok(_) => true,
-            Err(error) => {
-                crate::cdp_feed::setup_failed(tab_id, "response body capture", &error);
-                false
-            }
-        };
+        // Events queue on the subscription meanwhile; none of them is a
+        // network event until the domain is on.
+        let capture_enabled = limits.await.unwrap_or(false);
         let (queue, receiver) = tokio::sync::mpsc::channel(BODY_QUEUE_CAP);
         let body_app = app.clone();
         let body_session = session.clone();
@@ -150,7 +165,6 @@ pub fn attach(
         ));
         let mut tracker = BodyTracker::default();
         let mut batch = crate::cdp_feed::IpcBatch::default();
-        let _ = ready_tx.send(());
         loop {
             let incoming = if let Some(deadline) = batch.deadline() {
                 tokio::select! {
@@ -249,7 +263,6 @@ pub fn attach(
         // Dropping a pending CDP call and its permit releases their resources.
         worker.abort();
     });
-    ready_rx
 }
 
 fn record_capture(
@@ -448,9 +461,11 @@ pub fn map_event(tab_id: TabId, event: &CdpEvent) -> Option<NetworkEvent> {
             method: cap_to(&text(&p["request"]["method"]), 32),
             resource_type: cap_to(&text(&p["type"]), 64),
             headers: headers_of(&p["request"]["headers"]),
+            // Bounded in bytes, which is what the tab's body budget counts:
+            // 64 Ki characters could be four times that.
             post_data: p["request"]["postData"]
                 .as_str()
-                .map(|d| d.chars().take(64 * 1024).collect()),
+                .map(|d| truncate_bytes(d, MAX_BODY).to_owned()),
             timestamp,
             wall_time: p["wallTime"].as_f64().unwrap_or_default(),
         }),
@@ -549,6 +564,18 @@ fn cap(payload: &str) -> String {
     cap_to(payload, MAX_FRAME)
 }
 
+/// The longest prefix of `text` within `max` bytes that ends on a character.
+fn truncate_bytes(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
 fn cap_to(payload: &str, max: usize) -> String {
     if payload.chars().count() <= max {
         payload.to_owned()
@@ -578,6 +605,28 @@ fn headers_of(v: &Value) -> std::collections::BTreeMap<String, String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn request_bodies_are_capped_in_bytes_on_a_character() {
+        let event = CdpEvent {
+            navigation_epoch: 0,
+            method: "Network.requestWillBeSent".into(),
+            params: json!({
+                "requestId": "1",
+                "request": {"url": "https://a.dev/", "method": "POST", "postData": "é".repeat(MAX_BODY)},
+            }),
+        };
+        let Some(NetworkEvent::Sent {
+            post_data: Some(body),
+            ..
+        }) = map_event(TabId::new(), &event)
+        else {
+            panic!("expected a sent request with its body");
+        };
+        assert_eq!(body.len(), MAX_BODY);
+        assert_eq!(truncate_bytes("aé", 2), "a");
+        assert_eq!(truncate_bytes("short", 64), "short");
+    }
 
     #[test]
     fn body_decoding_keeps_complete_utf8_and_rejects_byte_overflow() {

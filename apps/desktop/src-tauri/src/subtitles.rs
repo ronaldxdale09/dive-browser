@@ -573,13 +573,10 @@ pub async fn start(
             },
         );
     }
-    let loaded = tokio::task::spawn_blocking(move || {
-        verify_model(&path, &model_id)?;
-        load_context(&path)
-    })
-    .await
-    .map_err(|e| format!("Model loader failed: {e}"))
-    .and_then(|r| r);
+    let loaded = tokio::task::spawn_blocking(move || shared_context(&path, &model_id))
+        .await
+        .map_err(|e| format!("Model loader failed: {e}"))
+        .and_then(|r| r);
     let mut ctx = match loaded {
         Ok(ctx) if !stop.load(Ordering::SeqCst) => ctx,
         Ok(_) => return Err("Subtitle start cancelled".into()),
@@ -763,8 +760,15 @@ pub fn is_running(app: &AppHandle<Runtime>, tab: TabId) -> bool {
     app.state::<AppState>().subtitles.is_running(tab)
 }
 
+/// One session's transcription state over a model shared with every other
+/// session using the same file.
 #[cfg(whisper_enabled)]
-type LocalContext = whisper_rs::WhisperState;
+pub(crate) struct LocalContext {
+    state: whisper_rs::WhisperState,
+    /// Keeps the shared model loaded, and findable, while this session runs.
+    _model: Arc<whisper_rs::WhisperContext>,
+}
+
 /// Stands in for the engine's state where the engine is not compiled in.
 ///
 /// A plain `()` would be the obvious choice and is the wrong one: every
@@ -778,24 +782,94 @@ pub(crate) struct NoLocalEngine;
 type LocalContext = NoLocalEngine;
 
 #[cfg(whisper_enabled)]
-fn load_context(path: &std::path::Path) -> Result<LocalContext, String> {
-    let ctx = whisper_rs::WhisperContext::new_with_params(
+fn load_model(path: &std::path::Path) -> Result<Arc<whisper_rs::WhisperContext>, String> {
+    whisper_rs::WhisperContext::new_with_params(
         &path.to_string_lossy(),
         whisper_rs::WhisperContextParameters::default(),
     )
-    .map_err(|e| format!("could not load the model: {e}"))?;
-    ctx.create_state()
-        .map_err(|e| format!("could not create transcription state: {e}"))
+    .map(Arc::new)
+    .map_err(|e| format!("could not load the model: {e}"))
+}
+
+#[cfg(whisper_enabled)]
+fn state_over(model: Arc<whisper_rs::WhisperContext>) -> Result<LocalContext, String> {
+    let state = model
+        .create_state()
+        .map_err(|e| format!("could not create transcription state: {e}"))?;
+    Ok(LocalContext {
+        state,
+        _model: model,
+    })
+}
+
+/// Load the model at `path` on its own, uncached: the model benchmark times
+/// exactly this.
+#[cfg(all(whisper_enabled, test))]
+fn load_context(path: &std::path::Path) -> Result<LocalContext, String> {
+    state_over(load_model(path)?)
+}
+
+/// What a model file looked like when it was verified and loaded. A file
+/// that has changed since -- downloaded again -- is verified and loaded anew.
+#[cfg(whisper_enabled)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ModelStamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+/// A transcription state for a session over the model at `path`, verified
+/// against `model_id`.
+///
+/// The model is loaded once for the whole process while any session uses
+/// it, and each session gets only a state of its own. Every start used to
+/// hash the file and load the model again -- hundreds of megabytes to a
+/// gigabyte and a half, read, checked and held once per tab with subtitles
+/// on.
+#[cfg(whisper_enabled)]
+fn shared_context(path: &std::path::Path, model_id: &str) -> Result<LocalContext, String> {
+    type Loaded =
+        HashMap<std::path::PathBuf, (ModelStamp, std::sync::Weak<whisper_rs::WhisperContext>)>;
+    static LOADED: std::sync::OnceLock<Mutex<Loaded>> = std::sync::OnceLock::new();
+    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    let stamp = ModelStamp {
+        len: metadata.len(),
+        modified: metadata.modified().ok(),
+    };
+    // Held across a load, so two tabs starting at once load the model once.
+    let mut loaded = LOADED
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((seen, model)) = loaded.get(path)
+        && *seen == stamp
+        && let Some(model) = model.upgrade()
+    {
+        return state_over(model);
+    }
+    verify_model(path, model_id)?;
+    let model = load_model(path)?;
+    loaded.retain(|_, (_, model)| model.strong_count() > 0);
+    loaded.insert(path.to_owned(), (stamp, Arc::downgrade(&model)));
+    drop(loaded);
+    state_over(model)
+}
+
+#[cfg(not(whisper_enabled))]
+fn shared_context(path: &std::path::Path, model_id: &str) -> Result<LocalContext, String> {
+    verify_model(path, model_id)?;
+    load_context(path)
 }
 
 #[cfg(whisper_enabled)]
 fn transcribe(
-    state: &mut LocalContext,
+    ctx: &mut LocalContext,
     audio: &[f32],
     language: &str,
     translate: bool,
 ) -> Result<(String, String), String> {
     use whisper_rs::{FullParams, SamplingStrategy};
+    let state = &mut ctx.state;
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     let threads =
         std::thread::available_parallelism().map_or(4, |n| (n.get().saturating_sub(2)).clamp(2, 8));

@@ -170,24 +170,22 @@ pub async fn attach(registry: &Registry, tab: TabId, nonce: &str, session: &dive
         "__NONCE__",
         &serde_json::to_string(nonce).unwrap_or_default(),
     );
+    // The domains are on already (the tab's setup enables them once), and
+    // the view is still on its blank document, which the first navigation
+    // replaces: registering is all it takes. Both calls go out together.
     let setup = async {
-        session.call0("Runtime.enable").await?;
-        session.call0("Page.enable").await?;
-        session
-            .call(
+        let (binding, script) = tokio::join!(
+            session.call(
                 "Runtime.addBinding",
                 serde_json::json!({"name":"__diveActivityChanged"}),
-            )
-            .await?;
-        session
-            .call(
+            ),
+            session.call(
                 "Page.addScriptToEvaluateOnNewDocument",
                 serde_json::json!({"source":source}),
-            )
-            .await?;
-        session
-            .call("Runtime.evaluate", serde_json::json!({"expression":source}))
-            .await?;
+            ),
+        );
+        binding?;
+        script?;
         Ok::<(), dive_cdp::CdpError>(())
     };
     match tokio::time::timeout(std::time::Duration::from_secs(5), setup).await {

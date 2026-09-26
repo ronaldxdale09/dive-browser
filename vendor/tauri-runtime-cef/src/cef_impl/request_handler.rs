@@ -329,7 +329,7 @@ wrap_resource_handler! {
         let method_str = CefString::from(&request.method()).to_string();
         let method = http::Method::from_bytes(method_str.as_bytes()).unwrap_or(http::Method::GET);
 
-        std::thread::spawn(move || {
+        crate::cef_impl::scheme_workers::run(move || {
           let mut http_request = http::Request::builder()
             .method(method)
             .uri(url.as_str())

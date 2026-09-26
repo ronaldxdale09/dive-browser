@@ -16,6 +16,12 @@ const FeatureReel = lazy(() => import("./FeatureReel").then((module) => ({ defau
 
 const INITIAL_SERVER_COUNT = 3;
 
+// The start page is where Dive sits idle, focused, for as long as nobody opens
+// a tab. Its orb is decoration: thirty frames a second are plenty, and once
+// the pointer has been still this long it holds its frame until it moves.
+const WELCOME_ORB_FPS = 30;
+const WELCOME_ORB_IDLE_MS = 8000;
+
 /** Put identified frameworks first and keep the welcome screen compact. */
 export function visibleDevServers(servers: DevServer[], expanded: boolean): DevServer[] {
   const ranked = [...servers].sort((a, b) => Number(b.framework !== "HTTP") - Number(a.framework !== "HTTP"));
@@ -43,7 +49,7 @@ export function Welcome() {
       <div className="relative z-10 mx-auto flex min-h-full w-full max-w-[1040px] flex-col items-center px-4 pt-4 pb-10 sm:px-8 sm:pt-6">
         {/* The small globe follows effective motion (System/Reduce/Full).
             Only the large character field above requires an explicit Full opt-in. */}
-        {background === "orbs" ? <OrbBurst pointer={{ drag: 0 }} width={190} height={190} className="-mb-4" pauseWhenBlurred /> : <div className="h-10" aria-hidden />}
+        {background === "orbs" ? <OrbBurst pointer={{ drag: 0 }} width={190} height={190} className="-mb-4" pauseWhenBlurred maxFps={WELCOME_ORB_FPS} idleAfterMs={WELCOME_ORB_IDLE_MS} /> : <div className="h-10" aria-hidden />}
         <p className="text-[10px] font-medium tracking-[0.18em] text-highlight uppercase">Dive</p>
         <h1 className="mt-2 max-w-full text-center text-[clamp(26px,4vw,34px)] leading-tight font-semibold tracking-[-0.025em] text-balance">
           The browser built for developers

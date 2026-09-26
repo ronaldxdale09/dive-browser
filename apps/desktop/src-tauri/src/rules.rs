@@ -726,8 +726,16 @@ pub fn attach(
     session: CdpSession,
 ) -> crate::cdp_feed::Ready {
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    // Paused requests, and what tells which document is on top. Taken
+    // before the task starts, so the tab's setup cannot enable a domain
+    // ahead of the listener.
+    let mut events = session.subscribe_to(&[
+        "Fetch.",
+        "Page.frameNavigated",
+        "Page.frameStartedLoading",
+        "Network.requestWillBeSent",
+    ]);
     tauri::async_runtime::spawn(async move {
-        let mut events = session.subscribe();
         let (initial_rules, initial_prefs, initial_document_url) = {
             let state = app.state::<AppState>();
             let rules = workspace.map_or_else(

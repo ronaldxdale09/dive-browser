@@ -266,7 +266,9 @@ pub async fn attach_page(
     let Some(workspace) = workspace else {
         return;
     };
-    let mut events = session.subscribe();
+    // Held only to learn when the session ends; no event is wanted, so none
+    // wakes it.
+    let mut events = session.subscribe_to(&[]);
     let label = view.label().to_owned();
     let (dismissed, scope) = {
         let state = app.state::<AppState>();
