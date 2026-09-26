@@ -32,11 +32,17 @@ interface SubtitlesState {
   setModel: (model: string) => void;
   loadModels: () => Promise<void>;
   download: (modelId: string) => Promise<void>;
+  /** Stop a model download; the partial file is removed. */
+  cancelDownload: (modelId: string) => void;
+  /** Delete a downloaded model from disk. */
+  remove: (modelId: string) => Promise<void>;
   start: () => Promise<boolean>;
   stop: () => Promise<void>;
 }
 
 const MODEL_KEY = "dive.subtitles.model";
+const LANGUAGE_KEY = "dive.subtitles.language";
+const TRANSLATE_KEY = "dive.subtitles.translate";
 
 function thisWindowTab() {
   const { activeTab, detached } = useBrowser.getState();
@@ -53,8 +59,33 @@ export function rememberedModel(): string {
 }
 
 function rememberModel(model: string) {
+  remember(MODEL_KEY, model);
+}
+
+/**
+ * The caption language chosen last time. Someone who watches Japanese video
+ * picked Japanese once; it used to be back to English at every launch.
+ */
+export function rememberedLanguage(): string {
   try {
-    uiStorage.setItem(MODEL_KEY, model);
+    return uiStorage.getItem(LANGUAGE_KEY) ?? "en";
+  } catch {
+    return "en";
+  }
+}
+
+/** Whether translation to English was on last time. */
+export function rememberedTranslate(): boolean {
+  try {
+    return uiStorage.getItem(TRANSLATE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function remember(key: string, value: string) {
+  try {
+    uiStorage.setItem(key, value);
   } catch {
     // Storage can be unavailable; the session still works.
   }
@@ -63,15 +94,21 @@ function rememberModel(model: string) {
 export const useSubtitles = create<SubtitlesState>((set, get) => ({
   active: false,
   starting: false,
-  language: "en",
-  translate: false,
+  language: rememberedLanguage(),
+  translate: rememberedTranslate(),
   model: rememberedModel(),
   models: [],
   downloading: {},
   lastCue: "",
   error: null,
-  setLanguage: (language) => set({ language }),
-  setTranslate: (translate) => set({ translate }),
+  setLanguage: (language) => {
+    remember(LANGUAGE_KEY, language);
+    set({ language });
+  },
+  setTranslate: (translate) => {
+    remember(TRANSLATE_KEY, translate ? "1" : "0");
+    set({ translate });
+  },
   setModel: (model) => {
     rememberModel(model);
     set({ model });
@@ -92,6 +129,7 @@ export const useSubtitles = create<SubtitlesState>((set, get) => ({
 
   download: async (modelId) => {
     if (get().downloading[modelId]) return;
+    cancelledDownloads.delete(modelId);
     // Fetching a model is choosing it: someone who downloads Tiny while Base
     // is selected expects Start to light up for Tiny, not stay grey for Base.
     const chosen = get().models.find((m) => m.id === get().model);
@@ -101,6 +139,23 @@ export const useSubtitles = create<SubtitlesState>((set, get) => ({
       await ipc.subtitleModelDownload(modelId);
     } catch (e) {
       set((s) => ({ downloading: without(s.downloading, modelId), error: errorMessage(e) }));
+    }
+  },
+
+  cancelDownload: (modelId) => {
+    // The row goes back at once; the host's "cancelled" report that follows
+    // finds nothing left to clear, and progress still in flight is ignored.
+    cancelledDownloads.add(modelId);
+    set((s) => ({ downloading: without(s.downloading, modelId) }));
+    void ipc.subtitleModelCancel(modelId).catch(() => undefined);
+  },
+
+  remove: async (modelId) => {
+    try {
+      await ipc.subtitleModelDelete(modelId);
+      set((s) => ({ error: null, models: s.models.map((m) => (m.id === modelId ? { ...m, downloaded: false } : m)) }));
+    } catch (e) {
+      set({ error: errorMessage(e) });
     }
   },
 
@@ -154,6 +209,9 @@ function without<T>(rec: Record<string, T>, key: string): Record<string, T> {
 }
 
 
+/** Models whose download was cancelled; late progress for them is not shown. */
+const cancelledDownloads = new Set<string>();
+
 let listening = false;
 const subscriptions: (() => void)[] = [];
 let stateRevision = 0;
@@ -171,6 +229,11 @@ export async function bootSubtitles(): Promise<void> {
     subscriptions.push(await events.subtitleModelProgress.listen((e) => {
       const p = e.payload;
       useSubtitles.setState((s) => {
+        if (p.cancelled) {
+          cancelledDownloads.delete(p.id);
+          return { downloading: without(s.downloading, p.id) };
+        }
+        if (cancelledDownloads.has(p.id)) return {};
         if (p.error) {
           return { downloading: without(s.downloading, p.id), error: p.error };
         }

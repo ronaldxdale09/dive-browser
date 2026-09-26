@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { events, ipc } from "../lib/ipc";
 import type { SubtitleCue, SubtitleModel, SubtitleModelProgress, SubtitleState } from "../lib/ipc";
 import { tabInThisWindow, useBrowser } from "./browser";
-import { bootSubtitles, resetSubtitlesListener, useSubtitles } from "./subtitles";
+import { bootSubtitles, rememberedLanguage, rememberedTranslate, resetSubtitlesListener, useSubtitles } from "./subtitles";
 
 const MODELS: SubtitleModel[] = [
   { id: "base", label: "Base", detail: "Fastest", size_mb: 142, downloaded: false },
@@ -94,6 +94,43 @@ describe("useSubtitles", () => {
     await useSubtitles.getState().loadModels();
     // "small" was never downloaded; the one on disk is ready to start.
     expect(useSubtitles.getState().model).toBe("medium");
+  });
+
+  it("remembers the caption language and translation for the next launch", () => {
+    useSubtitles.getState().setLanguage("ja");
+    useSubtitles.getState().setTranslate(true);
+    expect(rememberedLanguage()).toBe("ja");
+    expect(rememberedTranslate()).toBe(true);
+    useSubtitles.getState().setTranslate(false);
+    expect(rememberedTranslate()).toBe(false);
+  });
+
+  it("cancels a model download at once, and progress still in flight does not bring it back", async () => {
+    vi.spyOn(ipc, "subtitleModels").mockResolvedValue(MODELS);
+    vi.spyOn(ipc, "subtitleModelDownload").mockResolvedValue(null);
+    const cancel = vi.spyOn(ipc, "subtitleModelCancel").mockResolvedValue(undefined);
+    const h = stubListeners();
+    await bootSubtitles();
+    await useSubtitles.getState().loadModels();
+    await useSubtitles.getState().download("base");
+    h.progress?.({ payload: { id: "base", received: 5_000_000, total: 142_000_000, done: false, error: null } });
+    useSubtitles.getState().cancelDownload("base");
+    expect(cancel).toHaveBeenCalledWith("base");
+    expect(useSubtitles.getState().downloading.base).toBeUndefined();
+    h.progress?.({ payload: { id: "base", received: 6_000_000, total: 142_000_000, done: false, error: null } });
+    expect(useSubtitles.getState().downloading.base).toBeUndefined();
+    h.progress?.({ payload: { id: "base", received: 0, total: null, done: false, error: null, cancelled: true } });
+    expect(useSubtitles.getState().error).toBeNull();
+  });
+
+  it("deletes a downloaded model and says so when it cannot", async () => {
+    useSubtitles.setState({ models: MODELS.map((m) => ({ ...m, downloaded: true })) });
+    vi.spyOn(ipc, "subtitleModelDelete").mockResolvedValueOnce(null).mockRejectedValueOnce(new Error("A model is downloading."));
+    await useSubtitles.getState().remove("base");
+    expect(useSubtitles.getState().models.find((m) => m.id === "base")?.downloaded).toBe(false);
+    await useSubtitles.getState().remove("small");
+    expect(useSubtitles.getState().error).toBe("A model is downloading.");
+    expect(useSubtitles.getState().models.find((m) => m.id === "small")?.downloaded).toBe(true);
   });
 
   it("records progress from the event and flips a model to downloaded on done", async () => {

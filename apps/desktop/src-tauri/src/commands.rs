@@ -928,6 +928,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             default_browser_set,
             subtitle_models,
             subtitle_model_download,
+            subtitle_model_cancel,
+            subtitle_model_delete,
             subtitle_start,
             subtitle_stop,
             subtitle_running,
@@ -3667,6 +3669,23 @@ pub(crate) fn subtitle_models() -> Vec<crate::subtitles::SubtitleModel> {
 #[specta::specta]
 pub(crate) async fn subtitle_model_download(app: AppHandle<Runtime>, id: String) -> AppResult<()> {
     crate::subtitles::download_model(&app, &id)
+        .await
+        .map_err(AppError::new)
+}
+
+/// Stop a subtitle model download; it reports itself cancelled on
+/// `SubtitleModelProgress`.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn subtitle_model_cancel(id: String) {
+    crate::subtitles::cancel_download(&id);
+}
+
+/// Delete a downloaded subtitle model to free its space.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn subtitle_model_delete(id: String) -> AppResult<()> {
+    crate::subtitles::delete_model(&id)
         .await
         .map_err(AppError::new)
 }
