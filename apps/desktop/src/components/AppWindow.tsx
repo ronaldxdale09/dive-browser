@@ -45,7 +45,10 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
   const body = useRef<HTMLDivElement>(null);
   const menuRoot = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState(false);
-  const closeMenu = useCallback(() => setMenu(false), []);
+  // Uninstalling deletes the launcher and moves this window's page back
+  // into the main window, so the menu asks once more before it does.
+  const [confirming, setConfirming] = useState(false);
+  const closeMenu = useCallback(() => { setMenu(false); setConfirming(false); }, []);
   useDismiss(menuRoot, menu, closeMenu);
   useCoversContent(menu);
   const uninstall = useWebApps((s) => s.uninstall);
@@ -124,13 +127,23 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
           <span className="truncate text-xs text-ink" data-tauri-drag-region="true">{title}</span>
         </div>
         <div ref={menuRoot} className="relative">
-          <IconButton icon={EllipsisVertical} label="App menu" active={menu} hasPopup="menu" expanded={menu} onClick={() => setMenu((v) => !v)} tooltipAlign="end" />
+          <IconButton icon={EllipsisVertical} label="App menu" active={menu} hasPopup="menu" expanded={menu} onClick={() => (menu ? closeMenu() : setMenu(true))} tooltipAlign="end" />
           {menu && (
             <div role="menu" aria-label="App menu" className="surface-enter absolute top-full right-0 z-50 mt-1 w-56 rounded-xl border border-line-2 bg-surface p-1 text-xs shadow-2xl">
               <MenuItem icon={Copy} label="Copy URL" onClick={() => { void navigator.clipboard.writeText(url); closeMenu(); }} />
               <MenuItem icon={PanelsTopLeft} label="Open in Dive" onClick={() => { run(ipc.tabAttach(tabId)); closeMenu(); }} />
               <div className="my-1 h-px bg-line" />
-              <MenuItem icon={Trash2} label={`Uninstall ${app?.short_name || title}`} danger onClick={() => { closeMenu(); void uninstall(appId); }} />
+              {confirming ? (
+                <div role="group" aria-label="Confirm uninstall" className="px-2.5 py-1.5">
+                  <p className="text-ink-2">Remove {app?.short_name || title} and its launcher? This window's page moves back into Dive.</p>
+                  <div className="mt-2 flex justify-end gap-1.5">
+                    <button type="button" onClick={() => setConfirming(false)} className="h-7 rounded-lg px-2.5 text-ink-2 hover:bg-surface-2 hover:text-ink">Cancel</button>
+                    <button type="button" onClick={() => { closeMenu(); void uninstall(appId); }} className="h-7 rounded-lg bg-danger px-2.5 font-medium text-white hover:opacity-90">Uninstall</button>
+                  </div>
+                </div>
+              ) : (
+                <MenuItem icon={Trash2} label={`Uninstall ${app?.short_name || title}…`} danger onClick={() => setConfirming(true)} />
+              )}
             </div>
           )}
         </div>

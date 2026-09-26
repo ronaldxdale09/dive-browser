@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import type { WebApp, WebAppProbe } from "../lib/ipc";
 import { WEBAPPS_CHANGED, inScope, originOf, useWebApps } from "./webapps";
+import { useBrowser } from "./browser";
 
 vi.mock("../lib/ipc", async (importOriginal) => {
   const original = await importOriginal<typeof import("../lib/ipc")>();
@@ -85,6 +86,18 @@ describe("web apps store", () => {
     expect(await useWebApps.getState().install("t1")).toBeNull();
     expect(useWebApps.getState().error).toMatch(/icon/);
     expect(useWebApps.getState().installing).toBe(false);
+  });
+
+  it("reports a failed uninstall or open in the window, not only in the install dialog", async () => {
+    useBrowser.setState({ error: null });
+    vi.mocked(ipc.webappUninstall).mockRejectedValue(new Error("could not remove the launcher"));
+    await useWebApps.getState().uninstall(app.id);
+    expect(useBrowser.getState().error).toMatch(/launcher/);
+    vi.mocked(ipc.webappOpen).mockRejectedValue(new Error("that app is not installed"));
+    await useWebApps.getState().open(app.id);
+    expect(useBrowser.getState().error).toMatch(/not installed/);
+    expect(useWebApps.getState().error).toBeNull();
+    useBrowser.setState({ error: null });
   });
 
   it("uninstalling drops every cached probe, since any page may now be installable again", async () => {

@@ -3,6 +3,7 @@ import { ipc } from "../lib/ipc";
 import type { WebApp, WebAppProbe } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
 import { forgetWebAppIcon } from "../lib/useWebAppIcon";
+import { useBrowser } from "./browser";
 
 /** Fired on `window` when the installed apps change, so lists and buttons refresh. */
 export const WEBAPPS_CHANGED = "dive-webapps-changed";
@@ -21,6 +22,11 @@ interface WebAppsState {
   probes: Record<string, TabProbe>;
   /** True while an install is in flight; the dialog disables its button. */
   installing: boolean;
+  /**
+   * Why the last install failed, shown by the install dialog. Only the
+   * dialog shows it, so every other failure goes to the window's own error
+   * banner instead: an uninstall or open that failed used to say nothing.
+   */
   error: string | null;
   load: () => Promise<void>;
   /** Probe `tabId` at `url`; a repeat for the same URL is answered from memory. */
@@ -45,9 +51,10 @@ export const useWebApps = create<WebAppsState>((set, get) => ({
   load: async () => {
     try {
       const apps = await ipc.webappsList();
-      set({ apps, loaded: true, error: null });
+      set({ apps, loaded: true });
     } catch (e) {
-      set({ loaded: true, error: errorMessage(e) });
+      set({ loaded: true });
+      useBrowser.setState({ error: errorMessage(e) });
     }
   },
 
@@ -103,7 +110,7 @@ export const useWebApps = create<WebAppsState>((set, get) => ({
       await ipc.webappOpen(appId);
       await get().load();
     } catch (e) {
-      set({ error: errorMessage(e) });
+      useBrowser.setState({ error: errorMessage(e) });
     }
   },
 
@@ -116,7 +123,7 @@ export const useWebApps = create<WebAppsState>((set, get) => ({
       await get().load();
       announce();
     } catch (e) {
-      set({ error: errorMessage(e) });
+      useBrowser.setState({ error: errorMessage(e) });
     }
   },
 }));

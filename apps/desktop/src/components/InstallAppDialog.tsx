@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { Icon } from "./Icon";
 import { AppWindow } from "lucide-react";
 import { useCoversContent } from "../lib/overlay";
@@ -27,6 +27,9 @@ export function InstallAppDialog({ tabId, probe, onClose }: { tabId: string; pro
   const root = useRef<HTMLDivElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
   const { close, className } = useFadeClose(onClose);
+  // A failure belongs to the attempt that made it: opening the dialog again,
+  // for this page or another, starts clean.
+  useLayoutEffect(() => useWebApps.setState({ error: null }), []);
   useFocusTrap(root, { active: true, initialFocus: primary, onEscape: close });
   const name = probe.name ?? "";
   const origin = originOf(probe.start_url ?? "");

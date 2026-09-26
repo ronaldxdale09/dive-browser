@@ -1,6 +1,6 @@
 import { useJsDialog } from "../store/jsDialog";
 import { contentCoverDepth, resetContentCover } from "../lib/overlay";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab, WebApp } from "../lib/ipc";
 import { events, ipc } from "../lib/ipc";
@@ -68,11 +68,19 @@ describe("AppWindow", () => {
     await waitFor(() => expect(ipc.tabAttach).toHaveBeenCalledWith("a"));
   });
 
-  it("uninstalls from the app menu", async () => {
+  it("uninstalls from the app menu once confirmed", async () => {
     render(<AppWindow tabId="a" appId={app.id} />);
     await screen.findByText("Mail by Example");
     fireEvent.click(screen.getByRole("button", { name: "App menu" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Uninstall Mail" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Uninstall Mail…" }));
+    // The first choice only asks.
+    expect(useWebApps.getState().uninstall).not.toHaveBeenCalled();
+    const confirm = screen.getByRole("group", { name: "Confirm uninstall" });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("group", { name: "Confirm uninstall" })).toBeNull();
+    expect(useWebApps.getState().uninstall).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Uninstall Mail…" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Confirm uninstall" })).getByRole("button", { name: "Uninstall" }));
     expect(useWebApps.getState().uninstall).toHaveBeenCalledWith(app.id);
   });
 });
