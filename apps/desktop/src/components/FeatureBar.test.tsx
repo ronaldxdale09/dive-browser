@@ -79,8 +79,9 @@ describe("FeatureBar", () => {
     // Capture, the device simulator and the developer surfaces live in Apps.
     for (const gone of ["Capture", "Mobile", "Downloads", "DEV"]) expect(screen.queryByText(gone)).toBeNull();
     const apps = screen.getByRole("button", { name: "Apps: everything Dive can do" });
-    const tooltip = document.getElementById(apps.getAttribute("aria-describedby") ?? "");
-    expect(tooltip?.getAttribute("role")).toBe("tooltip");
+    expect(apps.parentElement?.querySelector('[role="tooltip"]')).toBeTruthy();
+    // The shortcut is announced as one, not read out of the tip.
+    expect(apps.getAttribute("aria-keyshortcuts")).toBe("Meta+Shift+Space");
     fireEvent.click(apps);
     expect(useBrowser.getState().open.apps).toBe(true);
   });

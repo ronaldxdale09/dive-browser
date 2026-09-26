@@ -58,7 +58,8 @@ describe("Shortcuts dialog", () => {
   it("covers the page and renders areas with Mac glyphs", async () => {
     render(<Shortcuts />);
     expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeTruthy();
-    expect(contentCoverDepth()).toBe(1);
+    // The dialog, and the tip of its focused Close when that focus counts as the keyboard's.
+    expect(contentCoverDepth()).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole("region", { name: "Tabs" })).toBeTruthy();
     expect(screen.getByText("History")).toBeTruthy();
     expect(screen.getByText("⌘Y")).toBeTruthy();

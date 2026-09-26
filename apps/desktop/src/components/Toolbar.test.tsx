@@ -460,7 +460,7 @@ describe("Toolbar", () => {
     expect(screen.getByRole("img", { name: /plain http/ })).toBeTruthy();
   });
 
-  it("associates every button around the address field with a custom tooltip", () => {
+  it("gives every button around the address field a custom tooltip that does not repeat its name", () => {
     render(<Toolbar />);
 
     const labels = [
@@ -474,9 +474,10 @@ describe("Toolbar", () => {
 
     for (const label of labels) {
       const button = screen.getByRole("button", { name: label });
-      const tooltip = document.getElementById(button.getAttribute("aria-describedby") ?? "");
-      expect(tooltip?.getAttribute("role")).toBe("tooltip");
+      const tooltip = button.parentElement?.querySelector('[role="tooltip"]');
       expect(tooltip?.textContent).toContain(label);
+      // The tip only says the name again, so it is not also the description.
+      expect(button.getAttribute("aria-describedby")).toBeNull();
       expect(button.getAttribute("title")).toBeNull();
     }
   });

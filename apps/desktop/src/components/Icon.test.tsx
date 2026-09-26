@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { Camera } from "lucide-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IconButton } from "./Icon";
-import { Tooltip } from "./Tooltip";
+import { Tooltip, ariaKeyShortcut } from "./Tooltip";
+import { contentCoverDepth, resetContentCover } from "../lib/overlay";
 
 afterEach(() => {
   cleanup();
@@ -10,13 +11,13 @@ afterEach(() => {
 });
 
 describe("IconButton", () => {
-  it("connects its button to a visible custom tooltip instead of a native title", () => {
+  it("gives its button a visible custom tooltip instead of a native title, not read twice as its description", () => {
     render(<IconButton icon={Camera} label="Capture full page" />);
 
     const button = screen.getByRole("button", { name: "Capture full page" });
     const tooltip = screen.getByRole("tooltip", { hidden: true });
     expect(tooltip.textContent).toBe("Capture full page");
-    expect(button.getAttribute("aria-describedby")).toBe(tooltip.id);
+    expect(button.getAttribute("aria-describedby")).toBeNull();
     expect(button.getAttribute("title")).toBeNull();
   });
 
@@ -68,6 +69,85 @@ describe("Tooltip", () => {
     fireEvent.focus(screen.getByRole("button", { name: "b" }));
     expect(above!.className).toContain("bottom-full");
     expect(beside!.className).toContain("left-full");
+  });
+
+  it("describes its trigger only when it says more than the trigger's name", () => {
+    render(
+      <>
+        <Tooltip label="Reload" shortcut="⌘R">
+          <button type="button" aria-label="Reload">r</button>
+        </Tooltip>
+        <Tooltip label="Connect an agent: drive Dive from Claude Code">
+          <button type="button" aria-label="Connect an agent">c</button>
+        </Tooltip>
+      </>,
+    );
+    const reload = screen.getByRole("button", { name: "Reload" });
+    expect(reload.getAttribute("aria-describedby")).toBeNull();
+    expect(reload.getAttribute("aria-keyshortcuts")).toMatch(/^(Meta|Control)\+R$/);
+    const connect = screen.getByRole("button", { name: "Connect an agent" });
+    expect(document.getElementById(connect.getAttribute("aria-describedby")!)?.textContent).toContain("Claude Code");
+  });
+
+  it("shows for keyboard focus, covers the page while shown, and Escape puts it away", () => {
+    // jsdom never calls focus keyboard focus; a browser does after a Tab or F6.
+    const matches = Element.prototype.matches;
+    vi.spyOn(Element.prototype, "matches").mockImplementation(function (this: Element, selector: string) {
+      return selector === ":focus-visible" ? true : matches.call(this, selector);
+    });
+    resetContentCover();
+    render(
+      <Tooltip label="Share this page to another device">
+        <button type="button" aria-label="Share">s</button>
+      </Tooltip>,
+    );
+    const button = screen.getByRole("button", { name: "Share" });
+    const tip = screen.getByRole("tooltip", { hidden: true });
+    expect(tip.className).toContain("hidden");
+    act(() => button.focus());
+    expect(tip.className).toContain("flex");
+    expect(contentCoverDepth()).toBe(1);
+    fireEvent.keyDown(button, { key: "Escape" });
+    expect(tip.className).toContain("hidden");
+    expect(contentCoverDepth()).toBe(0);
+    act(() => button.blur());
+    act(() => button.focus());
+    expect(tip.className).toContain("flex");
+  });
+
+  it("stays while the pointer crosses to it, and takes the pointer only once it can be seen", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <Tooltip label="Stop and save">
+          <button type="button">x</button>
+        </Tooltip>,
+      );
+      const tip = screen.getByRole("tooltip", { hidden: true });
+      const wrapper = tip.parentElement!;
+      fireEvent.mouseEnter(wrapper);
+      expect(tip.className).toContain("pointer-events-none");
+      act(() => vi.advanceTimersByTime(500));
+      expect(tip.className).toContain("pointer-events-auto");
+      fireEvent.mouseLeave(wrapper);
+      act(() => vi.advanceTimersByTime(100));
+      fireEvent.mouseEnter(wrapper);
+      act(() => vi.advanceTimersByTime(500));
+      expect(tip.className).toContain("flex");
+      fireEvent.mouseLeave(wrapper);
+      act(() => vi.advanceTimersByTime(200));
+      expect(tip.className).toContain("hidden");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("spells a shortcut for aria-keyshortcuts", () => {
+    expect(ariaKeyShortcut("⌘⌥⇧R", true)).toBe("Meta+Alt+Shift+R");
+    expect(ariaKeyShortcut("⌘⇧Space", false)).toBe("Control+Shift+Space");
+    expect(ariaKeyShortcut("mod+shift+[", true)).toBe("Meta+Shift+[");
+    expect(ariaKeyShortcut("Esc", true)).toBe("Escape");
+    expect(ariaKeyShortcut("⇧F6", true)).toBe("Shift+F6");
   });
 
   it("wraps a long label instead of letting it spill out of its box", () => {
