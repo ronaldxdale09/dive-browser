@@ -2113,6 +2113,13 @@ pub(crate) fn tab_navigate(
     url: String,
 ) -> AppResult<()> {
     let url = normalize_url_with(&url, state.prefs.get(&state).search_template())?;
+    // Another app's link typed into the bar is asked about straight away.
+    // Sent through the engine, the question would name the page on screen
+    // as the one asking, and "always" would be remembered for that site.
+    if crate::external_link::is_external(&url) {
+        crate::external_link::intercept(&app, id, &url, "");
+        return Ok(());
+    }
     if rebuild_failed_protocol(&app, &state, id, Some(url.as_str().to_owned()))? {
         return Ok(());
     }
@@ -4645,45 +4652,17 @@ fn normalize_url(input: &str) -> AppResult<url::Url> {
 }
 
 /// Normalize user input, using `template` for anything that is not a URL.
-/// The template is a URL carrying a `{query}` placeholder.
+/// The template is a URL carrying a `{query}` placeholder. What counts as a
+/// URL is `omnibox::classify`'s call, shared with the chrome's labels.
 pub fn normalize_url_with(input: &str, template: &str) -> AppResult<url::Url> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return Err(AppError::new("empty url"));
+    match crate::omnibox::classify(input) {
+        None => Err(AppError::new("empty url")),
+        Some(crate::omnibox::Typed::Address(url)) => Ok(url),
+        Some(crate::omnibox::Typed::Search(words)) => {
+            let query: String = url::form_urlencoded::byte_serialize(words.as_bytes()).collect();
+            url::Url::parse(&template.replace("{query}", &query)).map_err(Into::into)
+        }
     }
-    if let Ok(url) = url::Url::parse(trimmed)
-        && matches!(
-            url.scheme(),
-            "http"
-                | "https"
-                | "file"
-                | "about"
-                | "data"
-                | "blob"
-                | "view-source"
-                | crate::engine::INTERNAL_SCHEME
-        )
-    {
-        return Ok(url);
-    }
-    let looks_like_host = !trimmed.contains(' ')
-        && (trimmed.contains('.')
-            || trimmed.starts_with("localhost")
-            || trimmed.starts_with("127."));
-    if looks_like_host {
-        let host = trimmed.split_once(':').map_or(trimmed, |(host, _)| host);
-        let local = trimmed.starts_with("localhost")
-            || trimmed.starts_with("127.")
-            || trimmed.starts_with("[::1]")
-            || trimmed.starts_with("0.0.0.0")
-            || host
-                .rsplit_once('.')
-                .is_some_and(|(_, suffix)| suffix.eq_ignore_ascii_case("local"));
-        let scheme = if local { "http" } else { "https" };
-        return url::Url::parse(&format!("{scheme}://{trimmed}")).map_err(Into::into);
-    }
-    let query: String = url::form_urlencoded::byte_serialize(trimmed.as_bytes()).collect();
-    url::Url::parse(&template.replace("{query}", &query)).map_err(Into::into)
 }
 
 #[cfg(test)]

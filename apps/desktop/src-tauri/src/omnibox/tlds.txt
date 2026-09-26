@@ -1,0 +1,39 @@
+# Top-level domains the address bar recognises in a bare name like
+# "example.com", so "node.js" and "3.14" are searched rather than opened.
+# Read by src-tauri/src/omnibox.rs and src/lib/omnibox.ts alike, so the bar's
+# "Open" and "Search" labels always agree with what Enter does.
+#
+# Every two-letter country code, the common generic domains, and the names
+# reserved for local networks and development. "zip" and "mov" are left out
+# on purpose: a file name typed into the bar is a search far more often than
+# a site.
+
+# Generic
+com net org edu gov mil int info biz name pro aero coop museum mobi asia tel
+travel jobs cat app dev page blog shop store online site tech xyz cloud art
+design news live wiki club top link space website fun today media studio
+agency digital email network systems software zone social life world global
+team tools new how academy build cafe center chat city codes community company
+consulting direct events expert finance games guru host icu inc llc ltd love
+market money one photo photos plus press run services solutions support
+video vip win work works mba law health care lol
+
+# Places
+africa amsterdam berlin brussels bzh cymru eus gal london moscow nyc paris
+quebec scot tokyo vegas wales wien
+
+# Local networks and development
+local localhost localdomain test internal example invalid onion arpa lan home
+corp intranet
+
+# Countries and territories
+ac ad ae af ag ai al am ao aq ar as at au aw ax az ba bb bd be bf bg bh bi bj
+bm bn bo br bs bt bw by bz ca cc cd cf cg ch ci ck cl cm cn co cr cu cv cw cx
+cy cz de dj dk dm do dz ec ee eg er es et eu fi fj fk fm fo fr ga gd ge gf gg
+gh gi gl gm gn gp gq gr gs gt gu gw gy hk hm hn hr ht hu id ie il im in io iq
+ir is it je jm jo jp ke kg kh ki km kn kp kr kw ky kz la lb lc li lk lr ls lt
+lu lv ly ma mc md me mg mh mk ml mm mn mo mp mq mr ms mt mu mv mw mx my mz na
+nc ne nf ng ni nl no np nr nu nz om pa pe pf pg ph pk pl pm pn pr ps pt pw py
+qa re ro rs ru rw sa sb sc sd se sg sh si sk sl sm sn so sr ss st su sv sx sy
+sz tc td tf tg th tj tk tl tm tn to tr tt tv tw tz ua ug uk us uy uz va vc ve
+vg vi vn vu wf ws ye yt za zm zw

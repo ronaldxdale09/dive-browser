@@ -1,4 +1,5 @@
 import type { Bookmark, HistoryEntry, Tab } from "./ipc";
+import tldList from "../../src-tauri/src/omnibox/tlds.txt?raw";
 
 /** Most rows the address bar offers; past this the list hides the page for little gain. */
 export const SUGGESTION_LIMIT = 8;
@@ -11,18 +12,101 @@ export type Suggestion =
   | { kind: "tab"; url: string; title: string; favicon: string | null; tabId: string }
   | { kind: "bookmark" | "history"; url: string; title: string; favicon: string | null };
 
+/** Schemes the engine loads itself when they are typed out in full. */
+const ADDRESS_SCHEMES = new Set(["http", "https", "file", "about", "data", "blob", "view-source", "dive"]);
+
+/**
+ * Schemes the engine speaks (`INTERNAL` in external_link.rs). Any other
+ * scheme typed out is another app's link, passed on so the "open in another
+ * app" question is asked.
+ */
+const ENGINE_SCHEMES = new Set(["http", "https", "about", "blob", "data", "file", "javascript", "devtools", "chrome", "chrome-error", "chrome-extension", "chrome-untrusted", "view-source", "ws", "wss", "dive"]);
+
+/** The top-level domains a bare name must end in, from the list the backend reads too. */
+const TLDS = new Set(
+  tldList
+    .split("\n")
+    .filter((line) => !line.startsWith("#"))
+    .flatMap((line) => line.split(/\s+/))
+    .filter(Boolean),
+);
+
+const IPV4 = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
+const LABEL = /^(?:[a-z0-9_-]|[^\p{ASCII}])+$/iu;
+
 /**
  * Whether the backend will treat what was typed as an address rather than a
- * search. Mirrors `normalize_url_with` in the Rust side, which the address
- * bar's submit path always goes through: a parseable scheme, or a single token
- * with a dot or a loopback prefix.
+ * search. Mirrors `omnibox::classify` on the Rust side, which the address
+ * bar's submit path always goes through; both are tested against the same
+ * examples (src-tauri/src/omnibox/vectors.json), so a rule changed in one
+ * has to change in the other.
  */
 export function looksLikeUrl(input: string): boolean {
-  const trimmed = input.trim();
-  if (!trimmed) return false;
-  if (/^(https?|file|about|data|blob|dive):/i.test(trimmed)) return true;
-  if (/\s/.test(trimmed)) return false;
-  return trimmed.includes(".") || trimmed.startsWith("localhost") || trimmed.startsWith("127.");
+  const text = input.trim();
+  if (!text || text.startsWith("?")) return false;
+  if (text.startsWith("/") || text === "~" || text.startsWith("~/")) return true;
+  if (/^[a-z]:[\\/]/i.test(text) && typeof navigator !== "undefined" && /Windows/.test(navigator.userAgent)) return true;
+  return withScheme(text) || bareHost(text);
+}
+
+/** An address typed with a scheme the engine loads, or another app's link. */
+function withScheme(text: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    return false;
+  }
+  const scheme = url.protocol.slice(0, -1);
+  if (ADDRESS_SCHEMES.has(scheme)) return true;
+  const rest = text.slice(text.indexOf(":") + 1);
+  // "localhost:3000" parses as a scheme and a path; it is a host and a port.
+  const portLike = /^\d+(?:[/?#]|$)/.test(rest);
+  return scheme.length > 1 && !portLike && rest !== "" && !rest.startsWith(":") && !/\s/.test(text) && !ENGINE_SCHEMES.has(scheme);
+}
+
+/** A host typed without a scheme: an IP, this machine, a name with a port, or a name ending in a known domain. */
+function bareHost(text: string): boolean {
+  if (/\s/.test(text)) return false;
+  const end = text.search(/[/?#]/);
+  const split = splitPort(end === -1 ? text : text.slice(0, end));
+  if (!split) return false;
+  const { host, port } = split;
+  if (host.startsWith("[")) return host.endsWith("]") && URL.canParse(`http://${host}`);
+  if (IPV4.test(host)) return true;
+  const labels = host.replace(/\.$/, "").toLowerCase().split(".");
+  if (labels.some((label) => !LABEL.test(label))) return false;
+  const tld = labels[labels.length - 1]!;
+  // A single word is a search unless it is this machine or names a port:
+  // "myserver:8080" is somebody's intranet, "12:30" a time.
+  if (labels.length === 1) return tld === "localhost" || (port !== null && /\D/.test(tld));
+  return port !== null || tld.startsWith("xn--") || /[^\p{ASCII}]/u.test(tld) || TLDS.has(tld);
+}
+
+/** `host:port` split apart, with a port that is a real one or none at all. */
+function splitPort(authority: string): { host: string; port: number | null } | null {
+  let host = authority;
+  let port: string | null = null;
+  if (authority.startsWith("[")) {
+    const end = authority.indexOf("]");
+    if (end < 0) return null;
+    host = authority.slice(0, end + 1);
+    const rest = authority.slice(end + 1);
+    if (rest !== "") {
+      if (!rest.startsWith(":")) return null;
+      port = rest.slice(1);
+    }
+  } else {
+    const colon = authority.indexOf(":");
+    if (colon >= 0) {
+      host = authority.slice(0, colon);
+      port = authority.slice(colon + 1);
+    }
+  }
+  if (!host) return null;
+  if (port === null) return { host, port: null };
+  if (!/^\d+$/.test(port) || Number(port) > 65535) return null;
+  return { host, port: Number(port) };
 }
 
 /**

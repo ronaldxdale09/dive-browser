@@ -61,6 +61,7 @@ mod network;
 #[cfg(feature = "cef")]
 mod network_probe;
 mod normal_window;
+mod omnibox;
 mod openapi;
 mod page_menu;
 mod pagescript;

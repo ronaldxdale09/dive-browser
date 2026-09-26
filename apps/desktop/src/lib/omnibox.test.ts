@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Bookmark, HistoryEntry, Tab } from "./ipc";
 import { SUGGESTION_LIMIT, buildSuggestions, hostOf, looksLikeUrl, placeOf, stepHighlight } from "./omnibox";
+import vectors from "../../src-tauri/src/omnibox/vectors.json";
 
 const tab = (id: string, url: string, title: string): Tab => ({
   id,
@@ -40,6 +41,11 @@ describe("looksLikeUrl", () => {
   });
   it.each(["", "  ", "how to fold a shirt", "rust", "a.b c"])("treats %j as a search", (input) => {
     expect(looksLikeUrl(input)).toBe(false);
+  });
+  // The backend reads what is typed from the same examples; a label that
+  // said "Open" for what Enter then searched would be a lie.
+  it.each(vectors.map((v) => [v.input, "url" in v || "file" in v] as const))("agrees with the backend about %j", (input, address) => {
+    expect(looksLikeUrl(input)).toBe(address);
   });
 });
 
