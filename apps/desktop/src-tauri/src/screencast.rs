@@ -141,6 +141,11 @@ const TRACK_BINDING: &str = "__diveRecordTrack";
 /// The script that feeds the binding: pointer positions (throttled) and
 /// clicks, in viewport CSS pixels, with the page's own clock.
 ///
+/// It runs in Dive's isolated world (see `page_world`), which alone has the
+/// binding, so a page cannot draw a cursor or clicks of its own into the
+/// recording's zoom and cursor track. The events it listens to are the
+/// DOM's, which that world shares.
+///
 /// A page keeps its listeners after a recording ends, so a second recording
 /// of the same document finds them installed. It used to return there
 /// without a word, and the viewport message the sidecar is built on never
@@ -552,9 +557,7 @@ impl Recording {
     /// the tab's next page loads.
     async fn untrack(&self, session: &CdpSession) {
         let script = lock(&self.track_script).take();
-        let _ = session
-            .call("Runtime.evaluate", json!({"expression": UNTRACK_SCRIPT}))
-            .await;
+        let _ = crate::page_world::evaluate(session, json!({"expression": UNTRACK_SCRIPT})).await;
         if let Some(identifier) = script {
             let _ = session
                 .call(
@@ -860,26 +863,18 @@ impl Registry {
         // arrives at once. `bindingCalled` only fires while Runtime is on.
         let mut track_events = session.subscribe();
         let _ = session.call0("Runtime.enable").await;
-        let _ = session
-            .call("Runtime.addBinding", json!({"name": TRACK_BINDING}))
-            .await;
+        let _ = crate::page_world::add_binding(&session, TRACK_BINDING).await;
         // Kept so the stop can remove it; left in place, every later page
         // load of the tab installed the tracker again for nobody.
-        if let Ok(registered) = session
-            .call(
-                "Page.addScriptToEvaluateOnNewDocument",
-                json!({"source": TRACK_SCRIPT}),
-            )
-            .await
+        if let Ok(registered) = crate::page_world::add_script(&session, TRACK_SCRIPT).await
             && let Some(identifier) = registered["identifier"].as_str()
         {
             *lock(&rec.track_script) = Some(identifier.to_owned());
         }
-        let _ = session
-            .call("Runtime.evaluate", json!({"expression": TRACK_SCRIPT}))
-            .await;
+        let _ = crate::page_world::evaluate(&session, json!({"expression": TRACK_SCRIPT})).await;
         {
             let track_rec = rec.clone();
+            let track_session = session.clone();
             tauri::async_runtime::spawn(async move {
                 loop {
                     let event = match track_events.recv().await {
@@ -892,6 +887,7 @@ impl Registry {
                     }
                     if event.method != "Runtime.bindingCalled"
                         || event.params["name"] != TRACK_BINDING
+                        || crate::page_world::calling_context(&track_session, &event).is_none()
                     {
                         continue;
                     }
