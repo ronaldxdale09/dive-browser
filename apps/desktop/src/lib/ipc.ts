@@ -111,6 +111,7 @@ export const ipc = {
   tabHistory: async (id: string) => unwrap(await commands.tabHistory(id)),
   tabHistoryNavigate: async (id: string, generation: string, entryId: number) => unwrap(await commands.tabHistoryNavigate(id, generation, entryId)),
   tabReload: async (id: string) => unwrap(await commands.tabReload(id)),
+  tabReloadHard: async (id: string) => unwrap(await commands.tabReloadHard(id)),
   tabStop: async (id: string) => unwrap(await commands.tabStop(id)),
   tabPrint: async (id: string) => unwrap(await commands.tabPrint(id)),
   /** Sign-in requests still waiting in this tab. */

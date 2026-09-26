@@ -86,7 +86,8 @@ interface BrowserState {
   showHome: () => Promise<void>;
   back: () => Promise<void>;
   forward: () => Promise<void>;
-  reload: () => Promise<void>;
+  /** Reload the active tab; `hard` skips the HTTP cache. */
+  reload: (hard?: boolean) => Promise<void>;
   capture: (fullPage: boolean) => Promise<void>;
   /** Keep the active tab's page as a single file. */
   savePage: () => Promise<void>;
@@ -757,9 +758,9 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     const id = tabInThisWindow(get().activeTab, get().detached);
     if (id) await run(set, () => ipc.tabForward(id));
   },
-  reload: async () => {
+  reload: async (hard = false) => {
     const id = tabInThisWindow(get().activeTab, get().detached);
-    if (id) await run(set, () => ipc.tabReload(id));
+    if (id) await run(set, () => (hard ? ipc.tabReloadHard(id) : ipc.tabReload(id)));
   },
   stop: async () => {
     const id = tabInThisWindow(get().activeTab, get().detached);

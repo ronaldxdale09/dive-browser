@@ -696,6 +696,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::navigation::tab_history,
             crate::navigation::tab_history_navigate,
             tab_reload,
+            tab_reload_hard,
             tab_zoom,
             tab_stop,
             tab_print,
@@ -916,6 +917,12 @@ pub fn register_builtin(registry: &dive_core::CommandRegistry) {
         ("tab.new", "New tab", Some("mod+t"), CommandScope::Workspace),
         ("tab.close", "Close tab", Some("mod+w"), CommandScope::Tab),
         ("tab.reload", "Reload", Some("mod+r"), CommandScope::Tab),
+        (
+            "tab.reloadHard",
+            "Reload ignoring cache",
+            Some("mod+shift+r"),
+            CommandScope::Tab,
+        ),
         ("tab.home", "Home", Some("mod+shift+h"), CommandScope::Tab),
         (
             "tab.devtools",
@@ -2186,6 +2193,30 @@ pub(crate) fn tab_reload(
         return Ok(());
     }
     with_view(&state, id, tauri::Webview::reload)
+}
+
+/// Reload `id` without the HTTP cache, as ⌘⇧R does in every browser: a
+/// stale stylesheet or script is fetched again instead of served from disk.
+/// A tab with no DevTools session (still being created) gets a plain reload.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_reload_hard(
+    app: AppHandle<Runtime>,
+    state: State<'_, AppState>,
+    id: TabId,
+) -> AppResult<()> {
+    if rebuild_failed_protocol(&app, &state, id, None)? {
+        return Ok(());
+    }
+    let session = lock(&state.host).as_ref().and_then(|host| host.cdp(id));
+    match session {
+        Some(session) => session
+            .call("Page.reload", serde_json::json!({ "ignoreCache": true }))
+            .await
+            .map(|_| ())
+            .map_err(AppError::new),
+        None => with_view(&state, id, tauri::Webview::reload),
+    }
 }
 
 fn rebuild_failed_protocol(

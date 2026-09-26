@@ -145,10 +145,10 @@ describe("command dispatch", () => {
     expect(SHORTCUTS["mod+,"]).toBe("settings.open");
     expect(SHORTCUTS["mod+p"]).toBe("tab.print");
     // ⌘⇧R is every other browser's hard reload; recording sits on ⌘⌥⇧R.
-    expect(SHORTCUTS["mod+shift+r"]).toBeUndefined();
+    expect(SHORTCUTS["mod+shift+r"]).toBe("tab.reloadHard");
+    expect(menuSource).toContain('"CmdOrCtrl+Shift+R"');
     expect(SHORTCUTS["mod+alt+shift+r"]).toBe("screencast.toggle");
     expect(menuSource).toContain('"CmdOrCtrl+Alt+Shift+R"');
-    expect(menuSource).not.toContain('"CmdOrCtrl+Shift+R"');
     expect(chordOf(key({ key: "/", metaKey: true }))).toBe("mod+/");
     expect(shortcutFor(key({ key: "y", metaKey: true, target: document.createElement("div") }))).toBe("history.open");
   });

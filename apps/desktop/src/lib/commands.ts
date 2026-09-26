@@ -45,6 +45,7 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
     return detached.includes(activeTab) ? attachTab(activeTab) : detachTab(activeTab, null);
   },
   "tab.reload": () => useBrowser.getState().reload(),
+  "tab.reloadHard": () => useBrowser.getState().reload(true),
   "tab.home": () => {
     // A configured home page is where Home goes; without one, the welcome screen.
     const homepage = usePrefs.getState().prefs.homepage.trim();
@@ -248,8 +249,7 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+shift+b": "report.compose",
   // ⌘⇧R is hard reload in every other browser; recording a video taking it
   // meant a habitual reload opened the recorder. Recording moves to ⌘⌥⇧R.
-  // This engine has no cache-bypassing reload to put on ⌘⇧R, so it is left
-  // free rather than bound to something it is not.
+  "mod+shift+r": "tab.reloadHard",
   "mod+alt+shift+r": "screencast.toggle",
   "mod+=": "zoom.in",
   // ⌘+ is ⌘⇧= on most keyboards, and + on a numeric keypad.
@@ -308,6 +308,7 @@ export const COMMAND_TITLES: Record<string, string> = {
   "tab.reopen": "Reopen closed tab",
   "tab.detach": "Move tab to its own window",
   "tab.reload": "Reload",
+  "tab.reloadHard": "Reload ignoring cache",
   "tab.home": "Home",
   "tab.stop": "Stop loading",
   "tab.print": "Print…",
@@ -378,6 +379,7 @@ export function chordsByCommand(shortcuts: Record<string, string> = SHORTCUTS): 
 const NEEDS_THIS_WINDOW = new Set([
   "tab.pin",
   "tab.reload",
+  "tab.reloadHard",
   "tab.devtools",
   "report.compose",
   "screencast.toggle",

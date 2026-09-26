@@ -277,6 +277,12 @@ pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
 
     let view = SubmenuBuilder::new(app, "View")
         .item(&item(app, "tab.reload", "Reload Page", "CmdOrCtrl+R")?)
+        .item(&item(
+            app,
+            "tab.reloadHard",
+            "Reload Ignoring Cache",
+            "CmdOrCtrl+Shift+R",
+        )?)
         .separator()
         .item(&item(app, "zoom.in", "Zoom In", "CmdOrCtrl+Equal")?)
         .item(&item(app, "zoom.out", "Zoom Out", "CmdOrCtrl+Minus")?)

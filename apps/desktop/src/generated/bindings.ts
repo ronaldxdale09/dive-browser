@@ -206,6 +206,12 @@ export const commands = {
 	tabHistory: (id: TabId) => typedError<NavigationHistory, AppError>(__TAURI_INVOKE("tab_history", { id })),
 	tabHistoryNavigate: (id: TabId, generation: string, entryId: number) => typedError<null, AppError>(__TAURI_INVOKE("tab_history_navigate", { id, generation, entryId })),
 	tabReload: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_reload", { id })),
+	/**
+	 *  Reload `id` without the HTTP cache, as ⌘⇧R does in every browser: a
+	 *  stale stylesheet or script is fetched again instead of served from disk.
+	 *  A tab with no DevTools session (still being created) gets a plain reload.
+	 */
+	tabReloadHard: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_reload_hard", { id })),
 	/**  Set a tab's zoom factor (clamped to the step range). */
 	tabZoom: (id: TabId, factor: number | null) => typedError<null, AppError>(__TAURI_INVOKE("tab_zoom", { id, factor })),
 	/**  Stop the tab's current load. */
