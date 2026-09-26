@@ -6,7 +6,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use specta::Type;
 
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, page_json};
+
+/// How long axe may take. A large page is thousands of nodes and every rule
+/// runs over them; the default CDP deadline gave up on real sites while axe
+/// was still working.
+const AUDIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// One failing rule.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -47,21 +52,14 @@ pub async fn run(session: &CdpSession, axe_source: &str) -> AppResult<A11yReport
          return JSON.stringify({{violations: r.violations, passes: r.passes.length, incomplete: r.incomplete.length}}); }})()"
     );
     let result = session
-        .call(
+        .call_with_timeout(
             "Runtime.evaluate",
             json!({"expression": script, "awaitPromise": true, "returnByValue": true}),
+            AUDIT_TIMEOUT,
         )
         .await
         .map_err(AppError::new)?;
-    if let Some(details) = result.get("exceptionDetails") {
-        return Err(AppError::new(
-            details["exception"]["description"]
-                .as_str()
-                .unwrap_or("axe failed"),
-        ));
-    }
-    let raw = result["result"]["value"].as_str().unwrap_or("{}");
-    Ok(parse_report(&serde_json::from_str(raw).unwrap_or_default()))
+    Ok(parse_report(&page_json(&result, "the audit")?))
 }
 
 /// Scroll the first element matching `selector` into view and flash an
