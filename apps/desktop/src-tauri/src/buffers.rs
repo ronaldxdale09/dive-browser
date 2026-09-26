@@ -2,7 +2,7 @@
 //! agents (MCP, the sidecar) can read recent history without the chrome.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use dive_core::TabId;
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,8 @@ use crate::network::NetworkEvent;
 
 const CONSOLE_CAP: usize = 500;
 const NETWORK_CAP: usize = 1000;
-const RESPONSE_BODY_BUDGET: usize = 2 * 1024 * 1024;
+/// Bytes of request and response bodies kept per tab, together.
+const BODY_BUDGET: usize = 2 * 1024 * 1024;
 const RECORDED_STEP_CAP: usize = 5_000;
 
 /// What a `ref` from `page_state` points at.
@@ -102,7 +103,17 @@ struct TabBuffers {
     /// `console_pushed` when the page last started over: a main-frame
     /// navigation or `console.clear()`. What came before is the old page's.
     console_mark: u64,
+    /// Request rows, oldest first. Rows only ever leave from the front.
     requests: VecDeque<RequestSummary>,
+    /// Request id -> sequence number of its row. Every network event is
+    /// folded into its row by id, and finding it by walking up to a thousand
+    /// rows per event was the cost of a busy page.
+    request_index: HashMap<String, u64>,
+    /// Sequence number of the row at the front of `requests`.
+    first_request: u64,
+    /// Bytes of request and response bodies the rows hold, kept as they
+    /// change so the budget check never has to add them up.
+    body_bytes: usize,
     /// `ref` id -> backend DOM node id from the last `page_state` snapshot.
     ax_refs: HashMap<String, RefTarget>,
     /// Last two page snapshots, oldest first.
@@ -158,19 +169,92 @@ impl RequestSummary {
     }
 }
 
+/// Bytes a row's bodies count against the tab's budget.
+fn body_len(row: &RequestSummary) -> usize {
+    row.response_body.as_ref().map_or(0, String::len)
+        + row.post_data.as_ref().map_or(0, String::len)
+}
+
 impl TabBuffers {
+    /// Where the row for `id` sits in `requests`, if it is still kept.
+    fn position(&self, id: &str) -> Option<usize> {
+        let seq = self.request_index.get(id)?;
+        usize::try_from(seq - self.first_request).ok()
+    }
+
+    fn row(&self, id: &str) -> Option<&RequestSummary> {
+        self.requests.get(self.position(id)?)
+    }
+
+    fn row_mut(&mut self, id: &str) -> Option<&mut RequestSummary> {
+        let at = self.position(id)?;
+        self.requests.get_mut(at)
+    }
+
+    /// Take the oldest row out, with everything that hangs off it.
+    fn pop_front_row(&mut self) -> Option<RequestSummary> {
+        let row = self.requests.pop_front()?;
+        self.first_request += 1;
+        self.request_index.remove(&row.id);
+        self.body_bytes -= body_len(&row);
+        self.frames.remove(&row.id);
+        Some(row)
+    }
+
     /// Insert a row, replacing one with the same id (redirects reuse ids).
     fn push_row(&mut self, row: RequestSummary) {
-        if let Some(existing) = self.requests.iter_mut().find(|r| r.id == row.id) {
+        let id = row.id.clone();
+        let added = body_len(&row);
+        if let Some(existing) = self.row_mut(&id) {
+            let removed = body_len(existing);
             *existing = row;
+            self.body_bytes = self.body_bytes - removed + added;
         } else {
-            if self.requests.len() == NETWORK_CAP
-                && let Some(evicted) = self.requests.pop_front()
-            {
-                self.frames.remove(&evicted.id);
+            if self.requests.len() == NETWORK_CAP {
+                self.pop_front_row();
             }
+            let seq = self.first_request + self.requests.len() as u64;
             self.requests.push_back(row);
+            self.request_index.insert(id.clone(), seq);
+            self.body_bytes += added;
         }
+        self.fit_bodies(&id);
+    }
+
+    /// Drop the oldest bodies until the tab is within its byte budget again,
+    /// sparing `keep`'s. Request bodies count as much as response bodies: an
+    /// upload-heavy page kept up to a thousand of them, uncounted.
+    fn fit_bodies(&mut self, keep: &str) {
+        if self.body_bytes <= BODY_BUDGET {
+            return;
+        }
+        for row in &mut self.requests {
+            if self.body_bytes <= BODY_BUDGET {
+                break;
+            }
+            if row.id == keep {
+                continue;
+            }
+            if let Some(old) = row.response_body.take() {
+                self.body_bytes -= old.len();
+                row.response_body_note = Some("Body evicted: tab capture budget reached".into());
+            }
+            if let Some(old) = row.post_data.take() {
+                self.body_bytes -= old.len();
+            }
+        }
+    }
+
+    /// Set or clear a row's response body, keeping the byte count true.
+    fn replace_response_body(&mut self, id: &str, body: Option<String>, note: Option<String>) {
+        let Some(row) = self.row_mut(id) else {
+            return;
+        };
+        let removed = row.response_body.as_ref().map_or(0, String::len);
+        let added = body.as_ref().map_or(0, String::len);
+        row.response_body = body;
+        row.response_body_note = note;
+        self.body_bytes = self.body_bytes - removed + added;
     }
 
     /// Fold a lifecycle event into its row; `Frame` events go to `frames`.
@@ -207,7 +291,7 @@ impl TabBuffers {
                 // Frames are useful only while their request row is retained.
                 // Ignoring an unknown id also prevents a malformed event stream
                 // from growing the side map without bound.
-                if !self.requests.iter().any(|r| r.id == request_id) {
+                if !self.request_index.contains_key(request_id) {
                     return;
                 }
                 let frames = self.frames.entry(request_id.to_owned()).or_default();
@@ -226,7 +310,7 @@ impl TabBuffers {
                 headers,
                 ..
             } => {
-                if let Some(r) = self.requests.iter_mut().find(|r| r.id == request_id) {
+                if let Some(r) = self.row_mut(request_id) {
                     r.status = Some(*status);
                     r.mime_type.clone_from(mime_type);
                     r.response_headers.clone_from(headers);
@@ -237,7 +321,7 @@ impl TabBuffers {
                 timestamp,
                 ..
             } => {
-                if let Some(r) = self.requests.iter_mut().find(|r| r.id == request_id) {
+                if let Some(r) = self.row_mut(request_id) {
                     r.encoded_length = Some(*encoded_length);
                     r.finished_at = Some(*timestamp);
                 }
@@ -245,7 +329,7 @@ impl TabBuffers {
             NetworkEvent::Failed {
                 error, timestamp, ..
             } => {
-                if let Some(r) = self.requests.iter_mut().find(|r| r.id == request_id) {
+                if let Some(r) = self.row_mut(request_id) {
                     r.error = Some(error.clone());
                     r.finished_at = Some(*timestamp);
                 }
@@ -293,23 +377,50 @@ pub struct ActionEvent {
 }
 
 /// Thread-safe buffers for every tab.
+///
+/// Each tab's buffers sit behind a lock of their own. One lock for every tab
+/// had each network event of each tab queue behind every other tab's, and
+/// behind every agent read; the map's lock is now held only long enough to
+/// find the tab.
 #[derive(Default)]
 pub struct Buffers {
-    inner: Mutex<HashMap<TabId, TabBuffers>>,
+    inner: Mutex<HashMap<TabId, Arc<Mutex<TabBuffers>>>>,
 }
 
 impl Buffers {
-    fn with<T>(&self, f: impl FnOnce(&mut HashMap<TabId, TabBuffers>) -> T) -> T {
-        f(&mut self
+    /// The tab's buffers, made if `create` and they do not exist yet.
+    fn tab(&self, tab: TabId, create: bool) -> Option<Arc<Mutex<TabBuffers>>> {
+        let mut map = self
             .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if create {
+            Some(Arc::clone(map.entry(tab).or_default()))
+        } else {
+            map.get(&tab).cloned()
+        }
+    }
+
+    /// Run `f` on the tab's buffers, making them if they do not exist yet.
+    fn with_tab<T>(&self, tab: TabId, f: impl FnOnce(&mut TabBuffers) -> T) -> T {
+        let buffers = self.tab(tab, true).unwrap_or_default();
+        f(&mut buffers
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner))
     }
 
+    /// Run `f` on the tab's buffers if they exist. A late write for a tab
+    /// that was dropped must not bring it back.
+    fn with_existing<T>(&self, tab: TabId, f: impl FnOnce(&mut TabBuffers) -> T) -> Option<T> {
+        let buffers = self.tab(tab, false)?;
+        Some(f(&mut buffers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)))
+    }
+
     /// Record a console entry.
     pub fn push_console(&self, entry: ConsoleEntry) {
-        self.with(|m| {
-            let tab = m.entry(entry.tab_id).or_default();
+        self.with_tab(entry.tab_id, |tab| {
             if tab.console.len() == CONSOLE_CAP {
                 tab.console.pop_front();
             }
@@ -340,16 +451,13 @@ impl Buffers {
                 tab_id, request_id, ..
             } => (*tab_id, request_id),
         };
-        self.with(|m| m.entry(tab_id).or_default().fold_network(event, request_id));
+        self.with_tab(tab_id, |tab| tab.fold_network(event, request_id));
     }
 
     /// Note that the page started over -- a main-frame navigation, or
     /// `console.clear()` -- so a later clear can drop only what came before.
     pub fn mark_console(&self, tab: TabId) {
-        self.with(|m| {
-            let buf = m.entry(tab).or_default();
-            buf.console_mark = buf.console_pushed;
-        });
+        self.with_tab(tab, |buf| buf.console_mark = buf.console_pushed);
     }
 
     /// Forget a tab's console output: all of it, or only what came before
@@ -359,10 +467,7 @@ impl Buffers {
     /// asks after the fact, by which time the new page may already have
     /// logged; the mark is what keeps those lines.
     pub fn clear_console(&self, tab: TabId, before_mark_only: bool) {
-        self.with(|m| {
-            let Some(buf) = m.get_mut(&tab) else {
-                return;
-            };
+        self.with_existing(tab, |buf| {
             let since =
                 usize::try_from(buf.console_pushed - buf.console_mark).unwrap_or(usize::MAX);
             let keep = if before_mark_only {
@@ -379,80 +484,67 @@ impl Buffers {
     /// the request that started the page now showing. Frames, bodies and rule
     /// effects go with their requests.
     pub fn clear_network(&self, tab: TabId, keep_from: Option<&str>) {
-        self.with(|m| {
-            let Some(buf) = m.get_mut(&tab) else {
-                return;
-            };
-            let first_kept = keep_from
-                .and_then(|id| buf.requests.iter().position(|r| r.id == id))
-                .unwrap_or(if keep_from.is_some() {
-                    0
-                } else {
-                    buf.requests.len()
-                });
-            for gone in buf.requests.drain(..first_kept) {
-                buf.frames.remove(&gone.id);
-                buf.rewrites.retain(|(id, _)| *id != gone.id);
+        self.with_existing(tab, |buf| {
+            let first_kept =
+                keep_from
+                    .and_then(|id| buf.position(id))
+                    .unwrap_or(if keep_from.is_some() {
+                        0
+                    } else {
+                        buf.requests.len()
+                    });
+            let mut gone = std::collections::HashSet::new();
+            for _ in 0..first_kept {
+                if let Some(row) = buf.pop_front_row() {
+                    gone.insert(row.id);
+                }
+            }
+            if !gone.is_empty() {
+                buf.rewrites.retain(|(id, _)| !gone.contains(id));
             }
         });
     }
 
     /// Newest `limit` console entries, oldest first.
     pub fn console_tail(&self, tab: TabId, limit: usize) -> Vec<ConsoleEntry> {
-        self.with(|m| {
-            m.get(&tab)
-                .map(|b| {
-                    b.console
-                        .iter()
-                        .rev()
-                        .take(limit)
-                        .cloned()
-                        .collect::<Vec<_>>()
-                })
-                .map(|mut v| {
-                    v.reverse();
-                    v
-                })
-                .unwrap_or_default()
+        self.with_existing(tab, |b| {
+            let skip = b.console.len().saturating_sub(limit);
+            b.console.iter().skip(skip).cloned().collect()
         })
+        .unwrap_or_default()
     }
 
     /// Newest `limit` requests as slim listings, oldest first.
     pub fn requests_listing(&self, tab: TabId, limit: usize) -> Vec<RequestListing> {
-        self.with(|m| {
-            let mut rows = m
-                .get(&tab)
-                .map(|b| {
-                    b.requests
-                        .iter()
-                        .rev()
-                        .take(limit)
-                        .map(RequestListing::from)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            rows.reverse();
-            rows
+        self.with_existing(tab, |b| {
+            let skip = b.requests.len().saturating_sub(limit);
+            b.requests
+                .iter()
+                .skip(skip)
+                .map(RequestListing::from)
+                .collect()
         })
+        .unwrap_or_default()
     }
 
     /// Frames of a socket or event stream, oldest first.
     pub fn frames(&self, tab: TabId, request_id: &str) -> Vec<FrameSummary> {
-        self.with(|m| {
-            m.get(&tab)
-                .and_then(|b| b.frames.get(request_id))
+        self.with_existing(tab, |b| {
+            b.frames
+                .get(request_id)
                 .map(|f| f.iter().cloned().collect())
-                .unwrap_or_default()
         })
+        .flatten()
+        .unwrap_or_default()
     }
 
     /// Check capture eligibility without cloning request headers or bodies.
     pub fn is_json_response(&self, tab: TabId, request_id: &str) -> bool {
-        self.with(|m| {
-            m.get(&tab)
-                .and_then(|b| b.requests.iter().find(|r| r.id == request_id))
+        self.with_existing(tab, |b| {
+            b.row(request_id)
                 .is_some_and(|r| crate::network::is_json_mime(&r.mime_type))
         })
+        .unwrap_or(false)
     }
 
     /// Attach a complete response within a per-tab byte budget. Old bodies are
@@ -466,55 +558,26 @@ impl Buffers {
             );
             return;
         }
-        self.with(|m| {
-            let Some(b) = m.get_mut(&tab) else {
-                return;
-            };
-            if !b.requests.iter().any(|r| r.id == request_id) {
+        self.with_existing(tab, |b| {
+            if b.row(request_id).is_none() {
                 return;
             }
-            let mut retained = b
-                .requests
-                .iter()
-                .filter(|r| r.id != request_id)
-                .map(|r| r.response_body.as_ref().map_or(0, String::len))
-                .sum::<usize>();
-            for row in &mut b.requests {
-                if retained + body.len() <= RESPONSE_BODY_BUDGET {
-                    break;
-                }
-                if row.id != request_id
-                    && let Some(old) = row.response_body.take()
-                {
-                    retained -= old.len();
-                    row.response_body_note =
-                        Some("Body evicted: tab capture budget reached".into());
-                }
-            }
-            if let Some(row) = b.requests.iter_mut().find(|r| r.id == request_id) {
-                row.response_body = Some(body);
-                row.response_body_note = None;
-            }
+            b.replace_response_body(request_id, Some(body), None);
+            b.fit_bodies(request_id);
         });
     }
 
     /// Preserve the reason a body is unavailable instead of implying an empty body.
     pub fn set_response_body_note(&self, tab: TabId, request_id: &str, note: &str) {
-        self.with(|m| {
-            if let Some(row) = m
-                .get_mut(&tab)
-                .and_then(|b| b.requests.iter_mut().find(|r| r.id == request_id))
-            {
-                row.response_body = None;
-                row.response_body_note = Some(note.to_owned());
-            }
+        self.with_existing(tab, |b| {
+            b.replace_response_body(request_id, None, Some(note.to_owned()));
         });
     }
 
     /// Remember that a workspace rule changed `request_id`, in words.
     pub fn note_rewrite(&self, tab: TabId, request_id: &str, note: &str) {
-        self.with(|m| {
-            let list = &mut m.entry(tab).or_default().rewrites;
+        self.with_tab(tab, |b| {
+            let list = &mut b.rewrites;
             list.push_back((request_id.to_owned(), note.to_owned()));
             while list.len() > REWRITES_KEPT {
                 list.pop_front();
@@ -524,59 +587,46 @@ impl Buffers {
 
     /// What rules did to `request_id`, oldest first.
     pub fn rewrites_for(&self, tab: TabId, request_id: &str) -> Vec<String> {
-        self.with(|m| {
-            m.get(&tab).map_or_else(Vec::new, |b| {
-                b.rewrites
-                    .iter()
-                    .filter(|(id, _)| id == request_id)
-                    .map(|(_, note)| note.clone())
-                    .collect()
-            })
+        self.with_existing(tab, |b| {
+            b.rewrites
+                .iter()
+                .filter(|(id, _)| id == request_id)
+                .map(|(_, note)| note.clone())
+                .collect()
         })
+        .unwrap_or_default()
     }
 
     /// One request by id.
     pub fn request(&self, tab: TabId, request_id: &str) -> Option<RequestSummary> {
-        self.with(|m| {
-            m.get(&tab)
-                .and_then(|b| b.requests.iter().find(|r| r.id == request_id).cloned())
-        })
+        self.with_existing(tab, |b| b.row(request_id).cloned())
+            .flatten()
     }
 
     /// Newest `limit` requests, oldest first.
     pub fn requests(&self, tab: TabId, limit: usize) -> Vec<RequestSummary> {
-        self.with(|m| {
-            m.get(&tab)
-                .map(|b| {
-                    b.requests
-                        .iter()
-                        .rev()
-                        .take(limit)
-                        .cloned()
-                        .collect::<Vec<_>>()
-                })
-                .map(|mut v| {
-                    v.reverse();
-                    v
-                })
-                .unwrap_or_default()
+        self.with_existing(tab, |b| {
+            let skip = b.requests.len().saturating_sub(limit);
+            b.requests.iter().skip(skip).cloned().collect()
         })
+        .unwrap_or_default()
     }
 
     /// Remember the ref -> backend node mapping of the latest snapshot.
     pub fn set_refs(&self, tab: TabId, refs: HashMap<String, RefTarget>) {
-        self.with(|m| m.entry(tab).or_default().ax_refs = refs);
+        self.with_tab(tab, |b| b.ax_refs = refs);
     }
 
     /// Target of `reference`, if the snapshot is current.
     pub fn resolve_ref(&self, tab: TabId, reference: &str) -> Option<RefTarget> {
-        self.with(|m| m.get(&tab).and_then(|b| b.ax_refs.get(reference).cloned()))
+        self.with_existing(tab, |b| b.ax_refs.get(reference).cloned())
+            .flatten()
     }
 
     /// Store a snapshot, keeping the two most recent.
     pub fn push_snapshot(&self, tab: TabId, snap: crate::snapshot::PageSnapshot) {
-        self.with(|m| {
-            let list = &mut m.entry(tab).or_default().snapshots;
+        self.with_tab(tab, |b| {
+            let list = &mut b.snapshots;
             if list.len() == 2 {
                 list.pop_front();
             }
@@ -589,36 +639,38 @@ impl Buffers {
         &self,
         tab: TabId,
     ) -> Option<(crate::snapshot::PageSnapshot, crate::snapshot::PageSnapshot)> {
-        self.with(|m| {
-            let list = &m.get(&tab)?.snapshots;
+        self.with_existing(tab, |b| {
+            let list = &b.snapshots;
             (list.len() == 2).then(|| (list[0].clone(), list[1].clone()))
         })
+        .flatten()
     }
 
     /// Start (`Some(vec![])`) or stop (`None`) recording.
     pub fn set_recording(&self, tab: TabId, value: Option<Vec<crate::recorder::RecordedStep>>) {
-        self.with(|m| m.entry(tab).or_default().recording = value);
+        self.with_tab(tab, |b| b.recording = value);
     }
 
     /// Set or clear the recording nonce.
     pub fn set_recording_nonce(&self, tab: TabId, nonce: Option<String>) {
-        self.with(|m| m.entry(tab).or_default().recording_nonce = nonce);
+        self.with_tab(tab, |b| b.recording_nonce = nonce);
     }
 
     /// Remember the registered recorder bootstrap so stop can remove it.
     pub fn set_recording_script_id(&self, tab: TabId, id: Option<String>) {
-        self.with(|m| m.entry(tab).or_default().recording_script_id = id);
+        self.with_tab(tab, |b| b.recording_script_id = id);
     }
 
     /// Whether a recording is active.
     pub fn is_recording(&self, tab: TabId) -> bool {
-        self.with(|m| m.get(&tab).is_some_and(|b| b.recording.is_some()))
+        self.with_existing(tab, |b| b.recording.is_some())
+            .unwrap_or(false)
     }
 
     /// Append a recorded step if recording.
     pub fn push_recorded(&self, tab: TabId, step: crate::recorder::RecordedStep) {
-        self.with(|m| {
-            if let Some(list) = m.entry(tab).or_default().recording.as_mut()
+        self.with_tab(tab, |b| {
+            if let Some(list) = b.recording.as_mut()
                 && list.len() < RECORDED_STEP_CAP
             {
                 list.push(step);
@@ -631,16 +683,14 @@ impl Buffers {
         &self,
         tab: TabId,
     ) -> (Vec<crate::recorder::RecordedStep>, Option<String>) {
-        self.with(|m| {
-            let Some(buffer) = m.get_mut(&tab) else {
-                return (Vec::new(), None);
-            };
+        self.with_existing(tab, |buffer| {
             buffer.recording_nonce = None;
             (
                 buffer.recording.take().unwrap_or_default(),
                 buffer.recording_script_id.take(),
             )
         })
+        .unwrap_or_default()
     }
 
     /// Note that an action has started; returns its id.
@@ -648,8 +698,7 @@ impl Buffers {
     /// An action left `running` is a call that never came back — usually a
     /// crashed page — and stays visible as such rather than disappearing.
     pub fn begin_action(&self, tab: TabId, action: &str, target: Option<String>) -> String {
-        self.with(|m| {
-            let buf = m.entry(tab).or_default();
+        self.with_tab(tab, |buf| {
             buf.next_action += 1;
             let id = format!("a{}", buf.next_action);
             if buf.timeline.len() == TIMELINE_CAP {
@@ -670,8 +719,7 @@ impl Buffers {
 
     /// Close out an action. `error` of `None` means it succeeded.
     pub fn end_action(&self, tab: TabId, id: &str, error: Option<String>) {
-        self.with(|m| {
-            let Some(buf) = m.get_mut(&tab) else { return };
+        self.with_existing(tab, |buf| {
             let Some(event) = buf.timeline.iter_mut().find(|e| e.id == id) else {
                 return;
             };
@@ -688,46 +736,40 @@ impl Buffers {
 
     /// The most recent actions against a tab, oldest first.
     pub fn timeline(&self, tab: TabId, limit: usize) -> Vec<ActionEvent> {
-        self.with(|m| {
-            m.get(&tab)
-                .map(|b| {
-                    b.timeline
-                        .iter()
-                        .rev()
-                        .take(limit)
-                        .rev()
-                        .cloned()
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default()
+        self.with_existing(tab, |b| {
+            let skip = b.timeline.len().saturating_sub(limit);
+            b.timeline.iter().skip(skip).cloned().collect()
         })
+        .unwrap_or_default()
     }
 
     /// Media overrides last applied to a tab.
     pub fn media(&self, tab: TabId) -> crate::emulate::MediaOverrides {
-        self.with(|m| m.get(&tab).map(|b| b.media.clone()).unwrap_or_default())
+        self.with_existing(tab, |b| b.media.clone())
+            .unwrap_or_default()
     }
 
     /// Remember the full set of media overrides after CDP accepted them.
     pub fn set_media(&self, tab: TabId, media: crate::emulate::MediaOverrides) {
-        self.with(|m| m.entry(tab).or_default().media = media);
+        self.with_tab(tab, |b| b.media = media);
     }
 
     /// Device last applied to a tab, if any.
     pub fn device(&self, tab: TabId) -> Option<crate::emulate::Device> {
-        self.with(|m| m.get(&tab).and_then(|b| b.device.clone()))
+        self.with_existing(tab, |b| b.device.clone()).flatten()
     }
 
     /// Remember the device after CDP accepted it.
     pub fn set_device(&self, tab: TabId, device: Option<crate::emulate::Device>) {
-        self.with(|m| m.entry(tab).or_default().device = device);
+        self.with_tab(tab, |b| b.device = device);
     }
 
     /// Forget a closed tab.
     pub fn drop_tab(&self, tab: TabId) {
-        self.with(|m| {
-            m.remove(&tab);
-        });
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&tab);
     }
 }
 
@@ -753,10 +795,10 @@ mod tests {
     fn response_body_budget_preserves_metadata_and_releases_replaced_bodies() {
         let b = Buffers::default();
         let tab = TabId::new();
-        let count = RESPONSE_BODY_BUDGET / crate::network::MAX_BODY;
+        let count = BODY_BUDGET / crate::network::MAX_BODY;
         for i in 0..=count {
-            b.with(|m| {
-                m.entry(tab).or_default().push_row(RequestSummary::new(
+            b.with_tab(tab, |t| {
+                t.push_row(RequestSummary::new(
                     &i.to_string(),
                     "https://api.test",
                     "GET",
@@ -772,7 +814,7 @@ mod tests {
             rows.iter()
                 .map(|r| r.response_body.as_ref().map_or(0, String::len))
                 .sum::<usize>(),
-            RESPONSE_BODY_BUDGET
+            BODY_BUDGET
         );
         assert!(rows[0].response_body.is_none());
         assert_eq!(
@@ -802,6 +844,85 @@ mod tests {
             b.requests(tab, NETWORK_CAP).is_empty(),
             "late capture cannot recreate a dropped tab"
         );
+    }
+
+    fn sent(tab: TabId, id: &str, post_data: Option<String>) -> NetworkEvent {
+        NetworkEvent::Sent {
+            tab_id: tab,
+            request_id: id.into(),
+            url: format!("https://a.dev/{id}"),
+            method: "POST".into(),
+            resource_type: "Fetch".into(),
+            headers: std::collections::BTreeMap::new(),
+            post_data,
+            timestamp: 0.0,
+            wall_time: 0.0,
+        }
+    }
+
+    /// The running byte count, checked against the rows it counts.
+    fn assert_counted(b: &Buffers, tab: TabId) {
+        b.with_existing(tab, |t| {
+            assert_eq!(t.body_bytes, t.requests.iter().map(body_len).sum::<usize>());
+        });
+    }
+
+    #[test]
+    fn request_bodies_count_against_the_same_budget() {
+        let b = Buffers::default();
+        let tab = TabId::new();
+        let count = BODY_BUDGET / crate::network::MAX_BODY;
+        for i in 0..count + 4 {
+            b.push_network(&sent(
+                tab,
+                &i.to_string(),
+                Some("p".repeat(crate::network::MAX_BODY)),
+            ));
+            assert_counted(&b, tab);
+        }
+        let rows = b.requests(tab, NETWORK_CAP);
+        assert_eq!(rows.len(), count + 4, "the rows themselves are all kept");
+        let held: usize = rows.iter().map(body_len).sum();
+        assert!(held <= BODY_BUDGET, "{held} bytes held");
+        assert!(rows[0].post_data.is_none(), "the oldest bodies went first");
+        assert!(rows[count + 3].post_data.is_some(), "the newest is kept");
+    }
+
+    #[test]
+    fn the_request_index_follows_eviction_redirects_and_clears() {
+        let b = Buffers::default();
+        let tab = TabId::new();
+        for i in 0..NETWORK_CAP + 10 {
+            b.push_network(&sent(tab, &i.to_string(), Some("x".into())));
+        }
+        assert!(b.request(tab, "9").is_none(), "evicted rows are gone");
+        assert_eq!(b.request(tab, "10").unwrap().id, "10");
+        let last = (NETWORK_CAP + 9).to_string();
+        assert_eq!(b.request(tab, &last).unwrap().id, last);
+        // A redirect reuses its id and replaces the row where it stands.
+        b.push_network(&sent(tab, "500", Some("longer body".into())));
+        assert_eq!(
+            b.request(tab, "500").unwrap().post_data.as_deref(),
+            Some("longer body")
+        );
+        assert_eq!(b.requests(tab, NETWORK_CAP).len(), NETWORK_CAP);
+        assert_counted(&b, tab);
+        b.push_network(&NetworkEvent::Finished {
+            tab_id: tab,
+            request_id: "600".into(),
+            encoded_length: 7.0,
+            timestamp: 1.0,
+        });
+        assert_eq!(b.request(tab, "600").unwrap().encoded_length, Some(7.0));
+        b.clear_network(tab, Some("600"));
+        assert!(b.request(tab, "599").is_none());
+        assert_eq!(b.requests(tab, NETWORK_CAP)[0].id, "600");
+        assert_counted(&b, tab);
+        b.push_network(&sent(tab, "new", None));
+        assert_eq!(b.request(tab, "new").unwrap().id, "new");
+        b.clear_network(tab, None);
+        assert!(b.request(tab, "new").is_none());
+        assert_counted(&b, tab);
     }
 
     #[test]
