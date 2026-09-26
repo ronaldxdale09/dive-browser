@@ -96,6 +96,7 @@ export const ipc = {
   workspaceDelete: async (id: string) => unwrap(await commands.workspaceDelete(id)),
   workspaceReorder: async (ordered: string[]) => unwrap(await commands.workspaceReorder(ordered)),
   workspaceTabCounts: async () => unwrap(await commands.workspaceTabCounts()),
+  workspaceOtherTabs: async () => unwrap(await commands.workspaceOtherTabs()),
   tabOpen: async (workspaceId: string, url: string) => unwrap(await commands.tabOpen(workspaceId, url)),
   tabClose: async (id: string) => unwrap(await commands.tabClose(id)),
   tabScrollPosition: async (id: string) => unwrap(await commands.tabScrollPosition(id)),

@@ -179,6 +179,12 @@ export const commands = {
 	 *  workspace's tabs, so the rail asks for the rest separately.
 	 */
 	workspaceTabCounts: () => typedError<WorkspaceTabs[], AppError>(__TAURI_INVOKE("workspace_tab_counts")),
+	/**
+	 *  The tabs of every workspace but the active one, so the palette can find a
+	 *  tab wherever it lives. The snapshot carries only the active workspace's,
+	 *  with the essentials, which show in every workspace and are left out here.
+	 */
+	workspaceOtherTabs: () => typedError<Tab[], AppError>(__TAURI_INVOKE("workspace_other_tabs")),
 	tabOpen: (workspaceId: WorkspaceId, url: string) => typedError<Tab, AppError>(__TAURI_INVOKE("tab_open", { workspaceId, url })),
 	tabClose: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_close", { id })),
 	tabActivate: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_activate", { id })),

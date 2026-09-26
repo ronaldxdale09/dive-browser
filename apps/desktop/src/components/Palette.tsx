@@ -11,7 +11,7 @@ import { useCoversContent } from "../lib/overlay";
 import { useFadeClose } from "../lib/useFadeClose";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { tracePaletteLifecycle } from "../lib/inputTimingProbe";
-import { leadsTo, titleOf } from "../lib/omnibox";
+import { leadsTo, looksLikeUrl, titleOf } from "../lib/omnibox";
 
 /**
  * How many history rows the palette offers. It is a launcher, not a history
@@ -61,7 +61,7 @@ export function paletteFilter(value: string, search: string): number {
  */
 export function leadingSite(query: string, tabs: readonly Tab[], bookmarks: readonly Bookmark[], history: readonly HistoryEntry[]): { kind: "tab"; tab: Tab } | { kind: "bookmark" | "history"; entry: Bookmark | HistoryEntry } | null {
   const needle = query.trim().toLowerCase();
-  if (!needle || /\s/.test(needle) || /^[\w-]+(\.[\w-]+)+|^localhost|^https?:\/\//i.test(needle)) return null;
+  if (!needle || /\s/.test(needle) || looksLikeUrl(needle)) return null;
   const tab = tabs.find((t) => leadsTo(needle, t.url));
   if (tab) return { kind: "tab", tab };
   const bookmark = bookmarks.find((b) => leadsTo(needle, b.url));
@@ -86,15 +86,30 @@ export function Palette() {
   const openTab = useBrowser((s) => s.openTab);
   const tabs = useBrowser((s) => s.tabs);
   const activateTab = useBrowser((s) => s.activateTab);
+  const activateWorkspace = useBrowser((s) => s.activateWorkspace);
+  const workspaces = useBrowser((s) => s.workspaces);
+  // The store holds only this workspace's tabs; the others are asked for
+  // once, so a tab can be found wherever it was left.
+  const [elsewhere, setElsewhere] = useState<Tab[]>([]);
+  useEffect(() => {
+    let alive = true;
+    ipc
+      .workspaceOtherTabs()
+      .then((found) => alive && setElsewhere(found))
+      .catch(() => alive && setElsewhere([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [query, setQuery] = useState("");
   const [cmds, setCmds] = useState<CommandDef[]>([]);
   const [servers, setServers] = useState<DevServer[]>([]);
   const [visited, setHistory] = useState<HistoryEntry[]>([]);
   // A page that is open is offered as a tab, not again as history.
   const history = useMemo(() => {
-    const open = new Set(tabs.map((t) => t.url));
+    const open = new Set([...tabs, ...elsewhere].map((t) => t.url));
     return visited.filter((h) => !open.has(h.url));
-  }, [visited, tabs]);
+  }, [visited, tabs, elsewhere]);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   useEffect(() => {
     let alive = true;
@@ -132,7 +147,10 @@ export function Palette() {
     close();
     await openTab(url);
   };
-  const looksLikeUrl = /^[\w-]+(\.[\w-]+)+|^localhost|^https?:\/\//i.test(query.trim());
+  // The same judgement Enter gets from the backend, so the label never says
+  // Open for what then becomes a search, and dive://, file:// and about:
+  // pages read as the addresses they are.
+  const address = looksLikeUrl(query);
   const lead = useMemo(() => leadingSite(query, tabs, bookmarks, history), [query, tabs, bookmarks, history]);
   const leadUrl = lead === null ? null : lead.kind === "tab" ? lead.tab.url : lead.entry.url;
   const shownTabs = tabs.filter((t) => t.url !== leadUrl);
@@ -161,6 +179,36 @@ export function Palette() {
       ))}
     </Command.Group>
   );
+  // Other workspaces' tabs, under each workspace's name, while looking for a
+  // tab or typing: an empty palette is for this workspace. Picking one moves
+  // to its workspace first, as the rail would.
+  const elsewhereGroups = workspaces.map((workspace) => {
+    const found = elsewhere.filter((t) => t.workspace_id === workspace.id);
+    if (found.length === 0) return null;
+    return (
+      <Command.Group key={workspace.id} heading={workspace.name}>
+        {found.map((t) => (
+          <Command.Item
+            key={t.id}
+            value={`${titleOf(t)} ${t.url}${ROW_ID}${t.id}`}
+            title={paletteRowTitle(titleOf(t), t.url)}
+            onSelect={() => {
+              close();
+              void (async () => {
+                await activateWorkspace(workspace.id);
+                await activateTab(t.id);
+              })();
+            }}
+            className="flex items-center gap-2 rounded-lg px-3 py-2"
+          >
+            <Favicon src={t.favicon} size={14} />
+            <span className="truncate">{titleOf(t)}</span>
+            <span className="ml-auto truncate pl-3 font-mono text-[11px] text-ink-3">{host(t.url)}</span>
+          </Command.Item>
+        ))}
+      </Command.Group>
+    );
+  });
   return (
     <div ref={root} className={`overlay-backdrop fixed inset-0 z-50 ${className}`} onMouseDown={close}>
       <Command
@@ -207,13 +255,14 @@ export function Palette() {
           {query.trim() && (
             <Command.Group value="open">
               <Command.Item value={`open ${query}`} title={query} onSelect={() => void go(query)} className="flex items-center gap-2 rounded-lg px-3 py-2">
-                <Icon icon={looksLikeUrl ? ArrowUpRight : Search} size={14} className="text-ink-3" />
-                <span className="text-ink-2">{looksLikeUrl ? "Open" : "Search"}</span>
+                <Icon icon={address ? ArrowUpRight : Search} size={14} className="text-ink-3" />
+                <span className="text-ink-2">{address ? "Open" : "Search"}</span>
                 <span className="truncate font-mono text-ink" title={query}>{query}</span>
               </Command.Item>
             </Command.Group>
           )}
           {!tabsFirst && tabGroup}
+          {(tabsFirst || query.trim()) && elsewhereGroups}
           {servers.length > 0 && (
             <Command.Group heading="Local servers">
               {servers.map((d) => (

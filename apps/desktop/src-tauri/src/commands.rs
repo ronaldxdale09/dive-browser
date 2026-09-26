@@ -680,6 +680,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             workspace_delete,
             workspace_reorder,
             workspace_tab_counts,
+            workspace_other_tabs,
             tab_open,
             tab_close,
             tab_activate,
@@ -1212,6 +1213,35 @@ pub(crate) fn workspace_tab_counts(state: State<'_, AppState>) -> AppResult<Vec<
         .into_iter()
         .map(|(workspace_id, tabs)| WorkspaceTabs { workspace_id, tabs })
         .collect())
+}
+
+/// The tabs of every workspace but the active one, so the palette can find a
+/// tab wherever it lives. The snapshot carries only the active workspace's,
+/// with the essentials, which show in every workspace and are left out here.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn workspace_other_tabs(state: State<'_, AppState>) -> AppResult<Vec<Tab>> {
+    let active = *lock(&state.active_workspace);
+    other_workspace_tabs(&lock(&state.store), active)
+}
+
+fn other_workspace_tabs(
+    store: &dive_core::Store,
+    active: Option<WorkspaceId>,
+) -> AppResult<Vec<Tab>> {
+    let mut tabs = Vec::new();
+    for workspace in store.workspaces()? {
+        if Some(workspace.id) == active {
+            continue;
+        }
+        tabs.extend(
+            store
+                .tabs_for_workspace(workspace.id)?
+                .into_iter()
+                .filter(|tab| tab.workspace_id == Some(workspace.id)),
+        );
+    }
+    Ok(tabs)
 }
 
 /// Persist a new rail order. Ids not listed keep their relative order after
@@ -4693,6 +4723,29 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn other_workspace_tabs_leave_out_the_active_workspace_and_essentials() {
+        let store = dive_core::Store::in_memory().unwrap();
+        let profile = store.ensure_default_profile().unwrap();
+        let here = Workspace::new("Here", profile.container_id, profile.id, 0);
+        let there = Workspace::new("There", profile.container_id, profile.id, 1);
+        store.upsert_workspace(&here).unwrap();
+        store.upsert_workspace(&there).unwrap();
+        store
+            .upsert_tab(&Tab::new(here.id, "https://here.test", 0))
+            .unwrap();
+        let away = Tab::new(there.id, "https://there.test", 0);
+        store.upsert_tab(&away).unwrap();
+        let mut global = Tab::new(there.id, "https://global.test", 1);
+        global.tier = dive_core::TabTier::Essential;
+        global.workspace_id = None;
+        store.upsert_tab(&global).unwrap();
+        assert_eq!(
+            other_workspace_tabs(&store, Some(here.id)).unwrap(),
+            vec![away]
+        );
+    }
 
     #[test]
     fn reattachment_selects_owner_and_remembers_profile_without_moving_tabs() {

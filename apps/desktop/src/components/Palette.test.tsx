@@ -126,4 +126,62 @@ describe("Palette", () => {
     await waitFor(() => expect(screen.getByText("Example docs")).toBeTruthy());
     expect(screen.getAllByText("History")).toHaveLength(2);
   });
+
+  it("says Open only for what Enter will open, Dive's own pages and files included", () => {
+    vi.spyOn(ipc, "commandsList").mockResolvedValue([]);
+    vi.spyOn(ipc, "devServersWatch").mockResolvedValue([]);
+    vi.spyOn(events.devServersChanged, "listen").mockResolvedValue(() => undefined);
+    vi.spyOn(ipc, "bookmarksSearch").mockResolvedValue([]);
+    vi.spyOn(ipc, "historySearch").mockResolvedValue([]);
+    vi.spyOn(ipc, "workspaceOtherTabs").mockResolvedValue([]);
+    render(<Palette />);
+    const input = screen.getByPlaceholderText("Search, enter a URL, or run a command");
+    for (const [query, label] of [
+      ["dive://settings", "Open"],
+      ["file:///tmp/notes.html", "Open"],
+      ["about:blank", "Open"],
+      ["example.com", "Open"],
+      ["node.js", "Search"],
+      ["3.14", "Search"],
+    ] as const) {
+      fireEvent.change(input, { target: { value: query } });
+      expect(screen.getByRole("option", { name: new RegExp(query.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")) }).textContent).toContain(label);
+    }
+  });
+
+  it("finds tabs in other workspaces, under each workspace's name, and goes there to show one", async () => {
+    vi.spyOn(ipc, "commandsList").mockResolvedValue([]);
+    vi.spyOn(ipc, "devServersWatch").mockResolvedValue([]);
+    vi.spyOn(events.devServersChanged, "listen").mockResolvedValue(() => undefined);
+    vi.spyOn(ipc, "bookmarksSearch").mockResolvedValue([]);
+    vi.spyOn(ipc, "historySearch").mockResolvedValue([]);
+    const away = { id: "t9", workspace_id: "w2", url: "https://quarterly.example/", title: "Quarterly report", favicon: null, tier: "today", position: 0, state: "discarded", last_active_at: "2026-09-01T00:00:00Z" } as unknown as Tab;
+    vi.spyOn(ipc, "workspaceOtherTabs").mockResolvedValue([away]);
+    const activateWorkspace = vi.fn().mockResolvedValue(undefined);
+    const activateTab = vi.fn().mockResolvedValue(undefined);
+    const here = { id: "t1", workspace_id: "w1", url: "https://a.test/", title: "Alpha", favicon: null, tier: "today", position: 0, state: "active", last_active_at: "2026-09-01T00:00:00Z" } as unknown as Tab;
+    useBrowser.setState({
+      tabs: [here],
+      activeTab: "t1",
+      activeWorkspace: "w1",
+      workspaces: [
+        { id: "w1", name: "Home", color: "#000000", icon: "house", position: 0, container_id: "c", profile_id: "p" },
+        { id: "w2", name: "Work", color: "#000000", icon: "briefcase", position: 1, container_id: "c", profile_id: "p" },
+      ] as never,
+      activateWorkspace,
+      activateTab,
+    });
+    render(<Palette />);
+    const input = screen.getByPlaceholderText("Search, enter a URL, or run a command");
+    // An empty palette is about this workspace.
+    await waitFor(() => expect(ipc.workspaceOtherTabs).toHaveBeenCalled());
+    expect(screen.queryByText("Quarterly report")).toBeNull();
+    fireEvent.change(input, { target: { value: "quarterly" } });
+    const row = await screen.findByRole("option", { name: /Quarterly report/ });
+    expect(row.closest("[cmdk-group]")?.querySelector("[cmdk-group-heading]")?.textContent).toBe("Work");
+    fireEvent.click(row);
+    await waitFor(() => expect(activateTab).toHaveBeenCalledWith("t9"));
+    expect(activateWorkspace).toHaveBeenCalledWith("w2");
+    expect(activateWorkspace.mock.invocationCallOrder[0]).toBeLessThan(activateTab.mock.invocationCallOrder[0]!);
+  });
 });
