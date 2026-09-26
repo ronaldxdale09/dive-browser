@@ -3,6 +3,14 @@
 // person would hear: a playing, unmuted element with the volume up, or a
 // running AudioContext (games, synths, WebRTC playback).
 //
+// This half runs in Dive's isolated world (see page_world.rs) and alone
+// holds the binding and its nonce. It hears every player in the document
+// through the DOM, which the worlds share. What only the page's own world
+// can see -- an `Audio` made in script and never inserted, an AudioContext
+// -- is followed by audio-hooks.js there, which says "__dive-audio-on" or
+// "__dive-audio-off" on the window. The page can say those too; all it can
+// claim that way is a sound it could just as well make.
+//
 // The host's own mute is native and applies underneath this; the page cannot
 // see it and does not need to.
 
@@ -18,17 +26,15 @@
     try {
       window.__BINDING__(JSON.stringify({ nonce: NONCE, audible }));
     } catch {
-      // No binding, or a page that broke JSON: nothing to report.
+      // No binding: nothing to report.
     }
   };
 
   // Media elements come and go; holding them weakly keeps a finished player
   // collectable, the way the activity guard does.
   const players = new Set();
-  const contexts = new Set();
   const seen = new WeakSet();
   const MEDIA_EVENTS = ["play", "playing", "pause", "ended", "emptied", "volumechange"];
-  // Taken before any page script runs, like the constructors below.
   const Media = window.HTMLMediaElement;
   const watch = (element) => {
     if (seen.has(element)) return;
@@ -48,6 +54,8 @@
     }
     return found;
   };
+  // Sound made from the page's own world, as audio-hooks.js last said.
+  let scripted = false;
 
   let timer = 0;
   // A play/pause pair while a player seeks would otherwise flicker the tab's
@@ -56,7 +64,7 @@
     if (timer) return;
     timer = setTimeout(() => {
       timer = 0;
-      send(live(players, heard) || live(contexts, (context) => context.state === "running"));
+      send(live(players, heard) || scripted);
     }, 250);
   }
 
@@ -64,9 +72,8 @@
   // down, bubbling or not, so a listener there learns of each player the
   // first time it does anything. Registered at document start, it runs
   // before any capture listener the page adds, which cannot hide a player
-  // from it. This replaced an observer that re-queried the whole document for
-  // players on every batch of changes to it. A player seen once is then
-  // watched directly, so it is still heard after it leaves the document.
+  // from it. A player seen once is then watched directly, so it is still
+  // heard after it leaves the document.
   const noticed = (event) => {
     const target = event.target;
     if (Media && target instanceof Media) watch(target);
@@ -75,35 +82,14 @@
   for (const event of MEDIA_EVENTS) {
     addEventListener(event, noticed, { capture: true, passive: true });
   }
-
-  // Elements built in script and never inserted still play, so the
-  // constructors are watched as well as the document.
-  for (const name of ["Audio", "AudioContext", "webkitAudioContext"]) {
-    const Native = window[name];
-    if (typeof Native !== "function") continue;
-    const audio = name === "Audio";
-    try {
-      window[name] = new Proxy(Native, {
-        construct(target, args, newTarget) {
-          const made = Reflect.construct(target, args, newTarget);
-          if (audio) watch(made);
-          else {
-            contexts.add(new WeakRef(made));
-            made.addEventListener?.("statechange", schedule);
-            schedule();
-          }
-          return made;
-        },
-      });
-      // This wrapper replaces a global the activity guard may have proxied
-      // first. Telling it so keeps its coverage known; without this every
-      // tab looks tampered with and none is ever discarded.
-      window.__diveActivityAdopt?.(window, name);
-    } catch {
-      // A page that froze the global keeps its own constructor; the
-      // document's media events still cover everything it puts in the page.
-    }
-  }
+  addEventListener("__dive-audio-on", () => {
+    scripted = true;
+    schedule();
+  });
+  addEventListener("__dive-audio-off", () => {
+    scripted = false;
+    schedule();
+  });
 
   // A page put in the back/forward cache stops making sound.
   addEventListener("pagehide", () => send(false));

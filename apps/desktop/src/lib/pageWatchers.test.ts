@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import audioHooksSource from "../../src-tauri/src/inject/audio-hooks.js?raw";
 import audioSource from "../../src-tauri/src/inject/audio.js?raw";
 import credentialsSource from "../../src-tauri/src/inject/credentials.js?raw";
 import formsSource from "../../src-tauri/src/inject/forms.js?raw";
@@ -90,6 +91,39 @@ describe("audible-tab watcher", () => {
     video.dispatchEvent(new Event("pause"));
     vi.advanceTimersByTime(300);
     expect(sent).toEqual([true, false]);
+  });
+});
+
+describe("audible-tab watcher and the page's audio hooks", () => {
+  it("hears a running AudioContext made in the page's world through the hooks", () => {
+    const page = frame();
+    class Context extends page.EventTarget {
+      state = "suspended";
+    }
+    page.AudioContext = Context;
+    const sent: boolean[] = [];
+    page.__diveAudio = (payload: string) => sent.push(JSON.parse(payload).audible);
+    // Two worlds in the browser, one window here: the hooks in the page's,
+    // the watcher with the binding in Dive's.
+    new Function("window", "dispatchEvent", audioHooksSource.replace(mainFrameOnly, ""))(page, page.dispatchEvent.bind(page));
+    const watcher = audioSource.replace(mainFrameOnly, "").replaceAll("__NONCE__", '"n"').replaceAll("__BINDING__", "__diveAudio");
+    new Function("window", "document", "addEventListener", watcher)(page, page.document, page.addEventListener.bind(page));
+    const context = new (page.AudioContext as typeof Context)();
+    vi.advanceTimersByTime(300);
+    expect(sent).toEqual([]);
+    context.state = "running";
+    context.dispatchEvent(new page.Event("statechange"));
+    vi.advanceTimersByTime(600);
+    expect(sent).toEqual([true]);
+    context.state = "closed";
+    context.dispatchEvent(new page.Event("statechange"));
+    vi.advanceTimersByTime(600);
+    expect(sent).toEqual([true, false]);
+  });
+
+  it("keeps the nonce and the binding out of the page's world", () => {
+    expect(audioHooksSource).not.toContain("__NONCE__");
+    expect(audioHooksSource).not.toContain("__BINDING__");
   });
 });
 

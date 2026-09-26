@@ -1,8 +1,12 @@
 // Document-start activity evidence for conservative idle discard. No form data
 // leaves the renderer. Unknown coverage always protects the tab.
+//
+// This runs in the page's own world, since what it watches is the page's
+// JavaScript, and it holds no secret: the binding and its nonce are in
+// Dive's isolated world (activity-forward.js), which passes a change on when
+// this says so on the window.
 (function () {
   if (window.__diveActivitySnapshot) return;
-  const nonce = __NONCE__;
   let known = document.readyState === "loading";
   let dirty = false;
   let pendingCapture = 0;
@@ -36,11 +40,21 @@
     watching = false;
     changes.disconnect();
   };
+  // Taken now, before any page script runs, so a page that later replaces
+  // them does not silence the guard by accident.
+  const dispatch = window.EventTarget.prototype.dispatchEvent;
+  const ChangeEvent = window.Event;
   const signal = () => {
     // One receipt invalidates the host's previous evidence. Further changes
-    // need no IPC until a new snapshot arms another discard decision.
+    // need no IPC until a new snapshot arms another discard decision. The
+    // forwarder cancels the event once it has told the host; an event
+    // nobody cancelled told nobody, and evidence nobody hears is unknown.
     if (notified) return;
-    try { window.__diveActivityChanged(JSON.stringify({ nonce })); notified = true; unwatch(); }
+    try {
+      const told = !dispatch.call(window, new ChangeEvent("__dive-activity-changed", { cancelable: true }));
+      if (told) { notified = true; unwatch(); }
+      else known = false;
+    }
     catch (_) { known = false; }
   };
   const remember = (set, value, events) => {

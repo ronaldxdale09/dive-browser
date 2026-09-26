@@ -2,7 +2,10 @@
 //!
 //! The engine keeps no signal for this -- CEF exposes audio capture, not
 //! Chromium's own "is this tab audible" -- so a page script reports it and the
-//! host holds the answer per tab. Muting is native: `SetAudioMuted` on the
+//! host holds the answer per tab. The script that reports runs in Dive's
+//! isolated world (see `page_world`) with the binding; a second one in the
+//! page's own world only watches the audio constructors there and tells it,
+//! through the DOM, when script-made sound starts or stops. Muting is native: `SetAudioMuted` on the
 //! browser host silences the whole tab whatever the page does, and it is
 //! re-applied whenever a view is built again, so a muted tab that was
 //! discarded and woken comes back silent.
@@ -178,20 +181,21 @@ pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession)
             ("__BINDING__", BINDING.to_owned()),
         ],
     );
+    let hooks = crate::pagescript::build("audio-hooks.js", &[]);
     let mut events = session.subscribe_to(&["Runtime.bindingCalled"]);
     // Registered for every document to come, before the first navigation.
     // The view is still on its blank document, so there is no page to
-    // evaluate the script in now. Both calls go out together.
+    // evaluate the scripts in now. All three calls go out together.
     let setup = async {
-        let (binding, script) = tokio::join!(
-            session.call("Runtime.addBinding", json!({"name": BINDING})),
+        let (installed, hooked) = tokio::join!(
+            crate::page_world::install(&session, BINDING, &source),
             session.call(
                 "Page.addScriptToEvaluateOnNewDocument",
-                json!({"source": source}),
+                json!({"source": hooks}),
             ),
         );
-        binding?;
-        script?;
+        installed?;
+        hooked?;
         Ok::<(), dive_cdp::CdpError>(())
     };
     if let Err(error) = setup.await {
@@ -205,6 +209,9 @@ pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession)
             let Some(audible) = reported_audible(&event, &nonce) else {
                 continue;
             };
+            if crate::page_world::calling_context(&session, &event).is_none() {
+                continue;
+            }
             let next = with_tabs(|tabs| {
                 let entry = tabs.entry(tab_id).or_default();
                 if entry.audible == audible {

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import forwarder from "../../src-tauri/src/inject/activity-forward.js?raw";
 import source from "../../src-tauri/src/inject/activity-guard.js?raw";
 
 type Snapshot = { known: boolean; reasons: string[]; scroll: number[]; url: string };
@@ -8,7 +9,7 @@ type Page = Window & {
   __diveActivityAdopt?: (object: object, name: string) => void;
 };
 
-function install(page?: Page) {
+function install(page?: Page, { forwarding = true } = {}) {
   if (!page) {
     const frame = document.createElement("iframe");
     document.body.append(frame);
@@ -16,8 +17,14 @@ function install(page?: Page) {
   }
   const signals: string[] = [];
   page.__diveActivityChanged = (payload) => signals.push(payload);
+  // In the browser the forwarder runs in Dive's isolated world and the guard
+  // in the page's; one window stands in for both here. The forwarder is
+  // registered first, as the host does.
+  if (forwarding) {
+    new Function("window", "addEventListener", forwarder.replaceAll("__NONCE__", '"test-nonce"'))(page, page.addEventListener.bind(page));
+  }
   Object.defineProperty(page.document, "readyState", { configurable: true, value: "loading" });
-  new Function("window", "document", "navigator", source.replaceAll("__NONCE__", '"test-nonce"'))(page, page.document, page.navigator);
+  new Function("window", "document", "navigator", source)(page, page.document, page.navigator);
   Object.defineProperty(page.document, "readyState", { configurable: true, value: "complete" });
   return { page, signals, snapshot: () => page.__diveActivitySnapshot!() };
 }
@@ -225,6 +232,20 @@ describe("discard activity guard", () => {
     await Promise.resolve();
     expect(signals.length).toBe(before + 2);
     expect(watched).toBe(0);
+  });
+
+  it("tells the host through the forwarder, which alone knows the nonce", () => {
+    const { signals } = install();
+    expect(signals.length).toBeGreaterThan(0);
+    expect(JSON.parse(signals[0]!)).toEqual({ nonce: "test-nonce" });
+    expect(source).not.toContain("__NONCE__");
+    expect(source).not.toContain("__diveActivityChanged");
+  });
+
+  it("keeps the evidence unknown when nobody carried a change to the host", () => {
+    const { snapshot, signals } = install(undefined, { forwarding: false });
+    expect(signals).toEqual([]);
+    expect(snapshot().known).toBe(false);
   });
 
   it("protects unload handlers and closed shadow content", () => {
