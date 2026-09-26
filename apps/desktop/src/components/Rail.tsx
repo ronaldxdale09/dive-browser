@@ -3,7 +3,7 @@ import { AvatarImage } from "./AvatarImage";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowDownToLine, ArrowRight, Globe, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Settings2, Shield, SquarePlus, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowDownToLine, ArrowRight, ArrowUp, Globe, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Settings2, Shield, SquarePlus, Trash2, X } from "lucide-react";
 import { BuildBadge } from "./BuildBadge";
 import { useUpdates } from "../store/updates";
 import { useEffect, useRef, useState } from "react";
@@ -18,8 +18,9 @@ import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { QuickLinks } from "./QuickLinks";
 import { ProfileChip } from "./ProfileChip";
-import { TabStrip } from "./TabStrip";
+import { TabStrip, opensMenu } from "./TabStrip";
 import { displayChord, runCommand } from "../lib/commands";
+import { announce } from "../lib/announce";
 import { clampFloatingPosition, useClampToViewport } from "../lib/floating";
 
 /** Rail width in each mode; App.tsx sizes the grid column from these. */
@@ -332,6 +333,12 @@ function WorkspaceRow({
       title={expanded ? w.name : undefined}
       onClick={onActivate}
       onKeyDown={(e) => {
+        if (opensMenu(e)) {
+          e.preventDefault();
+          const r = e.currentTarget.getBoundingClientRect();
+          onMenu(r.left, r.bottom);
+          return;
+        }
         // A button answers Space as well as Enter; Space must not scroll the rail.
         if (e.key !== "Enter" && e.key !== " ") return;
         e.preventDefault();
@@ -397,12 +404,26 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
   const remove = useBrowser((s) => s.deleteWorkspace);
   const setEditing = useBrowser((s) => s.setEditing);
   const toggle = useBrowser((s) => s.toggle);
+  const reorder = useBrowser((s) => s.reorderWorkspaces);
+  const activeProfile = useBrowser((s) => s.activeProfile);
   const [confirming, setConfirming] = useState(false);
   const workspace = workspaces.find((w) => w.id === id);
+  // The rail's own order: this profile's workspaces, as the drag reorders them.
+  const shown = workspaces.filter((w) => !activeProfile || w.profile_id === activeProfile).map((w) => w.id);
+  const at = shown.indexOf(id);
+  // What dragging a row does, for the keyboard, with where it landed said aloud.
+  const move = (step: -1 | 1) => {
+    const ids = [...shown];
+    ids.splice(at, 1);
+    ids.splice(at + step, 0, id);
+    void reorder(ids);
+    announce(`Moved to position ${at + step + 1} of ${ids.length}`);
+    onClose();
+  };
   // Only a menu that renders covers the page; a stale id renders nothing.
   useCoversContent(Boolean(workspace));
   // A first guess; the menu's measured size corrects it, confirming or not.
-  const position = clampFloatingPosition({ x, y, width: 224, height: confirming ? 150 : 176, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
+  const position = clampFloatingPosition({ x, y, width: 224, height: confirming ? 150 : 236, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
   useClampToViewport(root, x, y);
   const item = "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-ink-2 hover:bg-surface-2 hover:text-ink";
   if (!workspace) return null;
@@ -469,6 +490,16 @@ function WorkspaceMenu({ id, x, y, onClose }: { id: string; x: number; y: number
             >
               <Icon icon={Pencil} size={13} /> Edit workspace…
             </button>
+            {shown.length > 1 && (
+              <>
+                <button type="button" role="menuitem" disabled={at <= 0} className={`${item} disabled:opacity-40 disabled:hover:bg-transparent`} onClick={() => move(-1)}>
+                  <Icon icon={ArrowUp} size={13} /> Move up
+                </button>
+                <button type="button" role="menuitem" disabled={at < 0 || at >= shown.length - 1} className={`${item} disabled:opacity-40 disabled:hover:bg-transparent`} onClick={() => move(1)}>
+                  <Icon icon={ArrowDown} size={13} /> Move down
+                </button>
+              </>
+            )}
             <button
               type="button"
               role="menuitem"

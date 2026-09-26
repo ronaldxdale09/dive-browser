@@ -577,6 +577,12 @@ const SortableTab = memo(function SortableTab({ tab: t, active, detached, inSpli
         onFocus={onFocus}
         onClick={onActivate}
         onKeyDown={(e) => {
+          if (opensMenu(e)) {
+            e.preventDefault();
+            const r = e.currentTarget.getBoundingClientRect();
+            onMenu(r.left, r.bottom);
+            return;
+          }
           if ((e.key === "Delete" || e.key === "Backspace") && !pinned) {
             e.preventDefault();
             // The focused tab is about to go, and focus with it would fall to
@@ -690,6 +696,12 @@ function EssentialTab({
       tabIndex={tabIndex}
       onClick={onActivate}
       onKeyDown={(e) => {
+        if (opensMenu(e)) {
+          e.preventDefault();
+          const r = e.currentTarget.getBoundingClientRect();
+          onMenu(r.left, r.bottom);
+          return;
+        }
         if (e.key !== "Enter" && e.key !== " ") return;
         e.preventDefault();
         onActivate();
@@ -749,6 +761,16 @@ export function moveTargets(tab: Tab | undefined, workspaces: readonly Workspace
   return workspaces
     .filter((w) => w.id !== tab.workspace_id && (!profile || w.profile_id === profile))
     .map((w) => ({ id: w.id, name: w.name, refusal: home && w.container_id !== home.container_id ? "Keeps its own cookies and logins" : null }));
+}
+
+/**
+ * The keyboard's right-click: the Menu key, or Shift+F10. Taken on keydown,
+ * where cancelling it also stops the browser's own contextmenu event for the
+ * key, so the menu opens once, anchored under the element rather than at a
+ * pointer that is somewhere else.
+ */
+export function opensMenu(e: { key: string; shiftKey: boolean }): boolean {
+  return e.key === "ContextMenu" || (e.shiftKey && e.key === "F10");
 }
 
 /** The menu item that focus should move to for an arrow, Home or End key; null for other keys. */

@@ -299,6 +299,20 @@ fn history_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
             "tab.next",
             "Next Tab",
             "CmdOrCtrl+Shift+BracketRight",
+        )?)
+        // Reordering without a drag, for the keyboard. Here as well as in the
+        // chrome's own chords so they work while the page holds focus.
+        .item(&item(
+            app,
+            "tab.moveLeft",
+            "Move Tab Left",
+            "CmdOrCtrl+Alt+Shift+Left",
+        )?)
+        .item(&item(
+            app,
+            "tab.moveRight",
+            "Move Tab Right",
+            "CmdOrCtrl+Alt+Shift+Right",
         )?);
     // ⌃1…⌃8 go to the tab in that place and ⌃9 to the last. Registered here
     // so they work while a page holds the keyboard; ⌘1…⌘9 stay the

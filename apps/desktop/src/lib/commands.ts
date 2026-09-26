@@ -53,6 +53,19 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
     return detached.includes(activeTab) ? attachTab(activeTab) : detachTab(activeTab, null);
   },
   "tab.reload": () => useBrowser.getState().reload(),
+  // The tab menu's actions for the active tab, for the palette and the
+  // keyboard: the menu itself answers only to a pointer or Shift+F10 on a tab.
+  // Loaded when first used: they reach the tab strip and the stores, which
+  // themselves import this list, and a static import made that a cycle that
+  // ran a store's setup before the store existed.
+  "tab.mute": () => tabActions().then((a) => a.muteActiveTab()),
+  "tab.duplicate": () => tabActions().then((a) => a.duplicateActiveTab()),
+  "tab.split": () => tabActions().then((a) => a.splitActiveTab()),
+  "tab.essential": () => tabActions().then((a) => a.essentialActiveTab()),
+  "tab.closeOthers": () => tabActions().then((a) => a.closeOtherTabs()),
+  // What dragging a tab does, without the drag.
+  "tab.moveLeft": () => tabActions().then((a) => a.moveActiveTab(-1)),
+  "tab.moveRight": () => tabActions().then((a) => a.moveActiveTab(1)),
   "tab.reloadHard": () => useBrowser.getState().reload(true),
   "tab.home": async () => {
     // A configured home page is where Home goes; without one, the welcome screen.
@@ -165,6 +178,8 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   // workspaces'.
   ...Object.fromEntries(TAB_SLOTS.map((n) => [`tab.select.${n}`, () => selectTab(n)])),
 };
+
+const tabActions = () => import("./tabActions");
 
 /** Create a blank tab and move it into its own browser window. */
 async function openWindow() {
@@ -356,6 +371,8 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+shift+]": "tab.next",
   "ctrl+tab": "tab.next",
   "ctrl+shift+tab": "tab.prev",
+  "mod+alt+shift+arrowleft": "tab.moveLeft",
+  "mod+alt+shift+arrowright": "tab.moveRight",
   "mod+shift+n": "window.private",
   "mod+alt+shift+n": "workspace.new",
   "mod+shift+e": "workspace.edit",
@@ -382,6 +399,13 @@ export const COMMAND_TITLES: Record<string, string> = {
   "tab.reopen": "Reopen closed tab",
   "tab.detach": "Move tab to its own window",
   "tab.reload": "Reload",
+  "tab.mute": "Mute or unmute tab",
+  "tab.duplicate": "Duplicate tab",
+  "tab.split": "Split view with this tab",
+  "tab.essential": "Make tab essential, or stop",
+  "tab.closeOthers": "Close other tabs",
+  "tab.moveLeft": "Move tab left",
+  "tab.moveRight": "Move tab right",
   "tab.reloadHard": "Hard reload",
   "tab.home": "Home",
   "tab.stop": "Stop loading",
@@ -457,6 +481,13 @@ export function chordsByCommand(shortcuts: Record<string, string> = SHORTCUTS): 
 /** Commands that act on the page in this window. A torn-off tab is the other window's. */
 const NEEDS_THIS_WINDOW = new Set([
   "tab.pin",
+  "tab.mute",
+  "tab.duplicate",
+  "tab.split",
+  "tab.essential",
+  "tab.closeOthers",
+  "tab.moveLeft",
+  "tab.moveRight",
   "tab.reload",
   "tab.reloadHard",
   "tab.devtools",

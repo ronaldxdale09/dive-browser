@@ -7,6 +7,7 @@ import { DEFAULT_PREFS, usePrefs } from "../store/prefs";
 import { useDefaultBrowser } from "../store/defaultBrowser";
 import { useUpdates } from "../store/updates";
 import { Rail, RailToggle } from "./Rail";
+import { currentAnnouncements, resetAnnouncements } from "../lib/announce";
 
 const personal: Workspace = {
   id: "ws-1",
@@ -168,6 +169,24 @@ describe("Rail", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete workspace" }));
     fireEvent.keyDown(screen.getByRole("button", { name: "Cancel" }), { key: "Escape" });
     expect(screen.queryByRole("menu", { name: "Client" })).toBeNull();
+  });
+
+  it("opens the workspace menu from the keyboard, and moves a workspace without a drag", () => {
+    const reorder = vi.fn().mockResolvedValue(undefined);
+    useBrowser.setState({ reorderWorkspaces: reorder });
+    render(<Rail />);
+    const row = screen.getByRole("button", { name: /^Personal/ });
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu", { name: "Personal" })).toBeTruthy();
+    // The first one cannot go up.
+    expect((screen.getByRole("menuitem", { name: "Move up" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move down" }));
+    expect(reorder).toHaveBeenCalledWith([client.id, personal.id]);
+    expect(currentAnnouncements().polite?.text).toBe("Moved to position 2 of 2");
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.keyDown(screen.getByRole("button", { name: /^Client/ }), { key: "ContextMenu" });
+    expect(screen.getByRole("menu", { name: "Client" })).toBeTruthy();
+    resetAnnouncements();
   });
 
   it("offers editing from the context menu instead of opening the dialog on right-click", () => {

@@ -54,6 +54,25 @@ describe("tab context menu", () => {
     expect(document.activeElement).toBe(screen.getByRole("tab", { name: /Beta/ }));
   });
 
+  it("opens from the keyboard with Shift+F10 or the Menu key, under the tab, and gives focus back on Escape", async () => {
+    vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
+    useBrowser.setState({ tabs: [tab], activeTab: "t1", activeWorkspace: "w1" });
+    render(<TabStrip />);
+    const alpha = screen.getByRole("tab", { name: /Alpha/ });
+    vi.spyOn(alpha, "getBoundingClientRect").mockReturnValue({ left: 30, top: 4, right: 200, bottom: 34, width: 170, height: 30, x: 30, y: 4, toJSON: () => ({}) });
+    alpha.focus();
+    fireEvent.keyDown(alpha, { key: "F10", shiftKey: true });
+    const menu = screen.getByRole("menu", { name: "Tab actions" });
+    expect(menu.style.left).toBe("30px");
+    expect(menu.style.top).toBe("34px");
+    expect(document.activeElement?.getAttribute("role")).toBe("menuitem");
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(document.activeElement).toBe(alpha);
+    fireEvent.keyDown(alpha, { key: "ContextMenu" });
+    expect(screen.getByRole("menu", { name: "Tab actions" })).toBeTruthy();
+  });
+
   it("closes on Escape and on a press outside the menu", async () => {
     vi.spyOn(ipc, "setContentCovered").mockResolvedValue(null);
     useBrowser.setState({ tabs: [tab], activeTab: "t1", activeWorkspace: "w1" });
