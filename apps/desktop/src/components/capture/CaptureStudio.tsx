@@ -187,7 +187,9 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
   const copy = async () => {
     setBusy("copy");
     try {
-      await ipc.captureSave(output().toDataURL("image/png").split(",")[1] ?? "");
+      // The clipboard only: saving is what the export buttons are for, and
+      // a refused copy rejects here instead of claiming it was copied.
+      await ipc.clipboardWritePng(output().toDataURL("image/png").split(",")[1] ?? "");
       setCopied(true); setTimeout(() => setCopied(false), 1800);
     } catch (cause) { useBrowser.setState({ error: errorMessage(cause) }); }
     finally { setBusy(null); }

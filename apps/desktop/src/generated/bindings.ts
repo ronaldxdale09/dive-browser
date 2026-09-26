@@ -471,6 +471,13 @@ export const commands = {
 	 */
 	tabCapture: (id: TabId, fullPage: boolean) => typedError<string, AppError>(__TAURI_INVOKE("tab_capture", { id, fullPage })),
 	/**
+	 *  Screenshot a tab's viewport as base64 PNG, saving and copying nothing:
+	 *  for a picture the chrome finishes before it is kept, such as a device
+	 *  frame drawn around it. Going through `tab_capture` for that left an
+	 *  unframed copy in the captures folder beside every framed one.
+	 */
+	tabCapturePng: (id: TabId) => typedError<string, AppError>(__TAURI_INVOKE("tab_capture_png", { id })),
+	/**
 	 *  Read a capture as base64 PNG for the annotator. Only files inside the
 	 *  captures directory are readable.
 	 */
@@ -480,6 +487,12 @@ export const commands = {
 	 *  to the clipboard; returns the new path.
 	 */
 	captureSave: (pngBase64: string) => typedError<string, AppError>(__TAURI_INVOKE("capture_save", { pngBase64 })),
+	/**
+	 *  Put a base64 PNG on the system clipboard, and nothing else. Copying from
+	 *  the capture editor used to save a new file on every click, and said
+	 *  "Copied" even when the clipboard refused the picture.
+	 */
+	clipboardWritePng: (pngBase64: string) => typedError<null, AppError>(__TAURI_INVOKE("clipboard_write_png", { pngBase64 })),
 	/**  Emulate `device` on a tab, or clear emulation with `None`. */
 	tabEmulate: (id: TabId, device: {
 	/**  Viewport width in CSS pixels. */

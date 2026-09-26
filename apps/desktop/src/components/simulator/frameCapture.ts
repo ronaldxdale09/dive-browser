@@ -67,8 +67,9 @@ export interface FramedCaptureInput {
  * Capture the page and draw the device around it. Returns the saved path.
  */
 export async function captureFramed({ tabId, device, landscape, mode, dark, url }: FramedCaptureInput): Promise<string> {
-  const path = await ipc.tabCapture(tabId, false);
-  const image = await loadImage(await ipc.captureRead(path));
+  // Only the framed picture is kept: capturing through tabCapture saved an
+  // unframed copy beside every framed one.
+  const image = await loadImage(await ipc.tabCapturePng(tabId));
   const screen = screenFor(device, landscape);
   const strips = stripsAround(device, landscape, mode);
   const viewportWidth = screen.width - strips.left - strips.right;

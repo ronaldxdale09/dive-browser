@@ -787,8 +787,10 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::screen::screen_export_finish,
             crate::screen::screen_export_cancel,
             tab_capture,
+            tab_capture_png,
             capture_read,
             capture_save,
+            clipboard_write_png,
             tab_emulate,
             tab_environment,
             device_presets,
@@ -3346,6 +3348,35 @@ pub(crate) async fn tab_capture(
 ) -> AppResult<String> {
     let path = capture_tab(&state, id, full_page).await?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// Screenshot a tab's viewport as base64 PNG, saving and copying nothing:
+/// for a picture the chrome finishes before it is kept, such as a device
+/// frame drawn around it. Going through `tab_capture` for that left an
+/// unframed copy in the captures folder beside every framed one.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn tab_capture_png(state: State<'_, AppState>, id: TabId) -> AppResult<String> {
+    let session = cdp_for(&state, id)?;
+    dive_cdp::page::capture_screenshot_base64(
+        &session,
+        dive_cdp::page::ScreenshotOptions::default(),
+    )
+    .await
+    .map_err(AppError::new)
+}
+
+/// Put a base64 PNG on the system clipboard, and nothing else. Copying from
+/// the capture editor used to save a new file on every click, and said
+/// "Copied" even when the clipboard refused the picture.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn clipboard_write_png(png_base64: String) -> AppResult<()> {
+    use base64::Engine as _;
+    let png = base64::engine::general_purpose::STANDARD
+        .decode(png_base64)
+        .map_err(AppError::new)?;
+    copy_png_to_clipboard(&png)
 }
 
 /// Put text on the system clipboard. Goes through the host rather than the

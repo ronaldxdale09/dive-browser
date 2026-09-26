@@ -151,8 +151,12 @@ export const ipc = {
   screenExportCancel: async (jobId: string) => unwrap(await commands.screenExportCancel(jobId)),
   screenExportFinish: async (request: ExportRequest) => unwrap(await commands.screenExportFinish(request)),
   tabCapture: async (id: string, fullPage: boolean) => unwrap(await commands.tabCapture(id, fullPage)),
+  /** The tab's viewport as base64 PNG, neither saved nor copied. */
+  tabCapturePng: async (id: string) => unwrap(await commands.tabCapturePng(id)),
   captureRead: async (path: string) => unwrap(await commands.captureRead(path)),
   captureSave: async (pngBase64: string) => unwrap(await commands.captureSave(pngBase64)),
+  /** Put a base64 PNG on the clipboard; rejects when the clipboard refuses it. */
+  clipboardWritePng: async (pngBase64: string) => unwrap(await commands.clipboardWritePng(pngBase64)),
   tabStorage: async (id: string) => unwrap(await commands.tabStorage(id)),
   tabMeta: async (id: string) => unwrap(await commands.tabMeta(id)),
   resolveFrame: async (tabId: string, url: string, line: number, column: number | null) => unwrap(await commands.resolveFrame(tabId, url, line, column)),

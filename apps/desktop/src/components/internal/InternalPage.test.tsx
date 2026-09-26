@@ -53,6 +53,7 @@ beforeEach(() => {
   useBrowser.setState({ notice: null, error: null });
   vi.spyOn(ipc, "captureRead").mockResolvedValue("aW1hZ2U=");
   vi.spyOn(ipc, "captureSave").mockResolvedValue("/tmp/dive-annotated.png");
+  vi.spyOn(ipc, "clipboardWritePng").mockResolvedValue(null);
   vi.stubGlobal("Image", LoadedImage);
   Object.defineProperty(HTMLCanvasElement.prototype, "getContext", { configurable: true, value: () => context });
   Object.defineProperty(HTMLCanvasElement.prototype, "getBoundingClientRect", {
@@ -165,6 +166,19 @@ describe("capture internal page", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+    // The clipboard only: no new file in the captures folder per click.
+    expect(ipc.clipboardWritePng).toHaveBeenCalledWith("Y2FwdHVyZQ==");
+    expect(ipc.captureSave).not.toHaveBeenCalled();
+  });
+
+  it("says so when the clipboard refuses the picture, instead of Copied", async () => {
+    vi.mocked(ipc.clipboardWritePng).mockRejectedValue(new Error("the clipboard is unavailable"));
+    render(<InternalPage tab={capture} />);
+    await screen.findByRole("img", { name: "Full-page capture preview" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(useBrowser.getState().error).toBe("the clipboard is unavailable"));
+    expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
   });
 
   it("exports a paginated PDF with a useful filename and completion notice", async () => {
