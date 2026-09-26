@@ -1335,6 +1335,17 @@ export type CoreEvent =
 { type: "workspace_activated"; data: WorkspaceId } |
 /**  A tab was created or updated. */
 { type: "tab_upserted"; data: Tab } |
+/**
+ *  A workspace's tabs were put in a new order: `ids` is the whole order,
+ *  and each tab's position is its index in it. One event for the move,
+ *  rather than a whole tab per tab that shifted.
+ */
+{ type: "tabs_reordered"; data: {
+	/**  The workspace whose tabs moved. */
+	workspace_id: WorkspaceId,
+	/**  Every tab of the workspace (not the essentials), in order. */
+	ids: TabId[],
+} } |
 /**  A tab was closed. */
 { type: "tab_closed"; data: TabId } |
 /**  The focused tab changed. */

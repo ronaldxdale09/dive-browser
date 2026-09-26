@@ -18,6 +18,15 @@ pub enum CoreEvent {
     WorkspaceActivated(WorkspaceId),
     /// A tab was created or updated.
     TabUpserted(Tab),
+    /// A workspace's tabs were put in a new order: `ids` is the whole order,
+    /// and each tab's position is its index in it. One event for the move,
+    /// rather than a whole tab per tab that shifted.
+    TabsReordered {
+        /// The workspace whose tabs moved.
+        workspace_id: WorkspaceId,
+        /// Every tab of the workspace (not the essentials), in order.
+        ids: Vec<TabId>,
+    },
     /// A tab was closed.
     TabClosed(TabId),
     /// The focused tab changed.

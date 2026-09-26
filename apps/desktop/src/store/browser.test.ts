@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Event } from "@tauri-apps/api/event";
-import { CLOSED_TABS_LIMIT, onTabClosed, orderWithAt, reduceCrash, sameSiteTab, togglePanel, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, tabInThisWindow, useBrowser, withoutRequest } from "./browser";
+import { CLOSED_TABS_LIMIT, countsChanged, onTabClosed, orderWithAt, reduceCrash, sameSiteTab, togglePanel, reduceEvent, reduceLoad, reducePermissionAsked, reduceWindowChange, rememberClosed, tabHoldsOnly, tabInThisWindow, useBrowser, withoutRequest } from "./browser";
 import type { CrashState, NavError } from "./browser";
 import { events, ipc } from "../lib/ipc";
 import type { PermissionAsked, PermissionDismissed, Snapshot, Tab, TabCrashed, TabLoad, Workspace } from "../lib/ipc";
@@ -70,6 +70,31 @@ describe("reduceEvent", () => {
     const base = { workspaces: [], tabs: [tab("a"), tab("b")], activeTab: "a", activeWorkspace: "w", recordingTab: "b", detached: [], profiles: [], activeProfile: null };
     expect(reduceEvent(base, { type: "tab_closed", data: "b" }).recordingTab).toBeNull();
     expect(reduceEvent(base, { type: "tab_closed", data: "a" }).recordingTab).toBe("b");
+  });
+});
+
+describe("tabs_reordered", () => {
+  it("renumbers the tabs it names and leaves an unchanged strip alone", () => {
+    const base = { workspaces: [], tabs: [{ ...tab("a"), position: 0 }, { ...tab("b"), position: 1 }, { ...tab("e"), tier: "essential" as const, position: 0 }], activeTab: "a", activeWorkspace: "w", recordingTab: null, detached: [], profiles: [], activeProfile: null };
+    const out = reduceEvent(base, { type: "tabs_reordered", data: { workspace_id: "w", ids: ["b", "a"] } });
+    expect(out.tabs?.map((t) => [t.id, t.position])).toEqual([["a", 1], ["b", 0], ["e", 0]]);
+    // The essential was not in the list and keeps its object.
+    expect(out.tabs?.[2]).toBe(base.tabs[2]);
+    expect(reduceEvent(base, { type: "tabs_reordered", data: { workspace_id: "w", ids: ["a", "b"] } })).toEqual({});
+  });
+});
+
+describe("countsChanged", () => {
+  it("asks for counts only when a tab arrives, leaves or changes workspace", () => {
+    const t = { ...tab("counted"), workspace_id: "w1" };
+    expect(countsChanged({ type: "tab_upserted", data: t })).toBe(true);
+    // A title change, a new icon, a load: the counts cannot have moved.
+    expect(countsChanged({ type: "tab_upserted", data: { ...t, title: "Now titled", favicon: "0123abcd" } })).toBe(false);
+    expect(countsChanged({ type: "tab_upserted", data: { ...t, workspace_id: "w2" } })).toBe(true);
+    expect(countsChanged({ type: "tab_activated", data: t.id })).toBe(false);
+    expect(countsChanged({ type: "tab_closed", data: t.id })).toBe(true);
+    // Seen again after closing -- a reopened tab -- it counts again.
+    expect(countsChanged({ type: "tab_upserted", data: { ...t, workspace_id: "w2" } })).toBe(true);
   });
 });
 

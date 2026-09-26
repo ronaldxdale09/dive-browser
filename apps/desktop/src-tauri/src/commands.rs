@@ -2141,6 +2141,7 @@ pub fn activate_tab(
             crate::housekeeping::restore_scroll(app.clone(), id);
         }
         host.activate(main, id)?;
+        let woke = tab.state != dive_core::TabState::Active;
         tab.last_active_at = dive_core::Timestamp::now();
         tab.state = dive_core::TabState::Active;
         {
@@ -2148,9 +2149,14 @@ pub fn activate_tab(
             store.upsert_tab(&tab)?;
             store.set_setting(crate::state::ACTIVE_TAB, &id.to_string())?;
         }
-        tab
+        woke.then_some(tab)
     };
-    state.bus.publish(CoreEvent::TabUpserted(tab));
+    // Only a tab that woke has changed in a way anyone draws. When it was
+    // last focused is the store's business, for the idle sweep; announcing
+    // that sent the whole tab to the chrome on every switch for nothing.
+    if let Some(tab) = tab {
+        state.bus.publish(CoreEvent::TabUpserted(tab));
+    }
     state.bus.publish(CoreEvent::TabActivated(id));
     Ok(())
 }
@@ -2265,20 +2271,25 @@ pub(crate) fn tab_reorder(
                 .position(|id| *id == t.id)
                 .unwrap_or(usize::MAX)
         });
-        let mut updated = Vec::new();
-        for (i, tab) in tabs.iter_mut().enumerate() {
-            let position = i32::try_from(i).unwrap_or(i32::MAX);
-            if tab.position != position {
-                tab.position = position;
-                store.upsert_tab(tab)?;
-                updated.push(tab.clone());
-            }
+        let moved: Vec<(TabId, i32)> = tabs
+            .iter()
+            .enumerate()
+            .map(|(i, tab)| (tab, i32::try_from(i).unwrap_or(i32::MAX)))
+            .filter(|(tab, position)| tab.position != *position)
+            .map(|(tab, position)| (tab.id, position))
+            .collect();
+        if moved.is_empty() {
+            return Ok(());
         }
-        updated
+        store.set_tab_positions(&moved)?;
+        tabs.into_iter().map(|tab| tab.id).collect::<Vec<_>>()
     };
-    for tab in updated {
-        state.bus.publish(CoreEvent::TabUpserted(tab));
-    }
+    // The whole order in one event. A tab per tab that moved sent every one
+    // of them, favicon and all, and re-rendered the strip once for each.
+    state.bus.publish(CoreEvent::TabsReordered {
+        workspace_id,
+        ids: updated,
+    });
     Ok(())
 }
 

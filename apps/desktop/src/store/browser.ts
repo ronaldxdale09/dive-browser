@@ -323,6 +323,12 @@ export function reduceEvent(state: Reduced, event: CoreEvent): Partial<Reduced> 
       const tabs = idx === -1 ? [...state.tabs, event.data] : state.tabs.map((t, i) => (i === idx ? event.data : t));
       return { tabs };
     }
+    case "tabs_reordered": {
+      // The whole order of one workspace; each tab's position is its index.
+      const order = new Map(event.data.ids.map((id, index) => [id, index]));
+      if (!state.tabs.some((t) => order.has(t.id) && order.get(t.id) !== t.position)) return {};
+      return { tabs: state.tabs.map((t) => (order.has(t.id) && order.get(t.id) !== t.position ? { ...t, position: order.get(t.id) ?? t.position } : t)) };
+    }
     case "tab_closed": {
       // The engine picks the replacement and announces it with tab_activated.
       const tabs = state.tabs.filter((t) => t.id !== event.data);
@@ -445,6 +451,8 @@ async function snapshotCandidate() {
 
 function replaySnapshot(snapshot: Snapshot, after: number): Partial<BrowserState> {
   const base = fromSnapshot(snapshot);
+  // The counts that come with a snapshot already include these tabs.
+  for (const tab of snapshot.tabs) tabWorkspaces.set(tab.id, tab.workspace_id);
   let state: Reduced = { ...base, recordingTab: null };
   for (const delta of snapshotDeltas) {
     if (delta.revision <= after) continue;
@@ -932,7 +940,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     const ws = get().activeWorkspace;
     if (!ws) return;
     const prevTabs = get().tabs;
-    // Optimistic: renumber locally, the engine confirms with tab_upserted events.
+    // Optimistic: renumber locally, the engine confirms with one tabs_reordered event.
     set((s) => ({ tabs: s.tabs.map((t) => (ordered.includes(t.id) ? { ...t, position: ordered.indexOf(t.id) } : t)) }));
     try {
       await ipc.tabReorder(ws, ordered);
@@ -1047,11 +1055,34 @@ export const useBrowser = create<BrowserState>((set, get) => ({
     if (event.type === "tab_upserted" && event.data.workspace_id && event.data.tier !== "essential") {
       useLayout.getState().forget(event.data.id, event.data.workspace_id);
     }
-    // Foreign-workspace tab events refresh badges without entering this strip.
-    // Coalesced: a page load can emit several tab updates.
-    if (event.type === "tab_upserted" || event.type === "tab_closed") scheduleCounts(get);
+    // Badges count tabs per workspace, so only a tab arriving, leaving or
+    // moving between workspaces changes them. Asking on every update asked
+    // on every title change of every tab. Coalesced all the same: opening a
+    // few tabs at once is one question.
+    if (countsChanged(event)) scheduleCounts(get);
   },
 }));
+
+/** The workspace each tab was last seen in, across every workspace. */
+const tabWorkspaces = new Map<string, string | null>();
+
+/**
+ * Whether `event` could change the per-workspace tab counts: a tab that is
+ * new to this chrome or has changed workspace, or one that closed. Tabs of
+ * other workspaces are remembered here even though the strip never holds
+ * them. Exported for tests.
+ */
+export function countsChanged(event: CoreEvent): boolean {
+  if (event.type === "tab_closed") {
+    tabWorkspaces.delete(event.data);
+    return true;
+  }
+  if (event.type !== "tab_upserted") return false;
+  const { id, workspace_id } = event.data;
+  if (tabWorkspaces.has(id) && tabWorkspaces.get(id) === workspace_id) return false;
+  tabWorkspaces.set(id, workspace_id);
+  return true;
+}
 
 let countsTimer: ReturnType<typeof setTimeout> | null = null;
 
