@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from "react";
+import { useLayoutEffect, type RefObject } from "react";
 
 /**
  * Close an anchored popover the way people expect: a click outside it, the
@@ -12,7 +12,10 @@ import { useEffect, type RefObject } from "react";
  * the person scrolled and clicked around the page under it.
  */
 export function useDismiss(root: RefObject<HTMLElement | null>, open: boolean, close: () => void) {
-  useEffect(() => {
+  // Wired as the popover is committed, not after paint: a press or Escape
+  // that lands in between (a quick double action, a busy frame) otherwise
+  // finds nothing listening and the popover stays up.
+  useLayoutEffect(() => {
     if (!open) return;
     const outside = (target: EventTarget | null) => !root.current?.contains(target as Node);
     const onDown = (e: MouseEvent) => {
