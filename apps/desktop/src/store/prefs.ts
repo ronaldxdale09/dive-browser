@@ -4,6 +4,7 @@ import type { Prefs as WirePrefs } from "../lib/ipc";
 import { useBrowser } from "./browser";
 import { APPEARANCE_KEYS, THEME_VARS, accentInk, contentCornerRadius, resolveScheme, themeCss } from "../lib/theme";
 import { errorMessage } from "../lib/errors";
+import { isPrivateWindow } from "../lib/privateMode";
 
 /**
  * User preferences. The host owns them (it clamps and persists), so writes go
@@ -232,7 +233,11 @@ export function isDefaultAppearance(prefs: Prefs): boolean {
  */
 export function applyAppearance(prefs: Prefs) {
   const root = document.documentElement;
-  const scheme = resolveScheme(prefs, systemTheme);
+  // A private window is drawn dark whatever the theme says (styles.css pins
+  // its palette), so the root and the pages in it hear "dark" too; a light
+  // theme here gave light-theme status colours and told pages the opposite
+  // of what surrounds them.
+  const scheme = isPrivateWindow() ? "dark" : resolveScheme(prefs, systemTheme);
   root.dataset.theme = scheme;
   syncPagesScheme(scheme);
   root.dataset.density = prefs.density;

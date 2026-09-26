@@ -324,11 +324,20 @@ button:not(:disabled):active,
    Painted as a pseudo-element above the button's own contents, so the label
    stays put and stays readable: nothing about the button's box changes, only
    what is lit. It rests far longer than it sweeps -- a hint that is always
-   moving stops being a hint and becomes a bar that will not sit still. */
+   moving stops being a hint and becomes a bar that will not sit still.
+
+   The light is the pseudo-element's own background, slid across by
+   background-position; the element itself never moves. It used to be the
+   whole gradient box translated out past the button, which relied on the
+   button clipping it: the compact (round) button did not clip at all, and a
+   composited transform can escape a rounded clip, so between sweeps a teal
+   smear sat over "Connect" and its neighbour. A background is painted only
+   inside its own rounded box, and at rest the lit band is parked wholly
+   outside that box, so what remains between sweeps is nothing. */
 @keyframes dive-shimmer-sweep {
-  0%   { transform: translateX(-140%); }
-  26%  { transform: translateX(140%); }
-  100% { transform: translateX(140%); }
+  0%   { background-position: 100% 0; }
+  26%  { background-position: 0% 0; }
+  100% { background-position: 0% 0; }
 }
 .dive-shimmer[data-hinting] {
   position: relative;
@@ -339,12 +348,17 @@ button:not(:disabled):active,
   inset: 0;
   pointer-events: none;
   border-radius: inherit;
-  background: linear-gradient(
+  /* Three button-widths wide and lit only across its middle 30%: at either
+     end position the lit band lies entirely off the button. */
+  background-image: linear-gradient(
     100deg,
-    transparent 30%,
-    color-mix(in srgb, var(--color-highlight) 45%, transparent) 50%,
-    transparent 70%
+    transparent 35%,
+    color-mix(in srgb, var(--color-highlight) 40%, transparent) 50%,
+    transparent 65%
   );
+  background-size: 300% 100%;
+  background-repeat: no-repeat;
+  background-position: 100% 0;
   /* 26% of seven seconds is a light that takes the better part of two
      seconds to cross, then waits five before coming back. Slow enough to be
      watched rather than caught out of the corner of an eye. */
@@ -353,10 +367,14 @@ button:not(:disabled):active,
 /* The button still has to be findable without motion, so what remains is a
    steady tint rather than nothing at all. */
 @media (prefers-reduced-motion: reduce) {
-  .dive-shimmer[data-hinting]::after {
+  :root:not([data-motion="full"]) .dive-shimmer[data-hinting]::after {
     animation: none;
     background: color-mix(in srgb, var(--color-highlight) 12%, transparent);
   }
+}
+:root[data-motion="reduce"] .dive-shimmer[data-hinting]::after {
+  animation: none;
+  background: color-mix(in srgb, var(--color-highlight) 12%, transparent);
 }
 
 /* Small surfaces arrive quickly and settle without animating layout. */
@@ -504,7 +522,11 @@ button:not(:disabled):active,
     .animate-loading-bar,
     .tab-drag-ghost,
     .tab-drop-zone,
-    .privacy-motion
+    .privacy-motion,
+    /* Tailwind's own and arbitrary animations: motion-safe:animate-spin,
+       animate-[dive-loading-sweep_…] and the like, which no list of class
+       names can keep up with. */
+    [class*="animate-"]
   ) {
     animation: none !important;
     transition: none !important;
@@ -543,7 +565,8 @@ button:not(:disabled):active,
   .animate-loading-bar,
   .tab-drag-ghost,
   .tab-drop-zone,
-  .privacy-motion
+  .privacy-motion,
+  [class*="animate-"]
 ) {
   animation: none !important;
   transition: none !important;
@@ -655,6 +678,14 @@ button:not(:disabled):active,
   --color-highlight: #bca5db !important;
   --color-highlight-ink: #19141f !important;
   --color-highlight-soft: #33273f !important;
+  /* The status colours too: a private window is dark whatever the theme
+     preference says, and the light theme's deep red and green were drawn
+     for white surfaces, not these. */
+  --color-link: #8ab4f8 !important;
+  --color-danger: #f0715e !important;
+  --color-danger-ink: #111111 !important;
+  --color-good: #6cc493 !important;
+  --color-warn: #f0b35e !important;
 }
 .private-badge, .private-emblem {
   color: #cbb8e4;

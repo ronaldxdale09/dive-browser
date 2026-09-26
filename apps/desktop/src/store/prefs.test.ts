@@ -241,6 +241,36 @@ describe("applyAppearance", () => {
     );
   });
 
+  it("stops Tailwind's and arbitrary animations and the Connect hint under the reduce preference", () => {
+    const reduceList = styles.slice(styles.indexOf(':root[data-motion="reduce"] :is('));
+    expect(reduceList.slice(0, reduceList.indexOf(") {"))).toContain('[class*="animate-"]');
+    expect(styles).toMatch(/:root\[data-motion="reduce"\] \.dive-shimmer\[data-hinting\]::after \{\s*animation: none;/);
+  });
+
+  it("parks the Connect hint's light off the button between sweeps instead of moving a box past it", () => {
+    const hint = styles.slice(styles.indexOf(".dive-shimmer[data-hinting]::after {"));
+    const rule = hint.slice(0, hint.indexOf("}"));
+    expect(rule).toContain("background-repeat: no-repeat");
+    expect(rule).not.toContain("transform");
+    expect(styles).toMatch(/@keyframes dive-shimmer-sweep \{[^}]*background-position[^}]*\}/);
+  });
+
+  it("draws a private window dark and tells its pages so, whatever the theme preference", () => {
+    const told = vi.spyOn(ipc, "pagesScheme").mockResolvedValue(null);
+    Object.defineProperty(window, "__DIVE_PRIVATE__", { value: true, configurable: true });
+    try {
+      applyAppearance({ ...DEFAULT_PREFS, theme: "light" });
+      expect(document.documentElement.dataset.theme).toBe("dark");
+      expect(told).toHaveBeenLastCalledWith("dark");
+    } finally {
+      Reflect.deleteProperty(window, "__DIVE_PRIVATE__");
+    }
+    const privateBlock = styles.slice(styles.indexOf(':root[data-private="true"] {'));
+    for (const token of ["--color-link", "--color-danger", "--color-danger-ink", "--color-good", "--color-warn"]) {
+      expect(privateBlock.slice(0, privateBlock.indexOf("}"))).toContain(token);
+    }
+  });
+
   it("sets every theme variable for a non-default appearance and clears them at the defaults", () => {
     const root = document.documentElement;
     applyAppearance({ ...DEFAULT_PREFS, appearance_preset: "sepia", corner_radius: "sharp", density: "relaxed", ui_font: "serif" });
