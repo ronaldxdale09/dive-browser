@@ -17,8 +17,11 @@ import { Switch } from "./SettingsFields";
 export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) {
   const prefs = usePrefs((s) => s.prefs);
   const update = usePrefs((s) => s.update);
-  const tabs = useBrowser((s) => s.tabs);
   const activeTab = useBrowser((s) => tabInThisWindow(s.activeTab, s.detached));
+  // The two things read from the active tab, not the list: this sits in the
+  // toolbar, and every tab's title or favicon change re-rendered it.
+  const sleeping = useBrowser((s) => s.tabs.find((candidate) => candidate.id === activeTab)?.state === "discarded");
+  const url = useBrowser((s) => s.tabs.find((candidate) => candidate.id === activeTab)?.url);
   const openSettings = useBrowser((s) => s.openSettings);
   const counts = usePrivacy(selectPrivacyCounts(activeTab));
   const info = usePrivacy((s) => s.info);
@@ -35,9 +38,7 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
   useCoversContent(open);
   useFocusTrap(panel, { active: open, onEscape: () => setOpen(false) });
 
-  const tab = tabs.find((candidate) => candidate.id === activeTab);
-  const sleeping = tab?.state === "discarded";
-  const host = pageHost(tab?.url);
+  const host = pageHost(url);
   const globalOn = prefs.block_trackers;
   const paused = host !== null && prefs.privacy_exceptions.includes(host);
   const siteOn = globalOn && host !== null && !paused && !sleeping;
@@ -99,8 +100,9 @@ export function ProtectionMenu({ compact = false }: { compact?: boolean } = {}) 
         tooltipAlign="end"
       >
         {globalOn && !sleeping && total > 0 && (
+          // Not keyed on the count: a remount per blocked request restarted
+          // its entrance animation many times a second on a busy page.
           <span
-            key={total}
             className="privacy-count privacy-motion ml-0.5 rounded-full bg-highlight-soft px-1.5 py-px font-mono text-[10px] leading-4 text-highlight"
             aria-label={`${total} privacy actions on this page`}
           >

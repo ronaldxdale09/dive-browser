@@ -18,6 +18,9 @@ interface PrivacyState {
   infoError: string | null;
   eventError: string | null;
   apply: (event: PrivacyEvent) => void;
+  /** Count an event with the next batch rather than at once. */
+  enqueue: (event: PrivacyEvent) => void;
+  flush: () => void;
   loadInfo: () => Promise<void>;
   clearPrivacy: (tabId: string) => void;
   drop: (tabId: string) => void;
@@ -37,14 +40,54 @@ export function foldPrivacy(counts: PrivacyCounts | undefined, event: PrivacyEve
     : { ...current, trackers: capped(current.trackers + 1) };
 }
 
+/** Two summaries added together, each count still capped. */
+function addCounts(a: PrivacyCounts | undefined, b: PrivacyCounts): PrivacyCounts {
+  const base = a ?? EMPTY_COUNTS;
+  return { ads: capped(base.ads + b.ads), trackers: capped(base.trackers + b.trackers), youtube: capped(base.youtube + b.youtube) };
+}
+
 let infoLoading: Promise<void> | null = null;
 
-export const usePrivacy = create<PrivacyState>((set) => ({
+/**
+ * Counts waiting to be added, per tab. A page with a few hundred trackers
+ * sent one event each, and each was a store update that re-rendered the
+ * toolbar's badge; now they land together, a few times a second at most.
+ */
+const pending = new Map<string, PrivacyCounts>();
+const FLUSH_MS = 100;
+let flushTimer: ReturnType<typeof setTimeout> | undefined;
+
+function cancelPending(tabId: string) {
+  pending.delete(tabId);
+  if (!pending.size) {
+    clearTimeout(flushTimer);
+    flushTimer = undefined;
+  }
+}
+
+export const usePrivacy = create<PrivacyState>((set, get) => ({
   byTab: {},
   info: null,
   infoError: null,
   eventError: null,
   apply: (event) => set((s) => ({ byTab: { ...s.byTab, [event.data.tab_id]: foldPrivacy(s.byTab[event.data.tab_id], event) } })),
+  enqueue: (event) => {
+    const tabId = event.data.tab_id;
+    pending.set(tabId, foldPrivacy(pending.get(tabId), event));
+    flushTimer ??= setTimeout(() => get().flush(), FLUSH_MS);
+  },
+  flush: () => {
+    clearTimeout(flushTimer);
+    flushTimer = undefined;
+    if (!pending.size) return;
+    const changes = new Map(pending);
+    pending.clear();
+    set((s) => {
+      const byTab = { ...s.byTab };
+      for (const [tabId, counts] of changes) byTab[tabId] = addCounts(byTab[tabId], counts);
+      return { byTab };
+    });
+  },
   loadInfo: () => {
     if (usePrivacy.getState().info) return Promise.resolve();
     if (infoLoading) return infoLoading;
@@ -63,18 +106,25 @@ export const usePrivacy = create<PrivacyState>((set) => ({
     infoLoading = request;
     return infoLoading;
   },
-  clearPrivacy: (tabId) => set((s) => {
-    if (!(tabId in s.byTab)) return s;
-    const byTab = { ...s.byTab };
-    delete byTab[tabId];
-    return { byTab };
-  }),
-  drop: (tabId) => set((s) => {
-    if (!(tabId in s.byTab)) return s;
-    const byTab = { ...s.byTab };
-    delete byTab[tabId];
-    return { byTab };
-  }),
+  clearPrivacy: (tabId) => {
+    // Whatever was waiting belonged to the page that was left.
+    cancelPending(tabId);
+    set((s) => {
+      if (!(tabId in s.byTab)) return s;
+      const byTab = { ...s.byTab };
+      delete byTab[tabId];
+      return { byTab };
+    });
+  },
+  drop: (tabId) => {
+    cancelPending(tabId);
+    set((s) => {
+      if (!(tabId in s.byTab)) return s;
+      const byTab = { ...s.byTab };
+      delete byTab[tabId];
+      return { byTab };
+    });
+  },
 }));
 
 let listening: Promise<() => void> | null = null;
@@ -83,7 +133,7 @@ let listening: Promise<() => void> | null = null;
 export function listenPrivacy() {
   if (listening) return listening;
   const request = events.privacyEvent
-    .listen((e) => usePrivacy.getState().apply(e.payload))
+    .listen((e) => usePrivacy.getState().enqueue(e.payload))
     .then((unlisten) => {
       usePrivacy.setState({ eventError: null });
       return unlisten;

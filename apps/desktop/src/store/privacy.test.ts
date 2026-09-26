@@ -48,6 +48,30 @@ describe("privacy store", () => {
     expect(selectPrivacyCounts("b")(usePrivacy.getState())).toEqual({ ads: 0, trackers: 0, youtube: 0 });
   });
 
+  it("lands a burst of blocked requests as one update, and drops what a closed or reloaded tab had waiting", () => {
+    vi.useFakeTimers();
+    try {
+      const updates = vi.fn();
+      const unsubscribe = usePrivacy.subscribe(updates);
+      for (let i = 0; i < 50; i += 1) usePrivacy.getState().enqueue({ type: "blocked", data: { tab_id: "a", category: i % 2 ? "ads" : "tracker" } });
+      usePrivacy.getState().enqueue({ type: "youtube", data: { tab_id: "a", count: 3 } });
+      usePrivacy.getState().enqueue({ type: "blocked", data: { tab_id: "b", category: "ads" } });
+      usePrivacy.getState().enqueue({ type: "blocked", data: { tab_id: "c", category: "ads" } });
+      usePrivacy.getState().drop("b");
+      usePrivacy.getState().clearPrivacy("c");
+      expect(updates).not.toHaveBeenCalled();
+      expect(selectPrivacyCounts("a")(usePrivacy.getState())).toEqual({ ads: 0, trackers: 0, youtube: 0 });
+      vi.advanceTimersByTime(100);
+      expect(updates).toHaveBeenCalledTimes(1);
+      expect(selectPrivacyCounts("a")(usePrivacy.getState())).toEqual({ ads: 25, trackers: 25, youtube: 3 });
+      expect(usePrivacy.getState().byTab.b).toBeUndefined();
+      expect(usePrivacy.getState().byTab.c).toBeUndefined();
+      unsubscribe();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("retries a failed subscription and caches the first successful listener", async () => {
     const listen = vi.spyOn(events.privacyEvent, "listen")
       .mockRejectedValueOnce(new Error("privacy events unavailable"))
