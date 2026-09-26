@@ -27,11 +27,12 @@ export function Welcome() {
   const toggle = useBrowser((s) => s.toggle);
   const background = useWelcomeBackground();
   const animateBackground = usePrefs((s) => s.prefs.motion === "full");
+  const windowActive = useWindowActive();
   return (
     <div className={`welcome absolute inset-0 overflow-auto ${background === "gradient" ? "welcome-gradient" : ""}`} data-background={background}>
       {background === "orbs" && (
         <CharacterBg
-          animated={animateBackground}
+          animated={animateBackground && windowActive}
           gridText="DIVE"
           gap={18}
           speed={45}
@@ -42,7 +43,7 @@ export function Welcome() {
       <div className="relative z-10 mx-auto flex min-h-full w-full max-w-[1040px] flex-col items-center px-4 pt-4 pb-10 sm:px-8 sm:pt-6">
         {/* The small globe follows effective motion (System/Reduce/Full).
             Only the large character field above requires an explicit Full opt-in. */}
-        {background === "orbs" ? <OrbBurst pointer={{ drag: 0 }} width={190} height={190} className="-mb-4" /> : <div className="h-10" aria-hidden />}
+        {background === "orbs" ? <OrbBurst pointer={{ drag: 0 }} width={190} height={190} className="-mb-4" pauseWhenBlurred /> : <div className="h-10" aria-hidden />}
         <p className="text-[10px] font-medium tracking-[0.18em] text-highlight uppercase">Dive</p>
         <h1 className="mt-2 max-w-full text-center text-[clamp(26px,4vw,34px)] leading-tight font-semibold tracking-[-0.025em] text-balance">
           The browser built for developers
@@ -71,6 +72,27 @@ export function Welcome() {
 }
 
 type WelcomeBackground = "orbs" | "plain" | "gradient";
+
+/**
+ * Whether the window is in front and showing. The start page is where Dive
+ * sits idle, often for hours behind other windows, and its artwork kept
+ * animating for no one.
+ */
+function useWindowActive(): boolean {
+  const [active, setActive] = useState(() => !document.hidden && document.hasFocus());
+  useEffect(() => {
+    const update = () => setActive(!document.hidden && document.hasFocus());
+    window.addEventListener("focus", update);
+    window.addEventListener("blur", update);
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      window.removeEventListener("focus", update);
+      window.removeEventListener("blur", update);
+      document.removeEventListener("visibilitychange", update);
+    };
+  }, []);
+  return active;
+}
 
 /** The backdrop preference, with anything unknown falling back to the orbs. */
 function useWelcomeBackground(): WelcomeBackground {
@@ -120,21 +142,26 @@ function ActiveDevServers() {
     // `listen` resolves asynchronously; if the screen unmounts first the
     // handle would arrive after cleanup, so release it on arrival instead.
     let live = true;
-    void ipc.devServersWatch(true);
+    // Detection is a nicety; a host that cannot watch must not leave an
+    // unhandled rejection behind every visit to the start page.
+    void ipc.devServersWatch(true).catch(() => undefined);
     void ipc
       .devServers()
       .then((list) => {
         if (live) setServers(list);
       })
       .catch(() => undefined);
-    void events.devServersChanged.listen((e) => setServers(e.payload.servers)).then((u) => {
-      if (live) unlisten = u;
-      else u();
-    });
+    void events.devServersChanged
+      .listen((e) => setServers(e.payload.servers))
+      .then((u) => {
+        if (live) unlisten = u;
+        else u();
+      })
+      .catch(() => undefined);
     return () => {
       live = false;
       unlisten?.();
-      void ipc.devServersWatch(false);
+      void ipc.devServersWatch(false).catch(() => undefined);
     };
   }, []);
 

@@ -19,6 +19,20 @@ interface RecorderState {
 
 let listening: Promise<() => void> | null = null;
 
+/**
+ * Subscribe once to recorded steps. A failed subscription is forgotten so the
+ * next Record tries again; kept, it failed every later start without asking.
+ */
+function listenSteps(onStep: (step: RecordedStep, tab: string) => void): Promise<() => void> {
+  if (listening) return listening;
+  const request = events.recorderEvent.listen((e) => onStep(e.payload.step, e.payload.tab_id)).catch((error: unknown) => {
+    if (listening === request) listening = null;
+    throw error;
+  });
+  listening = request;
+  return request;
+}
+
 /** As many steps as the host keeps (its RECORDED_STEP_CAP); a runaway page must not grow this list without end. */
 export const STEP_CAP = 5000;
 
@@ -36,11 +50,10 @@ export const useRecorder = create<RecorderState>((set, get) => ({
   isOpen: false,
   setOpen: (isOpen) => set({ isOpen }),
   start: async (tabId) => {
-    listening ??= events.recorderEvent.listen((e) => {
-      if (e.payload.tab_id === get().recordingTab) set((s) => ({ steps: appendStep(s.steps, e.payload.step) }));
-    });
-    await listening;
     try {
+      await listenSteps((step, tab) => {
+        if (tab === get().recordingTab) set((s) => ({ steps: appendStep(s.steps, step) }));
+      });
       await ipc.tabRecordStart(tabId);
       const tab = useBrowser.getState().tabs.find((t) => t.id === tabId);
       set({ recordingTab: tabId, startUrl: tab?.url ?? null, startTitle: tab?.title ?? null, steps: [], isOpen: false });

@@ -96,6 +96,59 @@ describe("Welcome", () => {
     view.unmount();
   });
 
+  it("stops its artwork while the window is in the background and starts it again on focus", () => {
+    const context = { setTransform() {}, clearRect() {}, beginPath() {}, fill() {}, arc() {} };
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context as unknown as CanvasRenderingContext2D);
+    // The character field animates only while in view; this one always is.
+    const Observer = globalThis.IntersectionObserver;
+    globalThis.IntersectionObserver = class {
+      constructor(private callback: (entries: { isIntersecting: boolean }[]) => void) {}
+      observe() { this.callback([{ isIntersecting: true }]); }
+      disconnect() {}
+    } as unknown as typeof IntersectionObserver;
+    let focused = true;
+    vi.spyOn(document, "hasFocus").mockImplementation(() => focused);
+    vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    let sequence = 0;
+    const frames = new Map<number, FrameRequestCallback>();
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.set(++sequence, callback);
+      return sequence;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => { frames.delete(id); });
+    const paint = (time: number) => act(() => {
+      const ready = [...frames.values()];
+      frames.clear();
+      ready.forEach((callback) => callback(time));
+    });
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, motion: "full" }, loaded: true });
+    const view = render(<Welcome />);
+    paint(20);
+    // The globe and the character field each keep a frame in hand.
+    expect(frames.size).toBe(2);
+
+    focused = false;
+    act(() => { window.dispatchEvent(new Event("blur")); });
+    paint(40);
+    expect(frames.size).toBe(0);
+
+    focused = true;
+    act(() => { window.dispatchEvent(new Event("focus")); });
+    expect(frames.size).toBe(2);
+    view.unmount();
+    globalThis.IntersectionObserver = Observer;
+  });
+
+  it("shrugs off a host that cannot watch for dev servers", async () => {
+    vi.spyOn(ipc, "devServersWatch").mockRejectedValue(new Error("no watcher"));
+    vi.spyOn(events.devServersChanged, "listen").mockRejectedValue(new Error("no events"));
+    const { unmount } = render(<Welcome />);
+    await act(async () => { await Promise.resolve(); });
+    unmount();
+    await Promise.resolve();
+    expect(ipc.devServersWatch).toHaveBeenLastCalledWith(false);
+  });
+
   it("picks an instant tour reveal when motion is off", () => {
     expect(tourRevealBehavior(true)).toBe("auto");
     expect(tourRevealBehavior(false)).toBe("smooth");

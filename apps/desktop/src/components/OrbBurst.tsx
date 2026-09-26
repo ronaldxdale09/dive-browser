@@ -219,6 +219,8 @@ const POINTER_DEFAULTS: Required<Pointer> = { drag: 100, damping: 20 };
 
 export interface OrbBurstProps {
   animated?: boolean;
+  /** Stop altogether while the window is in the background, rather than slowing down. */
+  pauseWhenBlurred?: boolean;
   style?: CSSProperties;
   className?: string;
   width?: number;
@@ -275,6 +277,7 @@ export function OrbBurst(props: OrbBurstProps) {
     spread: clampN(num(ball_.spread, 100), 40, 180) / 100,
     turn: (clampN(num(ball_.turn, 0), -180, 180) * Math.PI) / 180,
     tilt: (clampN(num(ball_.tilt, 0), -90, 90) * Math.PI) / 180,
+    pause: props.pauseWhenBlurred ? 1 : 0,
   };
 
   const sizeRef = useRef(size);
@@ -309,9 +312,14 @@ export function OrbBurst(props: OrbBurstProps) {
       // rate; there is no one to see the difference and the CPU is someone
       // else's. `dt` is still measured from the last paint, so the phase
       // advances by real time rather than slowing down.
-      if (!reduced && !document.hasFocus() && now - lastDrawn < BLURRED_FRAME_MS) {
-        raf = requestAnimationFrame(render);
-        return;
+      if (!reduced && !document.hasFocus()) {
+        // Where the orb is decoration, as on the start page, a window in the
+        // background stops it altogether; focus starts it again below.
+        if (vRef.current.pause) return;
+        if (now - lastDrawn < BLURRED_FRAME_MS) {
+          raf = requestAnimationFrame(render);
+          return;
+        }
       }
       lastDrawn = now;
       const dt = reduced ? 0 : Math.min(0.05, (now - last) / 1000);
@@ -429,6 +437,14 @@ export function OrbBurst(props: OrbBurstProps) {
       raf = requestAnimationFrame(render);
     };
 
+    // A loop paused for a blurred window resumes on focus, from now.
+    const onFocus = () => {
+      if (reduced || document.hidden || !vRef.current.pause) return;
+      cancelAnimationFrame(raf);
+      last = performance.now();
+      raf = requestAnimationFrame(render);
+    };
+
     const onDown = (e: PointerEvent) => {
       if ((vRef.current.drag as number) <= 0) return;
       drag.active = true;
@@ -477,6 +493,7 @@ export function OrbBurst(props: OrbBurstProps) {
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
 
     if (!document.hidden) raf = requestAnimationFrame(render);
     return () => {
@@ -486,6 +503,7 @@ export function OrbBurst(props: OrbBurstProps) {
       resize.disconnect();
       window.removeEventListener("resize", invalidate);
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
