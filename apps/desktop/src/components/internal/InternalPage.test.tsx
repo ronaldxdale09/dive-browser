@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../../lib/ipc";
 import { ipc } from "../../lib/ipc";
@@ -94,7 +94,7 @@ describe("capture internal page", () => {
   it("loads the full-resolution image and keeps annotation edits undoable", async () => {
     render(<InternalPage tab={capture} />);
 
-    const canvas = await screen.findByRole("img", { name: "Full-page capture preview" });
+    const canvas = await screen.findByRole("application", { name: "Full-page capture preview" });
     expect(canvas.getAttribute("width")).toBe("1200");
     expect(canvas.getAttribute("height")).toBe("3600");
     const undo = screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement;
@@ -111,16 +111,47 @@ describe("capture internal page", () => {
 
   it("commits a drag at the release position when no move event arrives", async () => {
     render(<InternalPage tab={capture} />);
-    const canvas = await screen.findByRole("img", { name: "Full-page capture preview" });
+    const canvas = await screen.findByRole("application", { name: "Full-page capture preview" });
     fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 20, clientY: 30 });
     fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 180, clientY: 130 });
     expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(false);
     expect(context.strokeRect).toHaveBeenCalledWith(40, 60, 320, 200);
   });
 
+  it("draws from the keyboard: arrows move the crosshair, Enter starts and finishes, Escape cancels", async () => {
+    render(<InternalPage tab={capture} />);
+    const canvas = await screen.findByRole("application", { name: "Full-page capture preview" });
+    fireEvent.click(screen.getByRole("button", { name: "Rectangle" }));
+    act(() => canvas.focus());
+    // The crosshair starts in the middle of the 1200 × 3600 capture.
+    fireEvent.keyDown(canvas, { key: "Enter" });
+    fireEvent.keyDown(canvas, { key: "ArrowRight", shiftKey: true });
+    fireEvent.keyDown(canvas, { key: "ArrowDown", shiftKey: true });
+    fireEvent.keyDown(canvas, { key: "Enter" });
+    expect(context.strokeRect).toHaveBeenCalledWith(600, 1800, 100, 100);
+    expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.keyDown(canvas, { key: "Enter" });
+    fireEvent.keyDown(canvas, { key: "ArrowLeft" });
+    fireEvent.keyDown(canvas, { key: "Escape" });
+    expect(screen.getByText("1 edit")).toBeTruthy();
+  });
+
+  it("crops by the numbers", async () => {
+    render(<InternalPage tab={capture} />);
+    await screen.findByRole("application", { name: "Full-page capture preview" });
+    fireEvent.click(screen.getByRole("button", { name: "Crop" }));
+    const form = screen.getByRole("form", { name: "Crop by the numbers" });
+    fireEvent.change(within(form).getByLabelText("X"), { target: { value: "100" } });
+    fireEvent.change(within(form).getByLabelText("Width"), { target: { value: "300" } });
+    fireEvent.change(within(form).getByLabelText("Height"), { target: { value: "200" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Apply crop" }));
+    expect(screen.getByText("Crop: 300 × 200 px")).toBeTruthy();
+  });
+
   it("keeps text placement focused through the initiating mouse click", async () => {
     render(<InternalPage tab={capture} />);
-    const canvas = await screen.findByRole("img", { name: "Full-page capture preview" });
+    const canvas = await screen.findByRole("application", { name: "Full-page capture preview" });
     fireEvent.click(screen.getByRole("button", { name: "Text" }));
     const runsMouseDefault = fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 20, clientY: 30 });
     // JSDOM does not implement the browser's default mousedown focus transfer.
@@ -137,7 +168,7 @@ describe("capture internal page", () => {
 
   it.each(["Pen", "Highlight"])("preserves batched %s strokes that return to their starting point", async (tool) => {
     render(<InternalPage tab={capture} />);
-    const canvas = await screen.findByRole("img", { name: "Full-page capture preview" });
+    const canvas = await screen.findByRole("application", { name: "Full-page capture preview" });
     fireEvent.click(screen.getByRole("button", { name: tool }));
     act(() => {
       fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 20, clientY: 30 });
@@ -152,7 +183,7 @@ describe("capture internal page", () => {
 
   it("cancels a gesture without committing it on a later release", async () => {
     render(<InternalPage tab={capture} />);
-    const canvas = await screen.findByRole("img", { name: "Full-page capture preview" });
+    const canvas = await screen.findByRole("application", { name: "Full-page capture preview" });
     fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 20, clientY: 30 });
     fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 180, clientY: 130 });
     fireEvent.pointerCancel(canvas, { pointerId: 1 });
@@ -162,7 +193,7 @@ describe("capture internal page", () => {
 
   it("copies the edited pixels and reports completion", async () => {
     render(<InternalPage tab={capture} />);
-    await screen.findByRole("img", { name: "Full-page capture preview" });
+    await screen.findByRole("application", { name: "Full-page capture preview" });
 
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
@@ -174,7 +205,7 @@ describe("capture internal page", () => {
   it("says so when the clipboard refuses the picture, instead of Copied", async () => {
     vi.mocked(ipc.clipboardWritePng).mockRejectedValue(new Error("the clipboard is unavailable"));
     render(<InternalPage tab={capture} />);
-    await screen.findByRole("img", { name: "Full-page capture preview" });
+    await screen.findByRole("application", { name: "Full-page capture preview" });
 
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await waitFor(() => expect(useBrowser.getState().error).toBe("the clipboard is unavailable"));
@@ -185,7 +216,7 @@ describe("capture internal page", () => {
     let downloaded = "";
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { downloaded = this.download; });
     render(<InternalPage tab={capture} />);
-    await screen.findByRole("img", { name: "Full-page capture preview" });
+    await screen.findByRole("application", { name: "Full-page capture preview" });
 
     fireEvent.click(screen.getByRole("combobox", { name: "PDF page size" }));
     fireEvent.click(screen.getByRole("option", { name: "A4 pages" }));

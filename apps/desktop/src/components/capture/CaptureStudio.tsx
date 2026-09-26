@@ -30,6 +30,22 @@ const TOOLS: { id: Tool; label: string; icon: typeof Crop }[] = [
   { id: "blur", label: "Blur sensitive content", icon: EyeOff },
 ];
 
+/** How far one arrow press moves the keyboard crosshair, in screen pixels; ⇧ moves ten times as far. */
+export const CROSSHAIR_STEP = 10;
+
+/**
+ * Where an arrow key moves the keyboard crosshair, in image pixels: a step
+ * that is the same distance on screen at any zoom, kept on the image. Null
+ * for any other key.
+ */
+export function crosshairMove(at: Point, key: string, big: boolean, zoom: number, size: { width: number; height: number }): Point | null {
+  const step = (CROSSHAIR_STEP * (big ? 10 : 1)) / Math.max(0.05, zoom);
+  const dx = key === "ArrowRight" ? step : key === "ArrowLeft" ? -step : 0;
+  const dy = key === "ArrowDown" ? step : key === "ArrowUp" ? -step : 0;
+  if (dx === 0 && dy === 0) return null;
+  return { x: Math.min(size.width, Math.max(0, at.x + dx)), y: Math.min(size.height, Math.max(0, at.y + dy)) };
+}
+
 /** Label for revealing the source file in this OS's file manager. */
 export function originalInFileManagerLabel(windows = isWindows()): string {
   return `Original in ${fileManagerName(windows)}`;
@@ -55,6 +71,12 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
     setDraft(next);
   };
   const [textAt, setTextAt] = useState<Point | null>(null);
+  // The keyboard's pointer: shown while the canvas has focus, moved with the
+  // arrow keys, and Enter starts or ends a shape where it is. Drawing was
+  // pointer-only before, so a keyboard could not annotate or crop at all.
+  const [crosshair, setCrosshair] = useState<Point | null>(null);
+  const [canvasFocused, setCanvasFocused] = useState(false);
+  const [said, setSaid] = useState("");
   // "fit" follows the width of the viewing area so the whole page is in
   // view without hiding under the settings panel; a number is a zoom the
   // person chose with the footer controls.
@@ -101,7 +123,8 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
     for (const operation of draft ? [...operations, draft] : operations) if (operation.kind !== "crop") drawMark(ctx, canvas, operation);
     const crop = draft?.kind === "crop" ? normalized(draft) : cropRegion;
     if (crop) drawCrop(ctx, canvas, crop);
-  }, [cropRegion, draft, image, operations]);
+    if (canvasFocused && crosshair) drawCrosshair(ctx, canvas, crosshair);
+  }, [canvasFocused, crosshair, cropRegion, draft, image, operations]);
   useEffect(paint, [paint]);
 
   const undoOne = useCallback(() => setOperations((current) => {
@@ -131,6 +154,13 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
     const bounds = event.currentTarget.getBoundingClientRect();
     return { x: ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * event.currentTarget.width, y: ((event.clientY - bounds.top) / Math.max(1, bounds.height)) * event.currentTarget.height };
   };
+  const begin = (start: Point) => {
+    updateDraft(tool === "crop"
+      ? { kind: "crop", x1: start.x, y1: start.y, x2: start.x, y2: start.y }
+      : tool === "pen" || tool === "highlight"
+        ? { kind: tool, color, width, x1: start.x, y1: start.y, x2: start.x, y2: start.y, points: [start] }
+        : { kind: tool, color, width, x1: start.x, y1: start.y, x2: start.x, y2: start.y });
+  };
   const onDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     // Suppress compatibility mousedown's focus transfer: text placement mounts
     // and focuses an input during this pointerdown.
@@ -138,11 +168,47 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
     const start = point(event);
     if (tool === "text") { setTextAt(start); return; }
     event.currentTarget.setPointerCapture?.(event.pointerId);
-    updateDraft(tool === "crop"
-      ? { kind: "crop", x1: start.x, y1: start.y, x2: start.x, y2: start.y }
-      : tool === "pen" || tool === "highlight"
-        ? { kind: tool, color, width, x1: start.x, y1: start.y, x2: start.x, y2: start.y, points: [start] }
-        : { kind: tool, color, width, x1: start.x, y1: start.y, x2: start.x, y2: start.y });
+    begin(start);
+  };
+  /** Keep a finished shape unless it is too small to be one. */
+  const finish = (completed: Operation): boolean => {
+    if (!validRegion(completed)) return false;
+    setOperations((operations) => [...operations, completed]);
+    setRedo([]);
+    return true;
+  };
+  const onCanvasKey = (event: React.KeyboardEvent<HTMLCanvasElement>) => {
+    if (!image || event.metaKey || event.ctrlKey) return;
+    const at = crosshair ?? { x: image.naturalWidth / 2, y: image.naturalHeight / 2 };
+    const moved = crosshairMove(at, event.key, event.shiftKey, zoom, { width: image.naturalWidth, height: image.naturalHeight });
+    if (moved) {
+      event.preventDefault();
+      setCrosshair(moved);
+      const current = draftRef.current;
+      if (current) updateDraft(extendDraft(current, moved));
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (tool === "text") { setTextAt(at); return; }
+      const current = draftRef.current;
+      if (!current) {
+        begin(at);
+        setSaid(`Started at ${Math.round(at.x)}, ${Math.round(at.y)}. Move with the arrow keys, then press Enter to finish.`);
+        return;
+      }
+      const kept = finish(extendDraft(current, at));
+      updateDraft(null);
+      setSaid(kept ? `${TOOLS.find((item) => item.id === tool)?.label ?? "Shape"} added.` : "Too small to keep; move further before pressing Enter.");
+      return;
+    }
+    if (event.key === "Escape" && draftRef.current) {
+      // Only the shape in progress; with none, Escape is left to the page.
+      event.preventDefault();
+      event.stopPropagation();
+      updateDraft(null);
+      setSaid("Cancelled.");
+    }
   };
   const extendDraft = (current: Operation, next: Point): Operation => ({
     ...current, x2: next.x, y2: next.y,
@@ -155,14 +221,17 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
   };
   const onUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const current = draftRef.current;
-    if (current) {
-      const completed = extendDraft(current, point(event));
-      if (validRegion(completed)) {
-        setOperations((operations) => [...operations, completed]);
-        setRedo([]);
-      }
-    }
+    if (current) finish(extendDraft(current, point(event)));
     updateDraft(null);
+  };
+  /** Add a crop or a blur from typed coordinates, clamped to the image. */
+  const addRegion = (kind: "crop" | "blur", region: { x: number; y: number; width: number; height: number }) => {
+    if (!image) return false;
+    const x1 = Math.min(image.naturalWidth, Math.max(0, region.x));
+    const y1 = Math.min(image.naturalHeight, Math.max(0, region.y));
+    const x2 = Math.min(image.naturalWidth, x1 + Math.max(0, region.width));
+    const y2 = Math.min(image.naturalHeight, y1 + Math.max(0, region.height));
+    return finish(kind === "crop" ? { kind, x1, y1, x2, y2 } : { kind, color, width, x1, y1, x2, y2 });
   };
   const commitText = (value: string) => {
     if (textAt && value.trim()) {
@@ -229,13 +298,22 @@ export function CaptureStudio({ src, sourceUrl, sourceTitle }: CaptureStudioProp
           {loadError && <div role="alert" className="mx-auto mt-20 max-w-md rounded-xl border border-danger/30 bg-danger/10 p-5 text-sm text-danger">{loadError}</div>}
           {!image && !loadError && <div role="status" className="mx-auto mt-20 w-fit rounded-full border border-line bg-surface px-4 py-2 text-xs text-ink-3">Loading full-resolution capture…</div>}
           {image && <div className="relative mx-auto w-fit shadow-2xl" style={{ width: image.naturalWidth * zoom }}>
-            <canvas ref={canvasRef} role="img" aria-label="Full-page capture preview" width={image.naturalWidth} height={image.naturalHeight} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => updateDraft(null)} className="block w-full touch-none bg-white" style={{ cursor: tool === "text" ? "text" : "crosshair" }} />
+            {/* An application, so a screen reader hands it the arrow keys it
+                draws with instead of reading on with them. */}
+            <canvas ref={canvasRef} role="application" tabIndex={0} aria-label="Full-page capture preview" aria-describedby="capture-keys" width={image.naturalWidth} height={image.naturalHeight}
+              onFocus={() => { setCanvasFocused(true); setCrosshair((at) => at ?? { x: image.naturalWidth / 2, y: image.naturalHeight / 2 }); }}
+              onBlur={() => setCanvasFocused(false)}
+              onKeyDown={onCanvasKey}
+              onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => updateDraft(null)} className="block w-full touch-none bg-white outline-none focus-visible:ring-2 focus-visible:ring-highlight" style={{ cursor: tool === "text" ? "text" : "crosshair" }} />
+            <p id="capture-keys" className="sr-only">Arrow keys move the crosshair, with Shift for bigger steps. Enter starts a shape and Enter again finishes it; Escape cancels it.</p>
+            <span role="status" className="sr-only">{said}</span>
             {textAt && <input autoFocus aria-label="Annotation text" placeholder="Type a note…" className="absolute min-w-40 rounded-md border border-highlight bg-surface px-2 py-1 text-xs text-ink shadow-xl outline-none" style={{ left: `${(textAt.x / image.naturalWidth) * 100}%`, top: `${(textAt.y / image.naturalHeight) * 100}%` }} onKeyDown={(event) => { if (event.key === "Enter") commitText(event.currentTarget.value); if (event.key === "Escape") setTextAt(null); }} onBlur={(event) => commitText(event.currentTarget.value)} />}
           </div>}
         </section>
         <aside aria-label="Tool settings" className="flex w-52 shrink-0 flex-col border-l border-line bg-surface p-4">
           <h2 className="text-xs font-semibold">{TOOLS.find((item) => item.id === tool)?.label}</h2><p className="mt-1 text-[11px] leading-relaxed text-ink-3">{toolHint(tool)}</p>
           {tool !== "crop" && tool !== "blur" && <><label className="mt-5 text-[10px] font-medium tracking-wider text-ink-3 uppercase">Color</label><div className="mt-2 flex flex-wrap gap-2">{COLORS.map((choice) => <button key={choice} type="button" aria-label={`Color ${COLOR_NAMES[choice] ?? choice}`} title={COLOR_NAMES[choice] ?? choice} aria-pressed={color === choice} onClick={() => setColor(choice)} className="size-6 rounded-full border border-line-2 aria-pressed:ring-2 aria-pressed:ring-highlight" style={{ background: choice }} />)}</div><label htmlFor="capture-stroke" className="mt-5 flex justify-between text-[10px] font-medium tracking-wider text-ink-3 uppercase"><span>Stroke</span><span>{width}px</span></label><input id="capture-stroke" aria-label="Stroke width" type="range" min="2" max="20" value={width} onChange={(event) => setWidth(Number(event.target.value))} className="mt-2 accent-[var(--color-highlight)]" /></>}
+          {image && (tool === "crop" || tool === "blur") && <RegionFields key={tool} kind={tool} image={{ width: image.naturalWidth, height: image.naturalHeight }} initial={tool === "crop" ? cropRegion : null} onApply={(region) => addRegion(tool, region)} />}
           <div className="mt-auto space-y-2 border-t border-line pt-4 text-[11px] text-ink-3">{image && <p>{image.naturalWidth.toLocaleString()} × {image.naturalHeight.toLocaleString()} px</p>}{cropRegion && <p className="text-highlight">Crop: {Math.round(cropRegion.width)} × {Math.round(cropRegion.height)} px</p>}<button type="button" disabled={!src} onClick={() => src && void ipc.downloadsReveal(src)} className="flex items-center gap-1.5 text-ink-2 hover:text-ink disabled:opacity-40"><Icon icon={FolderOpen} size={13} /> {originalInFileManagerLabel()}</button></div>
         </aside>
       </div>
@@ -265,6 +343,56 @@ function normalized(region: Region) { return { x: Math.min(region.x1, region.x2)
 function offsetMark(mark: Mark, x: number, y: number): Mark {
   const shifted = { ...mark, x1: mark.x1 - x, x2: mark.x2 - x, y1: mark.y1 - y, y2: mark.y2 - y };
   return mark.points ? { ...shifted, points: mark.points.map((point) => ({ x: point.x - x, y: point.y - y })) } : shifted;
+}
+
+/**
+ * A crop or a blur by the numbers: X, Y, width and height in image pixels.
+ * The exact way to frame one, and a way that needs no pointer.
+ */
+function RegionFields({ kind, image, initial, onApply }: { kind: "crop" | "blur"; image: { width: number; height: number }; initial: ReturnType<typeof normalized> | null; onApply: (region: { x: number; y: number; width: number; height: number }) => boolean }) {
+  const start = initial ?? (kind === "crop" ? { x: 0, y: 0, width: image.width, height: image.height } : { x: 0, y: 0, width: Math.min(200, image.width), height: Math.min(100, image.height) });
+  const [values, setValues] = useState({ x: Math.round(start.x), y: Math.round(start.y), width: Math.round(start.width), height: Math.round(start.height) });
+  const [refused, setRefused] = useState(false);
+  const field = (key: keyof typeof values, label: string) => (
+    <label className="flex flex-col gap-1 text-[10px] font-medium tracking-wider text-ink-3 uppercase">
+      {label}
+      <input type="number" min={0} step={1} value={values[key]} onChange={(event) => setValues((current) => ({ ...current, [key]: Number(event.target.value) }))} className="h-7 rounded-md border border-line bg-surface-2 px-2 font-mono text-[11px] tracking-normal text-ink normal-case outline-none focus:border-highlight/60" />
+    </label>
+  );
+  return (
+    <form
+      aria-label={kind === "crop" ? "Crop by the numbers" : "Blur by the numbers"}
+      className="mt-5"
+      onSubmit={(event) => {
+        event.preventDefault();
+        setRefused(!onApply(values));
+      }}
+    >
+      <div className="grid grid-cols-2 gap-2">
+        {field("x", "X")}
+        {field("y", "Y")}
+        {field("width", "Width")}
+        {field("height", "Height")}
+      </div>
+      <button type="submit" className="mt-2 h-7 w-full rounded-lg border border-line-2 bg-surface-3 text-[11px] text-ink hover:brightness-125">
+        {kind === "crop" ? "Apply crop" : "Blur this area"}
+      </button>
+      {refused && <p role="alert" className="mt-2 text-[11px] text-warn">That area is too small or lies outside the capture.</p>}
+    </form>
+  );
+}
+
+function drawCrosshair(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, at: Point) {
+  const line = Math.max(2, canvas.width / 900);
+  const arm = line * 12;
+  ctx.save();
+  ctx.lineWidth = line * 2.5;
+  ctx.strokeStyle = "rgba(0,0,0,.7)";
+  ctx.beginPath(); ctx.moveTo(at.x - arm, at.y); ctx.lineTo(at.x + arm, at.y); ctx.moveTo(at.x, at.y - arm); ctx.lineTo(at.x, at.y + arm); ctx.stroke();
+  ctx.lineWidth = line;
+  ctx.strokeStyle = "#fff";
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawCrop(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, crop: ReturnType<typeof normalized>) {

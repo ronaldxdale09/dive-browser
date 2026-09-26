@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { fitZoom } from "./CaptureStudio";
+import { crosshairMove, fitZoom } from "./CaptureStudio";
+
+describe("crosshairMove", () => {
+  const size = { width: 1000, height: 500 };
+  it("steps the same distance on screen at any zoom, ten times with Shift", () => {
+    expect(crosshairMove({ x: 100, y: 100 }, "ArrowRight", false, 1, size)).toEqual({ x: 110, y: 100 });
+    expect(crosshairMove({ x: 100, y: 100 }, "ArrowDown", true, 1, size)).toEqual({ x: 100, y: 200 });
+    expect(crosshairMove({ x: 100, y: 100 }, "ArrowLeft", false, 0.5, size)).toEqual({ x: 80, y: 100 });
+  });
+  it("stays on the image and ignores other keys", () => {
+    expect(crosshairMove({ x: 5, y: 495 }, "ArrowLeft", true, 1, size)).toEqual({ x: 0, y: 495 });
+    expect(crosshairMove({ x: 5, y: 495 }, "ArrowDown", true, 1, size)).toEqual({ x: 5, y: 500 });
+    expect(crosshairMove({ x: 5, y: 5 }, "Enter", false, 1, size)).toBeNull();
+  });
+});
 
 describe("fitZoom", () => {
   it("scales a wide capture down to the viewing area, less its padding", () => {
