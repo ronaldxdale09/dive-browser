@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use tokio::sync::{broadcast, oneshot, watch};
 
 use crate::error::CdpError;
+use crate::worlds::Worlds;
 
 /// Something that can deliver an outgoing CDP message to the browser.
 ///
@@ -59,6 +60,10 @@ struct Inner {
     next_id: AtomicU64,
     navigation_epoch: AtomicU64,
     main_frame: Mutex<Option<String>>,
+    /// Isolated worlds' execution contexts, from the `Runtime` events that
+    /// name them. Updated here, before any subscriber sees the event, so a
+    /// `bindingCalled` that follows a context's creation always finds it.
+    worlds: Mutex<Worlds>,
     pending: Pending,
     /// Shared, not cloned: a session has a dozen subscribers per tab, and
     /// `broadcast` hands each its own copy of the value. A deep clone of the
@@ -277,6 +282,7 @@ impl CdpSession {
                 next_id: AtomicU64::new(FIRST_ID),
                 navigation_epoch: AtomicU64::new(0),
                 main_frame: Mutex::new(None),
+                worlds: Mutex::new(Worlds::default()),
                 pending: Mutex::new(HashMap::new()),
                 events,
                 filtered: Mutex::new(Vec::new()),
@@ -437,6 +443,9 @@ impl CdpSession {
             }
             (None, Some(method)) => {
                 let params = msg.params.unwrap_or(Value::Null);
+                if method.starts_with("Runtime.executionContext") {
+                    self.worlds().observe(&method, &params);
+                }
                 if method == "Page.frameNavigated"
                     && params["frame"]["parentId"].is_null()
                     && let Some(id) = params["frame"]["id"].as_str()
@@ -482,6 +491,37 @@ impl CdpSession {
     /// Whether [`close`](Self::close) has been called.
     pub fn is_closed(&self) -> bool {
         *self.inner.closed.borrow()
+    }
+
+    /// The top frame's id, once a navigation of it has been seen.
+    pub fn main_frame(&self) -> Option<String> {
+        self.inner
+            .main_frame
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The isolated world a live execution context belongs to, or `None`
+    /// for the page's own world, a context already gone, or one never
+    /// reported. `Runtime.enable` reports every context there is, so with
+    /// the domain on, `None` for a context that calls a binding means it is
+    /// not one of ours.
+    pub fn context_world(&self, context_id: i64) -> Option<String> {
+        self.worlds().world_of(context_id).map(str::to_owned)
+    }
+
+    /// The newest live context of `world` in the top frame's document.
+    pub fn world_context(&self, world: &str) -> Option<i64> {
+        let frame = self.main_frame()?;
+        self.worlds().context_in(world, &frame)
+    }
+
+    fn worlds(&self) -> std::sync::MutexGuard<'_, Worlds> {
+        self.inner
+            .worlds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Latest observed navigation generation, independent of listener lag.
@@ -654,6 +694,34 @@ mod tests {
         serde_json::from_str::<Value>(raw).unwrap()["id"]
             .as_u64()
             .unwrap()
+    }
+
+    #[test]
+    fn isolated_world_contexts_are_known_before_any_subscriber_sees_them() {
+        let session = CdpSession::new(FakeTransport::default());
+        let mut events = session.subscribe_to(&["Runtime.bindingCalled"]);
+        let feed = |message: Value| session.handle_incoming(&message.to_string()).unwrap();
+        feed(
+            json!({"method": "Page.frameNavigated", "params": {"frame": {"id": "top", "url": "https://a.test/"}}}),
+        );
+        feed(
+            json!({"method": "Runtime.executionContextCreated", "params": {"context": {"id": 1, "name": "", "auxData": {"isDefault": true, "frameId": "top"}}}}),
+        );
+        feed(
+            json!({"method": "Runtime.executionContextCreated", "params": {"context": {"id": 2, "name": "dive", "auxData": {"isDefault": false, "frameId": "top", "type": "isolated"}}}}),
+        );
+        feed(
+            json!({"method": "Runtime.bindingCalled", "params": {"name": "b", "payload": "{}", "executionContextId": 2}}),
+        );
+        let event = events.try_recv().unwrap();
+        let context = event.params["executionContextId"].as_i64().unwrap();
+        assert_eq!(session.context_world(context).as_deref(), Some("dive"));
+        assert_eq!(session.context_world(1), None, "the page's own world");
+        assert_eq!(session.main_frame().as_deref(), Some("top"));
+        assert_eq!(session.world_context("dive"), Some(2));
+        feed(json!({"method": "Runtime.executionContextsCleared", "params": {}}));
+        assert_eq!(session.context_world(2), None);
+        assert_eq!(session.world_context("dive"), None);
     }
 
     #[tokio::test]

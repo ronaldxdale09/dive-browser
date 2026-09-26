@@ -1,7 +1,12 @@
 // Mirror video audio without rerouting speaker output. Each injection owns a session.
+//
+// Runs in Dive's isolated world (see page_world.rs): the binding is only
+// there, so the page cannot feed the model audio of its own, and each
+// message also carries the session's nonce.
 window.__diveSubtitles?.stop();
 delete window.__diveSubtitleError;
 const BINDING = "__AUDIO_BINDING__";
+const NONCE = __NONCE__;
 let stopped = false;
 let ctx, source, node, stream, video, overlay, line, monitor, hideTimer;
 let epoch = 0, currentSource = "", captureStarted = 0, lastFrame = 0;
@@ -14,7 +19,7 @@ function listen(target, name, fn, list = removers) {
   list.push(() => target.removeEventListener(name, fn, true));
 }
 function send(message) {
-  if (!stopped) window[BINDING](JSON.stringify({ ...message, epoch }));
+  if (!stopped) window[BINDING](JSON.stringify({ ...message, epoch, nonce: NONCE }));
 }
 function largestVideo() {
   return [...document.querySelectorAll("video")]

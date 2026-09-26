@@ -55,6 +55,10 @@ pub struct BackupVisit {
 /// One remembered form field.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct BackupFormEntry {
+    /// The site the entry is offered on. Missing from backups made before
+    /// entries kept their site; those restore as entries offered nowhere.
+    #[serde(default)]
+    pub origin: String,
     pub field: String,
     pub value: String,
 }
@@ -157,6 +161,7 @@ pub fn export(state: &AppState) -> AppResult<Backup> {
             .form_entries(profile.id)?
             .into_iter()
             .map(|entry| BackupFormEntry {
+                origin: entry.origin,
                 field: entry.field,
                 value: entry.value,
             })
@@ -290,6 +295,13 @@ pub fn restore(
         .iter()
         .filter(|entry| crate::browser_import::keep_form_entry(&entry.field, &entry.value))
         .map(|entry| ImportedFormEntry {
+            // A backup is a file anyone could have edited; a site that does
+            // not read as one is kept as no site rather than trusted.
+            origin: if entry.origin.is_empty() {
+                String::new()
+            } else {
+                crate::passwords::origin_of(&entry.origin).unwrap_or_default()
+            },
             field: entry.field.clone(),
             value: entry.value.clone(),
             uses: 1,
@@ -440,6 +452,7 @@ mod tests {
                 last_visited_at: "2026-09-02T00:00:00Z".into(),
             }],
             form_entries: vec![BackupFormEntry {
+                origin: "https://example.com".into(),
                 field: "email".into(),
                 value: "me@example.com".into(),
             }],

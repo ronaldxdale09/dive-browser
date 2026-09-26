@@ -4,6 +4,12 @@
 // for, and on the shape of the name/id/placeholder otherwise, which is what
 // most checkouts actually have. Nothing here reads a form or reports one: it
 // only writes what the person picked, once, when they picked it.
+//
+// It runs in Dive's isolated world (see page_world.rs). In the page's own
+// world, a page could define `__diveFillCard` before this did, mark the
+// script installed, and be handed the card. The host also asks first which
+// kinds of field the page has, and sends only the values those take: a page
+// with no card-number field is never sent a card number.
 
 (function () {
   if (window.__diveAutofillInstalled) return;
@@ -89,6 +95,11 @@
     return filled;
   };
 
+  // Which of `kinds` the page has a field for, by the same matching a fill
+  // uses.
+  window.__diveAutofillKinds = (kinds) =>
+    (Array.isArray(kinds) ? kinds : []).filter((kind) => Object.hasOwn(MATCHERS, kind) && find(kind, new Set()));
+
   window.__diveFillAddress = (address) => {
     const [first, ...rest] = (address.name || "").split(/\s+/);
     const lines = (address.street || "").split(/\n+/);
@@ -111,15 +122,17 @@
   };
 
   window.__diveFillCard = (card) => {
-    const month = String(card.expiry_month).padStart(2, "0");
-    const year = String(card.expiry_year);
+    // The host sends only what the page has fields for, so the expiry may
+    // not have come at all.
+    const month = card.expiry_month ? String(card.expiry_month).padStart(2, "0") : "";
+    const year = card.expiry_year ? String(card.expiry_year) : "";
     return {
       filled: fill([
         ["cc-name", card.cardholder],
         ["cc-number", card.number],
         ["cc-exp-month", month],
         ["cc-exp-year", year],
-        ["cc-exp", `${month}/${year.slice(-2)}`],
+        ["cc-exp", month && year ? `${month}/${year.slice(-2)}` : ""],
       ]),
     };
   };

@@ -269,6 +269,27 @@ const MIGRATIONS: &[&str] = &[
         updated_at TEXT NOT NULL
     );
     CREATE INDEX downloads_profile ON downloads(profile_id, started_at);",
+    // v20: form entries belong to the site they were typed on. Offered
+    // everywhere, they handed what was typed on one site to every other
+    // site with a field of the same name. The uniqueness moves to include
+    // the origin, which SQLite can only do by rebuilding the table. Rows
+    // from before know no site: they keep an empty origin, which no page
+    // ever has, so they stay listed in Settings but are offered nowhere.
+    "CREATE TABLE form_entries_by_site (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        origin TEXT NOT NULL DEFAULT '',
+        field TEXT NOT NULL,
+        value TEXT NOT NULL,
+        uses INTEGER NOT NULL DEFAULT 1,
+        last_used_at TEXT,
+        UNIQUE(profile_id, origin, field, value)
+    );
+    INSERT INTO form_entries_by_site (id, profile_id, origin, field, value, uses, last_used_at)
+        SELECT id, profile_id, '', field, value, uses, last_used_at FROM form_entries;
+    DROP TABLE form_entries;
+    ALTER TABLE form_entries_by_site RENAME TO form_entries;
+    CREATE INDEX form_entries_site ON form_entries(profile_id, origin, field);",
 ];
 
 /// Migrations whose data moves run in Rust, after their SQL and inside the
@@ -707,6 +728,10 @@ pub struct FormEntry {
     pub id: String,
     /// The profile the entry belongs to.
     pub profile_id: String,
+    /// `scheme://host[:port]` of the site it was typed on, and the only site
+    /// it is offered to. Empty for an entry that came from before sites were
+    /// kept, or from another browser, which is offered nowhere.
+    pub origin: String,
     /// The field's `name` (or `id`) attribute, lower-cased.
     pub field: String,
     /// What was typed.
@@ -720,6 +745,9 @@ pub struct FormEntry {
 /// A form entry on its way in from another browser.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedFormEntry {
+    /// The site it belongs to, or empty when the source never said (another
+    /// browser's autofill is not kept per site).
+    pub origin: String,
     /// The field's name, any case.
     pub field: String,
     /// What was typed.
@@ -1817,25 +1845,31 @@ impl Store {
     /// Everything remembered from forms in `profile`.
     pub fn form_entries(&self, profile: ProfileId) -> Result<Vec<FormEntry>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, profile_id, field, value, uses, last_used_at FROM form_entries
+            "SELECT id, profile_id, origin, field, value, uses, last_used_at FROM form_entries
              WHERE profile_id = ?1 ORDER BY field, uses DESC, value",
         )?;
         let rows = stmt.query_map([profile.to_string()], form_entry_row)?;
         readable_rows(rows, "form entries")
     }
 
-    /// Entries for one field whose value starts with `prefix` (case-folded),
-    /// most used first, at most `limit`.
+    /// Entries typed on `origin` for one field whose value starts with
+    /// `prefix` (case-folded), most used first, at most `limit`. An empty
+    /// origin matches nothing: entries that know no site are offered nowhere.
     pub fn form_entries_for(
         &self,
         profile: ProfileId,
+        origin: &str,
         field: &str,
         prefix: &str,
         limit: usize,
     ) -> Result<Vec<FormEntry>> {
+        if origin.is_empty() {
+            return Ok(Vec::new());
+        }
         let mut stmt = self.conn.prepare(
-            "SELECT id, profile_id, field, value, uses, last_used_at FROM form_entries
-             WHERE profile_id = ?1 AND field = ?2 AND lower(value) LIKE ?3 ESCAPE '\\'
+            "SELECT id, profile_id, origin, field, value, uses, last_used_at FROM form_entries
+             WHERE profile_id = ?1 AND origin = ?5 AND field = ?2
+               AND lower(value) LIKE ?3 ESCAPE '\\'
              ORDER BY uses DESC, last_used_at DESC, value LIMIT ?4",
         )?;
         let escaped = prefix
@@ -1848,32 +1882,36 @@ impl Store {
                 profile.to_string(),
                 field.to_lowercase(),
                 format!("{escaped}%"),
-                i64::try_from(limit).unwrap_or(i64::MAX)
+                i64::try_from(limit).unwrap_or(i64::MAX),
+                origin
             ],
             form_entry_row,
         )?;
         readable_rows(rows, "form entries")
     }
 
-    /// Remember that `value` was submitted in `field`; a repeat counts a use.
+    /// Remember that `value` was submitted in `field` on `origin`; a repeat
+    /// counts a use.
     pub fn record_form_entry(
         &self,
         profile: ProfileId,
+        origin: &str,
         field: &str,
         value: &str,
         at: Timestamp,
     ) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO form_entries (id, profile_id, field, value, uses, last_used_at)
-             VALUES (?1, ?2, ?3, ?4, 1, ?5)
-             ON CONFLICT(profile_id, field, value) DO UPDATE SET
+            "INSERT INTO form_entries (id, profile_id, origin, field, value, uses, last_used_at)
+             VALUES (?1, ?2, ?6, ?3, ?4, 1, ?5)
+             ON CONFLICT(profile_id, origin, field, value) DO UPDATE SET
                  uses = uses + 1, last_used_at = excluded.last_used_at",
             params![
                 uuid::Uuid::now_v7().to_string(),
                 profile.to_string(),
                 field.to_lowercase(),
                 value,
-                at.to_rfc3339()
+                at.to_rfc3339(),
+                origin
             ],
         )?;
         Ok(())
@@ -1890,9 +1928,9 @@ impl Store {
         let mut added = 0;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO form_entries (id, profile_id, field, value, uses, last_used_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT(profile_id, field, value) DO NOTHING",
+                "INSERT INTO form_entries (id, profile_id, origin, field, value, uses, last_used_at)
+                 VALUES (?1, ?2, ?7, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(profile_id, origin, field, value) DO NOTHING",
             )?;
             for e in entries {
                 added += stmt.execute(params![
@@ -1901,7 +1939,8 @@ impl Store {
                     e.field.to_lowercase(),
                     e.value,
                     e.uses.max(1),
-                    e.last_used_at.map(Timestamp::to_rfc3339)
+                    e.last_used_at.map(Timestamp::to_rfc3339),
+                    e.origin
                 ])?;
             }
         }
@@ -3126,10 +3165,11 @@ fn form_entry_row(row: &Row<'_>) -> rusqlite::Result<FormEntry> {
     Ok(FormEntry {
         id: row.get(0)?,
         profile_id: row.get(1)?,
-        field: row.get(2)?,
-        value: row.get(3)?,
-        uses: row.get(4)?,
-        last_used_at: row.get(5)?,
+        origin: row.get(2)?,
+        field: row.get(3)?,
+        value: row.get(4)?,
+        uses: row.get(5)?,
+        last_used_at: row.get(6)?,
     })
 }
 
@@ -3157,26 +3197,29 @@ mod tests {
         let store = Store::in_memory().unwrap();
         let profile = store.ensure_default_profile().unwrap();
         let now = Timestamp::now();
+        let site = "https://a.test";
         store
-            .record_form_entry(profile.id, "Email", "dale@example.com", now)
+            .record_form_entry(profile.id, site, "Email", "dale@example.com", now)
             .unwrap();
         store
-            .record_form_entry(profile.id, "email", "dale@example.com", now)
+            .record_form_entry(profile.id, site, "email", "dale@example.com", now)
             .unwrap();
         store
-            .record_form_entry(profile.id, "email", "dee@example.com", now)
+            .record_form_entry(profile.id, site, "email", "dee@example.com", now)
             .unwrap();
         let added = store
             .import_form_entries(
                 profile.id,
                 &[
                     ImportedFormEntry {
+                        origin: site.into(),
                         field: "email".into(),
                         value: "dale@example.com".into(),
                         uses: 9,
                         last_used_at: None,
                     },
                     ImportedFormEntry {
+                        origin: site.into(),
                         field: "name".into(),
                         value: "Dale".into(),
                         uses: 0,
@@ -3198,14 +3241,14 @@ mod tests {
             ]
         );
         let d = store
-            .form_entries_for(profile.id, "EMAIL", "D", 10)
+            .form_entries_for(profile.id, site, "EMAIL", "D", 10)
             .unwrap();
         assert_eq!(d.len(), 2);
         assert_eq!(d[0].value, "dale@example.com");
         // `%` and `_` in the prefix are literal.
         assert!(
             store
-                .form_entries_for(profile.id, "email", "%", 10)
+                .form_entries_for(profile.id, site, "email", "%", 10)
                 .unwrap()
                 .is_empty()
         );
@@ -3216,6 +3259,76 @@ mod tests {
         assert!(store.remove_form_entry(&d[1].id).unwrap());
         assert_eq!(store.clear_form_entries(profile.id).unwrap(), 2);
         assert!(store.form_entries(profile.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn form_entries_are_offered_only_to_the_site_they_were_typed_on() {
+        let store = Store::in_memory().unwrap();
+        let profile = store.ensure_default_profile().unwrap().id;
+        let now = Timestamp::now();
+        store
+            .record_form_entry(profile, "https://bank.test", "email", "me@bank.test", now)
+            .unwrap();
+        store
+            .record_form_entry(profile, "https://shop.test", "email", "me@bank.test", now)
+            .unwrap();
+        store
+            .import_form_entries(
+                profile,
+                &[ImportedFormEntry {
+                    origin: String::new(),
+                    field: "email".into(),
+                    value: "imported@a.test".into(),
+                    uses: 3,
+                    last_used_at: None,
+                }],
+            )
+            .unwrap();
+        let on = |origin: &str| {
+            store
+                .form_entries_for(profile, origin, "email", "", 10)
+                .unwrap()
+                .into_iter()
+                .map(|e| (e.origin, e.value, e.uses))
+                .collect::<Vec<_>>()
+        };
+        // The same value typed on two sites is two entries, each its own.
+        assert_eq!(
+            on("https://bank.test"),
+            vec![("https://bank.test".into(), "me@bank.test".into(), 1)]
+        );
+        assert!(on("https://evil.test").is_empty());
+        // An entry that knows no site is listed, but offered nowhere, not
+        // even to a caller that names no site.
+        assert!(on("").is_empty());
+        assert_eq!(store.form_entries(profile).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn form_entries_from_before_sites_keep_no_site_after_the_migration() {
+        let store = Store {
+            conn: Connection::open_in_memory().unwrap(),
+            scope: std::cell::RefCell::new(None),
+        };
+        store.migrate_to(19).unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO form_entries (id, profile_id, field, value, uses, last_used_at)
+                 VALUES ('e1', 'p1', 'email', 'old@a.test', 4, NULL)",
+                [],
+            )
+            .unwrap();
+        store.migrate().unwrap();
+        let rows: Vec<(String, String, u32)> = store
+            .conn
+            .prepare("SELECT id, origin, uses FROM form_entries")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap();
+        assert_eq!(rows, vec![("e1".into(), String::new(), 4)]);
     }
 
     #[test]
@@ -3779,7 +3892,7 @@ mod tests {
             .upsert_credential("kept", w.profile_id, "https://a.test", "me", now)
             .unwrap();
         store
-            .record_form_entry(other.id, "email", "me@a.test", now)
+            .record_form_entry(other.id, "https://a.test", "email", "me@a.test", now)
             .unwrap();
         store
             .set_setting(&format!("profile_workspace:{}", other.id), "x")
@@ -4592,11 +4705,12 @@ mod tests {
             .record_visit("https://yesterday.dev/", "", now - time::Duration::days(1))
             .unwrap();
         store
-            .record_form_entry(profile, "email", "new@a.test", now)
+            .record_form_entry(profile, "https://a.test", "email", "new@a.test", now)
             .unwrap();
         store
             .record_form_entry(
                 profile,
+                "https://a.test",
                 "email",
                 "old@a.test",
                 now - time::Duration::days(3),
@@ -4849,6 +4963,7 @@ mod tests {
             0x9762_4673_813a_bd0d,
             0xa00b_35bd_dbcb_9176,
             0x8a65_c444_ca82_336e,
+            0xac98_458c_bcb1_d76d,
         ];
         assert!(
             MIGRATIONS.len() >= SHIPPED.len(),

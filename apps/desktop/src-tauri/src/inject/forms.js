@@ -1,10 +1,16 @@
 // Form entries in the page: as the person types into a named text field,
-// asks the host what it remembers for that field and shows the matches in
-// a small list under the field; on submit, reports what was typed so the
-// host can remember it. Passwords, cards and hidden fields never take part.
+// asks the host what it remembers for that field on this site and shows the
+// matches in a small list under the field; on submit, reports what was typed
+// so the host can remember it for this site. Passwords, cards and hidden
+// fields never take part.
 //
-// The nonce lives in this closure; page script cannot forge a report or
-// hand the list its own values.
+// This runs in Dive's isolated world (see page_world.rs), so the page can
+// neither call the binding nor replace anything this script calls, and the
+// matches reach nothing but this closure and the closed shadow root below.
+// Only the person's own typing, click or keys ask for or pick an entry:
+// events page script dispatches are never `isTrusted`, so a page cannot
+// open the list, walk it and pick a value to read back out of its field.
+// The nonce lives in this closure as a second lock.
 
 (function () {
   if (window.top !== window) return; // main frame only
@@ -74,7 +80,7 @@
     listEl.addEventListener("mousedown", (e) => e.preventDefault()); // keep focus in the field
     listEl.addEventListener("click", (e) => {
       const li = e.target instanceof Element ? e.target.closest("li") : null;
-      if (li) choose(Number(li.dataset.index));
+      if (li && e.isTrusted) choose(Number(li.dataset.index));
     });
     root.append(style, listEl, live);
     document.documentElement.appendChild(host);
@@ -173,25 +179,33 @@
     clearTimeout(debounce);
     debounce = setTimeout(() => send({ kind: "query", field, prefix: el.value.slice(0, 200), token: forToken }), 80);
   };
-  // Typing asks; plain focus after a click asks too, with an empty prefix,
-  // so an empty field shows what is remembered for it.
-  let lastInteraction = 0;
-  const noteInteraction = () => {
-    lastInteraction = Date.now();
-  };
-  document.addEventListener("pointerdown", noteInteraction, true);
-  document.addEventListener("keydown", noteInteraction, true);
+  // Typing asks; a click on an empty field asks too, with an empty prefix,
+  // so it shows what is remembered for it. Both have to be the person's: an
+  // `input` event the page (or this script's own fill) dispatches, or focus
+  // the page moved there itself, asks nothing.
+  let pressed = { at: 0, target: null };
+  document.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (e.isTrusted) pressed = { at: Date.now(), target: e.composedPath()[0] || e.target };
+    },
+    true,
+  );
+  const reaches = (from, el) =>
+    from === el || (from instanceof Node && [...(el.labels || [])].some((label) => label.contains(from)));
   document.addEventListener(
     "input",
     (e) => {
-      if (e.target instanceof HTMLInputElement) ask(e.target);
+      if (e.isTrusted && e.target instanceof HTMLInputElement) ask(e.target);
     },
     true,
   );
   document.addEventListener(
     "focusin",
     (e) => {
-      if (e.target instanceof HTMLInputElement && Date.now() - lastInteraction < 1500 && !e.target.value) ask(e.target);
+      const el = e.target;
+      if (!(el instanceof HTMLInputElement) || el.value) return;
+      if (Date.now() - pressed.at < 1500 && reaches(pressed.target, el)) ask(el);
     },
     true,
   );
@@ -205,7 +219,7 @@
   document.addEventListener(
     "keydown",
     (e) => {
-      if (!target || items.length === 0 || e.target !== target) return;
+      if (!e.isTrusted || !target || items.length === 0 || e.target !== target) return;
       if (e.key === "ArrowDown") {
         e.preventDefault();
         select(selected + 1);

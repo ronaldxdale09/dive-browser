@@ -11,22 +11,26 @@
 // before/after diff it can turn into a CSS change rather than a screenshot of
 // the result.
 //
+// It runs in Dive's isolated world (see page_world.rs), where the page can
+// neither call its binding nor stand in for `__divePicker`. React's fibers
+// are the page's own JavaScript, out of this world's sight, so the component
+// is asked of react-bridge.js in the page's world (component-bridge.js).
+//
 // @dive-include role-name.js
 // @dive-include actionability.js
-// @dive-include react-context.js
+// @dive-include component-bridge.js
 // @dive-include css-path.js
 
 (function () {
-  // Never reuse an engine found on `window`: a page could have put it there
-  // to substitute its own or to be handed the nonce. Each injection installs
-  // a fresh engine whose nonce lives only in this closure; an earlier
-  // genuine install is asked to stand down so its listeners do not linger.
+  // Each injection installs a fresh engine whose nonce lives only in this
+  // closure; an earlier install is asked to stand down so its listeners do
+  // not linger.
   const previous = window.__divePicker;
   if (previous && typeof previous.cancel === "function") {
     try {
       previous.cancel();
     } catch {
-      // A page-owned object may throw; it is being replaced either way.
+      // It is being replaced either way.
     }
   }
 

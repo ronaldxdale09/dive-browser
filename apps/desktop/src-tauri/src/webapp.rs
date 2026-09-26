@@ -93,14 +93,17 @@ pub struct WebAppProbe {
     pub installed: Option<WebApp>,
 }
 
+/// Run a probe in Dive's isolated world (see `page_world`). It reads the
+/// page's DOM and fetches as the page, but in the page's own world a page
+/// could replace `fetch`, `URL` or `JSON` and have the probe return whatever
+/// name, start URL and icon it liked.
 async fn evaluate(session: &dive_cdp::CdpSession, script: String) -> AppResult<Value> {
-    let result = session
-        .call(
-            "Runtime.evaluate",
-            json!({ "expression": script, "awaitPromise": true, "returnByValue": true }),
-        )
-        .await
-        .map_err(|e| AppError::new(format!("could not read the page's manifest: {e}")))?;
+    let result = crate::page_world::evaluate(
+        session,
+        json!({ "expression": script, "awaitPromise": true, "returnByValue": true }),
+    )
+    .await
+    .map_err(|e| AppError::new(format!("could not read the page's manifest: {e}")))?;
     if let Some(text) = result["exceptionDetails"]["exception"]["description"].as_str() {
         return Err(AppError::new(format!("manifest probe threw: {text}")));
     }

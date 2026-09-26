@@ -3,12 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FormEntry } from "../../lib/ipc";
 import { ipc } from "../../lib/ipc";
 import { useBrowser } from "../../store/browser";
-import { FormEntries, fieldLabel, groupByField } from "./FormEntries";
+import { FormEntries, fieldLabel, groupByField, siteLabel } from "./FormEntries";
 
 const entries: FormEntry[] = [
-  { id: "f1", profile_id: "p", field: "email", value: "dale@example.com", uses: 12, last_used_at: null },
-  { id: "f2", profile_id: "p", field: "email", value: "dee@example.com", uses: 1, last_used_at: null },
-  { id: "f3", profile_id: "p", field: "billing_city", value: "Cebu", uses: 3, last_used_at: null },
+  { id: "f1", profile_id: "p", origin: "https://shop.example", field: "email", value: "dale@example.com", uses: 12, last_used_at: null },
+  { id: "f2", profile_id: "p", origin: "https://shop.example", field: "email", value: "dee@example.com", uses: 1, last_used_at: null },
+  { id: "f3", profile_id: "p", origin: "", field: "billing_city", value: "Cebu", uses: 3, last_used_at: null },
 ];
 const initial = useBrowser.getState();
 
@@ -31,6 +31,9 @@ describe("Settings › Form entries", () => {
     expect(screen.getByText("billing city")).toBeTruthy();
     expect(screen.getByText("used 12 times")).toBeTruthy();
     expect(screen.getByText("used once")).toBeTruthy();
+    // Each entry says where it is offered, or that it is not.
+    expect(screen.getAllByText("shop.example")).toHaveLength(2);
+    expect(screen.getByText("not offered")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Forget dee@example.com" }));
     expect(ipc.formsDelete).toHaveBeenCalledWith("f2");
     await waitFor(() => expect(screen.queryByText("dee@example.com")).toBeNull());
@@ -60,6 +63,8 @@ describe("Settings › Form entries", () => {
     expect(fieldLabel("shipping_postalCode")).toBe("shipping postal code");
     expect(fieldLabel("firstName")).toBe("first name");
     expect(fieldLabel("")).toBe("field");
+    expect(siteLabel("https://a.test:8443")).toBe("a.test:8443");
+    expect(siteLabel("")).toBe("not offered");
     expect(groupByField(entries).map((g) => [g.field, g.entries.length])).toEqual([
       ["email", 2],
       ["billing_city", 1],

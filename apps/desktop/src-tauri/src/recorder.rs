@@ -1,7 +1,11 @@
 //! Record the person's own clicks and typing in a tab as steps with
 //! accessibility-style locators, so a manual flow can become a Playwright
-//! test or a macro. A small script in the page reports events through a
-//! CDP binding; this module turns them into steps.
+//! test or a macro. A small script in Dive's isolated world (see
+//! `page_world`) reports events through a CDP binding only that world has;
+//! this module turns them into steps.
+//!
+//! A step's role ends up inside generated test code, so only the roles the
+//! script records are accepted, whatever a report says.
 
 use dive_cdp::{CdpEvent, CdpSession};
 use dive_core::TabId;
@@ -17,6 +21,27 @@ use crate::state::AppState;
 
 /// Name of the binding the page script calls.
 const BINDING: &str = "__diveRecord";
+
+/// The roles a recorded step can have: the ones `recorder.js` records
+/// (`INTERACTIVE` there). A report naming anything else is not from it.
+const ROLES: &[&str] = &[
+    "link",
+    "button",
+    "checkbox",
+    "radio",
+    "switch",
+    "searchbox",
+    "textbox",
+    "combobox",
+    "listbox",
+    "option",
+    "tab",
+    "menuitem",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "slider",
+    "spinbutton",
+];
 const MAX_FIELD: usize = 4 * 1024;
 const MAX_BINDING_PAYLOAD: usize = 1024 * 1024;
 
@@ -78,29 +103,23 @@ pub async fn start(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) 
     // Subscribe before setup calls: a fast navigation or interaction between
     // injection and task startup must not disappear from the recording.
     let mut events = session.subscribe();
-    session
-        .call("Runtime.addBinding", json!({"name": BINDING}))
+    crate::page_world::add_binding(&session, BINDING)
         .await
         .map_err(AppError::new)?;
     session
         .call("Page.enable", json!({}))
         .await
         .map_err(AppError::new)?;
-    let registered = session
-        .call(
-            "Page.addScriptToEvaluateOnNewDocument",
-            json!({"source": script}),
-        )
+    let registered = crate::page_world::add_script(&session, &script)
         .await
         .map_err(AppError::new)?;
     let script_id = registered["identifier"]
         .as_str()
         .ok_or_else(|| AppError::new("CDP did not return a recorder script identifier"))?
         .to_owned();
-    if let Err(error) = session
-        .call("Runtime.evaluate", json!({"expression": script}))
-        .await
-    {
+    // The document already showing has no copy yet: evaluate one into
+    // Dive's world of it.
+    if let Err(error) = crate::page_world::evaluate(&session, json!({"expression": script})).await {
         let _ = session
             .call(
                 "Page.removeScriptToEvaluateOnNewDocument",
@@ -125,6 +144,14 @@ pub async fn start(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) 
                     if !state.buffers.is_recording(tab_id) {
                         break;
                     }
+                    // A step reported from anywhere but Dive's world is not
+                    // the recorder's, whatever its nonce says.
+                    if event.method == "Runtime.bindingCalled"
+                        && event.params["name"] == BINDING
+                        && crate::page_world::calling_context(&session, &event).is_none()
+                    {
+                        continue;
+                    }
                     if let Some(step) = map_event(&event, &nonce) {
                         state.buffers.push_recorded(tab_id, step.clone());
                         let _ = RecorderEvent { tab_id, step }.emit(&app);
@@ -143,12 +170,11 @@ pub async fn start(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession) 
 /// Stop page-side recording and remove the bootstrap registered for later
 /// documents. Cleanup is best effort because the tab may already be closing.
 pub async fn stop(session: CdpSession, script_id: Option<String>) {
-    let _ = session
-        .call(
-            "Runtime.evaluate",
-            json!({"expression": "window.__diveRecorderNonce = null"}),
-        )
-        .await;
+    let _ = crate::page_world::evaluate(
+        &session,
+        json!({"expression": "window.__diveRecorderNonce = null"}),
+    )
+    .await;
     if let Some(identifier) = script_id {
         let _ = session
             .call(
@@ -176,14 +202,13 @@ pub fn map_event(event: &CdpEvent, nonce: &str) -> Option<RecordedStep> {
             if !matches!(kind, "click" | "type") {
                 return None;
             }
+            let role = payload["role"].as_str().unwrap_or_default();
+            if !ROLES.contains(&role) {
+                return None;
+            }
             Some(RecordedStep {
                 kind: kind.to_owned(),
-                role: payload["role"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .chars()
-                    .take(64)
-                    .collect(),
+                role: role.to_owned(),
                 name: payload["name"]
                     .as_str()
                     .unwrap_or_default()
@@ -267,7 +292,7 @@ mod tests {
         )
         .unwrap();
         assert!(step.masked && step.value.is_empty());
-        let huge = json!({"name": BINDING, "payload": format!("{{\"kind\":\"type\",\"value\":\"{}\",\"nonce\":\"n1\"}}", "x".repeat(MAX_FIELD + 10))});
+        let huge = json!({"name": BINDING, "payload": format!("{{\"kind\":\"type\",\"role\":\"textbox\",\"value\":\"{}\",\"nonce\":\"n1\"}}", "x".repeat(MAX_FIELD + 10))});
         let step = map_event(
             &CdpEvent {
                 navigation_epoch: 0,
@@ -285,6 +310,37 @@ mod tests {
             params: json!({"name": BINDING, "payload": "x".repeat(MAX_BINDING_PAYLOAD + 1)}),
         };
         assert!(map_event(&oversized, "n1").is_none());
+    }
+
+    #[test]
+    fn only_the_roles_the_script_records_are_accepted() {
+        let step = |role: &str| {
+            map_event(
+                &CdpEvent {
+                    navigation_epoch: 0,
+                    method: "Runtime.bindingCalled".into(),
+                    params: json!({"name": BINDING, "payload": json!({
+                        "kind": "click", "role": role, "name": "Go", "at": 1, "nonce": "n1"
+                    }).to_string()}),
+                },
+                "n1",
+            )
+        };
+        assert_eq!(step("button").unwrap().role, "button");
+        // A role is spliced into generated test code; one that is not a
+        // role at all never becomes a step.
+        assert!(step("button'); process.exit(1); ('").is_none());
+        assert!(step("generic").is_none());
+        assert!(step("").is_none());
+    }
+
+    #[test]
+    fn the_accepted_roles_are_the_ones_the_script_records() {
+        let script = script("n1");
+        let start = script.find("const INTERACTIVE = new Set([").unwrap();
+        let end = start + script[start..].find("]);").unwrap();
+        let listed: Vec<&str> = script[start..end].split('"').skip(1).step_by(2).collect();
+        assert_eq!(listed, ROLES);
     }
 
     #[test]

@@ -91,7 +91,7 @@ impl Registry {
         };
         let method = value["method"].as_str().unwrap_or_default();
         if method == "Runtime.bindingCalled" {
-            if value["params"]["name"] != "__diveActivityChanged" {
+            if value["params"]["name"] != BINDING {
                 return;
             }
             let Some(payload) = value["params"]["payload"]
@@ -165,27 +165,30 @@ impl Drop for Pending {
 }
 /// Install after permission wrappers and before first navigation. Failure leaves
 /// the session unready, so automatic discard stays disabled for it.
+///
+/// Two scripts: the guard in the page's own world, whose JavaScript is what
+/// it watches, and the forwarder in Dive's isolated world (see `page_world`),
+/// which alone has the binding and the nonce and passes the guard's changes
+/// on. The forwarder is registered first, so it is listening by the time the
+/// guard first speaks at document start.
 pub async fn attach(registry: &Registry, tab: TabId, nonce: &str, session: &dive_cdp::CdpSession) {
-    let source = include_str!("inject/activity-guard.js").replace(
-        "__NONCE__",
-        &serde_json::to_string(nonce).unwrap_or_default(),
-    );
+    let (forwarder, guard) = scripts(nonce);
     // The domains are on already (the tab's setup enables them once), and
     // the view is still on its blank document, which the first navigation
-    // replaces: registering is all it takes. Both calls go out together.
+    // replaces: registering is all it takes. The calls go out together, in
+    // this order.
     let setup = async {
-        let (binding, script) = tokio::join!(
-            session.call(
-                "Runtime.addBinding",
-                serde_json::json!({"name":"__diveActivityChanged"}),
-            ),
+        let (binding, forwarding, guarding) = tokio::join!(
+            crate::page_world::add_binding(session, BINDING),
+            crate::page_world::add_script(session, &forwarder),
             session.call(
                 "Page.addScriptToEvaluateOnNewDocument",
-                serde_json::json!({"source":source}),
+                serde_json::json!({"source": guard}),
             ),
         );
         binding?;
-        script?;
+        forwarding?;
+        guarding?;
         Ok::<(), dive_cdp::CdpError>(())
     };
     match tokio::time::timeout(std::time::Duration::from_secs(5), setup).await {
@@ -198,6 +201,18 @@ pub async fn attach(registry: &Registry, tab: TabId, nonce: &str, session: &dive
         // alive for ever, which somebody should know about.
         Err(_) => tracing::warn!(%tab, "activity instrumentation timed out; keeping tab active"),
     }
+}
+
+/// The binding the forwarder calls when the page's activity changed.
+const BINDING: &str = "__diveActivityChanged";
+
+/// The forwarder, carrying the nonce, and the guard, which carries none.
+fn scripts(nonce: &str) -> (String, &'static str) {
+    let forwarder = include_str!("inject/activity-forward.js").replace(
+        "__NONCE__",
+        &serde_json::to_string(nonce).unwrap_or_default(),
+    );
+    (forwarder, include_str!("inject/activity-guard.js"))
 }
 
 /// A single atomic renderer snapshot, with no sensitive form contents.
@@ -280,6 +295,68 @@ mod tests {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         (dive_cdp::CdpSession::new(Outbox(tx)), rx)
     }
+    #[test]
+    fn only_the_forwarder_in_dives_world_carries_the_nonce() {
+        let (forwarder, guard) = scripts("n-1");
+        assert!(forwarder.contains(r#"JSON.stringify({ nonce: "n-1" })"#));
+        assert!(!guard.contains("n-1") && !guard.contains("__NONCE__"));
+        assert!(
+            !guard.contains(BINDING),
+            "the page's world never names the binding"
+        );
+        assert!(guard.contains("\"__dive-activity-changed\""));
+        assert!(forwarder.contains("\"__dive-activity-changed\""));
+    }
+
+    #[tokio::test]
+    async fn the_forwarder_and_its_binding_are_registered_before_the_guard() {
+        let (session, mut calls) = session();
+        let registry = Registry::default();
+        let tab = TabId::new();
+        let nonce = registry.begin(tab);
+        let task = {
+            let session = session.clone();
+            let nonce = nonce.clone();
+            tokio::spawn(async move {
+                attach(&Registry::default(), tab, &nonce, &session).await;
+            })
+        };
+        let mut sent = Vec::new();
+        for _ in 0..3 {
+            let call = calls.recv().await.unwrap();
+            session
+                .handle_incoming(
+                    &serde_json::json!({"id": call["id"], "result": {"identifier": "1"}})
+                        .to_string(),
+                )
+                .unwrap();
+            sent.push(call);
+        }
+        task.await.unwrap();
+        assert_eq!(sent[0]["method"], "Runtime.addBinding");
+        assert_eq!(
+            sent[0]["params"]["executionContextName"],
+            crate::page_world::WORLD
+        );
+        assert_eq!(sent[1]["params"]["worldName"], crate::page_world::WORLD);
+        assert!(
+            sent[1]["params"]["source"]
+                .as_str()
+                .unwrap()
+                .contains(&nonce)
+        );
+        assert!(
+            sent[2]["params"].get("worldName").is_none(),
+            "the guard runs in the page's world"
+        );
+        assert!(
+            !sent[2]["params"]["source"]
+                .as_str()
+                .unwrap()
+                .contains(&nonce)
+        );
+    }
+
     #[tokio::test]
     async fn timed_out_or_malformed_activity_is_never_idle_evidence() {
         let (session, mut calls) = session();

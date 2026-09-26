@@ -1,7 +1,9 @@
-//! Saved logins in pages: a script watches login forms and talks to the host
-//! through a nonce-guarded binding. The host answers "which logins do you
-//! know for this site" with usernames only, fills a password into the page
-//! when asked, and turns a submitted login into a prompt for the chrome.
+//! Saved logins in pages: a script in Dive's isolated world (see
+//! `page_world`) watches login forms and talks to the host through a
+//! nonce-guarded binding that only that world has. The host answers "which
+//! logins do you know for this site" with usernames only, fills a password
+//! into that same world when asked, and turns a submitted login into a
+//! prompt for the chrome.
 //! A submitted password waits in memory under a token until the person
 //! answers the prompt; it never crosses into the chrome.
 
@@ -116,20 +118,8 @@ pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession)
     let mut events = session.subscribe_to(&["Runtime.bindingCalled"]);
     // Registered for every document to come, before the first navigation.
     // The view is still on its blank document, so there is no page to
-    // evaluate the script in now. Both calls go out together.
-    let setup = async {
-        let (binding, script) = tokio::join!(
-            session.call("Runtime.addBinding", json!({"name": BINDING})),
-            session.call(
-                "Page.addScriptToEvaluateOnNewDocument",
-                json!({"source": source}),
-            ),
-        );
-        binding?;
-        script?;
-        Ok::<(), dive_cdp::CdpError>(())
-    };
-    if let Err(error) = setup.await {
+    // evaluate the script in now.
+    if let Err(error) = crate::page_world::install(&session, BINDING, &source).await {
         crate::cdp_feed::setup_failed(tab_id, "saved logins", &error);
         return;
     }
@@ -140,13 +130,21 @@ pub async fn attach(app: AppHandle<Runtime>, tab_id: TabId, session: CdpSession)
             let Some(payload) = binding_payload(&event, &nonce) else {
                 continue;
             };
-            // The site is whatever document actually called, never the `url`
-            // its payload names: a page that learned the nonce could
-            // otherwise ask for another site's logins by claiming its URL.
-            let Some(origin) = caller_origin(&session, &event).await else {
+            let Some(context) = crate::page_world::calling_context(&session, &event) else {
                 continue;
             };
-            if let Err(error) = handle(&app, tab_id, &session, &nonce, &origin, payload).await {
+            // The site is whatever document actually called, never the `url`
+            // its payload names: a caller that got hold of the nonce could
+            // otherwise ask for another site's logins by claiming its URL.
+            let Some(origin) = crate::page_world::context_origin(&session, context).await else {
+                continue;
+            };
+            let caller = Caller {
+                session: &session,
+                context,
+                origin: &origin,
+            };
+            if let Err(error) = handle(&app, tab_id, &caller, &nonce, payload).await {
                 tracing::debug!(%tab_id, "saved logins request failed: {error}");
             }
         }
@@ -178,19 +176,12 @@ pub fn binding_payload(event: &CdpEvent, nonce: &str) -> Option<Value> {
     (payload["nonce"].as_str() == Some(nonce)).then_some(payload)
 }
 
-/// The origin of the document that called the binding, asked of that very
-/// execution context. `location` is unforgeable, so a page cannot answer for
-/// another site; a context already gone (the page navigated) answers nothing.
-async fn caller_origin(session: &CdpSession, event: &CdpEvent) -> Option<String> {
-    let context = event.params["executionContextId"].as_i64()?;
-    let result = session
-        .call(
-            "Runtime.evaluate",
-            json!({"expression": "location.origin", "contextId": context, "returnByValue": true}),
-        )
-        .await
-        .ok()?;
-    crate::passwords::origin_of(result["result"]["value"].as_str()?).ok()
+/// The document that called: its session, the context in Dive's world the
+/// call came from (where the answer goes), and that document's origin.
+struct Caller<'a> {
+    session: &'a CdpSession,
+    context: i64,
+    origin: &'a str,
 }
 
 fn field(payload: &Value, key: &str) -> String {
@@ -205,11 +196,11 @@ fn field(payload: &Value, key: &str) -> String {
 async fn handle(
     app: &AppHandle<Runtime>,
     tab_id: TabId,
-    session: &CdpSession,
+    caller: &Caller<'_>,
     nonce: &str,
-    origin: &str,
     payload: Value,
 ) -> AppResult<()> {
+    let origin = caller.origin;
     let Some(profile) = profile_of_tab(app, tab_id) else {
         return Ok(());
     };
@@ -221,11 +212,12 @@ async fn handle(
                 .iter()
                 .map(|c| json!({"id": c.id, "username": c.username}))
                 .collect();
-            offer(session, nonce, &list).await;
+            offer(caller.session, caller.context, nonce, &list).await;
         }
         "fill" => {
             let id = field(&payload, "id");
-            match fill(&state, session, nonce, profile, &id, Some(origin)).await {
+            let target = Target::Caller(caller.context, origin);
+            match fill(&state, caller.session, nonce, profile, &id, target).await {
                 // Only forgetting it helps, and the page cannot say so:
                 // ask the chrome to offer that.
                 Err(error) if crate::passwords::is_missing_password(&error) => {
@@ -334,49 +326,73 @@ fn submitted(
     .emit(app);
 }
 
-async fn offer(session: &CdpSession, nonce: &str, list: &[Value]) {
+/// The usernames for the site, into the world that asked. Evaluated in the
+/// calling context, which is in Dive's world: the page's own world never
+/// sees the list, nor gets to define the function that receives it.
+async fn offer(session: &CdpSession, context: i64, nonce: &str, list: &[Value]) {
     let expression = format!(
         "window.__diveCredentialsOffer && window.__diveCredentialsOffer({}, {})",
         serde_json::to_string(nonce).unwrap_or_default(),
         serde_json::to_string(list).unwrap_or_default()
     );
-    let _ = session
-        .call("Runtime.evaluate", json!({"expression": expression}))
-        .await;
+    let _ =
+        crate::page_world::evaluate_in(session, context, json!({"expression": expression})).await;
+}
+
+/// Where a fill goes: back to the context in Dive's world that asked for it,
+/// from a document of the given origin, or -- for a fill the chrome asked
+/// for -- into Dive's world of the tab's current document.
+#[derive(Clone, Copy)]
+enum Target<'a> {
+    Caller(i64, &'a str),
+    Current,
 }
 
 /// Put a saved login into the page, but only into a document of the site it
-/// was saved for. `asked_by` is the origin of the document that asked, when
-/// the page asked; a login for any other site is refused outright. The origin
-/// is checked again inside the same evaluation that fills, so a page that
-/// navigated in between never receives it.
+/// was saved for. When the page asked, the origin of the document that asked
+/// must be the login's; a login for any other site is refused outright. The
+/// origin is checked again inside the same evaluation that fills, so a page
+/// that navigated in between never receives it.
 async fn fill(
     state: &AppState,
     session: &CdpSession,
     nonce: &str,
     profile: ProfileId,
     id: &str,
-    asked_by: Option<&str>,
+    target: Target<'_>,
 ) -> AppResult<()> {
     let login = crate::passwords::list(state, profile)?
         .into_iter()
         .find(|c| c.id == id)
         .ok_or_else(|| AppError::new("no such login"))?;
-    if asked_by.is_some_and(|origin| origin != login.origin) {
+    if let Target::Caller(_, origin) = target
+        && origin != login.origin
+    {
         return Err(AppError::new("that login belongs to another site"));
     }
     let password = crate::passwords::reveal(state, profile, id)?;
-    let expression = format!(
-        "location.origin === {} && window.__diveCredentialsFill && window.__diveCredentialsFill({}, {})",
-        serde_json::to_string(&login.origin).unwrap_or_default(),
-        serde_json::to_string(nonce).unwrap_or_default(),
-        json!({"id": login.id, "username": login.username, "password": password})
-    );
-    session
-        .call("Runtime.evaluate", json!({"expression": expression}))
-        .await
-        .map_err(AppError::new)?;
+    let params = json!({
+        "expression": fill_expression(&login.origin, nonce, &login.id, &login.username, &password)
+    });
+    match target {
+        Target::Caller(context, _) => {
+            crate::page_world::evaluate_in(session, context, params).await
+        }
+        Target::Current => crate::page_world::evaluate(session, params).await,
+    }
+    .map_err(AppError::new)?;
     Ok(())
+}
+
+/// The evaluation that fills. It checks the document's origin itself, in
+/// the same turn as the fill.
+fn fill_expression(origin: &str, nonce: &str, id: &str, username: &str, password: &str) -> String {
+    format!(
+        "location.origin === {} && window.__diveCredentialsFill && window.__diveCredentialsFill({}, {})",
+        serde_json::to_string(origin).unwrap_or_default(),
+        serde_json::to_string(nonce).unwrap_or_default(),
+        json!({"id": id, "username": username, "password": password})
+    )
 }
 
 /// The chrome's answer to a save or update prompt.
@@ -426,7 +442,7 @@ pub async fn fill_into(app: AppHandle<Runtime>, tab_id: TabId, id: String) -> Ap
         .ok_or_else(|| AppError::new("saved logins are not set up on that tab"))?;
     let profile =
         profile_of_tab(&app, tab_id).ok_or_else(|| AppError::new("that tab has no profile"))?;
-    fill(&state, &session, &nonce, profile, &id, None).await
+    fill(&state, &session, &nonce, profile, &id, Target::Current).await
 }
 
 #[cfg(test)]
@@ -456,6 +472,16 @@ mod tests {
             "a".repeat(MAX_PAYLOAD)
         );
         assert!(binding_payload(&event(BINDING, &big), "n1").is_none());
+    }
+
+    #[test]
+    fn a_fill_checks_the_documents_origin_in_the_same_evaluation() {
+        let expression = fill_expression("https://a.test", "n1", "id1", "dale", "p\"w");
+        assert!(
+            expression.starts_with(r#"location.origin === "https://a.test" && "#),
+            "{expression}"
+        );
+        assert!(expression.contains(r#""password":"p\"w""#), "{expression}");
     }
 
     #[test]
