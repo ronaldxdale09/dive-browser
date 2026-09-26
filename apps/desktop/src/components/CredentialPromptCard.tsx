@@ -5,12 +5,20 @@ import { useCoversContent } from "../lib/overlay";
 import { useCredentialPrompt } from "../store/credentialPrompt";
 import { useBrowser } from "../store/browser";
 import { Icon } from "./Icon";
-import { credentialStoreName, credentialStoreTitle } from "../lib/commands";
+import { credentialStoreName, credentialStoreTitle, formatChord } from "../lib/commands";
+import { announce } from "../lib/announce";
+import type { CredentialPrompt } from "../lib/ipc";
 
 /** The site as the card names it. Plain http keeps its scheme, so a login
  * sent in the clear does not read the same as one sent over https. */
 function site(origin: string) {
   return origin.replace(/^https:\/\//, "");
+}
+
+/** The card's question, which is also its accessible name. */
+function headingOf(prompt: CredentialPrompt): string {
+  if (prompt.kind === "missing") return `${credentialStoreTitle()} no longer has the password for ${prompt.username}`;
+  return prompt.kind === "update" ? `Update the password for ${site(prompt.origin)}?` : `Save the password for ${site(prompt.origin)}?`;
 }
 
 /** Height of the floating find bar plus its gap, which owns the same corner. */
@@ -43,6 +51,14 @@ export function CredentialPromptCard({ tabId }: { tabId: string | null }) {
   const open = prompt !== undefined;
   useEffect(() => void init(), [init]);
   useCoversContent(open);
+  // The card never takes the keyboard, so nothing about it reached a screen
+  // reader: it arrived beside a page being typed into and waited unheard.
+  // It is said once, with the way to reach it; F6 lands on it.
+  const question = prompt ? headingOf(prompt) : null;
+  const token = prompt?.token;
+  useEffect(() => {
+    if (question) announce(`${question} Press ${formatChord("f6")} to answer.`);
+  }, [question, token]);
   if (!prompt) return null;
   const missing = prompt.kind === "missing";
   // Closing without deciding is "Not now": the host lets the password go
@@ -54,17 +70,16 @@ export function CredentialPromptCard({ tabId }: { tabId: string | null }) {
     e.stopPropagation();
     close();
   };
-  const heading = missing
-    ? `${credentialStoreTitle()} no longer has the password for ${prompt.username}`
-    : prompt.kind === "update"
-      ? `Update the password for ${site(prompt.origin)}?`
-      : `Save the password for ${site(prompt.origin)}?`;
+  const heading = headingOf(prompt);
   const top = 8 + (findOpen ? FIND_OFFSET : 0) + (crashed ? CRASH_OFFSET : 0);
   return (
     <div
       role="dialog"
       aria-label={heading}
       data-overlay-passive
+      // A stop for F6: the card is where the keyboard goes to answer it.
+      data-pane="prompt"
+      tabIndex={-1}
       onKeyDown={onKeyDown}
       style={{ top }}
       className="surface-enter absolute right-2 z-40 w-[340px] max-w-[calc(100%-16px)] rounded-2xl border border-line-2 bg-surface p-3 text-xs shadow-2xl"

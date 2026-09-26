@@ -39,7 +39,14 @@ pub struct MenuCommand(pub String);
 // Only the native menu bar uses this, and only macOS has one: Windows
 // draws its controls in the chrome instead.
 #[cfg(not(target_os = "windows"))]
-const FOCUS_CHROME: [&str; 12] = [
+const FOCUS_CHROME: [&str; 15] = [
+    // The agent's composer, from the page: ⌘J there means "let me type to
+    // the agent", and the composer takes the keyboard when it opens.
+    "sidecar.toggle",
+    // F6 from the page moves the keyboard into the chrome's regions; the
+    // chrome hands it back to the page itself when the walk ends there.
+    "pane.next",
+    "pane.prev",
     "palette.open",
     "tabs.search",
     "tab.new",
@@ -442,6 +449,11 @@ pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
         )?)
         .item(&item(app, "sidecar.toggle", "Agent", "CmdOrCtrl+J")?)
         .item(&item(app, "tab.devtools", "DevTools", "CmdOrCtrl+Alt+I")?)
+        .separator()
+        // The page holds the keyboard while it is up, so F6 has to be a menu
+        // accelerator to get from the page to the chrome at all.
+        .item(&item(app, "pane.next", "Next Pane", "F6")?)
+        .item(&item(app, "pane.prev", "Previous Pane", "Shift+F6")?)
         .build()?;
 
     let history = history_menu(app)?;
@@ -538,6 +550,14 @@ mod tests {
                 MenuTarget::Main,
                 "{command}"
             );
+        }
+    }
+
+    #[test]
+    fn f6_and_the_agent_take_the_keyboard_from_the_page() {
+        for command in ["pane.next", "pane.prev", "sidecar.toggle"] {
+            assert!(FOCUS_CHROME.contains(&command), "{command}");
+            assert_eq!(menu_target(command, None), MenuTarget::Focused, "{command}");
         }
     }
 

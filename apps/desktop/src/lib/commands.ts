@@ -10,6 +10,7 @@ import type { Command, Tab } from "./ipc";
 import { traceInputCommand } from "./inputTimingProbe";
 import { errorMessage } from "./errors";
 import { essentialTabs, orderTabs } from "./tabOrder";
+import { cyclePane, pageHasKeyboard } from "./panes";
 
 /** Rail positions a workspace chord can reach. */
 const WORKSPACE_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
@@ -67,7 +68,9 @@ export const UI_COMMANDS: Record<string, () => void | Promise<void>> = {
   "zoom.in": () => useBrowser.getState().zoomStep(1),
   "zoom.out": () => useBrowser.getState().zoomStep(-1),
   "zoom.reset": () => useBrowser.getState().zoomStep(0),
-  "sidecar.toggle": () => useBrowser.getState().toggle("sidecar"),
+  "sidecar.toggle": () => toggleAgent(),
+  "pane.next": () => void cyclePane(1),
+  "pane.prev": () => void cyclePane(-1),
   "sidecar.open": () => useBrowser.getState().toggle("sidecar", true),
   "share.open": () => void window.dispatchEvent(new CustomEvent(OPEN_SHARE)),
   "dock.toggle": () => useBrowser.getState().toggle("dock"),
@@ -190,6 +193,19 @@ async function toggleBookmark() {
   }
 }
 
+/**
+ * ⌘J. Open, it closes the agent only when the keyboard is already in it:
+ * with the agent open over a page someone is typing into, ⌘J means "let me
+ * talk to the agent", and closing it lost the conversation from view.
+ */
+function toggleAgent() {
+  const { open, toggle } = useBrowser.getState();
+  if (!open.sidecar) return toggle("sidecar", true);
+  const inAgent = !pageHasKeyboard() && document.activeElement?.closest('section[aria-label="Agent"]');
+  if (inAgent) return toggle("sidecar", false);
+  window.dispatchEvent(new CustomEvent(FOCUS_AGENT));
+}
+
 /** Activate the workspace sitting at `index` in the rail, if there is one. */
 function jumpToWorkspace(index: number) {
   const { workspaces, activeWorkspace, activateWorkspace, activeProfile } = useBrowser.getState();
@@ -310,6 +326,9 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+-": "zoom.out",
   "mod+0": "zoom.reset",
   "mod+j": "sidecar.toggle",
+  // F6 walks the regions of the window and the page, the way every browser's does.
+  f6: "pane.next",
+  "shift+f6": "pane.prev",
   "mod+shift+d": "dock.toggle",
   "mod+shift+m": "simulator.toggle",
   "mod+shift+u": "subtitles.open",
@@ -376,6 +395,8 @@ export const COMMAND_TITLES: Record<string, string> = {
   "zoom.out": "Zoom out",
   "zoom.reset": "Reset zoom",
   "sidecar.toggle": "Agent",
+  "pane.next": "Move to the next part of the window",
+  "pane.prev": "Move to the previous part of the window",
   "sidecar.open": "Open the agent",
   "share.open": "Share this page: QR code and address for your phone",
   "dock.toggle": "Developer dock",
@@ -544,6 +565,9 @@ const CHORDS_IN_FIELDS = new Set([
   "mod++",
   "mod+-",
   "mod+0",
+  // Leaving a field for the next region is what F6 is for.
+  "f6",
+  "shift+f6",
 ]);
 
 /** Keys that are not characters but still make sense in a chord. */

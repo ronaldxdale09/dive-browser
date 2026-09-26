@@ -55,7 +55,7 @@ export function FeatureBar({ compact = false }: { compact?: boolean }) {
   const narrow = compact || measuredNarrow;
 
   return (
-    <div ref={ref} data-narrow={narrow || undefined} className="flex h-full shrink-0 items-center gap-0.5 pr-2">
+    <div ref={ref} data-narrow={narrow || undefined} data-pane="features" className="flex h-full shrink-0 items-center gap-0.5 pr-2">
       <RecordingStatus compact={narrow} />
       {!isPrivateWindow() && <UpdatePill compact={narrow} />}
       {isPrivateWindow() && <PrivateBadge />}

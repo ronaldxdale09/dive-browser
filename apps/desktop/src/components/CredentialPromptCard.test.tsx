@@ -6,6 +6,7 @@ import { contentCoverDepth, resetContentCover } from "../lib/overlay";
 import { useBrowser } from "../store/browser";
 import { useCredentialPrompt } from "../store/credentialPrompt";
 import { CredentialPromptCard } from "./CredentialPromptCard";
+import { currentAnnouncements, resetAnnouncements } from "../lib/announce";
 
 const save: CredentialPrompt = { tab_id: "t1", kind: "save", origin: "https://github.com", username: "dale", token: "tok1" };
 const missing: CredentialPrompt = { tab_id: "t1", kind: "missing", origin: "https://github.com", username: "eve", token: "c2" };
@@ -60,6 +61,17 @@ describe("CredentialPromptCard", () => {
     // An update is for a site already saved: no "never" there.
     useCredentialPrompt.setState({ byTab: { t1: { ...save, kind: "update" } } });
     expect(screen.queryByRole("button", { name: "Never for this site" })).toBeNull();
+  });
+
+  it("says its question once without taking the keyboard, and is a stop for F6", () => {
+    useCredentialPrompt.setState({ byTab: { t1: save } });
+    render(<CredentialPromptCard tabId="t1" />);
+    expect(currentAnnouncements().polite?.text).toBe("Save the password for github.com? Press F6 to answer.");
+    const dialog = screen.getByRole("dialog", { name: "Save the password for github.com?" });
+    expect(document.activeElement).toBe(document.body);
+    expect(dialog.getAttribute("data-pane")).toBe("prompt");
+    expect(dialog.getAttribute("tabindex")).toBe("-1");
+    resetAnnouncements();
   });
 
   it("lets the login go with Not now, and names an update as such", async () => {
