@@ -312,6 +312,44 @@ fn history_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
         .build()
 }
 
+/// Label of the chrome a menu command goes to, with the keyboard moved there
+/// when the command types into it; `None` when it goes nowhere. A tab in its
+/// own window has its own chrome, and while that window is focused the
+/// shortcut is about it, not the main window's page.
+#[cfg(not(target_os = "windows"))]
+fn chrome_for_command(app: &tauri::AppHandle<Runtime>, id: &str) -> Option<String> {
+    let state = app.state::<AppState>();
+    let host = lock(&state.host);
+    let Some(host) = host.as_ref() else {
+        return Some(crate::CHROME_LABEL.to_owned());
+    };
+    let focused = host
+        .focused_popout()
+        .map(|tab| host.app_for_tab(tab).is_some());
+    match menu_target(id, focused) {
+        MenuTarget::Main => {
+            if let Err(error) = host.focus_main_chrome() {
+                tracing::warn!(%error, "focusing main window for menu failed");
+                return None;
+            }
+            Some(crate::CHROME_LABEL.to_owned())
+        }
+        MenuTarget::Focused => {
+            if FOCUS_CHROME.contains(&id) {
+                host.focus_chrome_for_menu();
+            }
+            Some(host.chrome_for_menu())
+        }
+        MenuTarget::Nowhere => {
+            tracing::debug!(
+                command = id,
+                "menu command has no page to act on in this window"
+            );
+            None
+        }
+    }
+}
+
 /// Build the menu and route its events to the chrome.
 // Only the native menu bar uses this, and only macOS has one: Windows
 // draws its controls in the chrome instead.
@@ -404,41 +442,8 @@ pub fn install(app: &App<Runtime>) -> tauri::Result<()> {
             let _ = crate::commands::window_exit_private(app.clone());
             return;
         }
-        // A tab in its own window has its own chrome; while that window is
-        // focused the shortcut is about it, not the main window's page.
-        let target = {
-            let state = app.state::<AppState>();
-            let host = lock(&state.host);
-            match host.as_ref() {
-                Some(host) => {
-                    let focused = host
-                        .focused_popout()
-                        .map(|tab| host.app_for_tab(tab).is_some());
-                    match menu_target(&id, focused) {
-                        MenuTarget::Main => {
-                            if let Err(error) = host.focus_main_chrome() {
-                                tracing::warn!(%error, "focusing main window for menu failed");
-                                return;
-                            }
-                            crate::CHROME_LABEL.to_owned()
-                        }
-                        MenuTarget::Focused => {
-                            if FOCUS_CHROME.contains(&id.as_str()) {
-                                host.focus_chrome_for_menu();
-                            }
-                            host.chrome_for_menu()
-                        }
-                        MenuTarget::Nowhere => {
-                            tracing::debug!(
-                                command = id,
-                                "menu command has no page to act on in this window"
-                            );
-                            return;
-                        }
-                    }
-                }
-                None => crate::CHROME_LABEL.to_owned(),
-            }
+        let Some(target) = chrome_for_command(app, &id) else {
+            return;
         };
         native_input_receipt("menu-focus-returned", &id);
         native_input_receipt("menu-emit-begin", &id);
