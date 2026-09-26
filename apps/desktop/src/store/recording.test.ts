@@ -211,3 +211,24 @@ describe("engine recording events", () => {
     expect(stop).toHaveBeenCalledWith("tab-1");
   });
 });
+
+describe("persisted settings", () => {
+  it("are not written again while a save reports its progress", async () => {
+    const { loadUiStorage, resetUiStorage } = await import("../lib/uiStorage");
+    vi.spyOn(ipc, "uiStateLoad").mockResolvedValue([]);
+    const write = vi.spyOn(ipc, "uiStateSet").mockResolvedValue(null);
+    try {
+      await loadUiStorage();
+      useRecording.setState({ phase: "finishing", tab: "tab-1" });
+      write.mockClear();
+      for (const progress of [0.2, 0.4, 0.6, 0.8]) applyRecordingEvent(event("progress", { progress }));
+      expect(useRecording.getState().progress).toBe(0.8);
+      expect(write).not.toHaveBeenCalled();
+      // A setting that does change is still kept.
+      useRecording.setState((s) => ({ settings: { ...s.settings, countdown: true } }));
+      expect(write).toHaveBeenCalledTimes(1);
+    } finally {
+      resetUiStorage();
+    }
+  });
+});

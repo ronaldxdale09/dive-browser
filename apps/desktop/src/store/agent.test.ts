@@ -230,6 +230,25 @@ describe("a conversation that belongs to a tab", () => {
     expect(load).not.toHaveBeenCalled();
   });
 
+  it("does not write back a conversation that only was looked at", async () => {
+    const save = vi.spyOn(ipc, "agentThreadSave").mockResolvedValue(null);
+    vi.spyOn(ipc, "agentThreadLoad").mockImplementation((tab) =>
+      Promise.resolve({ tab_id: tab, title: "kept", messages: `[{"id":"${tab}","role":"user","content":"kept"}]`, updated_at: "2026-09-01T00:00:00Z" }),
+    );
+    useAgent.setState({ tabId: null, messages: [] });
+    await useAgent.getState().loadFor("tab-a");
+    await useAgent.getState().loadFor("tab-b");
+    await useAgent.getState().loadFor("tab-a");
+    expect(save).not.toHaveBeenCalled();
+
+    // Once it changes, leaving writes it, once.
+    useAgent.setState((s) => ({ messages: [...s.messages, { id: "n", role: "user", content: "more" }] }));
+    await useAgent.getState().loadFor("tab-b");
+    await useAgent.getState().loadFor("tab-a");
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledWith("tab-a", "kept", expect.stringContaining("more"));
+  });
+
   it("leaves a run in flight alone", async () => {
     const load = vi.spyOn(ipc, "agentThreadLoad").mockResolvedValue(null);
     useAgent.setState({ tabId: "tab-1", busy: true, messages: [{ id: "1", role: "user", content: "working" }] });

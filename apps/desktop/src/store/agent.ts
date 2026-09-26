@@ -282,16 +282,35 @@ export function threadTitle(messages: Message[]): string {
 }
 
 /**
+ * The conversation as the host last has it: the tab and the very array that
+ * was saved or read back. Messages are replaced, never edited in place, so
+ * the same array means nothing has changed since.
+ */
+let persisted: { tabId: string; messages: Message[] } | null = null;
+
+/** Note that the host holds `messages` for `tabId`, as saved or as read. */
+function markPersisted(tabId: string, messages: Message[]) {
+  persisted = { tabId, messages };
+}
+
+/**
  * Keep the conversation for the tab it belongs to, if there is anything to
- * keep. A save that fails is said out loud: swallowing it meant a restart
- * quietly brought back an older conversation than the one on screen.
+ * keep and it changed since it was last saved or read back. Switching tabs
+ * wrote the whole conversation -- up to a megabyte of JSON -- every time,
+ * even when all that had happened was looking at it. A save that fails is
+ * said out loud: swallowing it meant a restart quietly brought back an older
+ * conversation than the one on screen.
  */
 function persist(state: { tabId: string | null; messages: Message[] }): void {
   const { tabId, messages } = state;
   if (!tabId) return;
+  if (persisted?.tabId === tabId && persisted.messages === messages) return;
   const keep = settledForStorage(messages);
   if (keep.length === 0) return;
+  markPersisted(tabId, messages);
   void ipc.agentThreadSave(tabId, threadTitle(keep), JSON.stringify(keep)).catch((e: unknown) => {
+    // Not saved after all, so the next chance tries again.
+    if (persisted?.messages === messages) persisted = null;
     useBrowser.getState().notify(`The agent conversation could not be saved: ${errorMessage(e)}`, 6000);
   });
 }
@@ -477,7 +496,11 @@ async function switchTo(tabId: string | null): Promise<void> {
     const thread = await ipc.agentThreadLoad(tabId);
     // The tab may have changed again while the host was answering.
     if (getState().tabId !== tabId) return;
-    setState({ messages: thread ? parseThread(thread.messages) : [] });
+    const messages = thread ? parseThread(thread.messages) : [];
+    setState({ messages });
+    // What was just read back is what the host has; leaving it unchanged
+    // must not write it again.
+    markPersisted(tabId, messages);
   } catch {
     // A conversation we cannot read back is not worth an error in the
     // panel; the tab simply starts a new one.

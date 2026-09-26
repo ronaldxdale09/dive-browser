@@ -22,6 +22,11 @@ export const uiStorage: Storage = {
   },
   setItem(key: string, value: string) {
     const text = String(value);
+    // A persisted store writes itself back on every change to any of its
+    // state, not just the part it keeps: the recorder rewrote its settings
+    // on each progress tick of a save. Only a value that changed is worth a
+    // write to the profile store.
+    if (entries.get(key) === text) return;
     entries.set(key, text);
     if (backed) void ipc.uiStateSet(key, text).catch(() => undefined);
   },
