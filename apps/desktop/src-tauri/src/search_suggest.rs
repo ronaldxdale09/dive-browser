@@ -9,7 +9,6 @@
 //! session whatever the preference says, and the request carries no cookies,
 //! no referrer and no history -- just the letters typed.
 
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde_json::Value;
@@ -59,22 +58,18 @@ fn endpoint_for(engine: &str) -> Option<&'static str> {
         .map(|(_, template)| *template)
 }
 
-/// The one client every completion request goes through.
+/// The one client every completion request goes through, for the network
+/// settings in force.
 ///
 /// A client owns its connection pool, so building one per request opened a
 /// fresh TLS connection to the engine for every keystroke; shared, the
 /// connection from the last letter is still open for the next. It still keeps
 /// no cookie store, so sharing it carries nothing from one query to the next.
-fn client() -> AppResult<&'static reqwest::Client> {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    if let Some(client) = CLIENT.get() {
-        return Ok(client);
-    }
-    let built = reqwest::Client::builder()
-        .timeout(TIMEOUT)
-        .build()
-        .map_err(AppError::new)?;
-    Ok(CLIENT.get_or_init(|| built))
+fn client(network: &crate::netconfig::NetworkConfig) -> AppResult<reqwest::Client> {
+    static CLIENT: crate::http_client::Cached = crate::http_client::Cached::new();
+    CLIENT
+        .get(network, |builder| builder.timeout(TIMEOUT))
+        .map_err(AppError::new)
 }
 
 /// The completions in an `OpenSearch` reply, cleaned up.
@@ -133,7 +128,11 @@ pub fn parse(body: &str, typed: &str) -> Vec<String> {
 /// Ask the engine what this query might be. An engine that is slow, down or
 /// unparseable yields nothing rather than an error the address bar would
 /// have to show.
-pub async fn suggest(engine: &str, query: &str) -> AppResult<Vec<String>> {
+pub async fn suggest(
+    network: &crate::netconfig::NetworkConfig,
+    engine: &str,
+    query: &str,
+) -> AppResult<Vec<String>> {
     let query = query.trim();
     if query.is_empty() || query.chars().count() > MAX_QUERY {
         return Ok(Vec::new());
@@ -145,7 +144,7 @@ pub async fn suggest(engine: &str, query: &str) -> AppResult<Vec<String>> {
         "{query}",
         &url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>(),
     );
-    let response = match client()?.get(&url).send().await {
+    let response = match crate::http_client::send_retrying(client(network)?.get(&url)).await {
         Ok(response) => response,
         Err(error) => {
             tracing::debug!(%engine, "suggestions unavailable: {error}");
@@ -201,16 +200,38 @@ mod tests {
         assert!(endpoint_for("google").unwrap().contains("oe=utf-8"));
     }
 
-    #[test]
-    fn every_request_shares_one_client() {
-        assert!(std::ptr::eq(client().unwrap(), client().unwrap()));
-    }
-
     #[tokio::test]
     async fn an_empty_or_oversized_query_asks_nobody() {
-        assert!(suggest("duckduckgo", "   ").await.unwrap().is_empty());
+        assert!(
+            suggest(
+                &crate::netconfig::NetworkConfig::default(),
+                "duckduckgo",
+                "   "
+            )
+            .await
+            .unwrap()
+            .is_empty()
+        );
         let long = "x".repeat(MAX_QUERY + 1);
-        assert!(suggest("duckduckgo", &long).await.unwrap().is_empty());
-        assert!(suggest("custom", "weather").await.unwrap().is_empty());
+        assert!(
+            suggest(
+                &crate::netconfig::NetworkConfig::default(),
+                "duckduckgo",
+                &long
+            )
+            .await
+            .unwrap()
+            .is_empty()
+        );
+        assert!(
+            suggest(
+                &crate::netconfig::NetworkConfig::default(),
+                "custom",
+                "weather"
+            )
+            .await
+            .unwrap()
+            .is_empty()
+        );
     }
 }

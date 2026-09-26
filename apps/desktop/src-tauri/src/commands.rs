@@ -3612,16 +3612,20 @@ pub(crate) async fn search_suggest(
     if crate::private_session::is_private() {
         return Ok(Vec::new());
     }
-    let (enabled, engine) = {
+    let (enabled, engine, network) = {
         use tauri::Manager as _;
         let state = app.state::<AppState>();
         let prefs = state.prefs.snapshot(&state);
-        (prefs.search_suggestions, prefs.search_engine.clone())
+        (
+            prefs.search_suggestions,
+            prefs.search_engine.clone(),
+            prefs.network(),
+        )
     };
     if !enabled {
         return Ok(Vec::new());
     }
-    crate::search_suggest::suggest(&engine, &query).await
+    crate::search_suggest::suggest(&network, &engine, &query).await
 }
 
 /// Silence a tab, or let it be heard again.

@@ -114,8 +114,12 @@ fn client_for(state: &AppState, provider: Provider, key: Option<String>) -> Clie
         .filter(|k| !k.trim().is_empty())
         .or_else(|| read_key(provider))
         .unwrap_or_default();
-    let base = (provider == Provider::Custom).then(|| state.prefs.get(state).agent_custom_base_url);
-    Client::new(provider, key.trim(), base.as_deref())
+    let prefs = state.prefs.get(state);
+    let base = (provider == Provider::Custom).then_some(prefs.agent_custom_base_url.clone());
+    // Through the proxy in Settings, like everything else Dive sends; a proxy
+    // this client cannot use fails the request rather than going around it.
+    let http = crate::http_client::builder(&prefs.network());
+    Client::with_http(provider, key.trim(), base.as_deref(), http)
 }
 
 // ----- state the commands share -----

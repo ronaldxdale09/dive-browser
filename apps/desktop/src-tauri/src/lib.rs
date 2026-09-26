@@ -45,6 +45,7 @@ mod form_fill;
 mod har;
 mod housekeeping;
 mod http_auth;
+mod http_client;
 mod https_only;
 mod inspect;
 mod ipc_security;

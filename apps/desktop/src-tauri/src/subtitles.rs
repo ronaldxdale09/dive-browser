@@ -359,14 +359,15 @@ async fn fetch_model_to(
 ) -> Result<(), Fetch> {
     use tokio::io::AsyncWriteExt as _;
 
-    let client = reqwest::Client::builder()
+    // Through the proxy in Settings: a network that only lets traffic out
+    // through one would otherwise never download a model.
+    let client = crate::http_client::builder(&crate::http_client::network(app))
+        .map_err(|e| format!("download client: {e}"))?
         .connect_timeout(MODEL_CONNECT_TIMEOUT)
         .read_timeout(MODEL_READ_TIMEOUT)
         .build()
         .map_err(|e| format!("download client: {e}"))?;
-    let resp = client
-        .get(url)
-        .send()
+    let resp = crate::http_client::send_retrying(client.get(url))
         .await
         .and_then(reqwest::Response::error_for_status)
         .map_err(|e| format!("download failed: {e}"))?;

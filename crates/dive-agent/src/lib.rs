@@ -386,6 +386,18 @@ impl Client {
     /// Build a client. `base_url` overrides the catalog's, and is required
     /// for [`Provider::Custom`].
     pub fn new(provider: Provider, api_key: impl Into<String>, base_url: Option<&str>) -> Self {
+        Self::with_http(provider, api_key, base_url, Ok(reqwest::Client::builder()))
+    }
+
+    /// Build a client on `http`, a builder the embedder has already pointed
+    /// at its proxy; an `Err` says why it could not, and every request then
+    /// fails with that reason instead of going around the proxy.
+    pub fn with_http(
+        provider: Provider,
+        api_key: impl Into<String>,
+        base_url: Option<&str>,
+        http: Result<reqwest::ClientBuilder, String>,
+    ) -> Self {
         let base_url = base_url
             .map(str::trim)
             .filter(|s| !s.is_empty())
@@ -394,11 +406,13 @@ impl Client {
                 |s| s.trim_end_matches('/').to_owned(),
             );
         Self {
-            http: reqwest::Client::builder()
-                .connect_timeout(CONNECT_TIMEOUT)
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .map_err(|error| error.to_string()),
+            http: http.and_then(|builder| {
+                builder
+                    .connect_timeout(CONNECT_TIMEOUT)
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .map_err(|error| error.to_string())
+            }),
             provider,
             base_url,
             api_key: api_key.into(),
@@ -445,10 +459,32 @@ impl Client {
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, AgentError> {
+        // One more try when the connection itself failed: nothing reached
+        // the provider, so nothing can be sent twice, and it covers a pooled
+        // connection that died while the machine slept.
+        let again = request.try_clone();
+        let first = Self::send_once(request).await;
+        let outcome = match (first, again) {
+            (Err(Some(error)), Some(again)) if error.is_connect() => Self::send_once(again).await,
+            (first, _) => first,
+        };
+        outcome.map_err(|error| {
+            AgentError::Http(error.map_or_else(
+                || "request timed out waiting for response headers".into(),
+                |error| error.to_string(),
+            ))
+        })
+    }
+
+    /// One attempt. `Err(None)` is the header timeout; `Err(Some)` is what
+    /// the connection said.
+    async fn send_once(
+        request: reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, Option<reqwest::Error>> {
         tokio::time::timeout(RESPONSE_HEADER_TIMEOUT, request.send())
             .await
-            .map_err(|_| AgentError::Http("request timed out waiting for response headers".into()))?
-            .map_err(|error| AgentError::Http(error.to_string()))
+            .map_err(|_| None)?
+            .map_err(Some)
     }
 
     /// Authentication headers for this provider.
