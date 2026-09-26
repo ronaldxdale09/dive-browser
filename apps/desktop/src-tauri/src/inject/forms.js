@@ -40,6 +40,7 @@
   // ---- the list ----
   let host = null;
   let listEl = null;
+  let live = null; // the list's own live region
   let items = [];
   let target = null;
   let selected = -1;
@@ -47,7 +48,9 @@
   const ensure = () => {
     if (host && document.documentElement.contains(host)) return;
     host = document.createElement("dive-form-entries");
-    host.style.cssText = "all:initial;position:fixed;z-index:2147483647;left:0;top:0;display:none;";
+    // Only the list inside hides; the host, and the live region in it, stay
+    // in the page so the region is being watched when the list next opens.
+    host.style.cssText = "all:initial;position:fixed;z-index:2147483647;left:0;top:0;display:block;";
     const root = host.attachShadow({ mode: "closed" });
     const style = document.createElement("style");
     style.textContent =
@@ -57,20 +60,42 @@
       "background:#fff;border:1px solid rgba(0,0,0,.14);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16)}" +
       "li{padding:6px 10px;border-radius:5px;cursor:default;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
       "li[aria-selected=true]{background:#2b6ef2;color:#fff}" +
-      ":host([data-dark]) ul{background:#2a2a2e;color:#f2f2f2;border-color:rgba(255,255,255,.14)}";
+      ":host([data-dark]) ul{background:#2a2a2e;color:#f2f2f2;border-color:rgba(255,255,255,.14)}" +
+      ".live{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}";
     listEl = document.createElement("ul");
     listEl.setAttribute("role", "listbox");
+    listEl.setAttribute("aria-label", "Earlier entries for this field");
+    listEl.style.display = "none";
+    live = document.createElement("span");
+    live.className = "live";
+    live.setAttribute("role", "status");
+    live.setAttribute("aria-live", "polite");
+    live.setAttribute("aria-atomic", "true");
     listEl.addEventListener("mousedown", (e) => e.preventDefault()); // keep focus in the field
     listEl.addEventListener("click", (e) => {
       const li = e.target instanceof Element ? e.target.closest("li") : null;
       if (li) choose(Number(li.dataset.index));
     });
-    root.append(style, listEl);
+    root.append(style, listEl, live);
     document.documentElement.appendChild(host);
   };
+  // Said a moment after it is set, so a region added a moment ago is
+  // already being watched when the words arrive.
+  let saying = 0;
+  const say = (text) => {
+    if (!live) return;
+    clearTimeout(saying);
+    live.textContent = "";
+    saying = setTimeout(() => {
+      if (live) live.textContent = text;
+    }, 50);
+  };
+  const shown = () => listEl !== null && listEl.style.display !== "none";
+  // The field's own attributes are the page's and are left as they are: a
+  // page that set aria-activedescendant for its own list had it taken away
+  // every time this one closed.
   const hide = () => {
-    if (host) host.style.display = "none";
-    if (target) target.removeAttribute("aria-activedescendant");
+    if (listEl) listEl.style.display = "none";
     items = [];
     selected = -1;
   };
@@ -90,6 +115,7 @@
     host.style.left = Math.max(0, r.left) + "px";
     host.style.top = r.bottom + 2 + "px";
     host.style.display = "block";
+    listEl.style.display = "block";
   };
   const render = () => {
     ensure();
@@ -114,6 +140,7 @@
   const select = (i) => {
     selected = (i + items.length) % items.length;
     render();
+    say(items[selected] + ", " + (selected + 1) + " of " + items.length);
   };
 
   Object.defineProperty(window, "__diveFormsOffer", {
@@ -129,7 +156,10 @@
       items = list.filter((v) => typeof v === "string").slice(0, 8);
       selected = -1;
       if (items.length === 0) return hide();
+      // Said when the list opens, not as it narrows with every letter typed.
+      const opening = !shown();
       render();
+      if (opening) say(items.length + (items.length === 1 ? " earlier entry" : " earlier entries") + ", use arrow keys");
     },
   });
 
@@ -192,8 +222,8 @@
     },
     true,
   );
-  window.addEventListener("scroll", () => (host && host.style.display !== "none" ? place() : null), true);
-  window.addEventListener("resize", () => (host && host.style.display !== "none" ? place() : null));
+  window.addEventListener("scroll", () => (shown() ? place() : null), true);
+  window.addEventListener("resize", () => (shown() ? place() : null));
 
   // ---- remembering ----
   const report = (form) => {

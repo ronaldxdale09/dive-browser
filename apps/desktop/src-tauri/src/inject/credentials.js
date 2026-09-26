@@ -72,6 +72,9 @@
       // Only a lone login is ever filled unasked, so only then do fields
       // that appear later need watching for.
       if (candidates.length !== 1) observer.disconnect();
+      // A choice is coming: its live region goes in now, so it is already
+      // there to be heard when the list first opens.
+      if (candidates.length > 1) ensure();
       maybeFillIdle();
       offerPending();
     },
@@ -122,13 +125,17 @@
   const attachShadow = Element.prototype.attachShadow;
   let host = null;
   let listEl = null;
+  let live = null; // the list's own live region
   let listFor = null; // the field the list hangs under
   let listPassword = null; // the password field a pick fills
   let selected = -1;
   const ensure = () => {
     if (host && document.documentElement.contains(host)) return;
     host = document.createElement("dive-saved-logins");
-    host.style.cssText = "all:initial;position:fixed;z-index:2147483647;left:0;top:0;display:none;";
+    // The host stays in the page once made and only the list inside it
+    // hides: a live region is heard only while it is displayed, so hiding
+    // the host took the region out of the tree with every close.
+    host.style.cssText = "all:initial;position:fixed;z-index:2147483647;left:0;top:0;display:block;";
     const root = attachShadow.call(host, { mode: "closed" });
     const style = document.createElement("style");
     style.textContent =
@@ -144,10 +151,19 @@
       "button[aria-selected=true],button:hover{background:#2b6ef2;color:#fff}" +
       "button[aria-selected=true] svg,button:hover svg{opacity:1}" +
       ":host([data-dark]) div{background:#2a2a2e;color:#f2f2f2;border-color:rgba(255,255,255,.14)}" +
-      ":host([data-dark]) p{color:#98989d}";
+      ":host([data-dark]) p{color:#98989d}" +
+      ".live{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}";
     listEl = document.createElement("div");
     listEl.setAttribute("role", "listbox");
     listEl.setAttribute("aria-label", "Saved logins");
+    listEl.style.display = "none";
+    // The page's field is the page's: its own ARIA is left alone, and the
+    // list says what it is doing through a region of its own instead.
+    live = document.createElement("span");
+    live.className = "live";
+    live.setAttribute("role", "status");
+    live.setAttribute("aria-live", "polite");
+    live.setAttribute("aria-atomic", "true");
     // Keep focus in the field, so typing carries on if nothing is picked.
     listEl.addEventListener("mousedown", (e) => e.preventDefault());
     listEl.addEventListener("click", (e) => {
@@ -155,16 +171,27 @@
       // Only a real click: page script cannot pick a login on the person's behalf.
       if (item && e.isTrusted) choose(Number(item.dataset.index));
     });
-    root.append(style, listEl);
+    root.append(style, listEl, live);
     document.documentElement.appendChild(host);
   };
+  // Said a moment after it is set, so a region that has only just been
+  // added is already being watched when the words arrive.
+  let saying = 0;
+  const say = (text) => {
+    if (!live) return;
+    clearTimeout(saying);
+    live.textContent = "";
+    saying = setTimeout(() => {
+      if (live) live.textContent = text;
+    }, 50);
+  };
   const hideList = () => {
-    if (host) host.style.display = "none";
+    if (listEl) listEl.style.display = "none";
     listFor = null;
     listPassword = null;
     selected = -1;
   };
-  const listShown = () => host !== null && host.style.display !== "none" && listFor !== null;
+  const listShown = () => listEl !== null && listEl.style.display !== "none" && listFor !== null;
   const pageIsDark = (el) => {
     const scheme = getComputedStyle(el).colorScheme || "";
     if (/dark/.test(scheme) && !/light/.test(scheme)) return true;
@@ -177,6 +204,7 @@
     if (pageIsDark(listFor)) host.setAttribute("data-dark", "");
     else host.removeAttribute("data-dark");
     host.style.display = "block";
+    listEl.style.display = "block";
     const r = listFor.getBoundingClientRect();
     // At least as wide as the field it belongs to.
     listEl.style.minWidth = Math.min(Math.max(r.width, 200), 360) + "px";
@@ -219,6 +247,7 @@
     listPassword = password;
     selected = -1;
     render();
+    say(candidates.length + " saved logins, use arrow keys");
   };
   const choose = (i) => {
     const login = candidates && candidates[i];
@@ -230,12 +259,23 @@
   document.addEventListener(
     "keydown",
     (e) => {
+      // Put away by Escape or by typing, the list comes back on Down Arrow
+      // (or Alt+Down, the way a select opens), as every browser's does.
+      if (!listShown() && e.key === "ArrowDown" && e.isTrusted && e.target instanceof HTMLInputElement && candidates && candidates.length > 1) {
+        const password = passwordOf(e.target);
+        if (password) {
+          e.preventDefault();
+          showList(e.target, password);
+        }
+        return;
+      }
       if (!listShown() || e.target !== listFor || !candidates) return;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const n = candidates.length;
         selected = e.key === "ArrowDown" ? (selected + 1) % n : (selected - 1 + n) % n;
         render();
+        say((candidates[selected].username || "no username") + ", " + (selected + 1) + " of " + n);
       } else if (e.key === "Enter" && selected >= 0) {
         e.preventDefault();
         e.stopPropagation();
