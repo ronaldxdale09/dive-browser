@@ -890,10 +890,18 @@ fn platform_clocks_advance_and_atomic_callback_publishes() {
     assert!(published > before.awake && published <= after.awake + 1);
 }
 
+/// How often an ordinary heartbeat is written down.
+const HEARTBEAT_EVERY_MS: u64 = 60_000;
+/// A heartbeat this slow is written down whenever it happens: short of a
+/// hang, but the kind of sluggishness worth a line.
+const SLOW_HEARTBEAT_MS: u64 = 250;
+
 struct Sink {
     store: Option<Store>,
     recent: VecDeque<Record>,
     disabled: bool,
+    /// Wall time of the last heartbeat written to disk.
+    heartbeat_written: Option<u64>,
 }
 impl Sink {
     fn new(path: &Path) -> Self {
@@ -902,13 +910,36 @@ impl Sink {
             disabled: store.is_none(),
             store,
             recent: VecDeque::with_capacity(SAMPLE_LIMIT),
+            heartbeat_written: None,
         }
     }
+    /// Whether `record` goes to disk. Every probe is kept in memory, but a
+    /// healthy heartbeat is one line a minute, not one a second: the disk
+    /// was written every second for the life of the app to say nothing had
+    /// happened. Hangs, recoveries and everything else are always written.
+    fn persists(&mut self, record: &Record) -> bool {
+        if record.kind != Kind::Heartbeat
+            || record.duration_ms.is_some_and(|ms| ms >= SLOW_HEARTBEAT_MS)
+        {
+            return true;
+        }
+        let due = self.heartbeat_written.is_none_or(|last| {
+            // A clock set back counts as due, or nothing would be written
+            // until it caught up again.
+            record.timestamp < last || record.timestamp - last >= HEARTBEAT_EVERY_MS
+        });
+        if due {
+            self.heartbeat_written = Some(record.timestamp);
+        }
+        due
+    }
     fn emit(&mut self, record: Record) {
-        if self
-            .store
-            .as_mut()
-            .is_some_and(|store| store.write(&record).is_err())
+        let persists = self.persists(&record);
+        if persists
+            && self
+                .store
+                .as_mut()
+                .is_some_and(|store| store.write(&record).is_err())
         {
             // A failed disk is not retried every second and never blocks UI work.
             self.store = None;
@@ -1196,6 +1227,53 @@ mod ownership_tests {
         assert!(sink.store.is_none());
         assert_eq!(sink.recent.len(), 256);
         assert_eq!(sink.recent.front().unwrap().timestamp, 9744);
+    }
+    #[test]
+    fn healthy_heartbeats_reach_the_disk_once_a_minute_and_everything_else_always() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sink = Sink::new(dir.path());
+        let at = |ms: u64, kind: Kind, duration: u64| Record {
+            duration_ms: Some(duration),
+            ..Record::new(
+                Sample {
+                    wall: ms,
+                    ..Sample::default()
+                },
+                kind,
+                None,
+            )
+        };
+        for second in 0..=120 {
+            sink.emit(at(second * 1000, Kind::Heartbeat, 3));
+        }
+        sink.emit(at(121_000, Kind::Heartbeat, SLOW_HEARTBEAT_MS));
+        sink.emit(at(122_000, Kind::HangStarted, 2000));
+        sink.emit(at(123_000, Kind::HangRecovered, 2500));
+        // A clock set back does not silence the heartbeat until it catches up.
+        sink.emit(at(1000, Kind::Heartbeat, 3));
+        let written = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
+        let kinds: Vec<(u64, Kind)> = written
+            .lines()
+            .map(|line| serde_json::from_str::<Record>(line).unwrap())
+            .map(|record| (record.timestamp, record.kind))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                (0, Kind::Heartbeat),
+                (60_000, Kind::Heartbeat),
+                (120_000, Kind::Heartbeat),
+                (121_000, Kind::Heartbeat),
+                (122_000, Kind::HangStarted),
+                (123_000, Kind::HangRecovered),
+                (1000, Kind::Heartbeat),
+            ]
+        );
+        assert_eq!(
+            sink.recent.len(),
+            125,
+            "every probe is still kept in memory"
+        );
     }
     #[test]
     fn one_empty_fault_request_is_consumed_and_nonempty_is_rejected() {
