@@ -1,4 +1,4 @@
-import { PagePrompts } from "./PagePrompts";
+import { DetachedCrashBanner, DetachedPrompts } from "./DetachedPrompts";
 import { windowDrag } from "../lib/windowDrag";
 import { isPrivateWindow } from "../lib/privateMode";
 import { PrivateBadge, PrivateWelcome } from "./PrivateMode";
@@ -259,13 +259,14 @@ export function Popout({ tabId }: { tabId: string }) {
         <IconButton icon={PanelsTopLeft} label="Move back to main window" tooltipAlign="end" onClick={() => run(ipc.tabAttach(tabId))} />
       </nav>
       <div>
+        <DetachedCrashBanner tabId={tabId} />
         {error && <div role="alert" className="flex items-start gap-2 border-b border-line bg-surface px-3 py-2 text-xs text-danger">
           <p className="min-w-0 flex-1 break-words">{error}</p>
           <button type="button" aria-label="Dismiss error" onClick={() => useBrowser.setState({ error: null })} className="grid size-5 shrink-0 place-items-center rounded hover:bg-surface-2"><Icon icon={X} size={13} /></button>
         </div>}
       </div>
       <div ref={body} className="relative min-h-0 flex-1 bg-surface">
-        <PagePrompts tabId={tabId} auth={false} />
+        <DetachedPrompts tabId={tabId} />
         {privateStart && <PrivateWelcome onBrowse={() => { inputRef.current?.focus(); inputRef.current?.select(); }} />}
         {navError && <NavErrorPanel url={navError.url} error={navError.error} onRetry={() => run(ipc.tabReload(tabId))} />}
       </div>

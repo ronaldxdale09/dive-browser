@@ -65,7 +65,18 @@ pub struct ExternalLinkAsked {
     pub origin: String,
 }
 
+/// A question no window needs to show any more: answered, let go, or
+/// replaced by a newer one from the same tab. Every window hears it, so a
+/// card answered in a torn-off tab's window does not linger in the main
+/// window's store and come back when the tab does.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Event)]
+pub struct ExternalLinkClosed {
+    pub tab_id: TabId,
+    pub token: String,
+}
+
 struct Pending {
+    tab_id: TabId,
     url: String,
     scheme: String,
     origin: String,
@@ -114,7 +125,10 @@ pub fn intercept(app: &AppHandle<Runtime>, tab_id: TabId, url: &url::Url, page_o
         return;
     }
     let token = TabId::new().to_string();
-    with_pending(|pending| {
+    let replaced = with_pending(|pending| {
+        // One question per tab: a page that fires several is asked about
+        // the newest, and the ones it replaces stop waiting in the host.
+        let replaced = superseded(pending, tab_id);
         // A page that navigates in a loop must not grow this without bound.
         if pending.len() >= 32 {
             pending.clear();
@@ -122,12 +136,17 @@ pub fn intercept(app: &AppHandle<Runtime>, tab_id: TabId, url: &url::Url, page_o
         pending.insert(
             token.clone(),
             Pending {
+                tab_id,
                 url: target.to_owned(),
                 scheme: scheme.clone(),
                 origin: origin.clone(),
             },
         );
+        replaced
     });
+    for old in replaced {
+        closed(app, tab_id, old);
+    }
     let _ = ExternalLinkAsked {
         tab_id,
         token,
@@ -143,6 +162,7 @@ pub fn answer(app: &AppHandle<Runtime>, token: &str, always: bool) -> AppResult<
     let Some(pending) = with_pending(|pending| pending.remove(token)) else {
         return Err(AppError::new("that link is no longer waiting"));
     };
+    closed(app, pending.tab_id, token.to_owned());
     if always && !pending.origin.is_empty() {
         remember(app, &pending.origin, &pending.scheme)?;
     }
@@ -151,8 +171,27 @@ pub fn answer(app: &AppHandle<Runtime>, token: &str, always: bool) -> AppResult<
 }
 
 /// Forget a link the person said no to.
-pub fn dismiss(token: &str) {
-    with_pending(|pending| pending.remove(token));
+pub fn dismiss(app: &AppHandle<Runtime>, token: &str) {
+    if let Some(pending) = with_pending(|pending| pending.remove(token)) {
+        closed(app, pending.tab_id, token.to_owned());
+    }
+}
+
+/// Take out every question `tab` is still waiting on, returning their tokens.
+fn superseded(pending: &mut HashMap<String, Pending>, tab: TabId) -> Vec<String> {
+    let tokens: Vec<String> = pending
+        .iter()
+        .filter(|(_, p)| p.tab_id == tab)
+        .map(|(token, _)| token.clone())
+        .collect();
+    for token in &tokens {
+        pending.remove(token);
+    }
+    tokens
+}
+
+fn closed(app: &AppHandle<Runtime>, tab_id: TabId, token: String) {
+    let _ = ExternalLinkClosed { tab_id, token }.emit(app);
 }
 
 fn remember(app: &AppHandle<Runtime>, origin: &str, scheme: &str) -> AppResult<()> {
@@ -229,18 +268,22 @@ mod tests {
     }
 
     #[test]
-    fn a_token_opens_once() {
-        with_pending(|pending| {
-            pending.insert(
-                "token".into(),
-                Pending {
-                    url: "claude://x".into(),
-                    scheme: "claude".into(),
-                    origin: "claude.ai".into(),
-                },
-            );
-        });
-        dismiss("token");
-        assert!(with_pending(|pending| pending.remove("token")).is_none());
+    fn a_newer_question_from_a_tab_replaces_its_older_one() {
+        let tab = TabId::new();
+        let other = TabId::new();
+        let question = |tab_id| Pending {
+            tab_id,
+            url: "claude://x".into(),
+            scheme: "claude".into(),
+            origin: "claude.ai".into(),
+        };
+        let mut pending = HashMap::new();
+        pending.insert("old".to_owned(), question(tab));
+        pending.insert("elsewhere".to_owned(), question(other));
+        assert_eq!(superseded(&mut pending, tab), vec!["old".to_owned()]);
+        // Another tab's question is its own and keeps waiting.
+        assert!(pending.contains_key("elsewhere"));
+        assert!(!pending.contains_key("old"));
+        assert!(superseded(&mut pending, tab).is_empty());
     }
 }

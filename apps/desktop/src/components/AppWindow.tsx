@@ -1,6 +1,6 @@
 import { useCoversContent } from "../lib/overlay";
 import { windowDrag } from "../lib/windowDrag";
-import { PagePrompts } from "./PagePrompts";
+import { DetachedCrashBanner, DetachedPrompts } from "./DetachedPrompts";
 import { ArrowLeft, ArrowRight, Copy, EllipsisVertical, PanelsTopLeft, RotateCw, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { events, ipc } from "../lib/ipc";
@@ -136,6 +136,7 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
         </div>
       )}
       <div>
+        <DetachedCrashBanner tabId={tabId} />
         {error && (
           <div role="alert" className="flex items-start gap-2 border-b border-line bg-surface px-3 py-2 text-xs text-danger">
             <p className="min-w-0 flex-1 break-words">{error}</p>
@@ -144,7 +145,7 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
         )}
       </div>
       <div ref={body} className="relative min-h-0 flex-1 bg-surface">
-        <PagePrompts tabId={tabId} />
+        <DetachedPrompts tabId={tabId} />
         {navError && <NavErrorPanel url={navError.url} error={navError.error} onRetry={() => run(ipc.tabReload(tabId))} />}
       </div>
     </div>

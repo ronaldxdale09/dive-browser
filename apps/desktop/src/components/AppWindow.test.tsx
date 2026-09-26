@@ -38,6 +38,9 @@ beforeEach(() => {
   vi.spyOn(events.tabHistoryChanged, "listen").mockResolvedValue(() => undefined);
   vi.spyOn(events.tabLoad, "listen").mockResolvedValue(() => undefined);
   vi.spyOn(events.menuCommand, "listen").mockResolvedValue(() => undefined);
+  vi.spyOn(events.permissionAsked, "listen").mockResolvedValue(() => undefined);
+  vi.spyOn(events.permissionDismissed, "listen").mockResolvedValue(() => undefined);
+  vi.spyOn(events.tabCrashed, "listen").mockResolvedValue(() => undefined);
   vi.spyOn(events.stateChanged, "listen").mockImplementation(async (callback) => {
     stateEvent = (payload) => callback({ event: "state-changed", id: 0, payload });
     return () => undefined;

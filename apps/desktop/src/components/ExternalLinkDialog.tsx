@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import type { ExternalLinkAsked } from "../lib/ipc";
-import { useExternalLink } from "../store/externalLink";
+import { useBrowser } from "../store/browser";
+import { questionFor, useExternalLink } from "../store/externalLink";
 import { Icon } from "./Icon";
 
 /**
@@ -14,9 +15,13 @@ import { Icon } from "./Icon";
  * the browser, so it does not sit quietly in a corner where a click meant for
  * the page could answer it. The site is named, because what matters is which
  * page asked, and the tick remembers that site and that scheme only.
+ *
+ * It asks in the window that shows the page: a detached window passes its
+ * tab, and the main window takes the questions of every tab it still holds.
  */
-export function ExternalLinkDialog() {
-  const asked = useExternalLink((s) => s.asked);
+export function ExternalLinkDialog({ tabId }: { tabId?: string }) {
+  const detached = useBrowser((s) => s.detached);
+  const asked = useExternalLink((s) => questionFor(s.questions, tabId ? (id) => id === tabId : (id) => !detached.includes(id)));
   const init = useExternalLink((s) => s.init);
   useEffect(() => void init(), [init]);
   // Keyed by token, so each question is its own dialog with its own tick:

@@ -890,6 +890,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::permissions::PermissionAsked,
             crate::credential_fill::CredentialPrompt,
             crate::external_link::ExternalLinkAsked,
+            crate::external_link::ExternalLinkClosed,
             crate::tab_audio::TabAudio,
             crate::permissions::PermissionDismissed,
             crate::js_dialog::JsDialogAsked,
@@ -2994,8 +2995,8 @@ pub(crate) fn external_link_open(
 /// Let go of a link the person did not want opened.
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn external_link_dismiss(token: String) {
-    crate::external_link::dismiss(&token);
+pub(crate) fn external_link_dismiss(app: AppHandle<Runtime>, token: String) {
+    crate::external_link::dismiss(&app, &token);
 }
 
 /// Answer a save or update prompt: save the submitted login, or let it go.
@@ -3161,9 +3162,15 @@ pub(crate) fn permission_reply(
     decision: crate::permissions::Decision,
     duration: crate::permissions::Duration,
 ) -> AppResult<()> {
-    on_main(&app, move |_, _, state| {
+    on_main(&app, move |_, app, state| {
         crate::permissions::require_chrome(&webview)?;
-        crate::permissions::reply(state, tab_id, &request_id, decision, duration)
+        crate::permissions::reply(state, tab_id, &request_id, decision, duration)?;
+        // Every window's chrome holds the question, not only the one that
+        // answered it: a torn-off tab's window answers for the page, and the
+        // main window must not keep a stale copy to show when the tab comes
+        // back. `reply` has let go of the host and the store by now.
+        let _ = crate::permissions::PermissionDismissed { request_id, tab_id }.emit(app);
+        Ok(())
     })
 }
 /// Recover dialogs opened before this chrome subscribed to native events.

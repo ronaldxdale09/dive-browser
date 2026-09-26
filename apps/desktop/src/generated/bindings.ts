@@ -804,6 +804,7 @@ export const events = {
 	downloadNotice: makeEvent<DownloadNotice>("download-notice"),
 	downloadProgress: makeEvent<DownloadProgress>("download-progress"),
 	externalLinkAsked: makeEvent<ExternalLinkAsked>("external-link-asked"),
+	externalLinkClosed: makeEvent<ExternalLinkClosed>("external-link-closed"),
 	httpAuthAsked: makeEvent<HttpAuthAsked>("http-auth-asked"),
 	httpAuthClosed: makeEvent<HttpAuthClosed>("http-auth-closed"),
 	inspectEvent: makeEvent<InspectEvent>("inspect-event"),
@@ -1504,6 +1505,17 @@ export type ExternalLinkAsked = {
 	scheme: string,
 	/**  The site that asked, as a host ("claude.ai"); empty when there is none. */
 	origin: string,
+};
+
+/**
+ *  A question no window needs to show any more: answered, let go, or
+ *  replaced by a newer one from the same tab. Every window hears it, so a
+ *  card answered in a torn-off tab's window does not linger in the main
+ *  window's store and come back when the tab does.
+ */
+export type ExternalLinkClosed = {
+	tab_id: TabId,
+	token: string,
 };
 
 /**  Which family a browser belongs to, which decides the files and formats. */

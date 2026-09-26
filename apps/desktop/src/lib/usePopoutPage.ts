@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { events, ipc } from "./ipc";
 import type { Tab } from "./ipc";
-import { useBrowser } from "../store/browser";
+import { useBrowser, withoutRequest } from "../store/browser";
 import { errorMessage } from "./errors";
 
 /** A detached window owns one page, independently of the main workspace. */
@@ -43,6 +43,20 @@ export function usePopoutPage(tabId: string) {
       // The store keeps the load state (and a failed document's error), so the
       // window explains a failure the way the main window does, not as a raw code.
       useBrowser.getState().applyLoad(payload);
+    }).then((stop) => { if (live) stops.push(stop); else stop(); }).catch(report);
+    // A detached window never boots the whole store, so the page's questions
+    // and its crashes have to be heard here. Without them a camera request
+    // waited on a dialog no window drew until its deadline denied it, and a
+    // crashed renderer left the window blank with nothing to say why.
+    void events.permissionAsked.listen(({ payload }) => {
+      if (live && payload.tab_id === tabId) useBrowser.getState().applyPermissionAsked(payload);
+    }).then((stop) => { if (live) stops.push(stop); else stop(); }).catch(report);
+    void events.permissionDismissed.listen(({ payload }) => {
+      if (!live || payload.tab_id !== tabId) return;
+      useBrowser.setState((s) => ({ permissionRequests: withoutRequest(s.permissionRequests, tabId, payload) }));
+    }).then((stop) => { if (live) stops.push(stop); else stop(); }).catch(report);
+    void events.tabCrashed.listen(({ payload }) => {
+      if (live && payload.tab_id === tabId) useBrowser.getState().applyCrash(payload);
     }).then((stop) => { if (live) stops.push(stop); else stop(); }).catch(report);
     return () => { live = false; stops.forEach((stop) => stop()); };
   }, [tabId]);

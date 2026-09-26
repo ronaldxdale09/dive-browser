@@ -101,9 +101,14 @@ export function Content() {
   );
 }
 
-/** The renderer died. While Dive reloads the tab this only informs; once it gives up it offers a reload. */
-function CrashBanner({ attempt, recovering }: { attempt: number; recovering: boolean }) {
-  const reload = useBrowser((s) => s.reload);
+/**
+ * The renderer died. While Dive reloads the tab this only informs; once it
+ * gives up it offers a reload. A detached window passes its own reload: the
+ * store's reload means the main window's active tab.
+ */
+export function CrashBanner({ attempt, recovering, onReload }: { attempt: number; recovering: boolean; onReload?: () => void }) {
+  const storeReload = useBrowser((s) => s.reload);
+  const reload = onReload ?? (() => void storeReload());
   return (
     <div role="status" className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-surface-2 px-3 text-xs text-ink-2">
       <Icon icon={AlertTriangle} size={13} className="shrink-0 text-ink-3" />
@@ -111,7 +116,7 @@ function CrashBanner({ attempt, recovering }: { attempt: number; recovering: boo
         {recovering ? `This tab's renderer crashed — reloading (attempt ${attempt})` : `This tab's renderer crashed and Dive stopped reloading it after ${attempt} ${attempt === 1 ? "attempt" : "attempts"}`}
       </span>
       {!recovering && (
-        <button type="button" onClick={() => void reload()} className="flex h-6 items-center gap-1 rounded-md border border-line-2 px-2 text-ink hover:bg-surface-3">
+        <button type="button" onClick={reload} className="flex h-6 items-center gap-1 rounded-md border border-line-2 px-2 text-ink hover:bg-surface-3">
           <Icon icon={RotateCw} size={11} /> Reload
         </button>
       )}
@@ -151,7 +156,7 @@ export function describePermission(kind: string): string {
  * about this page, and the tabs, rail and toolbar stay usable so the person
  * can look at another tab, or close this one, before deciding.
  */
-function PermissionDialog({ tabId, request }: { tabId: string; request: PermissionRequest | undefined }) {
+export function PermissionDialog({ tabId, request }: { tabId: string; request: PermissionRequest | undefined }) {
   const decide = useBrowser((s) => s.decidePermission);
   const profile = useBrowser((s) => s.profiles.find((profile) => profile.id === request?.scope.profile_id)?.name ?? "this profile");
   const [duration, setDuration] = useState<"remember" | "page">("remember");

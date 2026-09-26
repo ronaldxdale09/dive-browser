@@ -1,9 +1,10 @@
 import { useJsDialog } from "../store/jsDialog";
+import { useHttpAuth } from "../store/httpAuth";
 import { contentCoverDepth, resetContentCover } from "../lib/overlay";
 import { prettyUrl } from "../lib/prettyUrl";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Tab, TabLoad } from "../lib/ipc";
+import type { PermissionAsked, Tab, TabCrashed, TabLoad } from "../lib/ipc";
 import { events, ipc } from "../lib/ipc";
 import { useBrowser } from "../store/browser";
 import { usePrefs } from "../store/prefs";
@@ -30,6 +31,9 @@ const tab: Tab = {
 
 let stateEvent: (payload: import("../lib/ipc").CoreEvent) => void;
 let menuEvent: (command: string) => void;
+let permissionAsked: (payload: PermissionAsked) => void;
+let permissionDismissed: (payload: { request_id: string; tab_id: string }) => void;
+let tabCrashed: (payload: TabCrashed) => void;
 beforeEach(() => {
   useJsDialog.setState({ byTab: {}, listening: true });
   vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);
@@ -48,6 +52,18 @@ beforeEach(() => {
   });
   vi.spyOn(events.menuCommand, "listen").mockImplementation(async (callback) => {
     menuEvent = (payload) => callback({ event: "menu-command", id: 0, payload });
+    return () => undefined;
+  });
+  vi.spyOn(events.permissionAsked, "listen").mockImplementation(async (callback) => {
+    permissionAsked = (payload) => callback({ event: "permission-asked", id: 0, payload });
+    return () => undefined;
+  });
+  vi.spyOn(events.permissionDismissed, "listen").mockImplementation(async (callback) => {
+    permissionDismissed = (payload) => callback({ event: "permission-dismissed", id: 0, payload });
+    return () => undefined;
+  });
+  vi.spyOn(events.tabCrashed, "listen").mockImplementation(async (callback) => {
+    tabCrashed = (payload) => callback({ event: "tab-crashed", id: 0, payload });
     return () => undefined;
   });
   useBrowser.setState({ tabs: [tab], error: null, boot: vi.fn().mockResolvedValue(undefined) });
@@ -110,6 +126,62 @@ describe("detached Dive window", () => {
   });
 });
 
+
+describe("detached window prompts", () => {
+  const request: PermissionAsked = {
+    request_id: "r1",
+    tab_id: "a",
+    origin: "https://meet.example",
+    kinds: ["camera"],
+    scope: { profile_id: "p", container_id: "c" },
+    page_lifetime: true,
+  };
+
+  it("asks its own page's permission questions and answers them for that tab", async () => {
+    const reply = vi.spyOn(ipc, "permissionReply").mockResolvedValue(null);
+    render(<Popout tabId="a" />);
+    await waitFor(() => expect(permissionAsked).toBeDefined());
+    // Another window's page is not this window's question.
+    act(() => permissionAsked({ ...request, request_id: "r0", tab_id: "other" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => permissionAsked(request));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain("https://meet.example wants to use your camera");
+    fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+    await waitFor(() => expect(reply).toHaveBeenCalledWith("a", "r1", "allow", "remember"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("drops a question the host has dismissed", async () => {
+    render(<Popout tabId="a" />);
+    await waitFor(() => expect(permissionDismissed).toBeDefined());
+    act(() => permissionAsked(request));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    act(() => permissionDismissed({ request_id: "r1", tab_id: "a" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("asks for a sign-in its page is waiting on", async () => {
+    const asked = { tab_id: "a", request_id: "h1", host: "intranet.example", realm: "", scheme: "basic", is_proxy: false, secure: true };
+    vi.spyOn(ipc, "httpAuthPending").mockResolvedValue([asked]);
+    useHttpAuth.setState({ byTab: { a: [asked] }, listening: true });
+    render(<Popout tabId="a" />);
+    expect(await screen.findByRole("alertdialog", { name: "Sign in to intranet.example" })).toBeTruthy();
+    useHttpAuth.setState({ byTab: {}, listening: false });
+  });
+
+  it("says when its page crashed and reloads that page", async () => {
+    const reload = vi.spyOn(ipc, "tabReload").mockResolvedValue(null as never);
+    render(<Popout tabId="a" />);
+    await waitFor(() => expect(tabCrashed).toBeDefined());
+    act(() => tabCrashed({ tab_id: "other", attempt: 3, recovering: false }));
+    expect(screen.queryByText(/renderer crashed/)).toBeNull();
+    act(() => tabCrashed({ tab_id: "a", attempt: 3, recovering: false }));
+    const banner = (await screen.findByText(/renderer crashed and Dive stopped reloading it/)).closest("[role=status]") as HTMLElement;
+    fireEvent.click(within(banner).getByRole("button", { name: "Reload" }));
+    expect(reload).toHaveBeenCalledWith("a");
+  });
+});
 
 describe("detached page ownership and input", () => {
   it("loads its own page when the main workspace contains different tabs", async () => {
