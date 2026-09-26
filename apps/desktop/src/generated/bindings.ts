@@ -1513,6 +1513,12 @@ export type ExternalLinkAsked = {
 	app: string | null,
 	/**  The scheme being opened, without the colon ("claude"). */
 	scheme: string,
+	/**
+	 *  Where the link points, as far as the card says: `scheme://host`, or
+	 *  `scheme:` for a link with no host (`mailto:`). The rest of the URL can
+	 *  carry codes and tokens and stays in the host.
+	 */
+	target: string,
 	/**  The site that asked, as a host ("claude.ai"); empty when there is none. */
 	origin: string,
 };

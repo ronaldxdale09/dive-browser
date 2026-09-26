@@ -531,7 +531,7 @@ pub(crate) fn downloads_open(path: String) -> AppResult<()> {
     // reached cmd unquoted and cmd split on it. ShellExecuteW takes the path
     // as one wide string and parses nothing.
     #[cfg(target_os = "windows")]
-    return open_with_shell(&target);
+    return open_with_shell(target.as_os_str(), "the file");
     #[cfg(not(target_os = "windows"))]
     match status {
         Ok(s) if s.success() => Ok(()),
@@ -540,10 +540,11 @@ pub(crate) fn downloads_open(path: String) -> AppResult<()> {
     }
 }
 
-/// Hand a path to the Windows shell to open with its default application.
+/// Hand a path or URL to the Windows shell to open with its default
+/// application; `what` names it in the error ("the file", "the link").
 #[cfg(target_os = "windows")]
 #[allow(unsafe_code)] // ShellExecuteW is reachable only through the Win32 API.
-fn open_with_shell(target: &std::path::Path) -> AppResult<()> {
+pub(crate) fn open_with_shell(target: &std::ffi::OsStr, what: &str) -> AppResult<()> {
     use std::os::windows::ffi::OsStrExt as _;
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
@@ -555,7 +556,7 @@ fn open_with_shell(target: &std::path::Path) -> AppResult<()> {
             .collect::<Vec<u16>>()
     };
     let verb = wide(std::ffi::OsStr::new("open"));
-    let path = wide(target.as_os_str());
+    let path = wide(target);
     // SAFETY: both strings are NUL-terminated and outlive the call, and a null
     // HWND is documented as "no parent window".
     let result = unsafe {
@@ -574,7 +575,7 @@ fn open_with_shell(target: &std::path::Path) -> AppResult<()> {
         Ok(())
     } else {
         Err(AppError::new(format!(
-            "Windows could not open the file (code {})",
+            "Windows could not open {what} (code {})",
             result.0 as usize
         )))
     }

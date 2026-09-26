@@ -7,7 +7,7 @@ import { useBrowser } from "../store/browser";
 import { useExternalLink } from "../store/externalLink";
 import { ExternalLinkDialog } from "./ExternalLinkDialog";
 
-const asked: ExternalLinkAsked = { tab_id: "t1", token: "tok1", app: "Claude", scheme: "claude", origin: "claude.ai" };
+const asked: ExternalLinkAsked = { tab_id: "t1", token: "tok1", app: "Claude", scheme: "claude", target: "claude://login", origin: "claude.ai" };
 
 beforeEach(() => {
   vi.spyOn(ipc, "prepareContentCover").mockResolvedValue([]);
@@ -31,6 +31,8 @@ describe("ExternalLinkDialog", () => {
     render(<ExternalLinkDialog />);
     const dialog = screen.getByRole("dialog", { name: "Open Claude?" });
     expect(dialog.textContent).toContain("claude.ai wants to open this application");
+    // Where the link goes, without the codes in the rest of it.
+    expect(dialog.textContent).toContain("claude://login");
     expect(contentCoverDepth()).toBe(1);
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Open Claude" })));
     fireEvent.click(screen.getByRole("button", { name: "Open Claude" }));

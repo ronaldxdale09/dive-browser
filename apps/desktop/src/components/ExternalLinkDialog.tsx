@@ -58,6 +58,11 @@ function Prompt({ asked }: { asked: ExternalLinkAsked }) {
         <p className="mt-3 text-xs text-ink-2">
           {site} wants to open {asked.app ? "this application" : `a ${asked.scheme}: link`}.
         </p>
+        {/* Where it goes, as far as it is safe to say: the scheme and host.
+            The rest of the address can carry codes meant for the app. */}
+        <p className="mt-1 truncate font-mono text-[11px] text-ink-3" title={asked.target}>
+          {asked.target}
+        </p>
         {asked.origin && (
           <label className="mt-3 flex items-start gap-2 text-[11px] text-ink-2">
             <input type="checkbox" checked={always} onChange={(e) => setAlways(e.target.checked)} className="mt-0.5 size-3.5 accent-accent" />

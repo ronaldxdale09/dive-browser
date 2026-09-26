@@ -12,9 +12,13 @@
 //!
 //! The URL itself never crosses into the chrome's control: the card answers
 //! with a token, and the host opens what that token stands for.
+//!
+//! A few schemes are never handed over, asked or not (see `BLOCKED`), and a
+//! site that was told no waits a moment before it may ask again.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use dive_core::TabId;
 use serde::{Deserialize, Serialize};
@@ -48,8 +52,42 @@ const INTERNAL: &[&str] = &[
     "dive",
 ];
 
+/// Schemes a page never gets to hand to the system, whatever the person
+/// answers. They mount a network share (`smb:`, `afp:`, `nfs:`, `ftp:` and
+/// `WebDAV` all end in a Finder or Explorer mount), connect to a remote screen
+/// (`vnc:`), or open system settings, search or diagnostic tools with
+/// arguments of the page's choosing -- the shapes attacks from web pages have
+/// taken on both systems -- and no sign-in or meeting link needs any of them.
+const BLOCKED: &[&str] = &[
+    "smb",
+    "afp",
+    "nfs",
+    "cifs",
+    "ftp",
+    "ftps",
+    "dav",
+    "davs",
+    "webdav",
+    "webdavs",
+    "vnc",
+    "x-apple.systempreferences",
+    "x-apple-helpbasic",
+    "help",
+    "applescript",
+    "ms-settings",
+    "ms-msdt",
+    "ms-officecmd",
+    "search",
+    "search-ms",
+];
+
 /// The longest URL worth showing or opening.
 const MAX_URL: usize = 4096;
+
+/// How long a site that was told no waits before it may ask again. A page
+/// that navigates to the link in a loop otherwise raised the card again the
+/// instant it was cancelled, and the person could never get back to the page.
+const COOLDOWN: Duration = Duration::from_secs(5);
 
 /// What the chrome asks the person.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Event)]
@@ -61,6 +99,10 @@ pub struct ExternalLinkAsked {
     pub app: Option<String>,
     /// The scheme being opened, without the colon ("claude").
     pub scheme: String,
+    /// Where the link points, as far as the card says: `scheme://host`, or
+    /// `scheme:` for a link with no host (`mailto:`). The rest of the URL can
+    /// carry codes and tokens and stays in the host.
+    pub target: String,
     /// The site that asked, as a host ("claude.ai"); empty when there is none.
     pub origin: String,
 }
@@ -84,8 +126,18 @@ struct Pending {
 
 static PENDING: Mutex<Option<HashMap<String, Pending>>> = Mutex::new(None);
 
+/// Who was told no, and until when they may not ask again.
+static REFUSED: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
+
 fn with_pending<T>(f: impl FnOnce(&mut HashMap<String, Pending>) -> T) -> T {
     let mut guard = PENDING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    f(guard.get_or_insert_with(HashMap::new))
+}
+
+fn with_refused<T>(f: impl FnOnce(&mut HashMap<String, Instant>) -> T) -> T {
+    let mut guard = REFUSED
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     f(guard.get_or_insert_with(HashMap::new))
@@ -94,6 +146,35 @@ fn with_pending<T>(f: impl FnOnce(&mut HashMap<String, Pending>) -> T) -> T {
 /// Whether this URL is another app's to open.
 pub fn is_external(url: &url::Url) -> bool {
     !INTERNAL.contains(&url.scheme())
+}
+
+/// Whether this scheme is never handed to the system.
+fn is_blocked(scheme: &str) -> bool {
+    BLOCKED.contains(&scheme)
+}
+
+/// The link as the card names it; see `ExternalLinkAsked::target`.
+fn display_target(url: &url::Url) -> String {
+    match url.host_str().filter(|host| !host.is_empty()) {
+        Some(host) => format!("{}://{host}", url.scheme()),
+        None => format!("{}:", url.scheme()),
+    }
+}
+
+/// Who a refusal holds back: the site, or the tab when there is no site.
+fn asker(origin: &str, tab_id: TabId) -> String {
+    if origin.is_empty() {
+        format!("tab:{tab_id}")
+    } else {
+        origin.to_owned()
+    }
+}
+
+/// Whether `asker` was told no too recently to ask again, forgetting the
+/// refusals that have run out.
+fn cooling(refused: &mut HashMap<String, Instant>, asker: &str, now: Instant) -> bool {
+    refused.retain(|_, until| *until > now);
+    refused.contains_key(asker)
 }
 
 /// How a remembered permission is written down: the asking site and the
@@ -113,7 +194,15 @@ pub fn intercept(app: &AppHandle<Runtime>, tab_id: TabId, url: &url::Url, page_o
         tracing::warn!(%scheme, "external link too long to open");
         return;
     }
+    if is_blocked(&scheme) {
+        tracing::warn!(%scheme, "refused an external link to a blocked scheme");
+        return;
+    }
     let origin = page_origin.to_owned();
+    if with_refused(|refused| cooling(refused, &asker(&origin, tab_id), Instant::now())) {
+        tracing::debug!(%scheme, "external link asked again too soon after a no");
+        return;
+    }
     let state = app.state::<AppState>();
     let prefs = state.prefs.snapshot(&state);
     let allowed = !origin.is_empty()
@@ -121,7 +210,14 @@ pub fn intercept(app: &AppHandle<Runtime>, tab_id: TabId, url: &url::Url, page_o
             .external_link_allowed
             .contains(&allowance(&origin, &scheme));
     if allowed {
-        open(target);
+        // This runs on the main thread, and handing over waits on the
+        // system; nobody is waiting on an answer to report a failure to.
+        let target = target.to_owned();
+        std::thread::spawn(move || {
+            if let Err(error) = open(&target) {
+                tracing::warn!(%error, "opening an allowed external link failed");
+            }
+        });
         return;
     }
     let token = TabId::new().to_string();
@@ -152,6 +248,7 @@ pub fn intercept(app: &AppHandle<Runtime>, tab_id: TabId, url: &url::Url, page_o
         token,
         app: app_name_for(target),
         scheme,
+        target: display_target(url),
         origin,
     }
     .emit(app);
@@ -163,16 +260,19 @@ pub fn answer(app: &AppHandle<Runtime>, token: &str, always: bool) -> AppResult<
         return Err(AppError::new("that link is no longer waiting"));
     };
     closed(app, pending.tab_id, token.to_owned());
+    // Opened first: a site is remembered only for a link that could be.
+    open(&pending.url)?;
     if always && !pending.origin.is_empty() {
         remember(app, &pending.origin, &pending.scheme)?;
     }
-    open(&pending.url);
     Ok(())
 }
 
-/// Forget a link the person said no to.
+/// Forget a link the person said no to, and hold its site back for a moment.
 pub fn dismiss(app: &AppHandle<Runtime>, token: &str) {
     if let Some(pending) = with_pending(|pending| pending.remove(token)) {
+        let key = asker(&pending.origin, pending.tab_id);
+        with_refused(|refused| refused.insert(key, Instant::now() + COOLDOWN));
         closed(app, pending.tab_id, token.to_owned());
     }
 }
@@ -206,15 +306,26 @@ fn remember(app: &AppHandle<Runtime>, origin: &str, scheme: &str) -> AppResult<(
 }
 
 /// Hand the URL to the system, which starts whichever app claims the scheme.
-fn open(url: &str) {
-    #[cfg(target_os = "macos")]
+/// Waits until the system has taken it or refused it, so a link no app
+/// claims is reported rather than silently dropped; keep it off the main
+/// thread.
+fn open(url: &str) -> AppResult<()> {
+    #[cfg(target_os = "windows")]
+    return crate::commands::open_with_shell(std::ffi::OsStr::new(url), "the link");
+    #[cfg(not(target_os = "windows"))]
     {
-        if let Err(error) = std::process::Command::new("/usr/bin/open").arg(url).spawn() {
-            tracing::warn!(%error, "opening an external link failed");
+        #[cfg(target_os = "macos")]
+        let status = std::process::Command::new("/usr/bin/open")
+            .arg(url)
+            .status();
+        #[cfg(not(target_os = "macos"))]
+        let status = std::process::Command::new("xdg-open").arg(url).status();
+        match status {
+            Ok(status) if status.success() => Ok(()),
+            Ok(_) => Err(AppError::new("no app on this computer opens that link")),
+            Err(error) => Err(AppError::new(format!("could not open the link: {error}"))),
         }
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = url;
 }
 
 /// The name of the app the system would open, for the card to say.
@@ -265,6 +376,58 @@ mod tests {
             allowance("claude.ai", "claude"),
             allowance("evil.example", "claude")
         );
+    }
+
+    #[test]
+    fn network_mounts_and_settings_are_never_handed_over() {
+        for scheme in [
+            "smb",
+            "afp",
+            "nfs",
+            "ftp",
+            "vnc",
+            "x-apple.systempreferences",
+            "search-ms",
+            "ms-msdt",
+        ] {
+            let url = url::Url::parse(&format!("{scheme}://host/x")).unwrap();
+            assert!(is_external(&url), "{scheme}");
+            assert!(is_blocked(url.scheme()), "{scheme}");
+        }
+        for scheme in ["claude", "zoommtg", "mailto", "slack", "msteams"] {
+            assert!(!is_blocked(scheme), "{scheme}");
+        }
+    }
+
+    #[test]
+    fn the_card_names_the_scheme_and_host_only() {
+        let target = |raw: &str| display_target(&url::Url::parse(raw).unwrap());
+        assert_eq!(
+            target("claude://login/google-auth?code=secret"),
+            "claude://login"
+        );
+        assert_eq!(
+            target("zoommtg://zoom.us/join?confno=1&pwd=x"),
+            "zoommtg://zoom.us"
+        );
+        assert_eq!(target("mailto:someone@example.com"), "mailto:");
+    }
+
+    #[test]
+    fn a_site_told_no_waits_before_asking_again() {
+        let now = Instant::now();
+        let mut refused = HashMap::new();
+        refused.insert("loop.example".to_owned(), now + COOLDOWN);
+        assert!(cooling(&mut refused, "loop.example", now));
+        // Another site is not held back by it.
+        assert!(!cooling(&mut refused, "claude.ai", now));
+        // Once the moment has passed the site may ask, and the entry goes.
+        assert!(!cooling(&mut refused, "loop.example", now + COOLDOWN));
+        assert!(refused.is_empty());
+        // A page with no site is held back by its tab instead.
+        let tab = TabId::new();
+        assert_eq!(asker("", tab), format!("tab:{tab}"));
+        assert_eq!(asker("claude.ai", tab), "claude.ai");
     }
 
     #[test]
