@@ -13,7 +13,7 @@ function popoutCommands(): string[] {
 const initial = useBrowser.getState();
 
 beforeEach(() => {
-  for (const name of ["tabClose", "tabReload", "tabBack", "tabForward", "tabDevtools", "pageSave", "tabZoom"] as const) {
+  for (const name of ["tabClose", "tabReload", "tabReloadHard", "tabBack", "tabForward", "tabDevtools", "pageSave", "tabZoom"] as const) {
     vi.spyOn(ipc, name).mockResolvedValue(null as never);
   }
 });

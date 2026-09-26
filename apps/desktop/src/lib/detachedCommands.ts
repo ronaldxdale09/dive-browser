@@ -1,3 +1,4 @@
+import { FOCUS_FIND } from "./commands";
 import { ipc } from "./ipc";
 import { errorMessage } from "./errors";
 import { useBrowser } from "../store/browser";
@@ -23,6 +24,7 @@ export function runDetachedCommand(command: string, tabId: string, focusAddress?
   switch (command) {
     case "tab.close": run(ipc.tabClose(tabId)); return true;
     case "tab.reload": run(ipc.tabReload(tabId)); return true;
+    case "tab.reloadHard": run(ipc.tabReloadHard(tabId)); return true;
     case "tab.back": run(ipc.tabBack(tabId)); return true;
     case "tab.forward": run(ipc.tabForward(tabId)); return true;
     case "tab.devtools": run(ipc.tabDevtools(tabId)); return true;
@@ -30,7 +32,11 @@ export function runDetachedCommand(command: string, tabId: string, focusAddress?
     case "zoom.out": void browser.zoomStep(-1, tabId); return true;
     case "zoom.reset": void browser.zoomStep(0, tabId); return true;
     case "page.save": run(ipc.pageSave(tabId)); return true;
-    case "find.open": browser.toggle("find", true); return true;
+    case "find.open":
+      browser.toggle("find", true);
+      // An open bar does not remount; ⌘F again asks it for the keyboard.
+      window.dispatchEvent(new CustomEvent(FOCUS_FIND));
+      return true;
     case "address.focus":
       if (!focusAddress) return false;
       focusAddress();

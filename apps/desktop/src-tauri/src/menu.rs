@@ -64,9 +64,10 @@ pub(crate) fn main_window_command(command: &str) -> bool {
 /// Anything else sent there was dropped on the floor -- after the keyboard
 /// had already been taken from the page for it.
 #[cfg(not(target_os = "windows"))]
-const POPOUT_COMMANDS: [&str; 11] = [
+const POPOUT_COMMANDS: [&str; 12] = [
     "tab.close",
     "tab.reload",
+    "tab.reloadHard",
     "tab.back",
     "tab.forward",
     "tab.devtools",
