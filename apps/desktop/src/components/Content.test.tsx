@@ -1,10 +1,10 @@
-import { useJsDialog } from "../store/jsDialog";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Tab } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
 import { contentCoverDepth, resetContentCover, useCoversContent } from "../lib/overlay";
 import { tabInThisWindow, useBrowser } from "../store/browser";
+import { useJsDialog } from "../store/jsDialog";
 import { Content, NavErrorPanel, describePermission } from "./Content";
 
 // The welcome screen, the device simulator and its picker have tests of
@@ -213,6 +213,15 @@ describe("Content permission dialog", () => {
     await waitFor(() => expect(useBrowser.getState().permissionRequests).toEqual({}));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(contentCoverDepth()).toBe(0);
+  });
+
+  it("waits for the page's own alert or confirm to be answered first", () => {
+    useJsDialog.setState({ byTab: { t1: [{ tab_id: "t1", dialog_id: "d1", kind: "confirm", message: "Leave?", default_prompt: "", origin: "https://meet.test" } as never] } });
+    useBrowser.setState({ permissionRequests: { t1: [camera] } });
+    render(<Content />);
+    expect(screen.queryByRole("dialog", { name: /wants to use your camera/ })).toBeNull();
+    act(() => useJsDialog.setState({ byTab: {} }));
+    expect(screen.getByRole("dialog", { name: /wants to use your camera/ })).toBeTruthy();
   });
 
   it("dims only the content area, so tabs and the toolbar stay usable while it waits", () => {

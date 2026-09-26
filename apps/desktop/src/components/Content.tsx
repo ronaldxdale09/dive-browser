@@ -15,6 +15,7 @@ import { tabInThisWindow, useBrowser } from "../store/browser";
 import type { PermissionRequest } from "../store/browser";
 import { Icon } from "./Icon";
 import { selectDevice, useEmulation } from "../store/emulation";
+import { useJsDialog } from "../store/jsDialog";
 import { useLayout, visibleSplit } from "../store/layout";
 import { usePicker } from "../store/simulator";
 import { DropZones, SplitView } from "./SplitView";
@@ -168,10 +169,14 @@ function PermissionDialog({ tabId, request }: { tabId: string; request: Permissi
   const [error, setError] = useState<string | null>(null);
   const panel = useRef<HTMLDivElement>(null);
   const block = useRef<HTMLButtonElement>(null);
-  const open = request !== undefined;
+  // A page paused on its own alert/confirm answers that first, as in every
+  // browser: the permission question waits its turn. Shown together, this
+  // dialog's scrim blurred the page's card and covered its buttons.
+  const dialogUp = useJsDialog((s) => (s.byTab[tabId]?.length ?? 0) > 0);
+  const open = request !== undefined && !dialogUp;
   useCoversContent(open);
   useFocusTrap(panel, { active: open, initialFocus: block });
-  if (!request) return null;
+  if (!request || !open) return null;
   const answer = async (decision: "allow" | "deny") => {
     setBusy(true); setError(null);
     try { await decide(tabId, request, decision, duration); }
