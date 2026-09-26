@@ -323,7 +323,6 @@ class McpClient:
             "Authorization": "Bearer {}".format(self.token),
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
-            "Origin": self.url.rsplit("/", 1)[0],
         }
         if self.sid:
             headers["Mcp-Session-Id"] = self.sid

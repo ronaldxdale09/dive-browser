@@ -37,7 +37,6 @@ class McpClient:
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
-            "Origin": self.url.rsplit("/", 1)[0],
         }
         if self.session:
             headers["Mcp-Session-Id"] = self.session

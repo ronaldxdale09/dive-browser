@@ -22,7 +22,6 @@ def rpc(url, token, sid, method, params):
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
-        "Origin": url.rsplit("/", 1)[0],
     }
     if sid:
         headers["Mcp-Session-Id"] = sid
@@ -49,7 +48,6 @@ def notify(url, token, sid, method):
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
-        "Origin": url.rsplit("/", 1)[0],
         "Mcp-Session-Id": sid,
     }
     req = urllib.request.Request(url, data=json.dumps({"jsonrpc": "2.0", "method": method}).encode(), headers=headers)
