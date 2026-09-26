@@ -182,7 +182,7 @@ export function Toolbar({ compact = false, trailing = true }: { compact?: boolea
 
   return (
     <div className="relative flex h-full items-center gap-1 px-2">
-      <NavigationButtons tabId={current?.id ?? null} url={url} loading={loading} />
+      <NavigationButtons tabId={current?.id ?? null} url={url} />
       {/* While the page loads the same slot stops it, as in every browser. */}
       {loading ? (
         <IconButton icon={X} label="Stop loading" shortcut="Esc" disabled={!current} onClick={() => void stop()} size={14} />

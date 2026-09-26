@@ -3013,8 +3013,16 @@ export type TabCrashed = {
 	recovering: boolean,
 };
 
+/**
+ *  A tab moved in its history. Carries what the back and forward buttons
+ *  need; the entries themselves are read only when a history menu opens.
+ */
 export type TabHistoryChanged = {
 	tab_id: TabId,
+	/**  Whether there is an entry before the current one. */
+	can_go_back: boolean,
+	/**  Whether there is an entry after the current one. */
+	can_go_forward: boolean,
 };
 
 /**  Identifies a [`Tab`]. */

@@ -42,7 +42,7 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
   const findOpen = useBrowser((state) => state.open.find);
   const loadPrefs = usePrefs((s) => s.load);
   const url = tab?.url ?? "";
-  const { canBack, canForward } = useTabHistory(tab?.id ?? null, url, loading);
+  const { canBack, canForward } = useTabHistory(tab?.id ?? null, url);
   const body = useRef<HTMLDivElement>(null);
   const menuRoot = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState(false);

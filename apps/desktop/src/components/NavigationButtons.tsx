@@ -10,26 +10,34 @@ import { useBrowser } from "../store/browser";
 import { IconButton } from "./Icon";
 import { errorMessage } from "../lib/errors";
 
-export function NavigationButtons({ tabId, url, loading }: { tabId: string | null; url: string; loading: boolean }) {
-  const { history, canBack, canForward } = useTabHistory(tabId, url, loading);
+export function NavigationButtons({ tabId, url }: { tabId: string | null; url: string }) {
+  const { canBack, canForward, loadHistory } = useTabHistory(tabId, url);
   const back = useBrowser((s) => s.back);
   const forward = useBrowser((s) => s.forward);
   return <>
-    <HistoryButton key={`back-${tabId}`} direction="back" tabId={tabId} history={history} disabled={!canBack} navigate={back} />
-    <HistoryButton key={`forward-${tabId}`} direction="forward" tabId={tabId} history={history} disabled={!canForward} navigate={forward} />
+    <HistoryButton key={`back-${tabId}`} direction="back" tabId={tabId} loadHistory={loadHistory} disabled={!canBack} navigate={back} />
+    <HistoryButton key={`forward-${tabId}`} direction="forward" tabId={tabId} loadHistory={loadHistory} disabled={!canForward} navigate={forward} />
   </>;
 }
 
-function HistoryButton({ direction, tabId, history, disabled, navigate }: {
-  direction: "back" | "forward"; tabId: string | null; history: NavigationHistory | null; disabled: boolean; navigate: () => Promise<void>;
+function HistoryButton({ direction, tabId, loadHistory, disabled, navigate }: {
+  direction: "back" | "forward"; tabId: string | null; loadHistory: () => Promise<NavigationHistory | null>; disabled: boolean; navigate: () => Promise<void>;
 }) {
-  const [open, setOpen] = useState(false);
-  if (open && disabled) setOpen(false);
+  // The stack as read when the menu opened; read afresh each time it opens.
+  const [history, setHistory] = useState<NavigationHistory | null>(null);
+  const open = history !== null;
+  // Bumped whenever the menu is closed or asked for again, so a read that
+  // answers after that does not open a menu nobody is waiting for.
+  const request = useRef(0);
+  const close = useCallback(() => {
+    request.current += 1;
+    setHistory(null);
+  }, []);
+  if (open && disabled) setHistory(null);
   const root = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const label = direction === "back" ? "Back" : "Forward";
-  const visible = open && !disabled && history !== null;
-  const close = useCallback(() => setOpen(false), []);
+  const visible = open && !disabled;
   useCoversContent(visible);
   useFocusTrap(panel, { active: visible, menu: true, onEscape: close });
   useDismiss(root, visible, close);
@@ -37,11 +45,14 @@ function HistoryButton({ direction, tabId, history, disabled, navigate }: {
   const show = () => {
     if (disabled) return;
     root.current?.querySelector("button")?.focus();
-    setOpen(true);
+    const asked = ++request.current;
+    void loadHistory().then((read) => {
+      if (read && asked === request.current) setHistory(read);
+    });
   };
   return <div ref={root} className="relative shrink-0">
     <IconButton icon={direction === "back" ? ArrowLeft : ArrowRight} label={label} disabled={disabled}
-      onClick={() => { setOpen(false); void navigate(); }}
+      onClick={() => { close(); void navigate(); }}
       hasPopup="menu" expanded={visible}
       description="Right-click or press Arrow Down to show this tab’s history"
       onContextMenu={(event) => { event.preventDefault(); show(); }}
@@ -56,7 +67,7 @@ function HistoryButton({ direction, tabId, history, disabled, navigate }: {
         onMouseEnter={(event) => event.currentTarget.focus({ preventScroll: true })}
         className="block w-full rounded-lg px-2.5 py-1 text-left text-ink-2 outline-none hover:bg-surface-2 hover:text-ink focus-visible:bg-surface-2 focus-visible:text-ink"
         onClick={() => {
-          setOpen(false);
+          close();
           if (tabId && history) void ipc.tabHistoryNavigate(tabId, history.generation, entry.id).catch((error: unknown) => {
             useBrowser.setState({ error: errorMessage(error) });
           });

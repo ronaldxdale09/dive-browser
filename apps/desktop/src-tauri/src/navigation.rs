@@ -25,9 +25,37 @@ pub struct NavigationHistory {
     pub entries: Vec<NavigationEntry>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Type, Event)]
+/// A tab moved in its history. Carries what the back and forward buttons
+/// need; the entries themselves are read only when a history menu opens.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type, Event)]
 pub struct TabHistoryChanged {
     pub tab_id: TabId,
+    /// Whether there is an entry before the current one.
+    pub can_go_back: bool,
+    /// Whether there is an entry after the current one.
+    pub can_go_forward: bool,
+}
+
+impl TabHistoryChanged {
+    fn of(tab_id: TabId, history: &NavigationHistory) -> Self {
+        let last = i32::try_from(history.entries.len()).unwrap_or(i32::MAX) - 1;
+        Self {
+            tab_id,
+            can_go_back: history.current_index > 0,
+            can_go_forward: history.current_index >= 0 && history.current_index < last,
+        }
+    }
+}
+
+/// Read where `session`'s page stands in its history, for the chrome. `None`
+/// when the engine did not answer sensibly, as for a view that is closing.
+pub(crate) async fn history_changed(
+    tab_id: TabId,
+    session: &CdpSession,
+) -> Option<TabHistoryChanged> {
+    let reply = session.call0("Page.getNavigationHistory").await.ok()?;
+    let history = parse_history(reply, String::new()).ok()?;
+    Some(TabHistoryChanged::of(tab_id, &history))
 }
 
 fn parse_history(value: serde_json::Value, generation: String) -> AppResult<NavigationHistory> {
@@ -166,6 +194,20 @@ mod tests {
     fn accepts_only_the_empty_history_sentinel() {
         assert!(parse_history(json!({"currentIndex": -1, "entries": []}), "view-1".into()).is_ok());
         assert!(parse_history(json!({"currentIndex": 0, "entries": []}), "view-1".into()).is_err());
+    }
+
+    #[test]
+    fn the_buttons_learn_which_way_the_page_can_go() {
+        let tab = TabId::new();
+        let at = |index| {
+            TabHistoryChanged::of(tab, &parse_history(reply(index), String::new()).unwrap())
+        };
+        assert!(!at(0).can_go_back && at(0).can_go_forward);
+        assert!(at(1).can_go_back && !at(1).can_go_forward);
+        let empty =
+            parse_history(json!({"currentIndex": -1, "entries": []}), String::new()).unwrap();
+        let nowhere = TabHistoryChanged::of(tab, &empty);
+        assert!(!nowhere.can_go_back && !nowhere.can_go_forward);
     }
 
     #[test]

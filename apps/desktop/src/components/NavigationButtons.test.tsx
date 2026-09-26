@@ -15,7 +15,7 @@ const history: NavigationHistory = {
 };
 
 vi.mock("../lib/useTabHistory", () => ({
-  useTabHistory: () => ({ history, canBack: true, canForward: false }),
+  useTabHistory: () => ({ canBack: true, canForward: false, loadHistory: () => Promise.resolve(history) }),
 }));
 
 beforeEach(() => {
@@ -27,38 +27,38 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function openBackHistory() {
-  render(<NavigationButtons tabId="t1" url="https://three.example/" loading={false} />);
+async function openBackHistory() {
+  render(<NavigationButtons tabId="t1" url="https://three.example/" />);
   fireEvent.contextMenu(screen.getByRole("button", { name: "Back" }));
-  return screen.getByRole("menu", { name: "Back history" });
+  return screen.findByRole("menu", { name: "Back history" });
 }
 
 describe("NavigationButtons history menu", () => {
-  it("lists the entries behind the current page, nearest first", () => {
-    openBackHistory();
+  it("lists the entries behind the current page, nearest first", async () => {
+    await openBackHistory();
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Twohttps://two.example/", "Onehttps://one.example/"]);
   });
 
-  it("moves focus to the hovered row, so only one row is ever highlighted", () => {
-    openBackHistory();
+  it("moves focus to the hovered row, so only one row is ever highlighted", async () => {
+    await openBackHistory();
     const [first, second] = screen.getAllByRole("menuitem");
     expect(document.activeElement).toBe(first);
     fireEvent.mouseEnter(second!);
     expect(document.activeElement).toBe(second);
   });
 
-  it("closes when the window loses focus, as a click into the page does", () => {
-    openBackHistory();
+  it("closes when the window loses focus, as a click into the page does", async () => {
+    await openBackHistory();
     fireEvent.blur(window);
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("closes on a click outside and on Escape", () => {
-    openBackHistory();
+  it("closes on a click outside and on Escape", async () => {
+    await openBackHistory();
     fireEvent.mouseDown(document.body);
     expect(screen.queryByRole("menu")).toBeNull();
     fireEvent.contextMenu(screen.getByRole("button", { name: "Back" }));
-    fireEvent.keyDown(screen.getAllByRole("menuitem")[0]!, { key: "Escape" });
+    fireEvent.keyDown((await screen.findAllByRole("menuitem"))[0]!, { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
   });
 });

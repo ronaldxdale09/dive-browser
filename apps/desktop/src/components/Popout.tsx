@@ -48,7 +48,7 @@ export function Popout({ tabId }: { tabId: string }) {
   // the address bar shows its placeholder and the tab reads as new.
   const blank = url === "about:blank";
   const shownUrl = blank ? "" : url;
-  const { canBack, canForward } = useTabHistory(tab?.id ?? null, url, loading);
+  const { canBack, canForward } = useTabHistory(tab?.id ?? null, url);
   const [draft, setDraft] = useState({ tabId, value: shownUrl });
   const [editing, setEditing] = useState(false);
   if (draft.tabId !== tabId) setDraft({ tabId, value: shownUrl });
