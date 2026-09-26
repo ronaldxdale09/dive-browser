@@ -15,7 +15,7 @@ import { orderTabs, tabLabel } from "../TabStrip";
 /**
  * Everything decided before a recording starts, in one place: which tab,
  * what kind of file, how smooth, with a voice or not. Opens from the Record
- * button and from ⌘⇧R; Enter starts, Escape leaves.
+ * button and from ⌘⌥⇧R; Enter starts, Escape leaves.
  */
 export function RecordDialog() {
   const phase = useRecording((s) => s.phase);

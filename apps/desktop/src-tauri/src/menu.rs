@@ -148,7 +148,7 @@ fn file_menu(app: &App<Runtime>) -> tauri::Result<Submenu<Runtime>> {
             app,
             "screencast.toggle",
             "Record Tab as GIF",
-            "CmdOrCtrl+Shift+R",
+            "CmdOrCtrl+Alt+Shift+R",
         )?)
         .item(&item(
             app,

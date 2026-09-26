@@ -10,7 +10,7 @@ export function Recording({ index }: SceneProps) {
   const bar = ramp(frame, 10, 100);
   const done = frame >= 96;
   return (
-    <Scene index={index} eyebrow="Capture" title="Record a tab as a GIF" text="One chord starts recording, the same one stops it. The GIF lands on disk. Copy the path from the saved dialog if you want it on the clipboard." keys="⌘⇧R">
+    <Scene index={index} eyebrow="Capture" title="Record a tab as a GIF" text="One chord starts recording, the same one stops it. The GIF lands on disk. Copy the path from the saved dialog if you want it on the clipboard." keys="⌘⌥⇧R">
       <Window url="acme.test/analytics">
         <div style={{ position: "absolute", inset: 0, padding: "26px 30px" }}>
           <Skeleton lines={2} width={180} top={26} left={30} />

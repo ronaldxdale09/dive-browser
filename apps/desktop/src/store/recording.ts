@@ -52,7 +52,7 @@ interface RecordingState {
   closeSetup: () => void;
   setTab: (tab: string) => void;
   setSettings: (patch: Partial<RecordSettings>) => void;
-  /** ⌘⇧R: open setup when idle, stop when recording. */
+  /** ⌘⌥⇧R: open setup when idle, stop when recording. */
   toggle: () => Promise<void>;
   start: () => Promise<void>;
   pause: () => Promise<void>;

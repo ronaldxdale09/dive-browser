@@ -246,7 +246,11 @@ export const SHORTCUTS: Record<string, string> = {
   "mod+shift+h": "tab.home",
   "mod+alt+i": "tab.devtools",
   "mod+shift+b": "report.compose",
-  "mod+shift+r": "screencast.toggle",
+  // ⌘⇧R is hard reload in every other browser; recording a video taking it
+  // meant a habitual reload opened the recorder. Recording moves to ⌘⌥⇧R.
+  // This engine has no cache-bypassing reload to put on ⌘⇧R, so it is left
+  // free rather than bound to something it is not.
+  "mod+alt+shift+r": "screencast.toggle",
   "mod+=": "zoom.in",
   // ⌘+ is ⌘⇧= on most keyboards, and + on a numeric keypad.
   "mod+shift+=": "zoom.in",

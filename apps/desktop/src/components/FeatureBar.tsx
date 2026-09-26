@@ -256,7 +256,7 @@ function RecordingHud({ compact }: { compact: boolean }) {
       {paused && !compact && <span className="text-ink-3">paused</span>}
       {error && <Icon icon={AlertTriangle} size={13} role="img" aria-label={error} className="text-danger" />}
       <IconButton icon={paused ? Play : Pause} label={paused ? "Resume recording" : "Pause recording"} size={13} onClick={() => void (paused ? resume() : pause())} />
-      <Tooltip label="Stop and save" shortcut="⌘⇧R">
+      <Tooltip label="Stop and save" shortcut="⌘⌥⇧R">
         <button type="button" aria-label="Stop and save" onClick={() => void stop()} className="grid size-7 place-items-center rounded-full text-danger transition-colors hover:bg-danger/20">
           <Icon icon={Square} size={12} className="fill-current" />
         </button>

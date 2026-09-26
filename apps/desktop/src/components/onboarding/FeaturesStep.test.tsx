@@ -61,7 +61,7 @@ describe("FeaturesStep", () => {
     expect(document.body.textContent).toMatch(/Ctrl\+1–9/);
     expect(document.body.textContent).toMatch(/Ctrl\+J/);
     expect(document.body.textContent).toMatch(/Ctrl\+Shift\+D/);
-    expect(document.body.textContent).toMatch(/Ctrl\+Shift\+R/);
+    expect(document.body.textContent).toMatch(/Ctrl\+Alt\+Shift\+R/);
     expect(document.body.textContent).toMatch(/Ctrl\+K finds commands that apply here/);
   });
 });
