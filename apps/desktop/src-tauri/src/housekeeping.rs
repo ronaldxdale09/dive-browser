@@ -42,6 +42,8 @@ const PRUNE_EVERY_SWEEPS: u32 = 60;
 
 /// Start the periodic sweep.
 pub fn start(app: AppHandle<Runtime>) {
+    // Once per launch: frames a crashed recording left behind.
+    tauri::async_runtime::spawn_blocking(crate::screencast::sweep_stale_work_dirs);
     tauri::async_runtime::spawn(async move {
         let mut sweeps: u32 = 0;
         loop {

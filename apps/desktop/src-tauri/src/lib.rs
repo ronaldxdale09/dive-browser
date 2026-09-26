@@ -489,6 +489,15 @@ pub fn run() {
             if let Some(window) = app.get_window(MAIN_WINDOW) {
                 engine::remember_window_bounds(&window);
             }
+            // A recording in progress is saved before Dive goes; the exit
+            // comes back here once it is, and exports are asked then.
+            if app.state::<state::AppState>().screencast.prepare_exit()
+                == screencast::ExitAction::Save
+            {
+                api.prevent_exit();
+                screencast::save_for_exit(app.clone(), code.unwrap_or(0));
+                return;
+            }
             let registry = app.state::<state::AppState>().screen_exports.clone();
             match registry.prepare_exit() {
                 screen::jobs::ExitAction::Immediate => {}
@@ -981,7 +990,7 @@ async fn smoke_gif(
             )
             .await;
     }
-    let result = state.screencast.stop(id, &session).await?;
+    let result = state.screencast.stop(id, Some(&session)).await?;
     Ok(std::path::PathBuf::from(result.path))
 }
 

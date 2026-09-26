@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../lib/ipc";
 import { tabInThisWindow, useBrowser } from "./browser";
-import { DEFAULT_SETTINGS, describeLimits, effectiveSettings, elapsedSeconds, useRecording } from "./recording";
+import type { RecordingResult } from "../lib/ipc";
+import { applyRecordingEvent, DEFAULT_SETTINGS, describeLimits, effectiveSettings, elapsedSeconds, recordedTabClosed, useRecording } from "./recording";
 
 const caps = { ffmpeg: true, microphones: [{ id: "0", name: "Built-in" }], video_max_seconds: 600, gif_max_seconds: 60 };
 
 beforeEach(() => {
   useBrowser.setState({ activeTab: "tab-1", detached: [], recordingTab: null, error: null });
-  useRecording.setState({ phase: "idle", tab: null, error: null, result: null, settings: { ...DEFAULT_SETTINGS, countdown: false }, startedAt: null, pausedAt: null, pausedTotal: 0 });
+  useRecording.setState({ phase: "idle", tab: null, error: null, result: null, progress: null, micRequested: false, micFailed: false, limitHit: false, settings: { ...DEFAULT_SETTINGS, countdown: false }, startedAt: null, pausedAt: null, pausedTotal: 0 });
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -103,15 +104,110 @@ describe("recording command recovery", () => {
     expect(useRecording.getState()).toMatchObject({ phase: "paused", error: "Recorder is unavailable" });
   });
 
-  it("keeps a failed stop recoverable and offers another save attempt", async () => {
-    vi.spyOn(ipc, "tabScreencastStop").mockRejectedValue(new Error("Encoder did not respond"));
+  it("ends a failed stop in a state that says so, and a second try saves", async () => {
+    const stop = vi.spyOn(ipc, "tabScreencastStop").mockRejectedValueOnce(new Error("Encoder did not respond")).mockResolvedValueOnce(saved);
     useBrowser.setState({ recordingTab: "tab-1" });
     useRecording.setState({ phase: "recording", tab: "tab-1", startedAt: Date.now() });
 
     await useRecording.getState().stop();
 
-    expect(useRecording.getState()).toMatchObject({ phase: "recording", tab: "tab-1", error: "Encoder did not respond" });
+    // Capture is over, so no ticking clock or pause: a failure to act on.
+    expect(useRecording.getState()).toMatchObject({ phase: "failed", tab: "tab-1", error: "Encoder did not respond" });
     expect(useBrowser.getState().recordingTab).toBe("tab-1");
     expect(useBrowser.getState().error).toBeNull();
+
+    await useRecording.getState().stop();
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(useRecording.getState()).toMatchObject({ phase: "done", result: saved, error: null });
+    expect(useBrowser.getState().recordingTab).toBeNull();
+  });
+
+  it("gives up on a retry the engine holds nothing for", async () => {
+    vi.spyOn(ipc, "tabScreencastStop").mockRejectedValue(new Error("not recording this tab"));
+    useRecording.setState({ phase: "failed", tab: "tab-1", error: "nothing was painted while recording" });
+    await useRecording.getState().stop();
+    expect(useRecording.getState()).toMatchObject({ phase: "idle", tab: null });
+    expect(useBrowser.getState().error).toMatch(/Nothing was captured/);
+  });
+
+  it("throws a failed recording away", async () => {
+    const cancel = vi.spyOn(ipc, "tabScreencastCancel").mockResolvedValue(null);
+    useRecording.setState({ phase: "failed", tab: "tab-1", error: "disk full" });
+    await useRecording.getState().cancel();
+    expect(cancel).toHaveBeenCalledWith("tab-1");
+    expect(useRecording.getState()).toMatchObject({ phase: "idle", tab: null, error: null });
+  });
+
+  it("stops a save without throwing the recording away", async () => {
+    const cancel = vi.spyOn(ipc, "tabScreencastCancel").mockResolvedValue(null);
+    useRecording.setState({ phase: "finishing", tab: "tab-1" });
+    await useRecording.getState().cancel();
+    expect(cancel).toHaveBeenCalledWith("tab-1");
+    // The pending stop (or the engine's event) moves it on; nothing here resets it.
+    expect(useRecording.getState()).toMatchObject({ phase: "finishing", tab: "tab-1" });
+  });
+});
+
+const saved: RecordingResult = { path: "/captures/a.mp4", duration_secs: 3, bytes: 1000, width: 640, height: 360, format: "mp4", frames: 90, has_audio: false, events: null, preview: null };
+const event = (kind: string, extra: Partial<Parameters<typeof applyRecordingEvent>[0]> = {}) => ({ tab: "tab-1", kind, progress: null, result: null, error: null, ...extra });
+
+describe("recorded tab closing", () => {
+  it("hands a running recording to the engine's save instead of calling it discarded", () => {
+    useRecording.setState({ phase: "recording", tab: "tab-1", startedAt: Date.now() });
+    recordedTabClosed("tab-1");
+    expect(useRecording.getState().phase).toBe("finishing");
+    expect(useBrowser.getState().error).toBeNull();
+
+    applyRecordingEvent(event("progress", { progress: 0.5 }));
+    expect(useRecording.getState().progress).toBe(0.5);
+    applyRecordingEvent(event("saved", { result: saved }));
+    expect(useRecording.getState()).toMatchObject({ phase: "done", result: saved });
+  });
+
+  it("leaves a save already under way alone", () => {
+    useRecording.setState({ phase: "finishing", tab: "tab-1" });
+    recordedTabClosed("tab-1");
+    expect(useRecording.getState()).toMatchObject({ phase: "finishing", tab: "tab-1" });
+    expect(useBrowser.getState().error).toBeNull();
+  });
+
+  it("says nothing was recorded when the tab closes before capture began", () => {
+    useRecording.setState({ phase: "countdown", tab: "tab-1", countdown: 2 });
+    recordedTabClosed("tab-1");
+    expect(useRecording.getState()).toMatchObject({ phase: "idle", tab: null });
+    expect(useBrowser.getState().error).toMatch(/before recording began/);
+  });
+
+  it("ignores other tabs", () => {
+    useRecording.setState({ phase: "recording", tab: "tab-1", startedAt: Date.now() });
+    recordedTabClosed("tab-2");
+    expect(useRecording.getState().phase).toBe("recording");
+  });
+});
+
+describe("engine recording events", () => {
+  it("shows a save the engine began itself, and its failure", () => {
+    useRecording.setState({ phase: "paused", tab: "tab-1", startedAt: Date.now(), pausedAt: Date.now() });
+    applyRecordingEvent(event("finishing"));
+    expect(useRecording.getState().phase).toBe("finishing");
+    applyRecordingEvent(event("failed", { error: "ffmpeg timed out" }));
+    expect(useRecording.getState()).toMatchObject({ phase: "failed", error: "ffmpeg timed out" });
+  });
+
+  it("remembers a lost microphone for the saved dialog", () => {
+    useRecording.setState({ phase: "recording", tab: "tab-1", startedAt: Date.now(), micRequested: true });
+    applyRecordingEvent(event("mic_failed"));
+    expect(useRecording.getState().micFailed).toBe(true);
+    applyRecordingEvent({ ...event("mic_failed"), tab: "tab-2" });
+    expect(useRecording.getState().phase).toBe("recording");
+  });
+
+  it("stops at the length cap", async () => {
+    const stop = vi.spyOn(ipc, "tabScreencastStop").mockResolvedValue(saved);
+    useRecording.setState({ phase: "recording", tab: "tab-1", startedAt: Date.now() });
+    applyRecordingEvent(event("limit"));
+    expect(useRecording.getState().limitHit).toBe(true);
+    await vi.waitFor(() => expect(useRecording.getState().phase).toBe("done"));
+    expect(stop).toHaveBeenCalledWith("tab-1");
   });
 });

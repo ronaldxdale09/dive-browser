@@ -34,7 +34,7 @@ beforeEach(() => {
   });
   useEmulation.setState({ byTab: {}, media: {}, throttle: {} });
   usePicker.setState({ open: false });
-  useRecording.setState({ phase: "idle", tab: null, result: null, error: null, startedAt: null, pausedAt: null, pausedTotal: 0 });
+  useRecording.setState({ phase: "idle", tab: null, result: null, error: null, progress: null, startedAt: null, pausedAt: null, pausedTotal: 0 });
   vi.spyOn(ipc, "tabScreencastStart").mockResolvedValue(null);
   vi.spyOn(ipc, "tabScreencastPause").mockResolvedValue(null);
   vi.spyOn(ipc, "tabScreencastCancel").mockResolvedValue(null);
@@ -96,6 +96,28 @@ describe("FeatureBar", () => {
     await waitFor(() => expect(useRecording.getState().phase).toBe("idle"));
     expect(useBrowser.getState().recordingTab).toBeNull();
     expect(screen.queryByRole("timer")).toBeNull();
+  });
+
+  it("says in words that a save failed, and offers another try or discarding", async () => {
+    const stop = vi.spyOn(ipc, "tabScreencastStop").mockRejectedValue(new Error("ffmpeg timed out"));
+    useRecording.setState({ phase: "failed", tab: tab.id, error: "ffmpeg could not encode the recording" });
+    render(<FeatureBar />);
+    expect(screen.getByRole("alert").textContent).toContain("Not saved: ffmpeg could not encode the recording");
+    // Capture is over: nothing to pause.
+    expect(screen.queryByRole("button", { name: "Pause recording" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(stop).toHaveBeenCalledWith(tab.id);
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("ffmpeg timed out"));
+    fireEvent.click(screen.getByRole("button", { name: "Discard recording" }));
+    await waitFor(() => expect(useRecording.getState().phase).toBe("idle"));
+  });
+
+  it("shows how far a save has got, with a way to stop it", async () => {
+    useRecording.setState({ phase: "finishing", tab: tab.id, progress: 0.42 });
+    render(<FeatureBar />);
+    expect(screen.getByRole("status").textContent).toContain("Saving… 42%");
+    fireEvent.click(screen.getByRole("button", { name: "Stop saving" }));
+    await waitFor(() => expect(ipc.tabScreencastCancel).toHaveBeenCalledWith(tab.id));
   });
 
   it("opens the agent", () => {

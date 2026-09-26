@@ -317,7 +317,7 @@ export function reduceEvent(state: Reduced, event: CoreEvent): Partial<Reduced> 
       // The engine picks the replacement and announces it with tab_activated.
       const tabs = state.tabs.filter((t) => t.id !== event.data);
       const activeTab = state.activeTab === event.data ? null : state.activeTab;
-      // The engine discards that tab's recording; nothing is saved.
+      // The engine saves that tab's recording; the strip has no tab to mark.
       const recordingTab = state.recordingTab === event.data ? null : state.recordingTab;
       const detached = state.detached.filter((id) => id !== event.data);
       return { tabs, activeTab, recordingTab, detached };

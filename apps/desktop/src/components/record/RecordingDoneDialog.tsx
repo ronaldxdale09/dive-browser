@@ -22,6 +22,8 @@ export function RecordingDoneDialog() {
   const phase = useRecording((s) => s.phase);
   const result = useRecording((s) => s.result);
   const limitHit = useRecording((s) => s.limitHit);
+  const micRequested = useRecording((s) => s.micRequested);
+  const micFailed = useRecording((s) => s.micFailed);
   const dismiss = useRecording((s) => s.dismiss);
   const deleteResult = useRecording((s) => s.deleteResult);
   const openSetup = useRecording((s) => s.openSetup);
@@ -86,6 +88,11 @@ export function RecordingDoneDialog() {
           )}
         </div>
         {limitHit && <p className="mx-5 mt-2 text-[11px] text-ink-3">The recording reached its length limit and stopped on its own.</p>}
+        {micRequested && (micFailed || !result.has_audio) && (
+          <p className="mx-5 mt-2 text-[11px] text-danger">
+            {result.has_audio ? "The microphone stopped partway through, so the rest of the recording is silent." : "The microphone could not be recorded, so this recording has no sound."}
+          </p>
+        )}
 
         <footer className="flex items-center gap-1.5 px-5 py-4">
           <Action icon={ExternalLink} label="Open" onClick={() => ipc.recordingOpen(result.path).catch(fail)} />

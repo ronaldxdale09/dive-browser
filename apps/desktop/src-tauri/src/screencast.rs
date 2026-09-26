@@ -12,9 +12,9 @@ use std::fs::File;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use base64::Engine as _;
 use dive_cdp::CdpSession;
@@ -22,7 +22,7 @@ use dive_core::TabId;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use specta::Type;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager as _};
 use tauri_specta::Event;
 
 use crate::Runtime;
@@ -140,16 +140,31 @@ const TRACK_BINDING: &str = "__diveRecordTrack";
 
 /// The script that feeds the binding: pointer positions (throttled) and
 /// clicks, in viewport CSS pixels, with the page's own clock.
+///
+/// A page keeps its listeners after a recording ends, so a second recording
+/// of the same document finds them installed. It used to return there
+/// without a word, and the viewport message the sidecar is built on never
+/// came: the second recording had no cursor or zoom data at all. Now it
+/// switches the listeners back on and announces the viewport again, and a
+/// stop switches them off.
 const TRACK_SCRIPT: &str = r"(() => {
-  if (window.__diveRecordTrackOn) return; window.__diveRecordTrackOn = true;
-  const send = (o) => { try { window.__diveRecordTrack(JSON.stringify(o)); } catch (e) {} };
+  const viewport = () => ({k:'v', t: performance.now(), w: innerWidth, h: innerHeight, dpr: devicePixelRatio});
+  const known = window.__diveRecordTrackState;
+  if (known) { known.live = true; known.send(viewport()); return; }
+  const state = { live: true, send: (o) => { if (!state.live) return; try { window.__diveRecordTrack(JSON.stringify(o)); } catch (e) {} } };
+  window.__diveRecordTrackState = state;
+  const send = state.send;
   let last = 0;
   addEventListener('pointermove', (e) => { const t = performance.now(); if (t - last < 16) return; last = t; send({k:'m', t, x:e.clientX, y:e.clientY}); }, {capture:true, passive:true});
   addEventListener('pointerdown', (e) => send({k:'c', t: performance.now(), x:e.clientX, y:e.clientY, b:e.button}), {capture:true, passive:true});
   addEventListener('keydown', (e) => send({k:'k', t: performance.now()}), {capture:true, passive:true});
   addEventListener('scroll', () => send({k:'s', t: performance.now(), x: scrollX, y: scrollY}), {capture:true, passive:true});
-  send({k:'v', t: performance.now(), w: innerWidth, h: innerHeight, dpr: devicePixelRatio});
+  send(viewport());
 })();";
+
+/// Switches the page's pointer tracking off when a recording ends.
+const UNTRACK_SCRIPT: &str =
+    "window.__diveRecordTrackState && (window.__diveRecordTrackState.live = false)";
 
 /// One tracked pointer event, on the recording's media clock.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -204,16 +219,51 @@ pub struct RecordingCapabilities {
     pub gif_max_seconds: u32,
 }
 
-/// Something the chrome should react to while a recording runs.
+/// Something the chrome should react to while a recording runs or saves.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct RecordingEvent {
     /// The tab being recorded.
     pub tab: TabId,
-    /// `limit` when the length cap was reached and no more frames are kept.
+    /// `limit` when the length cap was reached and no more frames are kept;
+    /// `mic_failed` when the microphone stopped recording; `finishing` when
+    /// Dive began saving on its own (the tab closed, or Dive is quitting);
+    /// `progress` while a save runs; `saved` or `failed` when a save Dive
+    /// began on its own ends.
     pub kind: String,
+    /// Share of the save done, 0 to 1, with `progress`.
+    pub progress: Option<f64>,
+    /// The file, with `saved`.
+    pub result: Option<RecordingResult>,
+    /// Why, with `failed`.
+    pub error: Option<String>,
 }
 
+impl RecordingEvent {
+    fn new(tab: TabId, kind: &str) -> Self {
+        Self {
+            tab,
+            kind: kind.into(),
+            progress: None,
+            result: None,
+            error: None,
+        }
+    }
+}
+
+/// Prefix of the hidden work directory a recording keeps its frames in.
+const WORK_DIR_PREFIX: &str = ".recording-";
+/// A work directory untouched this long belongs to no live recording: a
+/// crash or a kill left it. Launch removes it; frames are gigabytes.
+const STALE_WORK_DIR: Duration = Duration::from_hours(1);
+/// Capture processes are told to end this long after the length cap, so
+/// the watchdog, which cuts at the cap exactly, always gets there first
+/// and the limit only matters when Dive is gone and cannot stop them.
+const CAPTURE_SLACK_SECONDS: f64 = 2.0;
+/// What a save stopped by the person reports.
+const SAVE_STOPPED: &str = "saving was stopped";
+
 /// One captured frame: when it was painted, and which file holds it.
+#[derive(Clone)]
 struct Frame {
     /// Seconds of media time (pauses excluded).
     at: f64,
@@ -240,12 +290,27 @@ struct Recording {
     stopped: AtomicBool,
     paused: AtomicBool,
     limit_hit: AtomicBool,
+    /// A save is running. A second stop is refused meanwhile, and a cancel
+    /// stops the save instead of deleting what it is saving.
+    finishing: AtomicBool,
+    /// The person asked the running save to stop.
+    cancel_save: AtomicBool,
+    /// Length fixed by the first stop, so a save tried again later does not
+    /// count the minutes spent in between as recording.
+    length: Mutex<Option<f64>>,
+    /// Why the last save failed, while the recording waits to be tried again.
+    error: Mutex<Option<String>>,
+    /// The microphone was lost and the chrome has been told.
+    mic_lost: AtomicBool,
     started: Instant,
     /// Total time spent paused, and when the current pause began.
     pauses: Mutex<(Duration, Option<Instant>)>,
     audio: Mutex<Audio>,
     /// Pointer and click events from the page, on the media clock.
     tracked: Mutex<Vec<TrackedEvent>>,
+    /// The new-document script feeding `tracked`, removed when capture ends
+    /// so every later page load of the tab stops installing it.
+    track_script: Mutex<Option<String>>,
     /// Screen-capture stretches, when recording the whole window.
     screen: Mutex<Audio>,
     window: Option<WindowRect>,
@@ -264,7 +329,7 @@ impl Recording {
     ) -> AppResult<Self> {
         let now = dive_core::Timestamp::now();
         let stamp = now.to_rfc3339().replace([':', '.'], "-");
-        let dir = crate::commands::captures_dir()?.join(format!(".recording-{stamp}"));
+        let dir = crate::commands::captures_dir()?.join(format!("{WORK_DIR_PREFIX}{stamp}"));
         std::fs::create_dir_all(&dir)?;
         Ok(Self {
             dir,
@@ -274,10 +339,16 @@ impl Recording {
             stopped: AtomicBool::new(false),
             paused: AtomicBool::new(false),
             limit_hit: AtomicBool::new(false),
+            finishing: AtomicBool::new(false),
+            cancel_save: AtomicBool::new(false),
+            length: Mutex::new(None),
+            error: Mutex::new(None),
+            mic_lost: AtomicBool::new(false),
             started: Instant::now(),
             pauses: Mutex::new((Duration::ZERO, None)),
             audio: Mutex::new(Audio::default()),
             tracked: Mutex::new(Vec::new()),
+            track_script: Mutex::new(None),
             screen: Mutex::new(Audio::default()),
             window,
             screencast_seen: AtomicBool::new(false),
@@ -293,8 +364,37 @@ impl Recording {
         self.started.elapsed().saturating_sub(paused).as_secs_f64()
     }
 
+    /// The recording's length, fixed the first time it is asked for.
+    fn length(&self) -> f64 {
+        *lock(&self.length).get_or_insert_with(|| self.media_time())
+    }
+
     fn done(&self) -> bool {
         self.stopped.load(Ordering::Relaxed) || self.limit_hit.load(Ordering::Relaxed)
+    }
+
+    fn emit(&self, event: &RecordingEvent) {
+        if let Err(error) = event.emit(&self.app) {
+            tracing::debug!(tab = %self.tab, %error, kind = %event.kind, "recording event not delivered");
+        }
+    }
+
+    /// Mark the length cap as reached, telling the chrome once.
+    fn hit_limit(&self) {
+        if !self.limit_hit.swap(true, Ordering::Relaxed) {
+            self.emit(&RecordingEvent::new(self.tab, "limit"));
+        }
+    }
+
+    /// Seconds a capture process started now may run: the rest of the
+    /// length cap, so one that outlives Dive still ends on its own.
+    fn capture_budget(&self) -> f64 {
+        capture_budget(self.options.max_seconds(), self.media_time())
+    }
+
+    /// Whether anything was captured that a save could turn into a file.
+    fn has_material(&self) -> bool {
+        !lock(&self.frames).is_empty() || !lock(&self.screen).segments.is_empty()
     }
 
     /// Keep a frame unless paused; returns whether the length cap was hit.
@@ -304,13 +404,7 @@ impl Recording {
         }
         let at = self.media_time();
         if at > f64::from(self.options.max_seconds()) {
-            if !self.limit_hit.swap(true, Ordering::Relaxed) {
-                let _ = RecordingEvent {
-                    tab: self.tab,
-                    kind: "limit".into(),
-                }
-                .emit(&self.app);
-            }
+            self.hit_limit();
             return true;
         }
         let mut frames = lock(&self.frames);
@@ -329,6 +423,11 @@ impl Recording {
     }
 
     fn set_paused(&self, paused: bool) {
+        // Past the cap or the stop, a resume would start capture processes
+        // nobody is going to end.
+        if self.done() {
+            return;
+        }
         if self.paused.swap(paused, Ordering::Relaxed) == paused {
             return;
         }
@@ -368,6 +467,7 @@ impl Recording {
             rect,
             self.options.microphone.as_deref(),
             self.options.fps(),
+            self.capture_budget(),
             &path,
         )?;
         screen.child = Some((child, path));
@@ -395,12 +495,45 @@ impl Recording {
             return;
         }
         let path = self.dir.join(format!("a{:03}.wav", audio.segments.len()));
-        match spawn_mic(mic, &path) {
+        match spawn_mic(mic, self.capture_budget(), &path) {
             Ok(child) => audio.child = Some((child, path)),
             Err(e) => {
                 tracing::warn!("microphone capture failed to start: {e}");
                 audio.failed = true;
             }
+        }
+    }
+
+    /// Whether the microphone process is running.
+    fn microphone_alive(&self) -> bool {
+        lock(&self.audio)
+            .child
+            .as_mut()
+            .is_some_and(|(child, _)| matches!(child.try_wait(), Ok(None)))
+    }
+
+    /// Notice a microphone process that ended on its own (the device was
+    /// unplugged, or access was withdrawn), keep what it wrote, and tell
+    /// the chrome once: the rest of the recording will be silent.
+    fn check_microphone(&self) {
+        let mut audio = lock(&self.audio);
+        let exited = audio
+            .child
+            .as_mut()
+            .is_some_and(|(child, _)| matches!(child.try_wait(), Ok(Some(_)) | Err(_)));
+        if !exited {
+            return;
+        }
+        if let Some((_, path)) = audio.child.take()
+            && path.exists()
+        {
+            audio.segments.push(path);
+        }
+        audio.failed = true;
+        drop(audio);
+        if !self.mic_lost.swap(true, Ordering::Relaxed) {
+            tracing::warn!(tab = %self.tab, "microphone capture ended while recording");
+            self.emit(&RecordingEvent::new(self.tab, "mic_failed"));
         }
     }
 
@@ -415,9 +548,92 @@ impl Recording {
         }
     }
 
+    /// Switch pointer tracking off in the page and stop installing it on
+    /// the tab's next page loads.
+    async fn untrack(&self, session: &CdpSession) {
+        let script = lock(&self.track_script).take();
+        let _ = session
+            .call("Runtime.evaluate", json!({"expression": UNTRACK_SCRIPT}))
+            .await;
+        if let Some(identifier) = script {
+            let _ = session
+                .call(
+                    "Page.removeScriptToEvaluateOnNewDocument",
+                    json!({"identifier": identifier}),
+                )
+                .await;
+        }
+        let _ = session
+            .call("Runtime.removeBinding", json!({"name": TRACK_BINDING}))
+            .await;
+    }
+
+    /// Encode what was captured into the captures directory. The frames stay
+    /// where they are, so a save that fails can be tried again.
+    fn encode(&self, duration: f64) -> AppResult<RecordingResult> {
+        self.stop_audio_segment();
+        self.stop_screen_segment();
+        let dir = crate::commands::captures_dir()?;
+        if self.options.is_window() {
+            let segments = lock(&self.screen).segments.clone();
+            let watch = Watch::new(self, duration);
+            return finish_window(&segments, &self.options, &dir, duration, &self.stem, &watch);
+        }
+        let frames = lock(&self.frames).clone();
+        let Some(last) = frames.last() else {
+            return Err(AppError::new("nothing was painted while recording"));
+        };
+        let audio = lock(&self.audio).segments.clone();
+        let end = duration.max(last.at + 0.1);
+        let watch = Watch::new(self, end);
+        let mut result = if self.options.is_gif() {
+            match ffmpeg_path() {
+                Some(_) => encode_gif_ffmpeg(&frames, &dir, end, &self.stem, &watch),
+                None => encode_gif(&frames, &dir, end, &self.stem, &watch),
+            }
+        } else {
+            encode_video(
+                &frames,
+                &audio,
+                &self.options,
+                &dir,
+                end,
+                &self.stem,
+                &watch,
+            )
+        }?;
+        let tracked = lock(&self.tracked).clone();
+        result.events = write_events(&dir, &result.path, tracked);
+        Ok(result)
+    }
+
     fn remove_dir(&self) {
         let _ = std::fs::remove_dir_all(&self.dir);
     }
+}
+
+/// The last owner of a recording takes its capture processes and its work
+/// directory with it. Every early return between creating the directory and
+/// handing the recording over used to leave both behind.
+impl Drop for Recording {
+    fn drop(&mut self) {
+        for slot in [&mut self.audio, &mut self.screen] {
+            let audio = slot
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some((mut child, _)) = audio.child.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+        self.remove_dir();
+    }
+}
+
+/// Seconds a capture process may run when `elapsed` of a `max`-second
+/// recording has gone: the rest, and a little over.
+fn capture_budget(max: u32, elapsed: f64) -> f64 {
+    (f64::from(max) - elapsed).max(0.0) + CAPTURE_SLACK_SECONDS
 }
 
 /// Tell an ffmpeg process to finish and wait for it. It finalises its file
@@ -446,10 +662,56 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Recordings in progress, one per tab at most.
+/// Watch a running recording: end it at its length cap even when nothing
+/// paints (a static page sends no frames, and a window capture sends none
+/// through here at all), and notice a microphone that stops.
+fn spawn_watchdog(rec: Arc<Recording>) {
+    tauri::async_runtime::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_millis(500));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            if rec.stopped.load(Ordering::Relaxed) {
+                break;
+            }
+            if rec.media_time() > f64::from(rec.options.max_seconds()) {
+                rec.hit_limit();
+                // Ending a segment waits for ffmpeg to finalise its file.
+                let worker = rec.clone();
+                let _ = tauri::async_runtime::spawn_blocking(move || {
+                    worker.stop_audio_segment();
+                    worker.stop_screen_segment();
+                })
+                .await;
+                break;
+            }
+            if !rec.paused.load(Ordering::Relaxed) {
+                rec.check_microphone();
+            }
+        }
+    });
+}
+
+/// What an `ExitRequested` should do about recordings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitAction {
+    /// Nothing to save, or the person insisted: let the exit happen.
+    Immediate,
+    /// Hold the exit while recordings are saved; [`save_for_exit`] exits.
+    Save,
+}
+
+const EXIT_IDLE: u8 = 0;
+const EXIT_SAVING: u8 = 1;
+const EXIT_RELEASED: u8 = 2;
+
+/// Recordings in progress, one per tab at most. A recording stays here
+/// while it saves and after a save fails, until it is saved or thrown away.
 #[derive(Default)]
 pub struct Registry {
     active: Mutex<HashMap<TabId, Arc<Recording>>>,
+    /// Where a quit stands: idle, holding for saves, or let through.
+    exit: AtomicU8,
 }
 
 impl Registry {
@@ -457,9 +719,17 @@ impl Registry {
         lock(&self.active)
     }
 
-    /// Whether `tab` is being recorded right now.
+    /// Whether `tab` has a recording, running, saving, or waiting to be saved.
     pub fn is_recording(&self, tab: TabId) -> bool {
         self.active().contains_key(&tab)
+    }
+
+    /// Take `rec` out of the registry, if it is still the one for its tab.
+    fn forget(&self, rec: &Arc<Recording>) {
+        let mut active = self.active();
+        if active.get(&rec.tab).is_some_and(|r| Arc::ptr_eq(r, rec)) {
+            active.remove(&rec.tab);
+        }
     }
 
     /// Start collecting frames for `tab`.
@@ -481,6 +751,11 @@ impl Registry {
         if options.is_window() && window.is_none() {
             return Err(AppError::new("the window could not be located on screen"));
         }
+        // Refused before a work directory exists: a second start used to
+        // create one and then leave it behind when it found the first.
+        if self.is_recording(tab) {
+            return Err(AppError::new("already recording this tab"));
+        }
         let rec = Arc::new(Recording::new(app, tab, options, window, page_url)?);
         {
             let mut active = self.active();
@@ -489,13 +764,16 @@ impl Registry {
             }
             active.insert(tab, rec.clone());
         }
+        // A quit that was held and then called off must not wave this one
+        // through the next time.
+        self.exit.store(EXIT_IDLE, Ordering::SeqCst);
         if rec.options.is_window() {
             // Native capture of the window: no DevTools frames at all. A
             // capture that dies at once is almost always a missing Screen
             // Recording permission, so say that rather than "nothing painted".
             if let Err(e) = rec.start_screen_segment() {
-                self.active().remove(&tab);
-                rec.remove_dir();
+                rec.stopped.store(true, Ordering::Relaxed);
+                self.forget(&rec);
                 return Err(e);
             }
             tokio::time::sleep(Duration::from_millis(900)).await;
@@ -506,14 +784,33 @@ impl Registry {
                     None => true,
                 }
             };
+            if rec.stopped.load(Ordering::Relaxed) {
+                return Err(AppError::new("the tab closed before recording began"));
+            }
             if died {
-                self.active().remove(&tab);
-                rec.remove_dir();
+                rec.stopped.store(true, Ordering::Relaxed);
+                self.forget(&rec);
                 return Err(AppError::new(
                     "screen capture stopped at once. Allow Dive under System Settings › Privacy & Security › Screen Recording, then try again",
                 ));
             }
+            spawn_watchdog(rec);
             return Ok(());
+        }
+        // The microphone first, and checked: a capture refused access ends
+        // at once, and the recording used to carry on without a word and
+        // save a silent file. Starting it before the frames also lines the
+        // sound up with the picture, both counted from the same moment.
+        if rec.options.microphone.is_some() {
+            rec.start_audio_segment();
+            tokio::time::sleep(Duration::from_millis(700)).await;
+            if !rec.microphone_alive() {
+                rec.stopped.store(true, Ordering::Relaxed);
+                self.forget(&rec);
+                return Err(AppError::new(
+                    "the microphone could not be recorded. Allow Dive under System Settings › Privacy & Security › Microphone, or choose another microphone, then try again",
+                ));
+            }
         }
         // Subscribe before starting so the first frame is not missed.
         let mut events = session.subscribe();
@@ -538,14 +835,20 @@ impl Registry {
                 }),
             )
             .await;
+        // The tab can close during the waits above; its recording was then
+        // finished without frames, and nothing here should start again.
+        if rec.stopped.load(Ordering::Relaxed) {
+            let _ = session.call0("Page.stopScreencast").await;
+            return Err(AppError::new("the tab closed before recording began"));
+        }
         if !captured_initial && let Err(error) = &screencast {
-            self.active().remove(&tab);
-            rec.remove_dir();
+            rec.stopped.store(true, Ordering::Relaxed);
+            self.forget(&rec);
             return Err(AppError::new(format!(
                 "screen capture is unavailable: {error}"
             )));
         }
-        rec.start_audio_segment();
+        spawn_watchdog(rec.clone());
         // Pointer tracking: a binding the page calls, installed now and on
         // every navigation while the recording runs.
         // Subscribed before the script runs: its first message (the viewport)
@@ -555,12 +858,18 @@ impl Registry {
         let _ = session
             .call("Runtime.addBinding", json!({"name": TRACK_BINDING}))
             .await;
-        let _ = session
+        // Kept so the stop can remove it; left in place, every later page
+        // load of the tab installed the tracker again for nobody.
+        if let Ok(registered) = session
             .call(
                 "Page.addScriptToEvaluateOnNewDocument",
                 json!({"source": TRACK_SCRIPT}),
             )
-            .await;
+            .await
+            && let Some(identifier) = registered["identifier"].as_str()
+        {
+            *lock(&rec.track_script) = Some(identifier.to_owned());
+        }
         let _ = session
             .call("Runtime.evaluate", json!({"expression": TRACK_SCRIPT}))
             .await;
@@ -669,18 +978,36 @@ impl Registry {
             .get(&tab)
             .cloned()
             .ok_or_else(|| AppError::new("not recording this tab"))?;
+        if rec.stopped.load(Ordering::Relaxed) {
+            return Err(AppError::new("this recording has already stopped"));
+        }
         rec.set_paused(paused);
         Ok(())
     }
 
-    /// Drop a recording without encoding it (cancelled, or the tab is going away).
+    /// Drop a recording without encoding it (the person threw it away).
+    ///
+    /// Mid-save, this stops the save instead: the recording stays, stopped,
+    /// to be saved again or thrown away with a second call, so a click meant
+    /// for a slow save cannot delete what it was saving.
     ///
     /// Stopping a segment asks ffmpeg to quit and then waits up to five
     /// seconds for it, so the wait runs on the blocking pool: `tab_close` runs
     /// on the main thread, which also pumps CEF, and a busy encoder froze the
     /// whole browser there for as long as it took to go.
     pub fn discard(&self, tab: TabId) {
-        if let Some(rec) = self.active().remove(&tab) {
+        let rec = {
+            let mut active = self.active();
+            match active.get(&tab) {
+                Some(rec) if rec.finishing.load(Ordering::SeqCst) => {
+                    rec.cancel_save.store(true, Ordering::SeqCst);
+                    return;
+                }
+                Some(_) => active.remove(&tab),
+                None => None,
+            }
+        };
+        if let Some(rec) = rec {
             rec.stopped.store(true, Ordering::Relaxed);
             tauri::async_runtime::spawn_blocking(move || {
                 rec.stop_audio_segment();
@@ -697,10 +1024,12 @@ impl Registry {
     /// microphone capture has nothing to end it, so the orphan kept the mic
     /// open after Dive had gone. Here each process is killed outright, since
     /// nobody will read the file, and the work directory removed in place.
+    /// By now a quit has already saved what it could (see [`save_for_exit`]).
     pub fn abandon_all(&self) {
         let recordings: Vec<_> = self.active().drain().map(|(_, rec)| rec).collect();
         for rec in recordings {
             rec.stopped.store(true, Ordering::Relaxed);
+            rec.cancel_save.store(true, Ordering::SeqCst);
             for slot in [&rec.audio, &rec.screen] {
                 if let Some((mut child, _)) = lock(slot).child.take() {
                     let _ = child.kill();
@@ -711,55 +1040,231 @@ impl Registry {
         }
     }
 
-    /// Stop recording `tab` and encode what was captured; returns the file.
-    pub async fn stop(&self, tab: TabId, session: &CdpSession) -> AppResult<RecordingResult> {
+    /// Stop capture of `tab` and mark its recording as saving.
+    fn begin_stop(&self, tab: TabId) -> AppResult<Arc<Recording>> {
         let rec = self
             .active()
-            .remove(&tab)
+            .get(&tab)
+            .cloned()
             .ok_or_else(|| AppError::new("not recording this tab"))?;
+        if rec.finishing.swap(true, Ordering::SeqCst) {
+            return Err(AppError::new("this recording is already being saved"));
+        }
+        rec.cancel_save.store(false, Ordering::SeqCst);
         rec.stopped.store(true, Ordering::Relaxed);
-        let _ = session.call0("Page.stopScreencast").await;
-        let duration = rec.media_time();
+        rec.length();
+        Ok(rec)
+    }
+
+    /// Encode a recording `begin_stop` stopped. It leaves the registry only
+    /// once saved, or when nothing was captured to save; a failed save keeps
+    /// its frames so trying again can succeed. It used to leave first and
+    /// delete the frames whatever happened, so a failed save lost the
+    /// recording and every later try said "not recording this tab".
+    async fn complete_stop(
+        &self,
+        rec: Arc<Recording>,
+        session: Option<&CdpSession>,
+    ) -> AppResult<RecordingResult> {
+        if let Some(session) = session {
+            let _ = session.call0("Page.stopScreencast").await;
+            rec.untrack(session).await;
+        }
+        let duration = rec.length();
+        let worker = rec.clone();
         let encoded = tauri::async_runtime::spawn_blocking(move || {
-            rec.stop_audio_segment();
-            if rec.options.is_window() {
-                rec.stop_screen_segment();
-                let segments = std::mem::take(&mut lock(&rec.screen).segments);
-                let dir = crate::commands::captures_dir();
-                let result = dir.and_then(|dir| {
-                    finish_window(&segments, &rec.options, &dir, duration, &rec.stem)
-                });
-                rec.remove_dir();
-                return result;
+            let result = worker.encode(duration);
+            if result.is_ok() {
+                worker.remove_dir();
             }
-            let frames = std::mem::take(&mut *lock(&rec.frames));
-            let result = if frames.is_empty() {
-                Err(AppError::new("nothing was painted while recording"))
-            } else {
-                let audio = std::mem::take(&mut lock(&rec.audio).segments);
-                let dir = crate::commands::captures_dir()?;
-                let end = duration.max(frames.last().map_or(0.0, |f| f.at) + 0.1);
-                let encoded = if rec.options.is_gif() {
-                    match ffmpeg_path() {
-                        Some(_) => encode_gif_ffmpeg(&frames, &dir, end, &rec.stem),
-                        None => encode_gif(&frames, &dir, end, &rec.stem),
-                    }
-                } else {
-                    encode_video(&frames, &audio, &rec.options, &dir, end, &rec.stem)
-                };
-                encoded.map(|mut r| {
-                    let tracked = std::mem::take(&mut *lock(&rec.tracked));
-                    r.events = write_events(&dir, &r.path, tracked);
-                    r
-                })
-            };
-            rec.remove_dir();
             result
         })
         .await
-        .map_err(AppError::new)??;
-        Ok(encoded)
+        .map_err(AppError::new)
+        .and_then(std::convert::identity);
+        match &encoded {
+            Err(error) if rec.has_material() => {
+                tracing::warn!(tab = %rec.tab, %error, "recording not saved; its frames are kept to try again");
+                *lock(&rec.error) = Some(error.message.clone());
+            }
+            _ => self.forget(&rec),
+        }
+        rec.cancel_save.store(false, Ordering::SeqCst);
+        rec.finishing.store(false, Ordering::SeqCst);
+        encoded
     }
+
+    /// Stop recording `tab` and encode what was captured; returns the file.
+    /// Without a session (the tab is gone) the page is simply not told.
+    pub async fn stop(
+        &self,
+        tab: TabId,
+        session: Option<&CdpSession>,
+    ) -> AppResult<RecordingResult> {
+        let rec = self.begin_stop(tab)?;
+        self.complete_stop(rec, session).await
+    }
+
+    /// Save `tab`'s recording without the chrome asking: its tab is closing,
+    /// or Dive is quitting. The chrome hears `finishing` now, and `saved`
+    /// or `failed` when the save ends. Returns at once, so a tab closing on
+    /// the main thread does not wait for an encoder.
+    ///
+    /// Closing the tab used to throw the recording away, which the person
+    /// learned only from a toast once it was gone.
+    pub fn finish_detached(&self, tab: TabId) {
+        let Ok(rec) = self.begin_stop(tab) else {
+            return;
+        };
+        rec.emit(&RecordingEvent::new(tab, "finishing"));
+        let app = rec.app.clone();
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<crate::state::AppState>();
+            let event = match state.screencast.complete_stop(rec, None).await {
+                Ok(result) => RecordingEvent {
+                    result: Some(result),
+                    ..RecordingEvent::new(tab, "saved")
+                },
+                Err(error) => RecordingEvent {
+                    error: Some(error.message),
+                    ..RecordingEvent::new(tab, "failed")
+                },
+            };
+            if let Err(error) = event.emit(&app) {
+                tracing::debug!(%tab, %error, "recording outcome not delivered");
+            }
+        });
+    }
+
+    /// Decide what a request to quit does about recordings. The first
+    /// request with recordings open holds the exit while they are saved;
+    /// a second one while that runs lets Dive go, so a save that will not
+    /// finish never keeps it open against the person's wishes.
+    pub fn prepare_exit(&self) -> ExitAction {
+        if self.active().is_empty() {
+            return ExitAction::Immediate;
+        }
+        if self
+            .exit
+            .compare_exchange(EXIT_IDLE, EXIT_SAVING, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            return ExitAction::Save;
+        }
+        self.exit.store(EXIT_RELEASED, Ordering::SeqCst);
+        ExitAction::Immediate
+    }
+
+    /// Whether any recording is saving right now.
+    fn saving(&self) -> bool {
+        self.active()
+            .values()
+            .any(|rec| rec.finishing.load(Ordering::SeqCst))
+    }
+
+    /// Why a recording that is still here could not be saved, if one could not.
+    fn first_failure(&self) -> Option<String> {
+        self.active()
+            .values()
+            .find_map(|rec| lock(&rec.error).clone())
+    }
+}
+
+/// Save every open recording, then exit with `code`; the second half of
+/// [`ExitAction::Save`]. Quitting mid-recording used to throw the recording
+/// away without a word. If a save fails, the person chooses between losing
+/// it and staying to try again.
+pub fn save_for_exit(app: AppHandle<Runtime>, code: i32) {
+    const QUIT_ANYWAY: &str = "Quit Anyway";
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<crate::state::AppState>();
+        let registry = &state.screencast;
+        let tabs: Vec<TabId> = registry.active().keys().copied().collect();
+        for tab in tabs {
+            registry.finish_detached(tab);
+        }
+        while registry.saving() {
+            if registry.exit.load(Ordering::SeqCst) == EXIT_RELEASED {
+                // The person quit again meanwhile; that exit is under way.
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        if let Some(error) = registry.first_failure() {
+            let answer = rfd::AsyncMessageDialog::new()
+                .set_title("Dive could not save your recording")
+                .set_description(format!(
+                    "{error}. Quit anyway and lose the recording, or stay to try saving it again?"
+                ))
+                .set_level(rfd::MessageLevel::Warning)
+                .set_buttons(rfd::MessageButtons::OkCancelCustom(
+                    QUIT_ANYWAY.into(),
+                    "Stay".into(),
+                ))
+                .show()
+                .await;
+            let quit = match answer {
+                rfd::MessageDialogResult::Ok => true,
+                rfd::MessageDialogResult::Custom(label) => label == QUIT_ANYWAY,
+                _ => false,
+            };
+            if !quit {
+                registry.exit.store(EXIT_IDLE, Ordering::SeqCst);
+                return;
+            }
+            registry.exit.store(EXIT_RELEASED, Ordering::SeqCst);
+        }
+        app.exit(code);
+    });
+}
+
+/// Remove recording work directories older than [`STALE_WORK_DIR`] from
+/// the captures directory. A crash, a kill or a power cut leaves one
+/// behind with every frame of the recording in it, hidden, and nothing
+/// else ever looked at them again.
+pub fn sweep_stale_work_dirs() {
+    let Ok(dir) = crate::commands::captures_dir() else {
+        return;
+    };
+    let removed = sweep_work_dirs(&dir, STALE_WORK_DIR);
+    if removed > 0 {
+        tracing::info!(
+            removed,
+            "removed recording work directories left by an earlier run"
+        );
+    }
+}
+
+/// Remove `.recording-*` directories in `dir` untouched for `max_age`;
+/// returns how many went. A live recording writes a frame every few dozen
+/// milliseconds, which keeps its directory's time fresh.
+fn sweep_work_dirs(dir: &Path, max_age: Duration) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let now = SystemTime::now();
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(WORK_DIR_PREFIX)
+        {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        let age = meta
+            .modified()
+            .ok()
+            .and_then(|at| now.duration_since(at).ok())
+            .unwrap_or(Duration::ZERO);
+        if meta.is_dir() && age >= max_age && std::fs::remove_dir_all(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
 }
 
 /// Capture one viewport frame using a CDP method supported by CEF even when
@@ -849,6 +1354,16 @@ pub(crate) const PROBE_LIMIT: Duration = Duration::from_secs(120);
 /// Run `command` to completion with a deadline and output caps, killing and
 /// reaping it when it overruns. Output is capped at [`OUTPUT_LIMIT`].
 pub(crate) fn run_with_deadline(command: &mut Command, timeout: Duration) -> AppResult<Output> {
+    run_watched(command, timeout, || Ok(()))
+}
+
+/// [`run_with_deadline`], also stopped when `interrupt` fails; it is called
+/// every few dozen milliseconds while the process runs.
+fn run_watched(
+    command: &mut Command,
+    timeout: Duration,
+    interrupt: impl FnMut() -> AppResult<()>,
+) -> AppResult<Output> {
     let name = program_name(command);
     let mut stdout = tempfile::tempfile()?;
     let mut stderr = tempfile::tempfile()?;
@@ -863,7 +1378,7 @@ pub(crate) fn run_with_deadline(command: &mut Command, timeout: Duration) -> App
         &mut stderr,
         Instant::now() + timeout,
         &name,
-        || Ok(()),
+        interrupt,
     );
     if result.is_err() {
         stop_child(&mut child)?;
@@ -957,7 +1472,7 @@ fn list_microphones(ffmpeg: &Path) -> Vec<Microphone> {
     if args.is_empty() {
         return Vec::new();
     }
-    let Ok(out) = Command::new(ffmpeg).args(args).output() else {
+    let Ok(out) = run_with_deadline(Command::new(ffmpeg).args(args), PROBE_LIMIT) else {
         return Vec::new();
     };
     parse_avfoundation_devices(&String::from_utf8_lossy(&out.stderr))
@@ -996,8 +1511,10 @@ pub fn parse_avfoundation_devices(listing: &str) -> Vec<Microphone> {
     mics
 }
 
-/// Start ffmpeg capturing one microphone into `path` until told to quit.
-fn spawn_mic(mic: &str, path: &Path) -> AppResult<Child> {
+/// Start ffmpeg capturing one microphone into `path` until told to quit, or
+/// for `seconds` at most: a capture Dive can no longer stop (it crashed) must
+/// not hold the microphone open for ever.
+fn spawn_mic(mic: &str, seconds: f64, path: &Path) -> AppResult<Child> {
     let ffmpeg = ffmpeg_path().ok_or_else(|| AppError::new("ffmpeg not found"))?;
     let mut cmd = Command::new(ffmpeg);
     cmd.args(["-hide_banner", "-loglevel", "error", "-y"]);
@@ -1005,7 +1522,7 @@ fn spawn_mic(mic: &str, path: &Path) -> AppResult<Child> {
     cmd.args(["-f", "avfoundation", "-i", &format!(":{mic}")]);
     #[cfg(not(target_os = "macos"))]
     cmd.args(["-f", "pulse", "-i", mic]);
-    cmd.args(["-ac", "1", "-ar", "48000"])
+    cmd.args(["-ac", "1", "-ar", "48000", "-t", &format!("{seconds:.1}")])
         .arg(path)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -1014,8 +1531,15 @@ fn spawn_mic(mic: &str, path: &Path) -> AppResult<Child> {
 }
 
 /// Start ffmpeg capturing the window's rectangle of its display (pointer
-/// included), with the microphone in the same stream, until told to quit.
-fn spawn_screen(rect: WindowRect, mic: Option<&str>, fps: u32, path: &Path) -> AppResult<Child> {
+/// included), with the microphone in the same stream, until told to quit or
+/// for `seconds` at most.
+fn spawn_screen(
+    rect: WindowRect,
+    mic: Option<&str>,
+    fps: u32,
+    seconds: f64,
+    path: &Path,
+) -> AppResult<Child> {
     let ffmpeg = ffmpeg_path().ok_or_else(|| AppError::new("ffmpeg not found"))?;
     let screens = list_screens(&ffmpeg);
     let device = screens
@@ -1090,7 +1614,8 @@ fn spawn_screen(rect: WindowRect, mic: Option<&str>, fps: u32, path: &Path) -> A
     } else {
         cmd.arg("-an");
     }
-    cmd.arg(path)
+    cmd.args(["-t", &format!("{seconds:.1}")])
+        .arg(path)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -1101,8 +1626,8 @@ fn spawn_screen(rect: WindowRect, mic: Option<&str>, fps: u32, path: &Path) -> A
 fn list_screens(ffmpeg: &Path) -> Vec<String> {
     #[cfg(target_os = "macos")]
     {
-        let Ok(out) = Command::new(ffmpeg)
-            .args([
+        let Ok(out) = run_with_deadline(
+            Command::new(ffmpeg).args([
                 "-hide_banner",
                 "-f",
                 "avfoundation",
@@ -1110,9 +1635,9 @@ fn list_screens(ffmpeg: &Path) -> Vec<String> {
                 "true",
                 "-i",
                 "",
-            ])
-            .output()
-        else {
+            ]),
+            PROBE_LIMIT,
+        ) else {
             return Vec::new();
         };
         parse_avfoundation_screens(&String::from_utf8_lossy(&out.stderr))
@@ -1145,6 +1670,115 @@ pub fn parse_avfoundation_screens(listing: &str) -> Vec<String> {
     screens.into_iter().map(|(_, id)| id).collect()
 }
 
+/// What a save checks while it works: whether the person stopped it, and
+/// how far it has got, which the chrome shows. Every pass runs under the
+/// same deadline as any other ffmpeg run; the encoders used to wait on
+/// ffmpeg with no limit at all, and a stuck one held "Saving…" for good.
+struct Watch<'a> {
+    rec: &'a Recording,
+    /// Seconds of media being written, to turn ffmpeg's position into a share.
+    total: f64,
+}
+
+impl<'a> Watch<'a> {
+    fn new(rec: &'a Recording, total: f64) -> Self {
+        Self { rec, total }
+    }
+
+    /// Fails once the person has stopped the save.
+    fn check(&self) -> AppResult<()> {
+        if self.rec.cancel_save.load(Ordering::SeqCst) {
+            Err(AppError::new(SAVE_STOPPED))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Tell the chrome that `share` of the save is done.
+    fn report(&self, share: f64) {
+        self.rec.emit(&RecordingEvent {
+            progress: Some(share.clamp(0.0, 1.0)),
+            ..RecordingEvent::new(self.rec.tab, "progress")
+        });
+    }
+
+    /// Where ffmpeg writes its position during a pass.
+    fn progress_file(&self) -> PathBuf {
+        self.rec.dir.join("progress.txt")
+    }
+
+    /// An ffmpeg command for one pass; with `report`, ffmpeg writes its
+    /// position where [`Watch::run`] reads it.
+    fn command(&self, ffmpeg: &Path, report: bool) -> Command {
+        let mut cmd = Command::new(ffmpeg);
+        cmd.args(["-hide_banner", "-loglevel", "error", "-y"]);
+        if report {
+            let file = self.progress_file();
+            let _ = std::fs::remove_file(&file);
+            cmd.arg("-nostats").arg("-progress").arg(file);
+        }
+        cmd
+    }
+
+    /// Run one pass. `span` is the share of the whole save it stands for,
+    /// from and to, when its command was made with `report`.
+    fn run(&self, cmd: &mut Command, span: Option<(f64, f64)>) -> AppResult<Output> {
+        let file = self.progress_file();
+        let mut last = Instant::now();
+        run_watched(cmd, PROCESS_LIMIT, || {
+            self.check()?;
+            if let Some((from, to)) = span
+                && self.total > 0.0
+                && last.elapsed() >= Duration::from_millis(400)
+            {
+                last = Instant::now();
+                if let Some(at) = read_progress(&file) {
+                    self.report(from + (to - from) * (at / self.total).clamp(0.0, 1.0));
+                }
+            }
+            Ok(())
+        })
+    }
+
+    /// [`Watch::run`], turning ffmpeg's failure into a message about `what`.
+    fn run_ok(&self, cmd: &mut Command, span: Option<(f64, f64)>, what: &str) -> AppResult<()> {
+        let out = self.run(cmd, span)?;
+        if out.status.success() {
+            return Ok(());
+        }
+        let err = String::from_utf8_lossy(&out.stderr);
+        Err(AppError::new(format!(
+            "ffmpeg could not encode {what}: {}",
+            err.lines().last().unwrap_or("unknown error")
+        )))
+    }
+}
+
+/// The last position ffmpeg wrote to its progress file, in seconds.
+fn read_progress(file: &Path) -> Option<f64> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    let mut f = File::open(file).ok()?;
+    let len = f.metadata().ok()?.len();
+    f.seek(SeekFrom::Start(len.saturating_sub(1024))).ok()?;
+    let mut tail = Vec::new();
+    f.read_to_end(&mut tail).ok()?;
+    progress_seconds(&String::from_utf8_lossy(&tail))
+}
+
+/// The newest `out_time_us` in ffmpeg's `-progress` output, in seconds.
+/// Early blocks say `N/A`, and `out_time_ms` is microseconds too despite
+/// its name.
+fn progress_seconds(text: &str) -> Option<f64> {
+    text.lines().rev().find_map(|line| {
+        let value = line
+            .strip_prefix("out_time_us=")
+            .or_else(|| line.strip_prefix("out_time_ms="))?;
+        let micros: i64 = value.trim().parse().ok()?;
+        #[allow(clippy::cast_precision_loss)] // Microseconds of a ten-minute cap.
+        (micros >= 0).then(|| micros as f64 / 1_000_000.0)
+    })
+}
+
 /// Join the screen-capture stretches into the final file, in the format
 /// asked for, and make its preview.
 #[allow(clippy::too_many_lines)] // Two ffmpeg command lines, spelled out.
@@ -1154,6 +1788,7 @@ fn finish_window(
     dir: &Path,
     duration: f64,
     stem: &str,
+    watch: &Watch<'_>,
 ) -> AppResult<RecordingResult> {
     if segments.is_empty() {
         return Err(AppError::new("nothing was captured"));
@@ -1169,12 +1804,12 @@ fn finish_window(
     }
     std::fs::write(&list, text)?;
     let joined = work.join("joined.mp4");
-    run_ffmpeg(&ffmpeg, |cmd| {
-        cmd.args(["-f", "concat", "-safe", "0", "-i"])
-            .arg(&list)
-            .args(["-c", "copy", "-movflags", "+faststart"])
-            .arg(&joined);
-    })?;
+    let mut cmd = watch.command(&ffmpeg, false);
+    cmd.args(["-f", "concat", "-safe", "0", "-i"])
+        .arg(&list)
+        .args(["-c", "copy", "-movflags", "+faststart"])
+        .arg(&joined);
+    watch.run_ok(&mut cmd, None, "the recording")?;
     let has_audio = options.microphone.is_some();
     let max_width = options.max_width.clamp(320, 3840);
     if options.is_gif() {
@@ -1182,12 +1817,12 @@ fn finish_window(
         let filter = format!(
             "scale='min({GIF_WIDTH},iw)':-2:flags=lanczos,split[a][b];[a]palettegen=max_colors=200:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle"
         );
-        run_ffmpeg(&ffmpeg, |cmd| {
-            cmd.arg("-i")
-                .arg(&joined)
-                .args(["-filter_complex", &filter, "-loop", "0"])
-                .arg(&path);
-        })?;
+        let mut cmd = watch.command(&ffmpeg, true);
+        cmd.arg("-i")
+            .arg(&joined)
+            .args(["-filter_complex", &filter, "-loop", "0"])
+            .arg(&path);
+        watch.run_ok(&mut cmd, Some((0.0, 1.0)), "the GIF")?;
         let (w, h) = probe_size(&path).unwrap_or((0, 0));
         return finish(&path, "gif", duration, w, h, 0, false);
     }
@@ -1195,30 +1830,31 @@ fn finish_window(
     let preview_dir = dir.join(PREVIEW_DIR);
     std::fs::create_dir_all(&preview_dir)?;
     let preview = preview_dir.join(format!("{stem}.webm"));
-    run_ffmpeg(&ffmpeg, |cmd| {
-        cmd.arg("-i").arg(&joined);
-        cmd.args([
-            "-vf",
-            &format!("scale='min({max_width},iw)':-2:flags=lanczos,format=yuv420p"),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "22",
-            "-movflags",
-            "+faststart",
-        ]);
-        if has_audio {
-            cmd.args(["-c:a", "aac", "-b:a", "128k"]);
-        } else {
-            cmd.arg("-an");
-        }
-        cmd.arg(&path);
-    })?;
+    let mut cmd = watch.command(&ffmpeg, true);
+    cmd.arg("-i").arg(&joined);
+    cmd.args([
+        "-vf",
+        &format!("scale='min({max_width},iw)':-2:flags=lanczos,format=yuv420p"),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "22",
+        "-movflags",
+        "+faststart",
+    ]);
+    if has_audio {
+        cmd.args(["-c:a", "aac", "-b:a", "128k"]);
+    } else {
+        cmd.arg("-an");
+    }
+    cmd.arg(&path);
+    watch.run_ok(&mut cmd, Some((0.0, 0.9)), "the recording")?;
     let (w, h) = probe_size(&path).unwrap_or((0, 0));
     let mut result = finish(&path, "mp4", duration, w, h, 0, has_audio)?;
-    result.preview = write_companion(&path, &preview, max_width, has_audio);
+    result.preview = companion(&path, &preview, max_width, has_audio, || watch.check());
+    watch.check()?;
     Ok(result)
 }
 
@@ -1251,6 +1887,17 @@ fn write_events(dir: &Path, recording: &str, events: Vec<TrackedEvent>) -> Optio
 /// once. Its own ffmpeg pass, from the finished file: a second output of
 /// the frame-encoding run produced a container the demuxer would not open.
 pub fn write_companion(mp4: &Path, out: &Path, max_width: u32, with_audio: bool) -> Option<String> {
+    companion(mp4, out, max_width, with_audio, || Ok(()))
+}
+
+/// [`write_companion`], given up when `interrupt` fails.
+fn companion(
+    mp4: &Path,
+    out: &Path,
+    max_width: u32,
+    with_audio: bool,
+    interrupt: impl FnMut() -> AppResult<()>,
+) -> Option<String> {
     let ffmpeg = ffmpeg_path()?;
     if let Some(dir) = out.parent() {
         std::fs::create_dir_all(dir).ok()?;
@@ -1285,24 +1932,8 @@ pub fn write_companion(mp4: &Path, out: &Path, max_width: u32, with_audio: bool)
         cmd.arg("-an");
     }
     cmd.arg(out);
-    let ok = run_with_deadline(&mut cmd, PROCESS_LIMIT).is_ok_and(|o| o.status.success());
+    let ok = run_watched(&mut cmd, PROCESS_LIMIT, interrupt).is_ok_and(|o| o.status.success());
     (ok && out.exists()).then(|| out.to_string_lossy().into_owned())
-}
-
-/// Run one ffmpeg invocation to completion, turning a failure into a message.
-fn run_ffmpeg(ffmpeg: &Path, args: impl FnOnce(&mut Command)) -> AppResult<()> {
-    let mut cmd = Command::new(ffmpeg);
-    cmd.args(["-hide_banner", "-loglevel", "error", "-y"]);
-    args(&mut cmd);
-    let out = cmd.stdin(Stdio::null()).output().map_err(AppError::new)?;
-    if out.status.success() {
-        return Ok(());
-    }
-    let err = String::from_utf8_lossy(&out.stderr);
-    Err(AppError::new(format!(
-        "ffmpeg failed: {}",
-        err.lines().last().unwrap_or("unknown error")
-    )))
 }
 
 /// ffconcat playlist at a constant `fps`: for every output tick, the frame
@@ -1336,6 +1967,7 @@ fn encode_video(
     dir: &Path,
     end: f64,
     stem: &str,
+    watch: &Watch<'_>,
 ) -> AppResult<RecordingResult> {
     let ffmpeg = ffmpeg_path().ok_or_else(|| AppError::new("ffmpeg not found"))?;
     let work = frames[0]
@@ -1359,9 +1991,8 @@ fn encode_video(
     std::fs::create_dir_all(&preview_dir)?;
     let preview = preview_dir.join(format!("{stem}.webm"));
     let max_width = options.max_width.clamp(320, 3840);
-    let mut cmd = Command::new(ffmpeg);
-    cmd.args(["-hide_banner", "-loglevel", "error", "-y"])
-        .args(["-f", "concat", "-safe", "0", "-r", &fps.to_string(), "-i"])
+    let mut cmd = watch.command(&ffmpeg, true);
+    cmd.args(["-f", "concat", "-safe", "0", "-r", &fps.to_string(), "-i"])
         .arg(&playlist);
     if with_audio {
         cmd.args(["-f", "concat", "-safe", "0", "-i"])
@@ -1380,45 +2011,41 @@ fn encode_video(
         "+faststart",
     ]);
     if with_audio {
-        cmd.args(["-c:a", "aac", "-b:a", "128k", "-shortest"]);
+        // Cut at the picture's length rather than the shorter stream's:
+        // `-shortest` cut the video short wherever the sound ended early,
+        // as it does when a microphone is lost partway through.
+        cmd.args(["-c:a", "aac", "-b:a", "128k", "-t", &format!("{end:.3}")]);
     } else {
         cmd.arg("-an");
     }
-    cmd.arg(&path).stdin(Stdio::null());
-    let out = cmd.output().map_err(AppError::new)?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        return Err(AppError::new(format!(
-            "ffmpeg could not encode the recording: {}",
-            err.lines().last().unwrap_or("unknown error")
-        )));
-    }
+    cmd.arg(&path);
+    watch.run_ok(&mut cmd, Some((0.0, 0.9)), "the recording")?;
     let (width, height) = probe_size(&path).unwrap_or_else(|| {
         decode(&std::fs::read(&frames[0].path).unwrap_or_default())
             .map_or((0, 0), |i| (i.width().min(max_width), i.height()))
     });
     let mut result = finish(&path, "mp4", end, width, height, frames.len(), with_audio)?;
-    result.preview = write_companion(&path, &preview, max_width, with_audio);
+    result.preview = companion(&path, &preview, max_width, with_audio, || watch.check());
+    watch.check()?;
     Ok(result)
 }
 
 /// Ask ffprobe (beside ffmpeg) for the picture size of the finished file.
 fn probe_size(path: &Path) -> Option<(u32, u32)> {
     let probe = ffmpeg_path()?.with_file_name("ffprobe");
-    let out = Command::new(probe)
-        .args([
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=width,height",
-            "-of",
-            "csv=p=0",
-        ])
-        .arg(path)
-        .output()
-        .ok()?;
+    let mut cmd = Command::new(probe);
+    cmd.args([
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height",
+        "-of",
+        "csv=p=0",
+    ])
+    .arg(path);
+    let out = run_with_deadline(&mut cmd, PROBE_LIMIT).ok()?;
     let text = String::from_utf8_lossy(&out.stdout);
     let mut parts = text.trim().split(',');
     Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
@@ -1460,6 +2087,7 @@ fn encode_gif_ffmpeg(
     dir: &Path,
     end: f64,
     stem: &str,
+    watch: &Watch<'_>,
 ) -> AppResult<RecordingResult> {
     let ffmpeg = ffmpeg_path().ok_or_else(|| AppError::new("ffmpeg not found"))?;
     let work = frames[0]
@@ -1472,30 +2100,20 @@ fn encode_gif_ffmpeg(
     let filter = format!(
         "scale='min({GIF_WIDTH},iw)':-2:flags=lanczos,split[a][b];[a]palettegen=max_colors=200:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle"
     );
-    let out = Command::new(ffmpeg)
-        .args(["-hide_banner", "-loglevel", "error", "-y"])
-        .args([
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-r",
-            &GIF_FPS.to_string(),
-            "-i",
-        ])
-        .arg(&playlist)
-        .args(["-filter_complex", &filter, "-loop", "0"])
-        .arg(&path)
-        .stdin(Stdio::null())
-        .output()
-        .map_err(AppError::new)?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        return Err(AppError::new(format!(
-            "ffmpeg could not encode the GIF: {}",
-            err.lines().last().unwrap_or("unknown error")
-        )));
-    }
+    let mut cmd = watch.command(&ffmpeg, true);
+    cmd.args([
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-r",
+        &GIF_FPS.to_string(),
+        "-i",
+    ])
+    .arg(&playlist)
+    .args(["-filter_complex", &filter, "-loop", "0"])
+    .arg(&path);
+    watch.run_ok(&mut cmd, Some((0.0, 1.0)), "the GIF")?;
     let (width, height) = probe_size(&path).unwrap_or_else(|| {
         decode(&std::fs::read(&frames[0].path).unwrap_or_default())
             .map_or((0, 0), |i| (i.width().min(GIF_WIDTH), i.height()))
@@ -1521,7 +2139,13 @@ fn sample(frames: &[Frame], fps: u32) -> Vec<&Frame> {
 /// without ffmpeg. Slow per frame, so the capture is thinned first.
 // Every float here is rounded and clamped into range before the cast.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn encode_gif(frames: &[Frame], dir: &Path, end: f64, stem: &str) -> AppResult<RecordingResult> {
+fn encode_gif(
+    frames: &[Frame],
+    dir: &Path,
+    end: f64,
+    stem: &str,
+    watch: &Watch<'_>,
+) -> AppResult<RecordingResult> {
     let total = frames.len();
     let frames = sample(frames, GIF_FPS);
     let first = decode(&std::fs::read(&frames[0].path)?)?;
@@ -1540,7 +2164,14 @@ fn encode_gif(frames: &[Frame], dir: &Path, end: f64, stem: &str) -> AppResult<R
         .set_repeat(gif::Repeat::Infinite)
         .map_err(AppError::new)?;
 
+    let mut reported = Instant::now();
     for (i, frame) in frames.iter().enumerate() {
+        watch.check()?;
+        if reported.elapsed() >= Duration::from_millis(400) {
+            reported = Instant::now();
+            #[allow(clippy::cast_precision_loss)] // A few thousand frames at most.
+            watch.report(i as f64 / frames.len() as f64);
+        }
         let img = decode(&std::fs::read(&frame.path)?)?
             .resize_exact(width, height, image::imageops::FilterType::Triangle)
             .to_rgba8();
@@ -1653,6 +2284,62 @@ mod tests {
         assert_eq!(poll_period(30), Duration::from_nanos(33_333_333));
         assert_eq!(poll_period(15), Duration::from_nanos(66_666_667));
         assert_eq!(poll_period(0), Duration::from_millis(200));
+    }
+
+    #[test]
+    fn stale_work_directories_go_and_everything_else_stays() {
+        let dir = std::env::temp_dir().join(format!("dive-sweep-{}", TabId::new()));
+        let work = dir.join(format!("{WORK_DIR_PREFIX}2026-09-27T01-02-03Z"));
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(work.join("f000000.jpg"), b"jpeg").unwrap();
+        std::fs::create_dir_all(dir.join(PREVIEW_DIR)).unwrap();
+        std::fs::write(dir.join("page recording.mp4"), b"mp4").unwrap();
+        // A file that only looks like a work directory is not one.
+        std::fs::write(dir.join(format!("{WORK_DIR_PREFIX}note")), b"x").unwrap();
+
+        // Fresh: a recording may still be writing into it.
+        assert_eq!(sweep_work_dirs(&dir, STALE_WORK_DIR), 0);
+        assert!(work.exists());
+
+        assert_eq!(sweep_work_dirs(&dir, Duration::ZERO), 1);
+        assert!(!work.exists());
+        assert!(dir.join(PREVIEW_DIR).exists());
+        assert!(dir.join("page recording.mp4").exists());
+        assert!(dir.join(format!("{WORK_DIR_PREFIX}note")).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn capture_processes_are_told_the_rest_of_the_cap() {
+        assert!((capture_budget(600, 0.0) - (600.0 + CAPTURE_SLACK_SECONDS)).abs() < 1e-9);
+        assert!((capture_budget(60, 45.5) - (14.5 + CAPTURE_SLACK_SECONDS)).abs() < 1e-9);
+        // Past the cap a resumed segment still gets a moment, never a
+        // negative length ffmpeg would refuse.
+        assert!((capture_budget(60, 75.0) - CAPTURE_SLACK_SECONDS).abs() < 1e-9);
+    }
+
+    #[test]
+    fn progress_reads_the_newest_position() {
+        let text = "frame=10\nout_time_us=N/A\nprogress=continue\n\
+            frame=40\nout_time_us=1500000\nout_time_ms=1500000\nprogress=continue\n\
+            frame=90\nout_time_ms=3250000\nout_time_us=N/A\nprogress=end\n";
+        assert_eq!(progress_seconds(text), Some(3.25));
+        assert_eq!(progress_seconds("out_time_us=N/A\n"), None);
+        assert_eq!(progress_seconds("out_time_us=-5\n"), None);
+        assert_eq!(progress_seconds(""), None);
+    }
+
+    #[test]
+    fn a_second_recording_of_a_page_announces_its_viewport_again() {
+        // The early return for an already-installed tracker must still send
+        // the viewport, which the sidecar cannot be written without.
+        let known = TRACK_SCRIPT
+            .lines()
+            .find(|l| l.contains("if (known)"))
+            .expect("the script handles a tracker already in the page");
+        assert!(known.contains("known.live = true"), "{known}");
+        assert!(known.contains("known.send(viewport())"), "{known}");
+        assert!(UNTRACK_SCRIPT.contains("live = false"));
     }
 
     #[test]

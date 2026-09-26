@@ -416,9 +416,16 @@ export const commands = {
 	tabScreencastStart: (id: TabId, options: RecordOptions) => typedError<null, AppError>(__TAURI_INVOKE("tab_screencast_start", { id, options })),
 	/**  Pause or resume a recording; paused time is cut out of the file. */
 	tabScreencastPause: (id: TabId, paused: boolean) => typedError<null, AppError>(__TAURI_INVOKE("tab_screencast_pause", { id, paused })),
-	/**  Stop recording and encode the file; returns what was written. */
+	/**
+	 *  Stop recording and encode the file; returns what was written. A save
+	 *  that failed can be tried again here after its tab has closed, so a
+	 *  missing session only means the page is not told.
+	 */
 	tabScreencastStop: (id: TabId) => typedError<RecordingResult, AppError>(__TAURI_INVOKE("tab_screencast_stop", { id })),
-	/**  Throw a recording away without encoding it. */
+	/**
+	 *  Throw a recording away without encoding it. While it is saving, stop the
+	 *  save instead and keep the recording to try again or throw away.
+	 */
 	tabScreencastCancel: (id: TabId) => typedError<null, AppError>(__TAURI_INVOKE("tab_screencast_cancel", { id })),
 	/**  What the recording dialog may offer on this machine. */
 	recordingCapabilities: () => typedError<RecordingCapabilities, AppError>(__TAURI_INVOKE("recording_capabilities")),
@@ -2402,12 +2409,24 @@ export type RecordingCapabilities = {
 	gif_max_seconds: number,
 };
 
-/**  Something the chrome should react to while a recording runs. */
+/**  Something the chrome should react to while a recording runs or saves. */
 export type RecordingEvent = {
 	/**  The tab being recorded. */
 	tab: TabId,
-	/**  `limit` when the length cap was reached and no more frames are kept. */
+	/**
+	 *  `limit` when the length cap was reached and no more frames are kept;
+	 *  `mic_failed` when the microphone stopped recording; `finishing` when
+	 *  Dive began saving on its own (the tab closed, or Dive is quitting);
+	 *  `progress` while a save runs; `saved` or `failed` when a save Dive
+	 *  began on its own ends.
+	 */
 	kind: string,
+	/**  Share of the save done, 0 to 1, with `progress`. */
+	progress: number | null,
+	/**  The file, with `saved`. */
+	result: RecordingResult | null,
+	/**  Why, with `failed`. */
+	error: string | null,
 };
 
 /**  One finished recording in the captures directory. */

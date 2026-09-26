@@ -203,7 +203,7 @@ export function FeatureButton({
 /** While a recording runs, its controls sit here so they are always on screen. */
 function RecordingStatus({ compact }: { compact: boolean }) {
   const phase = useRecording((s) => s.phase);
-  if (phase === "starting" || phase === "countdown" || phase === "recording" || phase === "paused" || phase === "finishing") {
+  if (phase === "starting" || phase === "countdown" || phase === "recording" || phase === "paused" || phase === "finishing" || phase === "failed") {
     return <RecordingHud compact={compact} />;
   }
   return null;
@@ -217,7 +217,9 @@ function RecordingHud({ compact }: { compact: boolean }) {
   const resume = useRecording((s) => s.resume);
   const stop = useRecording((s) => s.stop);
   const cancel = useRecording((s) => s.cancel);
+  const stopSaving = useRecording((s) => s.stopSaving);
   const error = useRecording((s) => s.error);
+  const progress = useRecording((s) => s.progress);
   const elapsed = useElapsed(phase === "recording");
   const paused = phase === "paused";
 
@@ -240,10 +242,28 @@ function RecordingHud({ compact }: { compact: boolean }) {
     );
   }
   if (phase === "finishing") {
+    const percent = progress === null ? null : `${Math.round(progress * 100)}%`;
     return (
-      <div role="status" aria-live="polite" className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 px-2.5 text-[11.5px] text-ink-2">
+      <div role="status" aria-live="polite" className="flex h-7 items-center gap-2 rounded-lg bg-surface-2 pr-1 pl-2.5 text-[11.5px] text-ink-2">
         <Icon icon={Loader2} size={13} className="motion-safe:animate-spin" />
-        {!compact && "Saving…"}
+        {compact ? percent : `Saving…${percent ? ` ${percent}` : ""}`}
+        <IconButton icon={X} label="Stop saving" size={13} onClick={() => void stopSaving()} />
+      </div>
+    );
+  }
+  // The save failed: capture is over and the frames are kept. Said in words,
+  // with the way out beside it; an icon's label alone reached nobody.
+  if (phase === "failed") {
+    return (
+      <div role="alert" className="flex h-7 items-center gap-1.5 rounded-lg bg-danger/15 pr-1 pl-2.5 text-[11.5px] text-ink">
+        <Icon icon={AlertTriangle} size={13} className="shrink-0 text-danger" />
+        <span className="max-w-72 truncate" title={error ?? undefined}>
+          {compact ? "Not saved" : `Not saved: ${error ?? "the recording could not be saved"}`}
+        </span>
+        <button type="button" onClick={() => void stop()} className="h-6 shrink-0 rounded-md px-2 font-medium whitespace-nowrap hover:bg-danger/20">
+          Try again
+        </button>
+        <IconButton icon={X} label="Discard recording" size={13} onClick={() => void cancel()} />
       </div>
     );
   }
@@ -254,7 +274,11 @@ function RecordingHud({ compact }: { compact: boolean }) {
         {recordingClock(elapsed)}
       </span>
       {paused && !compact && <span className="text-ink-3">paused</span>}
-      {error && <Icon icon={AlertTriangle} size={13} role="img" aria-label={error} className="text-danger" />}
+      {error && (
+        <Tooltip label={error} side="bottom">
+          <Icon icon={AlertTriangle} size={13} role="img" aria-label={error} className="text-danger" />
+        </Tooltip>
+      )}
       <IconButton icon={paused ? Play : Pause} label={paused ? "Resume recording" : "Pause recording"} size={13} onClick={() => void (paused ? resume() : pause())} />
       <Tooltip label="Stop and save" shortcut="⌘⌥⇧R">
         <button type="button" aria-label="Stop and save" onClick={() => void stop()} className="grid size-7 place-items-center rounded-full text-danger transition-colors hover:bg-danger/20">

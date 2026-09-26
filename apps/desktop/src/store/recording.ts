@@ -2,13 +2,16 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { uiStorage } from "../lib/uiStorage";
 import { events, ipc } from "../lib/ipc";
-import type { RecordingCapabilities, RecordingResult } from "../lib/ipc";
+import type { RecordingCapabilities, RecordingEvent, RecordingResult } from "../lib/ipc";
 import { tabInThisWindow, useBrowser } from "./browser";
 
 /**
  * Screen recording, start to finish: the setup dialog, a countdown, the
  * recording itself with pause and resume, and the finished file. One
  * recording at a time; the settings are remembered between recordings.
+ *
+ * A save that fails ends in `failed`: capture is over, the engine keeps
+ * what was captured, and the person tries again or throws it away.
  */
 
 export type RecordFormat = "mp4" | "gif";
@@ -27,7 +30,7 @@ export interface RecordSettings {
   countdown: boolean;
 }
 
-export type Phase = "idle" | "setup" | "starting" | "countdown" | "recording" | "paused" | "finishing" | "done";
+export type Phase = "idle" | "setup" | "starting" | "countdown" | "recording" | "paused" | "finishing" | "failed" | "done";
 
 interface RecordingState {
   phase: Phase;
@@ -43,6 +46,12 @@ interface RecordingState {
   pausedTotal: number;
   /** The length cap was reached; the file holds what fits. */
   limitHit: boolean;
+  /** Share of the save done, 0 to 1, while finishing; null before ffmpeg says. */
+  progress: number | null;
+  /** This recording asked for a microphone. */
+  micRequested: boolean;
+  /** The microphone stopped partway through the recording. */
+  micFailed: boolean;
   result: RecordingResult | null;
   error: string | null;
 
@@ -57,7 +66,10 @@ interface RecordingState {
   start: () => Promise<void>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
+  /** Stop and save; from `failed`, try the save again. */
   stop: () => Promise<void>;
+  /** Stop a save in progress; the recording is kept, as after a failed save. */
+  stopSaving: () => Promise<void>;
   /** Throw the recording away. */
   cancel: () => Promise<void>;
   /** Close the finished dialog. */
@@ -70,6 +82,9 @@ export const DEFAULT_SETTINGS: RecordSettings = { source: "page", format: "mp4",
 const COUNTDOWN_SECONDS = 3;
 let countdownTimer = 0;
 let listening = false;
+
+/** What the engine says when it holds no recording for the tab. */
+const NOT_RECORDING = "not recording this tab";
 
 const errorMessage = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : typeof error === "string" && error ? error : fallback);
 
@@ -109,6 +124,9 @@ export const useRecording = create<RecordingState>()(
       pausedAt: null,
       pausedTotal: 0,
       limitHit: false,
+      progress: null,
+      micRequested: false,
+      micFailed: false,
       result: null,
       error: null,
 
@@ -138,9 +156,9 @@ export const useRecording = create<RecordingState>()(
 
       toggle: async () => {
         const { phase } = get();
-        if (phase === "recording" || phase === "paused") await get().stop();
+        if (phase === "recording" || phase === "paused" || phase === "failed") await get().stop();
         else if (phase === "countdown") await get().cancel();
-        else get().openSetup();
+        else if (phase !== "finishing") get().openSetup();
       },
 
       start: async () => {
@@ -167,10 +185,16 @@ export const useRecording = create<RecordingState>()(
             if (get().phase !== "countdown") return;
           }
           await ipc.tabScreencastStart(tab, { source: settings.source, format: settings.format, fps: settings.fps, max_width: settings.width, microphone: settings.microphone });
-          set({ phase: "recording", startedAt: Date.now(), pausedAt: null, pausedTotal: 0, limitHit: false, error: null });
+          // The tab closed while the engine was starting: nothing is shown
+          // for this recording any more, so it must not keep running.
+          if (get().tab !== tab || get().phase === "idle") {
+            await ipc.tabScreencastCancel(tab).catch(() => undefined);
+            return;
+          }
+          set({ phase: "recording", startedAt: Date.now(), pausedAt: null, pausedTotal: 0, limitHit: false, progress: null, micRequested: settings.microphone !== null, micFailed: false, error: null });
           useBrowser.setState({ recordingTab: tab });
         } catch (e) {
-          set({ phase: "setup", error: errorMessage(e, "Recording could not be started") });
+          if (get().tab === tab && get().phase !== "idle") set({ phase: "setup", error: errorMessage(e, "Recording could not be started") });
         }
       },
 
@@ -197,23 +221,42 @@ export const useRecording = create<RecordingState>()(
 
       stop: async () => {
         const { tab, phase } = get();
-        if (!tab || (phase !== "recording" && phase !== "paused")) return;
-        set({ phase: "finishing", error: null });
+        if (!tab || (phase !== "recording" && phase !== "paused" && phase !== "failed")) return;
+        set({ phase: "finishing", progress: null, error: null });
         try {
           const result = await ipc.tabScreencastStop(tab);
           useBrowser.setState({ recordingTab: null });
-          set({ phase: "done", result, error: null, startedAt: null, pausedAt: null, pausedTotal: 0 });
+          set({ phase: "done", result, error: null, progress: null, startedAt: null, pausedAt: null, pausedTotal: 0 });
         } catch (e) {
-          set({ phase, error: errorMessage(e, "Recording could not be saved. Try again") });
+          const message = errorMessage(e, "Recording could not be saved");
+          // A retry the engine has nothing for: the first failure found
+          // nothing captured, and a button to try again would only fail again.
+          if (phase === "failed" && message === NOT_RECORDING) {
+            useBrowser.setState({ recordingTab: null, error: "Nothing was captured, so there is no recording to save" });
+            set({ phase: "idle", tab: null, error: null, progress: null, startedAt: null, pausedAt: null, pausedTotal: 0 });
+            return;
+          }
+          // Capture has ended either way. The engine keeps the frames, so
+          // the save can be tried again; staying in `recording` used to
+          // offer a pause and a ticking clock for a recording that was over.
+          set({ phase: "failed", progress: null, error: message });
         }
+      },
+
+      stopSaving: async () => {
+        const { tab, phase } = get();
+        // The pending stop, or the engine's `failed` event for a save it
+        // began itself, moves the recording on to `failed`.
+        if (tab && phase === "finishing") await ipc.tabScreencastCancel(tab).catch(() => undefined);
       },
 
       cancel: async () => {
         const { tab, phase } = get();
         window.clearTimeout(countdownTimer);
-        if (tab && (phase === "recording" || phase === "paused")) await ipc.tabScreencastCancel(tab).catch(() => undefined);
+        if (phase === "finishing") return get().stopSaving();
+        if (tab && (phase === "recording" || phase === "paused" || phase === "failed")) await ipc.tabScreencastCancel(tab).catch(() => undefined);
         useBrowser.setState({ recordingTab: null });
-        set({ phase: "idle", tab: null, startedAt: null, pausedAt: null, pausedTotal: 0, countdown: 0 });
+        set({ phase: "idle", tab: null, startedAt: null, pausedAt: null, pausedTotal: 0, countdown: 0, progress: null, error: null });
       },
 
       dismiss: () => {
@@ -236,28 +279,72 @@ export const useRecording = create<RecordingState>()(
   ),
 );
 
+/** Apply one of the engine's recording events. Exported for tests. */
+export function applyRecordingEvent(event: RecordingEvent) {
+  const { tab, phase } = useRecording.getState();
+  if (event.tab !== tab) return;
+  const set = useRecording.setState;
+  switch (event.kind) {
+    case "limit":
+      if (phase === "recording" || phase === "paused") {
+        set({ limitHit: true });
+        void useRecording.getState().stop();
+      }
+      return;
+    case "mic_failed":
+      set({ micFailed: true });
+      return;
+    case "progress":
+      if (phase === "finishing" && event.progress !== null) set({ progress: event.progress });
+      return;
+    // The engine began saving on its own: the tab closed, or Dive is quitting.
+    case "finishing":
+      if (phase === "recording" || phase === "paused" || phase === "failed") set({ phase: "finishing", progress: null, error: null });
+      return;
+    case "saved":
+      if (event.result && (phase === "finishing" || phase === "recording" || phase === "paused" || phase === "failed")) {
+        useBrowser.setState({ recordingTab: null });
+        set({ phase: "done", result: event.result, error: null, progress: null, startedAt: null, pausedAt: null, pausedTotal: 0 });
+      }
+      return;
+    case "failed":
+      if (phase === "finishing" || phase === "recording" || phase === "paused") set({ phase: "failed", progress: null, error: event.error ?? "Recording could not be saved" });
+      return;
+  }
+}
+
+/**
+ * The recorded tab closed. Before capture began there is nothing to keep;
+ * after, the engine saves the recording and its events say how that went.
+ * A save already under way, a failed one and a finished file are unaffected:
+ * a save used to be announced as "discarded" and then turn up saved anyway.
+ * Exported for tests.
+ */
+export function recordedTabClosed(id: string) {
+  const { tab, phase } = useRecording.getState();
+  if (id !== tab) return;
+  if (phase === "setup" || phase === "starting" || phase === "countdown") {
+    window.clearTimeout(countdownTimer);
+    useRecording.setState({ phase: "idle", tab: null, startedAt: null, pausedAt: null, pausedTotal: 0 });
+    useBrowser.setState({ recordingTab: null, error: "The tab to record was closed before recording began" });
+  } else if (phase === "recording" || phase === "paused") {
+    useRecording.setState({ phase: "finishing", progress: null, error: null });
+  }
+}
+
 /** Wire engine events once: the length cap ends the recording on its own,
- * and a tab closing under a recording discards it. */
+ * a save the engine began itself reports back, and a tab closing under a
+ * recording saves it. */
 function listen() {
   if (listening) return;
   listening = true;
   // Outside Tauri (tests) there is no event bridge; the recorder still works
-  // without the length-cap signal.
-  void events.recordingEvent.listen((e) => {
-    const { tab, phase } = useRecording.getState();
-    if (e.payload.kind === "limit" && e.payload.tab === tab && (phase === "recording" || phase === "paused")) {
-      useRecording.setState({ limitHit: true });
-      void useRecording.getState().stop();
-    }
+  // without these signals.
+  void events.recordingEvent.listen((e) => applyRecordingEvent(e.payload)).catch(() => undefined);
+  // The engine's own close event, not the tab list: that list holds the
+  // active workspace only, and switching workspaces used to count as the
+  // recorded tab closing.
+  void events.stateChanged.listen((e) => {
+    if (e.payload.type === "tab_closed") recordedTabClosed(e.payload.data);
   }).catch(() => undefined);
-  useBrowser.subscribe((s, prev) => {
-    if (s.tabs === prev.tabs) return;
-    const { tab, phase } = useRecording.getState();
-    if (!tab || phase === "idle" || phase === "done") return;
-    if (!s.tabs.some((t) => t.id === tab)) {
-      window.clearTimeout(countdownTimer);
-      useRecording.setState({ phase: "idle", tab: null, startedAt: null, pausedAt: null, pausedTotal: 0 });
-      useBrowser.setState({ recordingTab: null, error: "The tab being recorded was closed, so the recording was discarded" });
-    }
-  });
 }

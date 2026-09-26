@@ -1374,13 +1374,13 @@ fn close_views(app: &AppHandle<Runtime>, state: &AppState, tabs: &[TabId]) -> Ap
 }
 
 /// Forget everything kept about tab `id` outside the host and the store:
-/// its recording, its subtitles, its buffered console and network rows, its
+/// its recording (saved, not thrown away), its subtitles, its buffered console and network rows, its
 /// inspector picks, its crash budget, its privacy report, a sign-in prompt
 /// still waiting, and a pending https upgrade. Every path that closes a tab
 /// calls this, so none of them leaks what another path cleans up.
 pub(crate) fn forget_tab_state(app: &AppHandle<Runtime>, state: &AppState, id: TabId) {
     crate::subtitles::stop_tab(app, id);
-    state.screencast.discard(id);
+    state.screencast.finish_detached(id);
     state.buffers.drop_tab(id);
     state.inspector.drop_tab(id);
     state.crashes.drop_tab(id);
@@ -2327,18 +2327,21 @@ pub(crate) fn tab_screencast_pause(
     state.screencast.set_paused(id, paused)
 }
 
-/// Stop recording and encode the file; returns what was written.
+/// Stop recording and encode the file; returns what was written. A save
+/// that failed can be tried again here after its tab has closed, so a
+/// missing session only means the page is not told.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn tab_screencast_stop(
     state: State<'_, AppState>,
     id: TabId,
 ) -> AppResult<crate::screencast::RecordingResult> {
-    let session = cdp_for(&state, id)?;
-    state.screencast.stop(id, &session).await
+    let session = cdp_for(&state, id).ok();
+    state.screencast.stop(id, session.as_ref()).await
 }
 
-/// Throw a recording away without encoding it.
+/// Throw a recording away without encoding it. While it is saving, stop the
+/// save instead and keep the recording to try again or throw away.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn tab_screencast_cancel(state: State<'_, AppState>, id: TabId) -> AppResult<()> {
