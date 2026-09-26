@@ -1,7 +1,7 @@
 import { Select } from "./Select";
 import { isPrivateWindow } from "../lib/privateMode";
 import { PrivateWelcome } from "./PrivateMode";
-import { AlertTriangle, Check, RotateCw, Search, ShieldOff, ShieldQuestion, WifiOff, X } from "lucide-react";
+import { AlertTriangle, Check, Hourglass, RotateCw, Search, ShieldOff, ShieldQuestion, WifiOff, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
 import { createBoundsReporter, elementBounds } from "../lib/boundsReporter";
@@ -12,6 +12,7 @@ import { useContentPreview, useCoversContent } from "../lib/overlay";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { tabInThisWindow, useBrowser } from "../store/browser";
 import type { PermissionRequest } from "../store/browser";
+import type { CrashReason } from "../lib/ipc";
 import { Icon } from "./Icon";
 import { selectDevice, useEmulation } from "../store/emulation";
 import { useJsDialog } from "../store/jsDialog";
@@ -55,12 +56,13 @@ export function Content() {
   const internal = useBrowser((s) => s.tabs.find((t) => t.id === activeTab && isInternalUrl(t.url)));
   const dragging = useTabDrag((s) => s.dragging);
   const crash = useBrowser((s) => (activeTab ? s.crashedTabs[activeTab] : undefined));
+  const hung = useBrowser((s) => (activeTab ? s.unresponsiveTabs[activeTab] === true : false));
   const navError = useBrowser((s) => (activeTab ? s.navError[activeTab] : undefined));
   const asked = useBrowser((s) => (activeTab ? s.permissionRequests[activeTab]?.[0] : undefined));
   const findOpen = useBrowser((s) => s.open.find);
   // The page's questions start below whatever already floats at the top of
   // the page: the find bar (8px inset + 36px tall) or the crash notice row.
-  const promptTop = 8 + Math.max(findOpen ? FIND_BAR_HEIGHT : 0, activeTab && crash ? CRASH_ROW_HEIGHT : 0);
+  const promptTop = 8 + Math.max(findOpen ? FIND_BAR_HEIGHT : 0, activeTab ? ((crash ? CRASH_ROW_HEIGHT : 0) + (hung ? CRASH_ROW_HEIGHT : 0)) : 0);
   useStartupDevice(activeTab);
 
   return (
@@ -72,7 +74,8 @@ export function Content() {
     // rectangle is measured from the elements below, so a banner pushes the
     // native view down instead of vanishing behind it.
     <div className="relative flex min-h-0 min-w-0 flex-col bg-surface">
-      {activeTab && crash && <CrashBanner attempt={crash.attempt} recovering={crash.recovering} />}
+      {activeTab && crash && <CrashBanner attempt={crash.attempt} recovering={crash.recovering} reason={crash.reason} />}
+      {activeTab && <UnresponsiveBanner tabId={activeTab} />}
       {activeTab && <PermissionDialog key={`${activeTab}-${asked?.request_id ?? "none"}`} tabId={activeTab} request={asked} />}
       <CredentialPromptCard tabId={activeTab} />
       <ExternalLinkDialog />
@@ -106,20 +109,54 @@ export function Content() {
  * gives up it offers a reload. A detached window passes its own reload: the
  * store's reload means the main window's active tab.
  */
-export function CrashBanner({ attempt, recovering, onReload }: { attempt: number; recovering: boolean; onReload?: () => void }) {
+export function CrashBanner({ attempt, recovering, reason, onReload }: { attempt: number; recovering: boolean; reason?: CrashReason | undefined; onReload?: () => void }) {
   const storeReload = useBrowser((s) => s.reload);
   const reload = onReload ?? (() => void storeReload());
   return (
     <div role="status" className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-surface-2 px-3 text-xs text-ink-2">
       <Icon icon={AlertTriangle} size={13} className="shrink-0 text-ink-3" />
-      <span className="min-w-0 flex-1 truncate">
-        {recovering ? `This tab's renderer crashed — reloading (attempt ${attempt})` : `This tab's renderer crashed and Dive stopped reloading it after ${attempt} ${attempt === 1 ? "attempt" : "attempts"}`}
-      </span>
+      <span className="min-w-0 flex-1 truncate">{crashMessage(attempt, recovering, reason)}</span>
       {!recovering && (
         <button type="button" onClick={reload} className="flex h-6 items-center gap-1 rounded-md border border-line-2 px-2 text-ink hover:bg-surface-3">
           <Icon icon={RotateCw} size={11} /> Reload
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * What the crash banner says. A page the system stopped for memory, or that
+ * was ended because it hung, is not reloaded on its own: reloading it would
+ * only repeat what stopped it, so the person decides.
+ */
+export function crashMessage(attempt: number, recovering: boolean, reason?: CrashReason): string {
+  if (reason === "out_of_memory") return "This page ran out of memory and was stopped";
+  if (reason === "killed") return "This page was stopped";
+  if (recovering) return `This tab's renderer crashed — reloading (attempt ${attempt})`;
+  return `This tab's renderer crashed and Dive stopped reloading it after ${attempt} ${attempt === 1 ? "attempt" : "attempts"}`;
+}
+
+/**
+ * The page stopped answering. A row above it rather than a dialog: the
+ * native page paints over anything drawn on top, and the person may want to
+ * look at it before deciding. Wait gives it more time; End page stops its
+ * renderer, after which the crash banner offers a reload.
+ */
+export function UnresponsiveBanner({ tabId }: { tabId: string }) {
+  const hung = useBrowser((s) => s.unresponsiveTabs[tabId] === true);
+  const answer = useBrowser((s) => s.answerUnresponsive);
+  if (!hung) return null;
+  return (
+    <div role="alert" className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-surface-2 px-3 text-xs text-ink-2">
+      <Icon icon={Hourglass} size={13} className="shrink-0 text-ink-3" />
+      <span className="min-w-0 flex-1 truncate">This page isn't responding</span>
+      <button type="button" onClick={() => void answer(tabId, false)} className="flex h-6 items-center rounded-md border border-line-2 px-2 text-ink hover:bg-surface-3">
+        Wait
+      </button>
+      <button type="button" onClick={() => void answer(tabId, true)} className="flex h-6 items-center rounded-md border border-line-2 px-2 text-ink hover:bg-surface-3">
+        End page
+      </button>
     </div>
   );
 }

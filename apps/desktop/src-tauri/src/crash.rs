@@ -7,8 +7,20 @@
 //! The budget is the important half. A page that reliably crashes on load —
 //! a WebGL context the driver refuses, an out-of-memory loop — would
 //! otherwise be reloaded forever, each attempt taking a renderer process with
-//! it. After a few tries in a short window Dive stops and leaves the crash
-//! visible, which is the honest outcome and the one a developer can act on.
+//! it. After a few tries without a quiet spell in between Dive stops and
+//! leaves the crash visible, which is the honest outcome and the one a
+//! developer can act on.
+//!
+//! Not every death is worth a reload. A renderer the system killed for
+//! memory, or one the person ended because it hung, would only be killed
+//! again; those tabs keep the banner and wait for someone to press Reload.
+//! A tab nobody is looking at is not reloaded either: it is marked, and comes
+//! back when it is next shown, so a background crash costs nothing until then.
+//!
+//! The chrome itself is a page too. Its renderer can die like any other,
+//! and then the window has no tabs, no address bar and no way out; it is
+//! reloaded on the same kind of budget, with whatever cover it had left over
+//! the pages taken down first.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -24,34 +36,98 @@ use tauri_specta::Event;
 use crate::Runtime;
 use crate::state::{AppState, lock};
 
-/// Attempts allowed inside one window.
+/// Attempts allowed before a quiet spell resets the count.
 pub const MAX_ATTEMPTS: u32 = 3;
-/// How long a run of crashes counts as the same episode.
-pub const WINDOW: Duration = Duration::from_secs(30);
+/// How long a page has to go without crashing before its budget is whole
+/// again. Measured from the latest crash, not the first: a page that crashes
+/// every ten seconds never earns a fresh budget, where a window measured from
+/// the first crash handed it one every half minute and reloaded it forever.
+pub const QUIET: Duration = Duration::from_mins(5);
 /// First backoff; each further attempt doubles it.
 pub const BASE_DELAY: Duration = Duration::from_millis(250);
 /// Two reports of the same tab this close together are one crash seen by
 /// both signals: CEF's process hook and the `DevTools` `targetCrashed` event.
 pub const SAME_EVENT: Duration = Duration::from_secs(1);
+/// How long the `DevTools` report waits for CEF's, which says why the
+/// renderer died. Whichever is admitted first is the one acted on, and only
+/// the native one can tell a crash from an out-of-memory kill.
+const REASON_GRACE: Duration = Duration::from_millis(400);
+
+/// Why a renderer went away, as far as the engine could tell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum CrashReason {
+    /// It crashed, or exited abnormally.
+    Crashed,
+    /// It ran out of memory.
+    OutOfMemory,
+    /// It was killed: by the system, or by someone ending a page that hung.
+    Killed,
+    /// Only the `DevTools` session noticed, and it does not say.
+    Unknown,
+}
+
+impl CrashReason {
+    /// Whether reloading on our own is worth it. A process killed for memory
+    /// or on purpose would be killed again, so the person decides.
+    pub fn reloads(self) -> bool {
+        matches!(self, Self::Crashed | Self::Unknown)
+    }
+}
+
+#[cfg(feature = "cef")]
+impl From<tauri_runtime_cef::RendererExit> for CrashReason {
+    fn from(exit: tauri_runtime_cef::RendererExit) -> Self {
+        use tauri_runtime_cef::RendererExit;
+        match exit {
+            RendererExit::Crashed | RendererExit::Abnormal | RendererExit::LaunchFailed => {
+                Self::Crashed
+            }
+            RendererExit::OutOfMemory => Self::OutOfMemory,
+            RendererExit::Killed => Self::Killed,
+            RendererExit::Other => Self::Unknown,
+        }
+    }
+}
 
 /// Emitted when a tab's renderer dies, whether or not it is being recovered.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
 pub struct TabCrashed {
     /// The tab that lost its renderer.
     pub tab_id: TabId,
-    /// Which attempt this is, within the current window.
+    /// Which attempt this is, since the page last went quiet.
     pub attempt: u32,
-    /// Whether Dive is reloading it.
+    /// Whether Dive is reloading it, now or when it is next shown.
     pub recovering: bool,
+    /// Why the renderer went away.
+    pub reason: CrashReason,
+    /// The tab was in the background: it reloads when it is next shown.
+    pub deferred: bool,
 }
 
-/// How many crashes a tab has had, and when the run started.
+/// A tab's page stopped responding to input. The engine waits for an answer
+/// through `tab_unresponsive_answer`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
+pub struct TabUnresponsive {
+    /// The tab whose page hangs.
+    pub tab_id: TabId,
+}
+
+/// A page that was reported as not responding answers again, or its hang
+/// was otherwise settled (it was ended, or the tab closed).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Event)]
+pub struct TabResponsive {
+    /// The tab whose page recovered.
+    pub tab_id: TabId,
+}
+
+/// How many crashes a tab has had, and when the latest was.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Attempts {
-    /// Crashes so far in this window.
+    /// Crashes since the page last went quiet.
     pub count: u32,
-    /// When the window opened.
-    pub started: Option<Instant>,
+    /// When the latest crash was.
+    pub last: Option<Instant>,
 }
 
 /// What to do about a crash.
@@ -67,30 +143,38 @@ pub struct Plan {
 
 /// Decide whether to reload, or to give up and leave the crash visible.
 ///
-/// Returns `None` once the budget is spent. Pure so the backoff and the
-/// window can be tested without crashing a renderer.
-pub fn plan(state: Attempts, now: Instant) -> Option<Plan> {
+/// Returns `None` once the budget is spent, and the refused crash still
+/// counts as the latest: a page that keeps crashing stays refused until it
+/// has been quiet for [`QUIET`]. Pure so the backoff and the quiet spell can
+/// be tested without crashing a renderer.
+pub fn plan(state: Attempts, now: Instant) -> (Option<Plan>, Attempts) {
     // A crash long after the last one is a new episode, not a continuation:
     // a page that broke once this morning gets a fresh budget this afternoon.
     let fresh = state
-        .started
-        .is_none_or(|started| now.duration_since(started) >= WINDOW);
+        .last
+        .is_none_or(|last| now.saturating_duration_since(last) >= QUIET);
     let count = if fresh { 0 } else { state.count };
     if count >= MAX_ATTEMPTS {
-        return None;
+        return (
+            None,
+            Attempts {
+                count,
+                last: Some(now),
+            },
+        );
     }
-    Some(Plan {
-        delay: BASE_DELAY * 2_u32.pow(count),
-        attempt: count + 1,
-        next: Attempts {
-            count: count + 1,
-            started: Some(if fresh {
-                now
-            } else {
-                state.started.unwrap_or(now)
-            }),
-        },
-    })
+    let next = Attempts {
+        count: count + 1,
+        last: Some(now),
+    };
+    (
+        Some(Plan {
+            delay: BASE_DELAY * 2_u32.pow(count),
+            attempt: count + 1,
+            next,
+        }),
+        next,
+    )
 }
 
 struct Admitted {
@@ -106,6 +190,16 @@ pub struct Registry {
     inner: Mutex<HashMap<TabId, Attempts>>,
     /// When each tab's crash was last reported, to fold duplicate signals.
     seen: Mutex<HashMap<TabId, Instant>>,
+    /// Background tabs that crashed, by the view that did: reloaded when the
+    /// tab is next shown, rather than spending a renderer on a page nobody
+    /// is looking at.
+    deferred: Mutex<HashMap<TabId, String>>,
+    /// Pages that stopped responding, by the view that hangs, with the
+    /// engine's hold on the wait.
+    #[cfg(feature = "cef")]
+    hung: Mutex<HashMap<TabId, (String, tauri_runtime_cef::UnresponsiveRenderer)>>,
+    /// Chrome documents' own crash history, by webview label.
+    chrome: Mutex<HashMap<String, Attempts>>,
 }
 
 impl Registry {
@@ -117,6 +211,40 @@ impl Registry {
         views.insert(tab, label.to_owned());
         lock(&self.inner).remove(&tab);
         lock(&self.seen).remove(&tab);
+        // A new view is a new page: nothing of the old one's is owed.
+        lock(&self.deferred).remove(&tab);
+        #[cfg(feature = "cef")]
+        lock(&self.hung).remove(&tab);
+    }
+
+    /// Remember that `tab`'s view `label` crashed out of sight.
+    fn defer(&self, tab: TabId, label: &str) {
+        let views = lock(&self.views);
+        if views.get(&tab).is_some_and(|current| current == label) {
+            lock(&self.deferred).insert(tab, label.to_owned());
+        }
+    }
+
+    /// Whether `tab` is owed a reload now that it is shown; forgets it.
+    /// Only for the view that crashed: one rebuilt since starts fresh.
+    pub fn take_deferred(&self, tab: TabId, label: &str) -> bool {
+        let mut deferred = lock(&self.deferred);
+        if deferred.get(&tab).is_some_and(|crashed| crashed == label) {
+            deferred.remove(&tab);
+            return true;
+        }
+        false
+    }
+
+    /// Budget a crash of the chrome document `label`.
+    fn chrome_crash(&self, label: &str, now: Instant) -> Option<Plan> {
+        let mut history = lock(&self.chrome);
+        let current = history.get(label).copied().unwrap_or_default();
+        let (plan, next) = plan(current, now);
+        // Popout chrome labels are numbered and never reused, so a closed
+        // window's entry is a few bytes nobody asks for again.
+        history.insert(label.to_owned(), next);
+        plan
     }
 
     fn current_view(&self, tab: TabId, label: &str) -> bool {
@@ -161,9 +289,9 @@ impl Registry {
     pub fn on_crash(&self, tab: TabId, now: Instant) -> Option<Plan> {
         let mut history = lock(&self.inner);
         let current = history.get(&tab).copied().unwrap_or_default();
-        let plan = plan(current, now)?;
-        history.insert(tab, plan.next);
-        Some(plan)
+        let (plan, next) = plan(current, now);
+        history.insert(tab, next);
+        plan
     }
 
     /// Forget a closed tab's history.
@@ -172,18 +300,179 @@ impl Registry {
         views.remove(&tab);
         lock(&self.inner).remove(&tab);
         lock(&self.seen).remove(&tab);
+        lock(&self.deferred).remove(&tab);
+        #[cfg(feature = "cef")]
+        lock(&self.hung).remove(&tab);
+    }
+
+    /// Hold the engine's wait for `tab`'s hung view `label`. False when the
+    /// view is not the tab's current one, and the report is stale.
+    #[cfg(feature = "cef")]
+    fn hang(&self, tab: TabId, label: &str, wait: tauri_runtime_cef::UnresponsiveRenderer) -> bool {
+        let views = lock(&self.views);
+        if views.get(&tab).is_none_or(|current| current != label) {
+            return false;
+        }
+        lock(&self.hung).insert(tab, (label.to_owned(), wait));
+        true
+    }
+
+    /// The page answers again; true when it had been reported hung.
+    #[cfg(feature = "cef")]
+    fn unhang(&self, tab: TabId, label: &str) -> bool {
+        let mut hung = lock(&self.hung);
+        if hung.get(&tab).is_some_and(|(hanging, _)| hanging == label) {
+            hung.remove(&tab);
+            return true;
+        }
+        false
+    }
+
+    /// Take the engine's wait for `tab`, to answer it.
+    #[cfg(feature = "cef")]
+    fn take_hang(&self, tab: TabId) -> Option<tauri_runtime_cef::UnresponsiveRenderer> {
+        lock(&self.hung).remove(&tab).map(|(_, wait)| wait)
+    }
+
+    /// Whether `tab`'s page is waiting on an answer about its hang.
+    #[cfg(feature = "cef")]
+    pub fn is_hung(&self, tab: TabId) -> bool {
+        lock(&self.hung).contains_key(&tab)
     }
 }
 
-/// CEF's report that a tab's web content process went away. The `DevTools`
-/// session usually notices too; whichever signal lands second is dropped.
-#[cfg(target_os = "macos")]
-pub fn on_native_terminate(webview: &tauri::Webview<Runtime>) {
-    let Some(tab_id) = crate::engine::tab_from_label(webview.label()) else {
+/// Listen to a tab view's renderer: its death, with the reason, and its
+/// hangs. CEF reports these inside its own callbacks on the main thread, so
+/// everything that touches the runtime or the chrome is handed to a task.
+#[cfg(feature = "cef")]
+pub fn attach(app: &AppHandle<Runtime>, tab_id: TabId, view: &tauri::Webview<Runtime>) {
+    use tauri_runtime_cef::RendererEvent;
+    let app = app.clone();
+    let label = view.label().to_owned();
+    let _ = view.with_webview(move |native| {
+        native.set_renderer_handler(move |event| match event {
+            RendererEvent::Terminated { exit, error_code } => {
+                tracing::warn!(%tab_id, ?exit, error_code, "tab renderer terminated");
+                // A dead renderer answers no hang question.
+                if app.state::<AppState>().crashes.unhang(tab_id, &label) {
+                    emit_soon(&app, TabResponsive { tab_id });
+                }
+                schedule_recovery(&app, tab_id, label.clone(), None, exit.into());
+            }
+            RendererEvent::Unresponsive(wait) => {
+                if app.state::<AppState>().crashes.hang(tab_id, &label, wait) {
+                    tracing::warn!(%tab_id, "page stopped responding");
+                    emit_soon(&app, TabUnresponsive { tab_id });
+                }
+            }
+            RendererEvent::Responsive => {
+                if app.state::<AppState>().crashes.unhang(tab_id, &label) {
+                    emit_soon(&app, TabResponsive { tab_id });
+                }
+            }
+        });
+    });
+}
+
+/// Answer a hung page: keep waiting, or end its renderer. Ending it reports
+/// a kill, which is never reloaded on its own; the crash banner offers the
+/// reload instead. Must run on the main thread.
+#[cfg(feature = "cef")]
+pub fn answer_hang(app: &AppHandle<Runtime>, tab_id: TabId, end: bool) -> bool {
+    let Some(wait) = app.state::<AppState>().crashes.take_hang(tab_id) else {
+        return false;
+    };
+    if end {
+        wait.terminate();
+    } else {
+        wait.wait();
+    }
+    // Either way the question is settled; if the page is still stuck when
+    // the engine's timer runs out again, it asks again.
+    emit_soon(app, TabResponsive { tab_id });
+    true
+}
+
+/// Listen to a chrome document's renderer. When it dies the window has no
+/// tabs, no address bar and no menus, so it is reloaded on a budget, after
+/// the cover and overlay masks it left over the pages are taken down.
+#[cfg(feature = "cef")]
+pub fn attach_chrome(view: &tauri::Webview<Runtime>) {
+    use tauri_runtime_cef::RendererEvent;
+    let app = view.app_handle().clone();
+    let label = view.label().to_owned();
+    let _ = view.with_webview(move |native| {
+        native.set_renderer_handler(move |event| match event {
+            RendererEvent::Terminated { exit, error_code } => {
+                tracing::error!(chrome = %label, ?exit, error_code, "chrome renderer terminated");
+                let app = app.clone();
+                let label = label.clone();
+                tauri::async_runtime::spawn(async move {
+                    recover_chrome(&app, &label).await;
+                });
+            }
+            RendererEvent::Unresponsive(_) => {
+                // Nothing else can draw a question in this window. The engine
+                // keeps waiting, which is what the person would pick anyway.
+                tracing::warn!(chrome = %label, "chrome stopped responding");
+            }
+            RendererEvent::Responsive => {
+                tracing::info!(chrome = %label, "chrome responds again");
+            }
+        });
+    });
+}
+
+#[cfg(feature = "cef")]
+async fn recover_chrome(app: &AppHandle<Runtime>, label: &str) {
+    let state = app.state::<AppState>();
+    let Some(plan) = state.crashes.chrome_crash(label, Instant::now()) else {
+        tracing::error!(
+            chrome = %label,
+            "chrome crashed {MAX_ATTEMPTS} times without a quiet spell; leaving it"
+        );
         return;
     };
-    let app = webview.app_handle().clone();
-    schedule_recovery(&app, tab_id, webview.label().to_owned(), None);
+    // Its overlays and cover belonged to a document that is gone. A page
+    // left hidden under a dialog nobody can close would stay hidden for good.
+    reset_chrome_cover(app, label);
+    tokio::time::sleep(plan.delay).await;
+    let reload_app = app.clone();
+    let label = label.to_owned();
+    let _ = app.run_on_main_thread(move || {
+        let Some(view) = reload_app.get_webview(&label) else {
+            return;
+        };
+        tracing::warn!(chrome = %label, attempt = plan.attempt, "reloading the chrome");
+        if let Err(error) = view.reload() {
+            tracing::error!(chrome = %label, %error, "reloading the chrome failed");
+        }
+    });
+}
+
+/// Take down every overlay and cover `label`'s chrome had up, on the main
+/// thread. For a chrome whose document is new: reloaded after a crash, or
+/// booting and saying so.
+pub fn reset_chrome_cover(app: &AppHandle<Runtime>, label: &str) {
+    let task_app = app.clone();
+    let label = label.to_owned();
+    let _ = app.run_on_main_thread(move || {
+        let state = task_app.state::<AppState>();
+        if let Some(host) = lock(&state.host).as_mut()
+            && let Err(error) = host.reset_chrome_cover(&label)
+        {
+            tracing::warn!(chrome = %label, %error, "clearing the chrome's cover failed");
+        }
+    });
+}
+
+/// Emit from a task: the renderer callbacks run inside CEF on the main
+/// thread, where the event would be dispatched from within the engine.
+fn emit_soon<E: Event + Serialize + Clone + Send + 'static>(app: &AppHandle<Runtime>, event: E) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = event.emit(&app);
+    });
 }
 
 /// Watch a tab's session for renderer crashes and reload within budget.
@@ -197,7 +486,22 @@ pub fn watch(app: AppHandle<Runtime>, tab_id: TabId, view_label: String, session
             match events.recv().await {
                 Ok(event) => {
                     if event.method == "Inspector.targetCrashed" {
-                        schedule_recovery(&app, tab_id, view_label.clone(), Some(session.clone()));
+                        // The engine's own report says why; this one does
+                        // not. Give it a moment to land first, so an
+                        // out-of-memory kill is not reloaded as a crash.
+                        let app = app.clone();
+                        let label = view_label.clone();
+                        let session = session.clone();
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(REASON_GRACE).await;
+                            schedule_recovery(
+                                &app,
+                                tab_id,
+                                label,
+                                Some(session),
+                                CrashReason::Unknown,
+                            );
+                        });
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -234,6 +538,7 @@ fn schedule_recovery(
     tab_id: TabId,
     view_label: String,
     session: Option<CdpSession>,
+    reason: CrashReason,
 ) {
     let worker_app = app.clone();
     let source_label = view_label.clone();
@@ -256,7 +561,7 @@ fn schedule_recovery(
                     })
             });
             if let Some(session) = session {
-                recover(&worker_app, tab_id, &view_label, &session, planned).await;
+                recover(&worker_app, tab_id, &view_label, &session, planned, reason).await;
             }
         },
     );
@@ -295,12 +600,41 @@ async fn emit_current(app: &AppHandle<Runtime>, label: &str, notice: TabCrashed)
     rx.await.unwrap_or(false)
 }
 
+/// Whether anyone can see `tab_id` right now, in any window. Taken briefly
+/// and never across an await.
+fn on_screen(app: &AppHandle<Runtime>, tab_id: TabId) -> bool {
+    lock(&app.state::<AppState>().host)
+        .as_ref()
+        .is_some_and(|host| host.showing().contains(&tab_id))
+}
+
+/// What to do about one admitted crash, given its budget and whether the
+/// tab is on screen. Pure, so the policy can be tested without a renderer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Action {
+    /// Reload after this long.
+    Reload(Plan),
+    /// Mark it; reload when the tab is next shown.
+    Defer(Plan),
+    /// Leave the crash on screen for the person to act on.
+    Leave,
+}
+
+fn decide(planned: Option<Plan>, reason: CrashReason, visible: bool) -> Action {
+    match planned {
+        Some(plan) if reason.reloads() && visible => Action::Reload(plan),
+        Some(plan) if reason.reloads() => Action::Defer(plan),
+        _ => Action::Leave,
+    }
+}
+
 async fn recover(
     app: &AppHandle<Runtime>,
     tab_id: TabId,
     view_label: &str,
     session: &CdpSession,
     planned: Option<Plan>,
+    reason: CrashReason,
 ) {
     if session.is_closed()
         || !app
@@ -312,23 +646,47 @@ async fn recover(
     }
     let state = app.state::<AppState>();
     let crashes = &state.crashes;
-    let Some(plan) = planned else {
-        tracing::warn!(
-            %tab_id,
-            "renderer crashed {MAX_ATTEMPTS} times in {}s; leaving the tab as it is",
-            WINDOW.as_secs()
-        );
-        emit_current(
-            app,
-            view_label,
-            TabCrashed {
+    let attempt = planned.map_or(MAX_ATTEMPTS, |plan| plan.attempt);
+    let plan = match decide(planned, reason, on_screen(app, tab_id)) {
+        Action::Leave => {
+            if reason.reloads() {
+                tracing::warn!(
+                    %tab_id,
+                    "renderer crashed {MAX_ATTEMPTS} times without {}s of quiet; leaving the tab as it is",
+                    QUIET.as_secs()
+                );
+            } else {
+                tracing::warn!(%tab_id, ?reason, "renderer was stopped; not reloading it on its own");
+            }
+            let notice = TabCrashed {
                 tab_id,
-                attempt: MAX_ATTEMPTS,
+                attempt,
                 recovering: false,
-            },
-        )
-        .await;
-        return;
+                reason,
+                deferred: false,
+            };
+            emit_current(app, view_label, notice).await;
+            return;
+        }
+        Action::Defer(plan) => {
+            tracing::warn!(%tab_id, "background tab's renderer crashed; reloading it when shown");
+            crashes.defer(tab_id, view_label);
+            let notice = TabCrashed {
+                tab_id,
+                attempt: plan.attempt,
+                recovering: true,
+                reason,
+                deferred: true,
+            };
+            emit_current(app, view_label, notice).await;
+            // It may have been brought forward while this was decided;
+            // the activation that looked for the mark then did not find it.
+            if on_screen(app, tab_id) && crashes.take_deferred(tab_id, view_label) {
+                reload_now(app, tab_id, view_label, session).await;
+            }
+            return;
+        }
+        Action::Reload(plan) => plan,
     };
     tracing::warn!(
         %tab_id,
@@ -336,29 +694,55 @@ async fn recover(
         "renderer crashed; reloading in {}ms",
         plan.delay.as_millis()
     );
-    if !emit_current(
-        app,
-        view_label,
-        TabCrashed {
-            tab_id,
-            attempt: plan.attempt,
-            recovering: true,
-        },
-    )
-    .await
-    {
+    let notice = TabCrashed {
+        tab_id,
+        attempt: plan.attempt,
+        recovering: true,
+        reason,
+        deferred: false,
+    };
+    if !emit_current(app, view_label, notice).await {
         return;
     }
     tokio::time::sleep(plan.delay).await;
+    reload_now(app, tab_id, view_label, session).await;
+}
+
+async fn reload_now(
+    app: &AppHandle<Runtime>,
+    tab_id: TabId,
+    view_label: &str,
+    session: &CdpSession,
+) {
     if session.is_closed() {
         return;
     }
-    if !crashes.begin_current_reload(tab_id, view_label) {
+    if !app
+        .state::<AppState>()
+        .crashes
+        .begin_current_reload(tab_id, view_label)
+    {
         return;
     }
     if let Err(e) = session.call0("Page.reload").await {
         tracing::warn!(%tab_id, "reload after a crash failed: {e}");
     }
+}
+
+/// A tab is being shown: reload it if its renderer crashed while it was in
+/// the background. Called on the main thread with the host held, after the
+/// tab's view is in place; the reload itself is the view's own.
+pub fn reload_if_deferred(
+    crashes: &Registry,
+    tab_id: TabId,
+    view: &tauri::Webview<Runtime>,
+) -> tauri::Result<()> {
+    if crashes.take_deferred(tab_id, view.label()) {
+        tracing::info!(%tab_id, "reloading a tab that crashed in the background");
+        crashes.begin_reload(tab_id);
+        view.reload()?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -520,11 +904,13 @@ mod tests {
     #[test]
     fn the_first_crash_reloads_promptly() {
         let now = Instant::now();
-        let plan = plan(Attempts::default(), now).expect("a first crash is worth a reload");
+        let plan = plan(Attempts::default(), now)
+            .0
+            .expect("a first crash is worth a reload");
         assert_eq!(plan.attempt, 1);
         assert_eq!(plan.delay, BASE_DELAY);
         assert_eq!(plan.next.count, 1);
-        assert_eq!(plan.next.started, Some(now));
+        assert_eq!(plan.next.last, Some(now));
     }
 
     #[test]
@@ -533,7 +919,7 @@ mod tests {
         let mut state = Attempts::default();
         let mut delays = Vec::new();
         for _ in 0..MAX_ATTEMPTS {
-            let plan = plan(state, now).expect("within budget");
+            let plan = plan(state, now).0.expect("within budget");
             delays.push(plan.delay);
             state = plan.next;
         }
@@ -549,39 +935,120 @@ mod tests {
         let now = Instant::now();
         let spent = Attempts {
             count: MAX_ATTEMPTS,
-            started: Some(now),
+            last: Some(now),
         };
         assert!(
-            plan(spent, now).is_none(),
+            plan(spent, now).0.is_none(),
             "a reliably crashing page has to be left alone eventually"
         );
     }
 
     #[test]
-    fn a_crash_after_the_window_starts_a_fresh_episode() {
+    fn a_crash_after_a_quiet_spell_starts_a_fresh_episode() {
         let morning = Instant::now();
         let spent = Attempts {
             count: MAX_ATTEMPTS,
-            started: Some(morning),
+            last: Some(morning),
         };
-        let later = morning + WINDOW + Duration::from_secs(1);
-        let plan = plan(spent, later).expect("an unrelated crash gets its own budget");
+        let later = morning + QUIET + Duration::from_secs(1);
+        let plan = plan(spent, later)
+            .0
+            .expect("an unrelated crash gets its own budget");
         assert_eq!(plan.attempt, 1);
         assert_eq!(plan.delay, BASE_DELAY);
-        assert_eq!(plan.next.started, Some(later));
+        assert_eq!(plan.next.last, Some(later));
     }
 
     #[test]
-    fn crashes_inside_the_window_keep_the_original_start() {
+    fn a_page_crashing_every_few_seconds_runs_out_and_stays_out() {
+        // Measured from the first crash, a thirty-second window handed a page
+        // that crashes every twelve seconds a fresh budget every other crash,
+        // and it was reloaded forever.
+        let mut state = Attempts::default();
         let start = Instant::now();
-        let first = plan(Attempts::default(), start).unwrap();
-        let soon = start + Duration::from_secs(1);
-        let second = plan(first.next, soon).unwrap();
-        assert_eq!(second.attempt, 2);
+        let mut reloads = 0;
+        for n in 0..50u32 {
+            let now = start + Duration::from_secs(12) * n;
+            let (planned, next) = plan(state, now);
+            reloads += u32::from(planned.is_some());
+            state = next;
+        }
+        assert_eq!(reloads, MAX_ATTEMPTS);
+    }
+
+    #[test]
+    fn quiet_is_measured_from_the_latest_crash() {
+        let start = Instant::now();
+        let (_, state) = plan(Attempts::default(), start);
+        let (_, state) = plan(state, start + QUIET.saturating_sub(Duration::from_secs(1)));
+        let (second, state) = plan(state, start + QUIET + Duration::from_secs(1));
         assert_eq!(
-            second.next.started,
-            Some(start),
-            "the window is measured from the first crash, not the latest"
+            second.expect("still within budget").attempt,
+            3,
+            "the second crash was recent, so the third continues the episode"
+        );
+        assert_eq!(state.count, 3);
+    }
+
+    #[test]
+    fn only_a_crash_is_reloaded_on_its_own_and_only_where_it_is_seen() {
+        let (Some(plan), _) = plan(Attempts::default(), Instant::now()) else {
+            panic!("a first crash is within budget");
+        };
+        assert_eq!(
+            decide(Some(plan), CrashReason::Crashed, true),
+            Action::Reload(plan)
+        );
+        assert_eq!(
+            decide(Some(plan), CrashReason::Unknown, true),
+            Action::Reload(plan)
+        );
+        assert_eq!(
+            decide(Some(plan), CrashReason::Crashed, false),
+            Action::Defer(plan),
+            "a background tab waits until it is shown"
+        );
+        for reason in [CrashReason::OutOfMemory, CrashReason::Killed] {
+            assert_eq!(decide(Some(plan), reason, true), Action::Leave);
+            assert_eq!(decide(Some(plan), reason, false), Action::Leave);
+        }
+        assert_eq!(decide(None, CrashReason::Crashed, true), Action::Leave);
+    }
+
+    #[test]
+    fn a_deferred_reload_belongs_to_the_view_that_crashed() {
+        let registry = Registry::default();
+        let tab = TabId::new();
+        registry.bind_view(tab, "view-1");
+        registry.defer(tab, "stale");
+        assert!(!registry.take_deferred(tab, "stale"));
+        registry.defer(tab, "view-1");
+        assert!(!registry.take_deferred(tab, "view-2"));
+        assert!(registry.take_deferred(tab, "view-1"));
+        assert!(!registry.take_deferred(tab, "view-1"), "owed once");
+        registry.defer(tab, "view-1");
+        registry.bind_view(tab, "view-2");
+        assert!(
+            !registry.take_deferred(tab, "view-1"),
+            "a rebuilt view starts fresh"
+        );
+    }
+
+    #[test]
+    fn a_chrome_has_its_own_budget() {
+        let registry = Registry::default();
+        let now = Instant::now();
+        for _ in 0..MAX_ATTEMPTS {
+            assert!(registry.chrome_crash("chrome", now).is_some());
+        }
+        assert!(registry.chrome_crash("chrome", now).is_none());
+        assert!(
+            registry.chrome_crash("chrome-pop-1", now).is_some(),
+            "one window's chrome does not spend another's"
+        );
+        assert!(
+            registry.chrome_crash("chrome", now + QUIET).is_some(),
+            "a quiet spell restores it"
         );
     }
 

@@ -730,6 +730,26 @@ export const commands = {
 	 */
 	layoutSetContentCovered: (covered: boolean) => typedError<null, AppError>(__TAURI_INVOKE("layout_set_content_covered", { covered })),
 	/**
+	 *  The chrome document has booted. A chrome reloaded after its renderer died
+	 *  (or after a hot reload in development) starts with no dialogs and no
+	 *  menus, so any cover or overlay mask its previous document left over the
+	 *  pages is taken down; otherwise the page stayed hidden under a dialog that
+	 *  no longer existed, with nothing left to close it.
+	 */
+	chromeReady: () => typedError<null, AppError>(__TAURI_INVOKE("chrome_ready")),
+	/**
+	 *  Something went wrong inside the chrome's own code: a component that
+	 *  threw, an uncaught error, a rejected promise nobody awaited. The chrome
+	 *  shows what it can; the log keeps the rest, where a bug report finds it.
+	 */
+	logChromeError: (kind: string, message: string, stack: string | null) => __TAURI_INVOKE<void>("log_chrome_error", { kind, message, stack }),
+	/**
+	 *  Answer a page that stopped responding: `end` ends its renderer (the tab
+	 *  then shows the crash banner with a reload), otherwise Dive keeps waiting.
+	 *  False when the page had already recovered or was answered.
+	 */
+	tabUnresponsiveAnswer: (id: TabId, end: boolean) => typedError<boolean, AppError>(__TAURI_INVOKE("tab_unresponsive_answer", { id, end })),
+	/**
 	 *  Round the corners of the page views to match the chrome's corner
 	 *  preference; zero makes them square again.
 	 */
@@ -1012,6 +1032,8 @@ export const events = {
 	tabCrashed: makeEvent<TabCrashed>("tab-crashed"),
 	tabHistoryChanged: makeEvent<TabHistoryChanged>("tab-history-changed"),
 	tabLoad: makeEvent<TabLoad>("tab-load"),
+	tabResponsive: makeEvent<TabResponsive>("tab-responsive"),
+	tabUnresponsive: makeEvent<TabUnresponsive>("tab-unresponsive"),
 	tabWindowChanged: makeEvent<TabWindowChanged>("tab-window-changed"),
 	tabZoom: makeEvent<TabZoom>("tab-zoom"),
 	updateProgress: makeEvent<UpdateProgress>("update-progress"),
@@ -1474,6 +1496,17 @@ export type CoreEvent =
 { type: "profile_removed"; data: ProfileId } |
 /**  The active profile changed. */
 { type: "profile_activated"; data: ProfileId };
+
+/**  Why a renderer went away, as far as the engine could tell. */
+export type CrashReason =
+/**  It crashed, or exited abnormally. */
+"crashed" |
+/**  It ran out of memory. */
+"out_of_memory" |
+/**  It was killed: by the system, or by someone ending a page that hung. */
+"killed" |
+/**  Only the `DevTools` session noticed, and it does not say. */
+"unknown";
 
 /**
  *  A saved login for one site in one profile. The password itself lives in
@@ -3170,10 +3203,14 @@ export type TabAudio = {
 export type TabCrashed = {
 	/**  The tab that lost its renderer. */
 	tab_id: TabId,
-	/**  Which attempt this is, within the current window. */
+	/**  Which attempt this is, since the page last went quiet. */
 	attempt: number,
-	/**  Whether Dive is reloading it. */
+	/**  Whether Dive is reloading it, now or when it is next shown. */
 	recovering: boolean,
+	/**  Why the renderer went away. */
+	reason: CrashReason,
+	/**  The tab was in the background: it reloads when it is next shown. */
+	deferred: boolean,
 };
 
 /**
@@ -3206,6 +3243,15 @@ export type TabLoad = {
 	error: string | null,
 };
 
+/**
+ *  A page that was reported as not responding answers again, or its hang
+ *  was otherwise settled (it was ended, or the tab closed).
+ */
+export type TabResponsive = {
+	/**  The tab whose page recovered. */
+	tab_id: TabId,
+};
+
 /**  Lifecycle state of a tab's renderer. */
 export type TabState =
 /**  Renderer alive and painting. */
@@ -3223,6 +3269,15 @@ export type TabTier =
 "pinned" |
 /**  Ordinary tab, auto-archived after inactivity. */
 "today";
+
+/**
+ *  A tab's page stopped responding to input. The engine waits for an answer
+ *  through `tab_unresponsive_answer`.
+ */
+export type TabUnresponsive = {
+	/**  The tab whose page hangs. */
+	tab_id: TabId,
+};
 
 /**  A tab moved into its own window, or back into the main one. */
 export type TabWindowChanged = {

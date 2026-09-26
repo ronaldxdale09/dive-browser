@@ -184,6 +184,34 @@ describe("Content crash banner", () => {
     render(<Content />);
     expect(screen.queryByRole("status")).toBeNull();
   });
+
+  it("says a page stopped for memory was stopped, and leaves the reload to the person", () => {
+    useBrowser.setState({ crashedTabs: { t1: { attempt: 1, recovering: false, reason: "out_of_memory" } } });
+    render(<Content />);
+    expect(screen.getByRole("status").textContent).toContain("ran out of memory");
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    expect(ipc.tabReload).toHaveBeenCalledWith("t1");
+  });
+});
+
+describe("Content unresponsive page", () => {
+  it("asks whether to wait or end the page, and sends the answer", async () => {
+    const answer = vi.spyOn(ipc, "tabUnresponsiveAnswer").mockResolvedValue(true);
+    useBrowser.setState({ unresponsiveTabs: { t1: true } });
+    render(<Content />);
+    expect(screen.getByRole("alert").textContent).toContain("isn't responding");
+    fireEvent.click(screen.getByRole("button", { name: "End page" }));
+    await waitFor(() => expect(answer).toHaveBeenCalledWith("t1", true));
+    expect(screen.queryByText("This page isn't responding")).toBeNull();
+  });
+
+  it("keeps waiting when asked to", async () => {
+    const answer = vi.spyOn(ipc, "tabUnresponsiveAnswer").mockResolvedValue(true);
+    useBrowser.setState({ unresponsiveTabs: { t1: true } });
+    render(<Content />);
+    fireEvent.click(screen.getByRole("button", { name: "Wait" }));
+    await waitFor(() => expect(answer).toHaveBeenCalledWith("t1", false));
+  });
 });
 
 describe("Content permission dialog", () => {

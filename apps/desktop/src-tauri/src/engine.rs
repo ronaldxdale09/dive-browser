@@ -1073,6 +1073,8 @@ impl TabHost {
         attach_close_listener(app, tab_id, &view);
         #[cfg(feature = "cef")]
         crate::find::attach(tab_id, &view);
+        #[cfg(feature = "cef")]
+        crate::crash::attach(app, tab_id, &view);
         self.views.insert(tab_id, view);
         // A pane whose page was asleep kept its place in the split. Its new
         // view starts over the whole content area and hidden, so it is moved
@@ -1219,6 +1221,27 @@ impl TabHost {
             } else {
                 view.show()?;
             }
+        }
+        Ok(())
+    }
+
+    /// Forget every overlay and cover `chrome` had up. Its document is new --
+    /// reloaded after its renderer died, or booting -- so nothing it drew is
+    /// on screen any more, and a page hidden under a dialog that no longer
+    /// exists would otherwise stay hidden for good.
+    pub fn reset_chrome_cover(&mut self, chrome: &str) -> tauri::Result<()> {
+        if self.live_overlays.contains_key(chrome) {
+            self.set_live_overlay(chrome, Vec::new(), false, false, false)?;
+        }
+        let covered = if chrome == CHROME_LABEL {
+            self.covered
+        } else {
+            self.popouts
+                .values()
+                .any(|popout| popout.chrome == chrome && popout.covered)
+        };
+        if covered {
+            self.set_chrome_covered(chrome, false)?;
         }
         Ok(())
     }
@@ -2122,6 +2145,7 @@ fn attach_cdp(
 /// failure even when no renderer exists to display an application error page.
 #[cfg(feature = "cef")]
 fn watch_chrome_creation(view: &Webview<Runtime>, tab: Option<TabId>) -> tauri::Result<()> {
+    crate::crash::attach_chrome(view);
     let app = view.app_handle().clone();
     let label = view.label().to_owned();
     let window = view.window();

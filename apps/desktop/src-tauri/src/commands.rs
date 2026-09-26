@@ -1004,6 +1004,9 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             layout_set_content_bounds,
             layout_prepare_content_cover,
             layout_set_content_covered,
+            chrome_ready,
+            log_chrome_error,
+            tab_unresponsive_answer,
             layout_set_corner_radius,
             window_set_background,
             layout_set_overlay_regions,
@@ -1068,6 +1071,8 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             crate::automation::AgentPointer,
             crate::agent_presence::AgentPresence,
             crate::crash::TabCrashed,
+            crate::crash::TabUnresponsive,
+            crate::crash::TabResponsive,
             crate::devservers::DevServersChanged,
             crate::rules::RulesChanged,
             crate::inspect::InspectEvent,
@@ -2399,6 +2404,11 @@ pub fn activate_tab(
             crate::housekeeping::restore_scroll(app.clone(), id);
         }
         host.activate(main, id)?;
+        // A tab whose renderer crashed while it was in the background was
+        // left for now; shown, it is reloaded.
+        let _ = host.with_view(id, |view| {
+            crate::crash::reload_if_deferred(&state.crashes, id, view)
+        });
         let woke = tab.state != dive_core::TabState::Active;
         tab.last_active_at = dive_core::Timestamp::now();
         tab.state = dive_core::TabState::Active;
@@ -4847,6 +4857,71 @@ pub(crate) fn layout_set_content_covered(
     })
 }
 
+/// The chrome document has booted. A chrome reloaded after its renderer died
+/// (or after a hot reload in development) starts with no dialogs and no
+/// menus, so any cover or overlay mask its previous document left over the
+/// pages is taken down; otherwise the page stayed hidden under a dialog that
+/// no longer existed, with nothing left to close it.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn chrome_ready(
+    app: AppHandle<Runtime>,
+    webview: tauri::Webview<Runtime>,
+) -> AppResult<()> {
+    let label = webview.label().to_owned();
+    on_main(&app, move |_, _, state| {
+        if let Some(host) = lock(&state.host).as_mut() {
+            host.reset_chrome_cover(&label)?;
+        }
+        Ok(())
+    })
+}
+
+/// Something went wrong inside the chrome's own code: a component that
+/// threw, an uncaught error, a rejected promise nobody awaited. The chrome
+/// shows what it can; the log keeps the rest, where a bug report finds it.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::needless_pass_by_value)] // Tauri hands command arguments over by value.
+pub(crate) fn log_chrome_error(
+    webview: tauri::Webview<Runtime>,
+    kind: String,
+    message: String,
+    stack: Option<String>,
+) {
+    /// Enough for any real stack; a runaway string must not flood the log.
+    const LIMIT: usize = 8 * 1024;
+    let clip = |text: &str| -> String { text.chars().take(LIMIT).collect() };
+    tracing::error!(
+        chrome = %webview.label(),
+        kind = %clip(&kind),
+        stack = %clip(stack.as_deref().unwrap_or_default()),
+        "chrome error: {}",
+        clip(&message)
+    );
+}
+
+/// Answer a page that stopped responding: `end` ends its renderer (the tab
+/// then shows the crash banner with a reload), otherwise Dive keeps waiting.
+/// False when the page had already recovered or was answered.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn tab_unresponsive_answer(
+    app: AppHandle<Runtime>,
+    id: TabId,
+    end: bool,
+) -> AppResult<bool> {
+    #[cfg(feature = "cef")]
+    return on_main(&app, move |_, app, _| {
+        Ok(crate::crash::answer_hang(app, id, end))
+    });
+    #[cfg(not(feature = "cef"))]
+    {
+        let _ = (app, id, end);
+        Ok(false)
+    }
+}
+
 /// Regions belong to trusted chrome and use CSS logical pixels. `take_focus`
 /// is false when every overlay is passive (tooltips, the save-login card), so
 /// the page keeps the keyboard under them.
@@ -4929,7 +5004,15 @@ pub(crate) fn layout_set_panes(app: AppHandle<Runtime>, panes: Vec<PaneBounds>) 
                 }
             }
         }
+        let shown: Vec<TabId> = panes.iter().map(|pane| pane.tab).collect();
         host.set_panes(panes)?;
+        // A pane is on screen as much as the active tab is: one that crashed
+        // in the background is owed its reload now.
+        for tab in shown {
+            let _ = host.with_view(tab, |view| {
+                crate::crash::reload_if_deferred(&state.crashes, tab, view)
+            });
+        }
         Ok(())
     })
 }

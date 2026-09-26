@@ -22,7 +22,7 @@ export const events = {
     once: (callback: EventCallback<string>) => generatedEvents.menuCommand(getCurrentWebview()).once(callback),
   },
 };
-export type { ExternalLinkAsked, TabAudio, TaskRow, Address, Card, CardDraft, RestoreSummary, ClearOutcome, DownloadRecord } from "../generated/bindings";
+export type { CrashReason, TabUnresponsive, TabResponsive, ExternalLinkAsked, TabAudio, TaskRow, Address, Card, CardDraft, RestoreSummary, ClearOutcome, DownloadRecord } from "../generated/bindings";
 export type { NavigationEntry, NavigationHistory, Credential, CredentialPrompt, CsvImportSummary, LoginSave, PasswordExport, FormEntry, HttpAuthAsked, HttpAuthClosed, JsDialogAsked, JsDialogClosed } from "../generated/bindings";
 export type { ExtensionInfo, ExtensionList };
 export type { WebApp, WebAppProbe } from "../generated/bindings";
@@ -179,6 +179,12 @@ export const ipc = {
     unwrap(await commands.layoutSetContentBounds(b)),
   prepareContentCover: async () => unwrap(await commands.layoutPrepareContentCover()),
   setContentCovered: async (covered: boolean) => unwrap(await commands.layoutSetContentCovered(covered)),
+  /** This chrome document has booted: whatever cover its previous document left is taken down. */
+  chromeReady: async () => unwrap(await commands.chromeReady()),
+  /** Keep a chrome error in the host log. Never throws: it runs from error handlers. */
+  logChromeError: (kind: string, message: string, stack: string | null) => commands.logChromeError(kind, message, stack).catch(() => undefined),
+  /** Keep waiting for a page that stopped responding, or end it. */
+  tabUnresponsiveAnswer: async (id: string, end: boolean) => unwrap(await commands.tabUnresponsiveAnswer(id, end)),
   setContentCornerRadius: async (radius: number) => unwrap(await commands.layoutSetCornerRadius(radius)),
   setWindowBackground: async (hex: string) => unwrap(await commands.windowSetBackground(hex)),
   /** Show these tabs side by side; an empty list returns to a single page. */

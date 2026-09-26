@@ -7,7 +7,7 @@ import { clearPrivacy, listenPrivacy, usePrivacy } from "./privacy";
 import { useDownloads } from "./downloads";
 import { useLayout } from "./layout";
 import { canGoBack } from "../lib/useTabHistory";
-import type { DownloadNotice, CoreEvent, Decision, Duration, NavigationHistory, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
+import type { CrashReason, DownloadNotice, CoreEvent, Decision, Duration, NavigationHistory, PermissionAsked, Snapshot, Tab, TabCrashed, TabLoad, TabTier, Workspace, Profile, ProfileDraftInput } from "../lib/ipc";
 import { errorMessage } from "../lib/errors";
 import { fileNameOr, fileUrl, opensInTab} from "../lib/paths";
 import { isPrivateWindow } from "../lib/privateMode";
@@ -69,6 +69,10 @@ interface BrowserState {
   navError: Record<string, NavError>;
   /** Tabs whose renderer died; cleared once a load finishes. */
   crashedTabs: Record<string, CrashState>;
+  /** Tabs whose page stopped responding and is waiting on Wait or End page. */
+  unresponsiveTabs: Record<string, true>;
+  /** Keep waiting for a hung page, or end it. */
+  answerUnresponsive: (id: string, end: boolean) => Promise<void>;
   applyLoad: (load: TabLoad) => void;
   applyCrash: (crash: TabCrashed) => void;
   /** Pages asking for a capability, per tab; one entry per native request. */
@@ -358,7 +362,7 @@ export function rememberClosed(stack: ClosedTab[], tab: Pick<Tab, "url" | "title
   const next = [...stack, entry];
   return next.length > CLOSED_TABS_LIMIT ? next.slice(next.length - CLOSED_TABS_LIMIT) : next;
 }
-export type CrashState = { attempt: number; recovering: boolean };
+export type CrashState = { attempt: number; recovering: boolean; reason?: CrashReason; deferred?: boolean };
 
 /** Where the closed-tab stack is kept between runs (the profile store, through `uiStorage`). */
 const CLOSED_TABS_KEY = "closed-tabs";
@@ -448,7 +452,7 @@ export function withoutRequest(requests: Record<string, PermissionRequest[]>, ta
 
 export function reduceCrash(state: Pick<LoadState, "crashedTabs" | "loading">, crash: TabCrashed): Partial<LoadState> {
   return {
-    crashedTabs: { ...state.crashedTabs, [crash.tab_id]: { attempt: crash.attempt, recovering: crash.recovering } },
+    crashedTabs: { ...state.crashedTabs, [crash.tab_id]: { attempt: crash.attempt, recovering: crash.recovering, reason: crash.reason, deferred: crash.deferred } },
     loading: without(state.loading, crash.tab_id),
   };
 }
@@ -535,6 +539,8 @@ export function tabInThisWindow(activeTab: string | null, detached: readonly str
 let unlisten: (() => void) | null = null;
 let unlistenLoad: (() => void) | null = null;
 let unlistenCrash: (() => void) | null = null;
+let unlistenUnresponsive: (() => void) | null = null;
+let unlistenResponsive: (() => void) | null = null;
 let unlistenPermission: (() => void) | null = null;
 let unlistenPermissionDismissed: (() => void) | null = null;
 let unlistenWindowChanged: (() => void) | null = null;
@@ -803,6 +809,17 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   loading: {},
   navError: {},
   crashedTabs: {},
+  unresponsiveTabs: {},
+  answerUnresponsive: async (id, end) => {
+    // Down at once: the question is answered, and a page still stuck when
+    // the engine's timer runs out again is asked about again.
+    set((s) => ({ unresponsiveTabs: without(s.unresponsiveTabs, id) }));
+    try {
+      await ipc.tabUnresponsiveAnswer(id, end);
+    } catch (e) {
+      set({ error: errorMessage(e) });
+    }
+  },
   recordingTab: null,
   applyLoad: (load) => {
     if (load.phase === "started") {
@@ -870,6 +887,8 @@ export const useBrowser = create<BrowserState>((set, get) => ({
           once(unlisten, () => events.stateChanged.listen((e) => get().applyEvent(e.payload)), (off) => { unlisten = off; }),
           once(unlistenLoad, () => events.tabLoad.listen((e) => get().applyLoad(e.payload)), (off) => { unlistenLoad = off; }),
           once(unlistenCrash, () => events.tabCrashed.listen((e) => get().applyCrash(e.payload)), (off) => { unlistenCrash = off; }),
+          once(unlistenUnresponsive, () => events.tabUnresponsive.listen((e) => set((s) => ({ unresponsiveTabs: { ...s.unresponsiveTabs, [e.payload.tab_id]: true } }))), (off) => { unlistenUnresponsive = off; }),
+          once(unlistenResponsive, () => events.tabResponsive.listen((e) => set((s) => ({ unresponsiveTabs: without(s.unresponsiveTabs, e.payload.tab_id) }))), (off) => { unlistenResponsive = off; }),
           once(unlistenPermission, () => events.permissionAsked.listen((e) => get().applyPermissionAsked(e.payload)), (off) => { unlistenPermission = off; }),
           once(unlistenPermissionDismissed, () => events.permissionDismissed.listen((e) => set((s) => ({permissionRequests: withoutRequest(s.permissionRequests,e.payload.tab_id,e.payload)}))), (off) => { unlistenPermissionDismissed = off; }),
           once(unlistenWindowChanged, () => events.tabWindowChanged.listen((e) => {
@@ -1310,7 +1329,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       const scroll = scrollOfClosing.get(id);
       scrollOfClosing.delete(id);
       set((s) => ({ closedTabs: rememberClosed(s.closedTabs, gone, goneIndex, scroll) }));
-      set((s) => ({ loading: without(s.loading, id), navError: without(s.navError, id), crashedTabs: without(s.crashedTabs, id), permissionRequests: without(s.permissionRequests, id), zoom: without(s.zoom, id), pageModes: without(s.pageModes, id) }));
+      set((s) => ({ loading: without(s.loading, id), navError: without(s.navError, id), crashedTabs: without(s.crashedTabs, id), unresponsiveTabs: without(s.unresponsiveTabs, id), permissionRequests: without(s.permissionRequests, id), zoom: without(s.zoom, id), pageModes: without(s.pageModes, id) }));
       zoomWanted.delete(id);
       // Dropped here rather than in closeTab: a tab the engine, an agent or a
       // popout closed never passes through it, and each kept up to 500

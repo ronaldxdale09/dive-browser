@@ -294,12 +294,9 @@ pub fn run() {
             .command_line_args(chromium_args);
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        // CEF's own word that a tab's web content process died, alongside
-        // the DevTools signal; the crash registry folds the two together.
-        builder = builder.on_web_content_process_terminate(crash::on_native_terminate);
-    }
+    // CEF's own word that a renderer died, with the reason, is heard per view
+    // (`crash::attach`, `crash::attach_chrome`) on every platform; Tauri's
+    // builder hook carries no reason and exists only on macOS.
     builder = builder.on_permission_request(|webview, kind| permissions::decide(&webview, kind));
     // Signed updates need the release public key compiled in; a build
     // without one (development, CI checks) simply has no updater.
