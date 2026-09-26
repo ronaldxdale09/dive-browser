@@ -163,6 +163,18 @@ pub fn delete(state: &AppState, profile: ProfileId, id: &str) -> AppResult<bool>
     Ok(crate::state::lock(&state.store).remove_credential(id)?)
 }
 
+/// Remove the password behind login `id`, whose row is about to go with its
+/// profile. An item already gone counts as removed.
+pub fn delete_secret(id: &str) -> AppResult<()> {
+    match entry(id)?.delete_credential() {
+        Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
+        Err(error) => Err(AppError::new(format!(
+            "{} would not forget this password: {error}",
+            credential_store_name()
+        ))),
+    }
+}
+
 fn never_key(profile: ProfileId) -> String {
     format!("passwords.never.{profile}")
 }

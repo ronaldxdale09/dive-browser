@@ -730,6 +730,63 @@ impl Store {
         Ok(())
     }
 
+    /// Remove what a deleted profile kept in the database: its logins,
+    /// cards, addresses, form entries, history, bookmarks and the settings
+    /// named after it. Passwords and card numbers live in the keychain under
+    /// the row ids, so the caller reads those ids first and removes the
+    /// secrets itself. Installed web apps are left to their own uninstall,
+    /// which also takes their launchers away.
+    pub fn remove_profile_data(&self, id: ProfileId) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        let key = id.to_string();
+        for table in [
+            "credentials",
+            "cards",
+            "addresses",
+            "form_entries",
+            "history",
+            "bookmarks",
+        ] {
+            tx.execute(
+                &format!("DELETE FROM {table} WHERE profile_id = ?1"),
+                [&key],
+            )?;
+        }
+        // Settings keyed by the profile id: the workspace it last showed,
+        // sites it never saves logins for, sites kept awake.
+        tx.execute("DELETE FROM settings WHERE instr(key, ?1) > 0", [&key])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Remove `id` if no profile or workspace uses it any more, returning
+    /// it so the caller can delete its folder; `None` when it is still used.
+    pub fn remove_container_if_unused(&self, id: ContainerId) -> Result<Option<Container>> {
+        let used: i64 = self.conn.query_row(
+            "SELECT (SELECT COUNT(*) FROM workspaces WHERE container_id = ?1)
+                  + (SELECT COUNT(*) FROM profiles WHERE container_id = ?1)",
+            [id.to_string()],
+            |r| r.get(0),
+        )?;
+        if used > 0 {
+            return Ok(None);
+        }
+        let Some(container) = self
+            .conn
+            .query_row(
+                &format!("{CONTAINER_SELECT} WHERE id = ?1"),
+                [id.to_string()],
+                container_from_row,
+            )
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        self.conn
+            .execute("DELETE FROM containers WHERE id = ?1", [id.to_string()])?;
+        Ok(Some(container))
+    }
+
     /// Make sure a profile exists and every workspace belongs to one: a
     /// database from before profiles gets a "Personal" profile in the first
     /// container that adopts all its workspaces. Returns the first profile.
@@ -2286,6 +2343,49 @@ mod tests {
             1
         );
         assert!(store.agent_thread(live.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_deleted_profile_leaves_no_rows_and_frees_only_its_own_container() {
+        let (store, w) = seeded();
+        let own = Container::new("Other");
+        store.upsert_container(&own).unwrap();
+        let other = Profile::new("Other", own.id, 1);
+        store.upsert_profile(&other).unwrap();
+        let now = Timestamp::now();
+        store
+            .upsert_credential("login", other.id, "https://a.test", "me", now)
+            .unwrap();
+        store
+            .upsert_credential("kept", w.profile_id, "https://a.test", "me", now)
+            .unwrap();
+        store
+            .record_form_entry(other.id, "email", "me@a.test", now)
+            .unwrap();
+        store
+            .set_setting(&format!("profile_workspace:{}", other.id), "x")
+            .unwrap();
+        store.remove_profile(other.id).unwrap();
+        store.remove_profile_data(other.id).unwrap();
+        assert!(store.credentials(other.id).unwrap().is_empty());
+        assert!(store.form_entries(other.id).unwrap().is_empty());
+        assert!(
+            store
+                .setting(&format!("profile_workspace:{}", other.id))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(store.credentials(w.profile_id).unwrap().len(), 1);
+        // The shared default container is still in use; the profile's own is not.
+        assert!(
+            store
+                .remove_container_if_unused(w.container_id)
+                .unwrap()
+                .is_none()
+        );
+        let freed = store.remove_container_if_unused(own.id).unwrap().unwrap();
+        assert_eq!(freed.cache_dir, own.cache_dir);
+        assert!(store.container(own.id).is_err());
     }
 
     #[test]

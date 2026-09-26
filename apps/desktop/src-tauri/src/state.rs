@@ -122,6 +122,9 @@ pub fn init(app: &App<Runtime>) -> anyhow::Result<()> {
         Store::open(root.join("dive.db"))?
     };
     let active = seed_defaults(&store)?;
+    if !crate::private_session::is_private() {
+        sweep_container_deletions(&store, &profiles_root());
+    }
     if crate::private_session::is_private() {
         for mut container in store.containers()? {
             container.persist_cookies = false;
@@ -194,7 +197,118 @@ fn seed_defaults(store: &Store) -> anyhow::Result<WorkspaceId> {
     Ok(workspace.id)
 }
 
+/// Setting listing the folders of deleted containers, removed at the next
+/// launch.
+const PENDING_CONTAINER_DELETIONS: &str = "pending_container_deletions";
+
+/// Whether `name` is a folder name that stays inside the profiles root: a
+/// stored value is never trusted to be a path.
+fn is_plain_folder_name(name: &str) -> bool {
+    !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', ':', '\0'])
+}
+
+/// Delete these container folders at the next launch.
+///
+/// Not now: the engine keeps a container's request context, and with it
+/// its cookie and storage files, open for the rest of the session, and
+/// pulling them out from under it is how an engine crashes. At the next
+/// launch no container uses them, so nothing opens them first.
+pub(crate) fn queue_container_deletions(store: &Store, dirs: &[String]) -> dive_core::Result<()> {
+    if dirs.is_empty() {
+        return Ok(());
+    }
+    let mut pending = pending_container_deletions(store);
+    for dir in dirs {
+        if is_plain_folder_name(dir) && !pending.contains(dir) {
+            pending.push(dir.clone());
+        }
+    }
+    write_pending(store, &pending)
+}
+
+fn pending_container_deletions(store: &Store) -> Vec<String> {
+    store
+        .setting(PENDING_CONTAINER_DELETIONS)
+        .ok()
+        .flatten()
+        .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
+        .unwrap_or_default()
+}
+
+fn write_pending(store: &Store, pending: &[String]) -> dive_core::Result<()> {
+    if pending.is_empty() {
+        store.remove_setting(PENDING_CONTAINER_DELETIONS)?;
+        return Ok(());
+    }
+    let text =
+        serde_json::to_string(pending).map_err(|e| dive_core::CoreError::Invalid(e.to_string()))?;
+    store.set_setting(PENDING_CONTAINER_DELETIONS, &text)
+}
+
+/// Remove the folders of containers deleted in an earlier session. One that
+/// cannot be removed yet stays queued for the launch after; one that a
+/// container names again (restored from a backup since) is left alone.
+pub(crate) fn sweep_container_deletions(store: &Store, root: &std::path::Path) {
+    let pending = pending_container_deletions(store);
+    if pending.is_empty() {
+        return;
+    }
+    let in_use: Vec<String> = store
+        .containers()
+        .map(|all| all.into_iter().map(|c| c.cache_dir).collect())
+        .unwrap_or_default();
+    let mut left = Vec::new();
+    for dir in pending {
+        if !is_plain_folder_name(&dir) || in_use.contains(&dir) {
+            continue;
+        }
+        match std::fs::remove_dir_all(root.join(&dir)) {
+            Ok(()) => tracing::info!(%dir, "removed a deleted profile's data"),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                tracing::warn!(%dir, "a deleted profile's data could not be removed yet: {e}");
+                left.push(dir);
+            }
+        }
+    }
+    if let Err(e) = write_pending(store, &left) {
+        tracing::warn!("could not update the pending profile deletions: {e}");
+    }
+}
+
 /// Lock helper that tolerates poisoning.
 pub fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deleted_container_folders_go_at_the_next_launch_and_nothing_else_does() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::in_memory().unwrap();
+        let kept = Container::new("Kept");
+        store.upsert_container(&kept).unwrap();
+        for dir in ["container-gone", kept.cache_dir.as_str(), "neighbour"] {
+            std::fs::create_dir_all(root.path().join(dir).join("Default")).unwrap();
+        }
+        queue_container_deletions(
+            &store,
+            &[
+                "container-gone".into(),
+                kept.cache_dir.clone(),
+                "../neighbour".into(),
+                "..".into(),
+            ],
+        )
+        .unwrap();
+        sweep_container_deletions(&store, root.path());
+        assert!(!root.path().join("container-gone").exists());
+        // Still named by a container, or never a plain folder name: kept.
+        assert!(root.path().join(&kept.cache_dir).exists());
+        assert!(root.path().join("neighbour").exists());
+        assert!(pending_container_deletions(&store).is_empty());
+    }
 }

@@ -1338,7 +1338,7 @@ pub(crate) fn workspace_delete(
             next,
         )
     };
-    close_views(&app, &state, &tab_ids)?;
+    close_views(&app, &state, &tab_ids);
     lock(&state.store).remove_workspace(id)?;
     for tab in tab_ids {
         state.bus.publish(CoreEvent::TabClosed(tab));
@@ -1358,19 +1358,31 @@ pub(crate) fn workspace_delete(
 /// thread: a recording kept its ffmpeg running, subtitles kept transcribing,
 /// and every per-tab registry kept its entry for a tab that no longer
 /// existed. Views are closed on the main thread, as `close_tab` closes them.
-fn close_views(app: &AppHandle<Runtime>, state: &AppState, tabs: &[TabId]) -> AppResult<()> {
+///
+/// Every view is tried, and a refusal is only logged: the tabs' rows go with
+/// their workspace either way, and stopping at the first refusal left the
+/// rest open, the workspace in place and no `TabClosed` for any of them.
+fn close_views(app: &AppHandle<Runtime>, state: &AppState, tabs: &[TabId]) {
     for tab in tabs {
         forget_tab_state(app, state, *tab);
     }
     let tabs = tabs.to_vec();
-    on_main(app, move |_, _, state| {
+    let closed = on_main(app, move |_, _, state| {
         if let Some(host) = lock(&state.host).as_mut() {
             for tab in &tabs {
-                host.close(*tab)?;
+                if let Err(e) = host.close(*tab) {
+                    tracing::warn!(%tab, "view of a deleted tab would not close: {e}");
+                    // Forgotten all the same, so nothing keeps showing or
+                    // driving a tab that no longer exists.
+                    host.forget_closed(*tab);
+                }
             }
         }
         Ok(())
-    })
+    });
+    if let Err(e) = closed {
+        tracing::warn!("views of deleted tabs could not be closed: {e}");
+    }
 }
 
 /// Forget everything kept about tab `id` outside the host and the store:
@@ -1525,8 +1537,12 @@ pub(crate) fn profile_activate(
     workspace_activate(app, state, target)
 }
 
-/// Delete a profile with all its workspaces and tabs. Refuses to delete
-/// the last profile; if the active one goes, another takes over.
+/// Delete a profile with everything in it: its workspaces and tabs, its
+/// logins and cards (keychain secrets included), its history, bookmarks and
+/// form entries, and the cookies and site storage of any container nothing
+/// else uses. Those folders are removed at the next launch, once the engine
+/// no longer has them open. Refuses to delete the last profile; if the
+/// active one goes, another takes over.
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn profile_delete(
@@ -1534,13 +1550,22 @@ pub(crate) fn profile_delete(
     state: State<'_, AppState>,
     id: dive_core::ProfileId,
 ) -> AppResult<()> {
-    let (workspaces, tab_ids, next) = {
+    let (workspaces, tab_ids, next, containers, logins, cards) = {
         let store = lock(&state.store);
         let profiles = store.profiles()?;
         if profiles.len() <= 1 {
             return Err(AppError::new("cannot delete the last profile"));
         }
+        let profile = store.profile(id)?;
         let workspaces = store.workspaces_for_profile(id)?;
+        let mut containers = vec![profile.container_id];
+        for w in &workspaces {
+            if !containers.contains(&w.container_id) {
+                containers.push(w.container_id);
+            }
+        }
+        let logins: Vec<String> = store.credentials(id)?.into_iter().map(|c| c.id).collect();
+        let cards: Vec<String> = store.cards(id)?.into_iter().map(|c| c.id).collect();
         let mut tabs = Vec::new();
         for w in &workspaces {
             tabs.extend(
@@ -1552,19 +1577,42 @@ pub(crate) fn profile_delete(
             );
         }
         let next = profiles.iter().find(|p| p.id != id).map(|p| p.id);
-        (workspaces, tabs, next)
+        (workspaces, tabs, next, containers, logins, cards)
     };
-    close_views(&app, &state, &tab_ids)?;
+    close_views(&app, &state, &tab_ids);
     let was_active = {
         let active = *lock(&state.active_workspace);
         workspaces.iter().any(|w| Some(w.id) == active)
     };
+    // Secrets before rows, with no lock held: the keychain can take its
+    // time. One it refuses to let go of is logged rather than keeping the
+    // whole profile, which the person asked to be gone.
+    if !crate::private_session::is_private() {
+        for login in &logins {
+            if let Err(e) = crate::passwords::delete_secret(login) {
+                tracing::warn!("a deleted profile's password stayed in the keychain: {e}");
+            }
+        }
+        for card in &cards {
+            if let Err(e) = crate::autofill::delete_card_secret(card) {
+                tracing::warn!("a deleted profile's card stayed in the keychain: {e}");
+            }
+        }
+    }
     {
         let store = lock(&state.store);
         for w in &workspaces {
             store.remove_workspace(w.id)?;
         }
         store.remove_profile(id)?;
+        store.remove_profile_data(id)?;
+        let mut freed = Vec::new();
+        for container in containers {
+            if let Some(container) = store.remove_container_if_unused(container)? {
+                freed.push(container.cache_dir);
+            }
+        }
+        crate::state::queue_container_deletions(&store, &freed)?;
     }
     for tab in tab_ids {
         state.bus.publish(CoreEvent::TabClosed(tab));
