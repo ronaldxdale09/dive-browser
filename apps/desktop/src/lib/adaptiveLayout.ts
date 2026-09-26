@@ -33,10 +33,16 @@ export function useChromeLayout(): ChromeLayout {
   return layout;
 }
 
-/** The window's inner size, re-read on every resize (coalesced to a frame). */
-export function useViewportSize(): { width: number; height: number } {
+/**
+ * The window's inner size, re-read on every resize (coalesced to a frame).
+ * With `active` false it stops following, so the caller does not re-render
+ * through a resize it has no use for; it catches up on the next frame once
+ * active again.
+ */
+export function useViewportSize(active = true): { width: number; height: number } {
   const [size, setSize] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   useEffect(() => {
+    if (!active) return;
     let frame = 0;
     const update = () => {
       cancelAnimationFrame(frame);
@@ -44,11 +50,13 @@ export function useViewportSize(): { width: number; height: number } {
         setSize((current) => (current.width === window.innerWidth && current.height === window.innerHeight ? current : { width: window.innerWidth, height: window.innerHeight }));
       });
     };
+    // Whatever changed while this was not listening.
+    update();
     window.addEventListener("resize", update, { passive: true });
     return () => {
       cancelAnimationFrame(frame);
       window.removeEventListener("resize", update);
     };
-  }, []);
+  }, [active]);
   return size;
 }

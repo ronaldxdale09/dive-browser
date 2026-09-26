@@ -1,6 +1,7 @@
 import { windowDrag } from "./lib/windowDrag";
 import { isPrivateWindow } from "./lib/privateMode";
 import { lazy, Suspense, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { Rail, RAIL_WIDTH, RailToggle } from "./components/Rail";
 import { Wordmark } from "./components/Wordmark";
 import { BuildBadge } from "./components/BuildBadge";
@@ -22,7 +23,6 @@ import { useLayout } from "./store/layout";
 import { usePrefs, watchReducedMotion, watchSystemTheme } from "./store/prefs";
 import { useShortcuts } from "./lib/shortcuts";
 import { useCoversContent } from "./lib/overlay";
-import { Palette } from "./components/Palette";
 import { useChromeLayout, useViewportSize } from "./lib/adaptiveLayout";
 import { DialogLoading, PanelSkeleton, ToastViewport } from "./components/ChromeFeedback";
 import { usePicker } from "./store/simulator";
@@ -53,12 +53,14 @@ const Subtitles = lazy(() => import("./components/Subtitles").then(({ Subtitles 
 const ImportDialog = lazy(() => import("./components/ImportDialog").then(({ ImportDialog }) => ({ default: ImportDialog })));
 const Onboarding = lazy(() => import("./components/onboarding/Onboarding").then(({ Onboarding }) => ({ default: Onboarding })));
 const RecordingDoneDialog = lazy(() => import("./components/record/RecordingDoneDialog").then(({ RecordingDoneDialog }) => ({ default: RecordingDoneDialog })));
+// The palette brings cmdk and its Radix dialog with it, which kept them in the
+// startup chunk. It is lazy like the other dialogs and fetched once the window
+// is idle, so the first ⌘T or ⌘K does not wait on the network.
+const loadPalette = () => import("./components/Palette");
+const Palette = lazy(() => loadPalette().then(({ Palette }) => ({ default: Palette })));
 
 export function App() {
   const boot = useBrowser((s) => s.boot);
-  const error = useBrowser((s) => s.error);
-  const notice = useBrowser((s) => s.notice);
-  const noticeAction = useBrowser((s) => s.noticeAction);
   const editing = useBrowser((s) => s.editing);
   const open = useBrowser((s) => s.open);
   // Keep the native page covered between navigation dialogs, including while
@@ -75,16 +77,12 @@ export function App() {
   const loadPrefs = usePrefs((s) => s.load);
   const railExpanded = usePrefs((s) => s.prefs.rail_expanded);
   const responsive = useChromeLayout();
-  const viewport = useViewportSize();
   const pickerOpen = usePicker((s) => s.open);
   const recordingPhase = useRecording((s) => s.phase);
   const recorderOpen = useRecorder((s) => s.isOpen);
   const toggle = useBrowser((s) => s.toggle);
-  const dockHeight = useLayout((s) => s.dockHeight);
-  const setDockHeight = useLayout((s) => s.setDockHeight);
-  // The size under the pointer mid-drag; the store gets it on release.
-  const [live, setLive] = useState<{ dock: number | null }>({ dock: null });
   useEffect(() => void boot(), [boot]);
+  useEffect(() => whenIdle(() => void loadPalette()), []);
   // Watch the release channel: once after startup has settled, then on.
   useEffect(() => { if (!isPrivateWindow()) return startUpdateWatch(); }, []);
   // Subscribe once to the live-subtitles events.
@@ -130,10 +128,6 @@ export function App() {
   // agent wins while explicitly open; the dock preference is left intact and
   // returns when the sidecar closes.
   const showDock = open.dock && !(responsive.singleAuxPanel && (showSidecar || pickerOpen));
-  // The remembered dock height is kept as a preference; what shows is capped
-  // by the window, so a short window still has page to look at.
-  const dockLimits = dockLimitsFor(viewport.height);
-  const shownDockHeight = clampSize(live.dock ?? dockHeight, dockLimits);
 
   // macOS keeps its traffic lights in the frame's top-left, so the bar leaves
   // a gutter for them. Windows has none there -- its controls are on the
@@ -226,10 +220,7 @@ export function App() {
         </nav>
       )}
       <main className={`col-start-2 grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] bg-line ${oneBar ? "row-start-2" : "row-start-3"}`}>
-        <div
-          className="relative grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] bg-line"
-          style={{ gridTemplateRows: `minmax(0,1fr)${showDock ? ` auto ${shownDockHeight}px` : ""}` }}
-        >
+        <DockedPage showDock={showDock} onCloseDock={() => toggle("dock", false)}>
           {/* Find hangs over the page rather than taking a row of its own.
               A row pushed the whole page down by 44px on open and back up on
               close, which reflows the document you are searching and moves
@@ -242,21 +233,7 @@ export function App() {
             </div>
           )}
           <Content />
-          {showDock && (
-            <ResizeHandle
-              orientation="horizontal"
-              label="Resize dock"
-              value={shownDockHeight}
-              limits={dockLimits}
-              onResize={(px) => setLive((l) => ({ ...l, dock: px }))}
-              onCommit={(px) => {
-                setLive((l) => ({ ...l, dock: null }));
-                setDockHeight(px);
-              }}
-            />
-          )}
-          {showDock && <IsolatedPanel label="Developer dock" onClose={() => toggle("dock", false)}><Suspense fallback={<PanelSkeleton label="developer dock" horizontal />}><Dock /></Suspense></IsolatedPanel>}
-        </div>
+        </DockedPage>
       </main>
       {/* Over the page, not beside it: the agent is used in bursts, and the
           page it works on should stay the size it was. */}
@@ -291,13 +268,7 @@ export function App() {
         {recordingPhase === "setup" && <RecordDialog />}
         {recordingPhase === "done" && <RecordingDoneDialog />}
       </Suspense>
-      <ToastViewport
-        notice={notice}
-        noticeAction={noticeAction}
-        error={error}
-        onDismissNotice={() => useBrowser.setState({ notice: null, noticeAction: null })}
-        onDismissError={() => useBrowser.setState({ error: null })}
-      />
+      <BrowserToasts />
       <UpdateDialog />
       <TaskManager />
       <Suspense fallback={null}>
@@ -306,4 +277,71 @@ export function App() {
     </div>
     </TabDnd>
   );
+}
+
+/**
+ * The page and, when open, the developer dock under it. The dock is capped by
+ * the window's height, so this frame follows the window size rather than the
+ * whole chrome re-rendering on every frame of a resize; the page passed in is
+ * the same element each time and does not re-render with it.
+ */
+function DockedPage({ showDock, onCloseDock, children }: { showDock: boolean; onCloseDock: () => void; children: ReactNode }) {
+  const dockHeight = useLayout((s) => s.dockHeight);
+  const setDockHeight = useLayout((s) => s.setDockHeight);
+  // The size under the pointer mid-drag; the store gets it on release.
+  const [live, setLive] = useState<number | null>(null);
+  // Followed only while the dock shows: nothing else here depends on it.
+  const viewport = useViewportSize(showDock);
+  // The remembered dock height is kept as a preference; what shows is capped
+  // by the window, so a short window still has page to look at.
+  const dockLimits = dockLimitsFor(viewport.height);
+  const shownDockHeight = clampSize(live ?? dockHeight, dockLimits);
+  return (
+    <div
+      className="relative grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] bg-line"
+      style={{ gridTemplateRows: `minmax(0,1fr)${showDock ? ` auto ${shownDockHeight}px` : ""}` }}
+    >
+      {children}
+      {showDock && (
+        <ResizeHandle
+          orientation="horizontal"
+          label="Resize dock"
+          value={shownDockHeight}
+          limits={dockLimits}
+          onResize={setLive}
+          onCommit={(px) => {
+            setLive(null);
+            setDockHeight(px);
+          }}
+        />
+      )}
+      {showDock && <IsolatedPanel label="Developer dock" onClose={onCloseDock}><Suspense fallback={<PanelSkeleton label="developer dock" horizontal />}><Dock /></Suspense></IsolatedPanel>}
+    </div>
+  );
+}
+
+/** The notice and error toasts, subscribed here so a toast re-renders itself and not the whole chrome. */
+function BrowserToasts() {
+  const error = useBrowser((s) => s.error);
+  const notice = useBrowser((s) => s.notice);
+  const noticeAction = useBrowser((s) => s.noticeAction);
+  return (
+    <ToastViewport
+      notice={notice}
+      noticeAction={noticeAction}
+      error={error}
+      onDismissNotice={() => useBrowser.setState({ notice: null, noticeAction: null })}
+      onDismissError={() => useBrowser.setState({ error: null })}
+    />
+  );
+}
+
+/** Run `task` once the window has nothing more pressing to do; returns the cancel. */
+function whenIdle(task: () => void): () => void {
+  if (typeof requestIdleCallback === "function") {
+    const id = requestIdleCallback(task, { timeout: 5000 });
+    return () => cancelIdleCallback(id);
+  }
+  const id = setTimeout(task, 2000);
+  return () => clearTimeout(id);
 }
