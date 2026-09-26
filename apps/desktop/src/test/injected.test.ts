@@ -512,6 +512,9 @@ describe("picker", () => {
     (window as unknown as Record<string, unknown>).__diveTest = (raw: string) => {
       sent.push(JSON.parse(raw));
     };
+    // Two worlds in a tab, one window here: the React bridge in the page's,
+    // the picker in Dive's. The bridge installs once per document.
+    eval(buildInjected("react-bridge.js"));
     eval(buildInjected("picker.js", { __NONCE__: '"n1"', __BINDING__: "__diveTest" }));
     // Direct eval installs this global at runtime, which TypeScript cannot
     // infer after the explicit delete above. Reflect.get widens it back to
@@ -587,6 +590,40 @@ describe("picker", () => {
     // does report rather than on the shape of a real Chromium computation.
     expect(payload.styles).toContain("display:");
     expect(payload.htmlPreview).toContain("data-testid");
+  });
+
+  it("asks the page's world for the component and reads its answer as untrusted", () => {
+    // The picker itself never touches a fiber: those are the page's
+    // JavaScript, out of sight of Dive's world.
+    const script = buildInjected("picker.js", { __NONCE__: '"n"', __BINDING__: "__diveTest" });
+    expect(script).not.toContain("__reactFiber$");
+    const { picker, sent } = installPicker(`<button id="b">Go</button>`);
+    const button = document.getElementById("b")!;
+    // A page answering for the bridge with more than a pick carries.
+    const answer = (event: Event) => {
+      event.stopImmediatePropagation();
+      const detail = JSON.stringify({
+        componentName: "x".repeat(500),
+        source: { fileName: 42 },
+        stack: Array.from({ length: 20 }, () => ({ fileName: "/a.tsx", lineNumber: "1" })),
+        owners: ["A", 7, null],
+      });
+      button.dispatchEvent(new CustomEvent("__dive-component-reply", { detail, bubbles: true }));
+    };
+    window.addEventListener("__dive-component-request", answer, true);
+    try {
+      document.elementFromPoint = () => button;
+      picker.start();
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    } finally {
+      window.removeEventListener("__dive-component-request", answer, true);
+    }
+    const payload = sent.find((m) => m.kind === "picked")!.payload as Record<string, unknown>;
+    expect(String(payload.componentName)).toHaveLength(200);
+    expect(payload.source).toBeNull();
+    expect(payload.stack).toHaveLength(8);
+    expect((payload.stack as { lineNumber: unknown }[])[0]!.lineNumber).toBeNull();
+    expect(payload.owners).toEqual(["A"]);
   });
 
   it("falls back to the DOM when the page is not React", () => {

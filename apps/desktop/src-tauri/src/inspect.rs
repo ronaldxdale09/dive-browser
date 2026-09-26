@@ -11,10 +11,13 @@
 //! before/after diff it can turn into a CSS change rather than a screenshot
 //! of the result.
 //!
-//! The page talks back through a CDP binding, and every payload carries a
-//! nonce the picker was installed with. Without that check any page could
-//! call the binding itself and hand the chrome a fabricated pick pointing at
-//! a source file the user never opened.
+//! The picker runs in Dive's isolated world (see `page_world`) and talks
+//! back through a CDP binding only that world has, and every payload carries
+//! a nonce the picker was installed with. In the page's own world any page
+//! could have called the binding, or read the nonce, and handed the chrome a
+//! fabricated pick pointing at a source file the user never opened. React's
+//! fibers are the one thing the picker needs from the page's world; a small
+//! bridge there (`react-bridge.js`) answers for them and holds no secret.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -179,10 +182,22 @@ pub async fn start(app: &AppHandle<Runtime>, tab: TabId, session: &CdpSession) -
     let nonce = dive_core::TabId::new().to_string().replace('-', "");
     let state = app.state::<AppState>();
     let _pending = state.activity.pending(tab);
-    session
-        .call("Runtime.addBinding", serde_json::json!({"name": BINDING}))
+    crate::page_world::add_binding(session, BINDING)
         .await
         .map_err(AppError::new)?;
+    // The component lookup, in the page's own world where the fibers are.
+    // Best effort: without it a pick still has its element, just no
+    // component.
+    let bridge = crate::pagescript::build("react-bridge.js", &[]);
+    if let Err(error) = session
+        .call(
+            "Runtime.evaluate",
+            serde_json::json!({"expression": bridge}),
+        )
+        .await
+    {
+        tracing::debug!(%tab, "React bridge not installed: {error}");
+    }
     let script = crate::pagescript::build(
         "picker.js",
         &[
@@ -193,11 +208,7 @@ pub async fn start(app: &AppHandle<Runtime>, tab: TabId, session: &CdpSession) -
             ("__BINDING__", BINDING.to_owned()),
         ],
     );
-    session
-        .call(
-            "Runtime.evaluate",
-            serde_json::json!({"expression": script}),
-        )
+    crate::page_world::evaluate(session, serde_json::json!({"expression": script}))
         .await
         .map_err(AppError::new)?;
     // The nonce is recorded only once the script is in place, so a payload
@@ -305,16 +316,15 @@ async fn refresh_changes(
     Ok(changes)
 }
 
-/// A `Runtime.evaluate` that surfaces a page exception instead of returning
-/// a silent `undefined`.
+/// A `Runtime.evaluate` in Dive's world, where the picker lives, that
+/// surfaces an exception instead of returning a silent `undefined`.
 async fn evaluate(session: &CdpSession, expression: &str) -> AppResult<Value> {
-    let result = session
-        .call(
-            "Runtime.evaluate",
-            serde_json::json!({"expression": expression, "returnByValue": true}),
-        )
-        .await
-        .map_err(AppError::new)?;
+    let result = crate::page_world::evaluate(
+        session,
+        serde_json::json!({"expression": expression, "returnByValue": true}),
+    )
+    .await
+    .map_err(AppError::new)?;
     if let Some(details) = result.get("exceptionDetails") {
         return Err(AppError::new(
             details["exception"]["description"]
@@ -338,6 +348,7 @@ fn json_string(value: &str) -> String {
 /// is what decides whether a message counts.
 pub fn watch(app: AppHandle<Runtime>, tab: TabId, session: &CdpSession) {
     let mut events = session.subscribe_to(&["Runtime.bindingCalled", "Page.frameNavigated"]);
+    let session = session.clone();
     tauri::async_runtime::spawn(async move {
         loop {
             match events.recv().await {
@@ -349,6 +360,9 @@ pub fn watch(app: AppHandle<Runtime>, tab: TabId, session: &CdpSession) {
                         continue;
                     }
                     if let Some((kind, payload)) = message(&event) {
+                        if crate::page_world::calling_context(&session, &event).is_none() {
+                            continue;
+                        }
                         let state = app.state::<AppState>();
                         let Some(expected) = state.inspector.nonce(tab) else {
                             continue;

@@ -15,6 +15,7 @@
 
 import actionability from "../../src-tauri/src/inject/actionability.js?raw";
 import component from "../../src-tauri/src/inject/component.js?raw";
+import componentBridge from "../../src-tauri/src/inject/component-bridge.js?raw";
 import cssPath from "../../src-tauri/src/inject/css-path.js?raw";
 import locator from "../../src-tauri/src/inject/locator.js?raw";
 import markdown from "../../src-tauri/src/inject/markdown.js?raw";
@@ -24,6 +25,7 @@ import stack from "../../src-tauri/src/inject/stack.js?raw";
 import color from "../../src-tauri/src/inject/color.js?raw";
 import agentGlow from "../../src-tauri/src/inject/agent_glow.js?raw";
 import picker from "../../src-tauri/src/inject/picker.js?raw";
+import reactBridge from "../../src-tauri/src/inject/react-bridge.js?raw";
 import reactContext from "../../src-tauri/src/inject/react-context.js?raw";
 import recorder from "../../src-tauri/src/inject/recorder.js?raw";
 import roleName from "../../src-tauri/src/inject/role-name.js?raw";
@@ -33,6 +35,8 @@ const FRAGMENTS: Record<string, string> = {
   "role-name.js": roleName,
   "actionability.js": actionability,
   "react-context.js": reactContext,
+  "component-bridge.js": componentBridge,
+  "react-bridge.js": reactBridge,
   "css-path.js": cssPath,
   "locator.js": locator,
   "recorder.js": recorder,

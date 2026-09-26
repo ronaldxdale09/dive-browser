@@ -17,6 +17,11 @@ const FRAGMENTS: &[(&str, &str)] = &[
     ("role-name.js", include_str!("inject/role-name.js")),
     ("actionability.js", include_str!("inject/actionability.js")),
     ("react-context.js", include_str!("inject/react-context.js")),
+    (
+        "component-bridge.js",
+        include_str!("inject/component-bridge.js"),
+    ),
+    ("react-bridge.js", include_str!("inject/react-bridge.js")),
     ("css-path.js", include_str!("inject/css-path.js")),
     ("locator.js", include_str!("inject/locator.js")),
     ("recorder.js", include_str!("inject/recorder.js")),
