@@ -155,11 +155,31 @@ impl Run {
 
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
-        self.notify.notify_one();
+        self.notify.notify_waiters();
     }
 
     fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
+    }
+
+    /// Resolves once the run has been stopped, however long ago that was.
+    ///
+    /// Every await that could outlast a Stop races this: the model stream,
+    /// the approval wait, the backoff, a tool that is driving the page and the
+    /// first read of it. A single stored permit used to serve all of them,
+    /// so whichever waited first took it and a tool running after that never
+    /// heard the Stop at all. The flag is checked after the waiter is
+    /// registered, so a cancel that lands between the two is not missed.
+    async fn halted(&self) {
+        loop {
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.is_cancelled() {
+                return;
+            }
+            notified.await;
+        }
     }
 }
 
@@ -301,10 +321,58 @@ pub enum ChatDelta {
     /// A page tried to give the agent instructions. The text is for the
     /// person: what it tried, and the line it tried it on.
     Flagged(String),
+    /// What the run is doing that is not part of the reply -- waiting out a
+    /// busy provider, leaving out the oldest turns. Shown while it is true and
+    /// never kept as text, so it cannot end up in the transcript the model is
+    /// sent next time.
+    Status(String),
     /// Finished with a stop reason (`end_turn`, `max_tokens`, `refusal`, `stopped`).
     Done(String),
     /// Failed.
-    Error(String),
+    Error {
+        /// What went wrong, for the person.
+        message: String,
+        /// Which kind of failure, so the chrome offers the fix that fits.
+        kind: FailureKind,
+    },
+}
+
+/// Why a run failed, as far as what the person can do about it goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureKind {
+    /// The key is missing or the provider refused it: Settings can fix it.
+    Auth,
+    /// The model or endpoint is wrong for this provider: pick another.
+    Model,
+    /// Anything else. Asking again is the likely remedy.
+    Other,
+}
+
+impl FailureKind {
+    /// Sort a provider failure by what would fix it.
+    fn of(error: &dive_agent::AgentError) -> Self {
+        match error {
+            dive_agent::AgentError::MissingKey => Self::Auth,
+            dive_agent::AgentError::MissingBaseUrl => Self::Model,
+            e if e.is_unauthorized() => Self::Auth,
+            dive_agent::AgentError::Api { status: 404, .. } => Self::Model,
+            dive_agent::AgentError::Api {
+                status: 400,
+                message,
+                ..
+            } if message.to_ascii_lowercase().contains("model") => Self::Model,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// Tell the chrome the run failed.
+fn fail(on_delta: &Channel<ChatDelta>, message: impl Into<String>, kind: FailureKind) {
+    let _ = on_delta.send(ChatDelta::Error {
+        message: message.into(),
+        kind,
+    });
 }
 
 /// When the run stops to ask before acting.
@@ -523,7 +591,7 @@ async fn approved(
         return Approval::Denied;
     }
     let decision = tokio::select! {
-        () = run.notify.notified() => Approval::Denied,
+        () = run.halted() => Approval::Denied,
         answer = tokio::time::timeout(APPROVAL_TIMEOUT, rx) => match answer {
             Ok(Ok(true)) => Approval::Allowed,
             Ok(_) => Approval::Denied,
@@ -536,9 +604,9 @@ async fn approved(
 
 // ----- keeping a conversation -----
 
-/// Longest a saved conversation may be. A thread that outgrew this was going
-/// to be trimmed on the next send anyway; refusing the write keeps one
-/// runaway tab from filling the database.
+/// Longest a saved conversation may be. A longer one keeps its newest
+/// messages and loses the oldest, so one runaway tab cannot fill the
+/// database and a long conversation still survives a restart.
 const THREAD_CAP: usize = 1024 * 1024;
 /// How long a conversation is kept after the last thing was said in it.
 pub const THREAD_TTL: time::Duration = time::Duration::days(30);
@@ -570,15 +638,47 @@ pub(crate) fn agent_thread_save(
     if crate::private_session::is_private() {
         return Ok(());
     }
-    if messages.len() > THREAD_CAP {
-        return Err(AppError::new(format!(
-            "conversation is over the {THREAD_CAP} byte limit to keep"
-        )));
-    }
+    let messages = fit_thread(messages)?;
     let title: String = title.trim().chars().take(200).collect();
     lock(&state.store)
         .agent_thread_save(tab_id, &title, &messages)
         .map_err(AppError::new)
+}
+
+/// The conversation as it will be kept: whole when it fits under
+/// [`THREAD_CAP`], otherwise its newest messages.
+///
+/// Refusing the write outright meant a conversation that grew past the cap
+/// silently stopped being saved at all, so a restart brought back whatever it
+/// was the last time it fitted. Losing the oldest turns is what the model
+/// sees on the next send anyway.
+fn fit_thread(messages: String) -> AppResult<String> {
+    if messages.len() <= THREAD_CAP {
+        return Ok(messages);
+    }
+    let parsed: Vec<serde_json::Value> = serde_json::from_str(&messages)
+        .map_err(|_| AppError::new("conversation is not a list of messages"))?;
+    let sizes: Vec<usize> = parsed
+        .iter()
+        .map(|m| serde_json::to_string(m).map_or(usize::MAX, |s| s.len() + 1))
+        .collect();
+    // Walk back from the newest, keeping what fits with the brackets.
+    let mut total = 2usize;
+    let mut first = parsed.len();
+    while first > 0 {
+        let next = total.saturating_add(sizes[first - 1]);
+        if next > THREAD_CAP {
+            break;
+        }
+        total = next;
+        first -= 1;
+    }
+    if first == parsed.len() {
+        return Err(AppError::new(format!(
+            "the newest message alone is over the {THREAD_CAP} byte limit to keep"
+        )));
+    }
+    serde_json::to_string(&parsed[first..]).map_err(AppError::new)
 }
 
 /// Forget this tab's conversation.
@@ -615,7 +715,8 @@ pub(crate) async fn agent_send(
     options: SendOptions,
     on_delta: Channel<ChatDelta>,
 ) -> AppResult<()> {
-    validate_send(&run_id, &turns)?;
+    validate_run_id(&run_id)?;
+    let fitted = fit_turns(turns)?;
     let run = Arc::new(Run::new(&run_id));
     {
         let mut runs = lock(&state.agent_runs);
@@ -636,7 +737,7 @@ pub(crate) async fn agent_send(
         match open_clean_context(&browser, &run).await {
             Ok(()) => None,
             Err(message) => {
-                let _ = on_delta.send(ChatDelta::Error(message));
+                fail(&on_delta, message, FailureKind::Other);
                 lock(&state.agent_runs).remove(&run_id);
                 return Ok(());
             }
@@ -654,7 +755,7 @@ pub(crate) async fn agent_send(
             )
             .is_ok()
     });
-    let outcome = drive(&browser, &state, &run, turns, tab_id, options, &on_delta).await;
+    let outcome = drive(&browser, &state, &run, fitted, tab_id, options, &on_delta).await;
     if let Some(tab) = claimed {
         dive_mcp::lease::shared().release(tab, dive_mcp::lease::DIVE_AGENT);
     }
@@ -693,33 +794,112 @@ async fn open_clean_context(browser: &crate::mcp::AppBrowser, run: &Run) -> Resu
     Ok(())
 }
 
-fn validate_send(run_id: &str, turns: &[ChatTurn]) -> AppResult<()> {
+fn validate_run_id(run_id: &str) -> AppResult<()> {
     if run_id.is_empty() || run_id.len() > RUN_ID_CAP {
         return Err(AppError::new("run id must be 1 to 128 bytes"));
     }
-    if turns.len() > TURN_CAP {
+    Ok(())
+}
+
+/// A conversation as it will be sent, and whether older turns were left out
+/// to get it there.
+struct Fitted {
+    turns: Vec<ChatTurn>,
+    trimmed: bool,
+}
+
+/// Fit the chrome's conversation into what one request may carry.
+///
+/// A long conversation used to hit a wall: past [`TURN_CAP`] turns or
+/// [`TRANSCRIPT_CAP`] bytes every send was refused, and the only way on was
+/// to throw the whole thing away. The newest turns are the ones that matter to
+/// the next reply, so the oldest are left out instead. Only the message being
+/// sent now can make the send fail, by being too long on its own.
+///
+/// It is also made well-formed for the wire. A reply that was stopped before
+/// it said anything is an assistant turn with no text, which Anthropic
+/// refuses outright; blank turns are dropped, turns by the same speaker that
+/// end up next to each other are joined, and the conversation starts with the
+/// person, as every provider expects.
+fn fit_turns(turns: Vec<ChatTurn>) -> AppResult<Fitted> {
+    if turns
+        .iter()
+        .any(|t| !matches!(t.role.as_str(), "user" | "assistant"))
+    {
+        return Err(AppError::new("conversation role must be user or assistant"));
+    }
+    let Some(newest) = turns.last() else {
+        return Err(AppError::new("there is nothing to send"));
+    };
+    if newest.content.len() > TURN_TEXT_CAP {
         return Err(AppError::new(format!(
-            "conversation is over the {TURN_CAP} turn limit"
+            "the message is over the {TURN_TEXT_CAP} byte limit"
         )));
     }
+    let offered = turns.len();
+    let mut trimmed = false;
+    let mut kept: Vec<ChatTurn> = Vec::new();
     let mut total = 0usize;
-    for turn in turns {
-        if !matches!(turn.role.as_str(), "user" | "assistant") {
-            return Err(AppError::new("conversation role must be user or assistant"));
+    for mut turn in turns.into_iter().rev() {
+        if kept.len() == TURN_CAP {
+            break;
         }
         if turn.content.len() > TURN_TEXT_CAP {
-            return Err(AppError::new(format!(
-                "one conversation turn is over the {TURN_TEXT_CAP} byte limit"
-            )));
+            let mut cut = TURN_TEXT_CAP;
+            while !turn.content.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            turn.content.truncate(cut);
+            trimmed = true;
         }
-        total = total.saturating_add(turn.content.len());
-        if total > TRANSCRIPT_CAP {
-            return Err(AppError::new(format!(
-                "conversation is over the {TRANSCRIPT_CAP} byte limit"
-            )));
+        if total + turn.content.len() > TRANSCRIPT_CAP {
+            break;
+        }
+        total += turn.content.len();
+        kept.push(turn);
+    }
+    trimmed |= kept.len() < offered;
+    kept.reverse();
+    let last = kept.len() - 1;
+    let mut turns: Vec<ChatTurn> = Vec::with_capacity(kept.len());
+    for (i, turn) in kept.into_iter().enumerate() {
+        if i != last && turn.content.trim().is_empty() {
+            continue;
+        }
+        match turns.last_mut() {
+            Some(previous) if previous.role == turn.role => {
+                previous.content.push_str("\n\n");
+                previous.content.push_str(&turn.content);
+            }
+            None if turn.role == "assistant" => {}
+            _ => turns.push(turn),
         }
     }
-    Ok(())
+    if turns.is_empty() {
+        return Err(AppError::new("there is nothing to send"));
+    }
+    Ok(Fitted { turns, trimmed })
+}
+
+/// Why a round ended before the loop could carry on. The chrome has already
+/// been told either way.
+enum Ended {
+    /// The person pressed Stop.
+    Stopped,
+    /// The provider failed and the failure was reported.
+    Failed,
+}
+
+/// Answer the tool calls a round announced and never ran, so their rows in
+/// the chrome stop spinning and say what became of them.
+fn abandon(run: &Run, on_delta: &Channel<ChatDelta>, calls: &[dive_agent::ToolUse], why: &str) {
+    for call in calls {
+        let _ = on_delta.send(ChatDelta::ToolDone {
+            id: run.step_id(&call.id),
+            summary: why.to_owned(),
+            error: true,
+        });
+    }
 }
 
 #[allow(clippy::too_many_lines)] // Keep the streamed tool-loop state machine in execution order.
@@ -727,21 +907,38 @@ async fn drive(
     browser: &crate::mcp::AppBrowser,
     state: &AppState,
     run: &Run,
-    turns: Vec<ChatTurn>,
+    fitted: Fitted,
     tab_id: Option<TabId>,
     options: SendOptions,
     on_delta: &Channel<ChatDelta>,
 ) -> AppResult<()> {
+    let stopped = |on_delta: &Channel<ChatDelta>| {
+        let _ = on_delta.send(ChatDelta::Done("stopped".into()));
+    };
     let prefs = state.prefs.get(state);
     let provider = parse_provider(&prefs.agent_provider)?;
     let client = client_for(state, provider, None);
+    if fitted.trimmed {
+        let _ = on_delta.send(ChatDelta::Status(
+            "The oldest messages were left out so the conversation fits in one request.".into(),
+        ));
+    }
+    // Reading the page runs a script in it and resolves source maps, which a
+    // busy page can make slow; Stop is answered during the read, not after.
     let context = match tab_id {
-        Some(id) if options.include_page => page_context(state, id).await,
+        Some(id) if options.include_page => tokio::select! {
+            () = run.halted() => {
+                stopped(on_delta);
+                return Ok(());
+            }
+            context = page_context(state, id) => context,
+        },
         _ => String::new(),
     };
     let mut request = Request::new(
         system_prompt(&context, options.clean_session),
-        turns
+        fitted
+            .turns
             .into_iter()
             .map(|t| {
                 Turn::text(
@@ -766,9 +963,6 @@ async fn drive(
     } else {
         Approvals::parse(&prefs.agent_approvals)
     };
-    let stopped = |on_delta: &Channel<ChatDelta>| {
-        let _ = on_delta.send(ChatDelta::Done("stopped".into()));
-    };
     let mut total = Usage::default();
     let mut steps_used = 0usize;
     loop {
@@ -776,7 +970,9 @@ async fn drive(
             stopped(on_delta);
             return Ok(());
         }
-        let stream = start_stream(&client, &request, run, on_delta).await?;
+        let Ok(stream) = start_stream(&client, &request, run, on_delta).await else {
+            return Ok(());
+        };
         tokio::pin!(stream);
         let mut text = String::new();
         let mut calls = Vec::new();
@@ -784,7 +980,8 @@ async fn drive(
         let mut stop = None;
         loop {
             let delta = tokio::select! {
-                () = run.notify.notified() => {
+                () = run.halted() => {
+                    abandon(run, on_delta, &calls, "Not run: the run was stopped.");
                     stopped(on_delta);
                     return Ok(());
                 }
@@ -792,9 +989,12 @@ async fn drive(
                     Ok(Some(delta)) => delta,
                     Ok(None) => break,
                     Err(_) => {
-                        let _ = on_delta.send(ChatDelta::Error(
-                            "The provider stopped sending data for two minutes.".into(),
-                        ));
+                        abandon(run, on_delta, &calls, "Not run: the reply stopped arriving.");
+                        fail(
+                            on_delta,
+                            "The provider stopped sending data for two minutes.",
+                            FailureKind::Other,
+                        );
                         return Ok(());
                     }
                 },
@@ -820,25 +1020,40 @@ async fn drive(
                 Delta::Assistant(turn) => assistant = Some(turn),
                 Delta::Done(reason) => stop = Some(reason),
                 Delta::Error(e) => {
-                    let _ = on_delta.send(ChatDelta::Error(e));
+                    abandon(run, on_delta, &calls, "Not run: the reply failed.");
+                    fail(on_delta, e, FailureKind::Other);
                     return Ok(());
                 }
             }
         }
         let Some(stop) = stop else {
-            let _ = on_delta.send(ChatDelta::Error(
-                "The provider stream ended before it completed the reply.".into(),
-            ));
+            abandon(run, on_delta, &calls, "Not run: the reply was cut short.");
+            fail(
+                on_delta,
+                "The provider stream ended before it completed the reply.",
+                FailureKind::Other,
+            );
             return Ok(());
         };
         if calls.is_empty() || stop != "tool_use" {
+            abandon(run, on_delta, &calls, "Not run: the reply ended first.");
             let _ = on_delta.send(ChatDelta::Done(stop));
             return Ok(());
         }
         if steps_used + calls.len() > max_steps {
-            let _ = on_delta.send(ChatDelta::Error(format!(
-                "Stopped after {max_steps} tool calls. Raise the limit in Settings → Agent, or break the task up."
-            )));
+            abandon(
+                run,
+                on_delta,
+                &calls,
+                "Not run: the step limit was reached.",
+            );
+            fail(
+                on_delta,
+                format!(
+                    "Stopped after {max_steps} tool calls. Raise the limit in Settings → Agent, or break the task up."
+                ),
+                FailureKind::Other,
+            );
             return Ok(());
         }
         steps_used += calls.len();
@@ -876,38 +1091,52 @@ const STREAM_ATTEMPTS: u32 = 3;
 /// failure mid-stream is left alone for that reason. Only transient statuses
 /// are retried — a bad key or a malformed request fails identically however
 /// many times it is sent, and retrying would just spend the person's tokens.
+///
+/// Whatever ends the round early has been reported to the chrome by the time
+/// this returns, so a Stop during the wait is a stopped reply rather than an
+/// error, and a failure says what kind of failure it was.
 async fn start_stream(
     client: &dive_agent::Client,
     request: &dive_agent::Request,
     run: &Run,
     on_delta: &Channel<ChatDelta>,
-) -> AppResult<impl futures_util::Stream<Item = dive_agent::Delta> + use<>> {
+) -> Result<impl futures_util::Stream<Item = dive_agent::Delta> + use<>, Ended> {
     let mut attempt = 1;
     loop {
-        match client.stream(request).await {
+        let opened = tokio::select! {
+            () = run.halted() => {
+                let _ = on_delta.send(ChatDelta::Done("stopped".into()));
+                return Err(Ended::Stopped);
+            }
+            opened = client.stream(request) => opened,
+        };
+        match opened {
             Ok(stream) => return Ok(stream),
             Err(e) if e.is_transient() && attempt < STREAM_ATTEMPTS => {
                 let wait = dive_agent::retry_delay(attempt, e.retry_after());
                 // Say so rather than appearing to hang: a rate limit can ask
-                // for twenty seconds, and silence reads as a stall.
-                let _ = on_delta.send(ChatDelta::Text(format!(
-                    "\n_The provider is busy; trying again in {}s._\n",
+                // for twenty seconds, and silence reads as a stall. It is a
+                // status, not reply text, so it never reaches the model.
+                let _ = on_delta.send(ChatDelta::Status(format!(
+                    "The provider is busy; trying again in {}s.",
                     wait.as_secs().max(1)
                 )));
                 tracing::info!(attempt, ?wait, "provider asked us to wait; retrying");
                 // Stop is answered during the wait, not after it: a person
                 // who presses Stop should not sit through the backoff.
-                let halted = tokio::select! {
-                    () = run.notify.notified() => true,
-                    () = tokio::time::sleep(wait) => run.is_cancelled(),
-                };
-                if halted {
-                    let _ = on_delta.send(ChatDelta::Done("stopped".into()));
-                    return Err(AppError::new("stopped"));
+                tokio::select! {
+                    () = run.halted() => {
+                        let _ = on_delta.send(ChatDelta::Done("stopped".into()));
+                        return Err(Ended::Stopped);
+                    }
+                    () = tokio::time::sleep(wait) => {}
                 }
                 attempt += 1;
             }
-            Err(e) => return Err(AppError::new(e)),
+            Err(e) => {
+                fail(on_delta, e.to_string(), FailureKind::of(&e));
+                return Err(Ended::Failed);
+            }
         }
     }
 }
@@ -939,9 +1168,17 @@ async fn run_calls(
         } else {
             Approval::Allowed
         };
+        let stopped = "The user stopped the run before this ran.";
         let result = match approval {
-            _ if run.is_cancelled() => denied("The user stopped the run before this ran."),
-            Approval::Allowed => crate::agent_tools::run(browser, tab_id, &run.scope, call).await,
+            _ if run.is_cancelled() => denied(stopped),
+            // A tool can wait a long while -- for a page to load, for a
+            // selector to appear -- and Stop has to end that wait rather than
+            // queue behind it. Dropping the call abandons its reply; nothing
+            // it holds outlives the await.
+            Approval::Allowed => tokio::select! {
+                () = run.halted() => denied(stopped),
+                result = crate::agent_tools::run(browser, tab_id, &run.scope, call) => result,
+            },
             Approval::Denied => denied(
                 "The user did not allow this action. Do not retry it; explain what you wanted to do instead.",
             ),
@@ -1322,15 +1559,42 @@ mod tests {
         assert!(!run.is_cancelled());
         run.cancel();
         assert!(run.is_cancelled());
-        // The permit is stored, so a waiter that arrives later still wakes.
+        // A waiter that arrives after the cancel still wakes, and so does
+        // every one after it: the stream, the approval and the tool each
+        // wait on the same Stop.
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
             .unwrap();
         rt.block_on(async {
-            tokio::time::timeout(Duration::from_millis(50), run.notify.notified())
-                .await
-                .expect("cancel must wake a later waiter");
+            for _ in 0..3 {
+                tokio::time::timeout(Duration::from_millis(50), run.halted())
+                    .await
+                    .expect("cancel must wake a later waiter");
+            }
+        });
+    }
+
+    #[test]
+    fn a_stop_reaches_a_waiter_that_is_already_waiting() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let run = Arc::new(Run::default());
+            let waiting = Arc::clone(&run);
+            let first = tokio::spawn(async move { waiting.halted().await });
+            let waiting = Arc::clone(&run);
+            let second = tokio::spawn(async move { waiting.halted().await });
+            tokio::task::yield_now().await;
+            run.cancel();
+            tokio::time::timeout(Duration::from_millis(200), async {
+                first.await.unwrap();
+                second.await.unwrap();
+            })
+            .await
+            .expect("every waiter hears the Stop");
         });
     }
 
@@ -1426,15 +1690,123 @@ mod tests {
         assert!(parse_provider("skynet").is_err());
     }
 
+    fn turn(role: &str, content: impl Into<String>) -> ChatTurn {
+        ChatTurn {
+            role: role.into(),
+            content: content.into(),
+        }
+    }
+
     #[test]
     fn send_boundaries_reject_ambiguous_or_oversized_input() {
-        let turn = |role: &str, content: String| ChatTurn {
-            role: role.into(),
-            content,
+        assert!(validate_run_id("run-1").is_ok());
+        assert!(validate_run_id("").is_err());
+        assert!(validate_run_id(&"r".repeat(RUN_ID_CAP + 1)).is_err());
+        assert!(fit_turns(vec![turn("user", "hello")]).is_ok());
+        assert!(fit_turns(Vec::new()).is_err());
+        assert!(fit_turns(vec![turn("system", "no")]).is_err());
+        // Only the message being sent can be too long to send.
+        assert!(fit_turns(vec![turn("user", "x".repeat(TURN_TEXT_CAP + 1))]).is_err());
+    }
+
+    #[test]
+    fn a_stopped_reply_with_no_text_is_not_sent_back() {
+        // Asking again after Stop: the stopped reply is an empty assistant
+        // turn, which Anthropic refuses with a 400.
+        let fitted = fit_turns(vec![
+            turn("user", "first"),
+            turn("assistant", ""),
+            turn("user", "again"),
+        ])
+        .unwrap();
+        assert!(!fitted.trimmed);
+        assert_eq!(fitted.turns.len(), 1, "the two questions become one turn");
+        assert_eq!(fitted.turns[0].role, "user");
+        assert_eq!(fitted.turns[0].content, "first\n\nagain");
+        let fitted = fit_turns(vec![
+            turn("user", "a"),
+            turn("assistant", "  \n"),
+            turn("user", "b"),
+            turn("assistant", "answer"),
+            turn("user", "c"),
+        ])
+        .unwrap();
+        let roles: Vec<_> = fitted.turns.iter().map(|t| t.role.as_str()).collect();
+        assert_eq!(roles, ["user", "assistant", "user"]);
+    }
+
+    #[test]
+    fn a_long_conversation_loses_its_oldest_turns_instead_of_failing() {
+        let mut turns: Vec<ChatTurn> = (0..TURN_CAP + 10)
+            .map(|i| {
+                turn(
+                    if i % 2 == 0 { "user" } else { "assistant" },
+                    format!("turn {i}"),
+                )
+            })
+            .collect();
+        turns.push(turn("user", "newest"));
+        let fitted = fit_turns(turns).unwrap();
+        assert!(fitted.trimmed);
+        assert!(fitted.turns.len() <= TURN_CAP);
+        assert_eq!(fitted.turns.last().unwrap().content, "newest");
+        assert_eq!(
+            fitted.turns[0].role, "user",
+            "it still opens with the person"
+        );
+
+        let big = "y".repeat(TURN_TEXT_CAP);
+        let mut turns: Vec<ChatTurn> = (0..12)
+            .map(|i| turn(if i % 2 == 0 { "user" } else { "assistant" }, big.clone()))
+            .collect();
+        turns.push(turn("user", "newest"));
+        let fitted = fit_turns(turns).unwrap();
+        assert!(fitted.trimmed);
+        let bytes: usize = fitted.turns.iter().map(|t| t.content.len()).sum();
+        assert!(bytes <= TRANSCRIPT_CAP + 4 * fitted.turns.len());
+        assert!(fitted.turns.last().unwrap().content.ends_with("newest"));
+    }
+
+    #[test]
+    fn a_saved_conversation_over_the_cap_keeps_its_newest_messages() {
+        let small = r#"[{"id":"m1","role":"user","content":"hi"}]"#.to_owned();
+        assert_eq!(fit_thread(small.clone()).unwrap(), small);
+        let messages: Vec<serde_json::Value> = (0..40)
+            .map(|i| json!({"id": format!("m{i}"), "role": "user", "content": "z".repeat(40 * 1024)}))
+            .collect();
+        let kept = fit_thread(serde_json::to_string(&messages).unwrap()).unwrap();
+        assert!(kept.len() <= THREAD_CAP);
+        let kept: Vec<serde_json::Value> = serde_json::from_str(&kept).unwrap();
+        assert!(kept.len() < messages.len());
+        assert_eq!(kept.last().unwrap()["id"], "m39");
+        let huge = serde_json::to_string(&[json!({"content": "q".repeat(THREAD_CAP)})]).unwrap();
+        assert!(fit_thread(huge).is_err());
+    }
+
+    #[test]
+    fn failures_are_sorted_by_what_would_fix_them() {
+        let api = |status, message: &str| dive_agent::AgentError::Api {
+            status,
+            message: message.into(),
+            retry_after: None,
         };
-        assert!(validate_send("run-1", &[turn("user", "hello".into())]).is_ok());
-        assert!(validate_send("", &[]).is_err());
-        assert!(validate_send("run-1", &[turn("system", "no".into())]).is_err());
-        assert!(validate_send("run-1", &[turn("user", "x".repeat(TURN_TEXT_CAP + 1))]).is_err());
+        assert_eq!(
+            FailureKind::of(&dive_agent::AgentError::MissingKey),
+            FailureKind::Auth
+        );
+        assert_eq!(FailureKind::of(&api(401, "bad key")), FailureKind::Auth);
+        assert_eq!(
+            FailureKind::of(&api(404, "no such model")),
+            FailureKind::Model
+        );
+        assert_eq!(
+            FailureKind::of(&api(400, "model: not found")),
+            FailureKind::Model
+        );
+        assert_eq!(
+            FailureKind::of(&api(400, "messages: empty content")),
+            FailureKind::Other
+        );
+        assert_eq!(FailureKind::of(&api(529, "overloaded")), FailureKind::Other);
     }
 }

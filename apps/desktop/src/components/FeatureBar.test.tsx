@@ -9,6 +9,7 @@ import { COLLAPSE_BELOW, FeatureBar } from "./FeatureBar";
 import { usePicker } from "./simulator/DevicePicker";
 import { useUpdates } from "../store/updates";
 import { useConnectHint } from "../store/connectHint";
+import { useAgent } from "../store/agent";
 
 const tab: Tab = {
   id: "tab-1",
@@ -124,6 +125,17 @@ describe("FeatureBar", () => {
     render(<FeatureBar />);
     fireEvent.click(screen.getByRole("button", { name: "Agent" }));
     expect(useBrowser.getState().open.sidecar).toBe(true);
+  });
+
+  it("says on the closed Agent button that a run is going or waiting for approval", () => {
+    const initial = useAgent.getState();
+    useAgent.setState({ busy: true, messages: [] });
+    const bar = render(<FeatureBar />);
+    expect(screen.getByRole("button", { name: "Agent is working" })).toBeTruthy();
+    useAgent.setState({ messages: [{ id: "a", role: "assistant", content: "", pending: true, steps: [{ id: "s", name: "page_click", input: "{}", action: true, awaiting: true }] }] });
+    bar.rerender(<FeatureBar />);
+    expect(screen.getByRole("button", { name: "Agent needs your approval" })).toBeTruthy();
+    useAgent.setState(initial, true);
   });
 
   it("drops the labels to icons when the title bar is narrow, and brings them back", () => {

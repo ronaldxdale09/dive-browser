@@ -158,6 +158,14 @@ describe("AgentDock", () => {
     expect(useAgent.getState().clear).toHaveBeenCalledTimes(1);
   });
 
+  it("ends \"Allow all this session\" when the panel closes, as its tooltip promises", () => {
+    useAgent.setState({ sessionAutoApprove: true });
+    const dock = render(<AgentDock />);
+    expect(useAgent.getState().sessionAutoApprove).toBe(true);
+    dock.unmount();
+    expect(useAgent.getState().sessionAutoApprove).toBe(false);
+  });
+
   it("closes on Escape without trapping the page behind it", () => {
     render(<AgentDock />);
     fireEvent.keyDown(screen.getByRole("region", { name: "Agent" }), { key: "Escape" });

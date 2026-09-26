@@ -11,6 +11,7 @@ import { recordingClock } from "../lib/recordingFormat";
 import { Icon, IconButton } from "./Icon";
 import { Tooltip } from "./Tooltip";
 import { AgentIcon } from "./agent/AgentIcon";
+import { useAgent } from "../store/agent";
 import { McpDialog } from "./McpDialog";
 import { usePicker } from "../store/simulator";
 import { useConnectHint } from "../store/connectHint";
@@ -312,11 +313,16 @@ function AgentAction({ compact }: { compact: boolean }) {
   const open = useBrowser((s) => s.open.sidecar);
   const toggle = useBrowser((s) => s.toggle);
   const setPickerOpen = usePicker((s) => s.setOpen);
+  // A run keeps going with the panel closed, and so does a step waiting for
+  // Allow. The button says so, or the approval would time out unseen.
+  const busy = useAgent((s) => s.busy);
+  const asking = useAgent((s) => s.messages.at(-1)?.steps?.some((step) => step.awaiting) ?? false);
+  const badge = open ? null : asking ? "Agent needs your approval" : busy ? "Agent is working" : null;
   return (
-    <Tooltip label="Agent" shortcut="⌘J" align="end" side="bottom">
+    <Tooltip label={badge ?? "Agent"} shortcut="⌘J" align="end" side="bottom">
       <button
         type="button"
-        aria-label="Agent"
+        aria-label={badge ?? "Agent"}
         aria-pressed={open}
         onClick={() => {
           if (compact && !open) {
@@ -328,13 +334,14 @@ function AgentAction({ compact }: { compact: boolean }) {
         className={
           compact
             ? `pressable relative ml-0.5 grid size-7 place-items-center rounded-full transition-[color,background-color,transform] ${open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-3 hover:text-ink"}`
-            : `pressable ml-0.5 flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] font-medium transition-[color,background-color,transform] ${
+            : `pressable relative ml-0.5 flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] font-medium transition-[color,background-color,transform] ${
                 open ? "bg-accent text-accent-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
               }`
         }
       >
         <AgentIcon size={compact ? 15 : 13} className={open ? "text-accent-ink" : "text-highlight"} />
         {!compact && "Agent"}
+        {badge && <span aria-hidden className={`absolute top-0.5 right-0.5 size-2 rounded-full ring-2 ring-surface ${asking ? "bg-warn motion-safe:animate-pulse" : "bg-highlight"}`} />}
       </button>
     </Tooltip>
   );

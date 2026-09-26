@@ -261,7 +261,7 @@ async fn converse(
             }
             ChatDelta::Flagged(note) => lock(&collected).flagged.push(note),
             ChatDelta::Text(text) => lock(&collected).text.push_str(&text),
-            ChatDelta::Error(error) => lock(&collected).error = Some(error),
+            ChatDelta::Error { message, .. } => lock(&collected).error = Some(message),
             _ => {}
         }
         Ok(())

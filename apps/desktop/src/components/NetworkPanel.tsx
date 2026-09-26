@@ -133,6 +133,12 @@ export function NetworkPanel() {
   const keyPresent = isReady(providers.find((p) => p.id === providerId), keyed);
   const askAgent = (r: RequestRow) => {
     useBrowser.getState().toggle("sidecar", true);
+    // One run at a time. Sending now would be dropped without a word, and
+    // the person would wait for an answer that was never asked for.
+    if (useAgent.getState().busy) {
+      useBrowser.getState().notify("The agent is still working. Ask again when it has finished, or stop it first.", 5000);
+      return;
+    }
     const outcome = r.error ?? (r.status === null ? "no response yet" : `HTTP ${r.status}`);
     void send(
       `Explain this request from the current page and whether it looks right:\n\n${r.method} ${r.url}\nResult: ${outcome}${r.mimeType ? ` (${r.mimeType})` : ""}${r.size !== null ? `, ${r.size} bytes` : ""}${r.durationMs !== null ? `, ${r.durationMs} ms` : ""}\n\nRequest id ${r.id}: call network_body for its JSON body, or console_tail for related errors. If it failed, say why and how to fix it.`,

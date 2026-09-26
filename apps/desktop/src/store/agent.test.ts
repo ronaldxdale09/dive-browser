@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyDelta, coalesceDeltas, isReady, parseThread, settledForStorage, STREAM_FLUSH_MS, threadTitle, useAgent } from "./agent";
+import { applyDelta, coalesceDeltas, isReady, NOT_RUN, parseThread, settledForStorage, STREAM_FLUSH_MS, threadTitle, turnsFor, useAgent } from "./agent";
 import type { Message } from "./agent";
 import type { ChatDeltaOut, ProviderInfo } from "../lib/ipc";
 import { ipc } from "../lib/ipc";
@@ -27,7 +27,7 @@ describe("applyDelta", () => {
     expect(m[1]?.content).toBe("Done.");
   });
   it("records errors, cut-offs, refusals and stops", () => {
-    expect(applyDelta(base, { type: "error", data: "boom" })[1]).toMatchObject({ pending: false, error: "boom" });
+    expect(applyDelta(base, { type: "error", data: { message: "boom", kind: "auth" } })[1]).toMatchObject({ pending: false, error: "boom", errorKind: "auth" });
     expect(applyDelta(base, { type: "done", data: "max_tokens" })[1]?.error).toContain("length limit");
     expect(applyDelta(base, { type: "done", data: "refusal" })[1]?.error).toContain("declined");
     const stopped = applyDelta(base, { type: "done", data: "stopped" })[1];
@@ -66,7 +66,50 @@ describe("approval", () => {
     let m = applyDelta(base, { type: "tool_call", data: { id: "tu3", name: "page_type", input: "{}", action: true, locator: null, caution: null } });
     m = applyDelta(m, { type: "needs_approval", data: { id: "tu3", name: "page_type", input: "{}", action: true, locator: null, caution: null } });
     expect(applyDelta(m, { type: "done", data: "stopped" })[1]?.steps?.[0]?.awaiting).toBe(false);
-    expect(applyDelta(m, { type: "error", data: "gone" })[1]?.steps?.[0]?.awaiting).toBe(false);
+    expect(applyDelta(m, { type: "error", data: { message: "gone", kind: "other" } })[1]?.steps?.[0]?.awaiting).toBe(false);
+  });
+  it("stops a step that never ran from spinning once the reply is over", () => {
+    let m = applyDelta(base, { type: "tool_call", data: { id: "a", name: "page_text", input: "{}", action: false, locator: null, caution: null } });
+    m = applyDelta(m, { type: "tool_done", data: { id: "a", summary: "ok", error: false } });
+    m = applyDelta(m, { type: "tool_call", data: { id: "b", name: "page_click", input: "{}", action: true, locator: null, caution: null } });
+    for (const end of [{ type: "done", data: "stopped" }, { type: "error", data: { message: "limit", kind: "other" } }] as ChatDeltaOut[]) {
+      const steps = applyDelta(m, end)[1]?.steps;
+      expect(steps?.[0]).toMatchObject({ summary: "ok", error: false });
+      expect(steps?.[1]).toMatchObject({ summary: NOT_RUN, error: true, awaiting: false });
+    }
+  });
+});
+
+describe("status", () => {
+  it("is shown while the run waits and never becomes reply text", () => {
+    let m = applyDelta(base, { type: "status", data: "The provider is busy; trying again in 3s." });
+    expect(m[1]).toMatchObject({ status: "The provider is busy; trying again in 3s.", content: "" });
+    m = applyDelta(m, { type: "text", data: "Answer" });
+    expect(m[1]?.status).toBeUndefined();
+    expect(m[1]?.content).toBe("Answer");
+    const stopped = applyDelta(applyDelta(base, { type: "status", data: "waiting" }), { type: "done", data: "stopped" });
+    expect(stopped[1]).toMatchObject({ stopped: true, content: "" });
+    expect(stopped[1]?.status).toBeUndefined();
+    expect(settledForStorage([{ id: "x", role: "assistant", content: "a", status: "waiting" }])[0]).not.toHaveProperty("status");
+  });
+});
+
+describe("turnsFor", () => {
+  it("leaves out a reply that was stopped before it said anything, and failed ones", () => {
+    const turns = turnsFor([
+      { id: "1", role: "user", content: "first" },
+      { id: "2", role: "assistant", content: "", stopped: true },
+      { id: "3", role: "user", content: "again" },
+      { id: "4", role: "assistant", content: "half an answer", stopped: true },
+      { id: "5", role: "assistant", content: "partial", error: "boom" },
+      { id: "6", role: "user", content: "last" },
+    ]);
+    expect(turns).toEqual([
+      { role: "user", content: "first" },
+      { role: "user", content: "again" },
+      { role: "assistant", content: "half an answer" },
+      { role: "user", content: "last" },
+    ]);
   });
 });
 
@@ -194,6 +237,74 @@ describe("a conversation that belongs to a tab", () => {
     expect(load).not.toHaveBeenCalled();
     expect(useAgent.getState().tabId).toBe("tab-1");
     expect(useAgent.getState().messages).toHaveLength(1);
+    // ...but remembers where the person went, and goes there after.
+    expect(useAgent.getState().wantedTab).toBe("tab-2");
+    await useAgent.getState().loadFor("tab-1");
+    expect(useAgent.getState().wantedTab).toBeUndefined();
+  });
+
+  it("follows the person to the tab they moved to once the run ends", async () => {
+    vi.spyOn(ipc, "agentThreadSave").mockResolvedValue(null);
+    const load = vi.spyOn(ipc, "agentThreadLoad").mockResolvedValue(null);
+    let finish!: () => void;
+    vi.spyOn(ipc, "agentSend").mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+    useAgent.setState({ tabId: "tab-1", messages: [] });
+    const sending = useAgent.getState().send("look", "tab-1");
+    await Promise.resolve();
+    await useAgent.getState().loadFor("tab-2");
+    expect(useAgent.getState().tabId).toBe("tab-1");
+    finish();
+    await sending;
+    await vi.waitFor(() => expect(useAgent.getState().tabId).toBe("tab-2"));
+    expect(load).toHaveBeenCalledWith("tab-2");
+  });
+
+  it("asks in the conversation of the tab it was asked for, not the one on screen", async () => {
+    const save = vi.spyOn(ipc, "agentThreadSave").mockResolvedValue(null);
+    vi.spyOn(ipc, "agentThreadLoad").mockResolvedValue({
+      tab_id: "tab-2",
+      title: "earlier",
+      messages: '[{"id":"9","role":"user","content":"earlier"},{"id":"10","role":"assistant","content":"answer"}]',
+      updated_at: "2026-09-01T00:00:00Z",
+    });
+    const send = vi.spyOn(ipc, "agentSend").mockResolvedValue(undefined);
+    useAgent.setState({ tabId: "tab-1", messages: [{ id: "1", role: "user", content: "about tab one" }] });
+    await useAgent.getState().send("explain this request", "tab-2");
+    const turns = send.mock.calls[0]?.[1];
+    expect(turns?.map((t) => t.content)).toEqual(["earlier", "answer", "explain this request"]);
+    expect(useAgent.getState().tabId).toBe("tab-2");
+    // Tab one's conversation was written back under tab one, and the new
+    // question is kept under tab two.
+    expect(save).toHaveBeenCalledWith("tab-1", "about tab one", expect.any(String));
+    expect(save).toHaveBeenLastCalledWith("tab-2", "earlier", expect.stringContaining("explain this request"));
+  });
+
+  it("asks a failed question again without the reply that failed", async () => {
+    vi.spyOn(ipc, "agentThreadSave").mockResolvedValue(null);
+    const send = vi.spyOn(ipc, "agentSend").mockResolvedValue(undefined);
+    useAgent.setState({
+      tabId: "tab-1",
+      messages: [
+        { id: "1", role: "user", content: "why" },
+        { id: "2", role: "assistant", content: "", error: "overloaded", errorKind: "other" },
+      ],
+    });
+    await useAgent.getState().retry("tab-1");
+    expect(send.mock.calls[0]?.[1]).toEqual([{ role: "user", content: "why" }]);
+    const messages = useAgent.getState().messages;
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(messages[1]?.error).toBeUndefined();
+  });
+
+  it("says so when a conversation cannot be saved", async () => {
+    vi.spyOn(ipc, "agentThreadSave").mockRejectedValue(new Error("disk full"));
+    vi.spyOn(ipc, "agentThreadLoad").mockResolvedValue(null);
+    const notify = vi.fn();
+    const { useBrowser } = await import("./browser");
+    useBrowser.setState({ notify });
+    useAgent.setState({ tabId: "tab-1", messages: [{ id: "1", role: "user", content: "keep me" }] });
+    await useAgent.getState().loadFor("tab-2");
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(expect.stringContaining("disk full"), expect.any(Number)));
   });
 
   it("forgets the kept conversation when the thread is cleared", () => {

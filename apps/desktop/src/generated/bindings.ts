@@ -1092,10 +1092,22 @@ export type ChatDelta =
  *  person: what it tried, and the line it tried it on.
  */
 { type: "flagged"; data: string } |
+/**
+ *  What the run is doing that is not part of the reply -- waiting out a
+ *  busy provider, leaving out the oldest turns. Shown while it is true and
+ *  never kept as text, so it cannot end up in the transcript the model is
+ *  sent next time.
+ */
+{ type: "status"; data: string } |
 /**  Finished with a stop reason (`end_turn`, `max_tokens`, `refusal`, `stopped`). */
 { type: "done"; data: string } |
 /**  Failed. */
-{ type: "error"; data: string };
+{ type: "error"; data: {
+	/**  What went wrong, for the person. */
+	message: string,
+	/**  Which kind of failure, so the chrome offers the fix that fits. */
+	kind: FailureKind,
+} };
 
 /**  One message in the conversation, as the chrome stores it. */
 export type ChatTurn = {
@@ -1505,6 +1517,15 @@ export type ExternalLinkAsked = {
 	/**  The site that asked, as a host ("claude.ai"); empty when there is none. */
 	origin: string,
 };
+
+/**  Why a run failed, as far as what the person can do about it goes. */
+export type FailureKind =
+/**  The key is missing or the provider refused it: Settings can fix it. */
+"auth" |
+/**  The model or endpoint is wrong for this provider: pick another. */
+"model" |
+/**  Anything else. Asking again is the likely remedy. */
+"other";
 
 /**  Which family a browser belongs to, which decides the files and formats. */
 export type Family = "chromium" | "firefox" | "safari";

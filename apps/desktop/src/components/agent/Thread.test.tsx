@@ -103,7 +103,7 @@ describe("Thread", () => {
         { id: "m1", role: "user", content: "hello there" },
         { id: "m2", role: "assistant", content: "Hi! Here is **bold** text.", stopped: true },
         { id: "m3", role: "user", content: "again" },
-        { id: "m4", role: "assistant", content: "", error: "Rate limited." },
+        { id: "m4", role: "assistant", content: "", error: "Rate limited.", errorKind: "auth" },
         { id: "m5", role: "assistant", content: "", pending: true },
       ],
     });
@@ -114,7 +114,7 @@ describe("Thread", () => {
     expect(screen.getByText("Rate limited.")).toBeTruthy();
     const openSettings = vi.spyOn(useBrowser.getState(), "openSettings").mockImplementation(() => undefined);
     useBrowser.setState({ openSettings });
-    fireEvent.click(screen.getByRole("button", { name: "Change model or key" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check the key" }));
     expect(openSettings).toHaveBeenCalledWith("agent");
     expect(screen.getByText("Thinking…")).toBeTruthy();
     expect(screen.queryByText("Try one of these")).toBeNull();
@@ -338,5 +338,59 @@ describe("Thread", () => {
     // And there is a way back that says what is waiting.
     fireEvent.click(screen.getByRole("button", { name: /2 messages/ }));
     expect(screen.getByText("open youtube")).toBeTruthy();
+  });
+
+  it("offers Retry on the newest failed reply, and Settings only when Settings can fix it", () => {
+    const retry = vi.fn().mockResolvedValue(undefined);
+    useAgent.setState({
+      retry,
+      messages: [
+        { id: "u1", role: "user", content: "why" },
+        { id: "a1", role: "assistant", content: "", error: "The provider stopped sending data.", errorKind: "other" },
+      ],
+    });
+    render(<Thread onAddProvider={() => {}} />);
+    expect(screen.queryByRole("button", { name: /Change model|Check the key/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledWith("tab-1");
+  });
+
+  it("keeps what was typed when the panel closes and opens again", () => {
+    useAgent.setState({ setDraft: initialAgent.setDraft, draft: "" });
+    const first = render(<Thread onAddProvider={() => {}} />);
+    fireEvent.change(screen.getByPlaceholderText(placeholder), { target: { value: "half a question" } });
+    first.unmount();
+    render(<Thread onAddProvider={() => {}} />);
+    expect((screen.getByPlaceholderText(placeholder) as HTMLTextAreaElement).value).toBe("half a question");
+  });
+
+  it("wraps a long unbroken word inside the bubble", () => {
+    useAgent.setState({ messages: [{ id: "u1", role: "user", content: "a".repeat(400) }] });
+    render(<Thread onAddProvider={() => {}} />);
+    expect(screen.getByText("a".repeat(400)).className).toContain("[overflow-wrap:anywhere]");
+  });
+
+  it("opens at the newest turn when a minimised conversation is shown again", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+      frames.push(cb);
+      return frames.length;
+    });
+    useAgent.setState({
+      messages: [
+        { id: "u1", role: "user", content: "first" },
+        { id: "a1", role: "assistant", content: "Done." },
+      ],
+    });
+    render(<Thread onAddProvider={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Minimise the conversation" }));
+    const scroll = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+    scroll.mockClear();
+    frames.length = 0;
+    fireEvent.click(screen.getByRole("button", { name: /2 messages/ }));
+    act(() => {
+      for (const frame of frames.splice(0)) frame(0);
+    });
+    expect(scroll).toHaveBeenCalledWith({ block: "end" });
   });
 });

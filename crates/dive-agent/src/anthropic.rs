@@ -28,7 +28,10 @@ pub fn body(request: &Request) -> Value {
         "thinking": {"type": "adaptive", "display": "summarized"},
         "fallbacks": "default",
         "system": [{"type": "text", "text": request.system, "cache_control": {"type": "ephemeral"}}],
-        "messages": request.turns.iter().map(|t| json!({"role": t.role, "content": t.content})).collect::<Vec<_>>(),
+        // A turn with nothing in it -- a reply stopped before its first
+        // word -- is refused with a 400 that fails the whole request, so it
+        // is left out; the API joins the turns either side of it.
+        "messages": request.turns.iter().filter(|t| !is_blank(&t.content)).map(|t| json!({"role": t.role, "content": t.content})).collect::<Vec<_>>(),
     });
     let effort = match request.effort {
         Effort::Default => None,
@@ -44,6 +47,16 @@ pub fn body(request: &Request) -> Value {
         body["tools"] = serde_json::to_value(&request.tools).unwrap_or(Value::Null);
     }
     body
+}
+
+/// Content the API would reject as empty: blank text or no blocks at all.
+fn is_blank(content: &Value) -> bool {
+    match content {
+        Value::String(text) => text.trim().is_empty(),
+        Value::Array(blocks) => blocks.is_empty(),
+        Value::Null => true,
+        _ => false,
+    }
 }
 
 /// Models from `GET /v1/models`. Every current Claude model takes tools and
@@ -250,6 +263,22 @@ fn append(block: Option<&mut Value>, key: &str, text: &str) {
 mod tests {
     use super::*;
     use crate::{Role, ToolSpec, Turn};
+
+    #[test]
+    fn blank_turns_are_left_out_of_the_body() {
+        let r = Request::new(
+            "be brief",
+            vec![
+                Turn::text(Role::User, "first"),
+                Turn::text(Role::Assistant, ""),
+                Turn::text(Role::User, "again"),
+            ],
+        );
+        let b = body(&r);
+        let messages = b["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert!(messages.iter().all(|m| m["role"] == "user"));
+    }
 
     #[test]
     fn body_has_current_api_shape() {
