@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ipc } from "../../lib/ipc";
 import { exportTheme } from "../../lib/theme";
 import { DEFAULT_PREFS, usePrefs } from "../../store/prefs";
-import { Appearance } from "./Appearance";
+import { Appearance, normalizeHex } from "./Appearance";
 
 const clipboard = { writeText: vi.fn(), readText: vi.fn() };
 
@@ -106,6 +106,40 @@ describe("Appearance", () => {
     fireEvent.change(screen.getByLabelText("Custom accent"), { target: { value: "#ff8800" } });
     await waitFor(() => expect(prefs().accent).toBe("#FF8800"));
     expect(document.documentElement.style.getPropertyValue("--color-highlight")).toBe("#FF8800");
+  });
+
+  it("reads a short hex, flags one it cannot use, and puts the colour back on blur", async () => {
+    expect(normalizeHex("#abc")).toBe("#AABBCC");
+    expect(normalizeHex("12ab34")).toBe("#12AB34");
+    expect(normalizeHex("#12345")).toBeNull();
+    usePrefs.setState({ prefs: { ...DEFAULT_PREFS, appearance_preset: "custom" }, loaded: true });
+    render(<Appearance />);
+    const hex = screen.getByLabelText("Highlight hex") as HTMLInputElement;
+    fireEvent.change(hex, { target: { value: "#zz" } });
+    expect(hex.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByText("Use #RRGGBB")).toBeTruthy();
+    fireEvent.blur(hex);
+    expect(hex.value).toBe(DEFAULT_PREFS.custom_highlight.toUpperCase());
+    expect(hex.getAttribute("aria-invalid")).toBeNull();
+    fireEvent.change(hex, { target: { value: "#f80" } });
+    fireEvent.blur(hex);
+    await waitFor(() => expect(prefs().custom_highlight).toBe("#FF8800"));
+  });
+
+  it("previews a drag without saving each step, and saves once it is let go", async () => {
+    const set = vi.spyOn(ipc, "prefsSet");
+    render(<Appearance />);
+    const slider = screen.getByLabelText("Interface size");
+    // React's onChange follows every input event of the drag.
+    fireEvent.input(slider, { target: { value: "110" } });
+    fireEvent.input(slider, { target: { value: "115" } });
+    expect(document.documentElement.style.fontSize).toBe("18.4px");
+    expect(screen.getByTestId("scale-value").textContent).toBe("115%");
+    expect(set).not.toHaveBeenCalled();
+    expect(prefs().ui_scale).toBe(1);
+    fireEvent.change(slider, { target: { value: "115" } });
+    await waitFor(() => expect(prefs().ui_scale).toBe(1.15));
+    expect(set).toHaveBeenCalledTimes(1);
   });
 
   it("moves the interface size slider and resets it", async () => {

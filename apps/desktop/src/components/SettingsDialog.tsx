@@ -116,7 +116,7 @@ export function SettingsDialog() {
         aria-modal="true"
         aria-label="Settings"
         onMouseDown={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.key === "Escape" && close()}
+        onKeyDown={(e) => e.key === "Escape" && !escapeBelongsToField(e) && close()}
         className="flex h-[min(620px,88vh)] w-[860px] max-w-[92vw] overflow-hidden rounded-2xl border border-line-2 bg-surface shadow-2xl"
       >
         <nav
@@ -124,7 +124,7 @@ export function SettingsDialog() {
           aria-label="Settings sections"
           aria-orientation="vertical"
           onKeyDown={onNavKey}
-          className="flex w-[188px] shrink-0 flex-col border-r border-line bg-ground p-2.5"
+          className="flex w-[168px] shrink-0 flex-col overflow-y-auto border-r border-line bg-ground p-2.5 min-[900px]:w-[188px]"
         >
           <h2 className="px-2 pt-1 pb-2.5 text-sm font-semibold">Settings</h2>
           {visibleSections().map((s) => (
@@ -158,7 +158,7 @@ export function SettingsDialog() {
             role="tabpanel"
             id={`settings-panel-${section}`}
             aria-labelledby={`settings-tab-${section}`}
-            className="min-h-0 flex-1 overflow-y-auto px-5 pt-4 pb-2"
+            className="@container min-h-0 flex-1 overflow-y-auto px-5 pt-4 pb-2"
           >
             <Panel section={section} info={info} />
           </div>
@@ -166,6 +166,23 @@ export function SettingsDialog() {
       </div>
     </div>
   );
+}
+
+/**
+ * Whether an Escape is for the field it was pressed in rather than for the
+ * dialog. A field with text in it gets the key -- to clear a half-typed API
+ * key or site, or take back an edit -- and closing Settings there lost what
+ * was typed. Settings' own fields (`data-settings-field`) decide for
+ * themselves: they stop the key when they have an edit to take back and let
+ * it through when they do not.
+ */
+export function escapeBelongsToField(e: { target: EventTarget | null; defaultPrevented: boolean }): boolean {
+  if (e.defaultPrevented) return true;
+  const target = e.target;
+  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return false;
+  if (target.hasAttribute("data-settings-field")) return false;
+  if (target instanceof HTMLInputElement && !["text", "search", "url", "email", "password", "tel", "number", ""].includes(target.type)) return false;
+  return target.value !== "";
 }
 
 function Panel({ section, info }: { section: SectionId; info: AppInfo | null }) {

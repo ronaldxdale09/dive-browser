@@ -13,7 +13,9 @@
 
 use std::sync::Mutex;
 
-use dive_core::{ProfileId, Store, Tab, TabState, Timestamp, Workspace};
+use dive_core::{
+    ImportedEntry, ImportedFormEntry, ProfileId, Store, Tab, TabState, Timestamp, Workspace,
+};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -242,62 +244,63 @@ pub fn restore(
     let mut summary = RestoreSummary::default();
     let now = Timestamp::now();
 
-    let existing: std::collections::HashSet<String> = lock(store)
-        .all_bookmarks()?
-        .into_iter()
-        .map(|bookmark| bookmark.url)
-        .collect();
-    let bookmarks: Vec<&BackupBookmark> = backup
+    // Every merge below counts the rows it actually inserted, not the rows
+    // it was handed: a second restore of the same file used to report
+    // thousands of "restored" pages while adding none of them.
+    let bookmarks: Vec<ImportedEntry> = backup
         .bookmarks
         .iter()
-        .filter(|bookmark| is_keepable(&bookmark.url) && !existing.contains(&bookmark.url))
+        .filter(|bookmark| is_keepable(&bookmark.url))
+        .map(|bookmark| ImportedEntry {
+            url: bookmark.url.clone(),
+            title: bookmark.title.clone(),
+            at: Timestamp::parse(&bookmark.created_at).unwrap_or(now),
+        })
         .collect();
     summary.bookmarks = count(merge_in_chunks(
         store,
         profile,
         &bookmarks,
-        |store, chunk| {
-            for bookmark in chunk {
-                let at = Timestamp::parse(&bookmark.created_at).unwrap_or(now);
-                store.add_bookmark(&bookmark.url, &bookmark.title, at)?;
-            }
-            Ok(chunk.len())
-        },
+        |store, chunk| Ok(store.import_bookmarks(chunk)?),
     )?);
 
-    let history: Vec<&BackupVisit> = backup
+    // A visit already on record at the same moment is the same visit, so
+    // restoring the file again adds nothing.
+    let history: Vec<ImportedEntry> = backup
         .history
         .iter()
         .filter(|visit| is_keepable(&visit.url))
+        .map(|visit| ImportedEntry {
+            url: visit.url.clone(),
+            title: visit.title.clone(),
+            at: Timestamp::parse(&visit.last_visited_at).unwrap_or(now),
+        })
         .collect();
     summary.history = count(merge_in_chunks(
         store,
         profile,
         &history,
-        |store, chunk| {
-            for visit in chunk {
-                let at = Timestamp::parse(&visit.last_visited_at).unwrap_or(now);
-                store.record_visit(&visit.url, &visit.title, at)?;
-            }
-            Ok(chunk.len())
-        },
+        |store, chunk| Ok(store.import_history(chunk)?),
     )?);
 
-    let entries: Vec<&BackupFormEntry> = backup
+    // Skipped when already remembered, rather than counted as another use:
+    // a restore is not the person typing the value again.
+    let entries: Vec<ImportedFormEntry> = backup
         .form_entries
         .iter()
         .filter(|entry| crate::browser_import::keep_form_entry(&entry.field, &entry.value))
+        .map(|entry| ImportedFormEntry {
+            field: entry.field.clone(),
+            value: entry.value.clone(),
+            uses: 1,
+            last_used_at: Some(now),
+        })
         .collect();
     summary.form_entries = count(merge_in_chunks(
         store,
         profile,
         &entries,
-        |store, chunk| {
-            for entry in chunk {
-                store.record_form_entry(profile, &entry.field, &entry.value, now)?;
-            }
-            Ok(chunk.len())
-        },
+        |store, chunk| Ok(store.import_form_entries(profile, chunk)?),
     )?);
 
     // A handful of workspaces and their tabs: one hold is short enough.
@@ -399,6 +402,57 @@ mod tests {
         });
         assert!(switched.is_err());
         assert_eq!(holds, 1);
+    }
+
+    #[test]
+    fn a_second_restore_of_the_same_file_counts_nothing() {
+        let store = Store::in_memory().unwrap();
+        let profile = store.ensure_default_profile().unwrap();
+        let home = Workspace::new("Home", profile.container_id, profile.id, 0);
+        store.upsert_workspace(&home).unwrap();
+        store
+            .set_setting(crate::state::ACTIVE_WORKSPACE, &home.id.to_string())
+            .unwrap();
+        store
+            .add_bookmark("https://kept.example/", "Kept", Timestamp::now())
+            .unwrap();
+        let store = Mutex::new(store);
+        let backup = Backup {
+            version: VERSION,
+            exported_at: "2026-09-15T00:00:00Z".into(),
+            app_version: "0.1.26".into(),
+            preferences: None,
+            bookmarks: vec![
+                BackupBookmark {
+                    url: "https://kept.example/".into(),
+                    title: "Kept".into(),
+                    created_at: "2026-09-01T00:00:00Z".into(),
+                },
+                BackupBookmark {
+                    url: "https://new.example/".into(),
+                    title: "New".into(),
+                    created_at: "2026-09-01T00:00:00Z".into(),
+                },
+            ],
+            history: vec![BackupVisit {
+                url: "https://new.example/".into(),
+                title: "New".into(),
+                last_visited_at: "2026-09-02T00:00:00Z".into(),
+            }],
+            form_entries: vec![BackupFormEntry {
+                field: "email".into(),
+                value: "me@example.com".into(),
+            }],
+            workspaces: vec![],
+        };
+        let first = restore(&store, profile.id, &backup).unwrap();
+        // The bookmark that was already here is not counted as restored.
+        assert_eq!(
+            (first.bookmarks, first.history, first.form_entries),
+            (1, 1, 1)
+        );
+        let second = restore(&store, profile.id, &backup).unwrap();
+        assert_eq!(second, RestoreSummary::default());
     }
 
     #[test]

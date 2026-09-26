@@ -756,7 +756,7 @@ export const commands = {
 	 */
 	tabRestoreScroll: (id: TabId, x: number, y: number) => typedError<null, AppError>(__TAURI_INVOKE("tab_restore_scroll", { id, x, y })),
 	/**  Delete browsing data; returns a one-line summary of what went. */
-	browsingDataClear: (what: ClearRequest) => typedError<string, AppError>(__TAURI_INVOKE("browsing_data_clear", { what })),
+	browsingDataClear: (what: ClearRequest) => typedError<ClearOutcome, AppError>(__TAURI_INVOKE("browsing_data_clear", { what })),
 	/**  Show a download in the system file manager, or the downloads folder when `path` is `None`. */
 	downloadsReveal: (path: string | null) => typedError<null, AppError>(__TAURI_INVOKE("downloads_reveal", { path })),
 	/**

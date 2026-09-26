@@ -183,6 +183,17 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   },
 }));
 
+/**
+ * Show `patch` on the chrome without saving it, while a colour or the size
+ * slider is being dragged. Each step used to be a full preference write --
+ * a host round trip that also touched every open tab -- many times a second.
+ * The drag previews here and saves once, when it is let go; nothing is
+ * stored in the meantime, so the preview goes if it is never committed.
+ */
+export function previewAppearance(patch: Partial<Prefs>) {
+  applyAppearance({ ...usePrefs.getState().prefs, ...patch }, { preview: true });
+}
+
 /** Fill in anything the host left out, so the UI never binds to undefined. */
 function complete(wire: WirePrefs): Prefs {
   const prefs: Record<string, unknown> = { ...DEFAULT_PREFS };
@@ -231,7 +242,7 @@ export function isDefaultAppearance(prefs: Prefs): boolean {
  * tokens. At the defaults the inline properties are removed instead, so the
  * stylesheet's own values apply and the root carries nothing extra.
  */
-export function applyAppearance(prefs: Prefs) {
+export function applyAppearance(prefs: Prefs, { preview = false }: { preview?: boolean } = {}) {
   const root = document.documentElement;
   // A private window is drawn dark whatever the theme says (styles.css pins
   // its palette), so the root and the pages in it hear "dark" too; a light
@@ -239,21 +250,23 @@ export function applyAppearance(prefs: Prefs) {
   // of what surrounds them.
   const scheme = isPrivateWindow() ? "dark" : resolveScheme(prefs, systemTheme);
   root.dataset.theme = scheme;
-  syncPagesScheme(scheme);
+  // A preview stays in the chrome: pages and the native window hear about a
+  // colour once it is chosen, not at every step of the drag.
+  if (!preview) syncPagesScheme(scheme);
   root.dataset.density = prefs.density;
   root.dataset.tabStyle = prefs.tab_style;
   root.dataset.motion = resolveMotion(prefs);
   if (isDefaultAppearance(prefs)) {
     for (const name of THEME_VARS) root.style.removeProperty(name);
     root.style.removeProperty("font-size");
-    syncWindowBackground();
+    if (!preview) syncWindowBackground();
     return;
   }
   for (const [name, value] of themeCss(prefs, scheme)) root.style.setProperty(name, value);
   const scale = Math.min(1.3, Math.max(0.8, prefs.ui_scale || 1));
   if (scale === 1) root.style.removeProperty("font-size");
   else root.style.fontSize = `${16 * scale}px`;
-  syncWindowBackground();
+  if (!preview) syncWindowBackground();
 }
 
 // Pages that are told the theme get the scheme the chrome is drawn in, which

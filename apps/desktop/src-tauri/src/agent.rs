@@ -428,6 +428,13 @@ pub struct SendOptions {
 pub struct KeyCheck {
     /// The provider accepted it.
     pub ok: bool,
+    /// The key is known to be unusable: the provider refused it (401 or
+    /// 403), or there was nothing to try. Anything else that stops a check
+    /// -- the provider down, no network, a proxy in the way -- says nothing
+    /// about the key, and the chrome saves it anyway rather than making a
+    /// working key impossible to enter while offline.
+    #[serde(default)]
+    pub rejected: bool,
     /// What happened, for the person.
     pub message: String,
 }
@@ -491,22 +498,27 @@ pub(crate) async fn agent_key_verify(
     Ok(match client.verify().await {
         Ok(()) => KeyCheck {
             ok: true,
+            rejected: false,
             message: format!("{} accepted the key.", provider.info().name),
         },
         Err(e) if e.is_unauthorized() => KeyCheck {
             ok: false,
+            rejected: true,
             message: rejection_text(&provider.info().name, &e),
         },
         Err(dive_agent::AgentError::MissingKey) => KeyCheck {
             ok: false,
+            rejected: true,
             message: "Paste a key first.".into(),
         },
         Err(dive_agent::AgentError::MissingBaseUrl) => KeyCheck {
             ok: false,
+            rejected: true,
             message: "Set the base URL of the custom endpoint first.".into(),
         },
         Err(e) => KeyCheck {
             ok: false,
+            rejected: false,
             message: format!("Could not reach {}: {e}", provider.info().name),
         },
     })

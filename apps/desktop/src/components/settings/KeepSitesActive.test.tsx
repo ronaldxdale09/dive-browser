@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, expect, it, vi } from "vitest";
 import { ipc } from "../../lib/ipc";
 import { useBrowser } from "../../store/browser";
-import { KeepSitesActive } from "./KeepSitesActive";
+import { KeepSitesActive, siteAddress } from "./KeepSitesActive";
 vi.mock("../../lib/ipc", () => ({ ipc: { keepSitesList: vi.fn(), keepSiteSet: vi.fn() } }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 it("does not claim host and port without scheme", async () => {
@@ -39,4 +39,20 @@ it("ignores an old profile response after switching profiles", async () => {
   await screen.findByText("https://new.example");
   await act(async () => { resolve(["https://old.example"]); });
   expect(screen.queryByText("https://old.example")).toBeNull();
+});
+
+it("takes a bare host as the https site it means", async () => {
+  expect(siteAddress("  example.com ")).toBe("https://example.com");
+  expect(siteAddress("localhost:3000")).toBe("https://localhost:3000");
+  expect(siteAddress("http://intranet.test")).toBe("http://intranet.test");
+  expect(siteAddress("")).toBe("");
+  useBrowser.setState({ activeProfile: "personal" });
+  vi.mocked(ipc.keepSitesList).mockResolvedValue([]);
+  vi.mocked(ipc.keepSiteSet).mockResolvedValue(["https://example.com"]);
+  render(<KeepSitesActive />);
+  const field = await screen.findByLabelText("Site to keep active");
+  expect(field.getAttribute("type")).toBe("text");
+  fireEvent.change(field, { target: { value: "example.com" } });
+  fireEvent.keyDown(field, { key: "Enter" });
+  await waitFor(() => expect(ipc.keepSiteSet).toHaveBeenCalledWith("personal", "https://example.com", true));
 });

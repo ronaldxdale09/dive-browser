@@ -376,7 +376,9 @@ pub fn build_chromium_args(renderer_limit: Option<&str>) -> Vec<(&'static str, O
         crate::extensions::startup_paths()
     };
     crate::extensions::mark_started(&extension_paths);
-    let mut network = crate::netconfig::flags(&crate::netconfig::load());
+    let network_config = crate::netconfig::load();
+    crate::netconfig::record_running(&network_config);
+    let mut network = crate::netconfig::flags(&network_config);
     let mut args = build_chromium_args_with(
         renderer_limit,
         &std::env::var("DIVE_CHROMIUM_FLAGS").unwrap_or_default(),
