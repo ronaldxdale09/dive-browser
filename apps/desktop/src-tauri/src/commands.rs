@@ -1157,17 +1157,20 @@ pub(crate) fn workspace_activate(
         store.last_active_tab(id)?
     };
     *lock(&state.active_workspace) = Some(id);
-    if let Some(host) = lock(&state.host).as_mut() {
-        host.deactivate_all()?;
-    }
-    state.bus.publish(CoreEvent::WorkspaceActivated(id));
-    if let Some(tab) = last {
-        let next = tab.id;
-        on_main(&app, move |main, app, state| {
-            activate_tab(main, app, state, next)
-        })?;
-    }
-    Ok(())
+    let next = last.map(|tab| tab.id);
+    // Hiding the old workspace's views is native view work too, so it makes
+    // the same hop as showing the new one; off the main thread it raced the
+    // engine's own view changes.
+    on_main(&app, move |main, app, state| {
+        if let Some(host) = lock(&state.host).as_mut() {
+            host.deactivate_all()?;
+        }
+        state.bus.publish(CoreEvent::WorkspaceActivated(id));
+        if let Some(next) = next {
+            activate_tab(main, app, state, next)?;
+        }
+        Ok(())
+    })
 }
 
 /// How many tabs a workspace holds, for the rail.
@@ -1326,11 +1329,7 @@ pub(crate) fn workspace_delete(
             next,
         )
     };
-    if let Some(host) = lock(&state.host).as_mut() {
-        for tab in &tab_ids {
-            host.close(*tab)?;
-        }
-    }
+    close_views(&app, &state, &tab_ids)?;
     lock(&state.store).remove_workspace(id)?;
     for tab in tab_ids {
         state.bus.publish(CoreEvent::TabClosed(tab));
@@ -1341,6 +1340,44 @@ pub(crate) fn workspace_delete(
         workspace_activate(app, state, next)?;
     }
     Ok(())
+}
+
+/// Close the views of tabs that are going with their workspace or profile,
+/// and forget what the rest of the app kept about them.
+///
+/// These used to go through `host.close` alone, from the command's worker
+/// thread: a recording kept its ffmpeg running, subtitles kept transcribing,
+/// and every per-tab registry kept its entry for a tab that no longer
+/// existed. Views are closed on the main thread, as `close_tab` closes them.
+fn close_views(app: &AppHandle<Runtime>, state: &AppState, tabs: &[TabId]) -> AppResult<()> {
+    for tab in tabs {
+        forget_tab_state(app, state, *tab);
+    }
+    let tabs = tabs.to_vec();
+    on_main(app, move |_, _, state| {
+        if let Some(host) = lock(&state.host).as_mut() {
+            for tab in &tabs {
+                host.close(*tab)?;
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Forget everything kept about tab `id` outside the host and the store:
+/// its recording, its subtitles, its buffered console and network rows, its
+/// inspector picks, its crash budget, its privacy report, a sign-in prompt
+/// still waiting, and a pending https upgrade. Every path that closes a tab
+/// calls this, so none of them leaks what another path cleans up.
+pub(crate) fn forget_tab_state(app: &AppHandle<Runtime>, state: &AppState, id: TabId) {
+    crate::subtitles::stop_tab(app, id);
+    state.screencast.discard(id);
+    state.buffers.drop_tab(id);
+    state.inspector.drop_tab(id);
+    state.crashes.drop_tab(id);
+    state.privacy_pages.drop_tab(id);
+    state.http_auth.forget_tab(id);
+    crate::https_only::forget(id);
 }
 
 /// Setting key remembering the last workspace of a profile.
@@ -1508,11 +1545,7 @@ pub(crate) fn profile_delete(
         let next = profiles.iter().find(|p| p.id != id).map(|p| p.id);
         (workspaces, tabs, next)
     };
-    if let Some(host) = lock(&state.host).as_mut() {
-        for tab in &tab_ids {
-            host.close(*tab)?;
-        }
-    }
+    close_views(&app, &state, &tab_ids)?;
     let was_active = {
         let active = *lock(&state.active_workspace);
         workspaces.iter().any(|w| Some(w.id) == active)
@@ -1691,7 +1724,7 @@ pub fn close_tab(
     state: &AppState,
     id: TabId,
 ) -> AppResult<()> {
-    crate::subtitles::stop_tab(app, id);
+    forget_tab_state(app, state, id);
     let (was_active, workspace) = {
         let mut host = lock(&state.host);
         let store = lock(&state.store);
@@ -1706,11 +1739,6 @@ pub fn close_tab(
             tab.workspace_id.or(*lock(&state.active_workspace)),
         )
     };
-    state.buffers.drop_tab(id);
-    state.inspector.drop_tab(id);
-    state.crashes.drop_tab(id);
-    state.privacy_pages.drop_tab(id);
-    state.screencast.discard(id);
     state.bus.publish(CoreEvent::TabClosed(id));
     // Picked in its own statement so the store guard is released before
     // `activate_tab` takes the store again. Inside an `if let` chain the
