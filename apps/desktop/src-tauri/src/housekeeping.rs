@@ -55,20 +55,39 @@ pub fn start(app: AppHandle<Runtime>) {
             }
             // History retention is measured in days; pruning it on every
             // one-minute sweep was a SQLite transaction a minute for the life
-            // of the process. Once an hour is plenty.
+            // of the process. Once an hour is plenty -- but the first time
+            // comes with the first sweep, a minute after launch, rather than
+            // an hour in: a session shorter than that never pruned at all.
             sweeps = sweeps.wrapping_add(1);
-            if !sweeps.is_multiple_of(PRUNE_EVERY_SWEEPS) {
+            if sweeps != 1 && !sweeps.is_multiple_of(PRUNE_EVERY_SWEEPS) {
                 continue;
             }
-            let state = app.state::<AppState>();
-            match crate::prefs::prune_history(&state) {
-                Ok(0) => {}
-                Ok(n) => tracing::info!(n, "pruned history past the retention window"),
-                Err(e) => tracing::warn!("history prune failed: {e}"),
+            let app = app.clone();
+            // A blocking thread, not this task's worker: a first prune under
+            // a newly shortened retention can be a large delete.
+            if let Err(e) = tauri::async_runtime::spawn_blocking(move || prune(&app)).await {
+                tracing::warn!("history prune did not finish: {e}");
             }
-            crate::agent::prune_threads(&state);
         }
     });
+}
+
+/// The periodic clean-up of what is kept past its time: visits beyond the
+/// retention window, conversations whose tab is gone, and icons nothing
+/// wears any more.
+fn prune(app: &AppHandle<Runtime>) {
+    let state = app.state::<AppState>();
+    match crate::prefs::prune_history(&state) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(n, "pruned history past the retention window"),
+        Err(e) => tracing::warn!("history prune failed: {e}"),
+    }
+    crate::agent::prune_threads(&state);
+    match lock(&state.store).prune_favicon_images() {
+        Ok(0) => {}
+        Ok(n) => tracing::debug!(n, "dropped icons nothing wears"),
+        Err(e) => tracing::warn!("icon prune failed: {e}"),
+    }
 }
 
 /// Why an idle tab is still kept alive.

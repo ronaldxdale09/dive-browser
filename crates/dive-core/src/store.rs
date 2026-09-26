@@ -213,7 +213,55 @@ const MIGRATIONS: &[&str] = &[
     // whichever workspace happens to be active. Empty for apps installed
     // before this, which keep opening in the active workspace.
     "ALTER TABLE web_apps ADD COLUMN workspace_id TEXT;",
+    // v17: one row per address a profile has visited, kept up to date by
+    // `record_visit` next to the visit log. Searching history used to group
+    // the whole log by address on every keystroke; a few months of browsing
+    // is tens of thousands of visits but only a few thousand addresses.
+    // Addresses are indexed by a 64-bit hash rather than by their text:
+    // they run to kilobytes, and an index on the text doubled the size of
+    // the database. `key_hash` hashes the address without its fragment or
+    // trailing slash (see `url_key`), which finds the twins shown as one
+    // row. The rows are filled in `URLS_MIGRATION`, since the hashes are
+    // computed in Rust.
+    "CREATE TABLE urls (
+        id INTEGER PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        url TEXT NOT NULL,
+        url_hash INTEGER NOT NULL,
+        key_hash INTEGER NOT NULL,
+        title TEXT NOT NULL DEFAULT '',
+        last_visit TEXT NOT NULL,
+        visit_count INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX urls_by_address ON urls(profile_id, url_hash);
+    CREATE INDEX urls_by_key ON urls(profile_id, key_hash);
+    CREATE INDEX urls_by_recency ON urls(profile_id, last_visit);",
+    // v18: site icons are stored once, under a key made from their bytes,
+    // and everything else refers to them by that key. A tab row used to
+    // carry its icon inline -- tens of kilobytes of `data:` URL -- into
+    // every tab event, snapshot and history result the chrome was sent.
+    // `source` names the icon links the page declared when the icon was
+    // resolved, so a later load that declares the same ones can skip the
+    // fetch. The data moves across in `FAVICON_KEYS_MIGRATION`, since the
+    // key is computed in Rust.
+    "CREATE TABLE favicon_images (
+        key TEXT PRIMARY KEY,
+        data TEXT NOT NULL
+    );
+    CREATE TABLE favicons_by_key (
+        origin TEXT PRIMARY KEY,
+        key TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL
+    );",
 ];
+
+/// Migrations whose data moves run in Rust, after their SQL and inside the
+/// same transaction: see [`fill_urls`] and [`move_favicons_to_keys`]. A
+/// migration renumbered while merging must carry its number here with it.
+const URLS_MIGRATION: usize = 17;
+/// See [`URLS_MIGRATION`].
+const FAVICON_KEYS_MIGRATION: usize = 18;
 
 /// Setting that names the active workspace; the store reads it to know
 /// which profile history and bookmarks belong to right now.
@@ -249,22 +297,207 @@ fn backup_before_migrating(path: &Path) -> Result<Option<std::path::PathBuf>> {
             )),
         ))
     })?;
+    remove_older_backups(path, &backup);
     Ok(Some(backup))
 }
 
-/// How a history row reads on screen: its origin and title.
-///
-/// Two visits that differ only in a trailing slash or a tracking parameter
-/// share this, and are worth one line rather than two. An untitled page falls
-/// back to its full URL, since collapsing every blank title on a host would
-/// hide real pages.
-fn display_key(entry: &HistoryEntry) -> String {
-    let origin = crate::origin_of(&entry.url).unwrap_or_default();
-    if entry.title.is_empty() {
-        entry.url.clone()
-    } else {
-        format!("{origin}\u{1f}{}", entry.title)
+/// Delete the copies earlier migrations left beside the database, keeping
+/// `newest`. Each is a whole copy of the database -- tens of megabytes after
+/// some months -- and only the one taken just before the latest migration is
+/// worth going back to: an older one predates changes the newer copy holds.
+/// Failing to delete one costs disk space, never data, so errors are only
+/// logged.
+fn remove_older_backups(path: &Path, newest: &Path) {
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        return;
+    };
+    let prefix = format!("{}.before-v", name.to_string_lossy());
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let file = entry.file_name();
+        let file = file.to_string_lossy();
+        let is_backup = file
+            .strip_prefix(&prefix)
+            .is_some_and(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()));
+        if !is_backup || entry.path() == newest {
+            continue;
+        }
+        match std::fs::remove_file(entry.path()) {
+            Ok(()) => tracing::info!(backup = %file, "removed an older pre-migration copy"),
+            Err(e) => {
+                tracing::warn!(backup = %file, "could not remove an older pre-migration copy: {e}");
+            }
+        }
     }
+}
+
+/// The key a site icon is stored and requested under, made from its bytes.
+///
+/// FNV-1a over the `data:` URL plus its length: a stable, dependency-free
+/// fingerprint for a table that holds a few hundred icons, where the only
+/// thing a collision could do is show one site's mark on another. Because the
+/// key names the content, the chrome can cache what it reads for a key for as
+/// long as it runs; a changed icon arrives under a new key.
+pub fn favicon_key(data: &str) -> String {
+    format!("{:016x}{:x}", fnv1a(data), data.len())
+}
+
+/// 64-bit FNV-1a of `s`: tiny, stable across builds and platforms, and good
+/// enough to tell apart the few thousand strings a table here holds.
+fn fnv1a(s: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in s.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// [`fnv1a`] as SQLite stores an integer. Lookups always compare the text as
+/// well, so two addresses that share a hash stay two rows.
+fn url_hash(s: &str) -> i64 {
+    i64::from_ne_bytes(fnv1a(s).to_ne_bytes())
+}
+
+/// Fill the per-address table from the visit log: one row per profile and
+/// address, with its visit count, its latest visit and the title of its
+/// latest titled visit. Runs inside migration v17's transaction.
+fn fill_urls(conn: &Connection) -> Result<()> {
+    // SQLite's bare column beside MAX() comes from the row holding the
+    // maximum, which makes this the newest non-empty title per address.
+    let titles: std::collections::HashMap<(String, String), String> = {
+        let mut stmt = conn.prepare(
+            "SELECT profile_id, url, title, MAX(visited_at) FROM history
+             WHERE title != '' GROUP BY profile_id, url",
+        )?;
+        let rows = stmt.query_map([], |r| Ok(((r.get(0)?, r.get(1)?), r.get(2)?)))?;
+        rows.collect::<std::result::Result<_, _>>()?
+    };
+    let mut visited = conn.prepare(
+        "SELECT profile_id, url, MAX(visited_at), COUNT(*) FROM history GROUP BY profile_id, url",
+    )?;
+    let mut insert = conn.prepare(
+        "INSERT INTO urls (profile_id, url, url_hash, key_hash, title, last_visit, visit_count)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+    )?;
+    let mut rows = visited.query([])?;
+    while let Some(row) = rows.next()? {
+        let (profile, url): (String, String) = (row.get(0)?, row.get(1)?);
+        let (last, count): (String, i64) = (row.get(2)?, row.get(3)?);
+        let title = titles
+            .get(&(profile.clone(), url.clone()))
+            .map_or("", String::as_str);
+        insert.execute(params![
+            profile,
+            url,
+            url_hash(&url),
+            url_hash(url_key(&url)),
+            title,
+            last,
+            count
+        ])?;
+    }
+    Ok(())
+}
+
+/// Move icons from inline `data:` URLs to [`favicon_key`]s: the bytes go to
+/// `favicon_images` once, and the origin cache and every tab keep only the
+/// key. Runs inside the migration's transaction, so a failure leaves the
+/// database as it was.
+fn move_favicons_to_keys(conn: &Connection) -> Result<()> {
+    let origins: Vec<(String, String, String)> = {
+        let mut stmt = conn.prepare("SELECT origin, data, updated_at FROM favicons")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        rows.collect::<std::result::Result<_, _>>()?
+    };
+    for (origin, data, updated_at) in origins {
+        let key = favicon_key(&data);
+        conn.execute(
+            "INSERT OR IGNORE INTO favicon_images (key, data) VALUES (?1, ?2)",
+            params![key, data],
+        )?;
+        conn.execute(
+            "INSERT INTO favicons_by_key (origin, key, updated_at) VALUES (?1, ?2, ?3)",
+            params![origin, key, updated_at],
+        )?;
+    }
+    let tabs: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare("SELECT id, favicon FROM tabs WHERE favicon IS NOT NULL AND favicon != ''")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<std::result::Result<_, _>>()?
+    };
+    for (id, data) in tabs {
+        let key = favicon_key(&data);
+        conn.execute(
+            "INSERT OR IGNORE INTO favicon_images (key, data) VALUES (?1, ?2)",
+            params![key, data],
+        )?;
+        conn.execute(
+            "UPDATE tabs SET favicon = ?2 WHERE id = ?1",
+            params![id, key],
+        )?;
+    }
+    conn.execute_batch("DROP TABLE favicons; ALTER TABLE favicons_by_key RENAME TO favicons;")?;
+    Ok(())
+}
+
+/// What makes two history addresses the same page on screen: the address
+/// without its fragment and without trailing slashes. `https://a.dev/`,
+/// `https://a.dev` and `https://a.dev/#top` are one page; `?gl=PH` is not
+/// ignored, since a query can be the whole difference between two pages.
+pub fn url_key(url: &str) -> &str {
+    url.split('#').next().unwrap_or(url).trim_end_matches('/')
+}
+
+/// The empty document's own name, which a page reports as its title while
+/// the real one is still loading.
+const BLANK_TITLE: &str = "about:blank";
+
+/// How many matching addresses a history search ranks: the newest this many.
+/// Plenty for a site visited every day for months to be among them, and few
+/// enough that a one-letter query stays cheap.
+const HISTORY_CANDIDATES: usize = 1000;
+
+/// How much more a page counts when its address begins with what was typed.
+/// Typing `git` means github.com far more often than a page whose title
+/// happens to mention git, however often that page was read.
+const HOST_MATCH_BOOST: f64 = 8.0;
+
+/// How strongly history suggests a page: how often it was visited, weighed
+/// by how long ago the last visit was.
+///
+/// Recency comes in steps rather than a smooth decay, so a page read this
+/// morning and one read last night are equals. The count is taken on a log
+/// scale: a page visited daily still outranks one visited once, but a page
+/// left open and reloading itself for a year does not bury everything else.
+fn frecency(visits: u32, age: time::Duration) -> f64 {
+    let recency = match age.whole_hours() {
+        h if h < 24 => 100.0,
+        h if h < 24 * 4 => 70.0,
+        h if h < 24 * 14 => 50.0,
+        h if h < 24 * 31 => 30.0,
+        h if h < 24 * 90 => 15.0,
+        _ => 5.0,
+    };
+    recency * f64::from(visits.max(1)).ln_1p()
+}
+
+/// Whether `url`, without its scheme and `www.`, begins with `needle`
+/// (already lower-cased), which is also read without a scheme or `www.`:
+/// `git`, `github.com/` and `https://www.github.com` all match github.com.
+fn address_starts_with(url: &str, needle: &str) -> bool {
+    fn bare(s: &str) -> &str {
+        let s = s
+            .strip_prefix("https://")
+            .or_else(|| s.strip_prefix("http://"))
+            .unwrap_or(s);
+        s.strip_prefix("www.").unwrap_or(s)
+    }
+    let needle = bare(needle);
+    !needle.is_empty() && bare(&url.to_lowercase()).starts_with(needle)
 }
 
 /// A bookmark or visit brought in from another browser.
@@ -287,7 +520,8 @@ pub struct Bookmark {
     pub title: String,
     /// RFC 3339 creation time.
     pub created_at: String,
-    /// The site's remembered icon as a `data:` URL, when one is known.
+    /// The key of the site's remembered icon, when one is known; the chrome
+    /// reads the image itself with `favicon_get`.
     pub favicon: Option<String>,
 }
 
@@ -485,13 +719,57 @@ pub struct HistoryEntry {
     pub last_visited_at: String,
     /// Number of recorded visits.
     pub visits: u32,
-    /// The site's remembered icon as a `data:` URL, when one is known.
+    /// The key of the site's remembered icon, when one is known; the chrome
+    /// reads the image itself with `favicon_get`.
     pub favicon: Option<String>,
+}
+
+/// What one change to a tab means for history; see [`Store::save_tab`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisitChange<'a> {
+    /// The tab went to `url`: a visit, folded into the last one when the
+    /// same page was visited less than a minute ago.
+    Navigated {
+        /// Where the tab is now.
+        url: &'a str,
+        /// What to file it under; empty until the page names itself.
+        title: &'a str,
+        /// When.
+        at: Timestamp,
+    },
+    /// The page at `url` named itself `title`. It names the latest visit
+    /// there if that has no name yet, and changes nothing otherwise: a page
+    /// that animates its own title -- an unread count, a clock -- must not
+    /// write to history on every tick.
+    Titled {
+        /// The page.
+        url: &'a str,
+        /// Its title now.
+        title: &'a str,
+    },
+}
+
+/// What the store remembers about one origin's icon.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FaviconEntry {
+    /// The icon's key; see [`favicon_key`].
+    pub key: String,
+    /// The fingerprint of the icon links the page declared when it was
+    /// resolved, or empty when that is not known.
+    pub source: String,
+    /// When the icon was last resolved or confirmed.
+    pub updated_at: Timestamp,
 }
 
 /// Persistent store backed by SQLite.
 pub struct Store {
     conn: Connection,
+    /// The profile history and bookmarks are filed under, once worked out.
+    /// Every visit, search and bookmark check asks for it, and each answer
+    /// cost a settings read and a workspace read; it changes only when the
+    /// active workspace or the profiles do, and every write that could move
+    /// it clears this. See [`Store::scope`].
+    scope: std::cell::RefCell<Option<String>>,
 }
 
 impl Store {
@@ -521,7 +799,10 @@ impl Store {
         // A second Dive process or a short-lived SQLite checkpoint should wait
         // instead of surfacing an immediate, user-visible `database is locked`.
         conn.busy_timeout(Duration::from_secs(5))?;
-        let store = Self { conn };
+        let store = Self {
+            conn,
+            scope: std::cell::RefCell::new(None),
+        };
         store.migrate()?;
         // v8 left pre-profile workspaces with an empty profile id, which
         // `workspace_from_row` cannot parse. Repair here so every opener,
@@ -545,6 +826,12 @@ impl Store {
     }
 
     fn migrate(&self) -> Result<()> {
+        self.migrate_to(MIGRATIONS.len())
+    }
+
+    /// Apply migrations up to and including `target`; tests stop short of
+    /// the latest to build a database as an older build left it.
+    fn migrate_to(&self, target: usize) -> Result<()> {
         let version: i64 = self
             .conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))?;
@@ -556,7 +843,7 @@ impl Store {
                 MIGRATIONS.len()
             )));
         }
-        for (i, sql) in MIGRATIONS.iter().enumerate().skip(version) {
+        for (i, sql) in MIGRATIONS.iter().enumerate().take(target).skip(version) {
             let next = i + 1;
             tracing::info!(version = next, "applying migration");
             // Schema changes and their version marker are one unit. Without a
@@ -564,6 +851,11 @@ impl Store {
             // that cannot be safely retried on the next launch.
             let tx = self.conn.unchecked_transaction()?;
             tx.execute_batch(sql)?;
+            match next {
+                URLS_MIGRATION => fill_urls(&tx)?,
+                FAVICON_KEYS_MIGRATION => move_favicons_to_keys(&tx)?,
+                _ => {}
+            }
             tx.pragma_update(
                 None,
                 "user_version",
@@ -616,6 +908,7 @@ impl Store {
 
     /// Insert or replace a workspace.
     pub fn upsert_workspace(&self, w: &Workspace) -> Result<()> {
+        self.forget_scope();
         self.conn.execute(
             "INSERT INTO workspaces (id, name, color, icon, container_id, position, created_at, profile_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -675,6 +968,7 @@ impl Store {
 
     /// Insert or replace a profile.
     pub fn upsert_profile(&self, p: &Profile) -> Result<()> {
+        self.forget_scope();
         self.conn.execute(
             "INSERT INTO profiles (id, name, color, avatar, note, container_id, position, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -722,6 +1016,7 @@ impl Store {
 
     /// Remove a profile. Its workspaces must have been removed first.
     pub fn remove_profile(&self, id: ProfileId) -> Result<()> {
+        self.forget_scope();
         let workspaces: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM workspaces WHERE profile_id = ?1",
             [id.to_string()],
@@ -751,6 +1046,7 @@ impl Store {
     /// secrets itself. Installed web apps are left to their own uninstall,
     /// which also takes their launchers away.
     pub fn remove_profile_data(&self, id: ProfileId) -> Result<()> {
+        self.forget_scope();
         let tx = self.conn.unchecked_transaction()?;
         let key = id.to_string();
         for table in [
@@ -759,6 +1055,7 @@ impl Store {
             "addresses",
             "form_entries",
             "history",
+            "urls",
             "bookmarks",
         ] {
             tx.execute(
@@ -805,6 +1102,7 @@ impl Store {
     /// database from before profiles gets a "Personal" profile in the first
     /// container that adopts all its workspaces. Returns the first profile.
     pub fn ensure_default_profile(&self) -> Result<Profile> {
+        self.forget_scope();
         if let Some(first) = self.profiles()?.into_iter().next() {
             self.conn.execute(
                 "UPDATE workspaces SET profile_id = ?1 WHERE profile_id = ''",
@@ -830,6 +1128,7 @@ impl Store {
 
     /// Remove a workspace and, by cascade, its tabs.
     pub fn remove_workspace(&self, id: WorkspaceId) -> Result<()> {
+        self.forget_scope();
         let n = self
             .conn
             .execute("DELETE FROM workspaces WHERE id = ?1", [id.to_string()])?;
@@ -846,14 +1145,16 @@ impl Store {
 
     /// Insert or replace a tab.
     pub fn upsert_tab(&self, t: &Tab) -> Result<()> {
-        self.conn.execute(
+        // Cached: every title and address change of every tab lands here.
+        self.conn.prepare_cached(
             "INSERT INTO tabs (id, workspace_id, tier, url, title, position, state, last_active_at, favicon)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, tier = excluded.tier,
              url = excluded.url, title = excluded.title, position = excluded.position,
              state = excluded.state, last_active_at = excluded.last_active_at,
              favicon = excluded.favicon",
-            params![
+        )?
+        .execute(params![
                 t.id.to_string(),
                 t.workspace_id.map(|w| w.to_string()),
                 t.tier.as_str(),
@@ -863,8 +1164,50 @@ impl Store {
                 t.state.as_str(),
                 t.last_active_at.to_rfc3339(),
                 t.favicon
-            ],
-        )?;
+            ])?;
+        Ok(())
+    }
+
+    /// Persist `tab` and what the change means for history, together.
+    ///
+    /// One transaction instead of two or three autocommits: every title and
+    /// address change of every tab comes through here, and each commit is a
+    /// WAL append of its own. The visit is best-effort, as it always was: a
+    /// failure to file it is logged and rolled back on its own, and never
+    /// costs the tab its update.
+    pub fn save_tab(&self, tab: &Tab, visit: Option<VisitChange<'_>>) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        self.upsert_tab(tab)?;
+        if let Some(visit) = visit {
+            self.conn.execute_batch("SAVEPOINT visit")?;
+            let filed = match visit {
+                VisitChange::Navigated { url, title, at } => self.record_visit_in(url, title, at),
+                VisitChange::Titled { url, title } => self.title_visit_in(url, title).map(|_| ()),
+            };
+            match filed {
+                Ok(()) => self.conn.execute_batch("RELEASE visit")?,
+                Err(e) => {
+                    tracing::debug!(%tab.id, "history write failed: {e}");
+                    self.conn
+                        .execute_batch("ROLLBACK TO visit; RELEASE visit")?;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Move each listed tab to its position, all in one transaction: a drag
+    /// that shifts ten tabs is one commit, not ten.
+    pub fn set_tab_positions(&self, positions: &[(TabId, i32)]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        {
+            let mut stmt = tx.prepare_cached("UPDATE tabs SET position = ?2 WHERE id = ?1")?;
+            for (id, position) in positions {
+                stmt.execute(params![id.to_string(), position])?;
+            }
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -872,11 +1215,8 @@ impl Store {
     pub fn tab(&self, id: TabId) -> Result<Tab> {
         let mut tab = self
             .conn
-            .query_row(
-                &format!("{TAB_SELECT} WHERE id = ?1"),
-                [id.to_string()],
-                tab_from_row,
-            )
+            .prepare_cached(&format!("{TAB_SELECT} WHERE id = ?1"))?
+            .query_row([id.to_string()], tab_from_row)
             .optional()?
             .ok_or_else(|| CoreError::NotFound {
                 kind: "tab",
@@ -1016,27 +1356,102 @@ impl Store {
 
     // ----- favicons -----
 
-    /// Remember `data` as the icon every tab on `origin` should wear.
-    pub fn set_favicon(&self, origin: &str, data: &str) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO favicons (origin, data, updated_at) VALUES (?1, ?2, ?3)
-             ON CONFLICT(origin) DO UPDATE SET data = excluded.data,
-             updated_at = excluded.updated_at",
-            params![origin, data, Timestamp::now().to_rfc3339()],
-        )?;
-        Ok(())
+    /// Remember `data` as the icon every tab on `origin` should wear, and
+    /// return the key it is stored under (see [`favicon_key`]). `source`
+    /// fingerprints the icon links the page declared, so a later load that
+    /// declares the same ones can reuse this without fetching anything.
+    ///
+    /// Nothing is written when the origin already has this icon from this
+    /// source, confirmed within the last day: a site that is loaded again and
+    /// again must not rewrite its row every time.
+    pub fn set_favicon(&self, origin: &str, data: &str, source: &str) -> Result<String> {
+        let key = favicon_key(data);
+        let now = Timestamp::now();
+        let confirmed_after = (now - time::Duration::days(1)).to_rfc3339();
+        let tx = self.conn.unchecked_transaction()?;
+        tx.prepare_cached("INSERT OR IGNORE INTO favicon_images (key, data) VALUES (?1, ?2)")?
+            .execute(params![key, data])?;
+        tx.prepare_cached(
+            "INSERT INTO favicons (origin, key, source, updated_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(origin) DO UPDATE SET key = excluded.key, source = excluded.source,
+             updated_at = excluded.updated_at
+             WHERE favicons.key != excluded.key OR favicons.source != excluded.source
+                OR favicons.updated_at < ?5",
+        )?
+        .execute(params![
+            origin,
+            key,
+            source,
+            now.to_rfc3339(),
+            confirmed_after
+        ])?;
+        tx.commit()?;
+        Ok(key)
     }
 
-    /// The icon remembered for `origin`, if one has ever been resolved.
+    /// Store an icon that belongs to no origin -- a `file:` page's -- and
+    /// return its key. Only the tab wearing it keeps it from being pruned.
+    pub fn put_favicon_image(&self, data: &str) -> Result<String> {
+        let key = favicon_key(data);
+        self.conn
+            .prepare_cached("INSERT OR IGNORE INTO favicon_images (key, data) VALUES (?1, ?2)")?
+            .execute(params![key, data])?;
+        Ok(key)
+    }
+
+    /// The key of the icon remembered for `origin`, if one has ever been
+    /// resolved.
     pub fn favicon(&self, origin: &str) -> Result<Option<String>> {
         self.conn
-            .query_row(
-                "SELECT data FROM favicons WHERE origin = ?1",
-                [origin],
-                |r| r.get(0),
-            )
+            .prepare_cached("SELECT key FROM favicons WHERE origin = ?1")?
+            .query_row([origin], |r| r.get(0))
             .optional()
             .map_err(Into::into)
+    }
+
+    /// Everything remembered about `origin`'s icon: its key, the links it was
+    /// resolved from, and when that was last confirmed.
+    pub fn favicon_entry(&self, origin: &str) -> Result<Option<FaviconEntry>> {
+        self.conn
+            .prepare_cached("SELECT key, source, updated_at FROM favicons WHERE origin = ?1")?
+            .query_row([origin], |r| {
+                Ok(FaviconEntry {
+                    key: r.get(0)?,
+                    source: r.get(1)?,
+                    updated_at: parse_time(&r.get::<_, String>(2)?)?,
+                })
+            })
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// The images stored under `keys`, as `(key, data: URL)` pairs. A key
+    /// with no image -- one pruned since it was handed out -- is left out.
+    pub fn favicon_images(&self, keys: &[String]) -> Result<Vec<(String, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT data FROM favicon_images WHERE key = ?1")?;
+        let mut out = Vec::with_capacity(keys.len());
+        for key in keys {
+            if let Some(data) = stmt
+                .query_row([key], |r| r.get::<_, String>(0))
+                .optional()?
+            {
+                out.push((key.clone(), data));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Delete images nothing refers to any more: an origin whose icon changed
+    /// leaves its old one behind, and so does a tab that was closed.
+    pub fn prune_favicon_images(&self) -> Result<usize> {
+        Ok(self.conn.execute(
+            "DELETE FROM favicon_images
+             WHERE key NOT IN (SELECT key FROM favicons)
+               AND key NOT IN (SELECT favicon FROM tabs WHERE favicon IS NOT NULL)",
+            [],
+        )?)
     }
 
     /// Re-key `tab`'s icon to the site it is on now, dropping one that belongs
@@ -1072,7 +1487,24 @@ impl Store {
     /// The profile history and bookmarks are read and written for: the one
     /// owning the active workspace, else the first profile, else "" (a
     /// database with no profiles yet, as in tests).
+    ///
+    /// Cached until something that could change the answer is written; see
+    /// the `scope` field.
     fn scope(&self) -> Result<String> {
+        if let Some(cached) = self.scope.borrow().as_ref() {
+            return Ok(cached.clone());
+        }
+        let scope = self.read_scope()?;
+        *self.scope.borrow_mut() = Some(scope.clone());
+        Ok(scope)
+    }
+
+    /// Drop the cached scope; the next [`Self::scope`] reads it afresh.
+    fn forget_scope(&self) {
+        self.scope.borrow_mut().take();
+    }
+
+    fn read_scope(&self) -> Result<String> {
         if let Some(active) = self.setting(ACTIVE_WORKSPACE_SETTING)?
             && let Ok(id) = active.parse::<WorkspaceId>()
             && let Ok(workspace) = self.workspace(id)
@@ -1463,16 +1895,16 @@ impl Store {
     /// newest first, up to `limit`.
     pub fn all_history(&self, limit: usize) -> Result<Vec<HistoryEntry>> {
         let mut stmt = self.conn.prepare(
-            "SELECT url, MAX(title), MAX(visited_at), COUNT(*) FROM history
-             WHERE profile_id = ?1 GROUP BY url ORDER BY MAX(visited_at) DESC LIMIT ?2",
+            "SELECT url, title, last_visit, visit_count FROM urls
+             WHERE profile_id = ?1 ORDER BY last_visit DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(
             params![self.scope()?, i64::try_from(limit).unwrap_or(i64::MAX)],
             |r| {
                 Ok(HistoryEntry {
                     url: r.get(0)?,
-                    title: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                    last_visited_at: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    title: r.get(1)?,
+                    last_visited_at: r.get(2)?,
                     visits: r.get::<_, i64>(3)?.try_into().unwrap_or(u32::MAX),
                     favicon: None,
                 })
@@ -1640,8 +2072,12 @@ impl Store {
                  WHERE NOT EXISTS (SELECT 1 FROM history WHERE profile_id = ?4 AND url = ?1 AND visited_at = ?3)",
             )?;
             for item in items {
-                added +=
-                    stmt.execute(params![item.url, item.title, item.at.to_rfc3339(), scope])?;
+                let at = item.at.to_rfc3339();
+                let new = stmt.execute(params![item.url, item.title, at, scope])?;
+                if new > 0 {
+                    self.count_visit(&scope, &item.url, &item.title, &at)?;
+                }
+                added += new;
             }
         }
         tx.commit()?;
@@ -1650,42 +2086,109 @@ impl Store {
 
     // ----- history -----
 
-    /// Record a visit. Same URL within a minute updates the title instead of adding a row.
-    /// "about:blank" is never filed as a title: it names the empty document, not the page.
+    /// Record a visit. Same URL within a minute is the visit already filed,
+    /// which it can only name. "about:blank" is never filed as a title: it
+    /// names the empty document, not the page.
     pub fn record_visit(&self, url: &str, title: &str, at: Timestamp) -> Result<()> {
-        let title = if title == "about:blank" { "" } else { title };
+        let tx = self.conn.unchecked_transaction()?;
+        self.record_visit_in(url, title, at)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// [`Self::record_visit`] without a transaction of its own, for callers
+    /// that already hold one.
+    fn record_visit_in(&self, url: &str, title: &str, at: Timestamp) -> Result<()> {
+        let title = if title == BLANK_TITLE { "" } else { title };
         let scope = self.scope()?;
-        let recent: Option<i64> = self
+        let last: Option<String> = self
             .conn
-            .query_row(
-                "SELECT id FROM history WHERE url = ?1 AND profile_id = ?2 ORDER BY visited_at DESC LIMIT 1",
-                params![url, scope],
-                |r| r.get(0),
-            )
+            .prepare_cached(
+                "SELECT last_visit FROM urls WHERE profile_id = ?1 AND url_hash = ?2 AND url = ?3",
+            )?
+            .query_row(params![scope, url_hash(url), url], |r| r.get(0))
             .optional()?;
-        let last_at: Option<String> = match recent {
-            Some(id) => self
-                .conn
-                .query_row("SELECT visited_at FROM history WHERE id = ?1", [id], |r| {
-                    r.get(0)
-                })
-                .optional()?,
-            None => None,
-        };
-        let fresh = last_at
+        let fresh = last
             .and_then(|t| Timestamp::parse(&t).ok())
             .is_some_and(|t| (at.0 - t.0).abs() < time::Duration::minutes(1));
-        if fresh && let Some(id) = recent {
-            self.conn.execute(
-                "UPDATE history SET title = ?1 WHERE id = ?2 AND ?1 != ''",
-                params![title, id],
-            )?;
+        if fresh {
+            // A reload, or a redirect that came straight back: the visit is
+            // already here, and all this can add is its name.
+            self.title_visit_in(url, title)?;
             return Ok(());
         }
-        self.conn.execute(
-            "INSERT INTO history (profile_id, url, title, visited_at) VALUES (?4, ?1, ?2, ?3)",
-            params![url, title, at.to_rfc3339(), scope],
-        )?;
+        let at = at.to_rfc3339();
+        self.conn
+            .prepare_cached(
+                "INSERT INTO history (profile_id, url, title, visited_at) VALUES (?1, ?2, ?3, ?4)",
+            )?
+            .execute(params![scope, url, title, at])?;
+        self.count_visit(&scope, url, title, &at)
+    }
+
+    /// Name the latest visit to `url` `title`, if it has no name yet; true
+    /// when it did. A visit keeps the first real title it is given, so a
+    /// page that keeps retitling itself writes nothing after that.
+    fn title_visit_in(&self, url: &str, title: &str) -> Result<bool> {
+        if title.is_empty() || title == BLANK_TITLE {
+            return Ok(false);
+        }
+        let scope = self.scope()?;
+        // `+profile_id` keeps SQLite on the address index. Left to choose, it
+        // walks the profile's index newest-first until it meets this address,
+        // which for a page last seen weeks ago is the whole log.
+        let named = self
+            .conn
+            .prepare_cached(
+                "UPDATE history SET title = ?1 WHERE title = '' AND id = (
+                     SELECT id FROM history WHERE url = ?2 AND +profile_id = ?3
+                     ORDER BY visited_at DESC LIMIT 1)",
+            )?
+            .execute(params![title, url, scope])?;
+        if named > 0 {
+            self.conn
+                .prepare_cached(
+                    "UPDATE urls SET title = ?1
+                     WHERE profile_id = ?3 AND url_hash = ?4 AND url = ?2",
+                )?
+                .execute(params![title, url, scope, url_hash(url)])?;
+        }
+        Ok(named > 0)
+    }
+
+    /// Count one visit to `url` at `at` (RFC 3339) in the per-address table.
+    /// The newest non-empty title wins; a visit older than the latest one
+    /// (an import) names the row only if it has no name.
+    fn count_visit(&self, scope: &str, url: &str, title: &str, at: &str) -> Result<()> {
+        let hash = url_hash(url);
+        let row: Option<i64> = self
+            .conn
+            .prepare_cached(
+                "SELECT id FROM urls WHERE profile_id = ?1 AND url_hash = ?2 AND url = ?3",
+            )?
+            .query_row(params![scope, hash, url], |r| r.get(0))
+            .optional()?;
+        match row {
+            Some(id) => self
+                .conn
+                .prepare_cached(
+                    "UPDATE urls SET
+                        visit_count = visit_count + 1,
+                        title = CASE
+                            WHEN ?2 != '' AND (title = '' OR ?3 >= last_visit) THEN ?2
+                            ELSE title END,
+                        last_visit = MAX(last_visit, ?3)
+                     WHERE id = ?1",
+                )?
+                .execute(params![id, title, at])?,
+            None => self
+                .conn
+                .prepare_cached(
+                    "INSERT INTO urls (profile_id, url, url_hash, key_hash, title, last_visit, visit_count)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
+                )?
+                .execute(params![scope, url, hash, url_hash(url_key(url)), title, at])?,
+        };
         Ok(())
     }
 
@@ -1707,53 +2210,143 @@ impl Store {
             .map_err(Into::into)
     }
 
-    /// Forget every visit to one URL; returns how many rows went.
+    /// Forget every visit to `url` and to its twins -- the addresses shown as
+    /// the same row, see [`url_key`] -- so the row a person removed does not
+    /// come back as the twin it was hiding. Returns how many visits went.
     pub fn remove_history(&self, url: &str) -> Result<usize> {
-        Ok(self.conn.execute(
-            "DELETE FROM history WHERE url = ?1 AND profile_id = ?2",
-            params![url, self.scope()?],
-        )?)
+        let scope = self.scope()?;
+        let key = url_key(url);
+        let tx = self.conn.unchecked_transaction()?;
+        let mut twins: Vec<String> = {
+            let mut stmt =
+                tx.prepare("SELECT url FROM urls WHERE profile_id = ?1 AND key_hash = ?2")?;
+            let rows = stmt.query_map(params![scope, url_hash(key)], |r| r.get::<_, String>(0))?;
+            let mut twins = Vec::new();
+            for twin in rows {
+                let twin = twin?;
+                // The hash only narrows the search; the key decides.
+                if url_key(&twin) == key {
+                    twins.push(twin);
+                }
+            }
+            twins
+        };
+        if !twins.iter().any(|twin| twin == url) {
+            twins.push(url.to_owned());
+        }
+        let mut gone = 0;
+        for twin in &twins {
+            gone += tx.execute(
+                "DELETE FROM history WHERE url = ?1 AND +profile_id = ?2",
+                params![twin, scope],
+            )?;
+            tx.execute(
+                "DELETE FROM urls WHERE profile_id = ?1 AND url_hash = ?2 AND url = ?3",
+                params![scope, url_hash(twin), twin],
+            )?;
+        }
+        tx.commit()?;
+        Ok(gone)
     }
 
     /// Delete every visit of this profile; returns how many rows went.
     pub fn clear_history(&self) -> Result<usize> {
-        Ok(self
-            .conn
-            .execute("DELETE FROM history WHERE profile_id = ?1", [self.scope()?])?)
+        let scope = self.scope()?;
+        let tx = self.conn.unchecked_transaction()?;
+        let gone = tx.execute("DELETE FROM history WHERE profile_id = ?1", [&scope])?;
+        tx.execute("DELETE FROM urls WHERE profile_id = ?1", [&scope])?;
+        tx.commit()?;
+        Ok(gone)
     }
 
     /// Forget every cached site icon. Icons record which origins were
-    /// visited, so clearing history clears them too.
+    /// visited, so clearing history clears them too. An icon an open tab is
+    /// still wearing stays until that tab lets it go.
     pub fn clear_favicons(&self) -> Result<usize> {
-        Ok(self.conn.execute("DELETE FROM favicons", [])?)
-    }
-
-    /// Delete visits older than `cutoff`; returns how many rows went.
-    pub fn prune_history(&self, cutoff: Timestamp) -> Result<usize> {
-        Ok(self.conn.execute(
-            "DELETE FROM history WHERE visited_at < ?1 AND profile_id = ?2",
-            params![cutoff.to_rfc3339(), self.scope()?],
-        )?)
-    }
-
-    /// Distinct recent visits matching `query` (substring on url or title), newest first.
-    ///
-    /// `GROUP BY url` alone still yields rows a reader cannot tell apart: a
-    /// trailing slash or a stray query parameter makes two URLs distinct while
-    /// the title and host stay identical, so a short list fills up with what
-    /// looks like the same entry twice. Rows are collapsed by what is actually
-    /// on screen -- see [`display_key`] -- which is why the query over-fetches
-    /// before the caller's `limit` is applied.
-    pub fn search_history(&self, query: &str, limit: usize) -> Result<Vec<HistoryEntry>> {
-        let like = format!("%{}%", like_escape(query.trim()));
-        // Enough headroom that a run of near-duplicates cannot starve the
-        // list, capped so an empty query never walks the whole table.
-        let fetch = limit.saturating_mul(4).clamp(limit, 200);
-        let mut stmt = self.conn.prepare(
-            "SELECT url, MAX(title), MAX(visited_at), COUNT(*) FROM history
-             WHERE profile_id = ?3 AND (url LIKE ?1 ESCAPE '\\' OR title LIKE ?1 ESCAPE '\\')
-             GROUP BY url ORDER BY MAX(visited_at) DESC LIMIT ?2",
+        let tx = self.conn.unchecked_transaction()?;
+        let gone = tx.execute("DELETE FROM favicons", [])?;
+        tx.execute(
+            "DELETE FROM favicon_images
+             WHERE key NOT IN (SELECT favicon FROM tabs WHERE favicon IS NOT NULL)",
+            [],
         )?;
+        tx.commit()?;
+        Ok(gone)
+    }
+
+    /// Delete visits older than `cutoff` in every profile; returns how many
+    /// rows went.
+    ///
+    /// Every profile, not only the active one: retention is the browser's
+    /// setting, and a profile nobody had switched to kept every visit it
+    /// ever made.
+    pub fn prune_history(&self, cutoff: Timestamp) -> Result<usize> {
+        let cutoff = cutoff.to_rfc3339();
+        let tx = self.conn.unchecked_transaction()?;
+        let touched: Vec<(String, String)> = {
+            let mut stmt =
+                tx.prepare("SELECT DISTINCT profile_id, url FROM history WHERE visited_at < ?1")?;
+            let rows = stmt.query_map([&cutoff], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect::<std::result::Result<_, _>>()?
+        };
+        let gone = tx.execute("DELETE FROM history WHERE visited_at < ?1", [&cutoff])?;
+        {
+            let mut left = tx.prepare(
+                "SELECT COUNT(*), MAX(visited_at) FROM history WHERE url = ?2 AND +profile_id = ?1",
+            )?;
+            let mut forget = tx
+                .prepare("DELETE FROM urls WHERE profile_id = ?1 AND url_hash = ?3 AND url = ?2")?;
+            let mut recount = tx.prepare(
+                "UPDATE urls SET visit_count = ?4, last_visit = ?5
+                 WHERE profile_id = ?1 AND url_hash = ?3 AND url = ?2",
+            )?;
+            for (profile, url) in &touched {
+                let (count, last): (i64, Option<String>) =
+                    left.query_row(params![profile, url], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                let hash = url_hash(url);
+                match last {
+                    Some(last) if count > 0 => {
+                        recount.execute(params![profile, url, hash, count, last])?
+                    }
+                    _ => forget.execute(params![profile, url, hash])?,
+                };
+            }
+        }
+        tx.commit()?;
+        Ok(gone)
+    }
+
+    /// Pages in history matching `query` (a substring of the address or the
+    /// title), best first, one row per page.
+    ///
+    /// With no query the list is simply the most recent pages, which is what
+    /// the palette and the Library show before anything is typed. With one,
+    /// rows are ranked by [`frecency`]: a site visited every day outranks a
+    /// page seen once this morning, and a page whose address begins with what
+    /// was typed -- `git` for github.com -- outranks one that only mentions
+    /// it somewhere.
+    ///
+    /// Twins -- addresses that differ only in a fragment or a trailing slash,
+    /// see [`url_key`] -- are one row: the newest address, with the visits of
+    /// all of them. Addresses that differ in anything else stay apart even
+    /// when their titles match, since many different pages share a title
+    /// ("Vite App").
+    pub fn search_history(&self, query: &str, limit: usize) -> Result<Vec<HistoryEntry>> {
+        let query = query.trim();
+        let like = format!("%{}%", like_escape(query));
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT url, title, last_visit, visit_count FROM urls
+             WHERE profile_id = ?3 AND (url LIKE ?1 ESCAPE '\\' OR title LIKE ?1 ESCAPE '\\')
+             ORDER BY last_visit DESC LIMIT ?2",
+        )?;
+        // With a query every match is a candidate for the ranking, up to a
+        // bound that keeps a one-letter query cheap. Without one the order
+        // is the table's own, and a little headroom covers collapsed twins.
+        let fetch = if query.is_empty() {
+            limit.saturating_mul(4).clamp(limit, HISTORY_CANDIDATES)
+        } else {
+            HISTORY_CANDIDATES
+        };
         let rows = stmt.query_map(
             params![
                 like,
@@ -1763,37 +2356,60 @@ impl Store {
             |r| {
                 Ok(HistoryEntry {
                     url: r.get(0)?,
-                    title: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                    last_visited_at: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    title: r.get(1)?,
+                    last_visited_at: r.get(2)?,
                     visits: r.get::<_, i64>(3)?.try_into().unwrap_or(u32::MAX),
                     favicon: None,
                 })
             },
         )?;
 
-        let mut out: Vec<HistoryEntry> = Vec::with_capacity(limit);
+        let mut pages: Vec<HistoryEntry> = Vec::new();
         let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         for entry in rows {
             let entry = entry?;
-            match seen.get(&display_key(&entry)) {
-                // Newest wins, because the rows arrive newest first; the older
-                // twin only lends its visit count to the one on screen.
-                Some(&i) => out[i].visits = out[i].visits.saturating_add(entry.visits),
-                None if out.len() < limit => {
-                    seen.insert(display_key(&entry), out.len());
-                    out.push(entry);
+            let key = url_key(&entry.url).to_owned();
+            // Rows arrive newest first, so the page on screen is the newest
+            // twin; the older ones lend it their visits, and their title when
+            // it has none.
+            if let Some(&i) = seen.get(&key) {
+                let page = &mut pages[i];
+                page.visits = page.visits.saturating_add(entry.visits);
+                if page.title.is_empty() {
+                    page.title = entry.title;
                 }
-                // Full, but keep folding counts into the rows already chosen.
-                None => {}
+            } else {
+                seen.insert(key, pages.len());
+                pages.push(entry);
             }
         }
-        for entry in &mut out {
-            entry.favicon = self.site_favicon(&entry.url);
+        if !query.is_empty() {
+            let now = Timestamp::now();
+            let needle = query.to_lowercase();
+            let score = |page: &HistoryEntry| {
+                let age = Timestamp::parse(&page.last_visited_at)
+                    .map_or(time::Duration::days(365), |at| now.0 - at.0);
+                let boost = if address_starts_with(&page.url, &needle) {
+                    HOST_MATCH_BOOST
+                } else {
+                    1.0
+                };
+                frecency(page.visits, age) * boost
+            };
+            let mut scored: Vec<(f64, HistoryEntry)> =
+                pages.into_iter().map(|p| (score(&p), p)).collect();
+            // Stable, and the rows are newest first: equal scores keep that.
+            scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+            pages = scored.into_iter().map(|(_, p)| p).collect();
         }
-        Ok(out)
+        pages.truncate(limit);
+        for page in &mut pages {
+            page.favicon = self.site_favicon(&page.url);
+        }
+        Ok(pages)
     }
 
-    /// The icon remembered for `url`'s origin, if any.
+    /// The key of the icon remembered for `url`'s origin, if any.
     ///
     /// Lets a history or bookmark row wear its site's mark even though no tab
     /// is open on it, which is the only source of an icon for a page that is
@@ -1830,6 +2446,7 @@ impl Store {
 
     /// Forget a setting; `Ok(false)` when there was none.
     pub fn remove_setting(&self, key: &str) -> Result<bool> {
+        self.forget_scope();
         Ok(self
             .conn
             .execute("DELETE FROM settings WHERE key = ?1", [key])?
@@ -1878,6 +2495,7 @@ impl Store {
 
     /// Write a setting.
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        self.forget_scope();
         self.conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -1888,6 +2506,7 @@ impl Store {
 
     /// Write a related set of settings as one all-or-nothing decision.
     pub fn set_settings_atomic(&self, entries: &[(String, String)]) -> Result<()> {
+        self.forget_scope();
         let transaction = self.conn.unchecked_transaction()?;
         for (key, value) in entries {
             transaction.execute("INSERT INTO settings (key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[key,value])?;
@@ -2371,6 +2990,391 @@ mod tests {
         (store, w)
     }
 
+    /// A database as the build before per-address history and keyed icons
+    /// left it.
+    fn store_at_v16() -> Store {
+        let store = Store {
+            conn: Connection::open_in_memory().unwrap(),
+            scope: std::cell::RefCell::new(None),
+        };
+        store.migrate_to(16).unwrap();
+        store
+    }
+
+    fn count(store: &Store, sql: &str) -> i64 {
+        store.conn.query_row(sql, [], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn upgrading_files_every_address_once_and_every_icon_under_its_key() {
+        let store = store_at_v16();
+        let visits = [
+            ("https://a.dev/", "", "2026-09-01T10:00:00Z"),
+            ("https://a.dev/", "A dev", "2026-09-02T10:00:00Z"),
+            ("https://a.dev/", "", "2026-09-03T10:00:00Z"),
+            ("https://a.dev/#top", "A dev", "2026-08-01T10:00:00Z"),
+            ("https://b.dev/x//", "B", "2026-09-04T10:00:00Z"),
+        ];
+        for (url, title, at) in visits {
+            store
+                .conn
+                .execute(
+                    "INSERT INTO history (profile_id, url, title, visited_at) VALUES ('p', ?1, ?2, ?3)",
+                    params![url, title, at],
+                )
+                .unwrap();
+        }
+        let (origin_icon, tab_icon) = (
+            "data:image/png;base64,T1JJRw==",
+            "data:image/svg+xml;base64,VEFC",
+        );
+        store
+            .conn
+            .execute(
+                "INSERT INTO favicons (origin, data, updated_at) VALUES ('https://a.dev', ?1, '2026-09-01T00:00:00Z')",
+                [origin_icon],
+            )
+            .unwrap();
+        let tab = TabId::new();
+        store
+            .conn
+            .execute(
+                "INSERT INTO tabs (id, workspace_id, tier, url, title, position, state, last_active_at, favicon)
+                 VALUES (?1, NULL, 'essential', 'https://c.dev/', 'C', 0, 'active', '2026-09-01T00:00:00Z', ?2)",
+                params![tab.to_string(), tab_icon],
+            )
+            .unwrap();
+
+        store.migrate().unwrap();
+
+        // One row per address, with the newest non-empty title and its count.
+        let rows: Vec<(String, i64, String, String, i64)> = {
+            let mut stmt = store
+                .conn
+                .prepare(
+                    "SELECT url, key_hash, title, last_visit, visit_count FROM urls ORDER BY url",
+                )
+                .unwrap();
+            stmt.query_map([], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap()
+        };
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows[0],
+            (
+                "https://a.dev/".into(),
+                url_hash("https://a.dev"),
+                "A dev".into(),
+                "2026-09-03T10:00:00Z".into(),
+                3
+            )
+        );
+        assert_eq!(rows[1].1, rows[0].1, "the fragment twin shares its key");
+        assert_eq!(rows[2].1, url_hash("https://b.dev/x"));
+
+        // Icons live once, under their key; the rows that held them hold keys.
+        let key = favicon_key(origin_icon);
+        assert_eq!(store.favicon("https://a.dev").unwrap(), Some(key.clone()));
+        let tab_key: Option<String> = store
+            .conn
+            .query_row(
+                "SELECT favicon FROM tabs WHERE id = ?1",
+                [tab.to_string()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tab_key, Some(favicon_key(tab_icon)));
+        let images = store
+            .favicon_images(&[key.clone(), favicon_key(tab_icon), "missing".into()])
+            .unwrap();
+        assert_eq!(
+            images,
+            vec![
+                (key, origin_icon.to_owned()),
+                (favicon_key(tab_icon), tab_icon.to_owned())
+            ]
+        );
+
+        // The palette reads the new table: the fragment twin folds into its page.
+        *store.scope.borrow_mut() = Some("p".into());
+        let found = store.search_history("a.dev", 5).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].visits, 4);
+        assert_eq!(found[0].title, "A dev");
+    }
+
+    #[test]
+    fn a_page_that_keeps_retitling_itself_names_its_visit_once() {
+        let (store, w) = seeded();
+        let mut tab = Tab::new(w.id, "https://chat.test/", 0);
+        let now = Timestamp::now();
+        store
+            .save_tab(
+                &tab,
+                Some(VisitChange::Navigated {
+                    url: &tab.url,
+                    title: "",
+                    at: now,
+                }),
+            )
+            .unwrap();
+        for title in ["about:blank", "Chat", "(1) Chat", "(2) Chat"] {
+            tab.title = title.into();
+            store
+                .save_tab(
+                    &tab,
+                    Some(VisitChange::Titled {
+                        url: &tab.url,
+                        title,
+                    }),
+                )
+                .unwrap();
+        }
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM history"), 1);
+        let found = store.search_history("chat", 5).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].title, "Chat", "the first real title sticks");
+        assert_eq!(found[0].visits, 1);
+        assert_eq!(store.tab(tab.id).unwrap().title, "(2) Chat");
+
+        // Going somewhere else is a new visit, untitled until it is named.
+        tab.url = "https://chat.test/room".into();
+        let later = Timestamp(now.0 + time::Duration::minutes(5));
+        store
+            .save_tab(
+                &tab,
+                Some(VisitChange::Navigated {
+                    url: &tab.url,
+                    title: "",
+                    at: later,
+                }),
+            )
+            .unwrap();
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM history"), 2);
+        assert_eq!(store.tab(tab.id).unwrap().url, "https://chat.test/room");
+    }
+
+    #[test]
+    fn history_ranks_frequent_pages_and_address_matches_first() {
+        let store = Store::in_memory().unwrap();
+        let now = Timestamp::now();
+        let ago = |minutes: i64| Timestamp(now.0 - time::Duration::minutes(minutes));
+        // Read twenty times over the last day, but longer ago than the others.
+        for i in 0..20 {
+            store
+                .record_visit("https://docs.a.test/guide", "Rust guide", ago(600 + i * 5))
+                .unwrap();
+        }
+        store
+            .record_visit("https://b.test/once", "Rust, once", ago(1))
+            .unwrap();
+        let rust = store.search_history("rust", 5).unwrap();
+        assert_eq!(rust[0].url, "https://docs.a.test/guide");
+        assert_eq!(rust[0].visits, 20);
+
+        // An address that begins with what was typed beats a busier page
+        // that only mentions it.
+        for i in 0..6 {
+            store
+                .record_visit("https://blog.test/tips", "git tips", ago(2 + i * 5))
+                .unwrap();
+        }
+        store
+            .record_visit("https://github.com/", "GitHub", ago(3 * 24 * 60))
+            .unwrap();
+        assert_eq!(
+            store.search_history("git", 5).unwrap()[0].url,
+            "https://github.com/"
+        );
+        assert_eq!(
+            store.search_history("github.com/", 5).unwrap()[0].url,
+            "https://github.com/"
+        );
+
+        // With nothing typed the list is simply the newest pages.
+        let recent = store.search_history("", 3).unwrap();
+        assert_eq!(recent[0].url, "https://b.test/once");
+        assert_eq!(recent[1].url, "https://blog.test/tips");
+    }
+
+    #[test]
+    fn frecency_weighs_count_on_a_log_scale_and_recency_in_steps() {
+        let hours = time::Duration::hours;
+        assert!(frecency(20, hours(10)) > frecency(1, hours(0)));
+        assert!((frecency(1, hours(1)) - frecency(1, hours(20))).abs() < f64::EPSILON);
+        assert!(frecency(1, hours(1)) > frecency(1, hours(24 * 5)));
+        assert!(frecency(1000, hours(24 * 200)) < frecency(3, hours(1)));
+        assert!(address_starts_with("https://www.GitHub.com/x", "git"));
+        assert!(address_starts_with(
+            "http://github.com/",
+            "https://github.com/"
+        ));
+        assert!(!address_starts_with("https://blog.test/git", "git"));
+        assert!(!address_starts_with("https://a.test/", ""));
+    }
+
+    #[test]
+    fn removing_a_history_row_removes_the_twins_it_stood_for() {
+        let store = Store::in_memory().unwrap();
+        let now = Timestamp::now();
+        for (i, url) in [
+            "https://a.dev/",
+            "https://a.dev",
+            "https://a.dev/#section",
+            "https://a.dev/?q=1",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let at = Timestamp(now.0 - time::Duration::minutes(10 * i64::try_from(i).unwrap()));
+            store.record_visit(url, "A", at).unwrap();
+        }
+        assert_eq!(store.search_history("a.dev", 10).unwrap().len(), 2);
+        assert_eq!(store.remove_history("https://a.dev").unwrap(), 3);
+        let left = store.search_history("a.dev", 10).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].url, "https://a.dev/?q=1");
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM history"), 1);
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM urls"), 1);
+    }
+
+    #[test]
+    fn pruning_reaches_every_profile_and_keeps_the_address_counts_true() {
+        let store = Store::in_memory().unwrap();
+        let now = Timestamp::now();
+        let old = Timestamp(now.0 - time::Duration::days(40));
+        for profile in ["p1", "p2"] {
+            store.forget_scope();
+            *store.scope.borrow_mut() = Some(profile.into());
+            store
+                .record_visit("https://kept.test/", "Kept", old)
+                .unwrap();
+            store
+                .record_visit("https://kept.test/", "Kept", now)
+                .unwrap();
+            store
+                .record_visit("https://gone.test/", "Gone", old)
+                .unwrap();
+        }
+        let cutoff = Timestamp(now.0 - time::Duration::days(30));
+        assert_eq!(store.prune_history(cutoff).unwrap(), 4);
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM history"), 2);
+        let rows: Vec<(String, i64)> = {
+            let mut stmt = store
+                .conn
+                .prepare("SELECT url, visit_count FROM urls ORDER BY profile_id")
+                .unwrap();
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .collect::<std::result::Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            rows,
+            vec![
+                ("https://kept.test/".to_owned(), 1),
+                ("https://kept.test/".to_owned(), 1)
+            ]
+        );
+    }
+
+    #[test]
+    fn an_icon_is_written_only_when_something_about_it_changed() {
+        let (store, w) = seeded();
+        let data = "data:image/png;base64,QUFB";
+        let key = store.set_favicon("https://a.dev", data, "links-1").unwrap();
+        // Backdate it, as if it had been confirmed a while ago.
+        let hour_ago = Timestamp(Timestamp::now().0 - time::Duration::hours(1));
+        store
+            .conn
+            .execute(
+                "UPDATE favicons SET updated_at = ?1",
+                [hour_ago.to_rfc3339()],
+            )
+            .unwrap();
+        let entry = || store.favicon_entry("https://a.dev").unwrap().unwrap();
+        assert_eq!(
+            store.set_favicon("https://a.dev", data, "links-1").unwrap(),
+            key
+        );
+        assert_eq!(
+            entry().updated_at,
+            hour_ago,
+            "the same icon again writes nothing"
+        );
+        store.set_favicon("https://a.dev", data, "links-2").unwrap();
+        assert_eq!(entry().source, "links-2");
+        assert!(entry().updated_at > hour_ago);
+
+        // A replaced icon is pruned once nothing wears it; one a tab still
+        // wears stays, even after the cache is cleared.
+        let mut tab = Tab::new(w.id, "https://a.dev/", 0);
+        tab.favicon = Some(key.clone());
+        store.upsert_tab(&tab).unwrap();
+        let other = store
+            .set_favicon("https://a.dev", "data:image/png;base64,QkJC", "links-3")
+            .unwrap();
+        assert_eq!(store.prune_favicon_images().unwrap(), 0);
+        assert_eq!(store.clear_favicons().unwrap(), 1);
+        assert!(store.favicon_images(&[other]).unwrap().is_empty());
+        assert_eq!(
+            store
+                .favicon_images(std::slice::from_ref(&key))
+                .unwrap()
+                .len(),
+            1
+        );
+        store.remove_tab(tab.id).unwrap();
+        assert_eq!(store.prune_favicon_images().unwrap(), 1);
+        assert!(store.favicon_images(&[key]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn keys_name_content() {
+        let a = favicon_key("data:image/png;base64,AAAA");
+        assert_eq!(a, favicon_key("data:image/png;base64,AAAA"));
+        assert_ne!(a, favicon_key("data:image/png;base64,AAAB"));
+        assert!(a.bytes().all(|b| b.is_ascii_hexdigit()), "{a}");
+        assert!(!a.contains(':'), "a key never reads as a URL");
+        assert_eq!(url_key("https://a.dev/path//#x/y"), "https://a.dev/path");
+        assert_eq!(url_key("https://a.dev/?q=1#x"), "https://a.dev/?q=1");
+    }
+
+    #[test]
+    fn only_the_newest_pre_migration_copy_is_kept() {
+        let dir = std::env::temp_dir().join(format!("dive-backups-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("dive.db");
+        for name in [
+            "dive.db.before-v14",
+            "dive.db.before-v15",
+            "dive.db.before-v18",
+            "dive.db.before-vnext",
+            "other.db.before-v3",
+        ] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        remove_older_backups(&path, &dir.join("dive.db.before-v18"));
+        let mut left: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                "dive.db.before-v18",
+                "dive.db.before-vnext",
+                "other.db.before-v3"
+            ]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn a_tab_keeps_its_conversation_until_the_tab_or_the_time_runs_out() {
         let (store, w) = seeded();
@@ -2587,12 +3591,13 @@ mod tests {
         for t in [&a, &b, &other] {
             store.upsert_tab(t).unwrap();
         }
-        store
-            .set_favicon("https://example.com", "data:image/png;base64,AAAA")
+        let key = store
+            .set_favicon("https://example.com", "data:image/png;base64,AAAA", "")
             .unwrap();
+        assert_eq!(key, favicon_key("data:image/png;base64,AAAA"));
 
         // Neither tab has an icon of its own; both wear their site's.
-        let icon = Some("data:image/png;base64,AAAA");
+        let icon = Some(key.as_str());
         assert_eq!(store.tab(a.id).unwrap().favicon.as_deref(), icon);
         assert_eq!(store.tab(b.id).unwrap().favicon.as_deref(), icon);
         assert_eq!(store.tab(other.id).unwrap().favicon, None);
@@ -2950,11 +3955,12 @@ mod tests {
     }
 
     #[test]
-    fn history_collapses_rows_that_read_the_same() {
+    fn history_collapses_twin_addresses_only() {
         let store = Store::in_memory().unwrap();
         let t0 = Timestamp::now();
         // The shape the palette kept showing twice: one origin, one title,
-        // URLs that differ only in a slash or a stray parameter.
+        // URLs that differ only in a slash -- and one that differs in a
+        // parameter, which is a different address and stays one.
         for (i, url) in [
             "https://www.youtube.com/",
             "https://www.youtube.com",
@@ -2971,10 +3977,15 @@ mod tests {
             .unwrap();
 
         let all = store.search_history("", 5).unwrap();
-        assert_eq!(all.len(), 2, "three YouTube URLs are one line");
+        assert_eq!(
+            all.len(),
+            3,
+            "the two twins are one line; ?gl=PH is its own page"
+        );
         assert_eq!(all[0].url, "https://www.youtube.com/", "newest wins");
-        assert_eq!(all[0].visits, 3, "the twins lend their counts");
-        assert_eq!(all[1].title, "B site");
+        assert_eq!(all[0].visits, 2, "the twin lends its count");
+        assert_eq!(all[1].url, "https://www.youtube.com/?gl=PH");
+        assert_eq!(all[2].title, "B site");
 
         // A blank title is not enough to call two pages the same.
         store.record_visit("https://c.dev/one", "", t0).unwrap();
@@ -3009,8 +4020,10 @@ mod tests {
     fn history_and_bookmarks_wear_the_site_icon() {
         let store = Store::in_memory().unwrap();
         let now = Timestamp::now();
-        let icon = "data:image/png;base64,AAAA";
-        store.set_favicon("https://a.dev", icon).unwrap();
+        let key = store
+            .set_favicon("https://a.dev", "data:image/png;base64,AAAA", "")
+            .unwrap();
+        let icon = key.as_str();
         store
             .record_visit("https://a.dev/docs", "Docs", now)
             .unwrap();
@@ -3276,6 +4289,8 @@ mod tests {
             0xbe92_5ee4_9bbb_2be8,
             0x721f_a6d6_e53a_606b,
             0xb383_f674_f622_412e,
+            0x9762_4673_813a_bd0d,
+            0xa00b_35bd_dbcb_9176,
         ];
         assert!(
             MIGRATIONS.len() >= SHIPPED.len(),

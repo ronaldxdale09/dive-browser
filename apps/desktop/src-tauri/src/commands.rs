@@ -110,16 +110,26 @@ pub struct InspectorSnapshot {
 /// longer list is a caller that has lost track of what it is asking for.
 const MAX_FAVICON_LOOKUPS: usize = 32;
 
-/// The cached icon for each of `urls`, as a `data:` URL.
+/// How many images one `favicon_get` will return. The chrome batches the
+/// keys a render asks for; a tab strip and a page of history fit easily.
+const MAX_FAVICON_IMAGES: usize = 64;
+
+/// The images stored under `keys`, as `(key, data: URL)` pairs.
 ///
-/// Every site the person has visited leaves its icon in the store keyed by
-/// origin, so a pinned link can wear the site's own mark without anything
-/// touching the network -- and without waiting for a tab on that site to be
-/// open, which is what left a freshly added quick link showing a globe.
-///
-/// `www.` is tried both ways: a link pinned as `youtube.com` and a visit to
-/// `www.youtube.com` are different origins, and the person who typed the
-/// short one means the site they have been to.
+/// Tabs, history rows and bookmarks carry only an icon's key; this is where
+/// the chrome turns one into a picture. A key names its image's bytes, so
+/// the chrome keeps each answer for as long as it runs. A key with nothing
+/// stored under it any more is left out of the answer.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn favicon_get(
+    state: State<'_, AppState>,
+    keys: Vec<String>,
+) -> AppResult<Vec<(String, String)>> {
+    let keys: Vec<String> = keys.into_iter().take(MAX_FAVICON_IMAGES).collect();
+    Ok(lock(&state.store).favicon_images(&keys)?)
+}
+
 /// The same origin with `www.` added or taken away.
 ///
 /// A link pinned as `youtube.com` and a visit to `www.youtube.com` are
@@ -135,6 +145,16 @@ fn alternate_origin(origin: &str) -> String {
     )
 }
 
+/// The key of the cached icon for each of `urls`; see [`favicon_get`].
+///
+/// Every site the person has visited leaves its icon in the store keyed by
+/// origin, so a pinned link can wear the site's own mark without anything
+/// touching the network -- and without waiting for a tab on that site to be
+/// open, which is what left a freshly added quick link showing a globe.
+///
+/// `www.` is tried both ways: a link pinned as `youtube.com` and a visit to
+/// `www.youtube.com` are different origins, and the person who typed the
+/// short one means the site they have been to.
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn favicons_for(state: State<'_, AppState>, urls: Vec<String>) -> Vec<(String, String)> {
@@ -150,8 +170,8 @@ pub(crate) fn favicons_for(state: State<'_, AppState>, urls: Vec<String>) -> Vec
             .ok()
             .flatten()
             .or_else(|| store.favicon(&alternate).ok().flatten());
-        if let Some(data) = found {
-            out.push((url, data));
+        if let Some(key) = found {
+            out.push((url, key));
         }
     }
     out
@@ -864,6 +884,7 @@ pub fn specta_builder() -> tauri_specta::Builder<Runtime> {
             bookmarks_search,
             share_url,
             favicons_for,
+            favicon_get,
             crate::agent::agent_providers,
             crate::agent::agent_keys,
             crate::agent::agent_key_set,
@@ -4988,8 +5009,8 @@ mod tests {
         // shows a globe forever.
         let dir = tempfile::tempdir().expect("tempdir");
         let store = dive_core::Store::open(dir.path().join("t.db")).expect("store");
-        store
-            .set_favicon("https://www.youtube.com", "data:image/png;base64,AAA")
+        let key = store
+            .set_favicon("https://www.youtube.com", "data:image/png;base64,AAA", "")
             .expect("set");
         assert_eq!(
             store.favicon("https://youtube.com").expect("lookup"),
@@ -4999,9 +5020,10 @@ mod tests {
         // The pairing is what the command adds on top.
         let paired = alternate_origin("https://youtube.com");
         assert_eq!(paired, "https://www.youtube.com");
+        assert_eq!(store.favicon(&paired).expect("lookup"), Some(key.clone()));
         assert_eq!(
-            store.favicon(&paired).expect("lookup"),
-            Some("data:image/png;base64,AAA".to_owned())
+            store.favicon_images(&[key]).expect("image")[0].1,
+            "data:image/png;base64,AAA"
         );
     }
 

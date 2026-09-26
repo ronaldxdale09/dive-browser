@@ -16,8 +16,9 @@ pub use model::{
     Timestamp, Workspace, WorkspaceId,
 };
 pub use store::{
-    ACTIVE_WORKSPACE_SETTING, Address, Bookmark, Card, Credential, FormEntry, HistoryEntry,
-    ImportedEntry, ImportedFormEntry, Store, WebApp, origin_of,
+    ACTIVE_WORKSPACE_SETTING, Address, Bookmark, Card, Credential, FaviconEntry, FormEntry,
+    HistoryEntry, ImportedEntry, ImportedFormEntry, Store, VisitChange, WebApp, favicon_key,
+    origin_of, url_key,
 };
 
 /// Convenience alias used throughout the crate.

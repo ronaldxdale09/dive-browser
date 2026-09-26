@@ -20,6 +20,7 @@ import { errorMessage } from "../lib/errors";
 import { NavErrorPanel } from "./Content";
 import { inScope, originOf, useWebApps } from "../store/webapps";
 import { useWebAppIcon } from "../lib/useWebAppIcon";
+import { useFaviconSrc } from "../lib/favicons";
 import { WindowResizeEdges } from "./WindowResizeEdges";
 import { WindowControls } from "./WindowControls";
 
@@ -109,7 +110,8 @@ export function AppWindow({ tabId, appId }: { tabId: string; appId: string }) {
   const outside = app ? url !== "" && url !== "about:blank" && !inScope(url, app.scope) : false;
   const title = app?.name ?? tab?.title ?? "App";
   const appIcon = useWebAppIcon(app?.id);
-  const icon = appIcon ?? tab?.favicon ?? null;
+  const tabIcon = useFaviconSrc(tab?.favicon);
+  const icon = appIcon ?? tabIcon;
   const rows = `40px${outside ? " 32px" : ""} auto minmax(0,1fr)`;
 
   const captionGutter = isWindows() ? "pl-2" : "pl-[84px] pr-2";

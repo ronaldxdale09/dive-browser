@@ -277,8 +277,9 @@ pub struct Tab {
     pub url: String,
     /// Page title, empty until loaded.
     pub title: String,
-    /// Site icon as a `data:` URL, resolved from the page once it loads.
-    /// `None` until then, and cleared whenever the tab leaves its origin.
+    /// The key of the site's icon, resolved from the page once it loads; the
+    /// chrome reads the image itself with `favicon_get`. `None` until then,
+    /// and cleared whenever the tab leaves its origin.
     pub favicon: Option<String>,
     /// Order within its tier; lower first.
     pub position: i32,

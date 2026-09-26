@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use dive_cdp::CdpSession;
-use dive_core::{Container, CoreEvent, Tab, TabId};
+use dive_core::{Container, CoreEvent, Tab, TabId, VisitChange};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::webview::{DownloadEvent, WebviewBuilder};
@@ -2115,21 +2115,28 @@ pub fn update_tab(app: &AppHandle<Runtime>, id: TabId, f: impl FnOnce(&mut Tab))
     if tab.url != was {
         store.rekey_favicon(&mut tab);
     }
-    if let Err(e) = store.upsert_tab(&tab) {
+    let navigated = tab.url != was;
+    let visit = (records_a_visit(&tab.url, navigated, tab.title != before.title)
+        && !crate::private_session::is_private())
+    .then(|| {
+        if navigated {
+            VisitChange::Navigated {
+                url: &tab.url,
+                title: visit_title(navigated, &tab.title),
+                at: dive_core::Timestamp::now(),
+            }
+        } else {
+            VisitChange::Titled {
+                url: &tab.url,
+                title: &tab.title,
+            }
+        }
+    });
+    if let Err(e) = store.save_tab(&tab, visit) {
         tracing::warn!(%id, "failed to persist tab update: {e}");
         return;
     }
-    let navigated = tab.url != was;
-    if records_a_visit(&tab.url, navigated, tab.title != before.title)
-        && !crate::private_session::is_private()
-        && let Err(e) = store.record_visit(
-            &tab.url,
-            visit_title(navigated, &tab.title),
-            dive_core::Timestamp::now(),
-        )
-    {
-        tracing::debug!("history write failed: {e}");
-    }
+    drop(store);
     state.bus.publish(CoreEvent::TabUpserted(tab));
 }
 
@@ -2150,10 +2157,11 @@ fn reported_url(current: &str, reported: String) -> String {
 /// Whether this change to a tab belongs in history.
 ///
 /// Going somewhere does. So does a title arriving for where you already are --
-/// that is what fills in the entry, and `record_visit` folds it into the visit
-/// it already has. Anything else does not: a page that animates its own title
-/// otherwise wrote a fresh row every minute for as long as the tab was open,
-/// and a favicon or a load-state change wrote one for nothing at all.
+/// that is what fills in the entry, and only the first real one does
+/// (`VisitChange::Titled`). Anything else does not: a page that animates its
+/// own title otherwise wrote a fresh row every minute for as long as the tab
+/// was open, and a favicon or a load-state change wrote one for nothing at
+/// all.
 fn records_a_visit(url: &str, navigated: bool, title_changed: bool) -> bool {
     url.starts_with("http") && (navigated || title_changed)
 }

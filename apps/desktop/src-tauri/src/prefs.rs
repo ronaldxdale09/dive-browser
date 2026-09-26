@@ -1176,8 +1176,8 @@ fn summary(done: &[String]) -> String {
     }
 }
 
-/// Drop visits older than the retention window; no-op when history is kept
-/// forever. Returns how many rows went.
+/// Drop visits older than the retention window, in every profile; no-op
+/// when history is kept forever. Returns how many rows went.
 pub fn prune_history(state: &AppState) -> AppResult<usize> {
     let days = state.prefs.snapshot(state).history_days;
     if days <= 0 {

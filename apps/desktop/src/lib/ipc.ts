@@ -186,7 +186,10 @@ export const ipc = {
   popoutSetBounds: async (id: string, b: { x: number; y: number; width: number; height: number }) => unwrap(await commands.popoutSetBounds(id, b)),
   commandsList: () => commands.commandsList(),
   appInfo: () => commands.appInfo(),
+  /** The icon key the store keeps for each of `urls`' sites. */
   faviconsFor: (urls: string[]) => commands.faviconsFor(urls),
+  /** The images behind icon keys; see `lib/favicons.ts`. */
+  faviconGet: async (keys: string[]) => unwrap(await commands.faviconGet(keys)),
   privacyInfo: () => commands.privacyInfo(),
   prefsGet: () => commands.prefsGet(),
   prefsSet: async (prefs: Prefs) => unwrap(await commands.prefsSet(prefs)),

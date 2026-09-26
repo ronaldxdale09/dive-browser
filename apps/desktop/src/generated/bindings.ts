@@ -797,7 +797,28 @@ export const commands = {
 	bookmarksSearch: (query: string, limit: number) => typedError<Bookmark[], AppError>(__TAURI_INVOKE("bookmarks_search", { query, limit })),
 	/**  LAN URL and QR code for opening `url` on another device. */
 	shareUrl: (url: string) => typedError<ShareInfo, AppError>(__TAURI_INVOKE("share_url", { url })),
+	/**
+	 *  The key of the cached icon for each of `urls`; see [`favicon_get`].
+	 *
+	 *  Every site the person has visited leaves its icon in the store keyed by
+	 *  origin, so a pinned link can wear the site's own mark without anything
+	 *  touching the network -- and without waiting for a tab on that site to be
+	 *  open, which is what left a freshly added quick link showing a globe.
+	 *
+	 *  `www.` is tried both ways: a link pinned as `youtube.com` and a visit to
+	 *  `www.youtube.com` are different origins, and the person who typed the
+	 *  short one means the site they have been to.
+	 */
 	faviconsFor: (urls: string[]) => __TAURI_INVOKE<([string, string])[]>("favicons_for", { urls }),
+	/**
+	 *  The images stored under `keys`, as `(key, data: URL)` pairs.
+	 *
+	 *  Tabs, history rows and bookmarks carry only an icon's key; this is where
+	 *  the chrome turns one into a picture. A key names its image's bytes, so
+	 *  the chrome keeps each answer for as long as it runs. A key with nothing
+	 *  stored under it any more is left out of the answer.
+	 */
+	faviconGet: (keys: string[]) => typedError<([string, string])[], AppError>(__TAURI_INVOKE("favicon_get", { keys })),
 	/**  The provider catalog, for the chrome's pickers. */
 	agentProviders: () => __TAURI_INVOKE<ProviderInfo[]>("agent_providers"),
 	/**
@@ -1043,7 +1064,10 @@ export type Bookmark = {
 	title: string,
 	/**  RFC 3339 creation time. */
 	created_at: string,
-	/**  The site's remembered icon as a `data:` URL, when one is known. */
+	/**
+	 *  The key of the site's remembered icon, when one is known; the chrome
+	 *  reads the image itself with `favicon_get`.
+	 */
 	favicon: string | null,
 };
 
@@ -1690,7 +1714,10 @@ export type HistoryEntry = {
 	last_visited_at: string,
 	/**  Number of recorded visits. */
 	visits: number,
-	/**  The site's remembered icon as a `data:` URL, when one is known. */
+	/**
+	 *  The key of the site's remembered icon, when one is known; the chrome
+	 *  reads the image itself with `favicon_get`.
+	 */
 	favicon: string | null,
 };
 
@@ -2940,8 +2967,9 @@ export type Tab = {
 	/**  Page title, empty until loaded. */
 	title: string,
 	/**
-	 *  Site icon as a `data:` URL, resolved from the page once it loads.
-	 *  `None` until then, and cleared whenever the tab leaves its origin.
+	 *  The key of the site's icon, resolved from the page once it loads; the
+	 *  chrome reads the image itself with `favicon_get`. `None` until then,
+	 *  and cleared whenever the tab leaves its origin.
 	 */
 	favicon: string | null,
 	/**  Order within its tier; lower first. */
