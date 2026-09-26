@@ -516,6 +516,13 @@ pub fn run() {
             if let Some(monitor) = state::lock(&exit_responsiveness).as_ref() {
                 monitor.request_stop();
             }
+            // Here and not on ExitRequested, which an export in progress can
+            // veto: a recording must not be thrown away by a quit that did
+            // not happen.
+            {
+                use tauri::Manager as _;
+                app.state::<state::AppState>().screencast.abandon_all();
+            }
             tracing::info!("event loop exited");
         }
         // Links the system hands us once Dive is the default browser (or a
