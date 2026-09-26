@@ -690,6 +690,27 @@ impl Registry {
         }
     }
 
+    /// Drop every recording at once because the process is exiting.
+    ///
+    /// `discard` hands its wait to the blocking pool, which does not outlive
+    /// the event loop, and its ffmpeg processes were then left behind: a
+    /// microphone capture has nothing to end it, so the orphan kept the mic
+    /// open after Dive had gone. Here each process is killed outright, since
+    /// nobody will read the file, and the work directory removed in place.
+    pub fn abandon_all(&self) {
+        let recordings: Vec<_> = self.active().drain().map(|(_, rec)| rec).collect();
+        for rec in recordings {
+            rec.stopped.store(true, Ordering::Relaxed);
+            for slot in [&rec.audio, &rec.screen] {
+                if let Some((mut child, _)) = lock(slot).child.take() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            }
+            rec.remove_dir();
+        }
+    }
+
     /// Stop recording `tab` and encode what was captured; returns the file.
     pub async fn stop(&self, tab: TabId, session: &CdpSession) -> AppResult<RecordingResult> {
         let rec = self
@@ -772,6 +793,13 @@ async fn poll_frames(rec: Arc<Recording>, session: CdpSession) {
     while !rec.stopped.load(Ordering::Relaxed) {
         ticker.tick().await;
         if rec.stopped.load(Ordering::Relaxed) {
+            break;
+        }
+        // A closed session refuses every call at once, so without this a
+        // recording whose tab went away without a discard kept this loop
+        // ticking at the frame rate for the rest of the process.
+        if session.is_closed() {
+            tracing::debug!(tab = %rec.tab, "recorded tab's session closed; frame polling stops");
             break;
         }
         if let Some(jpeg) = capture_frame(&session).await

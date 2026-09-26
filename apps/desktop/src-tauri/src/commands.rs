@@ -1157,17 +1157,20 @@ pub(crate) fn workspace_activate(
         store.last_active_tab(id)?
     };
     *lock(&state.active_workspace) = Some(id);
-    if let Some(host) = lock(&state.host).as_mut() {
-        host.deactivate_all()?;
-    }
-    state.bus.publish(CoreEvent::WorkspaceActivated(id));
-    if let Some(tab) = last {
-        let next = tab.id;
-        on_main(&app, move |main, app, state| {
-            activate_tab(main, app, state, next)
-        })?;
-    }
-    Ok(())
+    let next = last.map(|tab| tab.id);
+    // Hiding the old workspace's views is native view work too, so it makes
+    // the same hop as showing the new one; off the main thread it raced the
+    // engine's own view changes.
+    on_main(&app, move |main, app, state| {
+        if let Some(host) = lock(&state.host).as_mut() {
+            host.deactivate_all()?;
+        }
+        state.bus.publish(CoreEvent::WorkspaceActivated(id));
+        if let Some(next) = next {
+            activate_tab(main, app, state, next)?;
+        }
+        Ok(())
+    })
 }
 
 /// How many tabs a workspace holds, for the rail.
@@ -1326,11 +1329,7 @@ pub(crate) fn workspace_delete(
             next,
         )
     };
-    if let Some(host) = lock(&state.host).as_mut() {
-        for tab in &tab_ids {
-            host.close(*tab)?;
-        }
-    }
+    close_views(&app, &state, &tab_ids)?;
     lock(&state.store).remove_workspace(id)?;
     for tab in tab_ids {
         state.bus.publish(CoreEvent::TabClosed(tab));
@@ -1341,6 +1340,44 @@ pub(crate) fn workspace_delete(
         workspace_activate(app, state, next)?;
     }
     Ok(())
+}
+
+/// Close the views of tabs that are going with their workspace or profile,
+/// and forget what the rest of the app kept about them.
+///
+/// These used to go through `host.close` alone, from the command's worker
+/// thread: a recording kept its ffmpeg running, subtitles kept transcribing,
+/// and every per-tab registry kept its entry for a tab that no longer
+/// existed. Views are closed on the main thread, as `close_tab` closes them.
+fn close_views(app: &AppHandle<Runtime>, state: &AppState, tabs: &[TabId]) -> AppResult<()> {
+    for tab in tabs {
+        forget_tab_state(app, state, *tab);
+    }
+    let tabs = tabs.to_vec();
+    on_main(app, move |_, _, state| {
+        if let Some(host) = lock(&state.host).as_mut() {
+            for tab in &tabs {
+                host.close(*tab)?;
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Forget everything kept about tab `id` outside the host and the store:
+/// its recording, its subtitles, its buffered console and network rows, its
+/// inspector picks, its crash budget, its privacy report, a sign-in prompt
+/// still waiting, and a pending https upgrade. Every path that closes a tab
+/// calls this, so none of them leaks what another path cleans up.
+pub(crate) fn forget_tab_state(app: &AppHandle<Runtime>, state: &AppState, id: TabId) {
+    crate::subtitles::stop_tab(app, id);
+    state.screencast.discard(id);
+    state.buffers.drop_tab(id);
+    state.inspector.drop_tab(id);
+    state.crashes.drop_tab(id);
+    state.privacy_pages.drop_tab(id);
+    state.http_auth.forget_tab(id);
+    crate::https_only::forget(id);
 }
 
 /// Setting key remembering the last workspace of a profile.
@@ -1508,11 +1545,7 @@ pub(crate) fn profile_delete(
         let next = profiles.iter().find(|p| p.id != id).map(|p| p.id);
         (workspaces, tabs, next)
     };
-    if let Some(host) = lock(&state.host).as_mut() {
-        for tab in &tab_ids {
-            host.close(*tab)?;
-        }
-    }
+    close_views(&app, &state, &tab_ids)?;
     let was_active = {
         let active = *lock(&state.active_workspace);
         workspaces.iter().any(|w| Some(w.id) == active)
@@ -1691,7 +1724,7 @@ pub fn close_tab(
     state: &AppState,
     id: TabId,
 ) -> AppResult<()> {
-    crate::subtitles::stop_tab(app, id);
+    forget_tab_state(app, state, id);
     let (was_active, workspace) = {
         let mut host = lock(&state.host);
         let store = lock(&state.store);
@@ -1706,11 +1739,6 @@ pub fn close_tab(
             tab.workspace_id.or(*lock(&state.active_workspace)),
         )
     };
-    state.buffers.drop_tab(id);
-    state.inspector.drop_tab(id);
-    state.crashes.drop_tab(id);
-    state.privacy_pages.drop_tab(id);
-    state.screencast.discard(id);
     state.bus.publish(CoreEvent::TabClosed(id));
     // Picked in its own statement so the store guard is released before
     // `activate_tab` takes the store again. Inside an `if let` chain the
@@ -1760,17 +1788,24 @@ pub(crate) async fn browser_import_run(
     })
     .await
     .map_err(AppError::new)??;
-    let (added_bookmarks, added_history, added_forms, profile) = {
-        let store = lock(&state.store);
-        let profile = active_profile(&store, *lock(&state.active_workspace))?;
-        (
-            store.import_bookmarks(&harvest.bookmarks)?,
-            store.import_history(&harvest.history)?,
-            store.import_form_entries(profile.id, &harvest.forms)?,
-            profile,
-        )
-    };
-    let known = crate::passwords::list(&state, profile.id)?;
+    // Merged a chunk at a time: another browser's history can be a hundred
+    // thousand rows, and the store is not ours alone for that long.
+    let profile = crate::backup::scoped_profile(&lock(&state.store))?;
+    let added_bookmarks = crate::backup::merge_in_chunks(
+        &state.store,
+        profile,
+        &harvest.bookmarks,
+        |store, chunk| Ok(store.import_bookmarks(chunk)?),
+    )?;
+    let added_history =
+        crate::backup::merge_in_chunks(&state.store, profile, &harvest.history, |store, chunk| {
+            Ok(store.import_history(chunk)?)
+        })?;
+    let added_forms =
+        crate::backup::merge_in_chunks(&state.store, profile, &harvest.forms, |store, chunk| {
+            Ok(store.import_form_entries(profile, chunk)?)
+        })?;
+    let known = crate::passwords::list(&state, profile)?;
     let mut added_passwords = 0u32;
     for login in &harvest.passwords {
         if known
@@ -1781,7 +1816,7 @@ pub(crate) async fn browser_import_run(
         }
         if crate::passwords::save(
             &state,
-            profile.id,
+            profile,
             &login.origin,
             &login.username,
             &login.password,
@@ -2383,8 +2418,11 @@ pub(crate) fn tab_zoom(state: State<'_, AppState>, id: TabId, factor: f64) -> Ap
         .and_then(|t| dive_core::origin_of(&t.url));
     if let Some(origin) = origin {
         let key = format!("{}{origin}", crate::engine::SITE_ZOOM_PREFIX);
+        // Before the store guard: a cold preferences cache reads the store,
+        // and that second lock on this thread would never return.
+        let default_zoom = state.prefs.snapshot(&state).default_zoom;
         let store = lock(&state.store);
-        if (factor - state.prefs.get(&state).default_zoom).abs() < f64::EPSILON {
+        if (factor - default_zoom).abs() < f64::EPSILON {
             store.remove_setting(&key)?;
         } else {
             store.set_setting(&key, &factor.to_string())?;
@@ -2659,13 +2697,22 @@ pub(crate) async fn backup_restore(
         .await
         .map_err(|error| AppError::new(format!("could not read {}: {error}", path.display())))?;
     let backup = crate::backup::parse(&text)?;
-    let summary = {
+    let mut summary = {
         use tauri::Manager as _;
         let state = app.state::<AppState>();
-        let store = lock(&state.store);
-        let profile = active_profile(&store, *lock(&state.active_workspace))?;
-        crate::backup::restore(&store, profile.id, &backup, take_preferences)?
+        let profile = crate::backup::scoped_profile(&lock(&state.store))?;
+        crate::backup::restore(&state.store, profile, &backup)?
     };
+    // Through the same path as a change in Settings. Written straight into
+    // the store, the restored preferences sat behind the registry's cached
+    // copy: the running browser never saw them, and the next change in
+    // Settings wrote the old ones back over the restore.
+    if take_preferences && let Some(preferences) = &backup.preferences {
+        use tauri::Manager as _;
+        let restored = crate::prefs::parse_stored(preferences);
+        prefs_set(app.state::<AppState>(), restored).await?;
+        summary.preferences = true;
+    }
     // Restored workspaces and their tabs have to reach the chrome, which
     // draws from events rather than re-reading the store.
     if summary.workspaces > 0 {

@@ -44,7 +44,10 @@ pub fn file_name(title: &str, url: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
-    cleaned.truncate(120);
+    // Cut at a character, not a byte: a title in Japanese or one ending in
+    // an emoji puts a multibyte character across byte 120, and `truncate`
+    // panics on a byte that is not a character boundary.
+    cleaned.truncate(cleaned.floor_char_boundary(120));
     let cleaned = cleaned.trim_matches('.').trim().to_owned();
     if cleaned.is_empty() {
         "page.mhtml".into()
@@ -123,5 +126,16 @@ mod tests {
                 .extension()
                 .is_some_and(|e| e == "mhtml")
         );
+    }
+
+    #[test]
+    fn a_long_title_in_any_script_is_cut_between_characters() {
+        // Three-byte and four-byte characters, so byte 120 falls inside one.
+        for title in ["日本語のページ".repeat(20), "🦀 crab ".repeat(30)] {
+            let name = file_name(&title, "https://x.dev");
+            assert!(name.len() <= 130, "{} bytes", name.len());
+            let stem = name.strip_suffix(".mhtml").expect("an .mhtml name");
+            assert!(title.starts_with(stem.trim()), "{name}");
+        }
     }
 }

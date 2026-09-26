@@ -161,8 +161,13 @@ fn repair_json_escapes(raw: &str) -> String {
     let bytes = raw.as_bytes();
     let mut out = String::with_capacity(raw.len());
     let mut i = 0;
+    // Four hex digits exactly: `from_str_radix` would also take a sign, and
+    // `\u+123` is no more valid JSON than an escape cut short.
     let hex4 = |at: usize| -> Option<u32> {
         let s = raw.get(at..at + 4)?;
+        if !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
         u32::from_str_radix(s, 16).ok()
     };
     while i < bytes.len() {
@@ -199,9 +204,14 @@ fn repair_json_escapes(raw: &str) -> String {
                 }
             }
         } else if bytes[i] == b'\\' && i + 1 < bytes.len() {
-            // Any other escape: copy the pair so a `\\u` is not misread.
-            out.push_str(&raw[i..i + 2]);
-            i += 2;
+            // Any other escape: copy the pair so a `\\u` is not misread. The
+            // character after the backslash is taken whole, not as one byte:
+            // a backslash before a multibyte character is invalid JSON but
+            // can still arrive, and slicing through that character panicked.
+            let next = raw[i + 1..].chars().next().unwrap_or('\u{fffd}');
+            out.push('\\');
+            out.push(next);
+            i += 1 + next.len_utf8();
         } else {
             let ch = raw[i..].chars().next().unwrap_or('\u{fffd}');
             out.push(ch);
@@ -459,6 +469,17 @@ mod tests {
         let repaired =
             repair_json_escapes(r#"{"method":"Log.entryAdded","params":{"t":"\ud83d"}}"#);
         assert!(serde_json::from_str::<serde_json::Value>(&repaired).is_ok());
+    }
+
+    #[test]
+    fn a_backslash_before_a_multibyte_character_is_copied_whole() {
+        // Not valid JSON, but the repair runs on whatever the engine sent and
+        // must not panic on it.
+        assert_eq!(repair_json_escapes(r#"{"a":"\é"}"#), r#"{"a":"\é"}"#);
+        assert_eq!(repair_json_escapes(r"\🦀x"), r"\🦀x");
+        assert_eq!(repair_json_escapes(r"tail\"), r"tail\");
+        // A sign is not a hex digit.
+        assert_eq!(repair_json_escapes(r#""\u+123""#), r#""\ufffd+123""#);
     }
 
     #[test]
